@@ -121,8 +121,8 @@ For Fortran/C:
 
 For Python:
 
-1) Ensure the full path to `python/` is in your `PYTHONPATH` environmental variable along with the path for PETSc. 
-2) `LD_LIBRARY_PATH` must include the `lib/` directory (along with paths for PETSc, BLAS and LAPACK).
+1) Ensure the full path to `python/` is in your `PYTHONPATH` environmental variable (along with the library path for PETSc). 
+2) `LD_LIBRARY_PATH` must include the `lib/` directory (along with the library path for PETSc).
 
 ## Modifying existing code to use PFLARE
 
