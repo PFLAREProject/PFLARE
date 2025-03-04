@@ -18,10 +18,105 @@ module pmisr_ddc
    public   
    
    contains
-   
+
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine pmisr(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
+
+      ! Wrapper
+
+      ! ~~~~~~
+
+      type(tMat), target, intent(in)      :: strength_mat
+      integer, intent(in)                 :: max_luby_steps
+      logical, intent(in)                 :: pmis
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
+      logical, optional, intent(in)       :: zero_measure_c_point
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank, errorcode
+      integer, dimension(:), allocatable :: seed
+      PetscReal, dimension(:), allocatable, target :: measure_local
+      PetscInt :: local_rows, local_cols
+      MPI_Comm :: MPI_COMM_MATRIX    
+      type(c_ptr)  :: measure_local_ptr, cf_markers_local_ptr
+      integer, dimension(:), allocatable :: cf_markers_local_two
+#endif        
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(strength_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then  
+
+         call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
+         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)                  
+
+         A_array = strength_mat%v  
+         pmis_int = 0
+         if (pmis) pmis_int = 1
+         zero_measure_c_point_int = 0
+         if (present(zero_measure_c_point)) then
+            if (zero_measure_c_point) zero_measure_c_point_int = 1
+         end if
+
+         ! Let's generate the random values on the host for now so they match
+         ! for comparisons with pmisr_cpu
+         call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
+         allocate(measure_local(local_rows))   
+         call random_seed(size=seed_size)
+         allocate(seed(seed_size))
+         do kfree = 1, seed_size
+            seed(kfree) = comm_rank + 1 + kfree
+         end do   
+         call random_seed(put=seed) 
+         ! Fill the measure with random numbers
+         call random_number(measure_local)
+         deallocate(seed)   
+         
+         measure_local_ptr = c_loc(measure_local)
+
+         allocate(cf_markers_local(local_rows))  
+         cf_markers_local_ptr = c_loc(cf_markers_local)
+
+         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, cf_markers_local_ptr, zero_measure_c_point_int)
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then         
+            call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local_two, zero_measure_c_point)  
+            
+            if (any(cf_markers_local /= cf_markers_local_two)) then
+
+               ! do kfree = 1, local_rows
+               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
+               !       print *, kfree, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
+               !    end if
+               ! end do
+               print *, "Kokkos and CPU versions of pmisr do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+            end if
+            deallocate(cf_markers_local_two)
+         end if
+
+      else
+         call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)       
+      end if
+#else
+      call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
+#endif        
+
+      ! ~~~~~~ 
+
+   end subroutine pmisr
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
 
       ! Let's do our own independent set with a Luby algorithm
       ! If PMIS is true, this is a traditional PMIS algorithm
@@ -549,8 +644,8 @@ module pmisr_ddc
          deallocate(measure_nonlocal)        
       end if
 
-   end subroutine pmisr  
-   
+   end subroutine pmisr_cpu  
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
@@ -566,7 +661,85 @@ module pmisr_ddc
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
       type(tIS), intent(in)               :: is_fine
-      PetscReal, intent(in)                    :: fraction_swap
+      PetscReal, intent(in)               :: fraction_swap
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, indices
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      type(c_ptr)  :: cf_markers_local_ptr
+      integer :: errorcode
+      !integer :: kfree
+      integer, dimension(:), allocatable :: cf_markers_local_two
+#endif 
+      ! ~~~~~~  
+
+      ! If we don't need to swap anything, return
+      if (fraction_swap == 0d0) then
+         return
+      end if      
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then  
+
+         A_array = input_mat%v  
+         indices = is_fine%v
+         cf_markers_local_ptr = c_loc(cf_markers_local)
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then         
+            allocate(cf_markers_local_two(size(cf_markers_local)))
+            cf_markers_local_two = cf_markers_local
+         end if
+
+         call ddc_kokkos(A_array, indices, fraction_swap, cf_markers_local_ptr)
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then  
+            call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local_two)  
+
+            if (any(cf_markers_local /= cf_markers_local_two)) then
+
+               ! do kfree = 1, size(cf_markers_local)
+               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
+               !       print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
+               !    end if
+               ! end do
+               print *, "Kokkos and CPU versions of ddc do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+            end if
+            deallocate(cf_markers_local_two)
+         end if
+
+      else
+         call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)     
+      end if
+#else
+      call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)
+#endif        
+      
+   end subroutine ddc
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)
+
+      ! Second pass diagonal dominance cleanup 
+      ! Flips the F definitions to C based on least diagonally dominant local rows
+      ! If fraction_swap = 0 this does nothing
+      ! If fraction_swap < 0 it uses abs(fraction_swap) to be a threshold 
+      !  for swapping C to F based on row-wise diagonal dominance (ie alpha_diag)
+      ! If fraction_swap > 0 it uses fraction_swap as the local fraction of worst C points to swap to F
+      !  though it won't hit that fraction exactly as we bin the diag dom ratios for speed, it will be close to the fraction
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)      :: input_mat
+      type(tIS), intent(in)               :: is_fine
+      PetscReal, intent(in)               :: fraction_swap
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
 
       ! Local
@@ -585,11 +758,6 @@ module pmisr_ddc
       integer, dimension(1000) :: dom_bins
 
       ! ~~~~~~  
-
-      ! If we don't need to swap anything, return
-      if (fraction_swap == 0d0) then
-         return
-      end if
 
       ! The indices are the numbering in Aff matrix
       call ISGetIndicesF90(is_fine, is_pointer, ierr)   
@@ -688,7 +856,7 @@ module pmisr_ddc
          ! Otherwise swap everything bigger than a fixed fraction
          else
 
-            ! In order to reduce the size of the sort required, we have binned the entries into 100 bins
+            ! In order to reduce the size of the sort required, we have binned the entries into 1000 bins
             ! Let's count backwards from the biggest entries to find which bin we know the nth_element is in
             ! and then we only include those bins and higher into the sort
             bin_sum = 0
@@ -725,7 +893,7 @@ module pmisr_ddc
       call ISRestoreIndicesF90(is_fine, is_pointer, ierr)
       call MatDestroy(Aff, ierr)     
 
-   end subroutine ddc      
+   end subroutine ddc_cpu      
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

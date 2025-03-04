@@ -149,10 +149,10 @@ module fc_smooth
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: vfull_array, vreduced_array
-      integer :: fine_int
+      integer :: fine_int, errorcode
       VecType :: vec_type
-      !Vec :: temp_vec
-      !PetscScalar normy;
+      Vec :: temp_vec
+      PetscScalar normy;
 #endif          
       ! ~~~~~~~~~~
 
@@ -177,6 +177,22 @@ module fc_smooth
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
                            mode, vreduced_array)
+
+                  ! If debugging do a comparison between CPU and Kokkos results
+                  if (kokkos_debug()) then             
+                     
+                     call VecDuplicate(vreduced, temp_vec, ierr)
+                     call VecISCopy(vfull, air_data%is_fine_index(our_level), mode, &
+                              temp_vec, ierr)
+                     call VecAXPY(temp_vec, -1d0, vreduced, ierr)
+                     call VecNorm(temp_vec, NORM_2, normy, ierr)
+                     if (normy .gt. 1d-13) then
+                        print *, "Kokkos and CPU versions of VecISCopyLocalWrapper REV FINE do not match"
+                        call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+                     end if
+                     call VecDestroy(temp_vec, ierr)
+
+                  end if
 
                else
                   call VecISCopy(vfull, air_data%is_fine_index(our_level), mode, &
@@ -214,12 +230,32 @@ module fc_smooth
                if (vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
                         vec_type == "kokkos") then
 
+                  if (kokkos_debug()) then             
+                     call VecDuplicate(vfull, temp_vec, ierr)
+                     call VecCopy(vfull, temp_vec, ierr)                           
+                  end if
+
                   fine_int = 0
                   if (fine) fine_int = 1
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
                            mode, vreduced_array)
+
+                  ! If debugging do a comparison between CPU and Kokkos results
+                  if (kokkos_debug()) then             
+                     
+                     call VecISCopy(temp_vec, air_data%is_fine_index(our_level), mode, &
+                              vreduced, ierr)  
+                     call VecAXPY(temp_vec, -1d0, vfull, ierr)
+                     call VecNorm(temp_vec, NORM_2, normy, ierr)
+                     if (normy .gt. 1d-13) then
+                        print *, "Kokkos and CPU versions of VecISCopyLocalWrapper FORW FINE do not match"
+                        call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+                     end if
+                     call VecDestroy(temp_vec, ierr)
+
+                  end if                           
 
                else
                   call VecISCopy(vfull, air_data%is_fine_index(our_level), mode, &
@@ -253,6 +289,22 @@ module fc_smooth
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
                            mode, vreduced_array)
+
+                  ! If debugging do a comparison between CPU and Kokkos results
+                  if (kokkos_debug()) then             
+                     
+                     call VecDuplicate(vreduced, temp_vec, ierr)
+                     call VecISCopy(vfull, air_data%is_coarse_index(our_level), mode, &
+                           temp_vec, ierr) 
+                     call VecAXPY(temp_vec, -1d0, vreduced, ierr)
+                     call VecNorm(temp_vec, NORM_2, normy, ierr)
+                     if (normy .gt. 1d-13) then
+                        print *, "Kokkos and CPU versions of VecISCopyLocalWrapper REV COARSE do not match"
+                        call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+                     end if
+                     call VecDestroy(temp_vec, ierr)
+
+                  end if                            
 
                else
                   call VecISCopy(vfull, air_data%is_coarse_index(our_level), mode, &
@@ -290,12 +342,32 @@ module fc_smooth
                if (vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
                         vec_type == "kokkos") then
 
+                  if (kokkos_debug()) then             
+                     call VecDuplicate(vfull, temp_vec, ierr)
+                     call VecCopy(vfull, temp_vec, ierr)                           
+                  end if                           
+
                   fine_int = 0
                   if (fine) fine_int = 1
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
                            mode, vreduced_array)
+
+                  ! If debugging do a comparison between CPU and Kokkos results
+                  if (kokkos_debug()) then             
+                     
+                     call VecISCopy(temp_vec, air_data%is_coarse_index(our_level), mode, &
+                           vreduced, ierr)
+                     call VecAXPY(temp_vec, -1d0, vfull, ierr)
+                     call VecNorm(temp_vec, NORM_2, normy, ierr)
+                     if (normy .gt. 1d-13) then
+                        print *, "Kokkos and CPU versions of VecISCopyLocalWrapper FORW COARSE do not match"
+                        call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+                     end if
+                     call VecDestroy(temp_vec, ierr)
+
+                  end if                            
 
                else
                   call VecISCopy(vfull, air_data%is_coarse_index(our_level), mode, &

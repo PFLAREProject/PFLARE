@@ -18,7 +18,7 @@ int main(int argc, char **args)
   Mat         A;              /* linear system matrix */
   KSP         ksp;            /* linear solver context */
   PC          pc;             /* preconditioner context */
-  PetscInt    i, n = 10, its, global_row_start, global_row_end_plus_one, local_size;
+  PetscInt    i, n = 100, its, global_row_start, global_row_end_plus_one, local_size;
   PetscInt    start_assign, counter;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
@@ -27,6 +27,8 @@ int main(int argc, char **args)
   PetscInitialize(&argc, &args, (char*)0, help);
 
   PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL);
+  PetscBool second_solve= PETSC_FALSE;
+  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);
 
   // Register the pflare types
   PCRegister_PFLARE();
@@ -164,9 +166,12 @@ int main(int argc, char **args)
                       Solve the linear system
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
-  // gpu implementation and we don't want a copy occuring back to the cpu     
-  VecSet(x, 1.0); 
-  KSPSolve(ksp, b, x);
+  // gpu implementation and we don't want a copy occuring back to the cpu    
+  if (second_solve)
+  { 
+   VecSet(x, 1.0); 
+   KSPSolve(ksp, b, x);
+  }
 
   KSPGetIterationNumber(ksp,&its);
   KSPGetConvergedReason(ksp,&reason);

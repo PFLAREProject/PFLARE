@@ -77,7 +77,9 @@ OBJS := $(SRCDIR)/NonBusyWait.o \
 # Include kokkos src files
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
-                       $(SRCDIR)/VecISCopyLocalk.o
+                       $(SRCDIR)/VecISCopyLocalk.o \
+							  $(SRCDIR)/PMISR_DDCk.o \
+							  $(SRCDIR)/Gmres_Polyk.o
 endif	
 
 OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \

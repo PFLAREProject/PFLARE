@@ -211,16 +211,7 @@ module repartition
       integer(c_long_long) :: A_array, B_array
       integer(c_int)       :: on_subcomm_int
 
-      MatType :: mat_type
-      integer :: errorcode, ierr
-
       ! ~~~~~~  
-
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type /= "mpiaij") then    
-         print *, "Subcomm only works with mataij types"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)           
-      end if
 
       A_array = input_mat%v
       call MatMPICreateNonemptySubcomm_c(A_array, on_subcomm_int, B_array)

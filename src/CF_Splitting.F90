@@ -3,6 +3,7 @@ module cf_splitting
    use petsc
    use pmisr_ddc
    use aggregation
+   use petsc_helper
 
 #include "petsc/finclude/petsc.h"
 
@@ -92,16 +93,13 @@ module cf_splitting
       logical, intent(in)        :: symmetrize, square
       logical, intent(in), optional :: allow_drop_diagonal
       
-      PetscInt :: col, ncols, ifree, max_nnzs
+      PetscInt :: ifree
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: global_col_start, global_col_end_plus_one, jfree, diagonal_index
+      PetscInt :: global_col_start, global_col_end_plus_one
       integer :: counter, errorcode, comm_size
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), allocatable :: nnzs_row, onzs_row, cols, cols_mod
-      PetscReal, dimension(:), allocatable :: vals, vals_copy
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      PetscReal :: rel_row_tol, abs_biggest_entry
       MPI_Comm :: MPI_COMM_MATRIX
       type(tMat) :: transpose_mat
       type(tIS) :: zero_diags
@@ -124,140 +122,10 @@ module cf_splitting
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
       call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)  
       
-      allocate(nnzs_row(local_rows))
-      nnzs_row = 0
-
-      max_nnzs = 0
-      if (comm_size/=1) then
-         allocate(onzs_row(local_rows))
-         onzs_row = 0
-      end if
-
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-      end do
-
-      allocate(cols(max_nnzs))
-      allocate(cols_mod(max_nnzs))
-      allocate(vals(max_nnzs)) 
-      allocate(vals_copy(max_nnzs))
-
-      ! ~~~~~~~~~~
-      ! Get the nnzs
-      ! ~~~~~~~~~~
-      
-      ! Loop over global row indices
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-         ! Get the row
-         call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)
-
-         ! Be careful here to use huge(0d0) rather than huge(0)!
-         abs_biggest_entry = -huge(0d0)
-         ! Find the biggest entry in the row thats not the diagonal and the diagonal index
-         do jfree = 1, ncols
-            if (cols(jfree) == ifree) then
-               diagonal_index = jfree
-            else if (abs(vals(jfree)) > abs_biggest_entry) then
-               abs_biggest_entry = abs(vals(jfree))
-            end if 
-         end do          
-                
-         ! Abs biggest entry in the row
-         rel_row_tol = strong_threshold * abs_biggest_entry
-
-         do col = 1, ncols
-
-            ! Have to count the diagonal and off-diagonal nnzs in parallel           
-            if (cols(col) .ge. global_col_start .AND. cols(col) .le. global_col_end_plus_one - 1) then
-
-               !if (abs(vals(col)) .ge. rel_row_tol) then
-               if (abs(vals(col)) .ge. rel_row_tol .OR. (.NOT. drop_diag .AND. cols(col) == ifree)) then
-                  ! Convert to local row indices
-                  nnzs_row(ifree - global_row_start + 1) = nnzs_row(ifree - global_row_start + 1) + 1
-               end if
-            else
-               if (abs(vals(col)) .ge. rel_row_tol .OR. (.NOT. drop_diag .AND. cols(col) == ifree)) then
-                  ! Convert to local row indices
-                  onzs_row(ifree - global_row_start + 1) = onzs_row(ifree - global_row_start + 1) + 1
-               end if               
-            end if
-         end do
-
-         ! Must call otherwise petsc leaks memory
-         call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)
-      end do
-
-      ! Create the output matrix - specifically an aij so output_mat
-      ! remains on the cpu as the cf splittings are all on the cpu for the moment
-      if (comm_size/=1) then
-         call MatCreateAIJ(MPI_COMM_MATRIX, local_rows, local_cols, &
-                  global_rows, global_cols, &
-                  nz_ignore, nnzs_row, &
-                  nz_ignore, onzs_row, &
-                  output_mat, ierr)   
-      else
-         call MatCreateSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, nz_ignore, nnzs_row, &
-                  output_mat, ierr)            
-      end if   
-       
-      ! Just in case there are some zeros in the input mat, ignore them
-      call MatSetOption(output_mat, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE, ierr)     
-      ! Don't set any off processor entries so no need for a reduction when assembling
-      call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)      
-      call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)     
-
-      ! ~~~~~~~~~~
-      ! Get the nnzs
-      ! ~~~~~~~~~~      
-      
-      ! Now go and fill the new matrix
-      ! Loop over global row indices
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-      
-         ! Get the row
-         call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)  
-         
-         ! Be careful here to use huge(0d0) rather than huge(0)!
-         abs_biggest_entry = -huge(0d0)
-         ! Find the biggest entry in the row thats not the diagonal and the diagonal index
-         do jfree = 1, ncols
-            if (cols(jfree) == ifree) then
-               diagonal_index = jfree
-            else if (abs(vals(jfree)) > abs_biggest_entry) then
-               abs_biggest_entry = abs(vals(jfree))
-            end if 
-         end do            
-         
-         ! Abs biggest entry in the row
-         rel_row_tol = strong_threshold * abs_biggest_entry
-
-         cols_mod(1:ncols) = cols(1:ncols)
-         ! Just set one to indicate strength
-         vals_copy(1:ncols) = 1d0
-                  
-         do col = 1, ncols
-            ! Get petsc to not insert the value here - drop diagonals
-            if (abs(vals(col)) < rel_row_tol .OR. (drop_diag .AND. cols(col) == ifree)) then
-               cols_mod(col) = -1
-            end if
-         end do
-
-         ! Much quicker to call setvalues
-         call MatSetValues(output_mat, one, [ifree], ncols, cols_mod, &
-                  vals_copy, INSERT_VALUES, ierr)
-
-         ! Must call otherwise petsc leaks memory
-         call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)   
-      end do           
-      
-      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
-
-      deallocate(cols, vals, nnzs_row, cols_mod, vals_copy)
-      if (comm_size/=1) deallocate(onzs_row)
-      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)  
+      ! Drop entries smaller than the strong_threshold, with a relative tolerance measured 
+      ! against the biggest abs non-diagonal entry, don't lump and always drop the diagonal
+      call remove_small_from_sparse(input_mat, strong_threshold, output_mat, &
+               relative_max_row_tol_int = -1, lump=.FALSE., drop_diagonal_int=-1)
 
       ! Now symmetrize if desired
       if (symmetrize) then
@@ -317,30 +185,13 @@ module cf_splitting
          ! Could call MatEliminateZeros in later versions of petsc, but for here
          ! given we know the entries are ==1, we will just create a copy with "small" stuff removed
          ! ie the zero diagonal
-         call remove_small_from_sparse(transpose_mat, 1d-100, output_mat, allow_drop_diagonal = .TRUE.) 
+         call remove_small_from_sparse(transpose_mat, 1d-100, output_mat, drop_diagonal_int = 1) 
          call MatDestroy(transpose_mat, ierr)
 
       end if   
       
       ! Reset the entries in the strength matrix back to 1
-      if (symmetrize .OR. square) then
-         max_nnzs = 0
-         do ifree = global_row_start, global_row_end_plus_one-1     
-            call MatGetRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)  
-            if (ncols > max_nnzs) max_nnzs = ncols
-            call MatRestoreRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)               
-         end do
-         allocate(vals(max_nnzs))
-         vals = 1d0
-         ! Set all the values in the matrix to one
-         do ifree = global_row_start, global_row_end_plus_one-1     
-            ! Set every entry in this row
-            call MatSetValuesRow(output_mat, ifree, vals, ierr)
-         end do
-         deallocate(vals)
-         call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
-         call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)          
-      end if
+      if (symmetrize .OR. square) call MatSetAllValues(output_mat, 1d0)
 
    end subroutine generate_sabs     
 
@@ -487,7 +338,7 @@ module cf_splitting
          ! ! Could call MatEliminateZeros in later versions of petsc, but for here
          ! ! given we know the entries are ==1, we will just create a copy with "small" stuff removed
          ! ! ie the zero diagonal
-         ! call remove_small_from_sparse(temp_mat, 1e-100, strength_mat_c, allow_drop_diagonal = .TRUE.)                   
+         ! call remove_small_from_sparse(temp_mat, 1e-100, strength_mat_c, drop_diagonal_int = .TRUE.)                   
          ! call MatDestroy(temp_mat, ierr)
          ! call ISRestoreIndicesF90(zero_diags, zero_diags_pointer, ierr)
          ! call ISDestroy(zero_diags, ierr)

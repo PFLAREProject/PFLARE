@@ -86,7 +86,7 @@ module air_mg_setup
             ! but make sure not to drop the diagonal entry!
             call remove_small_from_sparse(input_mat, air_data%options%strong_r_threshold, &
                            air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                           relative_max_row_tolerance= .TRUE., allow_drop_diagonal = .FALSE.)   
+                           relative_max_row_tol_int= 1, drop_diagonal_int = 0)   
          end if       
 
          call timer_finish(TIMER_ID_AIR_DROP)                
@@ -550,7 +550,7 @@ module air_mg_setup
                call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_W), &
                               air_data%options%r_drop, &
                               air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), &
-                              relative_max_row_tolerance= .TRUE.)  
+                              relative_max_row_tol_int= 1)  
             end if
             
             ! Delete temporary if not reusing
@@ -794,7 +794,7 @@ module air_mg_setup
       else
          call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                      air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
-                     relative_max_row_tolerance= .TRUE.)  
+                     relative_max_row_tol_int= 1)  
       end if
 
       call timer_finish(TIMER_ID_AIR_DROP)   
@@ -1007,7 +1007,7 @@ module air_mg_setup
       else
          call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                   air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
-                  relative_max_row_tolerance = .TRUE., lump=air_data%options%a_lump)
+                  relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
 
          call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
                      MAT_COPY_VALUES, coarse_matrix, ierr)

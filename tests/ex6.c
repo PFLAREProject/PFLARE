@@ -11,20 +11,26 @@ int main(int argc,char **args)
   PetscErrorCode ierr;
   PetscInt       its;
 #if defined(PETSC_USE_LOG)
-  PetscLogStage  stage1,stage2;
+  PetscLogStage  stage1,stage2, gpu_copy;
 #endif
   PetscReal      norm;
-  Vec            x,b,u, diag_vec;
-  Mat            A;
+  Vec            x,b,u, diag_vec, b_diff_type;
+  Mat            A, A_diff_type;
   char           file[PETSC_MAX_PATH_LEN];
   PetscViewer    fd;
   PetscBool      flg,b_in_f = PETSC_TRUE, diag_scale = PETSC_FALSE;
   KSP            ksp;
   PC             pc;
   KSPConvergedReason reason;
+  VecType vtype;
+  PetscInt one=1, m, n, M, N;
+  MatType mtype, mtype_input;
 
   ierr = PetscInitialize(&argc,&args,(char*)0,help);if (ierr) return ierr;
   ierr = PetscOptionsGetBool(NULL,NULL,"-b_in_f",&b_in_f,NULL);CHKERRQ(ierr);
+
+  PetscBool second_solve= PETSC_FALSE;
+  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);   
 
   /* Read matrix and RHS */
   ierr = PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg);CHKERRQ(ierr);
@@ -42,19 +48,54 @@ int main(int argc,char **args)
   ierr = PetscViewerDestroy(&fd);CHKERRQ(ierr);
   PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL);
 
+  ierr = MatGetLocalSize(A,&m,&n);CHKERRQ(ierr);
+  ierr = MatGetSize(A,&M,&N);CHKERRQ(ierr);
+
+  // Test and see if the user wants us to use a different matrix type
+  // with -mat_type on the command line
+  // This lets us easily test our cpu and kokkos versions through our CI
+  ierr = MatCreateFromOptions(PETSC_COMM_WORLD,NULL,\
+               one,m,n,M,N,&A_diff_type);
+  ierr = MatAssemblyBegin(A_diff_type, MAT_FINAL_ASSEMBLY);
+  ierr = MatAssemblyEnd(A_diff_type, MAT_FINAL_ASSEMBLY);
+      
+  ierr = MatGetType(A, &mtype);
+  ierr = MatGetType(A_diff_type, &mtype_input); 
+
+  if (mtype != mtype_input) 
+  {
+      // Doesn't seem like there is a converter to kokkos
+      // So instead we just copy into the empty A_diff_type
+      // This will be slow as its not preallocated, but this is just for testing
+      ierr = MatCopy(A, A_diff_type, DIFFERENT_NONZERO_PATTERN);
+      ierr = MatDestroy(&A);
+      A = A_diff_type;
+
+      // Mat and vec types have to match
+      ierr = VecCreateFromOptions(PETSC_COMM_WORLD,NULL, \
+               one,n,N,&b_diff_type);
+      ierr = VecCopy(b,b_diff_type);
+      ierr = VecDestroy(&b);
+      b = b_diff_type;
+  }
+  else
+  {
+      MatDestroy(&A_diff_type);
+  }   
+
   /*
    If the load matrix is larger then the vector, due to being padded
    to match the blocksize then create a new padded vector
   */
   {
-    PetscInt    m,n,j,mvec,start,end,indx;
+    PetscInt    j,mvec,start,end,indx;
     Vec         tmp;
     PetscScalar *bold;
 
-    ierr = MatGetLocalSize(A,&m,&n);CHKERRQ(ierr);
     ierr = VecCreate(PETSC_COMM_WORLD,&tmp);CHKERRQ(ierr);
     ierr = VecSetSizes(tmp,m,PETSC_DECIDE);CHKERRQ(ierr);
-    ierr = VecSetFromOptions(tmp);CHKERRQ(ierr);
+    ierr = VecGetType(b, &vtype);CHKERRQ(ierr);
+    ierr = VecSetType(tmp, vtype);CHKERRQ(ierr);
     ierr = VecGetOwnershipRange(b,&start,&end);CHKERRQ(ierr);
     ierr = VecGetLocalSize(b,&mvec);CHKERRQ(ierr);
     ierr = VecGetArray(b,&bold);CHKERRQ(ierr);
@@ -116,10 +157,19 @@ int main(int argc,char **args)
   ierr = PetscLogStagePop();CHKERRQ(ierr);
   ierr = PetscBarrier((PetscObject)A);CHKERRQ(ierr);
 
-  ierr = PetscLogStageRegister("mystage 2",&stage2);CHKERRQ(ierr);
-  ierr = PetscLogStagePush(stage2);CHKERRQ(ierr);
+  ierr = PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",&gpu_copy);CHKERRQ(ierr);
+  ierr = PetscLogStagePush(gpu_copy);CHKERRQ(ierr);
   ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
-  ierr = PetscLogStagePop();CHKERRQ(ierr);
+  ierr = PetscLogStagePop();CHKERRQ(ierr);  
+
+  if (second_solve)
+  {
+   ierr = VecSet(x, 1.0);CHKERRQ(ierr);
+   ierr = PetscLogStageRegister("mystage 2",&stage2);CHKERRQ(ierr);
+   ierr = PetscLogStagePush(stage2);CHKERRQ(ierr);
+   ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
+   ierr = PetscLogStagePop();CHKERRQ(ierr);  
+  }
 
   /* Show result */
   ierr = MatMult(A,x,u);CHKERRQ(ierr);
