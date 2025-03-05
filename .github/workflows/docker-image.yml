@@ -244,8 +244,8 @@ jobs:
       # Check it sees the gpu by running nvidia-smi
       - name: Run Docker image with explicit --gpus flag
         run: |
-         set -e  # Exit immediately if a command fails
-         echo '=== GPU Information ==='
+         set -e &&
+         echo '=== GPU Information ===' &&
          nvidia-smi &&
          sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
          git clone https://github.com/PFLAREProject/PFLARE.git &&
