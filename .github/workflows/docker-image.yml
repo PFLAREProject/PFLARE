@@ -242,7 +242,7 @@ jobs:
          set -e  # Exit immediately if a command fails
          echo '=== GPU Information ==='
          nvidia-smi         
-         sudo apt-get install -y nvidia-container-toolkit
+         apt-get update && apt-get install -y nvidia-container-toolkit
          docker build --progress=plain -t stevendargaville/petsc_cuda_kokkos_ci -f Dockerfile_cuda_kokkos_ci .
          docker push stevendargaville/petsc_cuda_kokkos_ci
          docker build --progress=plain -t stevendargaville/pflare_gpu -f Dockerfile_cuda_kokkos .
