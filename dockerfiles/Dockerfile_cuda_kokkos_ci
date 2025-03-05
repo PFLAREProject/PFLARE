@@ -85,6 +85,7 @@ RUN git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/pets
     --with-cuda \
     --download-kokkos \
     --download-kokkos-kernels \
+    --with-cuda-arch=86 \
     && \
   make
 
