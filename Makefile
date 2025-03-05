@@ -49,14 +49,6 @@ export PETSC_HAVE_KOKKOS := 0
 ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
 export PETSC_HAVE_KOKKOS := 1
 endif
-export PETSC_HAVE_CUDA := 0
-ifneq (,$(findstring PETSC_HAVE_CUDA 1,$(CONTENTS)))
-export PETSC_HAVE_CUDA := 1
-endif
-export PETSC_HAVE_HIP := 0
-ifneq (,$(findstring PETSC_HAVE_HIP 1,$(CONTENTS)))
-export PETSC_HAVE_HIP := 1
-endif
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~

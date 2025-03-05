@@ -311,29 +311,3 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	 -vec_type kokkos -mat_type aijkokkos	
 
 endif
-# ~~~~~~~~~~~~~~~~~~~~~~~	 
-# Include CUDA examples	 
-# ~~~~~~~~~~~~~~~~~~~~~~~
-ifeq ($(PETSC_HAVE_CUDA),1)
-# 
-	@echo ""
-	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening CUDA"
-	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_one_c_smooth \
-	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_fraction 0.0 -ksp_max_it 7 \
-	 -dm_mat_type aijcusparse -dm_vec_type cuda
-
-endif
-# ~~~~~~~~~~~~~~~~~~~~~~~	 
-# Include HIP examples	 
-# ~~~~~~~~~~~~~~~~~~~~~~~
-ifeq ($(PETSC_HAVE_HIP),1)
-# 
-	@echo ""
-	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening HIP"
-	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_one_c_smooth \
-	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_fraction 0.0 -ksp_max_it 7 \
-	 -dm_mat_type aijhipsparse -dm_vec_type hip
-
-endif
