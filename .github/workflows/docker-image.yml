@@ -235,6 +235,11 @@ jobs:
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}         
       # Currently our GPU CI only has a single GPU so we can't run the parallel tests
       # Check it sees the gpu by running nvidia-smi
       - name: Run Docker image with explicit --gpus flag
