@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=nvidia/cuda:11.8.0-devel-ubuntu22.04
+ARG BASE_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu24.04
 FROM ${BASE_IMAGE}
 
 RUN echo Etc/UTC > /etc/timezone && ln -s /usr/share/zoneinfo/Etc/UTC /etc/localtime
@@ -27,8 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   ripgrep \
   zlib1g-dev \
   python3-virtualenv \
-  python3.10-venv \
-  python3.10-dev \
+  python3-venv \
+  python3-dev \
   wget \
   valgrind \
   vim \
@@ -87,7 +87,7 @@ RUN git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/pets
     --download-kokkos-kernels \
     --with-cuda-arch=86 \
     && \
-  make && make PETSC_DIR=/build/petsc PETSC_ARCH=arch-linux-c-opt check
+  make
 
 WORKDIR /build/PFLARE
 
