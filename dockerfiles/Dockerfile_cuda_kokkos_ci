@@ -77,15 +77,15 @@ ENV PETSC_DIR=/build/petsc
 ENV PETSC_ARCH=arch-linux-c-opt
 RUN git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/petsc.git && \
   cd petsc && \
-  OPT='-O2 -ffp-contract=fast'; \
   python3 configure \
-    --with-debugging=0 COPTFLAGS="$OPT" CXXOPTFLAGS="$OPT" FOPTFLAGS="$OPT" \
+    --with-debugging=1 \
     --download-metis \
     --download-parmetis \
     --download-fblaslapack \
     --with-cuda \
     --download-kokkos \
     --download-kokkos-kernels \
+    --with-cuda-arch=86 \
     && \
   make
 
