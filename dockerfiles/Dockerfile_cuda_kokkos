@@ -21,9 +21,6 @@ ENV PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_
 
 WORKDIR /build
 
-# Test GPU availability during build
-RUN nvidia-smi || echo "No GPU available during build"
-
 # Clone PFLARE - we don't actually run the tests here
 # We do that in our yml file so we can run the tests with the --gpus flag
 RUN set -e; \

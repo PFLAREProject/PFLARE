@@ -34,7 +34,7 @@ jobs:
         run: |
           docker system prune --volumes -af            
 
-  build_gnu_debug:
+  gnu_debug:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -50,7 +50,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-debug
 
-  build_gnu_opt:
+  gnu_opt:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -72,7 +72,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
 
-  build_gnu_opt_64_bit:
+  gnu_opt_64_bit:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -94,7 +94,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
 
-  build_gnu_opt_kokkos:
+  gnu_opt_kokkos:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -110,7 +110,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt      
             
-  build_gnu_opt_64_bit_kokkos:
+  gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -126,7 +126,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt-64bit           
 
-  build_nvidia_opt:
+  nvidia_opt:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -142,7 +142,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-nvidia
             
-  build_intel_opt_no_test:
+  intel_opt_no_test:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -158,15 +158,18 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-intel
 
+  # ~~~~~~~~~~~~~
+  # Seperate the GPU builds into two steps - build and run
+  # ~~~~~~~~~~~~~
+  # Build the gpu on github free runners
   build_gnu_opt_gpu:
-    runs-on: ubicloud-gpu
-    # Only build on the gpu if the regular build succeeds
-    needs:  [setup, build_gnu_opt]
+    runs-on: ubuntu-22.04
+    needs:  [setup]
     # This conditional ensures the job only runs when manually triggered
-    if: github.event_name == 'workflow_dispatch'    
+    if: github.event_name == 'workflow_dispatch'
     # Specify the protected environment to ensure gpu builds are only triggered 
     # by the correct people
-    environment: protected-manual-builds    
+    environment: protected-manual-builds              
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -176,19 +179,33 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
-          push: false
+          # Always push this to dockerhub
+          push: true
           file: ./dockerfiles/Dockerfile_cuda_kokkos
           # Tag this so we pick it up in the next step
-          tags: pflare/gpu-build:latest
+          tags: stevendargaville/pflare_gpu:latest
           build-args: |
             BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-c-opt
+            ARCH=arch-linux-c-opt      
 
+  # Run the gpu tests on the gpu runner
+  run_gnu_opt_gpu:
+    runs-on: ubicloud-gpu
+    # Only runs the gpu tests if the build succeeds
+    needs:  build_gnu_opt_gpu
+    # This conditional ensures the job only runs when manually triggered
+    if: github.event_name == 'workflow_dispatch'    
+    # Specify the protected environment to ensure gpu builds are only triggered 
+    # by the correct people
+    environment: protected-manual-builds    
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
       # Currently our GPU CI only has a single GPU so we can't run the parallel tests
       # Check it sees the gpu by running nvidia-smi
       - name: Run Docker image with explicit --gpus flag
         run: |
-         docker run --rm --gpus all pflare/gpu-build:latest bash -c "
+         docker run --rm --gpus all stevendargaville/pflare_gpu:latest bash -c "
          set -e  # Exit immediately if a command fails
          echo '=== GPU Information ==='
          nvidia-smi
