@@ -196,7 +196,7 @@ jobs:
   # Build the gpu on github free runners
   build_gnu_opt_gpu:
     runs-on: ubicloud-gpu
-    needs:  [setup, build_petsc_opt_gpu]
+    needs:  setup
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'          
     env:
