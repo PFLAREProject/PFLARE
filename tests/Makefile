@@ -44,9 +44,6 @@ clean::
 run_tests_load_serial:
 #
 	@echo ""
-	@echo "Try without PFLARE"
-	./adv_diff_2d -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -ksp_max_it 5000 -pc_type none
-	@echo ""
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem"
 	./ex12f -f data/mat_stream_2364 -ksp_max_it 5
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing"
