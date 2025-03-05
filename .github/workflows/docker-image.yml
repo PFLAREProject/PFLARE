@@ -249,9 +249,10 @@ jobs:
          nvidia-smi &&
          sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
          mkdir build && cd build && git clone https://github.com/PFLAREProject/PFLARE.git &&
-         docker build --progress=plain -t stevendargaville/petsc_cuda_kokkos_ci -f /build/PFLARE/Dockerfile_cuda_kokkos_ci . &&
+         cd build/PFLARE &&
+         docker build --progress=plain -t stevendargaville/petsc_cuda_kokkos_ci -f dockerfiles/Dockerfile_cuda_kokkos_ci . &&
          docker push stevendargaville/petsc_cuda_kokkos_ci &&
-         docker build --progress=plain -t stevendargaville/pflare_gpu -f /build/PFLARE/Dockerfile_cuda_kokkos . &&
+         docker build --progress=plain -t stevendargaville/pflare_gpu -f dockerfiles/Dockerfile_cuda_kokkos . &&
          docker push stevendargaville/pflare_gpu &&
          docker run --rm --gpus all stevendargaville/pflare_gpu:latest bash -c "
          cd /build/petsc && make PETSC_DIR=/build/petsc PETSC_ARCH=arch-linux-c-opt check
