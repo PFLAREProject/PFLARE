@@ -157,3 +157,24 @@ jobs:
           build-args: |
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-intel
+
+  build_gnu_opt_gpu:
+    runs-on: ubuntu-22.04
+    needs: setup
+    # This conditional ensures the job only runs when manually triggered
+    if: github.event_name == 'workflow_dispatch'    
+    # Specify the protected environment to ensure gpu builds are only triggered 
+    # by the correct people
+    environment: protected-manual-builds    
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with KOKKOS and PETSc with GPU
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_cuda_kokkos
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt             
