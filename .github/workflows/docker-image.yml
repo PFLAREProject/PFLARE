@@ -160,7 +160,8 @@ jobs:
 
   build_gnu_opt_gpu:
     runs-on: ubicloud-gpu
-    needs: setup
+    # Only build on the gpu if the regular build succeeds
+    needs:  [setup, build_gnu_opt]
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
     # Specify the protected environment to ensure gpu builds are only triggered 
