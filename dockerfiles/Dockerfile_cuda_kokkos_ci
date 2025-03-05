@@ -87,7 +87,7 @@ RUN git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/pets
     --download-kokkos-kernels \
     --with-cuda-arch=86 \
     && \
-  make
+  make && make PETSC_DIR=/build/petsc PETSC_ARCH=arch-linux-c-opt check
 
 WORKDIR /build/PFLARE
 

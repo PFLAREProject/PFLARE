@@ -17,7 +17,7 @@ ENV PFLARE_KOKKOS_DEBUG=1
 # Also force any test that can to use the kokkos types
 # Many tests will output a warning that some of these options are unused but that can be ignored
 # Also our CI build uses an old mpich that doesn't support gpu aware mpi so we have to turn it off
-ENV PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos -use_gpu_aware_mpi 0"
+ENV PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos"
 
 WORKDIR /build
 
