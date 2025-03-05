@@ -34,7 +34,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
    // We also copy the coefficients over to the device as we need it
    PetscInt one = 1;
    auto coefficients_h = PetscScalarKokkosViewHost(coefficients, one);
-   auto coefficients_d = PetscScalarKokkosView("colmap_input_d", one);
+   auto coefficients_d = PetscScalarKokkosView("coefficients_d", one);
    Kokkos::deep_copy(coefficients_d, coefficients_h);   
 
    // ~~~~~~~~~~~~
@@ -236,7 +236,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(Mat *
    // We also copy the coefficients over to the device as we need it
    PetscInt coeff_size = poly_order + 1;
    auto coefficients_h = PetscScalarKokkosViewHost(coefficients, coeff_size);
-   auto coefficients_d = PetscScalarKokkosView("colmap_input_d", coeff_size);
+   auto coefficients_d = PetscScalarKokkosView("coefficients_d", coeff_size);
    Kokkos::deep_copy(coefficients_d, coefficients_h);         
 
    // ~~~~~~~~~~~~
