@@ -249,7 +249,7 @@ jobs:
          nvidia-smi &&
          sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
          git clone https://github.com/PFLAREProject/PFLARE.git &&
-         cd PFLARE &&
+         cd PFLARE && ls && cd dockerfiles && ls &&
          docker build --progress=plain -t stevendargaville/petsc_cuda_kokkos_ci -f dockerfiles/Dockerfile_cuda_kokkos_ci . &&
          docker push stevendargaville/petsc_cuda_kokkos_ci &&
          docker build --progress=plain -t stevendargaville/pflare_gpu -f dockerfiles/Dockerfile_cuda_kokkos . &&
