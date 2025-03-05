@@ -143,16 +143,29 @@ build_tests: $(OUT)
 		$(MAKE) -C tests $$t; \
 	done
 
-# Build and run all the tests
+# Separate out serial and parallel tests
 # Only run the tests that load the 32 bit test matrix in /tests/data
 # if PETSC has been configured without 64 bit integers
+tests_serial: $(OUT)
+	$(MAKE) build_tests
+ifeq ($(PETSC_USE_64BIT_INDICES),0)
+	$(MAKE) -C tests run_tests_load_serial
+endif	
+	$(MAKE) -C tests run_tests_no_load_serial
+
+tests_parallel: $(OUT)
+	$(MAKE) build_tests
+ifeq ($(PETSC_USE_64BIT_INDICES),0)
+	$(MAKE) -C tests run_tests_load_parallel
+endif	
+	$(MAKE) -C tests run_tests_no_load_parallel	
+
+# Build and run all the tests
 .PHONY: tests
 tests: $(OUT)
 	$(MAKE) build_tests
-ifeq ($(PETSC_USE_64BIT_INDICES),0)
-	$(MAKE) -C tests run_tests_load
-endif	
-	$(MAKE) -C tests run_tests_no_load
+	$(MAKE) tests_serial
+	$(MAKE) tests_parallel
 
 # Build the Python module with Cython
 .PHONY: python

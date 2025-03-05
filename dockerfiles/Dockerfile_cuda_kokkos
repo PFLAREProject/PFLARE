@@ -12,8 +12,7 @@ LABEL description="PFLARE_cuda_kokkos"
 ENV CHECKOUT_BRANCH=$BRANCH
 ENV PETSC_ARCH=$ARCH
 # This turns on checks between kokkos and cpu versions
-# ### Turn this on when we know our builds are working
-# ENV PFLARE_KOKKOS_DEBUG=1
+ENV PFLARE_KOKKOS_DEBUG=1
 # Ensure any test failures are caught and the build fails
 # Also force any test that can to use the kokkos types
 # Many tests will output a warning that some of these options are unused but that can be ignored
@@ -22,11 +21,12 @@ ENV PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_
 
 WORKDIR /build
 
-# Clone PFLARE and run all the tests
+# Clone PFLARE and run all the serial tests
+# Currently our GPU CI only has a single GPU so we can't run the parallel tests
 RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
     cd PFLARE && \
-    make && make tests
+    make && make tests_serial
 
 WORKDIR /build/PFLARE
