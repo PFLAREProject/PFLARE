@@ -14,7 +14,7 @@ Some examples of assymetric linear systems that PFLARE can scalably solve includ
    - Multigrid in time discretisations
    
    without requiring Gauss-Seidel methods. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
-2) Asymmetric problems such as:
+2) Other asymmetric problems such as:
    - Heavily anisotropic Poisson/diffusion equations
 
 ## Methods available in PETSC through PFLARE
