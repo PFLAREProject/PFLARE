@@ -83,7 +83,7 @@ RUN git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/pets
     --download-parmetis \
     --download-fblaslapack \
     --with-cuda \
-    --with-cuda-dir=/usr/local/cuda-12.8/ \
+    --with-cuda-dir=/usr/local/cuda-12.4/ \
     --download-kokkos \
     --download-kokkos-kernels \
     --with-cuda-arch=86 \
