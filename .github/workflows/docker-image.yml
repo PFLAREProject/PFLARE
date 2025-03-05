@@ -248,7 +248,7 @@ jobs:
          echo '=== GPU Information ===' &&
          nvidia-smi &&
          sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
-         git clone https://github.com/PFLAREProject/PFLARE.git &&
+         git clone -b CI_GPU_enable https://github.com/PFLAREProject/PFLARE.git &&
          cd PFLARE && ls && cd dockerfiles && ls &&
          docker build --progress=plain -t stevendargaville/petsc_cuda_kokkos_ci -f Dockerfile_cuda_kokkos_ci . &&
          docker push stevendargaville/petsc_cuda_kokkos_ci &&
