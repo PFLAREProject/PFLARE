@@ -83,7 +83,6 @@ RUN git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/pets
     --download-metis \
     --download-parmetis \
     --download-fblaslapack \
-    --with-petsc4py \
     --with-cuda \
     --download-kokkos \
     --download-kokkos-kernels \
