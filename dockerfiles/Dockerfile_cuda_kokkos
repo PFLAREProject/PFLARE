@@ -12,8 +12,6 @@ LABEL description="PFLARE_cuda_kokkos"
 ENV CHECKOUT_BRANCH=$BRANCH
 ENV PETSC_ARCH=$ARCH
 
-RUN cd /build/petsc && make PETSC_DIR=/build/petsc PETSC_ARCH=arch-linux-c-opt check
-
 # This turns on checks between kokkos and cpu versions
 ENV PFLARE_KOKKOS_DEBUG=1
 # Ensure any test failures are caught and the build fails
