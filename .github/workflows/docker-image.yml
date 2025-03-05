@@ -243,6 +243,8 @@ jobs:
          set -e  # Exit immediately if a command fails
          echo '=== GPU Information ==='
          nvidia-smi
+         cd /build/petsc && RUN cd /build/petsc && make PETSC_DIR=/build/petsc PETSC_ARCH=arch-linux-c-opt check
+         cd /build/PFLARE
          echo '=== Running Tests ==='
          make tests_serial
          "
