@@ -31,12 +31,6 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
    MatGetLocalSize(*input_mat, &local_rows, &local_cols);
    MatGetSize(*input_mat, &global_rows, &global_cols);       
 
-   // We also copy the coefficients over to the device as we need it
-   PetscInt one = 1;
-   auto coefficients_h = PetscScalarKokkosViewHost(coefficients, one);
-   auto coefficients_d = PetscScalarKokkosView("coefficients_d", one);
-   Kokkos::deep_copy(coefficients_d, coefficients_h);   
-
    // ~~~~~~~~~~~~
    // Get the number of nnzs
    // ~~~~~~~~~~~~
@@ -109,7 +103,8 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
             j_local_d(i) = i;
       });    
       // 0th order polynomial is just the first coefficient on the diagonal
-      Kokkos::deep_copy(a_local_d, coefficients_d(0));   
+      // Copy it straight from the host
+      Kokkos::deep_copy(a_local_d, coefficients[0]);   
 
       // Have to specify that we've modified the device data
       a_local_dual.modify_device();
@@ -192,7 +187,8 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
       Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
       // Annoying we can't just call MatSeqAIJGetKokkosView
       a_local_d = aijkok_local_output->a_dual.view_device();
-      Kokkos::deep_copy(a_local_d, coefficients_d(0));  
+      // Copy in the host value directly
+      Kokkos::deep_copy(a_local_d, coefficients[0]);  
 
       // Have to specify we've modifed local data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
