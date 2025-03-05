@@ -622,4 +622,5 @@ Please see these references for more details:
 [4] T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), SIAM Journal on Scientific Computing 40 (2018) A4105–A4130.  
 [5] A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, SIAM Journal on Scientific Computing (2024) S96–S122.  
 [6] T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, Numerical Linear
-Algebra with Applications 31 (3) (2024) e2543.
+Algebra with Applications 31 (3) (2024) e2543.  
+[7] Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. Numerical Linear Algebra with Applications (2022) 29, e2427.
