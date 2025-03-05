@@ -159,7 +159,7 @@ jobs:
             ARCH=arch-linux-intel
 
   build_gnu_opt_gpu:
-    runs-on: ubuntu-22.04
+    runs-on: ubicloud-gpu
     needs: setup
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
