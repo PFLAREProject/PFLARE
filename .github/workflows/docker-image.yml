@@ -244,6 +244,7 @@ jobs:
       # Check it sees the gpu by running nvidia-smi
       - name: Run Docker image with explicit --gpus flag
         run: |
+         ls /usr/local/ &&
          set -e &&
          echo '=== GPU Information ===' &&
          nvidia-smi &&
