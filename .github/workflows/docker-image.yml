@@ -166,10 +166,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs:  [setup]
     # This conditional ensures the job only runs when manually triggered
-    if: github.event_name == 'workflow_dispatch'
-    # Specify the protected environment to ensure gpu builds are only triggered 
-    # by the correct people
-    environment: protected-manual-builds              
+    if: github.event_name == 'workflow_dispatch'          
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
