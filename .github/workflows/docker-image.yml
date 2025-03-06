@@ -34,131 +34,131 @@ jobs:
         run: |
           docker system prune --volumes -af            
 
-#   gnu_debug:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Build Docker image with debug PETSc
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: false
-#           file: ./dockerfiles/Dockerfile
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-c-debug
+  gnu_debug:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with debug PETSc
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-debug
 
-#   gnu_opt:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Login to Docker Hub
-#         uses: docker/login-action@v3
-#         with:
-#           username: ${{ vars.DOCKER_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}      
-#       - name: Build Docker image for pull requests
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: ${{ github.event_name != 'pull_request' }}
-#           file: ./dockerfiles/Dockerfile
-#           tags: stevendargaville/pflare:latest
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-c-opt
+  gnu_opt:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}      
+      - name: Build Docker image for pull requests
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          file: ./dockerfiles/Dockerfile
+          tags: stevendargaville/pflare:latest
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt
 
-#   gnu_opt_64_bit:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Login to Docker Hub
-#         uses: docker/login-action@v3
-#         with:
-#           username: ${{ vars.DOCKER_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}        
-#       - name: Build Docker image for pull requests with 64-bit PETSc
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: ${{ github.event_name != 'pull_request' }}
-#           file: ./dockerfiles/Dockerfile_64_bit
-#           tags: stevendargaville/pflare_64_bit:latest
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-c-opt
+  gnu_opt_64_bit:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}        
+      - name: Build Docker image for pull requests with 64-bit PETSc
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          file: ./dockerfiles/Dockerfile_64_bit
+          tags: stevendargaville/pflare_64_bit:latest
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt
 
-#   gnu_opt_kokkos:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Build Docker image with KOKKOS and PETSc
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: false
-#           file: ./dockerfiles/Dockerfile_kokkos
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-c-opt      
+  gnu_opt_kokkos:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with KOKKOS and PETSc
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_kokkos
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt      
             
-#   gnu_opt_64_bit_kokkos:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Build Docker image with KOKKOS and 64-bit PETSc
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: false
-#           file: ./dockerfiles/Dockerfile_kokkos
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-c-opt-64bit           
+  gnu_opt_64_bit_kokkos:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with KOKKOS and 64-bit PETSc
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_kokkos
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt-64bit           
 
-#   nvidia_opt:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Build Docker image with PETSc and NVIDIA compilers
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: false
-#           file: ./dockerfiles/Dockerfile_nvidia
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-nvidia
+  nvidia_opt:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with PETSc and NVIDIA compilers
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_nvidia
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-nvidia
             
-#   intel_opt_no_test:
-#     runs-on: ubuntu-22.04
-#     needs: setup
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Build Docker image with PETSc and Intel
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: false
-#           file: ./dockerfiles/Dockerfile_intel
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-intel 
+  intel_opt_no_test:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with PETSc and Intel
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_intel
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-intel 
 
-  # Run the gpu tests on the gpu runner
+  # GPU testing
   # Have to build the entirity of the stack given the petsc configure
   # needs to detect the gpu
   gnu_opt_gpu:
@@ -168,7 +168,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'    
     # Specify the protected environment to ensure gpu builds are only triggered 
     # by the correct people
-    #environment: protected-manual-builds    
+    environment: protected-manual-builds    
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:       
@@ -176,10 +176,10 @@ jobs:
       - name: Test GPU
         run: |
          export BRANCH="${{ env.BRANCH }}" &&
+         echo "Using branch: $BRANCH" &&
          set -e &&
          echo '=== GPU Information ===' &&
          nvidia-smi &&
-         sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
             autoconf \
             automake \
@@ -209,7 +209,7 @@ jobs:
             wget \
             valgrind \
             vim &&
-         export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-opt &&
+         export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-debug &&
          git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git && \
          cd petsc && \
          python3 configure \
@@ -223,7 +223,7 @@ jobs:
             --with-cuda-arch=89 \
             --download-mpich \
             && \
-         make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-opt check &&
+         make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-debug check &&
          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git &&
          cd PFLARE &&
          export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
