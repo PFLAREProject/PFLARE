@@ -278,7 +278,6 @@ jobs:
          wget \
          valgrind \
          vim \
-         && rm -rf /var/lib/apt/lists/* &&
          mkdir build &&
          curl -O https://www.mpich.org/static/downloads/4.0.2/mpich-4.0.2.tar.gz && \
          tar xf mpich-4.0.2.tar.gz && \
