@@ -175,40 +175,40 @@ jobs:
       # Currently our GPU CI only has a single GPU so we can't run the parallel tests
       - name: Test GPU
         run: |
-         ls /usr/local/ &&
+         export BRANCH="${{ env.BRANCH }}" &&
          set -e &&
          echo '=== GPU Information ===' &&
          nvidia-smi &&
          sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-         autoconf \
-         automake \
-         bash-completion \
-         ca-certificates \
-         chrpath \
-         cmake \
-         curl \
-         g++ \
-         gcc \
-         gfortran \
-         git \
-         less \
-         libblis-serial-dev \
-         liblapack-dev \
-         libtool \
-         locales \
-         m4 \
-         make \
-         openssl \
-         pkg-config \
-         ripgrep \
-         zlib1g-dev \
-         python3-virtualenv \
-         python3-venv \
-         python3-dev \
-         wget \
-         valgrind \
-         vim &&
+            autoconf \
+            automake \
+            bash-completion \
+            ca-certificates \
+            chrpath \
+            cmake \
+            curl \
+            g++ \
+            gcc \
+            gfortran \
+            git \
+            less \
+            libblis-serial-dev \
+            liblapack-dev \
+            libtool \
+            locales \
+            m4 \
+            make \
+            openssl \
+            pkg-config \
+            ripgrep \
+            zlib1g-dev \
+            python3-virtualenv \
+            python3-venv \
+            python3-dev \
+            wget \
+            valgrind \
+            vim &&
          export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-opt &&
          git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git && \
          cd petsc && \
@@ -224,8 +224,7 @@ jobs:
             --download-mpich \
             && \
          make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-opt check &&
-         git clone -b ${{ env.BRANCH }} https://github.com/PFLAREProject/PFLARE.git &&
+         git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git &&
          cd PFLARE &&
-         export PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos" &&
+         export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
          make && make build_tests && make tests_serial
-         "
