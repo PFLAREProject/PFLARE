@@ -7,17 +7,15 @@ This library contains methods which can be used to solve linear systems in paral
 
 It aims to provide fast & scalable iterative methods for asymmetric linear systems, in parallel and on both CPUs and GPUs.
    
-Some examples of linear systems that PFLARE can scalably solve include:   
+Some examples of assymetric linear systems that PFLARE can scalably solve include:   
 1) Hyperbolic problems such as:
    - Advection equations
    - Streaming operators from Boltzmann transport applications
    - Multigrid in time discretisations
    
    without requiring Gauss-Seidel methods. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
-2) Asymmetric problems such as:
+2) Other asymmetric problems such as:
    - Heavily anisotropic Poisson/diffusion equations
-3) Symmetric problems such as:
-   - Poisson/diffusion equations
 
 ## Methods available in PETSC through PFLARE
 
@@ -86,9 +84,9 @@ The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarch
 
 ## Building PFLARE
 
-This library depends on MPI, BLAS, LAPACK and PETSc (3.15 to 3.22) configured with a graph partitioner (e.g., ParMETIS). 
+This library depends on MPI, BLAS, LAPACK and PETSc configured with a graph partitioner (e.g., ParMETIS).
 
-Please compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. We would recommend configuring PETSc with Kokkos if you wish to run on GPUs.
+Please compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. We would also recommend using the latest version of PETSc and configuring with Kokkos if you wish to run on GPUs.
 
 PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. PFLARE uses the same compilers and flags defined in the PETSc configure.
 
@@ -624,4 +622,5 @@ Please see these references for more details:
 [4] T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), SIAM Journal on Scientific Computing 40 (2018) A4105–A4130.  
 [5] A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, SIAM Journal on Scientific Computing (2024) S96–S122.  
 [6] T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, Numerical Linear
-Algebra with Applications 31 (3) (2024) e2543.
+Algebra with Applications 31 (3) (2024) e2543.  
+[7] Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. Numerical Linear Algebra with Applications (2022) 29, e2427.

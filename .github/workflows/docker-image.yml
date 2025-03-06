@@ -34,7 +34,7 @@ jobs:
         run: |
           docker system prune --volumes -af            
 
-  build_gnu_debug:
+  gnu_debug:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -50,7 +50,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-debug
 
-  build_gnu_opt:
+  gnu_opt:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -72,7 +72,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
 
-  build_gnu_opt_64_bit:
+  gnu_opt_64_bit:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -94,7 +94,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
 
-  build_gnu_opt_kokkos:
+  gnu_opt_kokkos:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -110,7 +110,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt      
             
-  build_gnu_opt_64_bit_kokkos:
+  gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -126,7 +126,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt-64bit           
 
-  build_nvidia_opt:
+  nvidia_opt:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -142,7 +142,7 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-nvidia
             
-  build_intel_opt_no_test:
+  intel_opt_no_test:
     runs-on: ubuntu-22.04
     needs: setup
     env:
@@ -156,11 +156,14 @@ jobs:
           file: ./dockerfiles/Dockerfile_intel
           build-args: |
             BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-intel
+            ARCH=arch-linux-intel 
 
-  build_gnu_opt_gpu:
-    runs-on: ubuntu-22.04
-    needs: setup
+  # GPU testing
+  # Have to build the entirity of the stack given the petsc configure
+  # needs to detect the gpu
+  gnu_debug_gpu:
+    runs-on: ubicloud-gpu
+    needs:  setup
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
     # Specify the protected environment to ensure gpu builds are only triggered 
@@ -168,13 +171,60 @@ jobs:
     environment: protected-manual-builds    
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
-    steps:
-      - name: Build Docker image with KOKKOS and PETSc with GPU
-        uses: docker/build-push-action@v2
-        with:
-          platforms: linux/amd64
-          push: false
-          file: ./dockerfiles/Dockerfile_cuda_kokkos
-          build-args: |
-            BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-c-opt             
+    steps:       
+      # Currently our GPU CI only has a single GPU so we can't run the parallel tests
+      - name: Test GPU
+        run: |
+         export BRANCH="${{ env.BRANCH }}" &&
+         echo "Using branch: $BRANCH" &&
+         set -e &&
+         echo '=== GPU Information ===' &&
+         nvidia-smi &&
+         sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            autoconf \
+            automake \
+            bash-completion \
+            ca-certificates \
+            chrpath \
+            cmake \
+            curl \
+            g++ \
+            gcc \
+            gfortran \
+            git \
+            less \
+            libblis-serial-dev \
+            liblapack-dev \
+            libtool \
+            locales \
+            m4 \
+            make \
+            openssl \
+            pkg-config \
+            ripgrep \
+            zlib1g-dev \
+            python3-virtualenv \
+            python3-venv \
+            python3-dev \
+            wget \
+            valgrind \
+            vim &&
+         export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-debug &&
+         git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git && \
+         cd petsc && \
+         python3 configure \
+            --with-debugging=1 \
+            --download-metis \
+            --download-parmetis \
+            --download-fblaslapack \
+            --with-cuda \
+            --download-kokkos \
+            --download-kokkos-kernels \
+            --with-cuda-arch=89 \
+            --download-mpich \
+            && \
+         make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-debug check &&
+         git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git &&
+         cd PFLARE &&
+         export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
+         make && make build_tests && make tests_serial

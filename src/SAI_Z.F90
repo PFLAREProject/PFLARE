@@ -440,13 +440,16 @@ module sai_z
                call KSPSetUp(ksp, ierr) 
 
                call MatCreateVecs(submatrices(1), solution, PETSC_NULL_VEC, ierr)
+               ! Have to restore the array before the solve in case this is kokkos
                call VecGetArrayF90(solution, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
+               call VecRestoreArrayF90(solution, vec_vals, ierr)     
 
                ! Do the solve - overwrite the rhs
                call KSPSolveTranspose(ksp, solution, solution, ierr)
                call KSPGetIterationNumber(ksp, iterations_taken, ierr)
 
+               call VecGetArrayF90(solution, vec_vals, ierr)
                e_row(1:i_size) = vec_vals(1:i_size)
                call VecRestoreArrayF90(solution, vec_vals, ierr)     
 
@@ -485,6 +488,7 @@ module sai_z
                call KSPSetUp(ksp, ierr)
 
                call MatCreateVecs(submatrices(1), solution, rhs, ierr)  
+               ! Have to restore the array before the solve in case this is kokkos
                call VecGetArrayF90(rhs, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
                call VecRestoreArrayF90(rhs, vec_vals, ierr)                                
