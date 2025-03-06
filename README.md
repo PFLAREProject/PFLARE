@@ -24,7 +24,7 @@ Installing and using PFLARE adds new methods to PETSc, including:
 2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
 3) CF splittings, e.g., PMISR DDC
 
-Details for each are given below, please also see references [1-6]. 
+Details for each are given below, please also see references [1-7]. 
 
 Note: for methods with GPU setup labelled "No" in the tables below, this indicates that some/all of the setup occurs on the CPU before being transferred to the GPU. The setup for these methods may therefore be slow. The solves however all occur on the GPU.   
 
