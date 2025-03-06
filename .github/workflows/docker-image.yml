@@ -281,7 +281,7 @@ jobs:
          mkdir build &&
          curl -O https://www.mpich.org/static/downloads/4.0.2/mpich-4.0.2.tar.gz && \
          tar xf mpich-4.0.2.tar.gz && \
-         rm mpich-4.0.2.tar.gz && \
+         sudo rm mpich-4.0.2.tar.gz && \
          cd mpich-4.0.2 && \
          ./configure \
                FFLAGS=-fallow-argument-mismatch \
@@ -292,12 +292,12 @@ jobs:
                --enable-error-messages=all \
                --enable-g=meminit && \
          make -j$(nproc) && \
-         make install && \
+         sudo make install && \
          cd /build && \
-         rm -rf /build/mpich-4.0.2 && \
+         sudo rm -rf /build/mpich-4.0.2 && \
          ldconfig &&      
          export HWLOC_HIDE_ERRORS=2 && export PETSC_DIR=/build/petsc && export PETSC_ARCH=arch-linux-c-opt &&
-         git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/petsc.git && \
+         git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git && \
          cd petsc && \
          python3 configure \
             --with-debugging=1 \
