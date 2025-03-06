@@ -249,15 +249,70 @@ jobs:
          echo '=== GPU Information ===' &&
          nvidia-smi &&
          sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit &&
+         sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+         autoconf \
+         automake \
+         bash-completion \
+         ca-certificates \
+         chrpath \
+         cmake \
+         curl \
+         g++ \
+         gcc \
+         gfortran \
+         git \
+         less \
+         libblis-serial-dev \
+         liblapack-dev \
+         libtool \
+         locales \
+         m4 \
+         make \
+         openssl \
+         pkg-config \
+         ripgrep \
+         zlib1g-dev \
+         python3-virtualenv \
+         python3-venv \
+         python3-dev \
+         wget \
+         valgrind \
+         vim \
+         && rm -rf /var/lib/apt/lists/* &&
+         mkdir build &&
+         curl -O https://www.mpich.org/static/downloads/4.0.2/mpich-4.0.2.tar.gz && \
+         tar xf mpich-4.0.2.tar.gz && \
+         rm mpich-4.0.2.tar.gz && \
+         cd mpich-4.0.2 && \
+         ./configure \
+               FFLAGS=-fallow-argument-mismatch \
+               FCFLAGS=-fallow-argument-mismatch \
+               --disable-wrapper-rpath \
+               --with-device=ch3:nemesis \
+               --enable-error-checking=runtime \
+               --enable-error-messages=all \
+               --enable-g=meminit && \
+         make -j$(nproc) && \
+         make install && \
+         cd /build && \
+         rm -rf /build/mpich-4.0.2 && \
+         ldconfig &&      
+         export HWLOC_HIDE_ERRORS=2 && export PETSC_DIR=/build/petsc && export PETSC_ARCH=arch-linux-c-opt &&
+         git clone --depth=1 --branch=$PETSC_GIT_BRANCH https://gitlab.com/petsc/petsc.git && \
+         cd petsc && \
+         python3 configure \
+            --with-debugging=1 \
+            --download-metis \
+            --download-parmetis \
+            --download-fblaslapack \
+            --with-cuda \
+            --download-kokkos \
+            --download-kokkos-kernels \
+            --with-cuda-arch=86 \
+            && \
+         make &&
          git clone -b CI_GPU_enable https://github.com/PFLAREProject/PFLARE.git &&
          cd PFLARE && ls && cd dockerfiles && ls &&
-         docker build --progress=plain -t stevendargaville/petsc_cuda_kokkos_ci -f Dockerfile_cuda_kokkos_ci . &&
-         docker push stevendargaville/petsc_cuda_kokkos_ci &&
-         docker build --progress=plain -t stevendargaville/pflare_gpu -f Dockerfile_cuda_kokkos . &&
-         docker push stevendargaville/pflare_gpu &&
-         docker run --rm --gpus all stevendargaville/pflare_gpu:latest bash -c "
-         cd /build/petsc && make PETSC_DIR=/build/petsc PETSC_ARCH=arch-linux-c-opt check
-         cd /build/PFLARE
-         echo '=== Running Tests ==='
-         make tests_serial
+         export PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos -use_gpu_aware_mpi 0" &&
+         make && make build_tests && make tests_serial
          "
