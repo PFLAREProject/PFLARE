@@ -156,76 +156,13 @@ jobs:
 #           file: ./dockerfiles/Dockerfile_intel
 #           build-args: |
 #             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-intel
-
-#   # ~~~~~~~~~~~~~
-#   # Build the gpu version of petsc
-#   # ~~~~~~~~~~~~~
-#   # Build the gpu on github free runners
-#   build_petsc_opt_gpu:
-#    runs-on: ubicloud-gpu
-#    needs:  [setup]
-#    # This conditional ensures the job only runs when manually triggered
-#    if: github.event_name == 'workflow_dispatch'          
-#    env:
-#      BRANCH: ${{ needs.setup.outputs.branch }}
-#    steps:
-#      - name: Login to Docker Hub
-#        uses: docker/login-action@v3
-#        with:
-#          username: ${{ vars.DOCKER_USERNAME }}
-#          password: ${{ secrets.DOCKERHUB_TOKEN }}        
-#      # This won't actually run the tests, for the Dockerfile_cuda_kokkos
-#      # image we need to run the tests in the next step
-#      - name: Build Docker image with KOKKOS and PETSc with GPU
-#        uses: docker/build-push-action@v2
-#        with:
-#          platforms: linux/amd64
-#          # Always push this to dockerhub
-#          push: true
-#          file: ./dockerfiles/Dockerfile_cuda_kokkos_ci
-#          # Tag this so we pick it up in the next step
-#          tags: stevendargaville/petsc_cuda_kokkos_ci:latest
-#          build-args: |
-#            BRANCH=${{ env.BRANCH }}
-#            ARCH=arch-linux-c-opt             
-
-#   # ~~~~~~~~~~~~~
-#   # Seperate the GPU builds into two steps - build and run
-#   # ~~~~~~~~~~~~~
-#   # Build the gpu on github free runners
-#   build_gnu_opt_gpu:
-#     runs-on: ubicloud-gpu
-#     needs:  setup
-#     # This conditional ensures the job only runs when manually triggered
-#     if: github.event_name == 'workflow_dispatch'          
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Login to Docker Hub
-#         uses: docker/login-action@v3
-#         with:
-#           username: ${{ vars.DOCKER_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}        
-#       # This won't actually run the tests, for the Dockerfile_cuda_kokkos
-#       # image we need to run the tests in the next step
-#       - name: Build Docker image with KOKKOS and PETSc with GPU
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           # Always push this to dockerhub
-#           push: true
-#           file: ./dockerfiles/Dockerfile_cuda_kokkos
-#           # Tag this so we pick it up in the next step
-#           tags: stevendargaville/pflare_gpu:latest
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-c-opt      
+#             ARCH=arch-linux-intel 
 
   # Run the gpu tests on the gpu runner
-  run_gnu_opt_gpu:
+  # Have to build the entirity of the stack given the petsc configure
+  # needs to detect the gpu
+  gnu_opt_gpu:
     runs-on: ubicloud-gpu
-    # Only runs the gpu tests if the build succeeds
     needs:  setup
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
@@ -234,15 +171,9 @@ jobs:
     #environment: protected-manual-builds    
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}         
+    steps:       
       # Currently our GPU CI only has a single GPU so we can't run the parallel tests
-      # Check it sees the gpu by running nvidia-smi
-      - name: Run Docker image with explicit --gpus flag
+      - name: Test GPU
         run: |
          ls /usr/local/ &&
          set -e &&
@@ -289,12 +220,12 @@ jobs:
             --with-cuda \
             --download-kokkos \
             --download-kokkos-kernels \
-            --with-cuda-arch=86 \
+            --with-cuda-arch=89 \
             --download-mpich \
             && \
-         make &&
-         git clone -b CI_GPU_enable https://github.com/PFLAREProject/PFLARE.git &&
+         make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-opt check &&
+         git clone -b ${{ env.BRANCH }} https://github.com/PFLAREProject/PFLARE.git &&
          cd PFLARE &&
-         export PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos -use_gpu_aware_mpi 0" &&
+         export PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos" &&
          make && make build_tests && make tests_serial
          "
