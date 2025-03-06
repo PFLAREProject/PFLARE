@@ -161,7 +161,7 @@ jobs:
   # GPU testing
   # Have to build the entirity of the stack given the petsc configure
   # needs to detect the gpu
-  gnu_opt_gpu:
+  gnu_debug_gpu:
     runs-on: ubicloud-gpu
     needs:  setup
     # This conditional ensures the job only runs when manually triggered
