@@ -172,7 +172,7 @@ jobs:
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:       
-      # Currently our GPU CI only has a single GPU so we can't run the parallel tests
+      # Run our tests on GPU
       - name: Test GPU
         run: |
          export BRANCH="${{ env.BRANCH }}" &&
