@@ -278,23 +278,7 @@ jobs:
          wget \
          valgrind \
          vim &&
-         curl -O https://www.mpich.org/static/downloads/4.0.2/mpich-4.0.2.tar.gz && \
-         tar xf mpich-4.0.2.tar.gz && \
-         sudo rm mpich-4.0.2.tar.gz && \
-         cd mpich-4.0.2 && \
-         ./configure \
-               FFLAGS=-fallow-argument-mismatch \
-               FCFLAGS=-fallow-argument-mismatch \
-               --disable-wrapper-rpath \
-               --with-device=ch3:nemesis \
-               --enable-error-checking=runtime \
-               --enable-error-messages=all \
-               --enable-g=meminit && \
-         make -j$(nproc) && \
-         sudo make install && \
-         mkdir build && cd build && \
-         sudo ldconfig &&      
-         export HWLOC_HIDE_ERRORS=2 && export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-opt &&
+         export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-opt &&
          git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git && \
          cd petsc && \
          python3 configure \
@@ -306,6 +290,7 @@ jobs:
             --download-kokkos \
             --download-kokkos-kernels \
             --with-cuda-arch=86 \
+            --download-mpich \
             && \
          make &&
          git clone -b CI_GPU_enable https://github.com/PFLAREProject/PFLARE.git &&
