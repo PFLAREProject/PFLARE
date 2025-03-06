@@ -293,7 +293,7 @@ jobs:
          make -j$(nproc) && \
          sudo make install && \
          mkdir build && cd build && \
-         ldconfig &&      
+         sudo ldconfig &&      
          export HWLOC_HIDE_ERRORS=2 && export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-opt &&
          git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git && \
          cd petsc && \
