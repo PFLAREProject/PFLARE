@@ -439,8 +439,13 @@ module pmisr_ddc
             ! ~~~~~~~~~~~
             
             ! We've updated the values in cf_markers_nonlocal, which is a pointer to lvec
+            ! We must first call restore on it (as if we're on the gpus this is a pointer to the 
+            ! host data and we must tell the vec we need to sync to the device if we're using 
+            ! gpu aware mpi)
             ! Calling a reverse scatter add will then update the values of vec_long (ie cf_markers_vec)
             ! Begin the scatter asynchronously
+
+            call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)            
             call vecscatter_mat_reverse_begin_c(A_array, vec_long)            
 
          end if
@@ -475,10 +480,6 @@ module pmisr_ddc
 
             ! Don't forget to finish the scatter
             call vecscatter_mat_reverse_end_c(A_array, vec_long)
-
-            ! We're now done with our markers
-            ! and have to call restore on the lvec we've pulled from strength_mat
-            call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)
          end if
 
          ! ~~~~~~~~~~~~
