@@ -360,6 +360,8 @@ module constrain_z_or_w
 
             ! Copy the values
             b_c_nonlocal_alloc(:, null_vec) = b_c_nonlocal
+            ! Make sure to restore as soon as we're done with it
+            call vecscatter_mat_restore_c(A_array, b_c_nonlocal_c_ptr)
 
          end do
          
@@ -509,7 +511,6 @@ module constrain_z_or_w
       
       ! Don't forget to restore
       if (comm_size /= 1) then
-         call vecscatter_mat_restore_c(A_array, b_c_nonlocal_c_ptr)
          deallocate(b_c_nonlocal_alloc)
       end if
 
