@@ -48,8 +48,43 @@ int main(int argc,char **args)
   ierr = PetscViewerDestroy(&fd);CHKERRQ(ierr);
   PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL);
 
+  // ~~~~~~~~~~~~~~~~~~
+  // If we're in parallel do a partitioning so our loaded matrix is sensibly distributed
+  MatPartitioning part;
+  IS is, isrows;
+  Mat A_partitioned;
+  Vec b_partitioned;
+  VecScatter vec_scatter;
+  int npe;
+  MPI_Comm_size(PETSC_COMM_WORLD, &npe);CHKERRQ(ierr);
+  PetscInt num_proc = npe;
+  if (num_proc != 1)
+  {
+      // Partition the matrix
+      MatPartitioningCreate(PETSC_COMM_WORLD, &part);
+      MatPartitioningSetAdjacency(part, A);
+      MatPartitioningSetNParts(part, num_proc);
+      MatPartitioningSetFromOptions(part);
+      MatPartitioningApply(part, &is);   
+      ISBuildTwoSided(is, NULL, &isrows);
+      MatCreateSubMatrix(A, isrows, isrows, MAT_INITIAL_MATRIX, &A_partitioned);
+      MatCreateVecs(A_partitioned,NULL,&b_partitioned);CHKERRQ(ierr);
+
+      // Scatter the b to match the partitioning
+      VecScatterCreate(b, isrows, b_partitioned, NULL, &vec_scatter); 
+      VecScatterBegin(vec_scatter, b, b_partitioned, INSERT_VALUES, SCATTER_FORWARD);
+      VecScatterEnd(vec_scatter, b, b_partitioned, INSERT_VALUES, SCATTER_FORWARD);
+
+      MatDestroy(&A);
+      VecDestroy(&b);
+      A = A_partitioned;
+      b = b_partitioned;
+  }
+
+  // ~~~~~~~~~~~~~~~~~~
+
   ierr = MatGetLocalSize(A,&m,&n);CHKERRQ(ierr);
-  ierr = MatGetSize(A,&M,&N);CHKERRQ(ierr);
+  ierr = MatGetSize(A,&M,&N);CHKERRQ(ierr);  
 
   // Test and see if the user wants us to use a different matrix type
   // with -mat_type on the command line
