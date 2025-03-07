@@ -3,57 +3,94 @@
 # PFLARE library
 ### Author: Steven Dargaville
 
-This library contains methods which can be used to solve linear systems in parallel with PETSc, with interfaces in C/Fortran/Python and GPU support.
+This library contains methods which can be used to solve linear systems in parallel with PETSc, with interfaces in C/Fortran/Python. 
+
+It aims to provide fast & scalable iterative methods for asymmetric linear systems, in parallel and on both CPUs and GPUs.
    
-PFLARE can scalably solve:
-1) Hyperbolic problems implicitly without Gauss-Seidel methods, such as advection equations, streaming operators from Boltzmann transport applications, multigrid in time discretisations, etc. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
-3) Other asymmetric problems such as heavily anisotropic Poisson/diffusion problems.
-4) Symmetric Poisson/diffusion problems, including those with varying coefficients.
+Some examples of assymetric linear systems that PFLARE can scalably solve include:   
+1) Hyperbolic problems such as:
+   - Advection equations
+   - Streaming operators from Boltzmann transport applications
+   - Multigrid in time discretisations
+   
+   without requiring Gauss-Seidel methods. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
+2) Other asymmetric problems such as:
+   - Heavily anisotropic Poisson/diffusion equations
 
-## New methods in PFLARE
+## Methods available in PETSC through PFLARE
 
-1) **PMISR DDC**: A new parallel CF splitting algorithm. When used on a matrix $\mathbf{A}$ this returns a set of "fine" and "coarse" points. PMISR DDC is similar to a PMIS CF splitting, but the resulting fine-fine submatrix $\mathbf{A}_ \textrm{ff}$ is more diagonally dominant than $\mathbf{A}$. $\mathbf{A}_ \textrm{ff}$ can also be made strongly diagonally dominant if desired.
+Installing and using PFLARE adds new methods to PETSc, including:
+1) Various polynomial approximate inverses, e.g., GMRES polynomials and Neumann polynomials
+2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
+3) CF splittings, e.g., PMISR DDC
 
-2) **PCPFLAREINV**: A new PETSc PC type, containing methods for computing approximate inverses, most of which can be applied as assembled matrices or matrix-free. PCPFLAREINV can be used with the command line argument ``-pc_type pflareinv``, with several different PFLAREINV types available with ``-pc_pflareinv_type``:
+Details for each are given below, please also see references [1-7]. 
 
-   | Command line type  | Flag | Description |
-   | ------------- | -- | ------------- |
-   | power  |  PFLAREINV_POWER  | GMRES polynomial with the power basis  |
-   | arnoldi  |  PFLAREINV_ARNOLDI  | GMRES polynomial with the Arnoldi basis  |
-   | newton  |  PFLAREINV_NEWTON  | GMRES polynomial with the Newton basis with extra roots for stability  |
-   | newton_no_extra  |  PFLAREINV_NEWTON_NO_EXTRA  | GMRES polynomial with the Newton basis with no extra roots   |
-   | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  |
-   | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  |
-   | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  |
-   | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi  |
-   | jacobi  |  PFLAREINV_JACOBI  | Jacobi  |
+Note: for methods with GPU setup labelled "No" in the tables below, this indicates that some/all of the setup occurs on the CPU before being transferred to the GPU. The setup for these methods may therefore be slow. The solves however all occur on the GPU.   
 
-3) **PCAIR**: A new PETSc PC type, containing different reduction multigrids. PCAIR can be used with the command line argument ``-pc_type air``. Several different CF splittings are available, including the PMISR DDC method above, along with several different grid-transfer operators and smoothers. There are several features used to improve the parallel performance of PCAIR:
+### PCPFLAREINV - A new PETSc PC type
+
+PCPFLAREINV contains methods for computing approximate inverses, most of which can be applied as assembled matrices or matrix-free. PCPFLAREINV can be used with the command line argument ``-pc_type pflareinv``, with several different PFLAREINV types available with ``-pc_pflareinv_type``:
+
+   | Command line type  | Flag | Description | GPU setup |
+   | ------------- | -- | ------------- | -- |
+   | power  |  PFLAREINV_POWER  | GMRES polynomial with the power basis  | Yes |
+   | arnoldi  |  PFLAREINV_ARNOLDI  | GMRES polynomial with the Arnoldi basis  | Yes |
+   | newton  |  PFLAREINV_NEWTON  | GMRES polynomial with the Newton basis with extra roots for stability  | Yes |
+   | newton_no_extra  |  PFLAREINV_NEWTON_NO_EXTRA  | GMRES polynomial with the Newton basis with no extra roots   | Yes |
+   | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  | Yes |
+   | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  | No |
+   | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | No |
+   | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi  | Yes |
+   | jacobi  |  PFLAREINV_JACOBI  | Jacobi  | Yes |
+
+### PCAIR - A new PETSc PC type
+
+PCAIR contains different types of reduction multigrids. PCAIR can be used with the command line argument ``-pc_type air``. The combination of ``-pc_air_z_type`` and ``-pc_air_inverse_type`` (given by the PCPFLAREINV types above) defines several different reduction multigrids:
+
+   | ``-pc_air_z_type``  | ``-pc_air_inverse_type`` | Description | GPU setup |
+   | ------------- | -- | ------------- | --- |
+   | product  |  power, arnoldi or newton  | AIRG  | Yes |
+   | product  |  neumann  | nAIR with Neumann smoothing  | Yes |
+   | product  |  sai  | SAI reduction multigrid  | No |
+   | product  |  isai  | ISAI reduction multigrid  | No |
+   | product  |  wjacobi or jacobi  | Distance 0 reduction multigrid  | Yes |
+   | lair  |  wjacobi or jacobi  | lAIR  | No |
+   | lair_sai  |  wjacobi or jacobi  | SAI version of lAIR  | No |
+
+Different combinations of these types can also be used, e.g., ``-pc_air_z_type lair -pc_air_inverse_type power`` uses a lAIR grid transfer operator and GMRES polynomial smoothing with the power basis.
+
+There are several features used to improve the parallel performance of PCAIR:
 
    - The number of active MPI ranks on lower levels can be reduced where necessary. If this is used then:
      - Repartitioning with graph partitioners can be applied.
      - OpenMP can be used in the polynomial inverse assembly (i.e., AIRG or nAIR) to reduce setup time (without requiring support for non-busy waits in the MPI library).
      - Calculation of polynomial coefficients can be done on subcommunicators.
    - The PCPFLAREINV methods above can be used as parallel coarse grid solvers, allowing heavy truncation of the multigrid hierarchy.
-   - The sparsity of the multigrid hierarchy (and hence the CF splitting, repartitioning and symbolic matrix-matrix products) can be reused during setup. 
+   - The multigrid hierarchy can be automatically truncated depending on the quality of the coarse grid solver
+   - The sparsity of the multigrid hierarchy (and hence the CF splitting, repartitioning and symbolic matrix-matrix products) can be reused during setup.    
 
-   The combination of ``-pc_air_z_type`` and ``-pc_air_inverse_type`` (given by the PCPFLAREINV types above) defines several different reduction multigrids:
+### CF splittings
 
-   | ``-pc_air_z_type``  | ``-pc_air_inverse_type`` | Description |
-   | ------------- | -- | ------------- |
-   | product  |  power, arnoldi or newton  | AIRG  |
-   | product  |  neumann  | nAIR with Neumann smoothing  |
-   | product  |  sai  | SAI reduction multigrid  |
-   | product  |  isai  | ISAI reduction multigrid  |
-   | product  |  wjacobi or jacobi  | Distance 0 reduction multigrid  |
-   | lair  |  wjacobi or jacobi  | lAIR  |
-   | lair_sai  |  wjacobi or jacobi  | SAI version of lAIR  |
+The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarchy. They can also be called independently from PCAIR. The CF splitting type within PCAIR can be specified with ``-pc_air_cf_splitting_type``: 
 
-   Different combinations of these types can also be used, e.g., ``-pc_air_z_type lair -pc_air_inverse_type power`` uses a lAIR grid transfer operator and GMRES polynomial smoothing with the power basis.
+   | Command line type  | Flag | Description | GPU setup |
+   | ------------- | -- | ------------- | -- |
+   | pmisr_ddc  |  CF_PMISR_DDC  | Two-pass splitting giving diagonally dominant $\mathbf{A}_\textrm{ff}$ | Yes |
+   | pmis  |  CF_PMIS  | PMIS method with symmetrized strength matrix | Yes |
+   | pmis_dist2  |  CF_PMIS_DIST2  | Distance 2 PMIS method with strength matrix formed by S'S + S and then symmetrized | Partial |
+   | agg  |  CF_AGG  | Aggregation method with root-nodes as C points. In parallel this is processor local aggregation  | No |
+   | pmis_agg  |  CF_PMIS_AGG  | PMIS method with symmetrized strength matrix on boundary nodes, then processor local aggregation.  | Partial |
 
 ## Building PFLARE
 
-This library depends on MPI, BLAS, LAPACK and PETSc (3.15 to 3.22) configured with a graph partitioner (e.g., ParMETIS). Please compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. PFLARE uses the same compilers and flags defined in the PETSc configure.
+This library depends on MPI, BLAS, LAPACK and PETSc configured with a graph partitioner (e.g., ParMETIS).
+
+Please compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. We would also recommend using the latest version of PETSc and configuring with Kokkos if you wish to run on GPUs.
+
+PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. PFLARE uses the same compilers and flags defined in the PETSc configure.
+
+To build the PFLARE library:
 
 1) Set `PETSC_DIR` and `PETSC_ARCH` environmental variables.
 2) Call ``make`` in the top level directory to build the PFLARE library.
@@ -74,10 +111,22 @@ An up to date Docker image is also available on Dockerhub which includes a build
 
 ## Linking to PFLARE
 
-1) For Fortran/C, link the library `libpflare` to your application; it is output to `lib/`. For Fortran, you must include `pflare.h` in `include/finclude/`, for C you must include `pflare.h` in `include/`.
-2) For Python, ensure the full path to `python/` is in your `PYTHONPATH` environmental variable along with the path for PETSc. Your `LD_LIBRARY_PATH` must include the `lib/` directory (along with paths for PETSc, BLAS and LAPACK).
+For Fortran/C:
 
-Using the components of PFLARE in an existing PETSc code is very simple. For C/Fortran, the user must call a single function which registers the new PC types with PETSc, while in Python this is handled by the import statement:
+1) Link the library `libpflare` to your application; it is output to `lib/`
+2) For Fortran: add `include/finclude/` to your include path
+3) For C: add `include/` to your include path
+
+For Python:
+
+1) Ensure the full path to `python/` is in your `PYTHONPATH` environmental variable (along with the library path for PETSc). 
+2) `LD_LIBRARY_PATH` must include the `lib/` directory (along with the library path for PETSc).
+
+## Modifying existing code to use PFLARE
+
+After linking your application to the PFLARE library, using the components of PFLARE through PETSc is very simple. 
+
+For Fortran/C, the user must call a single function which registers the new PC types with PETSc, while in Python this is handled by the import statement. For example, the only modifications required in an existing code are:
 
 in Fortran:
 
@@ -100,11 +149,7 @@ or in Python with petsc4py:
 
 ## Using PFLARE
 
-There are several different ways to use the methods in the PFLARE library.
-
-### Using the new PC types:
-
-Once the new PC types have been registered, they can then be used like native PETSc types, either by writing code to set the PETSc type/options, or through command line arguments. A few examples include:
+Once the new PC types have been registered they can then be used like native PETSc types, either by writing code to set the PETSc type/options, or through command line arguments. A few examples include:
 
 #### 1) Using PCAIR with default options, namely AIRG with parameters tuned for a time independent advection equation on 2D unstructured triangles:
 
@@ -367,29 +412,30 @@ It is recommended that PFLARE be linked with unthreaded BLAS/LAPACK libraries, a
 
 ## GPU support           
 
-If PETSc has been configured with GPU support then PCPFLAREINV and PCAIR support GPUs. We recommend configuring PETSc with Kokkos and always specifying the matrix/vector types as Kokkos, rather than as the back-end GPU types (e.g., CUDA, HIP, etc). PFLARE contains Kokkos routines to speed-up the setup/solve on GPUs which are only used if the matrix/vector types are Kokkos. 
+If PETSc has been configured with GPU support then PCPFLAREINV and PCAIR support GPUs. We recommend configuring PETSc with Kokkos and always specifying the matrix/vector types as Kokkos as this works across different GPU hardware (Nvidia, AMD, Intel). PFLARE also contains Kokkos routines to speed-up the setup/solve on GPUs. 
 
-For example, if we don't specify the matrix/vector types in the 1D advection problem ``tests/adv_1d`` it will run on the CPU. If we solve with a 30th order GMRES polynomial applied matrix-free:
+By default the tests run on the CPU unless the matrix/vector types are specified as those compatible with GPUs. For example, the following arguments specify that the 1D advection problem ``tests/adv_1d`` will use a 30th order GMRES polynomial applied matrix-free to solve on the CPU:
 
 ``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_order 30``
 
-If we want to run on GPUs, we must ensure the matrix/vector types match. In both ``tests/adv_1d`` and ``tests/adv_diff_2d``, these types can be set through command line arguments. The types are specified with either ``-mat_type`` and ``-vec_type``, or if set by a DM directly (like in ``tests/adv_diff_2d``), use ``-dm_mat_type`` and ``-dm_vec_type``. 
+To run on GPUs, we set the matrix/vector types as Kokkos, which can be easily set through command line arguments. Our tests use either ``-mat_type`` and ``-vec_type``, or if set by a DM directly use ``-dm_mat_type`` and ``-dm_vec_type``.
 
-For example, running on GPUs with KOKKOS:
+For example, running the same problem on a single GPU with KOKKOS:
 
 ``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_order 30 -mat_type aijkokkos -vec_type kokkos``
 
-For both PCPFLAREINV and PCAIR, the entirity of the solve happens on GPUs without any copies between the CPU/GPU. The setup however occurs on both the CPU and GPU depending on the options used, with copies occuring between the two where needed. The command line option  ``-log_view`` shows how many copies to/from the CPU/GPU occur.
+Note: all our tests allow the option ``-second_solve`` which turns on two solves, the first to trigger any copies to the GPU (typically for options that have GPU setup listed as "No" above) and the second to allow accurate timing. 
 
 Development of the setup on GPUs is ongoing, please get in touch if you would like to contribute. The main areas requiring development are:
 
-1) Processor agglomeration - GPU libraries exist which could replace the CPU-based calls to ParMETIS
+1) Processor agglomeration - GPU libraries exist which could replace the CPU-based calls to the PETSc graph partitioners
+2) GPU optimisation - There are several Kokkos routines in PFLARE which would benefit from optimisation
 
 ### Performance notes
 
 1 - Typically we find good performance using between 1-4 million DOFs per GPU. 
 
-2 - The default parameters used in the processor agglomeration in PCAIR (e.g., ``-pc_air_process_eq_limit``) have not been optimised for GPUs.
+2 - The processor agglomeration happens through the graph partitioners in PETSc and currently there is no GPU partitioner, hence this could be slow. The default parameters used in the processor agglomeration in PCAIR (e.g., ``-pc_air_process_eq_limit``) have also not been optimised for GPUs. You may wish to disable the processor agglomeration in parallel on GPUs (``-pc_air_processor_agglom 0``). Using heavy truncation may also help mitigate the the impact of turning off processor agglomeration on GPUs, see below.
 
 3 - Multigrid methods on GPUs will often pin the coarse grids to the CPU, as GPUs are not very fast at the small solves that occur on coarse grids. We do not do this in PCAIR; instead we use the same approach we used in [2] to improve parallel scaling on CPUs. 
 
@@ -407,17 +453,7 @@ we find that the 10th order polynomials are good enough coarse solvers to enable
 
 ## CF splittings
 
-The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarchy. There are several different CF splittings available with ``-pc_air_cf_splitting_type``:
-
-   | Command line type  | Flag | Description |
-   | ------------- | -- | ------------- |
-   | pmisr_ddc  |  CF_PMISR_DDC  | Two-pass splitting giving diagonally dominant $\mathbf{A}_\textrm{ff}$ |
-   | pmis  |  CF_PMIS  | PMIS method with symmetrized strength matrix |
-   | pmis_dist2  |  CF_PMIS_DIST2  | Distance 2 PMIS method with strength matrix formed by S'S + S and then symmetrized |
-   | agg  |  CF_AGG  | Aggregation method with root-nodes as C points. In parallel this is processor local aggregation  |
-   | pmis_agg  |  CF_PMIS_AGG  | PMIS method with symmetrized strength matrix on boundary nodes, then processor local aggregation.  |   
-
-The CF splittings can also be called independently from PCAIR. The CF splittings are returned in two PETSc IS's representing the coarse and fine points. For example, to compute a PMISR DDC CF splitting of a PETSc matrix $\mathbf{A}$:
+The CF splittings can be called separately to PCAIR and are returned in two PETSc IS's representing the coarse and fine points. For example, to compute a PMISR DDC CF splitting of a PETSc matrix $\mathbf{A}$:
 
 in Fortran:
 
@@ -586,4 +622,5 @@ Please see these references for more details:
 [4] T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), SIAM Journal on Scientific Computing 40 (2018) A4105–A4130.  
 [5] A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, SIAM Journal on Scientific Computing (2024) S96–S122.  
 [6] T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, Numerical Linear
-Algebra with Applications 31 (3) (2024) e2543.
+Algebra with Applications 31 (3) (2024) e2543.  
+[7] Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. Numerical Linear Algebra with Applications (2022) 29, e2427.

@@ -10,6 +10,9 @@ module petsc_helper
 
 #include "petsc_legacy.h"
 
+logical, protected :: got_debug_kokkos_env = .FALSE.
+logical, protected :: kokkos_debug_global = .FALSE.
+
    public
 
    ! -------------------------------------------------------------------------------------------------------------------------------
@@ -19,10 +22,53 @@ module petsc_helper
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
    contains 
+
+   !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   function kokkos_debug ()
+
+      ! This checks if an environmental variable is defined 
+      ! If it is we check if the Kokkos and CPU versions of routines
+      ! are the same
+
+      ! ~~~~~~~~~~~~
+      logical      :: kokkos_debug
+
+#if defined(PETSC_HAVE_KOKKOS)       
+      integer :: env_val, length, status
+      CHARACTER(len=255) :: env_char      
+#endif      
+      ! ~~~~~~~~~~~~
+      
+      kokkos_debug = .FALSE.
+     
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      ! Only get the environmental variable once
+      if (got_debug_kokkos_env) then
+         kokkos_debug = kokkos_debug_global
+      else
+         ! Check if the environment variable is set
+         call get_environment_variable('PFLARE_KOKKOS_DEBUG', env_char, &
+                  length=length, status=status)
+
+         got_debug_kokkos_env = .TRUE.
+         if (status /= 1 .AND. length /= 0) then
+            read(env_char, '(I3)') env_val
+            if (env_val == 1) then
+               kokkos_debug_global = .TRUE.
+               kokkos_debug = kokkos_debug_global
+            end if
+         end if
+      end if
+
+#endif
+      
+    end function kokkos_debug   
  
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tolerance, lump, allow_drop_diagonal)
+   subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tol_int, lump, drop_diagonal_int)
 
       ! Wrapper around remove_small_from_sparse_cpu and remove_small_from_sparse_kokkos
    
@@ -31,15 +77,16 @@ module petsc_helper
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       PetscReal, intent(in) :: tol
-      logical, intent(in), optional :: relative_max_row_tolerance, lump, allow_drop_diagonal
+      logical, intent(in), optional :: lump
+      integer, intent(in), optional :: relative_max_row_tol_int, drop_diagonal_int
       
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array
-      integer :: lump_int, allow_drop_diagonal_int, relative_max_row_tolerance_int
+      integer :: lump_int, allow_drop_diagonal_int, rel_max_row_tol_int, errorcode
       PetscErrorCode :: ierr
       MatType :: mat_type
-      !Mat :: temp_mat
-      !PetscScalar normy;
+      Mat :: temp_mat
+      PetscScalar normy;
 #endif      
       ! ~~~~~~~~~~
 
@@ -49,11 +96,10 @@ module petsc_helper
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
-         relative_max_row_tolerance_int = 0
-         if (present(relative_max_row_tolerance)) then
-            if (relative_max_row_tolerance) then
-               relative_max_row_tolerance_int = 1
-            end if
+         ! Absolute tolerance by default   
+         rel_max_row_tol_int = 0
+         if (present(relative_max_row_tol_int)) then
+            rel_max_row_tol_int = relative_max_row_tol_int
          end if
          lump_int = 0
          if (present(lump)) then
@@ -61,41 +107,44 @@ module petsc_helper
                lump_int = 1
             end if
          end if   
-         allow_drop_diagonal_int = 0 
-         if (present(allow_drop_diagonal)) then
-            if (allow_drop_diagonal) then
-               allow_drop_diagonal_int = 1
-            end if
+         ! Never drop the diagonal by default
+         allow_drop_diagonal_int = 0
+         if (present(drop_diagonal_int)) then
+            allow_drop_diagonal_int = drop_diagonal_int
          end if         
 
          A_array = input_mat%v             
          call remove_small_from_sparse_kokkos(A_array, tol, &
-                  B_array, relative_max_row_tolerance_int, lump_int, allow_drop_diagonal_int) 
+                  B_array, rel_max_row_tol_int, lump_int, allow_drop_diagonal_int) 
          output_mat%v = B_array
 
-         ! Debug check if the CPU and Kokkos versions are the same
-         ! call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tolerance, &
-         !          lump, allow_drop_diagonal)       
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
 
-         ! call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-         ! call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-         ! if (normy .gt. 1d-14) then
-         !    print *, "diff"
-         !    call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-         !    !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-         !    print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
-         !    call exit(0)
-         ! end if
+            ! Debug check if the CPU and Kokkos versions are the same
+            call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tol_int, &
+                     lump, drop_diagonal_int)       
+
+            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
 
       else
 
-         call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tolerance, &
-                  lump, allow_drop_diagonal)          
+         call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
+                  lump, drop_diagonal_int)          
 
       end if
 #else
-      call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tolerance, &
-               lump, allow_drop_diagonal)  
+      call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
+               lump, drop_diagonal_int)  
 #endif  
      
          
@@ -103,11 +152,11 @@ module petsc_helper
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tolerance, lump, allow_drop_diagonal)
+   subroutine remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, lump, drop_diagonal_int)
 
       ! Returns a copy of a sparse matrix with entries below abs(val) < tol removed
-      ! If relative_max_row_tolerance is true, then the tol is taken to be a relative scaling 
-      ! of the max row val on each row
+      ! If rel_max_row_tol_int is 1, then the tol is taken to be a relative scaling 
+      ! of the max row val on each row including the diagonal. If it's -1, it doesn't include the diagonal
       ! If lumped is true the removed entries are added to the diagonal
    
       ! ~~~~~~~~~~
@@ -115,7 +164,8 @@ module petsc_helper
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       PetscReal, intent(in) :: tol
-      logical, intent(in), optional :: relative_max_row_tolerance, lump, allow_drop_diagonal
+      logical, intent(in), optional :: lump
+      integer, intent(in), optional :: drop_diagonal_int, relative_max_row_tol_int
 
       PetscInt :: col, ncols, ifree, max_nnzs
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start
@@ -127,10 +177,12 @@ module petsc_helper
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v          
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      logical :: rel_row_tol_logical, lump_entries, drop_diag
+      logical :: lump_entries
+      integer :: drop_diag_int, errorcode, rel_max_row_tol_int
       PetscReal :: rel_row_tol
       MPI_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
+      PetscScalar :: abs_biggest_entry
       
       ! ~~~~~~~~~~
       ! If the tolerance is 0 we still want to go through this routine and drop the zeros
@@ -138,16 +190,26 @@ module petsc_helper
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
 
       lump_entries = .FALSE.
-      drop_diag = .FALSE.
+      ! 1  - Allow drop diagonal
+      ! 0  - Never drop diagonal
+      ! -1 - Always drop diagonal
+      ! Never drop the diagonal by default
+      drop_diag_int = 0
       if (present(lump)) lump_entries = lump
-      if (present(allow_drop_diagonal)) drop_diag = allow_drop_diagonal
-      rel_row_tol_logical = .FALSE.
+      if (present(drop_diagonal_int)) drop_diag_int = drop_diagonal_int
       rel_row_tol = tol
-      if (present(relative_max_row_tolerance)) then
-         if (relative_max_row_tolerance) then
-            rel_row_tol_logical = .TRUE.
-            rel_row_tol = 1d0
-         end if
+      ! 1  - Relative row tolerance (including diagonal)
+      ! 0  - Absolute tolerance
+      ! -1 - Relative row tolerance (not including diagonal)
+      ! Absolute tolerance by default    
+      rel_max_row_tol_int = 0
+      if (present(relative_max_row_tol_int)) then
+         rel_max_row_tol_int = relative_max_row_tol_int
+      end if
+
+      if (lump_entries .AND. drop_diag_int == 1) then
+         print *, "Error: Cannot lump and drop the diagonal"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
       end if
 
       ! Get the local sizes
@@ -171,9 +233,10 @@ module petsc_helper
 
       ! We know we never have more to do than the original nnzs
       allocate(row_indices(max_nnzs_total))
+      allocate(col_indices(max_nnzs_total))
       ! By default drop everything
       row_indices = -1
-      allocate(col_indices(max_nnzs_total))
+      col_indices = -1
       allocate(v(max_nnzs_total))      
 
       call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
@@ -202,22 +265,42 @@ module petsc_helper
          ! Copy in all the values
          v(counter:counter + ncols - 1) = vals(1:ncols)
 
-         if (rel_row_tol_logical) then
-            rel_row_tol = tol * maxval(abs(vals(1:ncols)))
+         ! If we want a relative row tolerance
+         if (rel_max_row_tol_int /= 0) then
+            ! Include the diagonal in the relative row tolerance
+            if (rel_max_row_tol_int == 1) then
+               rel_row_tol = tol * maxval(abs(vals(1:ncols)))
+
+            ! Don't include the diagonal in the relative row tolerance
+            else if (rel_max_row_tol_int == -1) then
+               
+               ! Be careful here to use huge(0d0) rather than huge(0)!
+               abs_biggest_entry = -huge(0d0)
+               ! Find the biggest entry in the row thats not the diagonal
+               do col = 1, ncols
+                  if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
+                     abs_biggest_entry = abs(vals(col))
+                  end if 
+               end do  
+               rel_row_tol = tol * abs_biggest_entry
+            end if
          end if 
                   
          do col = 1, ncols
 
             ! Set the row/col to be included (ie not -1) 
             ! if it is bigger than the tolerance
-            if (abs(vals(col)) .ge. rel_row_tol ) then
+            if (abs(vals(col)) .ge. rel_row_tol) then
 
+               ! If this is the diagonal and we are always dropping it, then don't add it
+               if (drop_diag_int == -1 .AND. cols(col) == ifree) cycle
+                                 
                row_indices(counter + col - 1) = ifree
                col_indices(counter + col - 1) = cols(col)
 
             ! If the entry is small and we are lumping, then add it to the diagonal
             ! or if this is the diagonal and it's small but we are not dropping it
-            else if (lump_entries .OR. (.NOT. drop_diag .AND. cols(col) == ifree)) then
+            else if (lump_entries .OR. (drop_diag_int == 0 .AND. cols(col) == ifree)) then
 
                row_indices(counter + col - 1) = ifree
                col_indices(counter + col - 1) = ifree
@@ -460,9 +543,205 @@ module petsc_helper
          
    end subroutine remove_from_sparse_match
 
+   !------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine MatSetAllValues(input_mat, val)
+
+      ! Sets all the values in the matrix to be val
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in)  :: input_mat
+      PetscScalar, intent(in) :: val
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+#endif        
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then  
+
+         A_array = input_mat%v             
+         call MatSetAllValues_kokkos(A_array, val) 
+
+      else
+         call MatSetAllValues_cpu(input_mat, val)          
+      end if
+#else
+      call MatSetAllValues_cpu(input_mat, val)    
+#endif        
+
+
+   end subroutine MatSetAllValues
+
+   !------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine MatSetAllValues_cpu(input_mat, val)
+
+      ! Sets all the values in the matrix to be val
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in)  :: input_mat
+      PetscScalar, intent(in) :: val
+
+      MPI_Comm :: MPI_COMM_MATRIX
+      integer :: errorcode, comm_size
+      PetscErrorCode :: ierr
+      type(tMat) :: Ad, Ao
+      PetscOffset :: iicol
+      PetscInt :: icol(1)      
+      PetscScalar, pointer :: xx_v(:)
+      PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
+      PetscInt :: shift = 0, n_ad, n_ao, local_rows, local_cols
+      logical :: symmetric = .false., inodecompressed=.false., done      
+
+      ! ~~~~~~~~~~
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
+      ! Get the comm size 
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
+      call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+
+      if (comm_size /= 1) then
+         ! Let's get the diagonal and off-diagonal parts of the strength matrix
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, icol, iicol, ierr) 
+      else
+         Ad = input_mat    
+      end if      
+
+      ! Need to know how many nnzs in xx_v, as its size isn't set
+      call MatGetRowIJF90(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      if (.NOT. done) then
+         print *, "Pointers not set in call to MatGetRowIJF90"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      if (comm_size /= 1) then
+         call MatGetRowIJF90(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         if (.NOT. done) then
+            print *, "Pointers not set in call to MatGetRowIJF90"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if       
+
+      ! Sequential part
+      call MatSeqAIJGetArrayF90(Ad,xx_v,ierr)
+      xx_v(1:ad_ia(local_rows+1)) = val
+      call MatSeqAIJRestoreArrayF90(Ad,xx_v,ierr)
+     
+      ! MPI part
+      if (comm_size /= 1) then
+         call MatSeqAIJGetArrayF90(Ao,xx_v,ierr)
+         xx_v(1:ao_ia(local_rows+1)) = val
+         call MatSeqAIJRestoreArrayF90(Ao,xx_v,ierr)         
+      end if   
+      
+      ! Restore the sequantial pointers once we're done
+      call MatRestoreRowIJF90(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      if (comm_size /= 1) then
+         call MatRestoreRowIJF90(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+      end if        
+
+   end subroutine MatSetAllValues_cpu   
+
   !------------------------------------------------------------------------------------------------------------------------
    
    subroutine mat_duplicate_copy_plus_diag(input_mat, reuse, output_mat)
+
+      ! Wrapper around mat_duplicate_copy_plus_diag_kokkos and mat_duplicate_copy_plus_diag_cpu
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in) :: input_mat
+      logical, intent(in) :: reuse
+      type(tMat), intent(inout) :: output_mat
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array
+      integer :: reuse_int, errorcode
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
+      PetscScalar normy;
+#endif        
+      ! ~~~~~~~~~~
+
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         reuse_int = 0
+         if (reuse) reuse_int = 1
+
+         A_array = input_mat%v             
+         if (reuse) B_array = output_mat%v
+         call mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array)
+         output_mat%v = B_array
+         
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! If we're doing reuse and debug, then we have to always output the result 
+            ! from the cpu version, as it will have coo preallocation structures set
+            ! They aren't copied over if you do a matcopy (or matconvert)
+            ! If we didn't do that the next time we come through this routine 
+            ! and try to call the cpu version with reuse, it will segfault
+            if (reuse) then
+               temp_mat = output_mat
+               call MatConvert(output_mat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+            else
+               temp_mat_compare = output_mat                 
+            end if
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, temp_mat)
+
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)                       
+
+            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of compute_R_from_Z do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse) then
+               call MatDestroy(output_mat, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            output_mat = temp_mat
+
+         end if
+
+      else
+
+         call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, output_mat)     
+
+      end if
+#else
+      call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, output_mat)
+#endif       
+
+         
+   end subroutine mat_duplicate_copy_plus_diag  
+   
+
+  !------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, output_mat)
 
       ! Duplicates and copies the values from input matrix into the output mat, but ensures
       ! there are always diagonal entries present that are set to zero if absent
@@ -576,7 +855,7 @@ module petsc_helper
       deallocate(cols, vals)
 
          
-   end subroutine mat_duplicate_copy_plus_diag   
+   end subroutine mat_duplicate_copy_plus_diag_cpu   
 
    !------------------------------------------------------------------------------------------------------------------------
    
@@ -787,6 +1066,67 @@ module petsc_helper
    
    subroutine generate_one_point_with_one_entry_from_sparse(input_mat, output_mat)
 
+      ! Wrapper around generate_one_point_with_one_entry_from_sparse_kokkos and 
+      ! generate_one_point_with_one_entry_from_sparse_cpu
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in) :: input_mat
+      type(tMat), intent(inout) :: output_mat
+      
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat
+      PetscScalar normy;
+#endif      
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then      
+
+         A_array = input_mat%v             
+         call generate_one_point_with_one_entry_from_sparse_kokkos(A_array, B_array) 
+         output_mat%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, temp_mat)      
+
+            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of generate_one_point_with_one_entry_from_sparse do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, output_mat)         
+
+      end if
+#else
+      call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, output_mat)  
+#endif 
+
+         
+   end subroutine generate_one_point_with_one_entry_from_sparse    
+
+  !------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine generate_one_point_with_one_entry_from_sparse_cpu(input_mat, output_mat)
+
       ! Returns a copy of a sparse matrix, but with only one in the spot of the biggest entry
       ! This can be used to generate a classical one point prolongator for example
    
@@ -881,11 +1221,109 @@ module petsc_helper
 
       deallocate(cols, vals)
          
-   end subroutine generate_one_point_with_one_entry_from_sparse       
+   end subroutine generate_one_point_with_one_entry_from_sparse_cpu   
+   
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine compute_P_from_W(W, global_row_start, is_fine, is_coarse, identity, reuse, P)
+
+      ! Wrapper around compute_P_from_W_cpu and compute_P_from_W_kokkos 
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(inout) :: W, P
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      PetscInt, intent(in)      :: global_row_start
+      logical, intent(in) :: identity, reuse
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse
+      integer :: identity_int, reuse_int, errorcode
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
+      PetscScalar normy;
+#endif        
+      ! ~~~~~~~~~~
+
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(W, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         identity_int = 0
+         if (identity) identity_int = 1
+         reuse_int = 0
+         if (reuse) reuse_int = 1
+
+         A_array = W%v             
+         indices_fine = is_fine%v
+         indices_coarse = is_coarse%v
+         if (reuse) B_array = P%v
+         call compute_P_from_W_kokkos(A_array, global_row_start, &
+                     indices_fine, indices_coarse, &
+                     identity_int, reuse_int, B_array)
+         P%v = B_array
+         
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! If we're doing reuse and debug, then we have to always output the result 
+            ! from the cpu version, as it will have coo preallocation structures set
+            ! They aren't copied over if you do a matcopy (or matconvert)
+            ! If we didn't do that the next time we come through this routine 
+            ! and try to call the cpu version with reuse, it will segfault
+            if (reuse) then
+               temp_mat = P
+               call MatConvert(P, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+            else
+               temp_mat_compare = P                         
+            end if
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+                     identity, reuse, temp_mat)   
+
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)                       
+
+            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of compute_P_from_W do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse) then
+               call MatDestroy(P, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            P = temp_mat
+
+         end if
+
+      else
+
+         call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+                  identity, reuse, P)         
+
+      end if
+#else
+      call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+                  identity, reuse, P)
+#endif  
+
+         
+   end subroutine compute_P_from_W         
 
   !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine compute_P_from_W(W, global_row_start, is_fine, is_coarse, identity, reuse, P)
+   subroutine compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, identity, reuse, P)
 
       ! Pass in W and get out P = [W I]' (or [W 0] if identity is false)
    
@@ -1018,12 +1456,125 @@ module petsc_helper
       call ISRestoreIndicesF90(is_coarse, is_pointer_coarse, ierr)
       call ISRestoreIndicesF90(is_fine, is_pointer_fine, ierr)       
          
-   end subroutine compute_P_from_W      
+   end subroutine compute_P_from_W_cpu      
+
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine compute_R_from_Z(Z, global_row_start, is_fine, is_coarse, &
+                     orig_fine_col_indices, &
+                     identity, reuse, &
+                     R)
+
+      ! Wrapper around compute_R_from_Z_kokkos and compute_R_from_Z_cpu
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(inout) :: Z, R
+      PetscInt, intent(in)      :: global_row_start
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      type(tIS), intent(inout)  :: orig_fine_col_indices
+      logical, intent(in) :: identity, reuse
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse, orig_indices
+      integer :: identity_int, reuse_int, reuse_indices_int, errorcode
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
+      PetscScalar normy;
+#endif        
+      ! ~~~~~~~~~~
+
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(Z, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         identity_int = 0
+         if (identity) identity_int = 1
+         reuse_int = 0
+         if (reuse) reuse_int = 1
+         reuse_indices_int = 0;
+         if (.NOT. PetscISIsNull(orig_fine_col_indices)) reuse_indices_int = 1
+
+         A_array = Z%v             
+         indices_fine = is_fine%v
+         indices_coarse = is_coarse%v
+         orig_indices = orig_fine_col_indices%v
+         if (reuse) B_array = R%v
+         call compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, indices_coarse, &
+                        orig_indices, &
+                        identity_int, reuse_int, reuse_indices_int, &
+                        B_array)
+         R%v = B_array
+         orig_fine_col_indices%v = orig_indices
+         
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! If we're doing reuse and debug, then we have to always output the result 
+            ! from the cpu version, as it will have coo preallocation structures set
+            ! They aren't copied over if you do a matcopy (or matconvert)
+            ! If we didn't do that the next time we come through this routine 
+            ! and try to call the cpu version with reuse, it will segfault
+            if (reuse) then
+               temp_mat = R
+               call MatConvert(R, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+            else
+               temp_mat_compare = R                       
+            end if
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                           orig_fine_col_indices, &
+                           identity, reuse, &
+                           temp_mat)  
+
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)                       
+
+            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of compute_R_from_Z do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse) then
+               call MatDestroy(R, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            R = temp_mat
+
+         end if
+
+      else
+
+         call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                        orig_fine_col_indices, &
+                        identity, reuse, &
+                        R)       
+
+      end if
+#else
+      call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                     orig_fine_col_indices, &
+                     identity, reuse, &
+                     R)
+#endif 
+         
+         
+   end subroutine compute_R_from_Z   
 
 
  !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine compute_R_from_Z(Z, global_row_start, is_fine, is_coarse, &
+   subroutine compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
                      orig_fine_col_indices, &
                      identity, reuse, &
                      R)
@@ -1046,7 +1597,7 @@ module petsc_helper
       PetscInt :: rows_ao, cols_ao, rows_ad, cols_ad, size_cols
       PetscInt :: global_rows_z, global_cols_z
       PetscInt :: local_rows_z, local_cols_z, counter
-      integer :: comm_size, comm_size_world, errorcode
+      integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), allocatable :: cols
@@ -1070,15 +1621,14 @@ module petsc_helper
       call PetscObjectGetComm(Z, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
-      call MPI_Comm_size(MPI_COMM_WORLD, comm_size_world, errorcode)   
       
       call ISGetIndicesF90(is_fine, is_pointer_fine, ierr)
       call ISGetIndicesF90(is_coarse, is_pointer_coarse, ierr)      
 
-      call IsGetLocalSize(is_coarse, local_coarse_size, ierr)
-      call IsGetLocalSize(is_fine, local_fine_size, ierr)
-      call IsGetSize(is_coarse, global_coarse_size, ierr)
-      call IsGetSize(is_fine, global_fine_size, ierr)      
+      call ISGetLocalSize(is_coarse, local_coarse_size, ierr)
+      call ISGetLocalSize(is_fine, local_fine_size, ierr)
+      call ISGetSize(is_coarse, global_coarse_size, ierr)
+      call ISGetSize(is_fine, global_fine_size, ierr)      
 
       local_full_cols = local_coarse_size + local_fine_size
       global_full_cols = global_coarse_size + global_fine_size
@@ -1272,7 +1822,7 @@ module petsc_helper
       call ISRestoreIndicesF90(is_coarse, is_pointer_coarse, ierr)
       call ISRestoreIndicesF90(is_fine, is_pointer_fine, ierr)       
          
-   end subroutine compute_R_from_Z
+   end subroutine compute_R_from_Z_cpu
    
    !------------------------------------------------------------------------------------------------------------------------
    

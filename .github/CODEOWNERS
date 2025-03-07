@@ -1,0 +1,5 @@
+# Workflow files can ONLY be modified by administrators
+/.github/workflows/ @stevendargaville
+
+# Protect the CODEOWNERS file itself
+/.github/CODEOWNERS @stevendargaville

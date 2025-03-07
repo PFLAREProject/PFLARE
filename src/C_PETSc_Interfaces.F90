@@ -207,6 +207,17 @@ module c_petsc_interfaces
       end subroutine remove_small_from_sparse_kokkos         
  
    end interface
+
+   interface   
+      
+      subroutine MatSetAllValues_kokkos(A_array, val) &
+         bind(c, name="MatSetAllValues_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscReal, value :: val
+      end subroutine MatSetAllValues_kokkos         
+ 
+   end interface   
    
    interface   
       
@@ -250,6 +261,111 @@ module c_petsc_interfaces
       end subroutine VecISCopyLocal_kokkos         
  
    end interface    
+
+   interface   
+      
+      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, cf_markers_local, zero_meaure_c_point_int) &
+         bind(c, name="pmisr_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         type(c_ptr), value :: measure_local
+         integer, value :: max_luby_steps, pmis_int, zero_meaure_c_point_int
+         type(c_ptr), value :: cf_markers_local
+      end subroutine pmisr_kokkos         
+ 
+   end interface     
+
+   interface   
+      
+      subroutine ddc_kokkos(A_array, indices, fraction_swap, cf_markers_local) &
+         bind(c, name="ddc_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, indices
+         PetscReal, value :: fraction_swap
+         type(c_ptr), value :: cf_markers_local
+      end subroutine ddc_kokkos         
+ 
+   end interface      
+
+   interface   
+      
+      subroutine compute_P_from_W_kokkos(A_array, global_row_start, indices_fine, &
+                     indices_coarse, identity_int, reuse_int, B_array) &
+         bind(c, name="compute_P_from_W_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, indices_fine, indices_coarse
+         integer(c_long_long) :: B_array
+         PetscInt, value :: global_row_start
+         integer(c_int), value :: identity_int, reuse_int
+      end subroutine compute_P_from_W_kokkos         
+ 
+   end interface   
+
+   interface   
+      
+      subroutine generate_one_point_with_one_entry_from_sparse_kokkos(A_array, B_array) &
+         bind(c, name="generate_one_point_with_one_entry_from_sparse_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+      end subroutine generate_one_point_with_one_entry_from_sparse_kokkos         
+ 
+   end interface    
+   
+   interface   
+      
+      subroutine compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, &
+                     indices_coarse, indices_orig, identity_int, reuse_int, reuse_indices_int, B_array) &
+         bind(c, name="compute_R_from_Z_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, indices_fine, indices_coarse, indices_orig
+         integer(c_long_long) :: B_array
+         PetscInt, value :: global_row_start
+         integer(c_int), value :: identity_int, reuse_int, reuse_indices_int
+      end subroutine compute_R_from_Z_kokkos         
+ 
+   end interface
+   
+   interface   
+      
+      subroutine build_gmres_polynomial_inverse_0th_order_kokkos(A_array, poly_order, &
+                  coefficients, reuse_int, B_array) &
+         bind(c, name="build_gmres_polynomial_inverse_0th_order_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+         integer, value :: poly_order
+         type(c_ptr), value :: coefficients
+         integer(c_int), value :: reuse_int
+      end subroutine build_gmres_polynomial_inverse_0th_order_kokkos         
+ 
+   end interface
+   
+   interface   
+      
+      subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(A_array, poly_order, &
+                  coefficients, reuse_int, B_array) &
+         bind(c, name="build_gmres_polynomial_inverse_0th_order_sparsity_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+         integer, value :: poly_order
+         type(c_ptr), value :: coefficients
+         integer(c_int), value :: reuse_int
+      end subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos         
+ 
+   end interface    
+
+   interface   
+      
+      subroutine mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array) &
+         bind(c, name="mat_duplicate_copy_plus_diag_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+         integer(c_int), value :: reuse_int
+      end subroutine mat_duplicate_copy_plus_diag_kokkos         
+ 
+   end interface   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

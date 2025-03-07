@@ -14,17 +14,19 @@
 
       PetscErrorCode  ierr
       PetscInt its,m,n,mlocal,nlocal
-      PetscBool  flg
+      PetscBool  flg, second_solve
       PetscScalar      none
       PetscReal        norm
-      Vec              x,b,u
-      Mat              A
+      Vec              x,b,u, b_diff_type
+      Mat              A, A_diff_type
       character*(128)  f
       PetscViewer      fd
-      MatInfo          info(MAT_INFO_SIZE)
       KSP              ksp
       PC               pc
       KSPConvergedReason reason
+      PetscInt, parameter :: one=1
+      MatType :: mtype, mtype_input
+      PetscLogStage :: gpu_copy
 
       none = -1d0
       call PetscInitialize(PETSC_NULL_CHARACTER,ierr)
@@ -38,27 +40,49 @@
      &        PETSC_NULL_CHARACTER,'-f',f,flg,ierr)
       call PetscViewerBinaryOpen(PETSC_COMM_WORLD,f,FILE_MODE_READ,     &
      &     fd,ierr)
+     second_solve = PETSC_FALSE
+     call PetscOptionsGetBool(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER,'-second_solve',second_solve,flg,ierr)  
 
       call MatCreate(PETSC_COMM_WORLD,A,ierr)
-      !call MatSetType(A, MATSEQAIJ,ierr)
       call MatLoad(A,fd,ierr)
 
-! Get information about matrix
+      ! Get information about matrix
       call MatGetSize(A,m,n,ierr)
       call MatGetLocalSize(A,mlocal,nlocal,ierr)
-      call MatGetInfo(A,MAT_GLOBAL_SUM,info,ierr)
-      write(*,100) m,                                                   &
-     &  n,                                                              &
-     &  mlocal,nlocal,                                                  &
-     &  info(MAT_INFO_BLOCK_SIZE),info(MAT_INFO_NZ_ALLOCATED),          &
-     &  info(MAT_INFO_NZ_USED),info(MAT_INFO_NZ_UNNEEDED),              &
-     &  info(MAT_INFO_MEMORY),info(MAT_INFO_ASSEMBLIES),                &
-     &  info(MAT_INFO_MALLOCS)
 
- 100  format(4(i4,1x),7(1pe9.2,1x))
       call VecCreate(PETSC_COMM_WORLD,b,ierr)
       call VecLoad(b,fd,ierr)
       call PetscViewerDestroy(fd,ierr)
+
+      ! Test and see if the user wants us to use a different matrix type
+      ! with -mat_type on the command line
+      ! This lets us easily test our cpu and kokkos versions through our CI
+      call MatCreateFromOptions(PETSC_COMM_WORLD,PETSC_NULL_CHARACTER,&
+               one,mlocal,nlocal,m,n,A_diff_type,ierr)
+      call MatAssemblyBegin(A_diff_type,MAT_FINAL_ASSEMBLY,ierr)
+      call MatAssemblyEnd(A_diff_type,MAT_FINAL_ASSEMBLY,ierr)               
+      
+      call MatGetType(A, mtype, ierr)
+      call MatGetType(A_diff_type, mtype_input, ierr)
+
+      if (mtype /= mtype_input) then
+         ! Doesn't seem like there is a converter to kokkos
+         ! So instead we just copy into the empty A_diff_type
+         ! This will be slow as its not preallocated, but this is just for testing
+         call MatCopy(A, A_diff_type, DIFFERENT_NONZERO_PATTERN, ierr)
+         call MatDestroy(A,ierr)
+         A = A_diff_type
+
+         ! Mat and vec types have to match
+         call VecCreateFromOptions(PETSC_COMM_WORLD,PETSC_NULL_CHARACTER, & 
+                  one,nlocal,n,b_diff_type,ierr)
+         call VecCopy(b,b_diff_type,ierr)
+         call VecDestroy(b,ierr)
+         b = b_diff_type
+ 
+      else
+         call MatDestroy(A_diff_type,ierr)
+      end if
 
 ! Set up solution
       call VecDuplicate(b,x,ierr)
@@ -81,8 +105,16 @@
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+      call PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",gpu_copy, ierr)
+      call PetscLogStagePush(gpu_copy, ierr)
       call KSPSetFromOptions(ksp,ierr)
       call KSPSolve(ksp,b,x,ierr)
+      call PetscLogStagePop()
+
+      if (second_solve) then
+         call VecSet(x, 1d0, ierr)
+         call KSPSolve(ksp,b,x,ierr)
+      end if
 
 ! Show result
       call MatMult(A,x,u,ierr)

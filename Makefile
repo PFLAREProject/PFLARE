@@ -49,14 +49,6 @@ export PETSC_HAVE_KOKKOS := 0
 ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
 export PETSC_HAVE_KOKKOS := 1
 endif
-export PETSC_HAVE_CUDA := 0
-ifneq (,$(findstring PETSC_HAVE_CUDA 1,$(CONTENTS)))
-export PETSC_HAVE_CUDA := 1
-endif
-export PETSC_HAVE_HIP := 0
-ifneq (,$(findstring PETSC_HAVE_HIP 1,$(CONTENTS)))
-export PETSC_HAVE_HIP := 1
-endif
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,7 +69,9 @@ OBJS := $(SRCDIR)/NonBusyWait.o \
 # Include kokkos src files
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
-                       $(SRCDIR)/VecISCopyLocalk.o
+                       $(SRCDIR)/VecISCopyLocalk.o \
+							  $(SRCDIR)/PMISR_DDCk.o \
+							  $(SRCDIR)/Gmres_Polyk.o
 endif	
 
 OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
@@ -149,16 +143,29 @@ build_tests: $(OUT)
 		$(MAKE) -C tests $$t; \
 	done
 
-# Build and run all the tests
+# Separate out serial and parallel tests
 # Only run the tests that load the 32 bit test matrix in /tests/data
 # if PETSC has been configured without 64 bit integers
+tests_serial: $(OUT)
+	$(MAKE) build_tests
+ifeq ($(PETSC_USE_64BIT_INDICES),0)
+	$(MAKE) -C tests run_tests_load_serial
+endif	
+	$(MAKE) -C tests run_tests_no_load_serial
+
+tests_parallel: $(OUT)
+	$(MAKE) build_tests
+ifeq ($(PETSC_USE_64BIT_INDICES),0)
+	$(MAKE) -C tests run_tests_load_parallel
+endif	
+	$(MAKE) -C tests run_tests_no_load_parallel	
+
+# Build and run all the tests
 .PHONY: tests
 tests: $(OUT)
 	$(MAKE) build_tests
-ifeq ($(PETSC_USE_64BIT_INDICES),0)
-	$(MAKE) -C tests run_tests_load
-endif	
-	$(MAKE) -C tests run_tests_no_load
+	$(MAKE) tests_serial
+	$(MAKE) tests_parallel
 
 # Build the Python module with Cython
 .PHONY: python

@@ -79,6 +79,9 @@ int main(int argc,char **argv)
   // Get command line options
   // ~~~~~~~~~~~~~~
 
+  PetscBool second_solve= PETSC_FALSE;
+  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);  
+
   // Advection velocities - direction is [cos(theta), sin(theta)]
   // Default theta is pi/4
   PetscReal pi = 4*atan(1.0);
@@ -189,8 +192,11 @@ int main(int argc,char **argv)
   // Solve
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
   // gpu implementation and we don't want a copy occuring back to the cpu
-  ierr = VecSet(x, 1.0);CHKERRQ(ierr);
-  ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
+  if (second_solve)
+  {
+   ierr = VecSet(x, 1.0);CHKERRQ(ierr);
+   ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
+  }
 
   // Write out the iteration count
   KSPGetIterationNumber(ksp,&its);
