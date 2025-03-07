@@ -442,11 +442,13 @@ module sai_z
                call MatCreateVecs(submatrices(1), solution, PETSC_NULL_VEC, ierr)
                call VecGetArrayF90(solution, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
+               call VecRestoreArrayF90(solution, vec_vals, ierr)
 
                ! Do the solve - overwrite the rhs
                call KSPSolveTranspose(ksp, solution, solution, ierr)
                call KSPGetIterationNumber(ksp, iterations_taken, ierr)
 
+               call VecGetArrayF90(solution, vec_vals, ierr)     
                e_row(1:i_size) = vec_vals(1:i_size)
                call VecRestoreArrayF90(solution, vec_vals, ierr)     
 
