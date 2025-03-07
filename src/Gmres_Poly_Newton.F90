@@ -205,7 +205,7 @@ module gmres_poly_newton
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
       ! ~~~~~~~~~~ 
-      call create_temp_space_box_mueller(matrix, subspace_size, V_n)
+      call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
       ! Create an extra vector for storage
       call VecDuplicate(V_n(1), w_j, ierr)      

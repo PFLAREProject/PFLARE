@@ -140,9 +140,9 @@ module gmres_poly
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine create_temp_space_box_mueller(matrix, subspace_size, V_n)
+   subroutine create_temp_space_box_muller(matrix, subspace_size, V_n)
       
-      ! Creates some temporary space and computes box mueller random numbers
+      ! Creates some temporary space and computes box muller random numbers
       ! in the first column
 
       ! ~~~~~~
@@ -198,11 +198,9 @@ module gmres_poly
 
       ! Gives random numbers between 0 <= u < 1  
       allocate(random_data(local_rows, 2))
+      ! Random numbers returned in fortran don't include one so don't have to 
+      ! remove 1 
       call random_number(random_data(:, 1:2))
-
-      ! Remove the u = 0 (ie epsilon) case
-      ! to change from [0,1) to (0,1], which we need for the log */
-      random_data(:, 1) = 1d0 - random_data(:, 1)
 
       ! We want our random rhs to be a normal distribution with zero mean as that preserves
       ! white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
@@ -235,7 +233,7 @@ module gmres_poly
 
       ! ~~~~~~~~~~~~
 
-   end subroutine create_temp_space_box_mueller  
+   end subroutine create_temp_space_box_muller  
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -481,7 +479,7 @@ module gmres_poly
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
       ! ~~~~~~~~~~ 
-      call create_temp_space_box_mueller(matrix, subspace_size, V_n)
+      call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
       ! Create an extra vector for storage
       call VecDuplicate(V_n(1), w_j, ierr)         
@@ -588,7 +586,7 @@ module gmres_poly
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
       ! ~~~~~~~~~~      
-      call create_temp_space_box_mueller(matrix, subspace_size, V_n)
+      call create_temp_space_box_muller(matrix, subspace_size, V_n)
 
       ! ~~~~~~~~~~~~
 

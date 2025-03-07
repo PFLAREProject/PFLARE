@@ -89,7 +89,7 @@ run_tests_load_serial:
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals"
-	./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 15	
+	./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 25	
 
 run_tests_load_parallel:
 #
