@@ -41,6 +41,7 @@ module fc_smooth
       MatType :: mat_type
       PetscErrorCode :: ierr
       integer(c_long_long) :: is_fine_array, is_coarse_array
+      PetscInt global_row_start, global_row_end_plus_one
 #endif         
       ! ~~~~~~~~~~
 
@@ -84,11 +85,12 @@ module fc_smooth
 
             ! Build in case not built yet
             call create_VecISCopyLocal_kokkos(air_data%options%max_levels)
+            call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)
 
             ! Copy the IS's over to the device
             is_fine_array = air_data%IS_fine_index(our_level)%v
             is_coarse_array = air_data%IS_coarse_index(our_level)%v
-            call set_VecISCopyLocal_kokkos_our_level(our_level, is_fine_array, is_coarse_array)
+            call set_VecISCopyLocal_kokkos_our_level(our_level, global_row_start, is_fine_array, is_coarse_array)
 
          end if
 #endif

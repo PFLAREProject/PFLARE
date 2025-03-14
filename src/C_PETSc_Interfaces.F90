@@ -240,10 +240,11 @@ module c_petsc_interfaces
    
    interface   
       
-      subroutine set_VecISCopyLocal_kokkos_our_level(our_level, index_fine, index_coarse) &
+      subroutine set_VecISCopyLocal_kokkos_our_level(our_level, global_row_start, index_fine, index_coarse) &
          bind(c, name="set_VecISCopyLocal_kokkos_our_level")
          use iso_c_binding
          integer, value :: our_level
+         PetscInt, value :: global_row_start
          integer(c_long_long) :: index_fine
          integer(c_long_long) :: index_coarse
       end subroutine set_VecISCopyLocal_kokkos_our_level         
