@@ -73,6 +73,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
    //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
    // Copy the input measure from host to device
    Kokkos::deep_copy(measure_local_d, measure_local_h);  
+   // Log copy with petsc
+   size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
+   PetscLogCpuToGpu(bytes);   
 
    // Compute the measure
    Kokkos::parallel_for(
@@ -455,6 +458,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
 
    // Now copy device cf_markers_local_d back to host
    Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
+   // Log copy with petsc
+   bytes = cf_markers_local_d.extent(0) * sizeof(PetscInt);
+   PetscLogGpuToCpu(bytes);    
    // Can now destroy our vec
    VecDestroy(&cf_markers_vec);
 
@@ -484,7 +490,10 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
    intKokkosViewHost cf_markers_local_h(cf_markers_local, local_rows);
    intKokkosView cf_markers_local_d("cf_markers_local_d", local_rows);   
    // Now copy cf markers to device
-   Kokkos::deep_copy(cf_markers_local_d, cf_markers_local_h);   
+   Kokkos::deep_copy(cf_markers_local_d, cf_markers_local_h);  
+   // Log copy with petsc
+   size_t bytes = cf_markers_local_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);     
 
    // Get pointers to the indices on the host
    const PetscInt *fine_indices_ptr;
@@ -498,6 +507,9 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
    auto fine_view_d = PetscIntKokkosView("fine_view_d", fine_local_size);   
    // Copy fine indices to the device
    Kokkos::deep_copy(fine_view_d, fine_view_h);
+   // Log copy with petsc
+   bytes = fine_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);   
 
    // Do a fixed alpha_diag
    PetscInt search_size;
@@ -685,7 +697,9 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
    }
 
    // Now copy device cf_markers_local_d back to host
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);   
+   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
+   bytes = cf_markers_local_d.extent(0) * sizeof(PetscInt);
+   PetscLogGpuToCpu(bytes);       
 
    ISRestoreIndices(*is_fine, &fine_indices_ptr);
    MatDestroy(&Aff);
