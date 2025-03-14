@@ -89,6 +89,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, IS *index_f
    IS_fine_views[our_level] = std::make_shared<PetscIntKokkosView>("IS_fine_view_" + std::to_string(our_level), fine_local_size);
    // Copy the indices over to the device
    Kokkos::deep_copy(*IS_fine_views[our_level], fine_view_h);
+   // Log copy with petsc
+   size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);
    ISRestoreIndices(*index_fine, &fine_indices_ptr);
 
    ISGetIndices(*index_coarse, &coarse_indices_ptr);
@@ -97,6 +100,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, IS *index_f
    IS_coarse_views[our_level] = std::make_shared<PetscIntKokkosView>("IS_coarse_view_" + std::to_string(our_level), coarse_local_size);
    // Copy the indices over to the device
    Kokkos::deep_copy(*IS_coarse_views[our_level], coarse_view_h);  
+   // Log copy with petsc
+   bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);   
    ISRestoreIndices(*index_coarse, &coarse_indices_ptr); 
 
    return;

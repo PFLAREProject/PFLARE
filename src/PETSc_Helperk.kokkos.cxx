@@ -288,7 +288,10 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
       colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);        
+      Kokkos::deep_copy(colmap_input_d, colmap_input_h);  
+      // Log copy with petsc
+      size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
+      PetscLogCpuToGpu(bytes);              
    }
    else
    {
@@ -325,6 +328,10 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    PetscScalarKokkosView rel_row_tol_d("rel_row_tol_d", local_rows);    
    // Copy in the tolerance
    Kokkos::deep_copy(rel_row_tol_d, tol);     
+   // Log copy with petsc
+   size_t bytes = sizeof(PetscReal);
+   PetscLogCpuToGpu(bytes);   
+
    // We need to know how many entries are in each row after our dropping  
    PetscIntKokkosView nnz_match_local_row_d("nnz_match_local_row_d", local_rows);             
    PetscIntKokkosView nnz_match_nonlocal_row_d;
@@ -872,7 +879,10 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
          // Create some host space for the output garray (that stays in scope) and copy it
          PetscMalloc1(colmap_output_d.extent(0), &garray_host);
          PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, colmap_output_d.extent(0));
-         Kokkos::deep_copy(colmap_output_h, colmap_output_d);   
+         Kokkos::deep_copy(colmap_output_h, colmap_output_d);
+         // Log copy with petsc
+         bytes = colmap_output_d.extent(0) * sizeof(PetscInt);
+         PetscLogGpuToCpu(bytes);            
       }
 
       // We can create our nonlocal diagonal block matrix directly on the device
@@ -976,7 +986,12 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    auto coarse_view_d = PetscIntKokkosView("coarse_view_d", local_rows_coarse);      
    // Copy indices to the device
    Kokkos::deep_copy(fine_view_d, fine_view_h);     
-   Kokkos::deep_copy(coarse_view_d, coarse_view_h);      
+   Kokkos::deep_copy(coarse_view_d, coarse_view_h);
+   // Log copy with petsc
+   size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);        
+   bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);      
 
    local_cols_coarse = local_rows_coarse;
    local_cols = local_rows_coarse + local_rows_fine;
@@ -1441,7 +1456,14 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    if (mpi) a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, aijkok_nonlocal->csrmat.nnz()); 
    // Copy in the val
    Kokkos::deep_copy(a_local_d, val); 
-   if (mpi) Kokkos::deep_copy(a_nonlocal_d, val); 
+   // Log copy with petsc
+   size_t bytes = sizeof(PetscReal);
+   PetscLogCpuToGpu(bytes);   
+   if (mpi) 
+   {  
+      Kokkos::deep_copy(a_nonlocal_d, val); 
+      PetscLogCpuToGpu(bytes);   
+   }
 
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -1505,7 +1527,10 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
       colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);        
+      Kokkos::deep_copy(colmap_input_d, colmap_input_h);
+      // Log copy with petsc
+      size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
+      PetscLogCpuToGpu(bytes);              
    }
    else
    {
@@ -1864,7 +1889,10 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          // Create some host space for the output garray (that stays in scope) and copy it
          PetscMalloc1(colmap_output_d.extent(0), &garray_host);
          PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, colmap_output_d.extent(0));
-         Kokkos::deep_copy(colmap_output_h, colmap_output_d);   
+         Kokkos::deep_copy(colmap_output_h, colmap_output_d);
+         // Log copy with petsc
+         size_t bytes = colmap_output_d.extent(0) * sizeof(PetscInt);
+         PetscLogGpuToCpu(bytes);            
       }
 
       // We can create our nonlocal diagonal block matrix directly on the device
@@ -1944,7 +1972,10 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
       colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);        
+      Kokkos::deep_copy(colmap_input_d, colmap_input_h);
+      // Log copy with petsc
+      size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
+      PetscLogCpuToGpu(bytes);              
    }
    else
    {
@@ -2033,8 +2064,15 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    auto orig_view_d = PetscIntKokkosView("orig_view_d", size_cols);       
    // Copy indices to the device
    Kokkos::deep_copy(fine_view_d, fine_view_h);     
-   Kokkos::deep_copy(coarse_view_d, coarse_view_h);    
-   Kokkos::deep_copy(orig_view_d, orig_view_h);      
+   // Log copy with petsc
+   size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);   
+   Kokkos::deep_copy(coarse_view_d, coarse_view_h);
+   bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);        
+   Kokkos::deep_copy(orig_view_d, orig_view_h); 
+   bytes = orig_view_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);       
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
