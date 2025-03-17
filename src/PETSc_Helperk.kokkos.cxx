@@ -215,7 +215,7 @@ PetscErrorCode MatSetSeqAIJKokkosWithCSRMatrix_mine(Mat A, Mat_SeqAIJKokkos *ako
 {
   Mat_SeqAIJ *aseq;
   PetscInt    i, m, n;
-  auto       &exec = PetscGetKokkosExecutionSpace();
+  auto       exec = PetscGetKokkosExecutionSpace();
 
   PetscFunctionBegin;
   PetscCheck(!A->spptr, PETSC_COMM_SELF, PETSC_ERR_PLIB, "A->spptr is supposed to be empty");
@@ -849,7 +849,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
          // that isn't -1
          // It should never be equal to start index, because otherwise we
          // have dropped all nonlocal entries
-         auto &exec = PetscGetKokkosExecutionSpace();
+         auto exec = PetscGetKokkosExecutionSpace();
          PetscInt start_index = Kokkos::Experimental::count(exec, colmap_output_d_big, -1);
 
          // Our final colmap_output_d is colmap_output_d_big(start_index:end)
@@ -1859,7 +1859,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          // that isn't -1
          // It should never be equal to start index, because otherwise we
          // have dropped all nonlocal entries
-         auto &exec = PetscGetKokkosExecutionSpace();
+         auto exec = PetscGetKokkosExecutionSpace();
          PetscInt start_index = Kokkos::Experimental::count(exec, colmap_output_d_big, -1);
 
          // Our final colmap_output_d is colmap_output_d_big(start_index:end)

@@ -7,6 +7,7 @@
 #include <Kokkos_StdAlgorithms.hpp>
 #include <../src/vec/vec/impls/seq/kokkos/veckokkosimpl.hpp>
 #include <Kokkos_Random.hpp>
+#include <Kokkos_Core.hpp>
 // Our kokkos definitions
 #include "kokkos_helper.h"
 //------------------------------------------------------------------------------------------------------------------------
@@ -648,7 +649,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
                }
                // Has to be atomic as many threads from different rows
                // may be writing to the same bin
-               Kokkos::atomic_increment(&dom_bins_d(bin - 1));
+               Kokkos::atomic_add(&dom_bins_d(bin - 1), 1);
             }
 
          });
