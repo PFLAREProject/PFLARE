@@ -113,14 +113,9 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
       a_local_dual.modify_device();
       i_local_dual.modify_device();
       j_local_dual.modify_device();
-
+      
       // We can create our local diagonal block matrix directly on the device
-      // See MatSeqAIJKokkosMergeMats for example
-      auto akok_local = new Mat_SeqAIJKokkos(local_rows, local_cols, nnzs_match_local, i_local_dual, j_local_dual, a_local_dual);    
-      // The equivalent of calling the internal MatCreateSeqAIJKokkosWithCSRMatrix
-      MatCreate(PETSC_COMM_SELF, &output_mat_local);
-      // Why isn't this publically available??
-      MatSetSeqAIJKokkosWithCSRMatrix_mine(output_mat_local, akok_local);   
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_dual, j_local_dual, a_local_dual, &output_mat_local);        
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
@@ -135,14 +130,9 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
          PetscInt col_ao_output = 0;
          // Silly but depending on the compiler this may return a non-null pointer
          PetscMalloc1(col_ao_output, &garray_host);      
-
+         
          // We can create our nonlocal diagonal block matrix directly on the device
-         auto akok_nonlocal = new Mat_SeqAIJKokkos(local_rows, col_ao_output, \
-                  nnzs_match_nonlocal, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual);  
-         // The equivalent of calling the internal MatCreateSeqAIJKokkosWithCSRMatrix
-         MatCreate(PETSC_COMM_SELF, &output_mat_nonlocal);
-         // Why isn't this publically available??
-         MatSetSeqAIJKokkosWithCSRMatrix_mine(output_mat_nonlocal, akok_nonlocal);    
+         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);         
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
@@ -390,12 +380,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(Mat *
       j_local_dual.modify_device();
 
       // We can create our local diagonal block matrix directly on the device
-      // See MatSeqAIJKokkosMergeMats for example
-      auto akok_local = new Mat_SeqAIJKokkos(local_rows, local_cols, nnzs_match_local, i_local_dual, j_local_dual, a_local_dual);    
-      // The equivalent of calling the internal MatCreateSeqAIJKokkosWithCSRMatrix
-      MatCreate(PETSC_COMM_SELF, &output_mat_local);
-      // Why isn't this publically available??
-      MatSetSeqAIJKokkosWithCSRMatrix_mine(output_mat_local, akok_local);   
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_dual, j_local_dual, a_local_dual, &output_mat_local);  
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
@@ -410,14 +395,9 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(Mat *
          PetscInt col_ao_output = 0;
          // Silly but depending on the compiler this may return a non-null pointer
          PetscMalloc1(col_ao_output, &garray_host);      
-
+         
          // We can create our nonlocal diagonal block matrix directly on the device
-         auto akok_nonlocal = new Mat_SeqAIJKokkos(local_rows, col_ao_output, \
-                  nnzs_match_nonlocal, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual);  
-         // The equivalent of calling the internal MatCreateSeqAIJKokkosWithCSRMatrix
-         MatCreate(PETSC_COMM_SELF, &output_mat_nonlocal);
-         // Why isn't this publically available??
-         MatSetSeqAIJKokkosWithCSRMatrix_mine(output_mat_nonlocal, akok_nonlocal);    
+         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
