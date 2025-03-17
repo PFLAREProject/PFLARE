@@ -119,142 +119,6 @@ PetscErrorCode MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(Mat mat, Mat
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Horrid copy of this code and MatSetSeqAIJKokkosWithCSRMatrix_mine as they're declared PETSC_INTERN
-// so I can't get at them
-PetscErrorCode MatSeqAIJSetPreallocation_SeqAIJ_mine(Mat B, PetscInt nz, const PetscInt *nnz)
-{
-  Mat_SeqAIJ *b              = (Mat_SeqAIJ *)B->data;
-  PetscBool   skipallocation = PETSC_FALSE, realalloc = PETSC_FALSE;
-  PetscInt    i;
-
-  PetscFunctionBegin;
-  if (B->hash_active) {
-    B->ops[0] = b->cops;
-    PetscCall(PetscHMapIJVDestroy(&b->ht));
-    PetscCall(PetscFree(b->dnz));
-    B->hash_active = PETSC_FALSE;
-  }
-  if (nz >= 0 || nnz) realalloc = PETSC_TRUE;
-  if (nz == MAT_SKIP_ALLOCATION) {
-    skipallocation = PETSC_TRUE;
-    nz             = 0;
-  }
-  PetscCall(PetscLayoutSetUp(B->rmap));
-  PetscCall(PetscLayoutSetUp(B->cmap));
-
-  if (nz == PETSC_DEFAULT || nz == PETSC_DECIDE) nz = 5;
-  PetscCheck(nz >= 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "nz cannot be less than 0: value %" PetscInt_FMT, nz);
-  if (nnz) {
-    for (i = 0; i < B->rmap->n; i++) {
-      PetscCheck(nnz[i] >= 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "nnz cannot be less than 0: local row %" PetscInt_FMT " value %" PetscInt_FMT, i, nnz[i]);
-      PetscCheck(nnz[i] <= B->cmap->n, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "nnz cannot be greater than row length: local row %" PetscInt_FMT " value %" PetscInt_FMT " rowlength %" PetscInt_FMT, i, nnz[i], B->cmap->n);
-    }
-  }
-
-  B->preallocated = PETSC_TRUE;
-  if (!skipallocation) {
-    if (!b->imax) { PetscCall(PetscMalloc1(B->rmap->n, &b->imax)); }
-    if (!b->ilen) {
-      /* b->ilen will count nonzeros in each row so far. */
-      PetscCall(PetscCalloc1(B->rmap->n, &b->ilen));
-    } else {
-      PetscCall(PetscMemzero(b->ilen, B->rmap->n * sizeof(PetscInt)));
-    }
-    if (!b->ipre) PetscCall(PetscMalloc1(B->rmap->n, &b->ipre));
-    if (!nnz) {
-      if (nz == PETSC_DEFAULT || nz == PETSC_DECIDE) nz = 10;
-      else if (nz < 0) nz = 1;
-      nz = PetscMin(nz, B->cmap->n);
-      for (i = 0; i < B->rmap->n; i++) b->imax[i] = nz;
-      PetscCall(PetscIntMultError(nz, B->rmap->n, &nz));
-    } else {
-      PetscInt64 nz64 = 0;
-      for (i = 0; i < B->rmap->n; i++) {
-        b->imax[i] = nnz[i];
-        nz64 += nnz[i];
-      }
-      PetscCall(PetscIntCast(nz64, &nz));
-    }
-
-    /* allocate the matrix space */
-    PetscCall(MatSeqXAIJFreeAIJ(B, &b->a, &b->j, &b->i));
-    PetscCall(PetscShmgetAllocateArray(nz, sizeof(PetscInt), (void **)&b->j));
-    PetscCall(PetscShmgetAllocateArray(B->rmap->n + 1, sizeof(PetscInt), (void **)&b->i));
-    b->free_ij = PETSC_TRUE;
-    if (B->structure_only) {
-      b->free_a = PETSC_FALSE;
-    } else {
-      PetscCall(PetscShmgetAllocateArray(nz, sizeof(PetscScalar), (void **)&b->a));
-      b->free_a = PETSC_TRUE;
-    }
-    b->i[0] = 0;
-    for (i = 1; i < B->rmap->n + 1; i++) b->i[i] = b->i[i - 1] + b->imax[i - 1];
-  } else {
-    b->free_a  = PETSC_FALSE;
-    b->free_ij = PETSC_FALSE;
-  }
-
-  if (b->ipre && nnz != b->ipre && b->imax) {
-    /* reserve user-requested sparsity */
-    PetscCall(PetscArraycpy(b->ipre, b->imax, B->rmap->n));
-  }
-
-  b->nz               = 0;
-  b->maxnz            = nz;
-  B->info.nz_unneeded = (double)b->maxnz;
-  if (realalloc) PetscCall(MatSetOption(B, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE));
-  B->was_assembled = PETSC_FALSE;
-  B->assembled     = PETSC_FALSE;
-  /* We simply deem preallocation has changed nonzero state. Updating the state
-     will give clients (like AIJKokkos) a chance to know something has happened.
-  */
-  B->nonzerostate++;
-  PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-PetscErrorCode MatSetSeqAIJKokkosWithCSRMatrix_mine(Mat A, Mat_SeqAIJKokkos *akok)
-{
-  Mat_SeqAIJ *aseq;
-  PetscInt    i, m, n;
-  auto       exec = PetscGetKokkosExecutionSpace();
-
-  PetscFunctionBegin;
-  PetscCheck(!A->spptr, PETSC_COMM_SELF, PETSC_ERR_PLIB, "A->spptr is supposed to be empty");
-
-  m = akok->nrows();
-  n = akok->ncols();
-  PetscCall(MatSetSizes(A, m, n, m, n));
-  PetscCall(MatSetType(A, MATSEQAIJKOKKOS));
-
-  /* Set up data structures of A as a MATSEQAIJ */
-  PetscCall(MatSeqAIJSetPreallocation_SeqAIJ_mine(A, MAT_SKIP_ALLOCATION, NULL));
-  aseq = (Mat_SeqAIJ *)A->data;
-
-  PetscCallCXX(akok->i_dual.sync_host(exec)); /* We always need sync'ed i, j on host */
-  PetscCallCXX(akok->j_dual.sync_host(exec));
-  PetscCallCXX(exec.fence());
-
-  aseq->i       = akok->i_host_data();
-  aseq->j       = akok->j_host_data();
-  aseq->a       = akok->a_host_data();
-  aseq->nonew   = -1; /*this indicates that inserting a new value in the matrix that generates a new nonzero is an error*/
-  aseq->free_a  = PETSC_FALSE;
-  aseq->free_ij = PETSC_FALSE;
-  aseq->nz      = akok->nnz();
-  aseq->maxnz   = aseq->nz;
-
-  PetscCall(PetscMalloc1(m, &aseq->imax));
-  PetscCall(PetscMalloc1(m, &aseq->ilen));
-  for (i = 0; i < m; i++) aseq->ilen[i] = aseq->imax[i] = aseq->i[i + 1] - aseq->i[i];
-
-  /* It is critical to set the nonzerostate, as we use it to check if sparsity pattern (hence data) has changed on host in MatAssemblyEnd */
-  akok->nonzerostate = A->nonzerostate;
-  A->spptr           = akok; /* Set A->spptr before MatAssembly so that A->spptr won't be allocated again there */
-  PetscCall(MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY));
-  PetscCall(MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY));
-  PetscFunctionReturn(PETSC_SUCCESS);
-}
-
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a tolerance but with kokkos - keeping everything on the device
@@ -2371,12 +2235,10 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
       a_local_dual.modify_device();
       i_local_dual.modify_device();
-      j_local_dual.modify_device();        
-
-      // The equivalent of calling the internal MatCreateSeqAIJKokkosWithCSRMatrix
-      MatCreate(PETSC_COMM_SELF, &output_mat_local);
-      // Why isn't this publically available??
-      MatSetSeqAIJKokkosWithCSRMatrix_mine(output_mat_local, akok_local);   
+      j_local_dual.modify_device();     
+      
+      // Create the matrix given the sorted csr
+      MatCreateSeqAIJKokkosWithKokkosCsrMatrix(PETSC_COMM_SELF, akok_local->csrmat, &output_mat_local);  
 
       // we also have to go and build our off block matrix and then the output
       if (mpi) 
@@ -2852,10 +2714,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
       i_local_dual.modify_device();
       j_local_dual.modify_device();        
 
-      // The equivalent of calling the internal MatCreateSeqAIJKokkosWithCSRMatrix
-      MatCreate(PETSC_COMM_SELF, &output_mat_local);
-      // Why isn't this publically available??
-      MatSetSeqAIJKokkosWithCSRMatrix_mine(output_mat_local, akok_local);   
+      // Create the matrix given the sorted csr
+      MatCreateSeqAIJKokkosWithKokkosCsrMatrix(PETSC_COMM_SELF, akok_local->csrmat, &output_mat_local);  
 
       // we also have to go and build our off block matrix and then the output
       if (mpi) 

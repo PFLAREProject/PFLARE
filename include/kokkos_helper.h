@@ -11,8 +11,5 @@ using intKokkosView = Kokkos::View<int *, Kokkos::DefaultExecutionSpace>;
 using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
 
 PetscErrorCode MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(Mat, Mat, Mat, PetscInt *);
-PetscErrorCode MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(Mat, Mat, Mat, PetscInt *);
-PetscErrorCode MatSeqAIJSetPreallocation_SeqAIJ_mine(Mat, PetscInt, const PetscInt *);
-PetscErrorCode MatSetSeqAIJKokkosWithCSRMatrix_mine(Mat, Mat_SeqAIJKokkos *);
 
 #endif
