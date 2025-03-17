@@ -85,40 +85,6 @@ namespace Kokkos {
     };
 }
 
-// Another horrid copy given it's only declared in the .cxx
-PetscErrorCode MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(Mat mat, Mat A, Mat B, PetscInt *garray)
-{
-  Mat_MPIAIJ *mpiaij = static_cast<Mat_MPIAIJ *>(mat->data);
-  PetscInt    m, n, M, N, Am, An, Bm, Bn;
-
-  PetscFunctionBegin;
-  PetscCall(MatGetSize(mat, &M, &N));
-  PetscCall(MatGetLocalSize(mat, &m, &n));
-  PetscCall(MatGetLocalSize(A, &Am, &An));
-  PetscCall(MatGetLocalSize(B, &Bm, &Bn));
-
-  PetscCheck(m == Am && m == Bm, PETSC_COMM_SELF, PETSC_ERR_PLIB, "local number of rows do not match");
-  PetscCheck(n == An, PETSC_COMM_SELF, PETSC_ERR_PLIB, "local number of columns do not match");
-  // PetscCheck(N == Bn, PETSC_COMM_SELF, PETSC_ERR_PLIB, "global number of columns do not match");
-  PetscCheck(!mpiaij->A && !mpiaij->B, PETSC_COMM_SELF, PETSC_ERR_PLIB, "A, B of the MPIAIJ matrix are not empty");
-  mpiaij->A      = A;
-  mpiaij->B      = B;
-  mpiaij->garray = garray;
-
-  mat->preallocated     = PETSC_TRUE;
-  mat->nooffprocentries = PETSC_TRUE; /* See MatAssemblyBegin_MPIAIJ. In effect, making MatAssemblyBegin a nop */
-
-  PetscCall(MatSetOption(mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE));
-  PetscCall(MatAssemblyBegin(mat, MAT_FINAL_ASSEMBLY));
-  /* MatAssemblyEnd is critical here. It sets mat->offloadmask according to A and B's, and
-    also gets mpiaij->B compacted, with its col ids and size reduced
-  */
-  PetscCall(MatAssemblyEnd(mat, MAT_FINAL_ASSEMBLY));
-  PetscCall(MatSetOption(mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_FALSE));
-  PetscCall(MatSetOption(mat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE));
-  PetscFunctionReturn(PETSC_SUCCESS);
-}
-
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a tolerance but with kokkos - keeping everything on the device
@@ -750,14 +716,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
 
       // Build our mpi kokkos matrix by passing in the local and 
       // nonlocal kokkos matrices and the colmap
-      // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-      // B     - the offdiag matrix using global col ids
-      // but reading the code, if you pass in garray as not null
-      // then the column id's of B should be the local indices,
-      // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-      // which then calls MatSetUpMultiply_MPIAIJ
-      // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-      // in B if garray is null 
+      // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+      // as long as garray has the global indices in it
       MatCreate(MPI_COMM_MATRIX, output_mat);
       // Only have to set the size * type in the mpi case, the serial case it gets set in 
       // MatSetSeqAIJKokkosWithCSRMatrix
@@ -765,8 +725,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
       PetscLayoutSetUp((*output_mat)->rmap);
       PetscLayoutSetUp((*output_mat)->cmap);
       MatSetType(*output_mat, mat_type);
-      // Why isn't this publically available??
-      MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+      MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
    }     
    // If in serial 
@@ -1223,14 +1182,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
-         // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-         // B     - the offdiag matrix using global col ids
-         // but reading the code, if you pass in garray as not null
-         // then the column id's of B should be the local indices,
-         // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-         // which then calls MatSetUpMultiply_MPIAIJ
-         // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-         // in B if garray is null 
+         // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+         // as long as garray has the global indices in it
          MatCreate(MPI_COMM_MATRIX, output_mat);
          // Only have to set the size * type in the mpi case, the serial case it gets set in 
          // MatSetSeqAIJKokkosWithCSRMatrix
@@ -1239,8 +1192,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          PetscLayoutSetUp((*output_mat)->cmap);
          MatSetType(*output_mat, mat_type);
          // The garray is the same as the W
-         // Why isn't this publically available??
-         MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+         MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
       }     
       // If in serial 
@@ -1740,14 +1692,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 
       // Build our mpi kokkos matrix by passing in the local and 
       // nonlocal kokkos matrices and the colmap
-      // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-      // B     - the offdiag matrix using global col ids
-      // but reading the code, if you pass in garray as not null
-      // then the column id's of B should be the local indices,
-      // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-      // which then calls MatSetUpMultiply_MPIAIJ
-      // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-      // in B if garray is null 
+      // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+      // as long as garray has the global indices in it
       MatCreate(MPI_COMM_MATRIX, output_mat);
       // Only have to set the size * type in the mpi case, the serial case it gets set in 
       // MatSetSeqAIJKokkosWithCSRMatrix
@@ -1755,8 +1701,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       PetscLayoutSetUp((*output_mat)->rmap);
       PetscLayoutSetUp((*output_mat)->cmap);
       MatSetType(*output_mat, mat_type);
-      // Why isn't this publically available??
-      MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+      MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
    }     
    // If in serial 
@@ -2262,14 +2207,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
-         // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-         // B     - the offdiag matrix using global col ids
-         // but reading the code, if you pass in garray as not null
-         // then the column id's of B should be the local indices,
-         // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-         // which then calls MatSetUpMultiply_MPIAIJ
-         // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-         // in B if garray is null 
+         // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+         // as long as garray has the global indices in it
          MatCreate(MPI_COMM_MATRIX, output_mat);
          // Only have to set the size * type in the mpi case, the serial case it gets set in 
          // MatSetSeqAIJKokkosWithCSRMatrix
@@ -2277,8 +2216,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          PetscLayoutSetUp((*output_mat)->rmap);
          PetscLayoutSetUp((*output_mat)->cmap);
          MatSetType(*output_mat, mat_type);
-         // Why isn't this publically available??
-         MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+         MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
       }    
       // If in serial 
@@ -2738,14 +2676,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
          
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
-         // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-         // B     - the offdiag matrix using global col ids
-         // but reading the code, if you pass in garray as not null
-         // then the column id's of B should be the local indices,
-         // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-         // which then calls MatSetUpMultiply_MPIAIJ
-         // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-         // in B if garray is null 
+         // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+         // as long as garray has the global indices in it
          MatCreate(MPI_COMM_MATRIX, output_mat);
          // Only have to set the size * type in the mpi case, the serial case it gets set in 
          // MatSetSeqAIJKokkosWithCSRMatrix
@@ -2753,8 +2685,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
          PetscLayoutSetUp((*output_mat)->rmap);
          PetscLayoutSetUp((*output_mat)->cmap);
          MatSetType(*output_mat, mat_type);
-         // Why isn't this publically available??
-         MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+         MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
       }    
       // If in serial 

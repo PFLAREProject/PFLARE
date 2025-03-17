@@ -136,14 +136,8 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
-         // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-         // B     - the offdiag matrix using global col ids
-         // but reading the code, if you pass in garray as not null
-         // then the column id's of B should be the local indices,
-         // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-         // which then calls MatSetUpMultiply_MPIAIJ
-         // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-         // in B if garray is null 
+         // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+         // as long as garray has the global indices in it
          MatCreate(MPI_COMM_MATRIX, output_mat);
          // Only have to set the size * type in the mpi case, the serial case it gets set in 
          // MatSetSeqAIJKokkosWithCSRMatrix
@@ -151,8 +145,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
          PetscLayoutSetUp((*output_mat)->rmap);
          PetscLayoutSetUp((*output_mat)->cmap);
          MatSetType(*output_mat, mat_type);
-         // Why isn't this publically available??
-         MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+         MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
       }     
       // If in serial 
@@ -401,14 +394,8 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(Mat *
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
-         // If you read the description of MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices it says 
-         // B     - the offdiag matrix using global col ids
-         // but reading the code, if you pass in garray as not null
-         // then the column id's of B should be the local indices,
-         // as when it calls MatAssemblyEnd of the mpikokkos, it calls the MatAssemblyEnd of the aijmpi matrix
-         // which then calls MatSetUpMultiply_MPIAIJ
-         // and looking at that it only goes and builds garray and compactifies (and turns indices to local)
-         // in B if garray is null 
+         // MatSetMPIAIJWithSplitSeqAIJ allows us to pass in B using local indices
+         // as long as garray has the global indices in it
          MatCreate(MPI_COMM_MATRIX, output_mat);
          // Only have to set the size * type in the mpi case, the serial case it gets set in 
          // MatSetSeqAIJKokkosWithCSRMatrix
@@ -416,8 +403,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(Mat *
          PetscLayoutSetUp((*output_mat)->rmap);
          PetscLayoutSetUp((*output_mat)->cmap);
          MatSetType(*output_mat, mat_type);
-         // Why isn't this publically available??
-         MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
+         MatSetMPIAIJWithSplitSeqAIJ(*output_mat, output_mat_local, output_mat_nonlocal, garray_host);
 
       }     
       // If in serial 
