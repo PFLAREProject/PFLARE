@@ -1,15 +1,9 @@
-#include <petscvec_kokkos.hpp>
-#include <petsc.h>
+// Our petsc kokkos definitions - has to go first
+#include "kokkos_helper.hpp"
 #include <iostream>
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
-#include <../src/mat/impls/aij/seq/kokkos/aijkok.hpp>
-#include <Kokkos_StdAlgorithms.hpp>
-#include <../src/vec/vec/impls/seq/kokkos/veckokkosimpl.hpp>
-#include <Kokkos_Random.hpp>
-#include <Kokkos_Core.hpp>
-// Our kokkos definitions
-#include "kokkos_helper.h"
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // PMISR cf splitting but on the device
