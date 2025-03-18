@@ -151,7 +151,7 @@ or in Python with petsc4py:
 
 Once the new PC types have been registered they can then be used like native PETSc types, either by writing code to set the PETSc type/options, or through command line arguments. A few examples include:
 
-#### 1) Using PCAIR with default options, namely AIRG with parameters tuned for a time independent advection equation on 2D unstructured triangles:
+#### 1) Using PCAIR to apply AIRG with default options:
 
 in Fortran:
 
