@@ -9,5 +9,6 @@ using PetscIntConstKokkosViewHost = Kokkos::View<const PetscInt *, Kokkos::HostS
 using intKokkosViewHost = Kokkos::View<int *, Kokkos::HostSpace>;
 using intKokkosView = Kokkos::View<int *, Kokkos::DefaultExecutionSpace>;
 using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
+using ConstMatRowMapKokkosView = KokkosCsrGraph::row_map_type::const_type;
 
 #endif

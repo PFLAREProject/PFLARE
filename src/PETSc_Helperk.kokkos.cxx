@@ -380,38 +380,28 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    // We need to assemble our i,j, vals so we can build our matrix
    // ~~~~~~~~~~~~~~~~~
    // Create dual memory on the device and host
-   MatScalarKokkosDualView a_local_dual = MatScalarKokkosDualView("a_local_dual", nnzs_match_local);
-   MatRowMapKokkosDualView i_local_dual = MatRowMapKokkosDualView("i_local_dual", local_rows+1);
-   MatColIdxKokkosDualView j_local_dual = MatColIdxKokkosDualView("j_local_dual", nnzs_match_local);
+   PetscScalarKokkosView a_local_d = PetscScalarKokkosView("a_local_d", nnzs_match_local);
+   PetscIntKokkosView i_local_d = PetscIntKokkosView("i_local_d", local_rows+1);
+   PetscIntKokkosView j_local_d = PetscIntKokkosView("j_local_d", nnzs_match_local);
 
-   // Get device views
-   MatScalarKokkosView a_local_d = a_local_dual.view_device();
-   MatRowMapKokkosView i_local_d = i_local_dual.view_device();
    // Initialize first entry to zero - the rest get set below
    Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
-   MatColIdxKokkosView j_local_d = j_local_dual.view_device();  
 
    // Nonlocal stuff 
-   MatScalarKokkosDualView a_nonlocal_dual;
-   MatRowMapKokkosDualView i_nonlocal_dual;
-   MatColIdxKokkosDualView j_nonlocal_dual;
-   MatScalarKokkosView a_nonlocal_d;
-   MatRowMapKokkosView i_nonlocal_d;          
-   MatColIdxKokkosView j_nonlocal_d;    
+   PetscScalarKokkosView a_nonlocal_d;
+   PetscIntKokkosView i_nonlocal_d;          
+   PetscIntKokkosView j_nonlocal_d;    
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
    if (mpi) 
    {
       // Non-local 
-      a_nonlocal_dual = MatScalarKokkosDualView("a_nonlocal_dual", nnzs_match_nonlocal);
-      i_nonlocal_dual = MatRowMapKokkosDualView("i_nonlocal_dual", local_rows+1);
-      j_nonlocal_dual = MatColIdxKokkosDualView("j_nonlocal_dual", nnzs_match_nonlocal);  
+      a_nonlocal_d = PetscScalarKokkosView("a_nonlocal_d", nnzs_match_nonlocal);
+      i_nonlocal_d = PetscIntKokkosView("i_nonlocal_d", local_rows+1);
+      j_nonlocal_d = PetscIntKokkosView("j_nonlocal_d", nnzs_match_nonlocal);  
 
-      a_nonlocal_d = a_nonlocal_dual.view_device();
-      i_nonlocal_d = i_nonlocal_dual.view_device();
       // Initialize first entry to zero - the rest get set below
-      Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                
-      j_nonlocal_d = j_nonlocal_dual.view_device();   
+      Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                 
    }               
 
    // Have to use rangepolicy here rather than teampolicy, as we don't want
@@ -598,22 +588,16 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
       }      
    });
 
-   // Have to specify that we've modified the device data
-   a_local_dual.modify_device();
-   i_local_dual.modify_device();
-   j_local_dual.modify_device();
+   // Let's make sure everything on the device is finished
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
 
    // We can create our local diagonal block matrix directly on the device
-   MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_dual, j_local_dual, a_local_dual, &output_mat_local);  
+   MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);  
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
    if (mpi) 
    {
-      // Have to specify that we've modified the device data
-      a_nonlocal_dual.modify_device();
-      i_nonlocal_dual.modify_device();
-      j_nonlocal_dual.modify_device();
-
       // Now we need to build garray on the host and rewrite the j_nonlocal_d indices so they are local
       // The default values here are for the case where we 
       // let do it, it resets this internally in MatSetUpMultiply_MPIAIJ
@@ -711,8 +695,11 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
          PetscLogGpuToCpu(bytes);            
       } 
       
+      // Let's make sure everything on the device is finished
+      exec.fence();
+
       // We can create our nonlocal diagonal block matrix directly on the device
-      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);      
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
 
       // Build our mpi kokkos matrix by passing in the local and 
       // nonlocal kokkos matrices and the colmap
@@ -830,22 +817,16 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
    PetscIntKokkosView nnz_match_local_row_d;
    PetscIntKokkosView nnz_match_nonlocal_row_d;
-   MatScalarKokkosDualView a_local_dual;
-   MatRowMapKokkosDualView i_local_dual;
-   MatColIdxKokkosDualView j_local_dual;
 
    // Get device views
-   MatScalarKokkosView a_local_d;
-   MatRowMapKokkosView i_local_d;  
-   MatColIdxKokkosView j_local_d;    
+   PetscScalarKokkosView a_local_d;
+   PetscIntKokkosView i_local_d;  
+   PetscIntKokkosView j_local_d;    
 
    // Nonlocal stuff 
-   MatScalarKokkosDualView a_nonlocal_dual;
-   MatRowMapKokkosDualView i_nonlocal_dual;
-   MatColIdxKokkosDualView j_nonlocal_dual;
-   MatScalarKokkosView a_nonlocal_d;
-   MatRowMapKokkosView i_nonlocal_d;          
-   MatColIdxKokkosView j_nonlocal_d;  
+   PetscScalarKokkosView a_nonlocal_d;
+   PetscIntKokkosView i_nonlocal_d;          
+   PetscIntKokkosView j_nonlocal_d;  
 
    Mat_MPIAIJ *mat_mpi_output = nullptr;
    Mat mat_local_output, mat_nonlocal_output;   
@@ -937,30 +918,24 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
       // Create dual memory on the device and host
-      a_local_dual = MatScalarKokkosDualView("a_local_dual", nnzs_match_local);
-      i_local_dual = MatRowMapKokkosDualView("i_local_dual", local_rows+1);
-      j_local_dual = MatColIdxKokkosDualView("j_local_dual", nnzs_match_local);
+      a_local_d = PetscScalarKokkosView("a_local_d", nnzs_match_local);
+      i_local_d = PetscIntKokkosView("i_local_d", local_rows+1);
+      j_local_d = PetscIntKokkosView("j_local_d", nnzs_match_local);
 
       // Get device views
-      a_local_d = a_local_dual.view_device();
-      i_local_d = i_local_dual.view_device();
       // Initialize first entry to zero - the rest get set below
       Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
-      j_local_d = j_local_dual.view_device();    
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
       {
          // Non-local 
-         a_nonlocal_dual = MatScalarKokkosDualView("a_nonlocal_dual", nnzs_match_nonlocal);
-         i_nonlocal_dual = MatRowMapKokkosDualView("i_nonlocal_dual", local_rows+1);
-         j_nonlocal_dual = MatColIdxKokkosDualView("j_nonlocal_dual", nnzs_match_nonlocal);  
+         a_nonlocal_d = PetscScalarKokkosView("a_nonlocal_d", nnzs_match_nonlocal);
+         i_nonlocal_d = PetscIntKokkosView("i_nonlocal_d", local_rows+1);
+         j_nonlocal_d = PetscIntKokkosView("j_nonlocal_d", nnzs_match_nonlocal);  
 
-         a_nonlocal_d = a_nonlocal_dual.view_device();
-         i_nonlocal_d = i_nonlocal_dual.view_device();
          // Initialize first entry to zero - the rest get set below
          Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                
-         j_nonlocal_d = j_nonlocal_dual.view_device();   
       }  
 
       // ~~~~~~~~~~~~~~~
@@ -1151,26 +1126,20 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
          }); 
       }   
-
-      // Have to specify that we've modified the device data
-      a_local_dual.modify_device();
-      i_local_dual.modify_device();
-      j_local_dual.modify_device();            
+        
+      // Let's make sure everything on the device is finished
+      auto exec = PetscGetKokkosExecutionSpace();
+      exec.fence();      
 
       // We can create our local diagonal block matrix directly on the device
-      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols_coarse, i_local_dual, j_local_dual, a_local_dual, &output_mat_local);  
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols_coarse, i_local_d, j_local_d, a_local_d, &output_mat_local);  
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
       {
-         // Have to specify that we've modified the device data
-         a_nonlocal_dual.modify_device();
-         i_nonlocal_dual.modify_device();
-         j_nonlocal_dual.modify_device();
-
          // We can create our nonlocal diagonal block matrix directly on the device
          // Same number of col_ao as W         
-         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);               
+         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);               
 
          // We just take a copy of the original garray
          PetscInt *garray_host = NULL; 
@@ -1248,7 +1217,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
 
-   MatScalarKokkosView a_local_d, a_nonlocal_d;
+   PetscScalarKokkosView a_local_d, a_nonlocal_d;
    a_local_d = PetscScalarKokkosView(device_local_vals, aijkok_local->csrmat.nnz());   
    if (mpi) a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, aijkok_nonlocal->csrmat.nnz()); 
    // Copy in the val
@@ -1513,38 +1482,29 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    // We need to assemble our i,j, vals so we can build our matrix
    // ~~~~~~~~~~~~~~~~~
    // Create dual memory on the device and host
-   MatScalarKokkosDualView a_local_dual = MatScalarKokkosDualView("a_local_dual", nnzs_match_local);
-   MatRowMapKokkosDualView i_local_dual = MatRowMapKokkosDualView("i_local_dual", local_rows+1);
-   MatColIdxKokkosDualView j_local_dual = MatColIdxKokkosDualView("j_local_dual", nnzs_match_local);
+   PetscScalarKokkosView a_local_d = PetscScalarKokkosView("a_local_d", nnzs_match_local);
+   PetscIntKokkosView i_local_d = PetscIntKokkosView("i_local_d", local_rows+1);
+   PetscIntKokkosView j_local_d = PetscIntKokkosView("j_local_d", nnzs_match_local);
 
    // Get device views
-   MatScalarKokkosView a_local_d = a_local_dual.view_device();
-   MatRowMapKokkosView i_local_d = i_local_dual.view_device();
    // Initialize first entry to zero - the rest get set below
    Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
-   MatColIdxKokkosView j_local_d = j_local_dual.view_device();  
 
    // Nonlocal stuff 
-   MatScalarKokkosDualView a_nonlocal_dual;
-   MatRowMapKokkosDualView i_nonlocal_dual;
-   MatColIdxKokkosDualView j_nonlocal_dual;
-   MatScalarKokkosView a_nonlocal_d;
-   MatRowMapKokkosView i_nonlocal_d;          
-   MatColIdxKokkosView j_nonlocal_d;    
+   PetscScalarKokkosView a_nonlocal_d;
+   PetscIntKokkosView i_nonlocal_d;          
+   PetscIntKokkosView j_nonlocal_d;    
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
    if (mpi) 
    {
       // Non-local 
-      a_nonlocal_dual = MatScalarKokkosDualView("a_nonlocal_dual", nnzs_match_nonlocal);
-      i_nonlocal_dual = MatRowMapKokkosDualView("i_nonlocal_dual", local_rows+1);
-      j_nonlocal_dual = MatColIdxKokkosDualView("j_nonlocal_dual", nnzs_match_nonlocal);  
+      a_nonlocal_d = PetscScalarKokkosView("a_nonlocal_d", nnzs_match_nonlocal);
+      i_nonlocal_d = PetscIntKokkosView("i_nonlocal_d", local_rows+1);
+      j_nonlocal_d = PetscIntKokkosView("j_nonlocal_d", nnzs_match_nonlocal);  
 
-      a_nonlocal_d = a_nonlocal_dual.view_device();
-      i_nonlocal_d = i_nonlocal_dual.view_device();
       // Initialize first entry to zero - the rest get set below
       Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                
-      j_nonlocal_d = j_nonlocal_dual.view_device();   
    }        
 
    // Initialize i_local_d row pointers (1 to local_rows) with cumulative sums from the scan
@@ -1574,22 +1534,16 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       }   
    });      
 
-   // Have to specify that we've modified the device data
-   a_local_dual.modify_device();
-   i_local_dual.modify_device();
-   j_local_dual.modify_device();
+   // Let's make sure everything on the device is finished
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
    
    // We can create our local diagonal block matrix directly on the device
-   MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_dual, j_local_dual, a_local_dual, &output_mat_local);     
+   MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);     
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
    if (mpi) 
    {
-      // Have to specify that we've modified the device data
-      a_nonlocal_dual.modify_device();
-      i_nonlocal_dual.modify_device();
-      j_nonlocal_dual.modify_device();
-
       // Now we need to build garray on the host and rewrite the j_nonlocal_d indices so they are local
       // The default values here are for the case where we 
       // let do it, it resets this internally in MatSetUpMultiply_MPIAIJ
@@ -1686,9 +1640,13 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          size_t bytes = colmap_output_d.extent(0) * sizeof(PetscInt);
          PetscLogGpuToCpu(bytes);            
       }
+
+      // Let's make sure everything on the device is finished
+      auto exec = PetscGetKokkosExecutionSpace();
+      exec.fence();      
       
       // We can create our nonlocal diagonal block matrix directly on the device
-      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);      
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
 
       // Build our mpi kokkos matrix by passing in the local and 
       // nonlocal kokkos matrices and the colmap
@@ -1865,22 +1823,16 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
    PetscIntKokkosView nnz_match_local_row_d;
    PetscIntKokkosView nnz_match_nonlocal_row_d;
-   MatScalarKokkosDualView a_local_dual;
-   MatRowMapKokkosDualView i_local_dual;
-   MatColIdxKokkosDualView j_local_dual;
 
    // Get device views
-   MatScalarKokkosView a_local_d;
-   MatRowMapKokkosView i_local_d;  
-   MatColIdxKokkosView j_local_d;    
+   PetscScalarKokkosView a_local_d;
+   PetscIntKokkosView i_local_d;  
+   PetscIntKokkosView j_local_d;    
 
    // Nonlocal stuff 
-   MatScalarKokkosDualView a_nonlocal_dual;
-   MatRowMapKokkosDualView i_nonlocal_dual;
-   MatColIdxKokkosDualView j_nonlocal_dual;
-   MatScalarKokkosView a_nonlocal_d;
-   MatRowMapKokkosView i_nonlocal_d;          
-   MatColIdxKokkosView j_nonlocal_d;  
+   PetscScalarKokkosView a_nonlocal_d;
+   PetscIntKokkosView i_nonlocal_d;          
+   PetscIntKokkosView j_nonlocal_d;  
 
    Mat_MPIAIJ *mat_mpi_output = nullptr;
    Mat mat_local_output, mat_nonlocal_output;   
@@ -1962,30 +1914,23 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
       // Create dual memory on the device and host
-      a_local_dual = MatScalarKokkosDualView("a_local_dual", nnzs_match_local);
-      i_local_dual = MatRowMapKokkosDualView("i_local_dual", local_rows_z+1);
-      j_local_dual = MatColIdxKokkosDualView("j_local_dual", nnzs_match_local);
+      a_local_d = PetscScalarKokkosView("a_local_d", nnzs_match_local);
+      i_local_d = PetscIntKokkosView("i_local_d", local_rows_z+1);
+      j_local_d = PetscIntKokkosView("j_local_d", nnzs_match_local);
 
-      // Get device views
-      a_local_d = a_local_dual.view_device();
-      i_local_d = i_local_dual.view_device();
       // Initialize first entry to zero - the rest get set below
       Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
-      j_local_d = j_local_dual.view_device();    
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
       {
          // Non-local 
-         a_nonlocal_dual = MatScalarKokkosDualView("a_nonlocal_dual", nnzs_match_nonlocal);
-         i_nonlocal_dual = MatRowMapKokkosDualView("i_nonlocal_dual", local_rows_z+1);
-         j_nonlocal_dual = MatColIdxKokkosDualView("j_nonlocal_dual", nnzs_match_nonlocal);  
+         a_nonlocal_d = PetscScalarKokkosView("a_nonlocal_d", nnzs_match_nonlocal);
+         i_nonlocal_d = PetscIntKokkosView("i_nonlocal_d", local_rows_z+1);
+         j_nonlocal_d = PetscIntKokkosView("j_nonlocal_d", nnzs_match_nonlocal);  
 
-         a_nonlocal_d = a_nonlocal_dual.view_device();
-         i_nonlocal_d = i_nonlocal_dual.view_device();
          // Initialize first entry to zero - the rest get set below
          Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                
-         j_nonlocal_d = j_nonlocal_dual.view_device();   
       }  
 
       // ~~~~~~~~~~~~~~~
@@ -2086,7 +2031,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
       // Have these point at the existing i pointers - we only need the local j
       ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows_z+1);
-      ConstMatColIdxKokkosView j_local_const_d = ConstMatColIdxKokkosView(device_local_j_output, aijkok_local_output->csrmat.nnz());
+      ConstMatRowMapKokkosView j_local_const_d = ConstMatRowMapKokkosView(device_local_j_output, aijkok_local_output->csrmat.nnz());
       ConstMatRowMapKokkosView i_nonlocal_const_d;
       if (mpi) i_nonlocal_const_d = ConstMatRowMapKokkosView(device_nonlocal_i_ouput, local_rows_z+1);        
 
@@ -2165,34 +2110,25 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
    if (!reuse_int)
    {
-      // Have to specify that we've modified the device data
-      a_local_dual.modify_device();
-      i_local_dual.modify_device();
-      j_local_dual.modify_device();      
-    
-      // We can create our local diagonal block matrix directly on the device
-      // See MatSeqAIJKokkosMergeMats for example
-      auto akok_local = new Mat_SeqAIJKokkos(local_rows_z, local_full_cols, nnzs_match_local, i_local_dual, j_local_dual, a_local_dual);    
+      // Let's make sure everything on the device is finished
+      auto exec = PetscGetKokkosExecutionSpace();
+      exec.fence();   
 
       // Now we have to sort the local column indices, as we add in the identity at the 
-      // end of our local j indices
-      KokkosSparse::sort_crs_matrix(akok_local->csrmat);
-
-      a_local_dual.modify_device();
-      i_local_dual.modify_device();
-      j_local_dual.modify_device();     
+      // end of our local j indices      
+      KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows_z, local_full_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+      KokkosSparse::sort_crs_matrix(csrmat_local);
+      
+      // Let's make sure everything on the device is finished
+      exec = PetscGetKokkosExecutionSpace();
+      exec.fence();       
       
       // Create the matrix given the sorted csr
-      MatCreateSeqAIJKokkosWithKokkosCsrMatrix(PETSC_COMM_SELF, akok_local->csrmat, &output_mat_local);  
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);         
 
       // we also have to go and build our off block matrix and then the output
       if (mpi) 
       {
-         // Have to specify that we've modified the device data
-         a_nonlocal_dual.modify_device();
-         i_nonlocal_dual.modify_device();
-         j_nonlocal_dual.modify_device();
-
          // We know the garray is just the original but rewritten to be 
          // the full indices, which we have in in is_pointer_orig_fine_col(cols_ad:end)
          PetscInt *garray_host = NULL; 
@@ -2203,7 +2139,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          }    
          
          // We can create our nonlocal diagonal block matrix directly on the device
-         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, cols_ao, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);         
+         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);         
 
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
@@ -2295,22 +2231,16 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
 
    PetscIntKokkosView nnz_match_local_row_d;
    PetscIntKokkosView nnz_match_nonlocal_row_d;
-   MatScalarKokkosDualView a_local_dual;
-   MatRowMapKokkosDualView i_local_dual;
-   MatColIdxKokkosDualView j_local_dual;
 
    // Get device views
-   MatScalarKokkosView a_local_d;
-   MatRowMapKokkosView i_local_d;  
-   MatColIdxKokkosView j_local_d;    
+   PetscScalarKokkosView a_local_d;
+   PetscIntKokkosView i_local_d;  
+   PetscIntKokkosView j_local_d;    
 
    // Nonlocal stuff 
-   MatScalarKokkosDualView a_nonlocal_dual;
-   MatRowMapKokkosDualView i_nonlocal_dual;
-   MatColIdxKokkosDualView j_nonlocal_dual;
-   MatScalarKokkosView a_nonlocal_d;
-   MatRowMapKokkosView i_nonlocal_d;          
-   MatColIdxKokkosView j_nonlocal_d;  
+   PetscScalarKokkosView a_nonlocal_d;
+   PetscIntKokkosView i_nonlocal_d;          
+   PetscIntKokkosView j_nonlocal_d;  
 
    Mat_MPIAIJ *mat_mpi_output = nullptr;
    Mat mat_local_output, mat_nonlocal_output;   
@@ -2429,30 +2359,23 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
       // Create dual memory on the device and host
-      a_local_dual = MatScalarKokkosDualView("a_local_dual", nnzs_match_local);
-      i_local_dual = MatRowMapKokkosDualView("i_local_dual", local_rows+1);
-      j_local_dual = MatColIdxKokkosDualView("j_local_dual", nnzs_match_local);
+      a_local_d = PetscScalarKokkosView("a_local_d", nnzs_match_local);
+      i_local_d = PetscIntKokkosView("i_local_d", local_rows+1);
+      j_local_d = PetscIntKokkosView("j_local_d", nnzs_match_local);
 
-      // Get device views
-      a_local_d = a_local_dual.view_device();
-      i_local_d = i_local_dual.view_device();
       // Initialize first entry to zero - the rest get set below
       Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
-      j_local_d = j_local_dual.view_device();    
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
       {
          // Non-local 
-         a_nonlocal_dual = MatScalarKokkosDualView("a_nonlocal_dual", nnzs_match_nonlocal);
-         i_nonlocal_dual = MatRowMapKokkosDualView("i_nonlocal_dual", local_rows+1);
-         j_nonlocal_dual = MatColIdxKokkosDualView("j_nonlocal_dual", nnzs_match_nonlocal);  
+         a_nonlocal_d = PetscScalarKokkosView("a_nonlocal_d", nnzs_match_nonlocal);
+         i_nonlocal_d = PetscIntKokkosView("i_nonlocal_d", local_rows+1);
+         j_nonlocal_d = PetscIntKokkosView("j_nonlocal_d", nnzs_match_nonlocal);  
 
-         a_nonlocal_d = a_nonlocal_dual.view_device();
-         i_nonlocal_d = i_nonlocal_dual.view_device();
          // Initialize first entry to zero - the rest get set below
          Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                
-         j_nonlocal_d = j_nonlocal_dual.view_device();   
       }  
 
       // ~~~~~~~~~~~~~~~
@@ -2553,7 +2476,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
 
       // Have these point at the existing i pointers - we only need the local j
       ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows+1);
-      ConstMatColIdxKokkosView j_local_const_d = ConstMatColIdxKokkosView(device_local_j_output, aijkok_local_output->csrmat.nnz());
+      ConstMatRowMapKokkosView j_local_const_d = ConstMatRowMapKokkosView(device_local_j_output, aijkok_local_output->csrmat.nnz());
       ConstMatRowMapKokkosView i_nonlocal_const_d;
       if (mpi) i_nonlocal_const_d = ConstMatRowMapKokkosView(device_nonlocal_i_ouput, local_rows+1);         
 
@@ -2635,34 +2558,25 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
 
    if (!reuse_int)
    {
-      // Have to specify that we've modified the device data
-      a_local_dual.modify_device();
-      i_local_dual.modify_device();
-      j_local_dual.modify_device();      
-    
-      // We can create our local diagonal block matrix directly on the device
-      // See MatSeqAIJKokkosMergeMats for example
-      auto akok_local = new Mat_SeqAIJKokkos(local_rows, local_cols, nnzs_match_local, i_local_dual, j_local_dual, a_local_dual);    
+      // Let's make sure everything on the device is finished
+      auto exec = PetscGetKokkosExecutionSpace();
+      exec.fence();     
 
-      // Now we have to sort the local column indices, as we add in the diagonal at the 
-      // end of our local j indices in some rows
-      KokkosSparse::sort_crs_matrix(akok_local->csrmat);
+      // Now we have to sort the local column indices, as we add in the identity at the 
+      // end of our local j indices      
+      KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+      KokkosSparse::sort_crs_matrix(csrmat_local);       
 
-      a_local_dual.modify_device();
-      i_local_dual.modify_device();
-      j_local_dual.modify_device();        
+      // Let's make sure everything on the device is finished
+      exec = PetscGetKokkosExecutionSpace();
+      exec.fence();       
 
       // Create the matrix given the sorted csr
-      MatCreateSeqAIJKokkosWithKokkosCsrMatrix(PETSC_COMM_SELF, akok_local->csrmat, &output_mat_local);  
+      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);                
 
       // we also have to go and build our off block matrix and then the output
       if (mpi) 
       {
-         // Have to specify that we've modified the device data
-         a_nonlocal_dual.modify_device();
-         i_nonlocal_dual.modify_device();
-         j_nonlocal_dual.modify_device();
-
          // We know the garray is just the original
          PetscInt *garray_host = NULL; 
          PetscMalloc1(cols_ao, &garray_host);
@@ -2672,7 +2586,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
          }    
          
          // We can create our nonlocal diagonal block matrix directly on the device
-         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_dual, j_nonlocal_dual, a_nonlocal_dual, &output_mat_nonlocal);      
+         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
          
          // Build our mpi kokkos matrix by passing in the local and 
          // nonlocal kokkos matrices and the colmap
