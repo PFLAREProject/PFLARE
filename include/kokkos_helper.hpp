@@ -1,7 +1,15 @@
 #if !defined (KOKKOS_HELPER_DEF_H)
 #define KOKKOS_HELPER_DEF_H
 
+// petscvec_kokkos.hpp has to go first
+#include <petscvec_kokkos.hpp>
 #include "petsc.h"
+#include <../src/mat/impls/aij/seq/kokkos/aijkok.hpp>
+#include <Kokkos_StdAlgorithms.hpp>
+#include <../src/vec/vec/impls/seq/kokkos/veckokkosimpl.hpp>
+#include <Kokkos_Random.hpp>
+#include <Kokkos_Core.hpp>
+#include <Kokkos_DualView.hpp>
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
 using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;

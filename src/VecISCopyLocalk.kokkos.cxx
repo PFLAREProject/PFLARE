@@ -1,14 +1,6 @@
-#include <petscvec_kokkos.hpp>
-#include <petsc.h>
+// Our petsc kokkos definitions - has to go first
+#include "kokkos_helper.hpp"
 #include <iostream>
-#include <../src/mat/impls/aij/seq/kokkos/aijkok.hpp>
-#include <Kokkos_DualView.hpp>
-#include <../src/vec/vec/impls/seq/kokkos/veckokkosimpl.hpp>
-
-using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
-using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;
-using HostMirrorMemorySpace = Kokkos::DualView<PetscScalar *>::host_mirror_space::memory_space;
-using PetscIntConstKokkosViewHost = Kokkos::View<const PetscInt *, HostMirrorMemorySpace>;
 
 using ViewPtr = std::shared_ptr<PetscIntKokkosView>;
 
