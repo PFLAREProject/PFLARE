@@ -424,7 +424,7 @@ For example, running the same problem on a single GPU with KOKKOS:
 
 ``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_order 30 -mat_type aijkokkos -vec_type kokkos``
 
-Note: all our tests allow the option ``-second_solve`` which turns on two solves, the first to trigger any copies to the GPU (typically for options that have GPU setup listed as "No" above) and the second to allow accurate timing. 
+Note: all the tests allow the option ``-second_solve`` which turns on two solves, the first to trigger any copies to the GPU (e.g., the top grid matrix if created on the host) and the second to allow accurate timing. 
 
 Development of the setup on GPUs is ongoing, please get in touch if you would like to contribute. The main areas requiring development are:
 
