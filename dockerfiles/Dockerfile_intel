@@ -23,6 +23,6 @@ RUN source /opt/intel/oneapi/setvars.sh && \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
     cd PFLARE && \
-    make && make build_tests
+    make -j2 && make -j2 build_tests
 
 WORKDIR /build/PFLARE
