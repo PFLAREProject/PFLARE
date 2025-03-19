@@ -695,7 +695,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
       MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
 
       // We can now create our MPI matrix
-      MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
+      MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
    }     
    // If in serial 
    else
@@ -716,7 +716,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscInt global_row_start_W, global_row_end_plus_one_W;
    PetscInt global_col_start_W, global_col_end_plus_one_W;
    PetscInt local_rows_coarse, local_rows, local_cols, local_cols_coarse;
-   PetscInt cols_z, rows_z, local_rows_fine;
+   PetscInt cols_z, rows_z, local_rows_fine, global_cols_coarse, global_rows, global_cols;
    PetscInt rows_ao, cols_ao;
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
@@ -780,10 +780,10 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    local_cols = local_rows_coarse + local_rows_fine;
    local_rows = local_cols; 
    
-   //global_cols = rows_z + cols_z;
-   //global_rows = global_cols;
+   global_cols = rows_z + cols_z;
+   global_rows = global_cols;
    //global_rows_coarse = rows_z;
-   //global_cols_coarse = rows_z;    
+   global_cols_coarse = rows_z;    
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
@@ -1132,7 +1132,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          }
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
+         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols_coarse, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
       }     
       // If in serial 
       else
@@ -1619,7 +1619,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
 
       // We can now create our MPI matrix
-      MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);      
+      MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);      
    }     
    // If in serial 
    else
@@ -1642,7 +1642,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscInt global_row_start_Z, global_row_end_plus_one_Z;
    PetscInt global_col_start_Z, global_col_end_plus_one_Z;
    PetscInt local_coarse_size, local_fine_size, local_full_cols;
-   PetscInt global_coarse_size, global_fine_size;
+   PetscInt global_coarse_size, global_fine_size, global_full_cols;
    PetscInt rows_ao, cols_ao, rows_ad, cols_ad, size_cols;
    PetscInt global_rows_z, global_cols_z;
    PetscInt local_rows_z, local_cols_z;
@@ -1687,7 +1687,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    ISGetSize(*is_fine, &global_fine_size);      
 
    local_full_cols = local_coarse_size + local_fine_size;
-   //global_full_cols = global_coarse_size + global_fine_size;
+   global_full_cols = global_coarse_size + global_fine_size;
 
    MatGetLocalSize(*input_mat, &local_rows_z, &local_cols_z); 
    MatGetSize(*input_mat, &global_rows_z, &global_cols_z);
@@ -2101,7 +2101,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);         
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
+         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_z, global_full_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
       }    
       // If in serial 
       else
@@ -2537,7 +2537,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
          MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
+         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
       }    
       // If in serial 
       else

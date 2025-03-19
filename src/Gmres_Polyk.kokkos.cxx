@@ -107,7 +107,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_kokkos(Mat *input_mat
          MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);         
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
+         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
       }     
       // If in serial 
       else
@@ -331,7 +331,7 @@ PETSC_INTERN void build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(Mat *
          MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
+         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
       }     
       // If in serial 
       else

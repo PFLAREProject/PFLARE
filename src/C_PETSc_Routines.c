@@ -404,9 +404,9 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
 #endif      
 
       // MAT_NO_OFF_PROC_ENTRIES is set to true in this routine so 
-      // don't need to set it  externally
+      // don't need to set it externally
       // Have to be careful here as need to feed in copies of A and B
-      MatCreateMPIAIJWithSeqAIJ(bcomm, Ad_copy, Ao_copy, a->garray, B);       
+      MatCreateMPIAIJWithSeqAIJ(bcomm, M, N, Ad_copy, Ao_copy, a->garray, B);       
     }
 
     MPI_Comm_free(&bcomm);
