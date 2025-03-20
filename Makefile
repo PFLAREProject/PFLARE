@@ -119,6 +119,12 @@ else
 OUT = $(LIBDIR)/libpflare.so
 endif
 
+# Dependency generation with makedepf90
+DEPFILE = Makefile.deps
+
+# Find Fortran source files in the src directory for makedepf90
+FSRC := $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Rules
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -137,24 +143,32 @@ else
 	$(LINK.F) -shared -o $(OUT) $(OBJS) $(LDLIBS)
 endif
 
-# Build the tests
+# Generate dependencies for parallel build with makedepf90
+.PHONY: depend
+depend:
+	@echo "Generating dependencies..."
+	@makedepf90 -b $(SRCDIR) $(FSRC) > $(DEPFILE)
+
+# Include dependencies if the file exists
+-include $(DEPFILE)
+
+# Build the tests (in parallel)
+.PHONY: build_tests
 build_tests: $(OUT)
-	@for t in $(TEST_TARGETS); do \
-		$(MAKE) -C tests $$t; \
-	done
+	+$(MAKE) -C tests $(TEST_TARGETS)
 
 # Separate out serial and parallel tests
 # Only run the tests that load the 32 bit test matrix in /tests/data
 # if PETSC has been configured without 64 bit integers
-tests_serial: $(OUT)
-	$(MAKE) build_tests
+.PHONY: tests_serial
+tests_serial: build_tests
 ifeq ($(PETSC_USE_64BIT_INDICES),0)
 	$(MAKE) -C tests run_tests_load_serial
 endif	
 	$(MAKE) -C tests run_tests_no_load_serial
 
-tests_parallel: $(OUT)
-	$(MAKE) build_tests
+.PHONY: tests_parallel
+tests_parallel: build_tests
 ifeq ($(PETSC_USE_64BIT_INDICES),0)
 	$(MAKE) -C tests run_tests_load_parallel
 endif	
@@ -162,8 +176,7 @@ endif
 
 # Build and run all the tests
 .PHONY: tests
-tests: $(OUT)
-	$(MAKE) build_tests
+tests: build_tests
 	$(MAKE) tests_serial
 	$(MAKE) tests_parallel
 
@@ -173,6 +186,7 @@ python: $(OUT)
 	$(MAKE) -C python python
 
 # Run the python tests
+.PHONY: tests_python
 tests_python: $(OUT)
 	$(MAKE) -C python run_tests
 
