@@ -217,7 +217,11 @@ contains
 
       call KSPGetConvergedReason(ksp, reason, ierr)
       call KSPGetIterationNumber(ksp,its,ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23) 
+      if (reason < 0) then
+#else
       if (reason%v < 0) then
+#endif  
          if (rank .eq. 0) write(6,101) count,its
       else
          if (rank .eq. 0) print *, "Solve FAILED"

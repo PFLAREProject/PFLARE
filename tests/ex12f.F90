@@ -137,7 +137,11 @@
 
       call PetscFinalize(ierr)
 
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23) 
+      if (reason < 0) then
+#else
       if (reason%v < 0) then
+#endif  
          error stop 1
       end if
       end
