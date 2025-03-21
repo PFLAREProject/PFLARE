@@ -61,16 +61,17 @@ module sai_z
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs
       logical :: approx_solve
-      ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
-      type(tMat), dimension(:), pointer :: submatrices, submatrices_full
       type(tMat) :: Ao, Ad, temp_mat
       type(tKSP) :: ksp
       type(tPC) :: pc
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1) 
+      PetscInt :: icol(1)
+      ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
+      type(tMat), dimension(2) :: submatrices, submatrices_full
 #else
       PetscInt, dimension(:), pointer :: colmap
+      type(tMat), dimension(:), pointer :: submatrices, submatrices_full
 #endif
       type(c_ptr) :: colmap_c_ptr
       PetscInt, pointer :: colmap_c(:)

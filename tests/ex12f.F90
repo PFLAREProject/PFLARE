@@ -109,11 +109,7 @@
       call PetscLogStagePush(gpu_copy, ierr)
       call KSPSetFromOptions(ksp,ierr)
       call KSPSolve(ksp,b,x,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-      call PetscLogStagePop()
-#else
-      call PetscLogStagePop(ierr)
-#endif      
+      call PetscLogStagePop(ierr)      
 
       if (second_solve) then
          call VecSet(x, 1d0, ierr)

@@ -758,12 +758,13 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
       PetscInt :: icol(1) 
+      ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
+      type(tMat), dimension(2) :: submatrices
 #else
       PetscInt, dimension(:), pointer :: colmap
+      type(tMat), dimension(:), pointer :: submatrices
 #endif
       type(c_ptr) :: colmap_c_ptr, vals_c_ptr
-      ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
-      type(tMat), dimension(:), pointer :: submatrices
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
       type(tMat), pointer :: mat_sparsity_match
       type(int_vec), dimension(:), allocatable :: symbolic_ones
