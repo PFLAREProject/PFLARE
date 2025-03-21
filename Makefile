@@ -3,7 +3,7 @@
 # Makefile for PFLARE
 #
 # Must have defined PETSC_DIR and PETSC_ARCH before calling
-# PETSc must be at least version 3.15
+# PETSc must be at least version 3.20
 # Copied from $PETSC_DIR/share/petsc/Makefile.basic.user
 # This uses the compilers and flags defined in the PETSc configuration
 # ~~~~~~~~~~~~~~~~~
