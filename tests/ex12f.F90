@@ -137,7 +137,7 @@
 
       call PetscFinalize(ierr)
 
-      if (reason /= KSP_CONVERGED_RTOL) then
+      if (reason%v < 0) then
          error stop 1
       end if
       end

@@ -242,7 +242,7 @@
       call KSPGetIterationNumber(ksp,its,ierr)  
       if (rank .eq. 0) write(6,101) count,its      
  101  format('Solve number ',i5,' iterations ',i5)
-      if (reason /= KSP_CONVERGED_RTOL) then
+      if (reason%v < 0) then
          error stop 1
       end if    
 
