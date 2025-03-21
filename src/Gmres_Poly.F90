@@ -1000,9 +1000,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! ~~~~~~~~~~
       
       allocate(cols(max_nnzs))
-      allocate(cols_two(max_nnzs))
       allocate(vals(max_nnzs)) 
-      allocate(vals_two(max_nnzs)) 
       allocate(vals_power_temp(max_nnzs))
       allocate(vals_previous_power_temp(max_nnzs))
       allocate(cols_index_one(max_nnzs))
@@ -1298,7 +1296,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       end if
 
       deallocate(col_indices_off_proc_array)
-      deallocate(cols, vals, cols_two, vals_two, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)
+      deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)
 
       ! Finish assembly
       call MatAssemblyEnd(cmat, MAT_FINAL_ASSEMBLY, ierr) 

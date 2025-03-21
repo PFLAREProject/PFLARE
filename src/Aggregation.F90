@@ -28,7 +28,7 @@ module aggregation
       ! Local
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols, kfree
-      PetscInt :: max_nnzs, aggregate, max_neighbour_index, max_neighbour_value, jfree
+      PetscInt :: aggregate, max_neighbour_index, max_neighbour_value, jfree
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
@@ -69,17 +69,7 @@ module aggregation
       else
          allocate(cf_markers(local_rows)) 
          cf_markers = 0 
-      end if
-
-      ! Get nnzs 
-      max_nnzs = 0
-      do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-         call MatGetRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do        
-
-      allocate(cols(max_nnzs))    
+      end if  
    
       ! Serial ordering to match pyamg in serial
       do ifree = 1, local_rows
@@ -199,7 +189,7 @@ module aggregation
          call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
-      deallocate(indices, cols)
+      deallocate(indices)
 
    end subroutine generate_serial_aggregation   
 

@@ -224,7 +224,7 @@ module constrain_z_or_w
       PetscInt :: local_rows, local_cols, global_row_start
       PetscInt :: global_row_end_plus_one, global_col_end_plus_one
       PetscInt :: global_rows, global_cols, i_loc
-      PetscInt :: rows_ao, cols_ao, global_col_start, max_nnzs, ncols
+      PetscInt :: rows_ao, cols_ao, global_col_start, ncols
       PetscInt :: cols_ad, rows_ad, ncols_ad, ncols_ao, ncols_temp
       integer :: errorcode, comm_size, null_vec
       PetscErrorCode :: ierr      
@@ -280,18 +280,9 @@ module constrain_z_or_w
       call MatGetLocalSize(row_mat, local_rows, local_cols, ierr)
       call MatGetSize(row_mat, global_rows, global_cols, ierr)
 
-      max_nnzs = 0
       ! Get the nnzs in row_mat
       call MatGetOwnershipRange(row_mat, global_row_start, global_row_end_plus_one, ierr) 
       call MatGetOwnershipRangeColumn(row_mat, global_col_start, global_col_end_plus_one, ierr)    
-      do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(row_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(row_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do   
-
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs))
 
       ! ~~~~~
       ! What we are doing, with W for example:
@@ -528,7 +519,6 @@ module constrain_z_or_w
          deallocate(b_c_nonlocal_alloc)
       end if
 
-      deallocate(cols, vals)
       ! Destroy the old input matrix
       call MatDestroy(z_or_w, ierr)      
 

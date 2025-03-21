@@ -228,9 +228,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs)) 
-
       ! We know we never have more to do than the original nnzs
       allocate(row_indices(max_nnzs_total))
       allocate(col_indices(max_nnzs_total))
@@ -313,7 +310,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)   
       end do           
 
-      deallocate(cols, vals)
       ! Set the values
       call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
       deallocate(row_indices, col_indices)
@@ -334,7 +330,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
 
-      PetscInt :: ncols, ifree, max_nnzs
+      PetscInt :: ncols, ifree
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols
@@ -344,20 +340,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! ~~~~~~~~~~
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
-
-      max_nnzs = 0
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         call MatGetRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)         
-      end do
-
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs)) 
        
       ! Just in case there are some zeros in the input mat, ignore them
       call MatSetOption(output_mat, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE, ierr)     
@@ -382,7 +364,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do  
             
       call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
-      deallocate(cols, vals)
       call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr) 
          
    end subroutine remove_from_sparse_match_no_lump   
@@ -452,9 +433,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       max_nnzs_total = max(max_nnzs_total, max_nnzs_total_two)
 
-      allocate(cols(max_nnzs))
       allocate(cols_mod(max_nnzs))
-      allocate(vals(max_nnzs)) 
       allocate(vals_copy(max_nnzs))
 
       ! Times 2 here in case we are lumping
@@ -535,7 +514,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          end if              
       end do  
             
-      deallocate(cols, vals, cols_mod, vals_copy)
+      deallocate(cols_mod, vals_copy)
       ! Set the values
       call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
       deallocate(row_indices, col_indices)
@@ -803,9 +782,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs_total = max_nnzs_total + local_rows
       max_nnzs = max_nnzs + 1
 
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs))
-
       allocate(row_indices(max_nnzs_total))
       allocate(col_indices(max_nnzs_total))
       allocate(v(max_nnzs_total))
@@ -860,9 +836,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! even though we're calling INSERT_VALUES
       call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
       deallocate(v)       
-      
-      deallocate(cols, vals)
-
          
    end subroutine mat_duplicate_copy_plus_diag_cpu   
 
@@ -1150,7 +1123,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       
-      PetscInt :: ncols, ifree, max_nnzs
+      PetscInt :: ncols, ifree
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_col_start, global_col_end_plus_one
@@ -1177,18 +1150,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetSize(input_mat, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
-      call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)  
-
-      max_nnzs = 0
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do
-
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs))       
+      call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)   
 
       ! ! Create the output matrix
       call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
@@ -1234,8 +1196,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       deallocate(row_indices, col_indices)
       call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
       deallocate(v)      
-
-      deallocate(cols, vals)
          
    end subroutine generate_one_point_with_one_entry_from_sparse_cpu   
    
@@ -1409,9 +1369,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (identity) max_nnzs_total = max_nnzs_total + local_rows_coarse
       max_nnzs = max_nnzs + 1
 
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs))
-
       allocate(row_indices(max_nnzs_total))
       allocate(col_indices(max_nnzs_total))
       allocate(v(max_nnzs_total))
@@ -1460,7 +1417,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
          end do     
       end if
-      deallocate(cols, vals) 
       
       ! Set the values
       if (.NOT. reuse) then
@@ -1765,9 +1721,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (identity) max_nnzs_total = max_nnzs_total + local_rows_z
       max_nnzs = max_nnzs + 1
 
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs))
-
       allocate(row_indices_coo(max_nnzs_total))
       allocate(col_indices_coo(max_nnzs_total))
       allocate(v(max_nnzs_total))    
@@ -1836,7 +1789,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
          end do  
       end if                                   
-      deallocate(cols, vals)
 
       ! Set the values
       if (.NOT. reuse) then

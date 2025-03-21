@@ -32,7 +32,7 @@ module repartition
 
       ! Local
       PetscInt :: local_rows, local_cols, global_rows, global_cols, i_loc
-      PetscInt :: ncols, local_nnzs, off_proc_nnzs, max_nnzs
+      PetscInt :: ncols, local_nnzs, off_proc_nnzs
       PetscInt :: global_row_start, global_row_end_plus_one, local_nnzs_row
       integer :: errorcode
       PetscErrorCode :: ierr
@@ -83,16 +83,6 @@ module repartition
       ! If it's not an mpiaij matrix, then we have to actually get the cols out and check 
       ! the sizes outside the local range
       else
-         
-         ! Get the nnzs
-         max_nnzs = 0
-         do i_loc = global_row_start, global_row_end_plus_one-1                  
-   
-            call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-            if (ncols > max_nnzs) max_nnzs = ncols
-            call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         end do         
-         allocate(cols(max_nnzs))
 
          ! Loop over all the rows
          do i_loc = global_row_start, global_row_end_plus_one-1
@@ -107,7 +97,6 @@ module repartition
 
             call MatRestoreRow(input_mat, i_loc, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
          end do
-         deallocate(cols)
 
       end if
       

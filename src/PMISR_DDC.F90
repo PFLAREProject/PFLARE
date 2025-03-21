@@ -755,7 +755,7 @@ module pmisr_ddc
       PetscInt :: local_rows, local_cols
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
       PetscInt :: input_row_start, input_row_end_plus_one
-      PetscInt :: max_nnzs, jfree, idx, search_size, diag_index
+      PetscInt :: jfree, idx, search_size, diag_index
       integer :: bin_sum, bin_boundary, bin
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols
@@ -797,17 +797,8 @@ module pmisr_ddc
          ! Get the local sizes
          call MatGetLocalSize(Aff, local_rows, local_cols, ierr)
          call MatGetOwnershipRange(Aff, a_global_row_start, a_global_row_end_plus_one, ierr)
-         call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                              
-
-         max_nnzs = 0
-         do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-            call MatGetRow(Aff, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-            if (ncols > max_nnzs) max_nnzs = ncols
-            call MatRestoreRow(Aff, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         end do         
-         
-         allocate(cols(max_nnzs))
-         allocate(vals(max_nnzs))     
+         call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
+   
          allocate(diag_dom_ratio(local_rows))   
          diag_dom_ratio = 0
          dom_bins = 0
@@ -896,7 +887,7 @@ module pmisr_ddc
             ! Swap by multiplying by -1
             cf_markers_local(idx) = cf_markers_local(idx) * (-1)
          end do
-         deallocate(cols, vals, diag_dom_ratio)
+         deallocate(diag_dom_ratio)
          if (allocated(diag_dom_ratio_small)) deallocate(diag_dom_ratio_small)
       end if
 

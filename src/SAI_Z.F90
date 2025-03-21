@@ -40,7 +40,7 @@ module sai_z
       ! Local variables 
       PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one
       PetscInt :: global_rows, global_cols, iterations_taken
-      PetscInt :: i_loc, j_loc, max_nnzs, cols_ad, rows_ad
+      PetscInt :: i_loc, j_loc, cols_ad, rows_ad
       PetscInt :: rows_ao, cols_ao, ifree, row_size, i_size, j_size
       PetscInt :: global_row_start_aff, global_row_end_plus_one_aff
       integer :: lwork, intersect_count, location
@@ -237,28 +237,7 @@ module sai_z
          end do
       end if        
 
-      max_nnzs = 0
-      ! Has to be the max nnzs over sparsity_mat_cf
       call MatGetOwnershipRange(sparsity_mat_cf, global_row_start, global_row_end_plus_one, ierr)              
-      do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(sparsity_mat_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do   
-      do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(A_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(A_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do         
-      ! This includes all the non-local rows
-      do i_loc = 0, row_size-1     
-         call MatGetRow(submatrices_full(1), i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(submatrices_full(1), i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do        
-      
-      allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs))
 
       ! Setup the options for iterative solve when the direct gets too big
       if (incomplete) then
@@ -564,8 +543,6 @@ module sai_z
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)
       call MatAssemblyEnd(z, MAT_FINAL_ASSEMBLY, ierr)       
-
-      deallocate(cols, vals)     
 
    end subroutine calculate_and_build_sai_z
 
