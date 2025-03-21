@@ -84,7 +84,7 @@ The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarch
 
 ## Building PFLARE
 
-This library depends on MPI, BLAS, LAPACK and PETSc configured with a graph partitioner (e.g., ParMETIS).
+This library depends on MPI, BLAS, LAPACK and PETSc (>=3.20) configured with a graph partitioner (e.g., ParMETIS).
 
 Please compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. We would also recommend using the latest release of PETSc and configuring with Kokkos if you wish to run on GPUs.
 
