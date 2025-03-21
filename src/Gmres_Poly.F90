@@ -951,6 +951,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! Easy in serial as we have everything we neeed
       else
          
+         allocate(submatrices(1))
          submatrices(1) = matrix
          row_size = local_rows
          allocate(col_indices_off_proc_array(local_rows))
@@ -1294,6 +1295,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if
+      if (comm_size == 1) deallocate(submatrices)
 
       deallocate(col_indices_off_proc_array)
       deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)

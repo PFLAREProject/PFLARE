@@ -228,6 +228,7 @@ module sai_z
       ! Easy in serial as we have everything we neeed
       else
          
+         allocate(submatrices_full(1))
          submatrices_full(1) = A_ff
          ! local rows is the size of c, local cols is the size of f
          row_size = local_cols
@@ -538,7 +539,8 @@ module sai_z
 
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
-      end if        
+      end if     
+      if (comm_size == 1) deallocate(submatrices_full)   
 
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)
