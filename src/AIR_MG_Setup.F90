@@ -1220,6 +1220,7 @@ module air_mg_setup
                call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), ierr)
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
                air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF) = PETSC_NULL_MAT
+               air_data%inv_A_ff(our_level) = PETSC_NULL_MAT
 #endif                
             end if      
 
