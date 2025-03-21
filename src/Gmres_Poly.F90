@@ -940,8 +940,10 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          ! as then the row indices match colmap
          ! This returns a sequential matrix
          if (.NOT. PetscMatIsNull(reuse_mat)) then
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
             allocate(submatrices(1))
             deallocate_submatrices = .TRUE.
+#endif            
             submatrices(1) = reuse_mat
             call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices, ierr)
          else
@@ -954,8 +956,10 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! Easy in serial as we have everything we neeed
       else
          
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
          allocate(submatrices(1))
          deallocate_submatrices = .TRUE.
+#endif         
          submatrices(1) = matrix
          row_size = local_rows
          allocate(col_indices_off_proc_array(local_rows))

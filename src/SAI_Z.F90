@@ -189,8 +189,10 @@ module sai_z
          if (incomplete) then
             
             if (.NOT. PetscMatIsNull(reuse_mat)) then
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
                allocate(submatrices(1))
-               deallocate_submatrices = .TRUE.               
+               deallocate_submatrices = .TRUE.      
+#endif                        
                submatrices_full(1) = reuse_mat
                call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
             else
@@ -215,8 +217,10 @@ module sai_z
             ! This is very slow in parallel and doesn't scale well! 
             ! There is no easy way in petsc to return only the non-zero columns for a given set of rows
             if (.NOT. PetscMatIsNull(reuse_mat)) then
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
                allocate(submatrices(1))
                deallocate_submatrices = .TRUE.               
+#endif
                submatrices_full(1) = reuse_mat        
                call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
             else
@@ -233,8 +237,10 @@ module sai_z
       ! Easy in serial as we have everything we neeed
       else
          
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
          allocate(submatrices_full(1))
          deallocate_submatrices = .TRUE.               
+#endif         
          submatrices_full(1) = A_ff
          ! local rows is the size of c, local cols is the size of f
          row_size = local_cols
