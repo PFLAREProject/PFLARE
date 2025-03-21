@@ -778,6 +778,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       logical :: symmetric = .false., inodecompressed=.false., done, reuse_triggered
       PetscInt, parameter :: one = 1, zero = 0
       MatType:: mat_type    
+      logical :: deallocate_submatrices = .FALSE.
       
       ! ~~~~~~~~~~  
 
@@ -939,6 +940,8 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          ! as then the row indices match colmap
          ! This returns a sequential matrix
          if (.NOT. PetscMatIsNull(reuse_mat)) then
+            allocate(submatrices(1))
+            deallocate_submatrices = .TRUE.
             submatrices(1) = reuse_mat
             call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices, ierr)
          else
@@ -952,6 +955,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       else
          
          allocate(submatrices(1))
+         deallocate_submatrices = .TRUE.
          submatrices(1) = matrix
          row_size = local_rows
          allocate(col_indices_off_proc_array(local_rows))
@@ -1295,7 +1299,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if
-      if (comm_size == 1) deallocate(submatrices)
+      if (deallocate_submatrices) deallocate(submatrices)
 
       deallocate(col_indices_off_proc_array)
       deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)

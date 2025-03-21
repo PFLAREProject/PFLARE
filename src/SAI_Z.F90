@@ -79,6 +79,7 @@ module sai_z
       integer(c_long_long) :: A_array
       MatType:: mat_type
       PetscScalar, dimension(:), pointer :: vec_vals
+      logical :: deallocate_submatrices = .FALSE.
 
       ! ~~~~~~
 
@@ -188,6 +189,8 @@ module sai_z
          if (incomplete) then
             
             if (.NOT. PetscMatIsNull(reuse_mat)) then
+               allocate(submatrices(1))
+               deallocate_submatrices = .TRUE.               
                submatrices_full(1) = reuse_mat
                call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
             else
@@ -212,6 +215,8 @@ module sai_z
             ! This is very slow in parallel and doesn't scale well! 
             ! There is no easy way in petsc to return only the non-zero columns for a given set of rows
             if (.NOT. PetscMatIsNull(reuse_mat)) then
+               allocate(submatrices(1))
+               deallocate_submatrices = .TRUE.               
                submatrices_full(1) = reuse_mat        
                call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
             else
@@ -229,6 +234,7 @@ module sai_z
       else
          
          allocate(submatrices_full(1))
+         deallocate_submatrices = .TRUE.               
          submatrices_full(1) = A_ff
          ! local rows is the size of c, local cols is the size of f
          row_size = local_cols
@@ -540,7 +546,7 @@ module sai_z
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if     
-      if (comm_size == 1) deallocate(submatrices_full)   
+      if (deallocate_submatrices) deallocate(submatrices_full)   
 
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)
