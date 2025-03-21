@@ -5,13 +5,10 @@
 
 module pflare
 
-   use petsc
    use air_mg_setup
    use pcair_shell
    use pcpflareinv_interfaces
    use pcair_interfaces
-
-#include "petsc/finclude/petsc.h"
 
    implicit none
 

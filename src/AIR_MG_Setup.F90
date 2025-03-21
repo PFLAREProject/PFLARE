@@ -1,6 +1,6 @@
 module air_mg_setup
 
-   use petsc
+   use petscksp
    use constrain_z_or_w
    use cf_splitting
    use matshell_data_type
@@ -10,8 +10,8 @@ module air_mg_setup
    use fc_smooth
    use c_petsc_interfaces
 
-#include "petsc/finclude/petsc.h"
-      
+#include "petsc/finclude/petscksp.h"
+
    implicit none
 
 #include "petsc_legacy.h"   
@@ -1031,7 +1031,7 @@ module air_mg_setup
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine setup_air_pcmg(amat, pmat, air_data, pcmg)
+   subroutine setup_air_pcmg(amat, pmat, air_data, pcmg_input)
 
       ! Setup AIR by computing the hierarchy and returning a PETSC PCMG object 
       ! Have to have called create_air_data before this routine
@@ -1040,7 +1040,7 @@ module air_mg_setup
       ! ~~~~~~
       type(tMat), target, intent(in)                     :: amat, pmat
       type(air_multigrid_data), target, intent(inout)    :: air_data
-      type(tPC), intent(inout)                           :: pcmg
+      type(tPC), intent(inout)                           :: pcmg_input
 
       ! Local
       PetscInt            :: local_rows, local_cols, global_rows, global_cols
@@ -1827,13 +1827,13 @@ module air_mg_setup
       ! ~~~~~~~~~~~~~~~
       if (no_levels > 1) then
 
-         call PCSetOperators(pcmg, amat, pmat, ierr)
-         call PCSetType(pcmg, PCMG, ierr)
+         call PCSetOperators(pcmg_input, amat, pmat, ierr)
+         call PCSetType(pcmg_input, PCMG, ierr)
          no_levels_petsc_int = no_levels
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 15)
-         call PCMGSetLevels(pcmg, no_levels_petsc_int, PETSC_NULL_MPI_COMM, ierr)
+         call PCMGSetLevels(pcmg_input, no_levels_petsc_int, PETSC_NULL_MPI_COMM, ierr)
 #else
-         call PCMGSetLevels(pcmg, no_levels_petsc_int, PETSC_NULL_KSP, ierr)
+         call PCMGSetLevels(pcmg_input, no_levels_petsc_int, PETSC_NULL_KSP, ierr)
 #endif      
 
          ! If we're doing fc smoothing always have zero down smooths, which petsc calls kaskade
@@ -1841,7 +1841,7 @@ module air_mg_setup
          ! Annoyingly kaskade calls the "down" smoother on the way up, so 
          ! we have to set the options carefully for the down smoother
          if (.NOT. air_data%options%full_smoothing_up_and_down) then
-            call PCMGSetType(pcmg, PC_MG_KASKADE, ierr)
+            call PCMGSetType(pcmg_input, PC_MG_KASKADE, ierr)
          end if
 
          ! PETSc MG levels work in the opposite order to those in our code. If there are N levels:
@@ -1865,15 +1865,15 @@ module air_mg_setup
             ! Set the restrictor/prolongator
             if (.NOT. air_data%options%symmetric) then
                ! If restrictor is not set petsc will use transpose of prolongator
-               call PCMGSetRestriction(pcmg, petsc_level, air_data%restrictors(our_level), ierr)
+               call PCMGSetRestriction(pcmg_input, petsc_level, air_data%restrictors(our_level), ierr)
             end if
-            call PCMGSetInterpolation(pcmg, petsc_level, air_data%prolongators(our_level), ierr)
+            call PCMGSetInterpolation(pcmg_input, petsc_level, air_data%prolongators(our_level), ierr)
 
             ! Get smoother for this level
             ! The up smoother is never used or called when doing kaskade, but we set it as a richardson so that petsc doesn't default
             ! to chebychev and hence try and calculate eigenvalues on each grid
-            call PCMGGetSmootherUp(pcmg, petsc_level, ksp_smoother_up, ierr)
-            call PCMGGetSmootherDown(pcmg, petsc_level, ksp_smoother_down, ierr)                                
+            call PCMGGetSmootherUp(pcmg_input, petsc_level, ksp_smoother_up, ierr)
+            call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp_smoother_down, ierr)                                
             
             ! Set the operators for smoothing on this level
             if (.NOT. air_data%options%full_smoothing_up_and_down) then
@@ -1957,7 +1957,7 @@ module air_mg_setup
          ! ~~~~~~~~~~~    
 
          ! Let's do a Richardson
-         call PCMGGetCoarseSolve(pcmg, ksp_coarse_solver, ierr)
+         call PCMGGetCoarseSolve(pcmg_input, ksp_coarse_solver, ierr)
          ! If you want to apply more iterations of the coarse solver, change this to 
          ! a richardson (can do via command line -mg_coarse_ksp_type richardson)
          call KSPSetType(ksp_coarse_solver, KSPPREONLY, ierr)
@@ -2025,22 +2025,22 @@ module air_mg_setup
          ! Precondition with the "coarse grid" solver we used to determine auto truncation
          if (auto_truncated) then
             call PetscObjectReference(amat, ierr) 
-            call PCSetOperators(pcmg, amat, &
+            call PCSetOperators(pcmg_input, amat, &
                         air_data%inv_A_ff(no_levels), ierr)         
-            call PCSetType(pcmg, PCMAT, ierr)
+            call PCSetType(pcmg_input, PCMAT, ierr)
 
          ! Otherwise just do a jacobi and tell the user
          else
             
             ! If we've only got one level just precondition with jacobi
-            call PCSetOperators(pcmg, amat, pmat, ierr)
-            call PCSetType(pcmg, PCJACOBI, ierr)
+            call PCSetOperators(pcmg_input, amat, pmat, ierr)
+            call PCSetType(pcmg_input, PCJACOBI, ierr)
             if (comm_rank == 0) print *, "Only a single level, defaulting to Jacobi PC"
          end if
       end if      
 
       ! Call the setup on our PC
-      call PCSetUp(pcmg, ierr)
+      call PCSetUp(pcmg_input, ierr)
 
       call timer_finish(TIMER_ID_AIR_SETUP)                
       ! Print out the coarse grid info
@@ -2054,7 +2054,7 @@ module air_mg_setup
       end if
       ! Print out stats on the hierarchy - collective so make sure to call 
       ! this on all ranks      
-      if (air_data%options%print_stats_timings) call print_stats(air_data, pcmg)   
+      if (air_data%options%print_stats_timings) call print_stats(air_data, pcmg_input)   
 
    end subroutine setup_air_pcmg       
    

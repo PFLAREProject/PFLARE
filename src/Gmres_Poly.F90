@@ -1,9 +1,9 @@
 module gmres_poly
 
-   use petsc
+   use petscmat
    use sorting
    use c_petsc_interfaces
-   use matshell
+   use matshell_pflare
    use tsqr
    use gmres_poly_data_type
    use nonbusywait
@@ -14,7 +14,7 @@ module gmres_poly
    use omp_lib
 #endif
 
-#include "petsc/finclude/petsc.h"   
+#include "petsc/finclude/petscmat.h"   
 
    implicit none
 
@@ -227,7 +227,7 @@ module gmres_poly
       vec_size = local_rows
       call VecSetPreallocationCOO(V_n(1), vec_size, indices, ierr)
       deallocate(indices)
-      call VecSetValuesCOO(V_n(1), random_data, INSERT_VALUES, ierr)
+      call VecSetValuesCOO(V_n(1), random_data(:, 1), INSERT_VALUES, ierr)
       
       deallocate(random_data)
 
@@ -746,20 +746,24 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       integer :: errorcode, match_counter, term, order, location
       integer :: comm_size
       PetscErrorCode :: ierr      
-      PetscReal, dimension(:), allocatable :: vals_two, vals_power_temp, vals_previous_power_temp
-      PetscReal, dimension(:), allocatable, target :: vals
+      PetscReal, dimension(:), pointer :: vals_two, vals_power_temp, vals_previous_power_temp
+      PetscReal, dimension(:), pointer :: vals
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
-      PetscInt, dimension(:), allocatable :: cols, cols_two, cols_local
+      PetscInt, dimension(:), pointer :: cols, cols_two, cols_local
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       PetscInt, pointer :: colmap_c(:)
-      type(tIS) :: col_indices
+      type(tIS), dimension(1) :: col_indices
       type(tMat) :: Ad, Ao
       type(tMat), target :: temp_mat
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1)
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif
       type(c_ptr) :: colmap_c_ptr, vals_c_ptr
       ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
-      type(tMat), dimension(2) :: submatrices
+      type(tMat), dimension(:), pointer :: submatrices
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
       type(tMat), pointer :: mat_sparsity_match
       type(int_vec), dimension(:), allocatable :: symbolic_ones
@@ -868,14 +872,24 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          ! ~~~~
          if (mat_type == "mpiaij") then
             ! Much more annoying in older petsc
-            call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, icol, iicol, ierr)            
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, colmap, ierr) 
+#endif
          
          ! If on the gpu, just do a convert to mpiaij format first
          ! This will be expensive but the best we can do for now without writing our 
          ! own version of this subroutine in cuda/kokkos
          else
             call MatConvert(mat_sparsity_match, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts 
             call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr) 
+#endif
             mat_sparsity_match => temp_mat
          end if
 
@@ -901,10 +915,10 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
          call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, &
-                     col_indices_off_proc_array, PETSC_USE_POINTER, col_indices, ierr) 
+                     col_indices_off_proc_array, PETSC_USE_POINTER, col_indices(1), ierr) 
 
          if (poly_sparsity_order /= 1) then
-            call ISSort(col_indices, ierr)
+            call ISSort(col_indices(1), ierr)
          end if
 
          ! ~~~~~~~
@@ -931,7 +945,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
             reuse_mat = submatrices(1)
          end if
          row_size = size(col_indices_off_proc_array)
-         call ISDestroy(col_indices, ierr)
+         call ISDestroy(col_indices(1), ierr)
 
       ! Easy in serial as we have everything we neeed
       else
@@ -953,24 +967,24 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       max_nnzs = 0
       ! Check the nnzs of the serial copy of matrix
       do ifree = 1, row_size            
-         call MatGetRow(submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
       ! and also the sparsity power
       do ifree = global_row_start, global_row_end_plus_one-1     
-         call MatGetRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do 
       
       ! ~~~~~~~~
       ! Get pointers to the sequential aij structure so we don't have to put critical regions
       ! around the matgetrow
       ! ~~~~~~~~
-      call MatGetRowIJF90(submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
+      call MatGetRowIJ(submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
       if (.NOT. done) then
-         print *, "Pointers not set in call to MatGetRowIJF90"
+         print *, "Pointers not set in call to MatGetRowIJF"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
       ! Returns the wrong size pointer and can break if that size goes negative??
@@ -978,7 +992,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       A_array = submatrices(1)%v
       ! Now we must never overwrite the values in this pointer, and we must 
       ! never call restore on it, see comment on top of the commented out
-      ! MatSeqAIJRestoreArrayF90 below
+      ! MatSeqAIJRestoreArray below
       call MatSeqAIJGetArrayF90_mine(A_array, vals_c_ptr)
       call c_f_pointer(vals_c_ptr, submatrices_vals, shape=[size(submatrices_ja)])
       
@@ -1256,7 +1270,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       end if      
 #endif  
 
-      call MatRestoreRowIJF90(submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
+      call MatRestoreRowIJ(submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
       ! We very deliberately don't call restorearray here!
       ! There is no matseqaijgetarrayread or matseqaijrestorearrayread in Fortran
       ! Those routines don't increment the PetscObjectStateGet which tells petsc
@@ -1266,7 +1280,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! even though we only read from the array
       ! That would mean if we pass in a pc->pmat for example, just setting up a pc
       ! would trigger petsc setting up the pc on every iteration of the pc
-      ! call MatSeqAIJRestoreArrayF90(submatrices(1),submatrices_vals,ierr);
+      ! call MatSeqAIJRestoreArray(submatrices(1),submatrices_vals,ierr);
 
       ! ~~~~~~~~~~~
 
@@ -1716,8 +1730,9 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tMat), intent(inout)                         :: inv_matrix
 
       ! Local variables
-      PetscInt :: global_row_start, global_row_end_plus_one, counter
+      PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_rows, global_cols, local_rows, local_cols, j_loc
+      PetscCount :: counter
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr      
       MPI_Comm :: MPI_COMM_MATRIX
@@ -1780,7 +1795,8 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
             indices(counter) = j_loc
             counter = counter + 1
          end do            
-         call MatSetPreallocationCOO(inv_matrix, local_rows, indices, indices, ierr)
+         counter = local_rows
+         call MatSetPreallocationCOO(inv_matrix, counter, indices, indices, ierr)
          deallocate(indices)
 
       end if
@@ -1908,8 +1924,9 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tMat), intent(inout)                         :: inv_matrix
 
       ! Local variables
-      PetscInt :: global_row_start, global_row_end_plus_one, counter
+      PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_rows, global_cols, local_rows, local_cols, i_loc
+      PetscCount :: counter
       integer :: comm_size, errorcode, order
       PetscErrorCode :: ierr      
       MPI_Comm :: MPI_COMM_MATRIX
@@ -1981,7 +1998,8 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
             counter = counter + 1
          end do
          ! Set the diagonal
-         call MatSetPreallocationCOO(inv_matrix, local_rows, indices, indices, ierr)
+         counter = local_rows
+         call MatSetPreallocationCOO(inv_matrix, counter, indices, indices, ierr)
          deallocate(indices)
 
       end if                   

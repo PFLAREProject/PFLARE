@@ -1,9 +1,9 @@
 module c_petsc_interfaces
 
    use iso_c_binding
-   use petsc
+   use petscsys
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscsys.h"
 
    implicit none
 
@@ -224,7 +224,7 @@ module c_petsc_interfaces
       subroutine create_VecISCopyLocal_kokkos(max_levels_input) &
          bind(c, name="create_VecISCopyLocal_kokkos")
          use iso_c_binding
-         integer, value :: max_levels_input
+         integer(c_int), value :: max_levels_input
       end subroutine create_VecISCopyLocal_kokkos         
  
    end interface  
@@ -243,7 +243,7 @@ module c_petsc_interfaces
       subroutine set_VecISCopyLocal_kokkos_our_level(our_level, global_row_start, index_fine, index_coarse) &
          bind(c, name="set_VecISCopyLocal_kokkos_our_level")
          use iso_c_binding
-         integer, value :: our_level
+         integer(c_int), value :: our_level
          PetscInt, value :: global_row_start
          integer(c_long_long) :: index_fine
          integer(c_long_long) :: index_coarse
@@ -256,7 +256,7 @@ module c_petsc_interfaces
       subroutine VecISCopyLocal_kokkos(our_level, fine_int, vfull, mode_int, vreduced) &
          bind(c, name="VecISCopyLocal_kokkos")
          use iso_c_binding
-         integer, value :: our_level, fine_int, mode_int
+         integer(c_int), value :: our_level, fine_int, mode_int
          integer(c_long_long) :: vfull
          integer(c_long_long) :: vreduced
       end subroutine VecISCopyLocal_kokkos         
@@ -270,7 +270,7 @@ module c_petsc_interfaces
          use iso_c_binding
          integer(c_long_long) :: A_array
          type(c_ptr), value :: measure_local
-         integer, value :: max_luby_steps, pmis_int, zero_meaure_c_point_int
+         integer(c_int), value :: max_luby_steps, pmis_int, zero_meaure_c_point_int
          type(c_ptr), value :: cf_markers_local
       end subroutine pmisr_kokkos         
  
@@ -334,7 +334,7 @@ module c_petsc_interfaces
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
-         integer, value :: poly_order
+         integer(c_int), value :: poly_order
          type(c_ptr), value :: coefficients
          integer(c_int), value :: reuse_int
       end subroutine build_gmres_polynomial_inverse_0th_order_kokkos         
@@ -349,7 +349,7 @@ module c_petsc_interfaces
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
-         integer, value :: poly_order
+         integer(c_int), value :: poly_order
          type(c_ptr), value :: coefficients
          integer(c_int), value :: reuse_int
       end subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos         

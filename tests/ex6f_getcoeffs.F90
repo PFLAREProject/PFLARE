@@ -13,7 +13,8 @@
 
 module solve_module
 
-#include "petsc/finclude/petsc.h"   
+   use petscksp
+#include "petsc/finclude/petscksp.h"   
 
    implicit none
   
@@ -29,9 +30,7 @@ contains
    subroutine solve1(ksp,A,x,b,u,count,nsteps,coeffs_levels,ierr)
 #include <petsc/finclude/petscksp.h>
       use petscksp
-#include "finclude/pflare.h"
-#include "petsc/finclude/petsc.h"
-      use petsc      
+#include "finclude/pflare.h"  
       use pflare
       
    !
@@ -218,7 +217,7 @@ contains
 
       call KSPGetConvergedReason(ksp, reason, ierr)
       call KSPGetIterationNumber(ksp,its,ierr)
-      if (reason > 0) then
+      if (reason /= KSP_CONVERGED_RTOL) then
          if (rank .eq. 0) write(6,101) count,its
       else
          if (rank .eq. 0) print *, "Solve FAILED"
@@ -248,9 +247,7 @@ contains
 
       program main
       use solve_module
-#include <petsc/finclude/petscksp.h>
-      use petsc
-#include "petsc/finclude/petsc.h"      
+#include <petsc/finclude/petscksp.h>   
       use petscksp
 #include "finclude/pflare.h"
       use pflare

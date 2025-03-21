@@ -1047,7 +1047,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int 
 
 // ~~~~~~~~~~~~~~~~
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 23)
+static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOptionsObject)
+#elif (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
 static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems *PetscOptionsObject)
 #else
 static PetscErrorCode PCSetFromOptions_AIR_c(PetscOptionItems *PetscOptionsObject,PC pc)

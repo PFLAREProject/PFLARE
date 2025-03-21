@@ -1,8 +1,8 @@
 module aggregation
 
-   use petsc
+   use petscmat
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
 
@@ -32,7 +32,8 @@ module aggregation
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
-      PetscInt, dimension(:), allocatable :: indices, cols
+      PetscInt, dimension(:), allocatable :: indices
+      PetscInt, dimension(:), pointer :: cols
       logical :: mark_neigh
 
       ! ~~~~~~   
@@ -73,9 +74,9 @@ module aggregation
       ! Get nnzs 
       max_nnzs = 0
       do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-         call MatGetRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do        
 
       allocate(cols(max_nnzs))    
@@ -91,7 +92,7 @@ module aggregation
       do ifree = 1, size(indices)
 
          ! Get S_i - distance 1 neighbours
-         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
          if (ncols == 0) then
 
@@ -120,7 +121,7 @@ module aggregation
 
          end if
 
-         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
       end do
 
@@ -131,7 +132,7 @@ module aggregation
          if (cf_markers(indices(ifree)) /= 0) cycle
 
          ! Get S_i - distance 1 neighbours
-         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
          max_neighbour_index = -1
          max_neighbour_value = 0
@@ -165,7 +166,7 @@ module aggregation
             aggregate = aggregate + 1
          end if
 
-         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
       end do      
 
       ! Swap the negative ones back to positive
@@ -180,7 +181,7 @@ module aggregation
          if (cf_markers(indices(ifree)) /= 0) cycle
 
          ! Get S_i - distance 1 neighbours
-         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
          ! This is the root node
          cf_markers(indices(ifree)) = 1
@@ -195,7 +196,7 @@ module aggregation
          ! Advance to a new aggregate
          aggregate = aggregate + 1
 
-         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
       deallocate(indices, cols)

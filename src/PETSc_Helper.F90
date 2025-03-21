@@ -1,9 +1,9 @@
 module petsc_helper
 
-   use petsc
+   use petscmat
    use c_petsc_interfaces
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
                 
    implicit none
@@ -170,10 +170,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: col, ncols, ifree, max_nnzs
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start
       PetscInt :: global_row_end_plus_one, max_nnzs_total
-      PetscInt :: counter
+      PetscCount :: counter
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v          
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -222,10 +222,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs_total = 0
       do ifree = global_row_start, global_row_end_plus_one-1                  
 
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
          max_nnzs_total = max_nnzs_total + ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
       allocate(cols(max_nnzs))
@@ -337,8 +337,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: ncols, ifree, max_nnzs
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       
       ! ~~~~~~~~~~
@@ -348,12 +348,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs = 0
       do ifree = global_row_start, global_row_end_plus_one-1                  
 
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-         call MatGetRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         call MatGetRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)         
+         call MatRestoreRow(output_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)         
       end do
 
       allocate(cols(max_nnzs))
@@ -402,14 +402,15 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(inout) :: output_mat
       logical, intent(in), optional :: lump
 
-      PetscInt :: col, ncols, ifree, max_nnzs, ncols_mod, index1, index2, counter
+      PetscInt :: col, ncols, ifree, max_nnzs, ncols_mod, index1, index2
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start 
       PetscInt :: global_row_end_plus_one, max_nnzs_total_two
       PetscInt :: global_col_start, global_col_end_plus_one, max_nnzs_total
+      PetscCount :: counter
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
-      PetscInt, dimension(:), allocatable :: cols, cols_mod
-      PetscReal, dimension(:), allocatable :: vals, vals_copy
+      PetscInt, dimension(:), pointer :: cols, cols_mod
+      PetscReal, dimension(:), pointer :: vals, vals_copy
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v        
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -439,14 +440,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs_total_two = 0
       do ifree = global_row_start, global_row_end_plus_one-1                  
 
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
          max_nnzs_total = max_nnzs_total + ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-         call MatGetRow(sparsity_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         call MatGetRow(sparsity_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
          max_nnzs_total_two = max_nnzs_total_two + ncols
-         call MatRestoreRow(sparsity_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)         
+         call MatRestoreRow(sparsity_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)         
       end do
 
       max_nnzs_total = max(max_nnzs_total, max_nnzs_total_two)
@@ -486,7 +487,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! Must call otherwise petsc leaks memory
          call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)  
          ! Get the sparsity row
-         call MatGetRow(sparsity_mat, ifree, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)    
+         call MatGetRow(sparsity_mat, ifree, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)    
          
          ! Now loop through and do the intersection
          ! Anything that is not in both is not inserted
@@ -513,7 +514,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          end do
 
          ! Must call otherwise petsc leaks memory
-         call MatRestoreRow(sparsity_mat, ifree, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)      
+         call MatRestoreRow(sparsity_mat, ifree, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)      
          
          ! Stick in the intersecting values
          do col = 1, ncols_mod
@@ -594,11 +595,15 @@ logical, protected :: kokkos_debug_global = .FALSE.
       MPI_Comm :: MPI_COMM_MATRIX
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
-      type(tMat) :: Ad, Ao
-      PetscOffset :: iicol
-      PetscInt :: icol(1)      
+      type(tMat) :: Ad, Ao     
       PetscScalar, pointer :: xx_v(:)
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
+      PetscOffset :: iicol
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif
       PetscInt :: shift = 0, n_ad, n_ao, local_rows, local_cols
       logical :: symmetric = .false., inodecompressed=.false., done      
 
@@ -610,42 +615,46 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
 
       if (comm_size /= 1) then
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
          ! Let's get the diagonal and off-diagonal parts of the strength matrix
          call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr) 
+#endif         
       else
          Ad = input_mat    
       end if      
 
       ! Need to know how many nnzs in xx_v, as its size isn't set
-      call MatGetRowIJF90(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
       if (.NOT. done) then
-         print *, "Pointers not set in call to MatGetRowIJF90"
+         print *, "Pointers not set in call to MatGetRowIJ"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
       if (comm_size /= 1) then
-         call MatGetRowIJF90(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         call MatGetRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
          if (.NOT. done) then
-            print *, "Pointers not set in call to MatGetRowIJF90"
+            print *, "Pointers not set in call to MatGetRowIJ"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
          end if
       end if       
 
       ! Sequential part
-      call MatSeqAIJGetArrayF90(Ad,xx_v,ierr)
+      call MatSeqAIJGetArray(Ad,xx_v,ierr)
       xx_v(1:ad_ia(local_rows+1)) = val
-      call MatSeqAIJRestoreArrayF90(Ad,xx_v,ierr)
+      call MatSeqAIJRestoreArray(Ad,xx_v,ierr)
      
       ! MPI part
       if (comm_size /= 1) then
-         call MatSeqAIJGetArrayF90(Ao,xx_v,ierr)
+         call MatSeqAIJGetArray(Ao,xx_v,ierr)
          xx_v(1:ao_ia(local_rows+1)) = val
-         call MatSeqAIJRestoreArrayF90(Ao,xx_v,ierr)         
+         call MatSeqAIJRestoreArray(Ao,xx_v,ierr)         
       end if   
       
       ! Restore the sequantial pointers once we're done
-      call MatRestoreRowIJF90(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
       if (comm_size /= 1) then
-         call MatRestoreRowIJF90(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
       end if        
 
    end subroutine MatSetAllValues_cpu   
@@ -755,11 +764,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: ncols, ifree, max_nnzs, max_nnzs_total
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: counter
+      PetscCount :: counter
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v         
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -784,11 +793,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs = -1
       do ifree = global_row_start, global_row_end_plus_one-1
          call MatGetRow(input_mat, ifree, &
-                  ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          max_nnzs_total = max_nnzs_total + ncols
          if (ncols > max_nnzs) max_nnzs = ncols                  
          call MatRestoreRow(input_mat, ifree, &
-                  ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)          
+                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)          
       end do
       ! Adding for potential missing diagonals
       max_nnzs_total = max_nnzs_total + local_rows
@@ -870,6 +879,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       
       PetscInt :: i_loc, local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
+      PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: indices
       PetscReal, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
@@ -906,7 +916,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do
       v = 1d0
       ! Set the diagonal
-      call MatSetPreallocationCOO(output_mat, local_rows, indices, indices, ierr)
+      counter = local_rows
+      call MatSetPreallocationCOO(output_mat, counter, indices, indices, ierr)
       deallocate(indices)
       call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
       deallocate(v)
@@ -931,6 +942,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: local_rows_rect, local_cols_rect, global_rows_rect, global_cols_rect
       PetscInt :: global_row_start_rect, global_row_end_plus_one_rect
       PetscInt :: local_indices_size
+      PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v      
       PetscErrorCode :: ierr
@@ -971,7 +983,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)          
 
       ! Get the indices we need
-      call ISGetIndicesF90(rect_indices, is_pointer, ierr)
+      call ISGetIndices(rect_indices, is_pointer, ierr)
 
       allocate(row_indices(local_indices_size))
       allocate(col_indices(local_indices_size))
@@ -983,12 +995,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! MatSetPreallocationCOO could modify the values in is_pointer
       col_indices = is_pointer
       ! Set the diagonal
-      call MatSetPreallocationCOO(output_mat, local_indices_size, row_indices, col_indices, ierr)
+      counter = local_indices_size
+      call MatSetPreallocationCOO(output_mat, counter, row_indices, col_indices, ierr)
       deallocate(row_indices, col_indices)
       call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
       deallocate(v)      
 
-      call ISRestoreIndicesF90(rect_indices, is_pointer, ierr)    
+      call ISRestoreIndices(rect_indices, is_pointer, ierr)    
          
    end subroutine generate_identity_rect   
 
@@ -1010,6 +1023,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: local_indices_size
+      PetscCount :: counter
       PetscReal, allocatable, dimension(:) :: v      
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -1043,7 +1057,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)  
       
       ! Get the indices we need
-      call ISGetIndicesF90(indices, is_pointer, ierr)
+      call ISGetIndices(indices, is_pointer, ierr)
 
       allocate(v(local_indices_size))
       allocate(row_indices(local_indices_size))
@@ -1053,12 +1067,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
       col_indices = row_indices
       v = 1d0
       ! Set the diagonal
-      call MatSetPreallocationCOO(output_mat, local_indices_size, row_indices, col_indices, ierr)
+      counter = local_indices_size
+      call MatSetPreallocationCOO(output_mat, counter, row_indices, col_indices, ierr)
       deallocate(row_indices, col_indices)
       call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
       deallocate(v)  
 
-      call ISRestoreIndicesF90(indices, is_pointer, ierr)       
+      call ISRestoreIndices(indices, is_pointer, ierr)       
          
    end subroutine generate_identity_is   
 
@@ -1138,12 +1153,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: ncols, ifree, max_nnzs
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: global_col_start, global_col_end_plus_one, counter
+      PetscInt :: global_col_start, global_col_end_plus_one
+      PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       integer :: max_loc(1)
       integer :: comm_size, errorcode
@@ -1166,9 +1182,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs = 0
       do ifree = global_row_start, global_row_end_plus_one-1                  
 
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
       allocate(cols(max_nnzs))
@@ -1339,12 +1355,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: local_rows_coarse, local_rows, local_cols, local_cols_coarse
       PetscInt :: max_nnzs, i_loc, ncols, max_nnzs_total
       PetscInt :: global_cols, global_rows, global_rows_coarse, global_cols_coarse
-      PetscInt :: cols_z, rows_z, local_rows_fine, counter
+      PetscInt :: cols_z, rows_z, local_rows_fine
+      PetscCount :: counter
       integer :: errorcode, comm_size, comm_size_world
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v      
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -1363,8 +1380,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       call MatGetSize(W, cols_z, rows_z, ierr) 
 
-      call ISGetIndicesF90(is_fine, is_pointer_fine, ierr)
-      call ISGetIndicesF90(is_coarse, is_pointer_coarse, ierr)      
+      call ISGetIndices(is_fine, is_pointer_fine, ierr)
+      call ISGetIndices(is_coarse, is_pointer_coarse, ierr)      
 
       call IsGetLocalSize(is_coarse, local_rows_coarse, ierr)
       call IsGetLocalSize(is_fine, local_rows_fine, ierr)
@@ -1383,11 +1400,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs = -1
       do i_loc = global_row_start_W, global_row_end_plus_one_W-1
          call MatGetRow(W, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          max_nnzs_total = max_nnzs_total + ncols
          if (ncols > max_nnzs) max_nnzs = ncols                  
          call MatRestoreRow(W, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)          
+                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)          
       end do
       if (identity) max_nnzs_total = max_nnzs_total + local_rows_coarse
       max_nnzs = max_nnzs + 1
@@ -1453,8 +1470,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatSetValuesCOO(P, v, INSERT_VALUES, ierr)    
       deallocate(v)  
       
-      call ISRestoreIndicesF90(is_coarse, is_pointer_coarse, ierr)
-      call ISRestoreIndicesF90(is_fine, is_pointer_fine, ierr)       
+      call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)
+      call ISRestoreIndices(is_fine, is_pointer_fine, ierr)       
          
    end subroutine compute_P_from_W_cpu      
 
@@ -1596,16 +1613,21 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_coarse_size, global_fine_size, global_full_cols
       PetscInt :: rows_ao, cols_ao, rows_ad, cols_ad, size_cols
       PetscInt :: global_rows_z, global_cols_z
-      PetscInt :: local_rows_z, local_cols_z, counter
+      PetscInt :: local_rows_z, local_cols_z
+      PetscCount :: counter
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
       PetscInt, allocatable, dimension(:) :: row_indices_coo, col_indices_coo
       PetscReal, allocatable, dimension(:) :: v      
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1)       
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif     
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       type(tMat) :: Ad, Ao, temp_mat
       type(c_ptr) :: colmap_c_ptr
@@ -1622,8 +1644,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
       
-      call ISGetIndicesF90(is_fine, is_pointer_fine, ierr)
-      call ISGetIndicesF90(is_coarse, is_pointer_coarse, ierr)      
+      call ISGetIndices(is_fine, is_pointer_fine, ierr)
+      call ISGetIndices(is_coarse, is_pointer_coarse, ierr)      
 
       call ISGetLocalSize(is_coarse, local_coarse_size, ierr)
       call ISGetLocalSize(is_fine, local_fine_size, ierr)
@@ -1645,7 +1667,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (comm_size /= 1) then
 
          if (mat_type == "mpiaij") then
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
             call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, icol, iicol, ierr)
+#else
+            call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, colmap, ierr)
+#endif             
             A_array = Z%v
 
          ! If on the gpu, just do a convert to mpiaij format first
@@ -1653,7 +1680,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! own version of this subroutine in cuda/kokkos            
          else
             call MatConvert(Z, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr)             
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr)
+#else
+            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr)
+#endif             
             A_array = temp_mat%v
          end if
 
@@ -1716,7 +1748,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end if
 
       ! Get the indices
-      call ISGetIndicesF90(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
+      call ISGetIndices(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
 
       ! Z
       ! Get the max number of nnzs
@@ -1724,11 +1756,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       max_nnzs = -1      
       do i_loc = global_row_start_Z, global_row_end_plus_one_Z-1
          call MatGetRow(Z, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          max_nnzs_total = max_nnzs_total + ncols
          if (ncols > max_nnzs) max_nnzs = ncols
          call MatRestoreRow(Z, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)          
+                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)          
       end do
       if (identity) max_nnzs_total = max_nnzs_total + local_rows_z
       max_nnzs = max_nnzs + 1
@@ -1818,9 +1850,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatDestroy(temp_mat, ierr)
       end if      
 
-      call ISRestoreIndicesF90(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
-      call ISRestoreIndicesF90(is_coarse, is_pointer_coarse, ierr)
-      call ISRestoreIndicesF90(is_fine, is_pointer_fine, ierr)       
+      call ISRestoreIndices(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
+      call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)
+      call ISRestoreIndices(is_fine, is_pointer_fine, ierr)       
          
    end subroutine compute_R_from_Z_cpu
    
@@ -1854,9 +1886,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! This will be the nnzs associated with the local rows
       do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          local_nnzs = local_nnzs + ncols
-         call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do          
 
       ! Do an accumulate if in parallel

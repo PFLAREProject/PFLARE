@@ -1,11 +1,12 @@
 module c_fortran_bindings
 
+   use petscksp
    use iso_c_binding
    use air_mg_setup
    use pcair_shell
    use pflare
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 
    implicit none
 

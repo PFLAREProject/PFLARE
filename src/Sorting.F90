@@ -1,9 +1,9 @@
 module sorting
    
    use binary_tree   
-   use petsc
+   use petscsys
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscsys.h"
 
    implicit none
 

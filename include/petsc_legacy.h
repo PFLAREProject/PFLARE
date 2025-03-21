@@ -8,13 +8,29 @@
 ! names can be used in the code everywhere. Where interfaces have changed we
 ! still need #ifdef PETSC_VERSION>... in the main code
 #include "petscversion.h"
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
+#include "petsc/finclude/petscis.h"
+#include "petsc/finclude/petscsys.h"
 
-! Defined in PETSC 3.22 and above
+! Defined in PETSc 3.22 and above
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
 #define PETSC_NULL_INTEGER_ARRAY PETSC_NULL_INTEGER
 #define PETSC_NULL_SCALAR_ARRAY PETSC_NULL_SCALAR
 #define PETSC_NULL_REAL_ARRAY PETSC_NULL_REAL
+#endif
+! Defined in PETSc 3.23 and above
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+#define PETSC_NULL_INTEGER_POINTER PETSC_NULL_INTEGER_ARRAY
+#define PETSC_NULL_SCALAR_POINTER PETSC_NULL_SCALAR_ARRAY
+#define PETSC_NULL_REAL_POINTER PETSC_NULL_REAL_ARRAY
+#define MatGetRowIJ MatGetRowIJF90
+#define MatRestoreRowIJ MatRestoreRowIJF90
+#define VecGetArray VecGetArrayF90
+#define VecRestoreArray VecRestoreArrayF90
+#define ISGetIndices ISGetIndicesF90
+#define ISRestoreIndices ISRestoreIndicesF90
+#define MatSeqAIJGetArray MatSeqAIJGetArrayF90
+#define MatSeqAIJRestoreArray MatSeqAIJRestoreArrayF90
 #endif
 
 ! PETSc 3.22 changed how to test for null things

@@ -1,14 +1,14 @@
 module tsqr
 
-   ! Don't actually use petsc here, just need the mpi types 
+   ! Need the mpi types 
    ! and it is difficult to pick either the old school 
    ! include mpif.h or the newer use mpi_f08
    ! If you want to change this to use mpi_f08 everywhere 
    ! some definitions need to change from integers
    ! like the tsqr_buffers%request, communicators and status
-   use petsc
+   use petscmat
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
    
    implicit none
 

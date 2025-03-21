@@ -1,9 +1,9 @@
 module nonbusywait
 
-   use petsc
+   use petscsys
    use iso_c_binding
 
-#include "petsc/finclude/petsc.h"   
+#include "petsc/finclude/petscsys.h"   
 
    implicit none
 

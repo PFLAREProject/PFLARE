@@ -4,9 +4,13 @@ module air_data_type
    use gmres_poly_data_type
    
    ! PETSc
-   use petsc
+   use petscmat
+   use petscvec
+   use petscis
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
+#include "petsc/finclude/petscvec.h"
+#include "petsc/finclude/petscis.h"
 
    implicit none
 

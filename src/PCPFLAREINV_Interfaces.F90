@@ -1,9 +1,9 @@
 module pcpflareinv_interfaces
 
    use iso_c_binding
-   use petsc
+   use petscksp
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
 
    implicit none

@@ -1,11 +1,11 @@
 module constrain_z_or_w
 
    use iso_c_binding
-   use petsc
+   use petscksp
    use c_petsc_interfaces
    use petsc_helper
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 
    implicit none
 
@@ -33,9 +33,7 @@ module constrain_z_or_w
       MPI_Comm :: MPI_COMM_MATRIX
       PetscBool :: has_constant
       PetscInt :: no_nullspace, no_nullspace_vecs, i_loc
-      ! Has to be big enough to hold all nullspace vectors, but there is no way to check 
-      ! how many have been set
-      type(tVec), dimension(20) :: null_vecs      
+      type(tVec), dimension(:), pointer :: null_vecs      
       logical :: cst_nullspace
 
       ! ~~~~~
@@ -232,17 +230,23 @@ module constrain_z_or_w
       PetscErrorCode :: ierr      
       MPI_Comm :: MPI_COMM_MATRIX
       type(tMat) :: row_mat, temp_mat_aij
-      PetscInt, dimension(:), allocatable :: cols, col_indices_off_proc_array
-      PetscReal, dimension(:), allocatable :: vals, row_vals, diff
+      PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
+      PetscReal, dimension(:), allocatable :: row_vals, diff
       type(tMat) :: new_z_or_w
-      PetscReal, dimension(:), pointer :: b_f_vals
       type(c_ptr) :: colmap_c_ptr, b_c_nonlocal_c_ptr
       integer(c_long_long) :: A_array, vec_long
       PetscInt, pointer :: colmap_c(:) => null()
       type(tMat) :: Ad, Ao
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1)
-      real(c_double), pointer :: b_c_nonlocal(:), b_c_local(:)
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif
+      real(c_double), pointer :: b_c_nonlocal(:)
+      PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0
       MatType:: mat_type
@@ -281,9 +285,9 @@ module constrain_z_or_w
       call MatGetOwnershipRange(row_mat, global_row_start, global_row_end_plus_one, ierr) 
       call MatGetOwnershipRangeColumn(row_mat, global_col_start, global_col_end_plus_one, ierr)    
       do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(row_mat, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(row_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(row_mat, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(row_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do   
 
       allocate(cols(max_nnzs))
@@ -321,7 +325,12 @@ module constrain_z_or_w
 
          ! Much more annoying in older petsc
          if (mat_type == "mpiaij") then
-            call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, icol, iicol, ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, colmap, ierr) 
+#endif
             A_array = row_mat%v
 
          ! If on the gpu, just do a convert to mpiaij format first
@@ -329,7 +338,12 @@ module constrain_z_or_w
          ! own version of this subroutine in cuda/kokkos               
          else
             call MatConvert(row_mat, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat_aij, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, icol, iicol, ierr)             
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, colmap, ierr) 
+#endif            
             A_array = temp_mat_aij%v
          end if
 
@@ -379,11 +393,11 @@ module constrain_z_or_w
          ! Get how many non-zero columsn we have for this row
          ! Convenience given we are going to interact with Ad and Ao separately
          call MatGetRow(row_mat, i_loc, ncols_temp, &
-                  cols, PETSC_NULL_SCALAR_ARRAY, ierr) 
+                  cols, PETSC_NULL_SCALAR_POINTER, ierr) 
          ncols = ncols_temp
          ! We're done with this row
          call MatRestoreRow(row_mat, i_loc, ncols_temp, &
-            cols, PETSC_NULL_SCALAR_ARRAY, ierr)   
+            cols, PETSC_NULL_SCALAR_POINTER, ierr)   
             
          ! Skip this row if there are no non-zeros
          if (ncols == 0) cycle
@@ -418,12 +432,12 @@ module constrain_z_or_w
          ! Loop over all the near nullspace vectors and get the local components
          do null_vec = 1, size(null_vecs_c)
 
-            call VecGetArrayF90(null_vecs_c(null_vec), b_c_local, ierr)
+            call VecGetArray(null_vecs_c(null_vec), b_c_local, ierr)
 
             ! cols are local indices
             b_c_vals(1:ncols_ad, null_vec) = b_c_local(cols(1:ncols_ad)+1)
 
-            call VecRestoreArrayF90(null_vecs_c(null_vec), b_c_local, ierr)
+            call VecRestoreArray(null_vecs_c(null_vec), b_c_local, ierr)
          end do
          call MatRestoreRow(Ad, i_loc - global_row_start, ncols_temp, &
                   cols, vals, ierr)          
@@ -469,10 +483,10 @@ module constrain_z_or_w
          ! Loop over near-nullspace vecs
          do null_vec = 1, size(null_vecs_c)
 
-            call VecGetArrayF90(null_vecs_f(null_vec), b_f_vals, ierr)
+            call VecGetArray(null_vecs_f(null_vec), b_f_vals, ierr)
             ! b_f_vals is local (we want b_f for this row) but so is the value we want
             diff(null_vec) = diff(null_vec) - b_f_vals(i_loc - global_row_start + 1)    
-            call VecRestoreArrayF90(null_vecs_f(null_vec), b_f_vals, ierr)               
+            call VecRestoreArray(null_vecs_f(null_vec), b_f_vals, ierr)               
          end do                  
                
          ! Compute (B_c^R)^T * B_c^R
@@ -500,7 +514,7 @@ module constrain_z_or_w
          ! ~~~~~~~~~~~~~
          ! Set all the row values, same sparsity pattern
          ! ~~~~~~~~~~~~~
-         call MatSetValues(new_z_or_w, one, [i_loc], ncols, col_indices_off_proc_array(1:ncols), b_c_vals, ADD_VALUES, ierr)            
+         call MatSetValues(new_z_or_w, one, [i_loc], ncols, col_indices_off_proc_array, b_c_vals(:, 1), ADD_VALUES, ierr)            
          deallocate(row_vals, col_indices_off_proc_array, b_c_vals)
          deallocate(diff, bctbc, pseudo, temp_mat)
 

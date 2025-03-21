@@ -1,11 +1,11 @@
 module cf_splitting
 
-   use petsc
+   use petscmat
    use pmisr_ddc
    use aggregation
    use petsc_helper
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
 
@@ -161,7 +161,7 @@ module cf_splitting
          ! Can end up with diagonal entries we have to remove
          ! Let's get the diagonals that are zero or unassigned
          call MatFindZeroDiagonals(transpose_mat, zero_diags, ierr)
-         call ISGetIndicesF90(zero_diags, zero_diags_pointer, ierr)
+         call ISGetIndices(zero_diags, zero_diags_pointer, ierr)
          ! Then let's just set every other row to have a zero diagonal
          ! as we know they're already preallocated
          counter = 1
@@ -178,6 +178,8 @@ module cf_splitting
             ! Set the diagonal to 0
             call MatSetValue(transpose_mat, ifree - 1 + global_row_start, ifree - 1 + global_row_start, 0d0, INSERT_VALUES, ierr)
          end do
+
+         call ISRestoreIndices(zero_diags, zero_diags_pointer, ierr)
          
          call MatAssemblyBegin(transpose_mat, MAT_FINAL_ASSEMBLY, ierr)
          call MatAssemblyEnd(transpose_mat, MAT_FINAL_ASSEMBLY, ierr)
@@ -223,8 +225,12 @@ module cf_splitting
       ! PetscInt, dimension(:), pointer :: is_pointer_coarse, is_pointer_fine, zero_diags_pointer
       PetscInt, parameter :: nz_ignore = -1
       type(tMat) :: Ad, Ao
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1)      
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif     
 
       ! ~~~~~~  
 
@@ -307,13 +313,13 @@ module cf_splitting
          ! call MatPtap(strength_mat, prolongators, &
          !          MAT_INITIAL_MATRIX, 1.58d0, temp_mat, ierr)   
          
-         ! call ISGetIndicesF90(is_fine, is_pointer_fine, ierr)
-         ! call ISGetIndicesF90(is_coarse, is_pointer_coarse, ierr)           
+         ! call ISGetIndices(is_fine, is_pointer_fine, ierr)
+         ! call ISGetIndices(is_coarse, is_pointer_coarse, ierr)           
 
          ! ! Can end up with diagonal entries we have to remove
          ! ! Let's get the diagonals that are zero or unassigned
          ! call MatFindZeroDiagonals(temp_mat, zero_diags, ierr)
-         ! call ISGetIndicesF90(zero_diags, zero_diags_pointer, ierr)
+         ! call ISGetIndices(zero_diags, zero_diags_pointer, ierr)
          ! ! Then let's just set every other row to have a zero diagonal
          ! ! as we know they're already preallocated
          ! counter = 1
@@ -340,7 +346,7 @@ module cf_splitting
          ! ! ie the zero diagonal
          ! call remove_small_from_sparse(temp_mat, 1e-100, strength_mat_c, drop_diagonal_int = .TRUE.)                   
          ! call MatDestroy(temp_mat, ierr)
-         ! call ISRestoreIndicesF90(zero_diags, zero_diags_pointer, ierr)
+         ! call ISRestoreIndices(zero_diags, zero_diags_pointer, ierr)
          ! call ISDestroy(zero_diags, ierr)
 
          ! ! Do the second distance 1 PMIS on just the C points
@@ -351,8 +357,8 @@ module cf_splitting
          ! ! Then make sure we put the new definitions back into the original cf_markers
          ! cf_markers_local(is_pointer_coarse - global_row_start + 1) = cf_markers_local_c
 
-         ! call ISRestoreIndicesF90(is_coarse, is_pointer_coarse, ierr)
-         ! call ISRestoreIndicesF90(is_fine, is_pointer_fine, ierr)         
+         ! call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)
+         ! call ISRestoreIndices(is_fine, is_pointer_fine, ierr)         
          ! call ISDestroy(is_fine, ierr)
          ! call ISDestroy(is_coarse, ierr)
          ! deallocate(cf_markers_local_c)
@@ -370,17 +376,22 @@ module cf_splitting
             call pmisr(strength_mat, max_luby_steps, .TRUE., cf_markers_local)
 
             ! Get the sequential part of the matrix
-            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr)   
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
+#endif            
             
             ! For any local node that doesn't touch a boundary node, we set the 
             ! cf_markers back to unassigned and leave them to be done by the aggregation
             do i_loc = 1, local_rows
 
                ! Get how many non-zeros are in the off-diagonal 
-               call MatGetRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+               call MatGetRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
                ! If we don't touch anything off-processor, its local and set it to unassigned
                if (ncols == 0) cf_markers_local(i_loc) = 0
-               call MatRestoreRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+               call MatRestoreRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
             end do
             
          else
@@ -396,9 +407,12 @@ module cf_splitting
         
          if (comm_size /= 1) then
 
-            ! Get the sequential part of the matrix
-            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr)   
-            
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
+#endif              
          else
             Ad = strength_mat
          end if

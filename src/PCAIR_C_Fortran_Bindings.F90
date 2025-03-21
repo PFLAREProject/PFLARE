@@ -1,10 +1,10 @@
 module pcair_c_fortran_bindings
 
    use iso_c_binding
-   use petsc
+   use petscksp
    use pcair_interfaces
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
 
    implicit none

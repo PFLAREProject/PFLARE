@@ -288,7 +288,9 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
 
 // ~~~~~~~~~~
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 23)
+static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems PetscOptionsObject)
+#elif (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
 static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems *PetscOptionsObject)
 #else
 static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PetscOptionItems *PetscOptionsObject,PC pc)

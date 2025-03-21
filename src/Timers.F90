@@ -1,12 +1,12 @@
 module timers
 
-   ! Don't actually use petsc here, just need the mpi types 
+   ! Just need the mpi types 
    ! and it is difficult to pick either the old school 
    ! include mpif.h or the newer use mpi_f08   
-   use petsc
+   use petscsys
    use iso_c_binding, only: c_double
 
-#include "petsc/finclude/petsc.h"   
+#include "petsc/finclude/petscsys.h"   
 
    implicit none
 

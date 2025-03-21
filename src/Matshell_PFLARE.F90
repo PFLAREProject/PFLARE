@@ -1,9 +1,9 @@
-module matshell
+module matshell_pflare
 
-   use petsc
+   use petscmat
    use matshell_data_type
 
-#include "petsc/finclude/petscsys.h"   
+#include "petsc/finclude/petscmat.h"   
 
    implicit none
 
@@ -34,4 +34,4 @@ module matshell
    
    contains
 
-end module matshell
+end module matshell_pflare

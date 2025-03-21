@@ -1,9 +1,9 @@
 module repartition
 
-   use petsc
+   use petscmat
    use c_petsc_interfaces
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
                 
    implicit none
 
@@ -39,10 +39,14 @@ module repartition
       MPI_Comm :: MPI_COMM_MATRIX      
       PetscReal :: ratio_parallel
       type(tMat) :: Ad, Ao
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1)
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif
       MatType:: mat_type
-      PetscInt, dimension(:), allocatable :: cols
+      PetscInt, dimension(:), pointer :: cols
 
       ! ~~~~~~  
 
@@ -61,15 +65,19 @@ module repartition
 
          ! Let's check the ratio of local to non-local nnzs on the coarse matrix
          ! If it's less than some ratio then we'll process agglomerate
-         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, icol, iicol, ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr) 
+#endif
 
          do i_loc = 1, local_rows         
-            call MatGetRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+            call MatGetRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
             local_nnzs = local_nnzs + ncols
-            call MatRestoreRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-            call MatGetRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+            call MatRestoreRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+            call MatGetRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
             off_proc_nnzs = off_proc_nnzs + ncols
-            call MatRestoreRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)               
+            call MatRestoreRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)               
          end do      
          
       ! If it's not an mpiaij matrix, then we have to actually get the cols out and check 
@@ -80,15 +88,15 @@ module repartition
          max_nnzs = 0
          do i_loc = global_row_start, global_row_end_plus_one-1                  
    
-            call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+            call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
             if (ncols > max_nnzs) max_nnzs = ncols
-            call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+            call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          end do         
          allocate(cols(max_nnzs))
 
          ! Loop over all the rows
          do i_loc = global_row_start, global_row_end_plus_one-1
-            call MatGetRow(input_mat, i_loc, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+            call MatGetRow(input_mat, i_loc, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
             ! How many columns are between global_row_start and global_row_end_plus_one-1
             local_nnzs_row = count(cols(1:ncols) .ge. global_row_start .AND. cols(1:ncols) < global_row_end_plus_one)
@@ -97,7 +105,7 @@ module repartition
             ! The off process columns are the ones left over
             off_proc_nnzs = off_proc_nnzs + (ncols - local_nnzs_row)
 
-            call MatRestoreRow(input_mat, i_loc, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+            call MatRestoreRow(input_mat, i_loc, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
          end do
          deallocate(cols)
 

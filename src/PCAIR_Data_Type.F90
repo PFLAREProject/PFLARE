@@ -1,7 +1,9 @@
 module pcair_data_type
 
-   use petsc
+   use petscksp
    use air_data_type
+
+#include "petsc/finclude/petscksp.h"
 
    implicit none
 

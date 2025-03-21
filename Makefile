@@ -60,7 +60,7 @@ OBJS := $(SRCDIR)/NonBusyWait.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
-		  $(SRCDIR)/Matshell.o \
+		  $(SRCDIR)/Matshell_PFLARE.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCPFLAREINV_Interfaces.o \

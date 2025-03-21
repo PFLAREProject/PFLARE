@@ -1,12 +1,12 @@
 module sai_z
 
    use iso_c_binding
-   use petsc
+   use petscksp
    use sorting
    use c_petsc_interfaces
    use petsc_helper
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 
    implicit none
 
@@ -48,29 +48,36 @@ module sai_z
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: transpose_mat
-      type(tIS) :: i_row_is, j_col_is, col_indices, all_cols_indices
+      type(tIS), dimension(1) :: i_row_is, j_col_is, all_cols_indices
+      type(tIS), dimension(1) :: col_indices
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
-      PetscInt, dimension(:), allocatable :: cols, j_rows, i_rows, ad_indices
+      PetscInt, dimension(:), allocatable :: j_rows, i_rows, ad_indices
       integer, dimension(:), allocatable :: pivots, j_indices, i_indices
-      PetscReal, dimension(:), allocatable :: vals, e_row, j_vals
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
+      PetscReal, dimension(:), allocatable :: e_row, j_vals
       PetscReal, dimension(:,:), allocatable :: submat_vals
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs
       logical :: approx_solve
       ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
-      type(tMat), dimension(2) :: submatrices, submatrices_full
+      type(tMat), dimension(:), pointer :: submatrices, submatrices_full
       type(tMat) :: Ao, Ad, temp_mat
       type(tKSP) :: ksp
       type(tPC) :: pc
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
       PetscOffset :: iicol
-      PetscInt :: icol(1)
+      PetscInt :: icol(1) 
+#else
+      PetscInt, dimension(:), pointer :: colmap
+#endif
       type(c_ptr) :: colmap_c_ptr
       PetscInt, pointer :: colmap_c(:)
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       integer(c_long_long) :: A_array
       MatType:: mat_type
-      PetscReal, dimension(:), pointer :: vec_vals
+      PetscScalar, dimension(:), pointer :: vec_vals
 
       ! ~~~~~~
 
@@ -120,11 +127,21 @@ module sai_z
          ! ~~~~
          ! Much more annoying in older petsc
          if (mat_type == "mpiaij") then
-            call MatMPIAIJGetSeqAIJ(sparsity_mat_cf, Ad, Ao, icol, iicol, ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(sparsity_mat_cf, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(sparsity_mat_cf, Ad, Ao, colmap, ierr) 
+#endif
             A_array = sparsity_mat_cf%v
          else
             call MatConvert(sparsity_mat_cf, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr)             
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
+            ! Let's get the diagonal and off-diagonal parts
+            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr) 
+#else
+            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr) 
+#endif            
             A_array = temp_mat%v
          end if
 
@@ -152,7 +169,7 @@ module sai_z
          deallocate(ad_indices)
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
-         call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, col_indices_off_proc_array, PETSC_USE_POINTER, col_indices, ierr) 
+         call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, col_indices_off_proc_array, PETSC_USE_POINTER, col_indices(1), ierr) 
 
          ! ~~~~~~~
          ! Now we can pull out the chunk of matrix that we need
@@ -183,9 +200,9 @@ module sai_z
             ! The IS stride doesn't actually store all the column integers, it just stores the start, end and stride
             ! So no need to worry about memory use
             ! The size and identity are what MatCreateSubMatrices uses to match allcolumns
-            call ISCreateStride(PETSC_COMM_SELF, global_cols, zero, one, all_cols_indices, ierr) 
+            call ISCreateStride(PETSC_COMM_SELF, global_cols, zero, one, all_cols_indices(1), ierr) 
             ! This plus MAT_SUBMAT_SINGLEIS above tells the matcreatesubmatrices that we have an identity for the columns
-            call ISSetIdentity(all_cols_indices, ierr)            
+            call ISSetIdentity(all_cols_indices(1), ierr)            
 
             ! We need to get all the column entries in the nonlocal rows 
             ! Have to be careful though, when we trigger allcolumns, the column indices are returned without 
@@ -200,12 +217,12 @@ module sai_z
                call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_INITIAL_MATRIX, submatrices_full, ierr)
                reuse_mat = submatrices_full(1)
             end if
-            call ISDestroy(all_cols_indices, ierr)
+            call ISDestroy(all_cols_indices(1), ierr)
 
          end if
 
          row_size = size(col_indices_off_proc_array)
-         call ISDestroy(col_indices, ierr)
+         call ISDestroy(col_indices(1), ierr)
 
       ! Easy in serial as we have everything we neeed
       else
@@ -223,20 +240,20 @@ module sai_z
       ! Has to be the max nnzs over sparsity_mat_cf
       call MatGetOwnershipRange(sparsity_mat_cf, global_row_start, global_row_end_plus_one, ierr)              
       do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(sparsity_mat_cf, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(sparsity_mat_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do   
       do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(A_cf, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(A_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(A_cf, i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(A_cf, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do         
       ! This includes all the non-local rows
       do i_loc = 0, row_size-1     
-         call MatGetRow(submatrices_full(1), i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(submatrices_full(1), i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(submatrices_full(1), i_loc, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(submatrices_full(1), i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do        
       
       allocate(cols(max_nnzs))
@@ -284,7 +301,7 @@ module sai_z
 
          ! We just want the F-indices of whatever distance we are going out to
          call MatGetRow(sparsity_mat_cf, i_loc, ncols, &
-                  cols, PETSC_NULL_SCALAR_ARRAY, ierr) 
+                  cols, PETSC_NULL_SCALAR_POINTER, ierr) 
                   
          allocate(j_rows(ncols))
          allocate(j_vals(ncols))
@@ -292,7 +309,7 @@ module sai_z
          j_rows = cols(1:ncols)
 
          call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, &
-                  cols, PETSC_NULL_SCALAR_ARRAY, ierr) 
+                  cols, PETSC_NULL_SCALAR_POINTER, ierr) 
 
          ! If we have no non-zeros in this row skip it
          ! This means we have a c point with no neighbour f points
@@ -351,13 +368,13 @@ module sai_z
 
                ! We just want the indices
                call MatGetRow(submatrices_full(1), j_rows(j_loc), ncols, &
-                        cols, PETSC_NULL_SCALAR_ARRAY, ierr) 
+                        cols, PETSC_NULL_SCALAR_POINTER, ierr) 
    
                call create_knuth_shuffle_tree_array(cols(1:ncols), &
                         i_rows_tree)                       
    
                call MatRestoreRow(submatrices_full(1), j_rows(j_loc), ncols, &
-                        cols, PETSC_NULL_SCALAR_ARRAY, ierr)             
+                        cols, PETSC_NULL_SCALAR_POINTER, ierr)             
    
             end do
 
@@ -386,10 +403,10 @@ module sai_z
          j_size = size(j_rows)
          call ISCreateGeneral(PETSC_COMM_SELF, i_size, &
                i_rows, &
-               PETSC_COPY_VALUES, i_row_is, ierr)  
+               PETSC_COPY_VALUES, i_row_is(1), ierr)  
          call ISCreateGeneral(PETSC_COMM_SELF, j_size, &
                j_rows, &
-               PETSC_COPY_VALUES, j_col_is, ierr) 
+               PETSC_COPY_VALUES, j_col_is(1), ierr) 
 
          ! Setting this is necessary to avoid an allreduce when calling createsubmatrices
          ! This will be reset to false after the call to createsubmatrices
@@ -441,17 +458,17 @@ module sai_z
 
                call MatCreateVecs(submatrices(1), solution, PETSC_NULL_VEC, ierr)
                ! Have to restore the array before the solve in case this is kokkos
-               call VecGetArrayF90(solution, vec_vals, ierr)
+               call VecGetArray(solution, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
-               call VecRestoreArrayF90(solution, vec_vals, ierr)     
+               call VecRestoreArray(solution, vec_vals, ierr)     
 
                ! Do the solve - overwrite the rhs
                call KSPSolveTranspose(ksp, solution, solution, ierr)
                call KSPGetIterationNumber(ksp, iterations_taken, ierr)
 
-               call VecGetArrayF90(solution, vec_vals, ierr)
+               call VecGetArray(solution, vec_vals, ierr)
                e_row(1:i_size) = vec_vals(1:i_size)
-               call VecRestoreArrayF90(solution, vec_vals, ierr)     
+               call VecRestoreArray(solution, vec_vals, ierr)     
 
                call KSPReset(ksp, ierr)
                call VecDestroy(solution, ierr)
@@ -489,18 +506,18 @@ module sai_z
 
                call MatCreateVecs(submatrices(1), solution, rhs, ierr)  
                ! Have to restore the array before the solve in case this is kokkos
-               call VecGetArrayF90(rhs, vec_vals, ierr)
+               call VecGetArray(rhs, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
-               call VecRestoreArrayF90(rhs, vec_vals, ierr)                                
+               call VecRestoreArray(rhs, vec_vals, ierr)                                
 
                ! Do the solve
                call KSPSolve(ksp, rhs, solution, ierr)
                call KSPGetIterationNumber(ksp, iterations_taken, ierr)
 
                ! Copy solution into e_row
-               call VecGetArrayF90(solution, vec_vals, ierr)
+               call VecGetArray(solution, vec_vals, ierr)
                e_row(1:size(j_rows)) = vec_vals(1:size(j_rows))
-               call VecRestoreArrayF90(solution, vec_vals, ierr) 
+               call VecRestoreArray(solution, vec_vals, ierr) 
 
                call KSPReset(ksp, ierr)
                call VecDestroy(solution, ierr)
@@ -535,8 +552,8 @@ module sai_z
 
          deallocate(j_rows, i_rows, e_row, j_vals, j_indices, i_indices)  
          if (allocated(submat_vals)) deallocate(submat_vals)
-         call ISDestroy(i_row_is, ierr)
-         call ISDestroy(j_col_is, ierr)               
+         call ISDestroy(i_row_is(1), ierr)
+         call ISDestroy(j_col_is(1), ierr)               
       end do  
 
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then

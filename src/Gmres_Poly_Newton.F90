@@ -1,10 +1,10 @@
 module gmres_poly_newton
 
-   use petsc
+   use petscmat
    use gmres_poly
    use c_petsc_interfaces
 
-#include "petsc/finclude/petsc.h"   
+#include "petsc/finclude/petscmat.h"   
 
    implicit none
 

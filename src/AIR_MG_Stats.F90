@@ -1,11 +1,11 @@
 module air_mg_stats
 
-   use petsc
+   use petscksp
    use petsc_helper
    use air_data_type
    use gmres_poly
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
       
    implicit none
 
@@ -79,24 +79,24 @@ module air_mg_stats
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine compute_nnzs_v_cycle_air(air_data, pcmg, nnzs)
+   subroutine compute_nnzs_v_cycle_air(air_data, pcmg_input, nnzs)
       
       ! Compute the nnzs of a V cycle of air
       ! Have to input both the air data and the pcmg that comes from setup_air_pcmg
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout):: air_data
-      type(tPC), intent(in)                  :: pcmg
+      type(tPC), intent(in)                  :: pcmg_input
       integer(kind=8), intent(out)           :: nnzs
 
       integer :: our_level, non_zero_order
       PetscInt :: maxits, petsc_level
       PetscErrorCode :: ierr
-      PCType pc_type
+      PCType :: pc_type
       type(tKSP) :: ksp
       PetscReal :: rtol, atol, dtol
       integer(kind=8) maxits_long, maxits_aff_long, gmres_size_long, poly_order_long
-      MatType:: mat_type
+      MatType :: mat_type
 
       ! ~~~~~~    
       
@@ -104,11 +104,11 @@ module air_mg_stats
       nnzs = 0
 
       ! Check we're doing mg
-      call PCGetType(pcmg, pc_type, ierr)
+      call PCGetType(pcmg_input, pc_type, ierr)
       if (pc_type /= PCMG) return
 
       ! Coarse grid solve
-      call PCMGGetCoarseSolve(pcmg, ksp, ierr)   
+      call PCMGGetCoarseSolve(pcmg_input, ksp, ierr)   
       call KSPGetTolerances(ksp, rtol, atol, dtol, maxits, ierr)
       ! Round to long
       maxits_long = int(maxits, kind=8)
@@ -154,7 +154,7 @@ module air_mg_stats
          ! Now being careful here to actually pull out the down smoother from petsc
          ! as the kaskade cycle only calls the "down" smoother on the way up
          petsc_level = air_data%no_levels-our_level
-         call PCMGGetSmootherDown(pcmg, petsc_level, ksp, ierr)      
+         call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp, ierr)      
          ! Get the number of F&C up smooths
          call KSPGetTolerances(ksp, rtol, atol, dtol, maxits, ierr)   
 
@@ -245,14 +245,14 @@ module air_mg_stats
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine compute_stats(air_data, pcmg, grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx)
+   subroutine compute_stats(air_data, pcmg_input, grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx)
       
       ! Compute the different stats for air
       ! Have to input both the air data and the pcmg that comes from setup_air_pcmg
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
-      type(tPC), intent(in)                   :: pcmg
+      type(tPC), intent(in)                   :: pcmg_input
       PetscReal, intent(out)  :: grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx
 
       integer :: our_level, i_loc
@@ -271,7 +271,7 @@ module air_mg_stats
       call compute_nnzs_air_matrices(air_data)
       ! Compute the nnzs in a single V cycle
       call compute_nnzs_v_cycle_air(air_data, &
-                     pcmg, &
+                     pcmg_input, &
                      nnzs_air_v)   
             
       ! ~~~~~~~~~
@@ -323,7 +323,7 @@ module air_mg_stats
       
       ! Coarse grid solve
       if (air_data%no_levels /= 1) then
-         call PCMGGetCoarseSolve(pcmg, ksp, ierr)      
+         call PCMGGetCoarseSolve(pcmg_input, ksp, ierr)      
          call KSPGetTolerances(ksp, rtol, atol, dtol, maxits_coarse, ierr)       
          ! If we're doing matrix-free application of coarse grid, we need the coarse grid
          if (air_data%options%coarsest_matrix_free_polys) then
@@ -373,13 +373,13 @@ module air_mg_stats
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine print_stats(air_data, pcmg)
+   subroutine print_stats(air_data, pcmg_input)
       
       ! Print out stats on the mg hierarchy
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
-      type(tPC), intent(in)                   :: pcmg
+      type(tPC), intent(in)                   :: pcmg_input
 
       PetscReal :: grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx
       integer :: comm_rank, errorcode
@@ -389,11 +389,11 @@ module air_mg_stats
       ! ~~~~~~   
       
       ! Get the communicator the input matrix is on, we build everything on that
-      call PetscObjectGetComm(pcmg, MPI_COMM_MATRIX, ierr)      
+      call PetscObjectGetComm(pcmg_input, MPI_COMM_MATRIX, ierr)      
       ! Get the comm rank
       call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)       
 
-      call compute_stats(air_data, pcmg, grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx)
+      call compute_stats(air_data, pcmg_input, grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx)
 
       if (comm_rank == 0) print *, "~~~~~~~~~~~~"
       if (comm_rank == 0) print *, "Grid complexity            : ", grid_complx

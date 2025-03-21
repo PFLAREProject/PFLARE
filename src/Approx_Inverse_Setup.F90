@@ -1,14 +1,15 @@
 module approx_inverse_setup
 
+   use petscmat
    use gmres_poly
    use gmres_poly_newton
    use neumann_poly
    use weighted_jacobi
    use sai_z
    use repartition
-   use matshell
+   use matshell_pflare
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
       
    implicit none
 

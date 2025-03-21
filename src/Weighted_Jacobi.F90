@@ -1,8 +1,8 @@
 module weighted_jacobi
 
-   use petsc
+   use petscmat
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
 
@@ -33,7 +33,8 @@ module weighted_jacobi
       integer :: comm_size, errorcode
       MPI_Comm :: MPI_COMM_MATRIX 
       PetscInt :: local_rows, local_cols, global_row_start, global_row_end_plus_one
-      PetscInt :: global_rows, global_cols, i_loc, counter
+      PetscInt :: global_rows, global_cols, i_loc
+      PetscCount :: counter
       PetscErrorCode :: ierr
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       type(tMat) :: temp_mat
@@ -125,7 +126,8 @@ module weighted_jacobi
          col_indices = row_indices
          ! Set the diagonal
          ! Don't need to set the values as we do that directly with MatDiagonalSet
-         call MatSetPreallocationCOO(inv_matrix, local_rows, row_indices, col_indices, ierr)
+         counter = local_rows
+         call MatSetPreallocationCOO(inv_matrix, counter, row_indices, col_indices, ierr)
          deallocate(row_indices, col_indices)         
       end if  
 
