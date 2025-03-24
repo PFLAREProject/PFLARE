@@ -1303,7 +1303,9 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
       if (deallocate_submatrices) deallocate(submatrices)
+#endif      
 
       deallocate(col_indices_off_proc_array)
       deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)

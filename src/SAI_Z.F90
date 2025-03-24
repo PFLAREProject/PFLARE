@@ -552,7 +552,9 @@ module sai_z
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if     
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
       if (deallocate_submatrices) deallocate(submatrices_full)   
+#endif
 
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)
