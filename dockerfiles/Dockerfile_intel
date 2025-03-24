@@ -16,13 +16,13 @@ ENV PETSC_OPTIONS="-on_error_abort"
 WORKDIR /build
 
 # Clone PFLARE and run all the tests
-# Skip running the tests until we figure out what is breaking the 
+# Skip running the parallel tests until we figure out what is breaking the 
 # power basis in parallel
 RUN source /opt/intel/oneapi/setvars.sh && \
     set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
     cd PFLARE && \
-    make -j2 && make -j2 build_tests
+    make -j2 && make -j2 tests_serial
 
 WORKDIR /build/PFLARE

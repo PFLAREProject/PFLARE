@@ -52,7 +52,7 @@ jobs:
 
   gnu_opt:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: gnu_debug
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -74,7 +74,7 @@ jobs:
 
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: gnu_debug
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -96,7 +96,7 @@ jobs:
 
   gnu_opt_kokkos:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: gnu_debug
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -112,7 +112,7 @@ jobs:
             
   gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: gnu_debug
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -128,7 +128,7 @@ jobs:
 
   nvidia_opt:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: gnu_debug
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -142,9 +142,9 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-nvidia
             
-  intel_opt_no_test:
+  intel_opt_serial_test:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: gnu_debug
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -163,7 +163,7 @@ jobs:
   # needs to detect the gpu
   gnu_debug_gpu:
     runs-on: ubicloud-gpu
-    needs:  setup
+    needs:  gnu_debug
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
     # Specify the protected environment to ensure gpu builds are only triggered 
