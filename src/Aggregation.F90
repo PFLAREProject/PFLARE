@@ -5,9 +5,6 @@ module aggregation
 #include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public   
    
    contains

@@ -9,8 +9,6 @@ module pmisr_ddc
 
    implicit none
 
-#include "petsc_legacy.h"
-
    ! Define C and F points in the CF marker 
    integer, parameter :: C_POINT = 1
    integer, parameter :: F_POINT = -1
@@ -156,12 +154,7 @@ module pmisr_ddc
       real(c_double), pointer :: cf_markers_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
       type(tVec) :: cf_markers_vec
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-#else
       PetscInt, dimension(:), pointer :: colmap
-#endif
       integer(c_long_long) :: A_array, vec_long
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, cols_ptr, ao_ia, ao_ja
       PetscInt :: shift = 0
@@ -186,12 +179,7 @@ module pmisr_ddc
       call MatGetOwnershipRange(strength_mat, global_row_start, global_row_end_plus_one, ierr)   
 
       if (comm_size /= 1) then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-         ! Let's get the diagonal and off-diagonal parts
-         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr) 
-#else
          call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
-#endif         
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
       else

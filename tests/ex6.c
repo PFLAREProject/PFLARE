@@ -159,11 +159,7 @@ int main(int argc,char **args)
    ierr = VecDuplicate(x, &diag_vec);
    ierr = MatGetDiagonal(A, diag_vec);
    ierr = VecReciprocal(diag_vec);
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 19)
    ierr = MatDiagonalScale(A, diag_vec, PETSC_NULLPTR);    
-#else
-   ierr = MatDiagonalScale(A, diag_vec, PETSC_NULL);    
-#endif
    ierr = VecPointwiseMult(b, diag_vec, b); CHKERRQ(ierr);
    ierr = VecDestroy(&diag_vec); CHKERRQ(ierr);
   }  

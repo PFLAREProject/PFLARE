@@ -10,9 +10,6 @@ module fc_smooth
 #include "petscconf.h"
                 
    implicit none
-
-#include "petsc_legacy.h"
-
    public
 
    ! -------------------------------------------------------------------------------------------------------------------------------

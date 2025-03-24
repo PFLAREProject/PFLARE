@@ -8,8 +8,6 @@ module petsc_helper
                 
    implicit none
 
-#include "petsc_legacy.h"
-
 logical, protected :: got_debug_kokkos_env = .FALSE.
 logical, protected :: kokkos_debug_global = .FALSE.
 
@@ -577,12 +575,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat) :: Ad, Ao     
       PetscScalar, pointer :: xx_v(:)
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-#else
       PetscInt, dimension(:), pointer :: colmap
-#endif
       PetscInt :: shift = 0, n_ad, n_ao, local_rows, local_cols
       logical :: symmetric = .false., inodecompressed=.false., done      
 
@@ -594,12 +587,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
 
       if (comm_size /= 1) then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-         ! Let's get the diagonal and off-diagonal parts of the strength matrix
-         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, icol, iicol, ierr) 
-#else
          call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr) 
-#endif         
       else
          Ad = input_mat    
       end if      
@@ -1470,7 +1458,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          reuse_int = 0
          if (reuse) reuse_int = 1
          reuse_indices_int = 0;
-         if (.NOT. PetscISIsNull(orig_fine_col_indices)) reuse_indices_int = 1
+         if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) reuse_indices_int = 1
 
          A_array = Z%v             
          indices_fine = is_fine%v
@@ -1578,16 +1566,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, dimension(:), pointer :: vals
       PetscInt, allocatable, dimension(:) :: row_indices_coo, col_indices_coo
       PetscReal, allocatable, dimension(:) :: v      
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-#else
       PetscInt, dimension(:), pointer :: colmap
-#endif     
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       type(tMat) :: Ad, Ao, temp_mat
-      type(c_ptr) :: colmap_c_ptr
-      PetscInt, pointer :: colmap_c(:)
       PetscInt, dimension(:), pointer :: col_indices_off_proc_array
       type(tIS) :: col_indices
       PetscInt, dimension(:), pointer :: is_pointer_orig_fine_col, is_pointer_coarse, is_pointer_fine
@@ -1623,12 +1604,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (comm_size /= 1) then
 
          if (mat_type == "mpiaij") then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, icol, iicol, ierr)
-#else
             call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, colmap, ierr)
-#endif             
             A_array = Z%v
 
          ! If on the gpu, just do a convert to mpiaij format first
@@ -1636,12 +1612,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! own version of this subroutine in cuda/kokkos            
          else
             call MatConvert(Z, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr)
-#else
             call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr)
-#endif             
             A_array = temp_mat%v
          end if
 
@@ -1655,13 +1626,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end if
 
       ! We can reuse the orig_fine_col_indices as they can be expensive to generate in parallel
-      if (PetscISIsNull(orig_fine_col_indices)) then
+      if (PetscObjectIsNull(orig_fine_col_indices)) then
             
          ! Now we need the global off-processor column indices in Z
          if (comm_size /= 1) then 
-
-            call get_colmap_c(A_array, colmap_c_ptr)
-            call c_f_pointer(colmap_c_ptr, colmap_c, shape=[cols_ao])
             
             ! These are the global indices of the columns we want
             allocate(col_indices_off_proc_array(cols_ad + cols_ao))
@@ -1672,7 +1640,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             end do
             ! Off diagonal rows we want (as global indices)
             do i_loc = 1, cols_ao
-               col_indices_off_proc_array(cols_ad + i_loc) = colmap_c(i_loc)
+               col_indices_off_proc_array(cols_ad + i_loc) = colmap(i_loc)
             end do            
             ! These indices are not sorted, we deliberately have the local ones first then the 
             ! off processor ones, as we insert Z into the full matrix in pieces

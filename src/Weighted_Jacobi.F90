@@ -5,9 +5,6 @@ module weighted_jacobi
 #include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public
    
    PetscEnum, parameter :: PFLAREINV_WJACOBI=7
@@ -95,7 +92,7 @@ module weighted_jacobi
       ! Let's create a matrix to represent the inverse diagonal
       ! Can't use matdiagonal as we want to do symbolic matmat products
       ! and don't want to have to define how that is done
-      reuse_triggered = .NOT. PetscMatIsNull(inv_matrix) 
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then

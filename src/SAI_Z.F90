@@ -9,9 +9,6 @@ module sai_z
 #include "petsc/finclude/petscksp.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public
 
    PetscEnum, parameter :: AIR_Z_PRODUCT=0
@@ -64,18 +61,9 @@ module sai_z
       type(tMat) :: Ao, Ad, temp_mat
       type(tKSP) :: ksp
       type(tPC) :: pc
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1)
-      ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
-      type(tMat), dimension(2) :: submatrices, submatrices_full
-#else
       PetscInt, dimension(:), pointer :: colmap
       type(tMat), dimension(:), pointer :: submatrices, submatrices_full
       logical :: deallocate_submatrices = .FALSE.
-#endif
-      type(c_ptr) :: colmap_c_ptr
-      PetscInt, pointer :: colmap_c(:)
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       integer(c_long_long) :: A_array
       MatType:: mat_type
@@ -97,7 +85,7 @@ module sai_z
       ! We're enforcing the same sparsity 
       
       ! If not re-using
-      if (PetscMatIsNull(z)) then
+      if (PetscObjectIsNull(z)) then
          call MatDuplicate(sparsity_mat_cf, MAT_DO_NOT_COPY_VALUES, z, ierr)
       end if
 
@@ -129,21 +117,11 @@ module sai_z
          ! ~~~~
          ! Much more annoying in older petsc
          if (mat_type == "mpiaij") then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(sparsity_mat_cf, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(sparsity_mat_cf, Ad, Ao, colmap, ierr) 
-#endif
             A_array = sparsity_mat_cf%v
          else
             call MatConvert(sparsity_mat_cf, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr) 
-#endif            
             A_array = temp_mat%v
          end if
 
@@ -151,10 +129,6 @@ module sai_z
          call MatGetSize(Ad, rows_ad, cols_ad, ierr)             
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)         
-
-         ! For the column indices we need to take all the columns
-         call get_colmap_c(A_array, colmap_c_ptr)
-         call c_f_pointer(colmap_c_ptr, colmap_c, shape=[cols_ao])
 
          ! These are the global indices of the columns we want
          ! Taking care here to use cols_ad and not rows_ao  
@@ -166,8 +140,8 @@ module sai_z
          end do
 
          ! Do a sort on the indices
-         ! Both ad_indices and colmap_c should already be sorted so we can merge them together quickly
-         call merge_pre_sorted(ad_indices, colmap_c, col_indices_off_proc_array)
+         ! Both ad_indices and colmap should already be sorted so we can merge them together quickly
+         call merge_pre_sorted(ad_indices, colmap, col_indices_off_proc_array)
          deallocate(ad_indices)
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
@@ -188,11 +162,9 @@ module sai_z
          ! This returns a sequential matrix
          if (incomplete) then
             
-            if (.NOT. PetscMatIsNull(reuse_mat)) then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
+            if (.NOT. PetscObjectIsNull(reuse_mat)) then
                allocate(submatrices(1))
                deallocate_submatrices = .TRUE.      
-#endif                        
                submatrices_full(1) = reuse_mat
                call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
             else
@@ -216,11 +188,9 @@ module sai_z
             ! This means we will have to map any column indices we use 
             ! This is very slow in parallel and doesn't scale well! 
             ! There is no easy way in petsc to return only the non-zero columns for a given set of rows
-            if (.NOT. PetscMatIsNull(reuse_mat)) then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
+            if (.NOT. PetscObjectIsNull(reuse_mat)) then
                allocate(submatrices(1))
                deallocate_submatrices = .TRUE.               
-#endif
                submatrices_full(1) = reuse_mat        
                call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
             else
@@ -237,10 +207,8 @@ module sai_z
       ! Easy in serial as we have everything we neeed
       else
          
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
          allocate(submatrices_full(1))
          deallocate_submatrices = .TRUE.               
-#endif         
          submatrices_full(1) = A_ff
          ! local rows is the size of c, local cols is the size of f
          row_size = local_cols
@@ -552,9 +520,7 @@ module sai_z
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if     
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
       if (deallocate_submatrices) deallocate(submatrices_full)   
-#endif
 
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)
@@ -612,7 +578,7 @@ module sai_z
       else
 
          ! If we're not doing reuse
-         if (PetscMatIsNull(inv_matrix)) then
+         if (PetscObjectIsNull(inv_matrix)) then
 
             ! Copy the pointer
             A_power = matrix

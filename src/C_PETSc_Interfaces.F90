@@ -36,19 +36,7 @@ module c_petsc_interfaces
          integer(c_long_long) :: C_array
       end subroutine mat_mat_symbolic_c         
 
-   end interface        
-
-   interface   
-      
-      subroutine get_colmap_c(A_array, colmap) &
-         bind(c, name="get_colmap_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr) :: colmap
-
-      end subroutine get_colmap_c         
- 
-   end interface  
+   end interface
 
    interface   
       

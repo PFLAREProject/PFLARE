@@ -18,8 +18,6 @@ module gmres_poly
 
    implicit none
 
-#include "petsc_legacy.h"
-
    ! Just define pi
    PetscReal, parameter, private :: pi = 3.141592653589793
    type int_vec
@@ -59,10 +57,7 @@ module gmres_poly
           inverse_type == PFLAREINV_NEWTON .OR. &
           inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
          poly_data%buffers%subcomm = subcomm
-      end if
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-      poly_data%buffers%matrix = PETSC_NULL_MAT
-#endif      
+      end if   
       poly_data%buffers%proc_stride = int(proc_stride)
 
       ! For matrices with size smaller than the subspace size (ie polynomial order + 1)
@@ -751,21 +746,13 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
       PetscInt, dimension(:), pointer :: cols, cols_two, cols_local
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
-      PetscInt, pointer :: colmap_c(:)
       type(tIS), dimension(1) :: col_indices
       type(tMat) :: Ad, Ao
       type(tMat), target :: temp_mat
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-      ! In fortran this needs to be of size n+1 where n is the number of submatrices we want
-      type(tMat), dimension(2) :: submatrices
-#else
       PetscInt, dimension(:), pointer :: colmap
       type(tMat), dimension(:), pointer :: submatrices
       logical :: deallocate_submatrices = .FALSE.
-#endif
-      type(c_ptr) :: colmap_c_ptr, vals_c_ptr
+      type(c_ptr) :: vals_c_ptr
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
       type(tMat), pointer :: mat_sparsity_match
       type(int_vec), dimension(:), allocatable :: symbolic_ones
@@ -800,7 +787,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)  
       call MatGetOwnershipRangeColumn(matrix, global_col_start, global_col_end_plus_one, ierr)  
 
-      reuse_triggered = .NOT. PetscMatIsNull(cmat) 
+      reuse_triggered = .NOT. PetscObjectIsNull(cmat) 
 
       ! ~~~~~~~~~~
       ! Special case if we just want to return a gmres polynomial with the sparsity of the diagonal
@@ -858,40 +845,19 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! MatMPIAIJGetSeqAIJ specifically if that's the case
       if (comm_size /= 1) then
 
-         ! Petsc stores the diagonal and off diagonal components of our local rows - ie Ad and Ao
-         ! colmap gives the map between local columns of Ao and the global numbering      
-         ! In petsc <3.14, we have to call some custom c code to get at colmap directly (as I can't 
-         ! seem to get the icol and iicol variables to work in the fortran interface of MatMPIAIJGetSeqAIJ)
-         ! In petsc 3.15 - 3.18 we could use MatMPIAIJGetLocalMatMerge, as that returns colmap
-         ! but it also constructs [Ad Ao] which we don't really need
-         ! In petsc 3.19 we could call the new fortran interface MatMPIAIJGetSeqAIJF90
-         ! (in fact we would have to given the fortran interface to MatMPIAIJGetSeqAIJ is deprecated)
-         ! So once we're on petsc 3.19 we should just use MatMPIAIJGetSeqAIJF90 and then we can do 
-         ! away with get_colmap_c
-
          ! ~~~~
          ! Get the cols
          ! ~~~~
          if (mat_type == "mpiaij") then
             ! Much more annoying in older petsc
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, colmap, ierr) 
-#endif
          
          ! If on the gpu, just do a convert to mpiaij format first
          ! This will be expensive but the best we can do for now without writing our 
          ! own version of this subroutine in cuda/kokkos
          else
             call MatConvert(mat_sparsity_match, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts 
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr) 
-#endif
             mat_sparsity_match => temp_mat
          end if
 
@@ -901,8 +867,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
 
          ! For the column indices we need to take all the columns of mat_sparsity_match
          A_array = mat_sparsity_match%v
-         call get_colmap_c(A_array, colmap_c_ptr)
-         call c_f_pointer(colmap_c_ptr, colmap_c, shape=[cols_ao])
 
          ! These are the global indices of the columns we want
          allocate(col_indices_off_proc_array(cols_ad + cols_ao))
@@ -912,7 +876,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          end do
          ! Off diagonal rows we want (as global indices)
          do ifree = 1, cols_ao
-            col_indices_off_proc_array(cols_ad + ifree) = colmap_c(ifree)
+            col_indices_off_proc_array(cols_ad + ifree) = colmap(ifree)
          end do
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
@@ -939,11 +903,9 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          ! We could just request the non-local rows, but it's easier to just get the whole slab
          ! as then the row indices match colmap
          ! This returns a sequential matrix
-         if (.NOT. PetscMatIsNull(reuse_mat)) then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
+         if (.NOT. PetscObjectIsNull(reuse_mat)) then
             allocate(submatrices(1))
             deallocate_submatrices = .TRUE.
-#endif            
             submatrices(1) = reuse_mat
             call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices, ierr)
          else
@@ -956,10 +918,8 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! Easy in serial as we have everything we neeed
       else
          
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
          allocate(submatrices(1))
          deallocate_submatrices = .TRUE.
-#endif         
          submatrices(1) = matrix
          row_size = local_rows
          allocate(col_indices_off_proc_array(local_rows))
@@ -1303,9 +1263,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=23)      
       if (deallocate_submatrices) deallocate(submatrices)
-#endif      
 
       deallocate(col_indices_off_proc_array)
       deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)
@@ -1471,13 +1429,10 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)
 
          ! If not re-using
-         if (PetscMatIsNull(inv_matrix)) then
+         if (PetscObjectIsNull(inv_matrix)) then
 
             ! Have to dynamically allocate this
-            allocate(mat_ctx)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-            mat_ctx%mat_ida = PETSC_NULL_MAT
-#endif             
+            allocate(mat_ctx)         
 
             ! We pass in the polynomial coefficients as the context
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
@@ -1511,7 +1466,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! ~~~~~~~~~~~~
       ! If we're here then we want an assembled approximate inverse
       ! ~~~~~~~~~~~~
-      reuse_triggered = .NOT. PetscMatIsNull(inv_matrix) 
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
 
       ! If we're zeroth order poly this is trivial as it's just the coefficient(1) on the diagonal
       if (poly_order == 0) then
@@ -1663,7 +1618,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)               
 
          A_array = matrix%v             
-         reuse_triggered = .NOT. PetscMatIsNull(inv_matrix) 
+         reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
          reuse_int = 0
          if (reuse_triggered) then
             reuse_int = 1
@@ -1771,7 +1726,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)     
 
-      reuse_triggered = .NOT. PetscMatIsNull(inv_matrix) 
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
       ! If not re-using
       if (.NOT. reuse_triggered) then
 
@@ -1855,7 +1810,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)               
 
          A_array = matrix%v             
-         reuse_triggered = .NOT. PetscMatIsNull(inv_matrix) 
+         reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
          reuse_int = 0
          if (reuse_triggered) then
             reuse_int = 1
@@ -1958,7 +1913,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)  
 
-      reuse_triggered = .NOT. PetscMatIsNull(inv_matrix)
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
 
        ! Our matrix has to be square
       call MatCreateVecs(matrix, rhs_copy, diag_vec, ierr)

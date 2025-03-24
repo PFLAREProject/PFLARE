@@ -87,11 +87,8 @@ int main(int argc,char **argv)
   PetscReal pi = 4*atan(1.0);
   theta = pi/4.0;
   PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL);
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 17)
-      PetscCheck(theta <= pi/2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
-#else
-      if (theta > pi/2.0 || theta < 0.0) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
-#endif
+  PetscCheck(theta <= pi/2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
+
   // Coefficients for 2d advection
   u = cos(theta);
   v = sin(theta);
@@ -101,13 +98,9 @@ int main(int argc,char **argv)
   PetscOptionsGetReal(NULL, NULL, "-u", &u_test, &option_found_u);
   PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v);
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 17)
-      if (option_found_u) PetscCheck(u_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
-      if (option_found_v) PetscCheck(v_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
-#else
-      if (option_found_u) if (u_test < 0) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
-      if (option_found_v) if (v_test < 0) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
-#endif  
+  if (option_found_u) PetscCheck(u_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
+  if (option_found_v) PetscCheck(v_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
+
   if (option_found_u && option_found_v) {
    u = u_test;
    v = v_test;
@@ -137,11 +130,7 @@ int main(int argc,char **argv)
    }
   }
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 17)
-      PetscCheck(check_nondim, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Non-dimensional advection only applies without diffusion");
-#else
-      if (!check_nondim) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Non-dimensional advection only applies without diffusion");
-#endif  
+  PetscCheck(check_nondim, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Non-dimensional advection only applies without diffusion");
 
   // Do we diagonally scale our matrix before solving
   // Defaults to false
@@ -166,11 +155,7 @@ int main(int argc,char **argv)
    ierr = VecDuplicate(x, &diag_vec);CHKERRQ(ierr);
    ierr = MatGetDiagonal(A, diag_vec);CHKERRQ(ierr);
    ierr = VecReciprocal(diag_vec);CHKERRQ(ierr);
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 19)
    ierr = MatDiagonalScale(A, diag_vec, PETSC_NULLPTR);CHKERRQ(ierr);    
-#else
-   ierr = MatDiagonalScale(A, diag_vec, PETSC_NULL);CHKERRQ(ierr);    
-#endif
    ierr = VecPointwiseMult(b, diag_vec, b); CHKERRQ(ierr);
    ierr = VecDestroy(&diag_vec); CHKERRQ(ierr);
   }
@@ -316,9 +301,7 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
   ierr = MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
 
   // Eliminate the zeros that the 5 point stencil may have in it with only advection
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>=20)
   MatFilter(A, 0.0, PETSC_TRUE, PETSC_TRUE);
-#endif
 
   return 0;
 }

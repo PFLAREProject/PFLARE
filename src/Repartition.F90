@@ -6,9 +6,6 @@ module repartition
 #include "petsc/finclude/petscmat.h"
                 
    implicit none
-
-#include "petsc_legacy.h"
-
    public
 
    ! -------------------------------------------------------------------------------------------------------------------------------
@@ -39,12 +36,7 @@ module repartition
       MPI_Comm :: MPI_COMM_MATRIX      
       PetscReal :: ratio_parallel
       type(tMat) :: Ad, Ao
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-#else
       PetscInt, dimension(:), pointer :: colmap
-#endif
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: cols
 
@@ -65,11 +57,7 @@ module repartition
 
          ! Let's check the ratio of local to non-local nnzs on the coarse matrix
          ! If it's less than some ratio then we'll process agglomerate
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, icol, iicol, ierr) 
-#else
          call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr) 
-#endif
 
          do i_loc = 1, local_rows         
             call MatGetRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)

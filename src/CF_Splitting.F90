@@ -8,9 +8,6 @@ module cf_splitting
 #include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public   
 
    PetscEnum, parameter :: CF_PMISR_DDC=0
@@ -225,12 +222,7 @@ module cf_splitting
       ! PetscInt, dimension(:), pointer :: is_pointer_coarse, is_pointer_fine, zero_diags_pointer
       PetscInt, parameter :: nz_ignore = -1
       type(tMat) :: Ad, Ao
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-#else
       PetscInt, dimension(:), pointer :: colmap
-#endif     
 
       ! ~~~~~~  
 
@@ -376,12 +368,7 @@ module cf_splitting
             call pmisr(strength_mat, max_luby_steps, .TRUE., cf_markers_local)
 
             ! Get the sequential part of the matrix
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
-#endif            
             
             ! For any local node that doesn't touch a boundary node, we set the 
             ! cf_markers back to unassigned and leave them to be done by the aggregation
@@ -406,13 +393,7 @@ module cf_splitting
       else if (cf_splitting_type == CF_AGG) then
         
          if (comm_size /= 1) then
-
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
-#endif              
          else
             Ad = strength_mat
          end if

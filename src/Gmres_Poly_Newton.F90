@@ -7,9 +7,6 @@ module gmres_poly_newton
 #include "petsc/finclude/petscmat.h"   
 
    implicit none
-
-#include "petsc_legacy.h"   
-
    public 
    
    contains
@@ -615,13 +612,10 @@ module gmres_poly_newton
       ! ~~~~~~~
 
       ! If not re-using
-      if (PetscMatIsNull(inv_matrix)) then
+      if (PetscObjectIsNull(inv_matrix)) then
 
          ! Have to dynamically allocate this
-         allocate(mat_ctx)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-         mat_ctx%mat_ida = PETSC_NULL_MAT
-#endif         
+         allocate(mat_ctx)      
 
          ! We pass in the polynomial coefficients as the context
          call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &

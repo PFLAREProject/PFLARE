@@ -8,9 +8,6 @@ module air_mg_stats
 #include "petsc/finclude/petscksp.h"
       
    implicit none
-
-#include "petsc_legacy.h"   
-
    public
 
    contains
@@ -348,7 +345,7 @@ module air_mg_stats
          ! Loop over all the reused matrices
          do i_loc = 1, size(air_data%reuse(our_level)%reuse_mat)
             temp_mat = air_data%reuse(our_level)%reuse_mat(i_loc)
-            if (.NOT. PetscMatIsNull(temp_mat)) then
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
                call get_nnzs_petsc_sparse(air_data%reuse(our_level)%reuse_mat(i_loc), mat_nnzs)
                mat_reuse_storage_nnzs = mat_reuse_storage_nnzs + mat_nnzs
             end if
@@ -356,7 +353,7 @@ module air_mg_stats
          ! Include any IS's
          do i_loc = 1, size(air_data%reuse(our_level)%reuse_is)
             temp_is = air_data%reuse(our_level)%reuse_is(i_loc)
-            if (.NOT. PetscISIsNull(temp_is)) then
+            if (.NOT. PetscObjectIsNull(temp_is)) then
                call ISGetSize(air_data%reuse(our_level)%reuse_is(i_loc), global_rows, ierr)
                mat_reuse_storage_nnzs = mat_reuse_storage_nnzs + global_rows
             end if

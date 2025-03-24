@@ -8,9 +8,6 @@ module constrain_z_or_w
 #include "petsc/finclude/petscksp.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public     
    
    contains
@@ -51,14 +48,14 @@ module constrain_z_or_w
       cst_nullspace = .FALSE.
       no_nullspace_vecs = 0
       no_nullspace = 0
-      if (PetscNullspaceIsNull(nullspace) .AND. &
+      if (PetscObjectIsNull(nullspace) .AND. &
             (left .OR. right)) then
 
          cst_nullspace = .TRUE.
          no_nullspace_vecs = 1
          
       ! If the user has provided a near null-space
-      else if (.NOT. PetscNullspaceIsNull(nullspace) .AND. &
+      else if (.NOT. PetscObjectIsNull(nullspace) .AND. &
                   (left .OR. right)) then    
 
          ! Get the nullspace vectors
@@ -235,16 +232,10 @@ module constrain_z_or_w
       PetscReal, dimension(:), pointer :: vals
       PetscReal, dimension(:), allocatable :: row_vals, diff
       type(tMat) :: new_z_or_w
-      type(c_ptr) :: colmap_c_ptr, b_c_nonlocal_c_ptr
+      type(c_ptr) :: b_c_nonlocal_c_ptr
       integer(c_long_long) :: A_array, vec_long
-      PetscInt, pointer :: colmap_c(:) => null()
       type(tMat) :: Ad, Ao
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)      
-      PetscOffset :: iicol
-      PetscInt :: icol(1) 
-#else
       PetscInt, dimension(:), pointer :: colmap
-#endif
       real(c_double), pointer :: b_c_nonlocal(:)
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
@@ -316,12 +307,7 @@ module constrain_z_or_w
 
          ! Much more annoying in older petsc
          if (mat_type == "mpiaij") then
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, colmap, ierr) 
-#endif
             A_array = row_mat%v
 
          ! If on the gpu, just do a convert to mpiaij format first
@@ -329,22 +315,13 @@ module constrain_z_or_w
          ! own version of this subroutine in cuda/kokkos               
          else
             call MatConvert(row_mat, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat_aij, ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
-            ! Let's get the diagonal and off-diagonal parts
-            call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, icol, iicol, ierr) 
-#else
             call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, colmap, ierr) 
-#endif            
             A_array = temp_mat_aij%v
          end if
 
          call MatGetSize(Ad, rows_ad, cols_ad, ierr)             
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)         
-
-         ! For the column indices we need to take all the columns of row_mat
-         call get_colmap_c(A_array, colmap_c_ptr)
-         call c_f_pointer(colmap_c_ptr, colmap_c, shape=[cols_ao])
 
          allocate(b_c_nonlocal_alloc(cols_ao, size(null_vecs_c)))
 
@@ -446,7 +423,7 @@ module constrain_z_or_w
             ! after the local values in row_vals
             row_vals(ncols_ad+1:ncols_ad + ncols_ao) = vals(1:ncols_ao) 
             ! Global indices of our nonlocal cols
-            col_indices_off_proc_array(ncols_ad+1:ncols_ad + ncols_ao) = colmap_c(cols(1:ncols_ao)+1) 
+            col_indices_off_proc_array(ncols_ad+1:ncols_ad + ncols_ao) = colmap(cols(1:ncols_ao)+1) 
 
             ! Get the nonlocal b_c values
             ! Remembering cols are the local indices into colmap (or equivalently the first dim of b_c_nonlocal_alloc)
