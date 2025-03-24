@@ -763,6 +763,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
 #else
       PetscInt, dimension(:), pointer :: colmap
       type(tMat), dimension(:), pointer :: submatrices
+      logical :: deallocate_submatrices = .FALSE.
 #endif
       type(c_ptr) :: colmap_c_ptr, vals_c_ptr
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
@@ -778,7 +779,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       logical :: symmetric = .false., inodecompressed=.false., done, reuse_triggered
       PetscInt, parameter :: one = 1, zero = 0
       MatType:: mat_type    
-      logical :: deallocate_submatrices = .FALSE.
       
       ! ~~~~~~~~~~  
 

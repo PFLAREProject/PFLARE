@@ -72,6 +72,7 @@ module sai_z
 #else
       PetscInt, dimension(:), pointer :: colmap
       type(tMat), dimension(:), pointer :: submatrices, submatrices_full
+      logical :: deallocate_submatrices = .FALSE.
 #endif
       type(c_ptr) :: colmap_c_ptr
       PetscInt, pointer :: colmap_c(:)
@@ -79,7 +80,6 @@ module sai_z
       integer(c_long_long) :: A_array
       MatType:: mat_type
       PetscScalar, dimension(:), pointer :: vec_vals
-      logical :: deallocate_submatrices = .FALSE.
 
       ! ~~~~~~
 
