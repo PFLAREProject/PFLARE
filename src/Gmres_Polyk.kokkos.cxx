@@ -413,7 +413,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
          for (int term = poly_sparsity_order + 1; term <= poly_order; term++)
          {
             // Skip any zero coefficients
-            if (coefficients[term] != 0.0)
+            if (coefficients_d(term) != 0.0)
             {
                // Set vals_temp to zero
                Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
@@ -444,7 +444,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
                // ~~~~~~~~~~~               
                Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
                   // Do the mult with coeff
-                  device_local_vals_output[device_local_i_output[i] + j] += coefficients[term] * vals_temp[j];
+                  device_local_vals_output[device_local_i_output[i] + j] += coefficients_d(term) * vals_temp[j];
                   // This should now have the value of A^(term-1) in it
                   vals_prev[j] = vals_temp[j];
                });
