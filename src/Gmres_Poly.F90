@@ -711,11 +711,136 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! Deallocate the receive buffer
       if (allocated(buffers%R_buffer_receive)) deallocate(buffers%R_buffer_receive)    
 
-   end subroutine  finish_gmres_polynomial_coefficients_power     
-
+   end subroutine  finish_gmres_polynomial_coefficients_power  
+   
 !------------------------------------------------------------------------------------------------------------------------
    
    subroutine mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, reuse_mat, cmat)
+
+      ! Wrapper around mat_mult_powers_share_sparsity_cpu and mat_mult_powers_share_sparsity_kokkos     
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), target, intent(in)                  :: matrix
+      integer, intent(in)                             :: poly_order, poly_sparsity_order
+      type(tsqr_buffers), intent(inout)               :: buffers
+      PetscReal, dimension(:), target, intent(inout)  :: coefficients
+      type(tMat), intent(inout)                       :: reuse_mat, cmat
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array, reuse_array
+      integer :: errorcode, reuse_int_cmat, reuse_int_reuse_mat
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
+      PetscScalar normy;
+      logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
+      type(c_ptr)  :: coefficients_ptr
+#endif      
+      ! ~~~~~~~~~~
+
+      ! ~~~~~~~~~~
+      ! Special case if we just want to return a gmres polynomial with the sparsity of the diagonal
+      ! This is like a damped Jacobi
+      ! ~~~~~~~~~~
+if (poly_sparsity_order == 0) then
+
+      call build_gmres_polynomial_inverse_0th_order_sparsity(matrix, poly_order, buffers, &
+               coefficients, cmat)     
+
+      return
+end if
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(matrix, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then      
+               
+         ! Finish off the non-blocking all reduce to compute our coefficients
+         ! This is a fortran routine and we don't want to call this inside the kokkos
+         call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)                
+
+         A_array = matrix%v             
+         reuse_triggered_cmat = .NOT. PetscObjectIsNull(cmat) 
+         reuse_triggered_reuse_mat = .NOT. PetscObjectIsNull(reuse_mat) 
+         reuse_int_cmat = 0
+         if (reuse_triggered_cmat) then
+            reuse_int_cmat = 1
+            B_array = cmat%v
+         end if
+         reuse_int_reuse_mat = 0
+         if (reuse_triggered_reuse_mat) then
+            reuse_int_reuse_mat = 1
+         end if         
+         reuse_array = reuse_mat%v
+         coefficients_ptr = c_loc(coefficients)
+         ! The kokkos version doesn't take the buffers, we finish all the async stuff before
+         ! the kokkos routine is called
+         call mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
+                  coefficients_ptr, reuse_int_reuse_mat, reuse_array, reuse_int_cmat, B_array)
+                         
+         reuse_mat%v = reuse_array
+         cmat%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! If we're doing reuse and debug, then we have to always output the result 
+            ! from the cpu version, as it will have coo preallocation structures set
+            ! They aren't copied over if you do a matcopy (or matconvert)
+            ! If we didn't do that the next time we come through this routine 
+            ! and try to call the cpu version with reuse, it will segfault
+            if (reuse_triggered_cmat) then
+               temp_mat = cmat
+               call MatConvert(cmat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+            else
+               temp_mat_compare = cmat                         
+            end if            
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+                     buffers, coefficients, reuse_mat, temp_mat)
+                     
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)                        
+
+            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of mat_mult_powers_share_sparsity do not match"
+
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse_triggered_cmat) then
+               call MatDestroy(cmat, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            cmat = temp_mat
+         end if
+
+      else
+
+         call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+                  buffers, coefficients, reuse_mat, cmat)       
+
+      end if
+#else
+      call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+                  buffers, coefficients, reuse_mat, cmat)
+#endif         
+
+      ! ~~~~~~~~~~
+      
+   end subroutine mat_mult_powers_share_sparsity
+
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, buffers, coefficients, reuse_mat, cmat)
 
       ! Compute matrix powers c = coeff(1) * I + coeff(2) * A + coeff(3) * A^2 + coeff(4) * A^3 + ... 
       ! where a c and the powers all share the same sparsity as the power input in poly_sparsity_order
@@ -727,7 +852,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tMat), target, intent(in)                  :: matrix
       integer, intent(in)                             :: poly_order, poly_sparsity_order
       type(tsqr_buffers), intent(inout)               :: buffers
-      PetscReal, dimension(:), intent(inout)               :: coefficients
+      PetscReal, dimension(:), intent(inout)          :: coefficients
       type(tMat), intent(inout)                       :: reuse_mat, cmat
       
       PetscInt :: local_rows, local_cols, global_rows, global_cols
@@ -748,7 +873,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       type(tIS), dimension(1) :: col_indices
       type(tMat) :: Ad, Ao
-      type(tMat), target :: temp_mat
       PetscInt, dimension(:), pointer :: colmap
       type(tMat), dimension(:), pointer :: submatrices
       logical :: deallocate_submatrices = .FALSE.
@@ -765,7 +889,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       real(c_double), pointer :: submatrices_vals(:)
       logical :: symmetric = .false., inodecompressed=.false., done, reuse_triggered
       PetscInt, parameter :: one = 1, zero = 0
-      MatType:: mat_type    
       
       ! ~~~~~~~~~~  
 
@@ -773,8 +896,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          print *, "Requested sparsity is greater than or equal to the order"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if      
-
-      call MatGetType(matrix, mat_type, ierr)
 
       call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
@@ -788,18 +909,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       call MatGetOwnershipRangeColumn(matrix, global_col_start, global_col_end_plus_one, ierr)  
 
       reuse_triggered = .NOT. PetscObjectIsNull(cmat) 
-
-      ! ~~~~~~~~~~
-      ! Special case if we just want to return a gmres polynomial with the sparsity of the diagonal
-      ! This is like a damped Jacobi
-      ! ~~~~~~~~~~
-      if (poly_sparsity_order == 0) then
-
-         call build_gmres_polynomial_inverse_0th_order_sparsity(matrix, poly_order, buffers, &
-                  coefficients, cmat)     
-
-         return
-      end if
 
       ! ~~~~~~~~~~
       ! Compute any matrix powers we might need to constrain sparsity and start assembling the 
@@ -848,18 +957,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
          ! ~~~~
          ! Get the cols
          ! ~~~~
-         if (mat_type == "mpiaij") then
-            ! Much more annoying in older petsc
-            call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, colmap, ierr) 
-         
-         ! If on the gpu, just do a convert to mpiaij format first
-         ! This will be expensive but the best we can do for now without writing our 
-         ! own version of this subroutine in cuda/kokkos
-         else
-            call MatConvert(mat_sparsity_match, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr) 
-            mat_sparsity_match => temp_mat
-         end if
+         call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, colmap, ierr)
 
          call MatGetSize(Ad, rows_ad, cols_ad, ierr)             
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
@@ -1055,7 +1153,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
                           
          ! Get the row of mat_sparsity_match
          ! We need both the local indices into submatrices(1) and the global indices
-         ! We have local but want global
          if (poly_sparsity_order == 1) then
 
             ! This is the number of columns
@@ -1076,7 +1173,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
                cols(1:ncols) = cols_ptr               
             end if  
 
-         ! We have global but want local
+         ! Higher order sparsity
          else
 
             ! Should optimise this to use the pointers rather than a critical protected access
@@ -1097,7 +1194,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
                      cols_two, vals_two, ierr)     
             !$omp end critical           
                      
-            ! We already have the global indices, we need the local ones
+            ! We need the local indices 
             do j_loc = 1, ncols
                ! We have a local column
                !if (cols(j_loc) .ge. global_col_start .AND. cols(j_loc) < global_col_end_plus_one) then
@@ -1141,7 +1238,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
             vals_two_ptr => submatrices_vals(submatrices_ia(cols_local(j_loc)+1)+1:submatrices_ia(cols_local(j_loc)+2))
             
             ! Search for the matching column - assuming sorted
-            ! Need to make sure we're matching the global indices
+            ! Need to make sure we're matching the local indices
             call intersect_pre_sorted_indices_only(cols_local(1:ncols), cols_two_ptr, cols_index_one, cols_index_two, match_counter)                 
             
             ! Don't need to do anything if we have no matches
@@ -1260,9 +1357,6 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       do order = 2, poly_sparsity_order
          call MatDestroy(matrix_powers(order), ierr)
       end do
-      if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
-         call MatDestroy(temp_mat, ierr)
-      end if
       if (deallocate_submatrices) deallocate(submatrices)
 
       deallocate(col_indices_off_proc_array)
@@ -1272,7 +1366,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       call MatAssemblyEnd(cmat, MAT_FINAL_ASSEMBLY, ierr) 
 
          
-   end subroutine mat_mult_powers_share_sparsity
+   end subroutine mat_mult_powers_share_sparsity_cpu
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1654,8 +1748,8 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
             call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
             if (normy .gt. 1d-13) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of build_gmres_polynomial_inverse_0th_order do not match"
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
@@ -1848,8 +1942,8 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
             if (normy .gt. 1d-11) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of build_gmres_polynomial_inverse_0th_order_sparsity do not match"
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
