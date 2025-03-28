@@ -347,9 +347,10 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
          PetscScalar* scratch_vals = (PetscScalar*)t.team_scratch(1).get_shmem(ncols_local * max_nnz * (sizeof(PetscScalar)));       
          // Get scratch space for the previous temporary matrix powers sum
          PetscScalar* vals_prev = (PetscScalar*)t.team_scratch(1).get_shmem(ncols_local * (sizeof(PetscScalar)));     
+         PetscScalar* vals_temp = (PetscScalar*)t.team_scratch(1).get_shmem(ncols_local * (sizeof(PetscScalar)));
          // Create view on scratch memory for atomic operations on vals_temp
          Kokkos::View<PetscScalar*, ScratchMemSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>> 
-            vals_temp(t.team_scratch(1), ncols_local);           
+            vals_temp_view(vals_temp, ncols_local);           
          
          // Loop over all the columns in this row
          Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
@@ -416,7 +417,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
             {
                // Set vals_temp to zero
                Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-                  vals_temp(j) = 0;
+                  vals_temp_view(j) = 0;
                });      
                
                // Team barrier to ensure initialization is complete before use
@@ -430,7 +431,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
                   {
                      // Has to be atomic! Potentially lots of contention so maybe not 
                      // the most performant way to do this
-                     Kokkos::atomic_add(&vals_temp(scratch_indices[j * max_nnz + k]), vals_prev[j] * scratch_vals[j * max_nnz + k]);
+                     Kokkos::atomic_add(&vals_temp_view(scratch_indices[j * max_nnz + k]), vals_prev[j] * scratch_vals[j * max_nnz + k]);
                   }
 
                });      
@@ -443,9 +444,9 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
                // ~~~~~~~~~~~               
                Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
                   // Do the mult with coeff
-                  device_local_vals_output[device_local_i_output[i] + j] += coefficients_d(term) * vals_temp(j);
+                  device_local_vals_output[device_local_i_output[i] + j] += coefficients_d(term) * vals_temp_view(j);
                   // This should now have the value of A^(term-1) in it
-                  vals_prev[j] = vals_temp(j);
+                  vals_prev[j] = vals_temp_view(j);
                });
 
                // Team barrier to ensure initialization is complete before use
