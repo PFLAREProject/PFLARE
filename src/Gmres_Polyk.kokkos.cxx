@@ -4,6 +4,13 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
+// Create views using scratch memory space
+using ScratchSpace = typename KokkosTeamMemberType::scratch_memory_space;
+using ScratchIntView = Kokkos::View<PetscInt*, ScratchSpace, Kokkos::MemoryUnmanaged>;
+using ScratchScalarView = Kokkos::View<PetscScalar*, ScratchSpace, Kokkos::MemoryUnmanaged>;
+using Scratch2DIntView = Kokkos::View<PetscInt**, ScratchSpace, Kokkos::MemoryUnmanaged>;
+using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::MemoryUnmanaged>;
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // Build a 0th order gmres polynomial but with kokkos - keeping everything on the device
@@ -323,9 +330,12 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
       // We will have ncols of integers which tell us how many matching indices we have
       // We then want ncols space for each column (both indices and values)
       // We then want a vals_temp and vals_prev to store the accumulated matrix powers
+      // the last bit of memory is to account for 8-byte alignment for each view
       size_t scratch_size_per_team = max_nnz * max_nnz * (sizeof(PetscInt) + sizeof(PetscScalar)) + \
                   max_nnz * sizeof(PetscInt) + \
-                  max_nnz * 2 * sizeof(PetscScalar);
+                  max_nnz * 2 * sizeof(PetscScalar) + \
+                  8 * 5 * sizeof(PetscScalar);
+
       Kokkos::TeamPolicy<> policy(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO());
       // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
       policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
@@ -339,15 +349,14 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
          // ncols
          PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];  
 
-         // Get scratch space for the match counter
-         PetscInt* scratch_match_counter = (PetscInt*)t.team_scratch(1).get_shmem(ncols_local * (sizeof(PetscInt)));         
-         // Get scratch space for the indices
-         PetscInt* scratch_indices = (PetscInt*)t.team_scratch(1).get_shmem(ncols_local * max_nnz * (sizeof(PetscInt)));
-         // Get scratch space for the values
-         PetscScalar* scratch_vals = (PetscScalar*)t.team_scratch(1).get_shmem(ncols_local * max_nnz * (sizeof(PetscScalar)));       
-         // Get scratch space for the previous temporary matrix powers sum
-         PetscScalar* vals_prev = (PetscScalar*)t.team_scratch(1).get_shmem(ncols_local * (sizeof(PetscScalar)));     
-         PetscScalar* vals_temp = (PetscScalar*)t.team_scratch(1).get_shmem(ncols_local * (sizeof(PetscScalar)));         
+         // Allocate views directly on scratch memory
+         // Have to use views here given alignment issues
+         ScratchIntView scratch_match_counter(t.team_scratch(1), ncols_local);
+         // Be careful as 2D views are column major by default
+         Scratch2DIntView scratch_indices(t.team_scratch(1), max_nnz, ncols_local);
+         Scratch2DScalarView scratch_vals(t.team_scratch(1), max_nnz, ncols_local);
+         ScratchScalarView vals_prev(t.team_scratch(1), ncols_local);
+         ScratchScalarView vals_temp(t.team_scratch(1), ncols_local);    
          
          // Loop over all the columns in this row
          Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
@@ -385,9 +394,9 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
                   // Match found - this ensures we insert in sorted order
                   PetscInt match_idx = scratch_match_counter[j]++;
                   // Local index into row i
-                  scratch_indices[j * max_nnz + match_idx] = idx_orig;
+                  scratch_indices(match_idx, j) = idx_orig;
                   // Values of matches 
-                  scratch_vals[j * max_nnz + match_idx] = device_local_vals[target_start + idx_target];
+                  scratch_vals(match_idx, j) = device_local_vals[target_start + idx_target];
                   // Move forward in both arrays
                   idx_orig++;
                   idx_target++;
@@ -428,7 +437,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
                   {
                      // Has to be atomic! Potentially lots of contention so maybe not 
                      // the most performant way to do this
-                     Kokkos::atomic_add(&vals_temp[scratch_indices[j * max_nnz + k]], vals_prev[j] * scratch_vals[j * max_nnz + k]);
+                     Kokkos::atomic_add(&vals_temp[scratch_indices(k, j)], vals_prev[j] * scratch_vals(k, j));
                   }
 
                });      
