@@ -861,11 +861,12 @@ end if
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_col_start, global_col_end_plus_one, n, ncols, ncols_two, ifree, max_nnzs
       PetscInt :: i_loc, j_loc, row_size, rows_ao, cols_ao, rows_ad, cols_ad, shift = 0
+      PetscInt :: ncols_local, ncols_nonlocal
 #ifdef _OPENMP
       integer :: omp_threads, omp_threads_env, length, status
       CHARACTER(len=255) :: omp_threads_env_char
 #endif      
-      integer :: errorcode, match_counter, term, order, location
+      integer :: errorcode, match_counter, term, order
       integer :: comm_size
       PetscErrorCode :: ierr      
       PetscReal, dimension(:), pointer :: vals_two, vals_power_temp, vals_previous_power_temp
@@ -983,10 +984,6 @@ end if
          call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, &
                      col_indices_off_proc_array, PETSC_USE_POINTER, col_indices(1), ierr) 
 
-         if (poly_sparsity_order /= 1) then
-            call ISSort(col_indices(1), ierr)
-         end if
-
          ! ~~~~~~~
          ! Now we can pull out the chunk of matrix that we need
          ! ~~~~~~~
@@ -1017,7 +1014,9 @@ end if
 
       ! Easy in serial as we have everything we neeed
       else
-         
+
+         Ad = mat_sparsity_match
+         cols_ad = local_cols
          allocate(submatrices(1))
          deallocate_submatrices = .TRUE.
          submatrices(1) = matrix
@@ -1182,38 +1181,46 @@ end if
             ! but the matmatmults to 
             ! create the powers are very expensive so should deal with that first            
             !$omp critical
-            call MatGetRow(mat_sparsity_match, global_row_start + i_loc-1, ncols_two, &
-                  cols_two, vals_two, ierr)  
+            call MatGetRow(Ad, i_loc-1, ncols_local, &
+                     PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+            ncols = ncols_local
+            call MatRestoreRow(Ad, i_loc-1, ncols_local, &
+                     PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)                     
                   
-            ! Can't have two getrows active at the same time, so store this one
-            ncols = ncols_two
-            cols(1:ncols) = cols_two(1:ncols)
-            allocate(cols_local(ncols))
-            vals(1:ncols) = vals_two(1:ncols) 
-            vals_ptr => vals(1:ncols)
-            
-            call MatRestoreRow(mat_sparsity_match, global_row_start + i_loc-1, ncols_two, &
-                     cols_two, vals_two, ierr)     
-            !$omp end critical           
-                     
-            ! We need the local indices 
-            do j_loc = 1, ncols
-               ! We have a local column
-               !if (cols(j_loc) .ge. global_col_start .AND. cols(j_loc) < global_col_end_plus_one) then
-               !   cols_local(j_loc) = cols(j_loc) - global_col_start
+            if (comm_size /= 1) then
+               call MatGetRow(Ao, i_loc-1, ncols_nonlocal, &
+                        PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+               ncols = ncols + ncols_nonlocal                        
+               call MatRestoreRow(Ao, i_loc-1, ncols_nonlocal, &
+                        PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr) 
+            end if
 
-               ! Otherwise we have a parallel column we have to find the local index in col_indices_off_proc_array
-               ! We have sorted col_indices_off_proc_array, as they are not necessarily sorted if we just 
-               ! consider the col indices augmented with those from colmap
-               !else
-                  call sorted_binary_search(col_indices_off_proc_array, cols(j_loc), location)
-                  if (location == -1) then
-                     print *, "Couldn't find location"
-                     call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-                  end if
-                  cols_local(j_loc) = location-1
-               !end if
-            end do  
+            allocate(cols_local(ncols))
+            call MatGetRow(Ad, i_loc-1, ncols_local, &
+                     cols_two, vals_two, ierr)
+            cols_local(1:ncols_local) = cols_two(1:ncols_local)
+            vals(1:ncols_local) = vals_two(1:ncols_local)                      
+            call MatRestoreRow(Ad, i_loc-1, ncols_local, &
+                     cols_two, vals_two, ierr)   
+                     
+            if (comm_size /= 1) then  
+               call MatGetRow(Ao, i_loc-1, ncols_nonlocal, &
+                  cols_two, vals_two, ierr)
+               cols_local(ncols_local+1:ncols) = cols_two(1:ncols_nonlocal) + cols_ad
+               vals(ncols_local+1:ncols) = vals_two(1:ncols_nonlocal)                      
+               call MatRestoreRow(Ao, i_loc-1, ncols_nonlocal, &
+                        cols_two, vals_two, ierr)  
+            end if               
+
+            if (comm_size /= 1) then
+               ! Gives us the global indices
+               cols(1:ncols) = col_indices_off_proc_array(cols_local(1:ncols)+1)
+            else
+               cols(1:ncols) = cols_local(1:ncols)               
+            end if              
+            vals_ptr => vals(1:ncols)
+  
+            !$omp end critical
          end if
          
          if (any(cols_local > row_size)) then
