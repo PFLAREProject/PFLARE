@@ -1458,7 +1458,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
          reuse_int = 0
          if (reuse) reuse_int = 1
          reuse_indices_int = 0;
-         if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) reuse_indices_int = 1
+         if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) then
+            reuse_indices_int = 1
+         end if
 
          A_array = Z%v             
          indices_fine = is_fine%v
