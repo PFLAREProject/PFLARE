@@ -1,13 +1,10 @@
 module aggregation
 
-   use petsc
+   use petscmat
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public   
    
    contains
@@ -28,11 +25,12 @@ module aggregation
       ! Local
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols, kfree
-      PetscInt :: max_nnzs, aggregate, max_neighbour_index, max_neighbour_value, jfree
+      PetscInt :: aggregate, max_neighbour_index, max_neighbour_value, jfree
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
-      PetscInt, dimension(:), allocatable :: indices, cols
+      PetscInt, dimension(:), allocatable :: indices
+      PetscInt, dimension(:), pointer :: cols
       logical :: mark_neigh
 
       ! ~~~~~~   
@@ -68,17 +66,7 @@ module aggregation
       else
          allocate(cf_markers(local_rows)) 
          cf_markers = 0 
-      end if
-
-      ! Get nnzs 
-      max_nnzs = 0
-      do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-         call MatGetRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(strength_mat, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-      end do        
-
-      allocate(cols(max_nnzs))    
+      end if  
    
       ! Serial ordering to match pyamg in serial
       do ifree = 1, local_rows
@@ -91,7 +79,7 @@ module aggregation
       do ifree = 1, size(indices)
 
          ! Get S_i - distance 1 neighbours
-         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
          if (ncols == 0) then
 
@@ -120,7 +108,7 @@ module aggregation
 
          end if
 
-         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
       end do
 
@@ -131,7 +119,7 @@ module aggregation
          if (cf_markers(indices(ifree)) /= 0) cycle
 
          ! Get S_i - distance 1 neighbours
-         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
          max_neighbour_index = -1
          max_neighbour_value = 0
@@ -165,7 +153,7 @@ module aggregation
             aggregate = aggregate + 1
          end if
 
-         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
       end do      
 
       ! Swap the negative ones back to positive
@@ -180,7 +168,7 @@ module aggregation
          if (cf_markers(indices(ifree)) /= 0) cycle
 
          ! Get S_i - distance 1 neighbours
-         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatGetRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
          ! This is the root node
          cf_markers(indices(ifree)) = 1
@@ -195,10 +183,10 @@ module aggregation
          ! Advance to a new aggregate
          aggregate = aggregate + 1
 
-         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_ARRAY, ierr)
+         call MatRestoreRow(strength_mat, a_global_row_start + indices(ifree)-1, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
-      deallocate(indices, cols)
+      deallocate(indices)
 
    end subroutine generate_serial_aggregation   
 

@@ -1,18 +1,15 @@
 module fc_smooth
 
-   use petsc
+   use petscksp
    use c_petsc_interfaces
    use air_data_type
    use petsc_helper
-   use matshell
+   use matshell_pflare
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 #include "petscconf.h"
                 
    implicit none
-
-#include "petsc_legacy.h"
-
    public
 
    ! -------------------------------------------------------------------------------------------------------------------------------
@@ -149,6 +146,7 @@ module fc_smooth
       ScatterMode, intent(in)              :: mode  
       
       PetscErrorCode :: ierr
+      integer :: mode_int
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: vfull_array, vreduced_array
       integer :: fine_int, errorcode
@@ -158,6 +156,11 @@ module fc_smooth
 #endif          
       ! ~~~~~~~~~~
 
+      if (mode == SCATTER_REVERSE) then
+         mode_int = 1
+      else
+         mode_int = 0
+      end if
       ! FINE variables
       if (fine) then
          if (mode == SCATTER_REVERSE) then
@@ -178,7 +181,7 @@ module fc_smooth
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
-                           mode, vreduced_array)
+                           mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
                   if (kokkos_debug()) then             
@@ -242,7 +245,7 @@ module fc_smooth
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
-                           mode, vreduced_array)
+                           mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
                   if (kokkos_debug()) then             
@@ -290,7 +293,7 @@ module fc_smooth
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
-                           mode, vreduced_array)
+                           mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
                   if (kokkos_debug()) then             
@@ -354,7 +357,7 @@ module fc_smooth
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
                   call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
-                           mode, vreduced_array)
+                           mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
                   if (kokkos_debug()) then             

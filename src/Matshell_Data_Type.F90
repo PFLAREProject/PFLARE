@@ -1,9 +1,9 @@
 module matshell_data_type
 
-   use petsc
+   use petscmat
    use air_data_type
 
-#include "petsc/finclude/petsc.h"   
+#include "petsc/finclude/petscmat.h"   
 
    implicit none
 

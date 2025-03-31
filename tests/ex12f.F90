@@ -109,7 +109,7 @@
       call PetscLogStagePush(gpu_copy, ierr)
       call KSPSetFromOptions(ksp,ierr)
       call KSPSolve(ksp,b,x,ierr)
-      call PetscLogStagePop()
+      call PetscLogStagePop(ierr)      
 
       if (second_solve) then
          call VecSet(x, 1d0, ierr)
@@ -133,7 +133,7 @@
 
       call PetscFinalize(ierr)
 
-      if (reason < 0) then
+      if (reason%v < 0) then
          error stop 1
       end if
       end

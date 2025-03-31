@@ -1,13 +1,10 @@
 module weighted_jacobi
 
-   use petsc
+   use petscmat
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"
-
    public
    
    PetscEnum, parameter :: PFLAREINV_WJACOBI=7
@@ -33,7 +30,8 @@ module weighted_jacobi
       integer :: comm_size, errorcode
       MPI_Comm :: MPI_COMM_MATRIX 
       PetscInt :: local_rows, local_cols, global_row_start, global_row_end_plus_one
-      PetscInt :: global_rows, global_cols, i_loc, counter
+      PetscInt :: global_rows, global_cols, i_loc
+      PetscCount :: counter
       PetscErrorCode :: ierr
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       type(tMat) :: temp_mat
@@ -94,7 +92,7 @@ module weighted_jacobi
       ! Let's create a matrix to represent the inverse diagonal
       ! Can't use matdiagonal as we want to do symbolic matmat products
       ! and don't want to have to define how that is done
-      reuse_triggered = .NOT. PetscMatIsNull(inv_matrix) 
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
@@ -125,7 +123,8 @@ module weighted_jacobi
          col_indices = row_indices
          ! Set the diagonal
          ! Don't need to set the values as we do that directly with MatDiagonalSet
-         call MatSetPreallocationCOO(inv_matrix, local_rows, row_indices, col_indices, ierr)
+         counter = local_rows
+         call MatSetPreallocationCOO(inv_matrix, counter, row_indices, col_indices, ierr)
          deallocate(row_indices, col_indices)         
       end if  
 

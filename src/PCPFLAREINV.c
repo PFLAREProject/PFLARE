@@ -288,11 +288,7 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
 
 // ~~~~~~~~~~
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
-static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems *PetscOptionsObject)
-#else
-static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PetscOptionItems *PetscOptionsObject,PC pc)
-#endif
+static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems PetscOptionsObject)
 {
    PetscBool    flg;
    PCPFLAREINVType deflt, type;
@@ -304,11 +300,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PetscOptionItems *PetscOption
    inv_data = (PC_PFLAREINV *)pc->data;
 
    PCPFLAREINVGetType(pc, &deflt);
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
-   PetscOptionsHeadBegin(PetscOptionsObject, "PCPFLAREINV options");
-#else
-   PetscOptionsHead(PetscOptionsObject, "PCPFLAREINV options");
-#endif   
+   PetscOptionsHeadBegin(PetscOptionsObject, "PCPFLAREINV options"); 
    const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg);
    if (flg) PCPFLAREINVSetType(pc, type);
@@ -317,11 +309,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PetscOptionItems *PetscOption
    if (flg) PCPFLAREINVSetOrder(pc, poly_order);
    PetscOptionsInt("-pc_pflareinv_sparsity_order", "Sparsity order of assembled inverse", "PCPFLAREINVSetSparsityOrder", inv_data->inverse_sparsity_order, &inverse_sparsity_order, &flg);
    if (flg) PCPFLAREINVSetSparsityOrder(pc, inverse_sparsity_order);     
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
    PetscOptionsHeadEnd();
-#else
-   PetscOptionsTail();
-#endif
    PetscFunctionReturn(0);
 }
 
@@ -346,20 +334,12 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
    // Newton has to be matrix free
    if (type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA)
    {
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 17)
       PetscCheck(inv_data->matrix_free, comm, PETSC_ERR_ARG_WRONGSTATE, "GMRES polynomial with Newton basis must be applied matrix-free");
-#else
-      if (!inv_data->matrix_free) SETERRQ(comm, PETSC_ERR_ARG_WRONGSTATE, "GMRES polynomial with Newton basis must be applied matrix-free");
-#endif
    }
    // SAI/ISAI can't be matrix free
    if (type == PFLAREINV_SAI || type == PFLAREINV_ISAI)
    {
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 17)
       PetscCheck(!inv_data->matrix_free, comm, PETSC_ERR_ARG_WRONGSTATE, "PFLARE SAI/ISAI inverses cannot be applied matrix-free - Use PCASM");
-#else
-      if (!inv_data->matrix_free) SETERRQ(comm, PETSC_ERR_ARG_WRONGSTATE, "PFLARE SAI/ISAI inverses cannot be applied matrix-free - Use PCASM");
-#endif
    }     
 
    // We have to pass in an int

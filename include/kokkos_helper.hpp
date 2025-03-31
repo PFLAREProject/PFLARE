@@ -3,6 +3,7 @@
 
 // petscvec_kokkos.hpp has to go first
 #include <petscvec_kokkos.hpp>
+#include <petscmat_kokkos.hpp>
 #include "petsc.h"
 #include <../src/mat/impls/aij/seq/kokkos/aijkok.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
@@ -18,10 +19,6 @@ using PetscIntConstKokkosViewHost = Kokkos::View<const PetscInt *, HostMirrorMem
 using intKokkosViewHost = Kokkos::View<int *, HostMirrorMemorySpace>;
 using intKokkosView = Kokkos::View<int *, Kokkos::DefaultExecutionSpace>;
 using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
-
-PetscErrorCode MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(Mat, Mat, Mat, PetscInt *);
-PetscErrorCode MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices_mine(Mat, Mat, Mat, PetscInt *);
-PetscErrorCode MatSeqAIJSetPreallocation_SeqAIJ_mine(Mat, PetscInt, const PetscInt *);
-PetscErrorCode MatSetSeqAIJKokkosWithCSRMatrix_mine(Mat, Mat_SeqAIJKokkos *);
+using ConstMatRowMapKokkosView = KokkosCsrGraph::row_map_type::const_type;
 
 #endif

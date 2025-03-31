@@ -1,16 +1,13 @@
 module neumann_poly
 
-   use petsc
+   use petscmat
    use gmres_poly
-   use matshell
+   use matshell_pflare
    use c_petsc_interfaces
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"   
-
    public
 
    PetscEnum, parameter :: PFLAREINV_NEUMANN=4
@@ -148,7 +145,7 @@ module neumann_poly
          call MatGetSize(matrix, global_rows, global_cols, ierr)      
          
          ! If not re-using
-         if (PetscMatIsNull(inv_matrix)) then
+         if (PetscObjectIsNull(inv_matrix)) then
 
             allocate(coefficients(poly_order + 1))
             coefficients = 1d0 
@@ -181,10 +178,7 @@ module neumann_poly
 
             ! Have to dynamically allocate this
             allocate(mat_ctx_ida)
-            mat_ctx_ida%coefficients => coefficients
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-            mat_ctx_ida%mat_ida = PETSC_NULL_MAT
-#endif                        
+            mat_ctx_ida%coefficients => coefficients                     
             
             ! Create the matshell
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &

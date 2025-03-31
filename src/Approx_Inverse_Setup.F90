@@ -1,19 +1,17 @@
 module approx_inverse_setup
 
+   use petscmat
    use gmres_poly
    use gmres_poly_newton
    use neumann_poly
    use weighted_jacobi
    use sai_z
    use repartition
-   use matshell
+   use matshell_pflare
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
       
    implicit none
-
-#include "petsc_legacy.h"   
-
    public
 
    contains
@@ -90,20 +88,13 @@ module approx_inverse_setup
       ! We then copy the pointer of inv_matrix_temp back into inv_matrix after we're done
       if (inv_matrix /= PETSC_NULL_MAT) then
          inv_matrix_temp = inv_matrix
-      else
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-         inv_matrix_temp = PETSC_NULL_MAT
-#endif          
       end if
 
       ! The inverse is always returned on the same comm as the input matrix
       ! but some methods benefit from having their intermediate calculations 
       ! done on a subcomm
       buffers%subcomm = subcomm
-      ! Don't do any re-use, if you want reuse call the start/finish yourself
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-      reuse_mat = PETSC_NULL_MAT
-#endif      
+      ! Don't do any re-use, if you want reuse call the start/finish yourself   
 
       ! Start the calculation
       call start_approximate_inverse(matrix, inverse_type, &
@@ -122,7 +113,7 @@ module approx_inverse_setup
          call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
          mat_ctx%own_coefficients = .TRUE.               
       end if
-      if (.NOT. PetscMatIsNull(reuse_mat)) then
+      if (.NOT. PetscObjectIsNull(reuse_mat)) then
          call MatDestroy(reuse_mat, ierr)
       end if
 
@@ -185,7 +176,7 @@ module approx_inverse_setup
       ! ~~~~~~~~~~~~~~~
 
       ! If we're on the subcomm, we don't need to do anything
-      if (.NOT. PetscMatIsNull(buffers%matrix)) then
+      if (.NOT. PetscObjectIsNull(buffers%matrix)) then
 
          ! Gmres poylnomial with power basis
          if (inverse_type == PFLAREINV_POWER) then
@@ -352,10 +343,7 @@ module approx_inverse_setup
 
       ! If we were on a subcomm we created a copy of our matrix, if not we incremented 
       ! the reference counter
-      call MatDestroy(buffers%matrix, ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-      buffers%matrix = PETSC_NULL_MAT
-#endif               
+      call MatDestroy(buffers%matrix, ierr)            
 
    end subroutine finish_approximate_inverse
    
@@ -373,7 +361,7 @@ module approx_inverse_setup
       type(mat_ctxtype), pointer :: mat_ctx, mat_ctx_ida
       ! ~~~~~~
 
-      if (.NOT. PetscMatIsNull(matrix)) then
+      if (.NOT. PetscObjectIsNull(matrix)) then
          call MatGetType(matrix, mat_type, ierr)
          ! If its a matshell, make sure to delete its ctx
          if (mat_type==MATSHELL) then
@@ -385,7 +373,7 @@ module approx_inverse_setup
             call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
 
             ! Both newton and neumann polynomials use some extra temporary vectors
-            if (.NOT. PetscMatIsNull(mat_ctx%mat_ida) .OR. &
+            if (.NOT. PetscObjectIsNull(mat_ctx%mat_ida) .OR. &
                      associated(mat_ctx%real_roots)) then
                
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)
@@ -393,7 +381,7 @@ module approx_inverse_setup
             end if
 
             ! Neumann polynomial has extra context that needs deleting
-            if (.NOT. PetscMatIsNull(mat_ctx%mat_ida)) then
+            if (.NOT. PetscObjectIsNull(mat_ctx%mat_ida)) then
                call MatShellGetContext(mat_ctx%mat_ida, mat_ctx_ida, ierr)
                deallocate(mat_ctx_ida)
                call MatDestroy(mat_ctx%mat_ida, ierr)
@@ -401,10 +389,7 @@ module approx_inverse_setup
             end if
             deallocate(mat_ctx)
          end if               
-         call MatDestroy(matrix, ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)      
-         matrix = PETSC_NULL_MAT
-#endif         
+         call MatDestroy(matrix, ierr)       
       end if  
       
    end subroutine reset_inverse_mat

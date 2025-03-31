@@ -1,8 +1,9 @@
 module gmres_poly_data_type
 
    use tsqr
+   use petscsys
 
-#include "petsc/finclude/petsc.h"   
+#include "petsc/finclude/petscsys.h"   
    
    implicit none
    

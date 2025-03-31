@@ -17,14 +17,6 @@ PETSC_INTERN void ShellSetVecType_c(Mat *matrix, Mat *shellmatrix)
    return;
 }
 
-// Annoying as versions of petsc before 3.15 don't have easy access to colmap in fortran
-PETSC_INTERN void get_colmap_c(Mat *matrix, PetscInt **colmap)
-{
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   *colmap = a->garray;
-   return;
-}
-
 // Does a vecscatter according to the pattern in the given Mat
 // Have to do this in C as there is no fortran interface to MatGetCommunicationStructs
 PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, double **nonlocal_vals)
@@ -347,11 +339,7 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
 
   // Ensure we return petsc_null so we can test if we are on this subcomm
   // outside the function
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 19)
   *B = PETSC_NULLPTR;
-#else
-  *B = NULL;
-#endif
   PetscObjectGetComm((PetscObject)(*A), &acomm);
   MPI_Comm_size(acomm, &size);
   MPI_Comm_size(acomm, &rank);
@@ -394,19 +382,10 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
       MatDuplicate(a->A, MAT_COPY_VALUES, &Ad_copy);
       MatDuplicate(a->B, MAT_COPY_VALUES, &Ao_copy);
 
-      // After petsc 3.20, the test in MatCreateMPIAIJWithSeqAIJ is that the absolute value 
-      // of the block sizes match
-      // Before that there is no absolute value, and for some reason entering this routine
-      // with <3.20 Ad will have a block size of 1, but Ao will have -1
-      // After 3.20 they're both -1
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR < 20)
-      Ao_copy->rmap->bs = Ad_copy->rmap->bs;
-#endif      
-
       // MAT_NO_OFF_PROC_ENTRIES is set to true in this routine so 
-      // don't need to set it  externally
+      // don't need to set it externally
       // Have to be careful here as need to feed in copies of A and B
-      MatCreateMPIAIJWithSeqAIJ(bcomm, Ad_copy, Ao_copy, a->garray, B);       
+      MatCreateMPIAIJWithSeqAIJ(bcomm, M, N, Ad_copy, Ao_copy, a->garray, B);       
     }
 
     MPI_Comm_free(&bcomm);

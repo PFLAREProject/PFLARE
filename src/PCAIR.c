@@ -1047,11 +1047,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int 
 
 // ~~~~~~~~~~~~~~~~
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
-static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems *PetscOptionsObject)
-#else
-static PetscErrorCode PCSetFromOptions_AIR_c(PetscOptionItems *PetscOptionsObject,PC pc)
-#endif
+static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOptionsObject)
 {
    PetscFunctionBegin;
    
@@ -1062,11 +1058,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PetscOptionItems *PetscOptionsObjec
    PCAIRZType old_z_type, z_type;
    CFSplittingType old_cf_type, cf_type;
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
    PetscOptionsHeadBegin(PetscOptionsObject, "PCAIR options");
-#else
-   PetscOptionsHead(PetscOptionsObject, "PCAIR options");
-#endif
    // ~~~~
    PCAIRGetPrintStatsTimings(pc, &old_flag);
    flg = old_flag;
@@ -1280,11 +1272,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PetscOptionItems *PetscOptionsObjec
    PCAIRSetProcessEqLimit(pc, input_int);   
    // ~~~~                                                       
 
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR >= 18)
    PetscOptionsHeadEnd();
-#else
-   PetscOptionsTail();
-#endif
    PetscFunctionReturn(0);
 }
 

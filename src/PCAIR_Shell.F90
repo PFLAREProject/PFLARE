@@ -1,12 +1,11 @@
 module pcair_shell
 
-   use petsc
+   use petscksp
    use c_petsc_interfaces
    use pcair_data_type
    use air_mg_setup
 
-#include "petsc/finclude/petscsys.h"   
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
 
    implicit none
 
@@ -159,7 +158,8 @@ module pcair_shell
 
          ! If we've got a different non-zero pattern we've got to 
          ! start again 
-         if (structure_flag == DIFFERENT_NONZERO_PATTERN) then
+         ! DIFFERENT_NONZERO_PATTERN = 0
+         if (structure_flag == 0) then
 
             ! Reset the air data
             call reset_pc_air_data(pc_air_data)
@@ -167,7 +167,8 @@ module pcair_shell
             call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
 
          ! We can re-use the sparsity
-         else if (structure_flag == SAME_NONZERO_PATTERN) then
+         ! SAME_NONZERO_PATTERN = 2
+         else if (structure_flag == 2) then
 
             if (pc_air_data%air_data%options%reuse_sparsity) then
                ! Reset the air data but keep any reuse data we need

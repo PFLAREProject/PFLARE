@@ -52,7 +52,7 @@ jobs:
 
   gnu_opt:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [setup]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -74,7 +74,7 @@ jobs:
 
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [setup]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -92,11 +92,11 @@ jobs:
           tags: stevendargaville/pflare_64_bit:latest
           build-args: |
             BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-c-opt
+            ARCH=arch-linux-c-opt         
 
   gnu_opt_kokkos:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [setup]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -112,7 +112,7 @@ jobs:
             
   gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [setup]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -126,25 +126,26 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt-64bit           
 
-  nvidia_opt:
-    runs-on: ubuntu-22.04
-    needs: setup
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
-    steps:
-      - name: Build Docker image with PETSc and NVIDIA compilers
-        uses: docker/build-push-action@v2
-        with:
-          platforms: linux/amd64
-          push: false
-          file: ./dockerfiles/Dockerfile_nvidia
-          build-args: |
-            BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-nvidia
+# Currently nvidia fortran compiler breaks on petsc 3.23            
+#   nvidia_opt:
+#     runs-on: ubuntu-22.04
+#     needs: [setup]
+#     env:
+#       BRANCH: ${{ needs.setup.outputs.branch }}
+#     steps:
+#       - name: Build Docker image with PETSc and NVIDIA compilers
+#         uses: docker/build-push-action@v2
+#         with:
+#           platforms: linux/amd64
+#           push: false
+#           file: ./dockerfiles/Dockerfile_nvidia
+#           build-args: |
+#             BRANCH=${{ env.BRANCH }}
+#             ARCH=arch-linux-nvidia
             
-  intel_opt_no_test:
+  intel_opt_serial_test:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [setup]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -163,7 +164,7 @@ jobs:
   # needs to detect the gpu
   gnu_debug_gpu:
     runs-on: ubicloud-gpu
-    needs:  setup
+    needs:  [setup]
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
     # Specify the protected environment to ensure gpu builds are only triggered 

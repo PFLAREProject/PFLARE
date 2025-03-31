@@ -1,15 +1,13 @@
 module pmisr_ddc
 
    use iso_c_binding
-   use petsc
+   use petscmat
    use petsc_helper
    use c_petsc_interfaces
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
 
    implicit none
-
-#include "petsc_legacy.h"
 
    ! Define C and F points in the CF marker 
    integer, parameter :: C_POINT = 1
@@ -156,8 +154,7 @@ module pmisr_ddc
       real(c_double), pointer :: cf_markers_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
       type(tVec) :: cf_markers_vec
-      PetscOffset :: iicol
-      PetscInt :: icol(1)
+      PetscInt, dimension(:), pointer :: colmap
       integer(c_long_long) :: A_array, vec_long
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, cols_ptr, ao_ia, ao_ja
       PetscInt :: shift = 0
@@ -182,8 +179,7 @@ module pmisr_ddc
       call MatGetOwnershipRange(strength_mat, global_row_start, global_row_end_plus_one, ierr)   
 
       if (comm_size /= 1) then
-         ! Let's get the diagonal and off-diagonal parts of the strength matrix
-         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, icol, iicol, ierr)
+         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
       else
@@ -194,15 +190,15 @@ module pmisr_ddc
       ! Get pointers to the sequential diagonal and off diagonal aij structures 
       ! so we don't have to put critical regions around the matgetrow
       ! ~~~~~~~~
-      call MatGetRowIJF90(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
       if (.NOT. done) then
-         print *, "Pointers not set in call to MatGetRowIJF90"
+         print *, "Pointers not set in call to MatGetRowIJ"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
       if (comm_size /= 1) then
-         call MatGetRowIJF90(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         call MatGetRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
          if (.NOT. done) then
-            print *, "Pointers not set in call to MatGetRowIJF90"
+            print *, "Pointers not set in call to MatGetRowIJ"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
          end if
       end if      
@@ -599,9 +595,9 @@ module pmisr_ddc
       ! ~~~~~~~~~~~~
 
       ! Restore the sequantial pointers once we're done
-      call MatRestoreRowIJF90(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
       if (comm_size /= 1) then
-         call MatRestoreRowIJF90(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
       end if    
       
       ! ~~~~~~~~~
@@ -747,11 +743,12 @@ module pmisr_ddc
       PetscInt :: local_rows, local_cols
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
       PetscInt :: input_row_start, input_row_end_plus_one
-      PetscInt :: max_nnzs, jfree, idx, search_size, diag_index
+      PetscInt :: jfree, idx, search_size, diag_index
       integer :: bin_sum, bin_boundary, bin
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), allocatable :: cols
-      PetscReal, dimension(:), allocatable :: vals, diag_dom_ratio, diag_dom_ratio_small
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
+      PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_small
       PetscInt, dimension(:), pointer :: is_pointer
       type(tMat) :: Aff
       PetscReal :: diag_val
@@ -761,7 +758,7 @@ module pmisr_ddc
       ! ~~~~~~  
 
       ! The indices are the numbering in Aff matrix
-      call ISGetIndicesF90(is_fine, is_pointer, ierr)   
+      call ISGetIndices(is_fine, is_pointer, ierr)   
       
       ! Do a fixed alpha_diag
       if (fraction_swap < 0) then
@@ -788,17 +785,8 @@ module pmisr_ddc
          ! Get the local sizes
          call MatGetLocalSize(Aff, local_rows, local_cols, ierr)
          call MatGetOwnershipRange(Aff, a_global_row_start, a_global_row_end_plus_one, ierr)
-         call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                              
-
-         max_nnzs = 0
-         do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-            call MatGetRow(Aff, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-            if (ncols > max_nnzs) max_nnzs = ncols
-            call MatRestoreRow(Aff, ifree, ncols, PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_SCALAR_ARRAY, ierr)
-         end do         
-         
-         allocate(cols(max_nnzs))
-         allocate(vals(max_nnzs))     
+         call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
+   
          allocate(diag_dom_ratio(local_rows))   
          diag_dom_ratio = 0
          dom_bins = 0
@@ -887,11 +875,11 @@ module pmisr_ddc
             ! Swap by multiplying by -1
             cf_markers_local(idx) = cf_markers_local(idx) * (-1)
          end do
-         deallocate(cols, vals, diag_dom_ratio)
+         deallocate(diag_dom_ratio)
          if (allocated(diag_dom_ratio_small)) deallocate(diag_dom_ratio_small)
       end if
 
-      call ISRestoreIndicesF90(is_fine, is_pointer, ierr)
+      call ISRestoreIndices(is_fine, is_pointer, ierr)
       call MatDestroy(Aff, ierr)     
 
    end subroutine ddc_cpu      

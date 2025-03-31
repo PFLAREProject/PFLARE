@@ -4,9 +4,13 @@ module air_data_type
    use gmres_poly_data_type
    
    ! PETSc
-   use petsc
+   use petscmat
+   use petscvec
+   use petscis
 
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscmat.h"
+#include "petsc/finclude/petscvec.h"
+#include "petsc/finclude/petscis.h"
 
    implicit none
 
@@ -343,7 +347,6 @@ module air_data_type
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout)    :: air_data
-      integer :: our_level
       ! ~~~~~~    
 
       air_data%no_levels = -1    
@@ -363,15 +366,9 @@ module air_data_type
       allocate(air_data%coarse_matrix(air_data%options%max_levels))
       allocate(air_data%A_ff(air_data%options%max_levels))
       allocate(air_data%inv_A_ff(air_data%options%max_levels))
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)         
-      air_data%inv_A_ff = PETSC_NULL_MAT
-#endif
       allocate(air_data%inv_A_ff_poly_data(air_data%options%max_levels))
       allocate(air_data%inv_A_ff_poly_data_dropped(air_data%options%max_levels))
       allocate(air_data%inv_A_cc(air_data%options%max_levels))
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)         
-      air_data%inv_A_cc = PETSC_NULL_MAT
-#endif
       allocate(air_data%inv_A_cc_poly_data(air_data%options%max_levels))
       allocate(air_data%A_fc(air_data%options%max_levels))
       allocate(air_data%A_cf(air_data%options%max_levels))
@@ -419,13 +416,7 @@ module air_data_type
       air_data%allocated_matrices_A_ff = .FALSE.
       air_data%allocated_is = .FALSE.
       air_data%allocated_matrices_A_cc = .FALSE. 
-      air_data%allocated_coarse_matrix = .FALSE.   
-      do our_level = 1, air_data%options%max_levels
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)         
-         air_data%reuse(our_level)%reuse_mat(:) = PETSC_NULL_MAT
-         air_data%reuse(our_level)%reuse_is(:) = PETSC_NULL_IS
-#endif
-      end do
+      air_data%allocated_coarse_matrix = .FALSE.
      
    end subroutine create_air_data    
 

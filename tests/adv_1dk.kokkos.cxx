@@ -24,7 +24,8 @@ int main(int argc, char **args)
   Mat         A;              /* linear system matrix */
   KSP         ksp;            /* linear solver context */
   PC          pc;             /* preconditioner context */
-  PetscInt    i, n = 100, its, global_row_start, global_row_end_plus_one, local_size, counter;
+  PetscInt    i, n = 100, its, global_row_start, global_row_end_plus_one, local_size;
+  PetscCount  counter;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
 
@@ -115,7 +116,8 @@ int main(int argc, char **args)
   }
 
   // Set the indices
-  MatSetPreallocationCOO(A, 2 * local_size, oor, ooc);
+  counter = 2 * local_size;
+  MatSetPreallocationCOO(A, counter, oor, ooc);
   // Can delete oor and ooc now
   PetscFree2(oor, ooc);
 

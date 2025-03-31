@@ -3,10 +3,15 @@
 # Makefile for PFLARE
 #
 # Must have defined PETSC_DIR and PETSC_ARCH before calling
-# PETSc must be at least version 3.15
 # Copied from $PETSC_DIR/share/petsc/Makefile.basic.user
 # This uses the compilers and flags defined in the PETSc configuration
 # ~~~~~~~~~~~~~~~~~
+
+# Check PETSc version is at least 3.23.0
+PETSC_VERSION_MIN := $(shell ${PETSC_DIR}/lib/petsc/bin/petscversion ge 3.23)
+ifeq ($(PETSC_VERSION_MIN),0)
+$(error PETSc version is too old. PFLARE requires at least version 3.23.0)
+endif
 
 # Get the flags we have on input
 CFLAGS_INPUT := $(CFLAGS)
@@ -60,7 +65,7 @@ OBJS := $(SRCDIR)/NonBusyWait.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
-		  $(SRCDIR)/Matshell.o \
+		  $(SRCDIR)/Matshell_PFLARE.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCPFLAREINV_Interfaces.o \

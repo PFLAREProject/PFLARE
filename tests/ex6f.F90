@@ -12,11 +12,9 @@
 !
 
       program main
-#include <petsc/finclude/petscksp.h>
-      use petsc
       use petscksp
 #include "finclude/pflare.h"
-#include "petsc/finclude/petsc.h"
+#include "petsc/finclude/petscksp.h"
       implicit none
 
 !  Variables:
@@ -149,8 +147,7 @@
 ! -----------------------------------------------------------------------
 !
       subroutine solve1(ksp,A,x,b,u,count,nsteps,regen,A2,ierr)
-      use petsc
-#include "petsc/finclude/petsc.h"        
+#include "petsc/finclude/petscksp.h"        
       use petscksp
       use pflare
       implicit none
@@ -245,8 +242,7 @@
       call KSPGetIterationNumber(ksp,its,ierr)  
       if (rank .eq. 0) write(6,101) count,its      
  101  format('Solve number ',i5,' iterations ',i5)
-
-      if (reason < 0) then
+      if (reason%v < 0) then
          error stop 1
       end if    
 

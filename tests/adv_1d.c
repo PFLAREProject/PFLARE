@@ -19,7 +19,8 @@ int main(int argc, char **args)
   KSP         ksp;            /* linear solver context */
   PC          pc;             /* preconditioner context */
   PetscInt    i, n = 100, its, global_row_start, global_row_end_plus_one, local_size;
-  PetscInt    start_assign, counter;
+  PetscInt    start_assign;
+  PetscCount  counter;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
 
