@@ -247,11 +247,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
       ISCreateGeneral(PETSC_COMM_SELF, size_cols, \
                   col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices);
 
-      if (poly_sparsity_order != 1)
-      {
-         ISSort(col_indices);
-      }
-
       MatSetOption(*input_mat, MAT_SUBMAT_SINGLEIS, PETSC_TRUE); 
       // Now this will be doing comms to get the non-local rows we want and returns in a sequential matrix
       if (!reuse_int_reuse_mat)
