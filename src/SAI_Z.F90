@@ -145,7 +145,8 @@ module sai_z
          deallocate(ad_indices)
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
-         call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, col_indices_off_proc_array, PETSC_USE_POINTER, col_indices(1), ierr) 
+         call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, col_indices_off_proc_array, &
+                  PETSC_USE_POINTER, col_indices(1), ierr) 
 
          ! ~~~~~~~
          ! Now we can pull out the chunk of matrix that we need
