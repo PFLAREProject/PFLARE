@@ -52,7 +52,7 @@ jobs:
 
   gnu_opt:
     runs-on: ubuntu-22.04
-    needs: gnu_debug
+    needs: [setup, gnu_debug]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -74,7 +74,7 @@ jobs:
 
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
-    needs: gnu_debug
+    needs: [setup, gnu_debug]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -96,7 +96,7 @@ jobs:
 
   gnu_opt_kokkos:
     runs-on: ubuntu-22.04
-    needs: gnu_debug
+    needs: [setup, gnu_debug]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -112,7 +112,7 @@ jobs:
             
   gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
-    needs: gnu_debug
+    needs: [setup, gnu_debug]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -129,7 +129,7 @@ jobs:
 # Currently nvidia fortran compiler breaks on petsc 3.23            
 #   nvidia_opt:
 #     runs-on: ubuntu-22.04
-#     needs: gnu_debug
+#     needs: [setup, gnu_debug]
 #     env:
 #       BRANCH: ${{ needs.setup.outputs.branch }}
 #     steps:
@@ -145,7 +145,7 @@ jobs:
             
   intel_opt_serial_test:
     runs-on: ubuntu-22.04
-    needs: gnu_debug
+    needs: [setup, gnu_debug]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
@@ -164,7 +164,7 @@ jobs:
   # needs to detect the gpu
   gnu_debug_gpu:
     runs-on: ubicloud-gpu
-    needs:  gnu_debug
+    needs:  [setup, gnu_debug]
     # This conditional ensures the job only runs when manually triggered
     if: github.event_name == 'workflow_dispatch'    
     # Specify the protected environment to ensure gpu builds are only triggered 
