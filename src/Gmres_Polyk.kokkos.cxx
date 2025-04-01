@@ -252,7 +252,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
       if (!reuse_int_reuse_mat)
       {
          MatCreateSubMatrices(*input_mat, one, &col_indices, &col_indices, MAT_INITIAL_MATRIX, &submatrices);
-         reuse_mat = &submatrices[0];
+         *reuse_mat = submatrices[0];
       }
       else
       {
