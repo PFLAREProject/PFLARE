@@ -116,6 +116,10 @@ run_tests_load_parallel:
 # 
 	@echo "Test PMISR DDC CF splitting in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364
+#
+	@echo ""
+	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"
+	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 25		
 
 run_tests_no_load_serial:
 #

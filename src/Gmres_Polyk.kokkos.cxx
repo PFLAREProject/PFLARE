@@ -350,6 +350,48 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
       }
    }   
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   // ~~~~~~~~~~~~~
+   // Now we have to be careful 
+   // mat_sparsity_match may not have diagonal entries in some rows
+   // but we know our gmres polynomial inverse must 
+   // and after calling mat_duplicate_copy_plus_diag_kokkos we know our output_mat
+   // has diagonals
+   // But when we write out to output_mat below, we assume it has the same sparsity as 
+   // mat_sparsity_match
+   // So we have to track which rows don't have diagonals in mat_sparsity_match
+   // so we can increment the writing out by one in output_mat
+   // The reason we don't have to do this in the cpu version is because we are calling
+   // matsetvalues to write out to output_mat, rather than writing out to the csr directly
+   // ~~~~~~~~~~~~~
+
+   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);    
+   Kokkos::deep_copy(found_diag_row_d, 0); 
+
+   Kokkos::parallel_for(
+      Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
+      KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+
+      // Row
+      PetscInt i = t.league_rank();
+      // ncols_local
+      PetscInt ncols_local = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+      
+      // Loop over all the columns in this row of sparsity mat
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+
+         // Is this column the diagonal
+         bool is_diagonal = (device_local_j_sparsity[device_local_i_sparsity[i] + j] + global_col_start == i + global_row_start);         
+         // This will only happen on a max of one thread per row
+         if (is_diagonal) found_diag_row_d(i) = 1;
+
+      });
+   });
+   
+   // ~~~~~~~~~~~~~
+   // ~~~~~~~~~~~~~
+
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
    // We will have ncols of integers which tell us how many matching indices we have
@@ -362,7 +404,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
                max_nnz * 2 * sizeof(PetscScalar) + \
                8 * 5 * sizeof(PetscScalar);
 
-   auto exec = PetscGetKokkosExecutionSpace();
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
    policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
@@ -512,11 +553,20 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
             // ~~~~~~~~~~~               
             Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
 
+               PetscInt diag_increm = 0;
+
                // Do the mult with coeff
                // If we're in the local part of the matrix
                if (j < start_nonlocal_idx)
                {
-                  device_local_vals_output[device_local_i_output[i] + j] += coefficients_d(term) * vals_temp[j];
+                  // We need to increment the index we access by one
+                  // if we don't have a diagonal in the sparsity matrix
+                  // as we have one in the output_mat                  
+                  if (found_diag_row_d(i) == 0 && device_local_j_output[device_local_i_output[i] + j] >= i) 
+                  {
+                     diag_increm = 1;
+                  }
+                  device_local_vals_output[device_local_i_output[i] + j + diag_increm] += coefficients_d(term) * vals_temp[j];
                }
                // Nonlocal part
                else
