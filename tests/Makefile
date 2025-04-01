@@ -116,6 +116,10 @@ run_tests_load_parallel:
 # 
 	@echo "Test PMISR DDC CF splitting in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364
+#
+	@echo ""
+	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"
+	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 25		
 
 run_tests_no_load_serial:
 #
@@ -190,6 +194,8 @@ run_tests_no_load_serial:
 	./ex6f -m 10 -n 10 -ksp_max_it 10 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
 	@echo "Test AIRG with 2nd order GMRES polynomials with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
+	@echo "Test AIRG with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change"
+	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2	
 # 
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC reused with no sparsity change with 0th order fixed sparsity"
@@ -328,6 +334,8 @@ run_tests_no_load_parallel:
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -ksp_max_it 10 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
 	@echo "Test AIRG with 2nd order GMRES polynomials with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
+	@echo "Test AIRG with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2
 # 
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC reused with no sparsity change in parallel with 0th order fixed sparsity"

@@ -21,4 +21,6 @@ using intKokkosView = Kokkos::View<int *, Kokkos::DefaultExecutionSpace>;
 using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
 using ConstMatRowMapKokkosView = KokkosCsrGraph::row_map_type::const_type;
 
+PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
+
 #endif

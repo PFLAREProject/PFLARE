@@ -346,6 +346,21 @@ module c_petsc_interfaces
 
    interface   
       
+      subroutine mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
+                  coefficients, reuse_int_reuse_mat, reuse_array, reuse_int_cmat, B_array) &
+         bind(c, name="mat_mult_powers_share_sparsity_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array, reuse_array
+         integer(c_int), value :: poly_order, poly_sparsity_order
+         type(c_ptr), value :: coefficients
+         integer(c_int), value :: reuse_int_cmat, reuse_int_reuse_mat
+      end subroutine mat_mult_powers_share_sparsity_kokkos         
+ 
+   end interface     
+
+   interface   
+      
       subroutine mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array) &
          bind(c, name="mat_duplicate_copy_plus_diag_kokkos")
          use iso_c_binding
