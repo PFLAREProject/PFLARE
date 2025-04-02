@@ -34,25 +34,7 @@ module air_mg_setup
       type(tMat) :: smoothing_mat, temp_mat
 
       ! ~~~~~~~~~~   
-
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      ! Pull out each of the sub-matrices
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      call timer_start(TIMER_ID_AIR_EXTRACT)             
-
-      ! Pull out A_ff
-      if (air_data%allocated_matrices_A_ff(our_level)) then
-         call MatCreateSubMatrix(input_mat, &
-               air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-               air_data%A_ff(our_level), ierr)         
-      else
-         call MatCreateSubMatrix(input_mat, &
-               air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_ff(our_level), ierr)
-      end if
-               
-      call timer_finish(TIMER_ID_AIR_EXTRACT)           
-
+        
       ! ~~~~~~~~~~~~~
       ! Now to apply a strong R tolerance as lAIR in hypre does, we have to drop entries 
       ! from A_cf and A_ff according to the strong R tolerance on A 
@@ -985,7 +967,7 @@ module air_mg_setup
       PetscInt            :: petsc_level, no_levels_petsc_int
       PetscInt            :: local_vec_size, ystart, yend, local_rows_repart, local_cols_repart
       PetscInt            :: global_rows_repart, global_cols_repart
-      integer             :: i_loc
+      integer             :: i_loc, inverse_type_aff
       integer             :: no_levels, our_level, our_level_coarse, errorcode, comm_rank, comm_size
       PetscErrorCode      :: ierr
       MPI_Comm            :: MPI_COMM_MATRIX
@@ -1275,13 +1257,51 @@ module air_mg_setup
             call timer_finish(TIMER_ID_AIR_CONSTRAIN)
          end if
 
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! We need to pull out Aff before we do anything
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~         
+
+         call timer_start(TIMER_ID_AIR_EXTRACT)             
+
+         ! Pull out A_ff
+         if (air_data%allocated_matrices_A_ff(our_level)) then
+            call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
+                  air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
+                  air_data%A_ff(our_level), ierr)         
+         else
+            call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
+                  air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                  air_data%A_ff(our_level), ierr)
+         end if
+                  
+         call timer_finish(TIMER_ID_AIR_EXTRACT)   
+         
+         ! SET A COMMAND LINE FLAG AND TURN THIS INTO JACOBI
+         ! have to get aff out first above the steup_gmres_poly_data and 
+         ! change the inverse type
+
+         ! ~~~~~~~~~
+         ! Check if Aff is purely diagonal
+         ! ~~~~~~~~~                 
+         ! Don't have to check if we have strong threshold of zero, we know it is
+         ! and maxits_a_ff_levels is set to one already in that case
+         inverse_type_aff = air_data%options%inverse_type
+         if (air_data%options%strong_threshold /= 0d0) then      
+
+            call MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
+            ! If Aff is diagonal we only have to do one iteration                
+            if (diag_only == 1) then
+               air_data%maxits_a_ff_levels(our_level) = 1
+               inverse_type_aff = PFLAREINV_JACOBI
+            end if     
+         end if             
 
          ! ~~~~~~~~~
          ! Setup the details of our gmres polynomials
          ! ~~~~~~~~~         
 
          call setup_gmres_poly_data(global_fine_is_size, &
-                  air_data%options%inverse_type, &
+                  inverse_type_aff, &
                   air_data%options%poly_order, &
                   air_data%options%inverse_sparsity_order, &
                   air_data%options%subcomm, &
@@ -1290,7 +1310,7 @@ module air_mg_setup
 
          ! Setup the same structure for the inv_A_ff made from dropped Aff 
          call setup_gmres_poly_data(global_fine_is_size, &
-                  air_data%options%inverse_type, &
+                  inverse_type_aff, &
                   air_data%options%poly_order, &
                   air_data%options%inverse_sparsity_order, &
                   air_data%options%subcomm, &
@@ -1316,20 +1336,7 @@ module air_mg_setup
          ! Extract the submatrices and start the comms to compute the approximate inverses
          ! ~~~~~~~~~         
          call get_submatrices_start_poly_coeff_comms(air_data%coarse_matrix(our_level), &
-               our_level, air_data)   
-
-         ! ~~~~~~~~~
-         ! Check if Aff is purely diagonal
-         ! ~~~~~~~~~                 
-         ! Don't have to check if we have strong threshold of zero, we know it is
-         ! and maxits_a_ff_levels is set to one already in that case
-         if (air_data%options%strong_threshold /= 0d0) then      
-            call MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
-            ! If Aff is diagonal we only have to do one iteration                
-            if (diag_only == 1) then
-               air_data%maxits_a_ff_levels(our_level) = 1
-            end if     
-         end if    
+               our_level, air_data)
                
          ! ~~~~~~~
          ! Temporary vecs we use in the smoother
