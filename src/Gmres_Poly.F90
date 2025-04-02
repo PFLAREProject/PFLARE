@@ -60,6 +60,7 @@ module gmres_poly
       end if   
       poly_data%buffers%proc_stride = int(proc_stride)
 
+      poly_data%inverse_type = inverse_type
       ! For matrices with size smaller than the subspace size (ie polynomial order + 1)
       ! we'll have (close to) an exact solver and only need to go up to the matrix size
       poly_data%gmres_poly_order = poly_order

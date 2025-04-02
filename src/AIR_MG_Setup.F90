@@ -124,7 +124,7 @@ module air_mg_setup
       if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) .AND. &
                   air_data%options%reuse_poly_coeffs)) then
          call start_approximate_inverse(smoothing_mat, &
-                  air_data%options%inverse_type, &
+                  air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                   air_data%inv_A_ff_poly_data(our_level)%buffers, &
                   air_data%inv_A_ff_poly_data(our_level)%coefficients)        
@@ -141,7 +141,7 @@ module air_mg_setup
          if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) .AND. &
                      air_data%options%reuse_poly_coeffs)) then
             call start_approximate_inverse(air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
-                  air_data%options%inverse_type, &
+                  air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_order, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)          
@@ -172,8 +172,10 @@ module air_mg_setup
          if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) &
                      .AND. air_data%options%reuse_poly_coeffs)) then
             call start_approximate_inverse(air_data%A_cc(our_level), &
-                  air_data%options%inverse_type, air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
-                  air_data%inv_A_cc_poly_data(our_level)%buffers, air_data%inv_A_cc_poly_data(our_level)%coefficients)  
+                  air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
+                  air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
+                  air_data%inv_A_cc_poly_data(our_level)%buffers, &
+                  air_data%inv_A_cc_poly_data(our_level)%coefficients)  
          end if
 
          call timer_finish(TIMER_ID_AIR_INVERSE)
@@ -351,7 +353,8 @@ module air_mg_setup
 
       ! Regardless of if we are fc smoothing or smoothing all unknowns we store the inverse
       ! in inv_A_ff
-      call finish_approximate_inverse(smoothing_mat, air_data%options%inverse_type, &
+      call finish_approximate_inverse(smoothing_mat, &
+            air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
             air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
             air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
             air_data%inv_A_ff_poly_data(our_level)%buffers, &
@@ -377,7 +380,7 @@ module air_mg_setup
             ! given to matrix_free_polys
             ! If we aren't doing matrix-free smooths, then we keep the assembled inv_A_ff
             call finish_approximate_inverse(air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
-                     air_data%options%inverse_type, &
+                     air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_order, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_sparsity_order, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
@@ -402,7 +405,7 @@ module air_mg_setup
             if (air_data%options%matrix_free_polys) then            
                ! Making sure to give it the non dropped A_ff here
                call finish_approximate_inverse(air_data%A_ff(our_level), &
-                        air_data%options%inverse_type, &
+                        air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
                         air_data%inv_A_ff_poly_data(our_level)%buffers, &
@@ -827,7 +830,7 @@ module air_mg_setup
          call timer_start(TIMER_ID_AIR_INVERSE)           
                   
          call finish_approximate_inverse(air_data%A_cc(our_level), &
-                  air_data%options%inverse_type, &
+                  air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_sparsity_order, &
                   air_data%inv_A_cc_poly_data(our_level)%buffers, &
@@ -1002,6 +1005,7 @@ module air_mg_setup
       logical :: auto_truncated
       PetscRandom :: rctx
       MatType:: mat_type
+      integer(c_int) :: diag_only
 
       ! ~~~~~~     
 
@@ -1052,6 +1056,7 @@ module air_mg_setup
          ! Only have to do one "smooth" to apply the exact inverse
          air_data%options%maxits_a_ff = 1        
       end if                 
+      air_data%maxits_a_ff_levels = air_data%options%maxits_a_ff
 
       if (air_data%options%print_stats_timings .AND. comm_rank == 0) print *, "Timers are cumulative"
 
@@ -1098,9 +1103,10 @@ module air_mg_setup
 
             ! Start the approximate inverse we'll use on this level
             call start_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%options%coarsest_inverse_type, &
+                  air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%inv_coarsest_poly_data%buffers, air_data%inv_coarsest_poly_data%coefficients)                       
+                  air_data%inv_coarsest_poly_data%buffers, &
+                  air_data%inv_coarsest_poly_data%coefficients)                       
 
             ! This will be a vec of randoms that differ from those used to create the gmres polynomials
             ! We will solve Ax = rand_vec to test how good our coarse solver is
@@ -1116,9 +1122,11 @@ module air_mg_setup
 
             ! Finish our approximate inverse
             call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%options%coarsest_inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
-                  air_data%inv_coarsest_poly_data%buffers, air_data%inv_coarsest_poly_data%coefficients, &
+                  air_data%inv_coarsest_poly_data%inverse_type, &
+                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                  air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
+                  air_data%inv_coarsest_poly_data%buffers, &
+                  air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
                   air_data%inv_A_ff(our_level))             
@@ -1308,7 +1316,20 @@ module air_mg_setup
          ! Extract the submatrices and start the comms to compute the approximate inverses
          ! ~~~~~~~~~         
          call get_submatrices_start_poly_coeff_comms(air_data%coarse_matrix(our_level), &
-               our_level, air_data)         
+               our_level, air_data)   
+
+         ! ~~~~~~~~~
+         ! Check if Aff is purely diagonal
+         ! ~~~~~~~~~                 
+         ! Don't have to check if we have strong threshold of zero, we know it is
+         ! and maxits_a_ff_levels is set to one already in that case
+         if (air_data%options%strong_threshold /= 0d0) then      
+            call MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
+            ! If Aff is diagonal we only have to do one iteration                
+            if (diag_only == 1) then
+               air_data%maxits_a_ff_levels(our_level) = 1
+            end if     
+         end if    
                
          ! ~~~~~~~
          ! Temporary vecs we use in the smoother
@@ -1725,9 +1746,10 @@ module air_mg_setup
          ! We've already created our coarse solver if we've auto truncated         
          if (.NOT. auto_truncated) then
             call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
-                  air_data%options%coarsest_inverse_type, &
+                  air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%inv_coarsest_poly_data%buffers, air_data%inv_coarsest_poly_data%coefficients)                   
+                  air_data%inv_coarsest_poly_data%buffers, &
+                  air_data%inv_coarsest_poly_data%coefficients)                   
          end if
       end if
       call timer_finish(TIMER_ID_AIR_INVERSE)  
@@ -1884,7 +1906,7 @@ module air_mg_setup
          if (.NOT. auto_truncated) then
 
             call finish_approximate_inverse(air_data%coarse_matrix(no_levels), &
-                  air_data%options%coarsest_inverse_type, &
+                  air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
                   air_data%inv_coarsest_poly_data%buffers, &
@@ -2102,7 +2124,8 @@ module air_mg_setup
       air_data%A_cc_nnzs            = 0       
       air_data%inv_A_cc_nnzs        = 0  
       air_data%coarse_matrix_nnzs   = 0   
-      air_data%allocated_coarse_matrix = .FALSE.       
+      air_data%allocated_coarse_matrix = .FALSE.   
+      air_data%maxits_a_ff_levels = -1
 
    end subroutine reset_air_data     
 
@@ -2202,7 +2225,9 @@ module air_mg_setup
          deallocate(air_data%allocated_matrices_A_ff)
          deallocate(air_data%allocated_matrices_A_cc)      
          deallocate(air_data%allocated_is)
-         deallocate(air_data%allocated_coarse_matrix)         
+         deallocate(air_data%allocated_coarse_matrix)    
+         
+         deallocate(air_data%maxits_a_ff_levels)         
     
          deallocate(air_data%temp_vecs(1)%array)
          deallocate(air_data%temp_vecs_fine(1)%array)

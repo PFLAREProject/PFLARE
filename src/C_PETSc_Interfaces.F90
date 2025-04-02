@@ -170,6 +170,17 @@ module c_petsc_interfaces
 
    interface   
       
+      subroutine MatGetDiagonalOnly_c(A_array, diag_only) &
+         bind(c, name="MatGetDiagonalOnly_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int) :: diag_only
+      end subroutine MatGetDiagonalOnly_c         
+ 
+   end interface   
+
+   interface   
+      
       subroutine generate_identity_is_kokkos(A_array, index, B_array) &
          bind(c, name="generate_identity_is_kokkos")
          use iso_c_binding

@@ -14,6 +14,9 @@ module gmres_poly_data_type
    ! Stores the data needed for gmres polynomials
    type gmres_poly_data
 
+      ! Inverse type
+      integer :: inverse_type = 0
+
       ! Order of the gmres polynomial
       integer :: gmres_poly_order = 6
       ! The sparsity order of the polynomial if assembled

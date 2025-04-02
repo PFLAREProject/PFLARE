@@ -314,6 +314,9 @@ module air_data_type
       ! Boolean to tell whether we have allocated petsc matrices
       logical, allocatable, dimension(:)                 :: allocated_coarse_matrix
 
+      ! The number of F smooths we do on each level
+      PetscInt, allocatable, dimension(:)              :: maxits_a_ff_levels
+
       ! The coarsest grid is stored in coarse_matrix(no_levels) and this is the 
       ! GMRES polynomial data for the coarsest grid solver
       ! The approx inverse for the coarse grid solve is stored in inv_A_ff(no_levels)
@@ -387,7 +390,9 @@ module air_data_type
       allocate(air_data%allocated_matrices_A_ff(air_data%options%max_levels))
       allocate(air_data%allocated_matrices_A_cc(air_data%options%max_levels))
       allocate(air_data%allocated_is(air_data%options%max_levels))
-      allocate(air_data%allocated_coarse_matrix(air_data%options%max_levels))    
+      allocate(air_data%allocated_coarse_matrix(air_data%options%max_levels))   
+      
+      allocate(air_data%maxits_a_ff_levels(air_data%options%max_levels))      
 
       ! Temporary vectors
       allocate(air_data%temp_vecs_fine(1)%array(air_data%options%max_levels))
@@ -417,6 +422,7 @@ module air_data_type
       air_data%allocated_is = .FALSE.
       air_data%allocated_matrices_A_cc = .FALSE. 
       air_data%allocated_coarse_matrix = .FALSE.
+      air_data%maxits_a_ff_levels = -1
      
    end subroutine create_air_data    
 
