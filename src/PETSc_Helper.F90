@@ -1788,30 +1788,21 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in) :: input_mat
       integer(kind=8), intent(out) :: nnzs
 
-      PetscInt :: ncols, i_loc
-      PetscInt :: global_row_start, global_row_end_plus_one
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX
+      PetscInt :: local_nnzs_petsc
       integer(kind=8) :: local_nnzs
       
       ! ~~~~~~~~~~
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
       ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
 
-      ! This returns the global index of the local portion of the matrix
-      call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
-      
-      local_nnzs = 0
-
-      ! This will be the nnzs associated with the local rows
-      do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         local_nnzs = local_nnzs + ncols
-         call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do          
+      ! Get local nnzs without using getrow
+      call MatGetNNZs_local_c(input_mat%v, local_nnzs_petsc)      
+      local_nnzs = local_nnzs_petsc
 
       ! Do an accumulate if in parallel
       if (comm_size/=1) then
