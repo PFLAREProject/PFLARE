@@ -372,7 +372,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    // ~~~~~~~~~~~~~~~~~  
    // We need to assemble our i,j, vals so we can build our matrix
    // ~~~~~~~~~~~~~~~~~
-   // Create dual memory on the device and host
+   // Create memory on the device
    Kokkos::View<PetscScalar *> a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
    Kokkos::View<PetscInt *> i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows+1);
    Kokkos::View<PetscInt *> j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
@@ -525,6 +525,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                // If we don't have an existing diagonal, add it in where it would be
                else
                {  
+                  // @@@ this bound is wrong - ncols_local-1 is not right
                   for (int j = ncols_local-1; j > before_diag_index; j--)
                   {
                      j_local_d(i_local_d(i) + j + 1) = j_local_d(i_local_d(i) + j);
@@ -566,6 +567,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                // If we don't have an existing diagonal, add it in where it would be
                else
                {  
+                  // @@@ this bound is wrong
                   for (int j = ncols_local-1; j > before_diag_index; j--)
                   {
                      j_nonlocal_d(i_nonlocal_d(i) + j + 1) = j_nonlocal_d(i_nonlocal_d(i) + j);
@@ -899,7 +901,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // ~~~~~~~~~~~~~~~~~  
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
-      // Create dual memory on the device and host
+      // Create memory on the device
       a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
       i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows+1);
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
@@ -1451,7 +1453,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    // ~~~~~~~~~~~~~~~~~  
    // We need to assemble our i,j, vals so we can build our matrix
    // ~~~~~~~~~~~~~~~~~
-   // Create dual memory on the device and host
+   // Create memory on the device
    Kokkos::View<PetscScalar *> a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
    Kokkos::View<PetscInt *> i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows+1);
    Kokkos::View<PetscInt *> j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
@@ -1872,7 +1874,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // ~~~~~~~~~~~~~~~~~  
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
-      // Create dual memory on the device and host
+      // Create memory on the device
       a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
       i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows_z+1);
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
@@ -2306,7 +2308,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
       // ~~~~~~~~~~~~~~~~~  
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
-      // Create dual memory on the device and host
+      // Create memory on the device
       a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
       i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows+1);
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
