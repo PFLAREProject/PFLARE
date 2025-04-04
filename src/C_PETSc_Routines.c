@@ -406,7 +406,7 @@ PETSC_INTERN void PCGetSetupCalled_c(PC *pc, PetscInt *setupcalled)
    *setupcalled = (*pc)->setupcalled;
 }
 
-// Gets the number of nonzeros in the local componet 
+// Gets the number of nonzeros in the local 
 PETSC_INTERN PetscErrorCode MatGetNNZs_local_c(Mat *A, PetscInt *nnzs)
 {
   MPI_Comm        acomm;
@@ -435,6 +435,50 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_local_c(Mat *A, PetscInt *nnzs)
 
   // Set the number of non-zeros
   *nnzs = a->nz;
+
+  PetscFunctionReturn(0);
+}
+
+// Gets the number of nonzeros in the both local and nonlocal 
+PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, PetscInt *nnzs_nonlocal)
+{
+  MPI_Comm        acomm;
+  PetscMPIInt     size;
+
+  PetscFunctionBegin;
+
+  PetscObjectGetComm((PetscObject)(*A), &acomm);
+  MPI_Comm_size(acomm, &size);
+
+  Mat_MPIAIJ *mat_mpi = NULL;
+  Mat mat_local, mat_nonlocal; 
+
+  // Get the existing output mats
+  if (size != 1)
+  {
+     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
+     mat_local = mat_mpi->A;
+     mat_nonlocal = mat_mpi->B;
+  }
+  else
+  {
+     mat_local = *A;
+  } 
+
+  Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local->data;
+
+  // Set the number of non-zeros
+  *nnzs_local = a->nz;
+
+  if (size != 1)
+  {
+     Mat_SeqAIJ *b = (Mat_SeqAIJ *)mat_nonlocal->data;
+     *nnzs_nonlocal = b->nz;
+  }
+  else
+  {
+     *nnzs_nonlocal = 0;
+  }  
 
   PetscFunctionReturn(0);
 }

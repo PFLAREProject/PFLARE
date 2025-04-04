@@ -1570,7 +1570,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, allocatable, dimension(:) :: v      
       PetscInt, dimension(:), pointer :: colmap
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      type(tMat) :: Ad, Ao, temp_mat
+      type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: col_indices_off_proc_array
       type(tIS) :: col_indices
       PetscInt, dimension(:), pointer :: is_pointer_orig_fine_col, is_pointer_coarse, is_pointer_fine
@@ -1605,18 +1605,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Get the local non-local components and sizes
       if (comm_size /= 1) then
 
-         if (mat_type == "mpiaij") then
-            call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, colmap, ierr)
-            A_array = Z%v
-
-         ! If on the gpu, just do a convert to mpiaij format first
-         ! This will be expensive but the best we can do for now without writing our 
-         ! own version of this subroutine in cuda/kokkos            
-         else
-            call MatConvert(Z, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr)
-            A_array = temp_mat%v
-         end if
+         call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, colmap, ierr)
+         A_array = Z%v
 
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
@@ -1766,11 +1756,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end if
       deallocate(row_indices_coo, col_indices_coo)
       call MatSetValuesCOO(R, v, INSERT_VALUES, ierr)    
-      deallocate(v)   
-
-      if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
-         call MatDestroy(temp_mat, ierr)
-      end if      
+      deallocate(v)     
 
       call ISRestoreIndices(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
       call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)
