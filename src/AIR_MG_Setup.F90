@@ -279,6 +279,7 @@ module air_mg_setup
       type(tMat) :: minus_mat, sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat
       type(tMat) :: temp_mat
       type(tIS)  :: temp_is
+      type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
       integer :: comm_size, errorcode, order, i_loc
       MPI_Comm :: MPI_COMM_MATRIX
@@ -286,7 +287,7 @@ module air_mg_setup
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer
-      MatType:: mat_type
+      MatType:: mat_type, mat_type_minus
 
       ! ~~~~~~~~~~
 
@@ -423,8 +424,9 @@ module air_mg_setup
          end if
 
          ! Copy inv_A_ff and multiply by -1
-         call MatConvert(inv_dropped_Aff, MATSAME, MAT_INITIAL_MATRIX, minus_mat, ierr)
+         call MatDuplicate(inv_dropped_Aff, MAT_COPY_VALUES, minus_mat, ierr) 
          call MatScale(minus_mat, -1d0, ierr)
+         call MatGetType(minus_mat, mat_type_minus, ierr)       
 
          if (destroy_mat) then
             call MatDestroy(inv_dropped_Aff, ierr)         
@@ -502,13 +504,36 @@ module air_mg_setup
 
             ! Do the multiplication
             temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_W)
-            if (.NOT. PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(minus_mat, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
-                        MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)
+            ! If we know our inv_aff is diagonal we don't have to do a matmatmult
+            ! It is just a row/column scaling
+            if (mat_type_minus == MATDIAGONAL) then
+               if (.NOT. PetscObjectIsNull(temp_mat)) then
+                  call MatCopy(air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                           air_data%reuse(our_level)%reuse_mat(MAT_W), &
+                           SAME_NONZERO_PATTERN, ierr)
+               else
+                  call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                           MAT_COPY_VALUES, &
+                           air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)          
+               end if
+               call MatCreateVecs(minus_mat, PETSC_NULL_VEC, diag_vec, ierr)
+               ! Should be able to call MatDiagonalGetDiagonal but it returns
+               ! the wrong vector type with kokkos, even when it is set correctly
+               ! when calling matcreatediagonal
+               call MatGetDiagonal(minus_mat, diag_vec, ierr)
+               ! Left multiply
+               call MatDiagonalScale(air_data%reuse(our_level)%reuse_mat(MAT_W), &
+                        diag_vec, PETSC_NULL_VEC, ierr)          
+               call VecDestroy(diag_vec, ierr)
             else
-               call MatMatMult(minus_mat, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
-                        MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)  
-            end if
+               if (.NOT. PetscObjectIsNull(temp_mat)) then
+                  call MatMatMult(minus_mat, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                           MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)
+               else
+                  call MatMatMult(minus_mat, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                           MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)  
+               end if
+            end if              
 
             call timer_start(TIMER_ID_AIR_DROP)  
 
@@ -708,12 +733,33 @@ module air_mg_setup
       ! For AIRG - we do a matmatmult with our approximate A_ff inverse
       else         
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z)
-         if (.NOT. PetscObjectIsNull(temp_mat)) then
-            call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), minus_mat, &
-                  MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
-         else
-            call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), minus_mat, &
-                  MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
+
+         ! If we know our inv_aff is diagonal we don't have to do a matmatmult
+         ! It is just a row/column scaling
+         if (mat_type_minus == MATDIAGONAL) then
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatCopy(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
+                        air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                        SAME_NONZERO_PATTERN, ierr)
+            else
+               call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
+                        MAT_COPY_VALUES, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+            end if
+            call MatCreateVecs(minus_mat, PETSC_NULL_VEC, diag_vec, ierr)
+            call MatGetDiagonal(minus_mat, diag_vec, ierr)
+            ! Right multiply
+            call MatDiagonalScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                     PETSC_NULL_VEC, diag_vec, ierr)          
+            call VecDestroy(diag_vec, ierr)
+         else         
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), minus_mat, &
+                     MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
+            else
+               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), minus_mat, &
+                     MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
+            end if
          end if
       end if
 

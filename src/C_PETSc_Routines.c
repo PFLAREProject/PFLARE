@@ -411,11 +411,20 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_local_c(Mat *A, PetscInt *nnzs)
 {
   MPI_Comm        acomm;
   PetscMPIInt     size;
+  MatType mat_type;
 
   PetscFunctionBegin;
 
   PetscObjectGetComm((PetscObject)(*A), &acomm);
   MPI_Comm_size(acomm, &size);
+
+  MatGetType(*A, &mat_type);
+  if (strcmp(mat_type, MATDIAGONAL) == 0)
+  {
+      // This is a diagonal matrix, so just return the number of rows
+      MatGetLocalSize(*A, nnzs, NULL);
+      PetscFunctionReturn(0);   
+  }
 
   Mat_MPIAIJ *mat_mpi = NULL;
   Mat mat_local; 
@@ -444,11 +453,21 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
 {
   MPI_Comm        acomm;
   PetscMPIInt     size;
+  MatType mat_type;
 
   PetscFunctionBegin;
 
   PetscObjectGetComm((PetscObject)(*A), &acomm);
   MPI_Comm_size(acomm, &size);
+  *nnzs_nonlocal = 0;
+
+  MatGetType(*A, &mat_type);
+  if (strcmp(mat_type, MATDIAGONAL) == 0)
+  {
+      // This is a diagonal matrix, so just return the number of rows
+      MatGetLocalSize(*A, nnzs_local, NULL);
+      PetscFunctionReturn(0);   
+  }  
 
   Mat_MPIAIJ *mat_mpi = NULL;
   Mat mat_local, mat_nonlocal; 
@@ -475,10 +494,6 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
      Mat_SeqAIJ *b = (Mat_SeqAIJ *)mat_nonlocal->data;
      *nnzs_nonlocal = b->nz;
   }
-  else
-  {
-     *nnzs_nonlocal = 0;
-  }  
 
   PetscFunctionReturn(0);
 }
