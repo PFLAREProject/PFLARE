@@ -1570,7 +1570,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, allocatable, dimension(:) :: v      
       PetscInt, dimension(:), pointer :: colmap
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      type(tMat) :: Ad, Ao, temp_mat
+      type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: col_indices_off_proc_array
       type(tIS) :: col_indices
       PetscInt, dimension(:), pointer :: is_pointer_orig_fine_col, is_pointer_coarse, is_pointer_fine
@@ -1605,18 +1605,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Get the local non-local components and sizes
       if (comm_size /= 1) then
 
-         if (mat_type == "mpiaij") then
-            call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, colmap, ierr)
-            A_array = Z%v
-
-         ! If on the gpu, just do a convert to mpiaij format first
-         ! This will be expensive but the best we can do for now without writing our 
-         ! own version of this subroutine in cuda/kokkos            
-         else
-            call MatConvert(Z, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr)
-            A_array = temp_mat%v
-         end if
+         call MatMPIAIJGetSeqAIJ(Z, Ad, Ao, colmap, ierr)
+         A_array = Z%v
 
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
@@ -1766,11 +1756,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end if
       deallocate(row_indices_coo, col_indices_coo)
       call MatSetValuesCOO(R, v, INSERT_VALUES, ierr)    
-      deallocate(v)   
-
-      if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
-         call MatDestroy(temp_mat, ierr)
-      end if      
+      deallocate(v)     
 
       call ISRestoreIndices(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
       call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)
@@ -1788,30 +1774,21 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in) :: input_mat
       integer(kind=8), intent(out) :: nnzs
 
-      PetscInt :: ncols, i_loc
-      PetscInt :: global_row_start, global_row_end_plus_one
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX
+      PetscInt :: local_nnzs_petsc
       integer(kind=8) :: local_nnzs
       
       ! ~~~~~~~~~~
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
       ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
 
-      ! This returns the global index of the local portion of the matrix
-      call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
-      
-      local_nnzs = 0
-
-      ! This will be the nnzs associated with the local rows
-      do i_loc = global_row_start, global_row_end_plus_one-1                  
-         call MatGetRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         local_nnzs = local_nnzs + ncols
-         call MatRestoreRow(input_mat, i_loc, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do          
+      ! Get local nnzs without using getrow
+      call MatGetNNZs_local_c(input_mat%v, local_nnzs_petsc)      
+      local_nnzs = local_nnzs_petsc
 
       ! Do an accumulate if in parallel
       if (comm_size/=1) then

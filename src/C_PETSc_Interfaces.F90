@@ -145,6 +145,28 @@ module c_petsc_interfaces
       end subroutine MatMPICreateNonemptySubcomm_c         
  
    end interface
+
+   interface   
+      
+      subroutine MatGetNNZs_local_c(A_array, nnzs) &
+         bind(c, name="MatGetNNZs_local_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt :: nnzs
+      end subroutine MatGetNNZs_local_c
+ 
+   end interface
+   
+   interface   
+      
+      subroutine MatGetNNZs_both_c(A_array, nnzs_local, nnzs_nonlocal) &
+         bind(c, name="MatGetNNZs_both_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt :: nnzs_local, nnzs_nonlocal
+      end subroutine MatGetNNZs_both_c
+ 
+   end interface      
    
    interface   
       
