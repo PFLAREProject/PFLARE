@@ -294,28 +294,42 @@ PETSC_INTERN void mat_mat_symbolic_c(Mat *A, Mat *B, Mat *result)
 {
    MPI_Comm comm;
    int comm_size;
+   MatType mat_type_a, mat_type_b;
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*A, &comm);
    MPI_Comm_size(comm, &comm_size);
 
-   // For some reason in serial matduplicate is not defined on unassembled matrices
-   // ie we call a matduplicate on the symbolic sparsity_mat returned from this
-   // So we just do an ordinary matmatmult in serial
-   if (comm_size == 1) 
-   {
-      MatMatMult(*A, *B, MAT_INITIAL_MATRIX, 1.0, result);
+   MatGetType(*A, &mat_type_a);
+   MatGetType(*B, &mat_type_b);
 
+   if (strcmp(mat_type_a, MATDIAGONAL) == 0)
+   {
+      MatDuplicate(*B, MAT_DO_NOT_COPY_VALUES, result);
+   }
+   else if (strcmp(mat_type_b, MATDIAGONAL) == 0)
+   {  
+      MatDuplicate(*A, MAT_DO_NOT_COPY_VALUES, result);
    }
    else
    {
-      MatProductCreate(*A, *B, NULL, result);
-      MatProductSetType(*result, MATPRODUCT_AB);
-      MatProductSetAlgorithm(*result, "default");
-      MatProductSetFill(*result, PETSC_DEFAULT);
-      MatProductSetFromOptions(*result);
-      MatProductSymbolic(*result);
-      MatProductClear(*result);
+      // For some reason in serial matduplicate is not defined on unassembled matrices
+      // ie we call a matduplicate on the symbolic sparsity_mat returned from this
+      // So we just do an ordinary matmatmult in serial
+      if (comm_size == 1) 
+      {
+         MatMatMult(*A, *B, MAT_INITIAL_MATRIX, 1.0, result);
+      }
+      else
+      {
+         MatProductCreate(*A, *B, NULL, result);
+         MatProductSetType(*result, MATPRODUCT_AB);
+         MatProductSetAlgorithm(*result, "default");
+         MatProductSetFill(*result, PETSC_DEFAULT);
+         MatProductSetFromOptions(*result);
+         MatProductSymbolic(*result);
+         MatProductClear(*result);
+      }
    }
 
    return;
