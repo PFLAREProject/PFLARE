@@ -588,7 +588,7 @@ module air_mg_setup
             ! (rather than just having the same sparsity) once we've 
             ! repartitioned. We have to force it to repartition to get around this
             ! so the exact same matrices are used in every case
-            call MatGetType(air_data%A_ff(our_level), mat_type, ierr)
+            call MatGetType(air_data%coarse_matrix(our_level), mat_type, ierr)
             if (mat_type == MATMPIAIJKOKKOS) then
                air_data%reuse_one_point_classical_prolong = .FALSE.
             end if
@@ -1022,7 +1022,7 @@ module air_mg_setup
       type(tMat)          :: temp_mat
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
-      type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec
+      type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
       type(tIS)           :: is_unchanged, is_full, temp_is
       type(mat_ctxtype), pointer :: mat_ctx
       PetscInt, parameter :: one=1, zero=0
@@ -1030,9 +1030,9 @@ module air_mg_setup
       type(tVec), dimension(:), allocatable :: left_null_vecs_c, right_null_vecs_c
       VecScatter :: vec_scatter
       VecType :: vec_type
-      logical :: auto_truncated
+      logical :: auto_truncated, aff_diag, check_diag_only
       PetscRandom :: rctx
-      MatType:: mat_type
+      MatType:: mat_type, mat_type_aff
       integer(c_int) :: diag_only
 
       ! ~~~~~~     
@@ -1077,13 +1077,7 @@ module air_mg_setup
       call get_near_nullspace(amat, air_data%options%constrain_z, air_data%options%constrain_w, &
                left_null_vecs, right_null_vecs)
 
-      ! ~~~~~~~~~~~~~~~~~~~~~
-
-      ! If we have an exact IS, we know Aff is diagonal and our inverse is exact
-      if (air_data%options%strong_threshold == 0d0) then   
-         ! Only have to do one "smooth" to apply the exact inverse
-         air_data%options%maxits_a_ff = 1        
-      end if                 
+      ! ~~~~~~~~~~~~~~~~~~~~~                
       air_data%maxits_a_ff_levels = air_data%options%maxits_a_ff
 
       if (air_data%options%print_stats_timings .AND. comm_rank == 0) print *, "Timers are cumulative"
@@ -1311,9 +1305,30 @@ module air_mg_setup
 
          ! Pull out A_ff
          if (air_data%allocated_matrices_A_ff(our_level)) then
-            call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
-                  air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                  air_data%A_ff(our_level), ierr)         
+            call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
+
+            ! If our Aff was previously converted to a matdiagonal, can't call matcreatesubmatrix 
+            ! with MAT_REUSE_MATRIX
+            if (mat_type_aff == MATDIAGONAL) then
+
+               ! Easy to get out Aff if we know its diagonal
+               call MatCreateVecs(air_data%A_ff(our_level), diag_vec_aff, PETSC_NULL_VEC, ierr)
+               call MatCreateVecs(air_data%coarse_matrix(our_level), diag_vec, PETSC_NULL_VEC, ierr)
+               ! Get the matrix diagonal
+               call MatGetDiagonal(air_data%coarse_matrix(our_level), diag_vec, ierr)
+               ! Pull out the F points in the diagonal - this happens on the host
+               ! if this becomes expensive could call something like our version of VecISCopyLocal_kokkos
+               call VecISCopy(diag_vec, air_data%IS_fine_index(our_level), &
+                        SCATTER_REVERSE, diag_vec_aff, ierr)
+               call MatDiagonalSet(air_data%A_ff(our_level), diag_vec_aff, INSERT_VALUES, ierr)
+               call VecDestroy(diag_vec_aff, ierr)                               
+
+            ! If its not matdiagonal we can do reuse as normal
+            else
+               call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
+                     air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
+                     air_data%A_ff(our_level), ierr)         
+            end if
          else
             call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
                   air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
@@ -1322,24 +1337,49 @@ module air_mg_setup
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
          
-         ! SET A COMMAND LINE FLAG AND TURN THIS INTO JACOBI
-         ! have to get aff out first above the steup_gmres_poly_data and 
-         ! change the inverse type
-
          ! ~~~~~~~~~
          ! Check if Aff is purely diagonal
          ! ~~~~~~~~~                 
-         ! Don't have to check if we have strong threshold of zero, we know it is
-         ! and maxits_a_ff_levels is set to one already in that case
          inverse_type_aff = air_data%options%inverse_type
-         if (air_data%options%strong_threshold /= 0d0) then      
+         aff_diag = .FALSE.
+         check_diag_only = .TRUE.
+         ! Don't have to check if we have strong threshold of zero 
+         ! or its already matdiagonal due to reuse
+         if (mat_type_aff == MATDIAGONAL .OR. air_data%options%strong_threshold == 0d0) then
+            check_diag_only = .FALSE.
+         end if
+
+         ! Check if Aff is only a diagonal
+         if (check_diag_only) then      
 
             call MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
-            ! If Aff is diagonal we only have to do one iteration                
+            ! If Aff is diagonal we can exploit this                
             if (diag_only == 1) then
-               air_data%maxits_a_ff_levels(our_level) = 1
-               inverse_type_aff = PFLAREINV_JACOBI
-            end if     
+               aff_diag = .TRUE.
+            end if
+         else
+            aff_diag = .TRUE.
+         end if
+
+         ! Convert Aff to a matdiagonal type
+         if (aff_diag) then
+
+            ! We've already updated Aff above if we are reusing and it is matdiagonal already
+            if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
+               call MatCreateVecs(air_data%A_ff(our_level), diag_vec_aff, PETSC_NULL_VEC, ierr)
+               call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)               
+
+               call MatDestroy(air_data%A_ff(our_level), ierr)
+               ! The matrix takes ownership of diag_vec_aff
+               call MatCreateDiagonal(diag_vec_aff, air_data%A_ff(our_level), ierr)                  
+            end if
+
+            ! Use an exact inverse 
+            air_data%maxits_a_ff_levels(our_level) = 1
+            inverse_type_aff = PFLAREINV_JACOBI
+            if (air_data%options%print_stats_timings .AND. comm_rank == 0) then
+               print *, "Detected diagonal Aff - using exact inverse"
+            end if            
          end if             
 
          ! ~~~~~~~~~
