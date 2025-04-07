@@ -1013,7 +1013,7 @@ module air_mg_setup
       PetscInt            :: petsc_level, no_levels_petsc_int
       PetscInt            :: local_vec_size, ystart, yend, local_rows_repart, local_cols_repart
       PetscInt            :: global_rows_repart, global_cols_repart
-      integer             :: i_loc, inverse_type_aff
+      integer             :: i_loc, inverse_type_aff, inverse_sparsity_aff
       integer             :: no_levels, our_level, our_level_coarse, errorcode, comm_rank, comm_size
       PetscErrorCode      :: ierr
       MPI_Comm            :: MPI_COMM_MATRIX
@@ -1341,6 +1341,7 @@ module air_mg_setup
          ! Check if Aff is purely diagonal
          ! ~~~~~~~~~                 
          inverse_type_aff = air_data%options%inverse_type
+         inverse_sparsity_aff = air_data%options%inverse_sparsity_order
          aff_diag = .FALSE.
          check_diag_only = .TRUE.
          ! Don't have to check if we have strong threshold of zero 
@@ -1375,11 +1376,16 @@ module air_mg_setup
             end if
 
             ! Use an exact inverse 
+            !inverse_type_aff = PFLAREINV_JACOBI
+            ! if (air_data%options%print_stats_timings .AND. comm_rank == 0) then
+            !    print *, "Detected diagonal Aff - using exact inverse"
+            ! end if   
+
+            ! If diagonal we know the sparsity is "0th" order
+            inverse_sparsity_aff = 0         
+            ! Our approximation of diagonals is often an exact inverse
+            ! So set the number of F smooths to 1
             air_data%maxits_a_ff_levels(our_level) = 1
-            inverse_type_aff = PFLAREINV_JACOBI
-            if (air_data%options%print_stats_timings .AND. comm_rank == 0) then
-               print *, "Detected diagonal Aff - using exact inverse"
-            end if            
          end if             
 
          ! ~~~~~~~~~
@@ -1389,7 +1395,7 @@ module air_mg_setup
          call setup_gmres_poly_data(global_fine_is_size, &
                   inverse_type_aff, &
                   air_data%options%poly_order, &
-                  air_data%options%inverse_sparsity_order, &
+                  inverse_sparsity_aff, &
                   air_data%options%subcomm, &
                   proc_stride, &
                   air_data%inv_A_ff_poly_data(our_level))
@@ -1398,7 +1404,7 @@ module air_mg_setup
          call setup_gmres_poly_data(global_fine_is_size, &
                   inverse_type_aff, &
                   air_data%options%poly_order, &
-                  air_data%options%inverse_sparsity_order, &
+                  inverse_sparsity_aff, &
                   air_data%options%subcomm, &
                   proc_stride, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)) 
