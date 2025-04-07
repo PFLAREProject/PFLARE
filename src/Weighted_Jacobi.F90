@@ -82,8 +82,8 @@ module weighted_jacobi
          ! Should be able to call MatDiagonalGetDiagonal but it returns
          ! the wrong vector type with kokkos
          call MatDiagonalSet(inv_matrix, diag_vec, INSERT_VALUES, ierr)
-         call VecDestroy(diag_vec, ierr)
       end if       
+      call VecDestroy(diag_vec, ierr)
    
    end subroutine calculate_and_build_weighted_jacobi_inverse
 

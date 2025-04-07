@@ -1375,8 +1375,9 @@ module air_mg_setup
                call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)               
 
                call MatDestroy(air_data%A_ff(our_level), ierr)
-               ! The matrix takes ownership of diag_vec_aff
-               call MatCreateDiagonal(diag_vec_aff, air_data%A_ff(our_level), ierr)                  
+               ! The matrix takes ownership of diag_vec_aff and increases ref counter
+               call MatCreateDiagonal(diag_vec_aff, air_data%A_ff(our_level), ierr)     
+               call VecDestroy(diag_vec_aff, ierr)
             end if
 
             ! Use an exact inverse 

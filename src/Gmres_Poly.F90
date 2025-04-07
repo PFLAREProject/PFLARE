@@ -1730,8 +1730,8 @@ end if
          ! Should be able to call MatDiagonalGetDiagonal but it returns
          ! the wrong vector type with kokkos
          call MatDiagonalSet(inv_matrix, diag_vec, INSERT_VALUES, ierr)
-         call VecDestroy(diag_vec, ierr)
       end if             
+      call VecDestroy(diag_vec, ierr)
 
    end subroutine build_gmres_polynomial_inverse_0th_order
 
@@ -1783,15 +1783,15 @@ end if
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
-         ! The matrix takes ownership of rhs_copy
+         ! The matrix takes ownership of rhs_copy and increases ref counter
          call MatCreateDiagonal(rhs_copy, inv_matrix, ierr)
       else
          ! Should be able to call MatDiagonalGetDiagonal but it returns
          ! the wrong vector type with kokkos
          call MatDiagonalSet(inv_matrix, rhs_copy, INSERT_VALUES, ierr)
-         call VecDestroy(rhs_copy, ierr) 
       end if  
 
+      call VecDestroy(rhs_copy, ierr)
       call VecDestroy(diag_vec, ierr)
       call VecDestroy(power_vec, ierr)                      
 
