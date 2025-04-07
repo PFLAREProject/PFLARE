@@ -1787,6 +1787,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
 
       ! Get local nnzs without using getrow
+      
       call MatGetNNZs_local_c(input_mat%v, local_nnzs_petsc)      
       local_nnzs = local_nnzs_petsc
 

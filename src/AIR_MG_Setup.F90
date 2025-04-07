@@ -1321,7 +1321,8 @@ module air_mg_setup
                call VecISCopy(diag_vec, air_data%IS_fine_index(our_level), &
                         SCATTER_REVERSE, diag_vec_aff, ierr)
                call MatDiagonalSet(air_data%A_ff(our_level), diag_vec_aff, INSERT_VALUES, ierr)
-               call VecDestroy(diag_vec_aff, ierr)                               
+               call VecDestroy(diag_vec_aff, ierr)  
+               call VecDestroy(diag_vec, ierr)                             
 
             ! If its not matdiagonal we can do reuse as normal
             else
@@ -1363,7 +1364,10 @@ module air_mg_setup
          end if
 
          ! Convert Aff to a matdiagonal type
-         if (aff_diag) then
+         ! Haven't rewritten sai to take advantage of matdiagonal
+         if (aff_diag .AND. &
+                  inverse_type_aff /= PFLAREINV_SAI .AND. &
+                  inverse_type_aff /= PFLAREINV_ISAI) then
 
             ! We've already updated Aff above if we are reusing and it is matdiagonal already
             if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
@@ -1385,7 +1389,14 @@ module air_mg_setup
             inverse_sparsity_aff = 0         
             ! Our approximation of diagonals is often an exact inverse
             ! So set the number of F smooths to 1
-            air_data%maxits_a_ff_levels(our_level) = 1
+            if (inverse_type_aff /= PFLAREINV_WJACOBI .AND. &
+                  air_data%options%poly_order > 2) then
+                     
+               air_data%maxits_a_ff_levels(our_level) = 1
+               if (air_data%options%print_stats_timings .AND. comm_rank == 0) then
+                  print *, "Detected diagonal Aff - setting maxits_a_ff to 1 on this level"
+               end if                 
+            end if
          end if             
 
          ! ~~~~~~~~~
