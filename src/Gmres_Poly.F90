@@ -1711,27 +1711,27 @@ end if
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
-      call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+      ! Let's create a matrix to represent the inverse diagonal
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
+
+      if (.NOT. reuse_triggered) then
+         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+      else
+         call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
+      end if
       
       ! Finish off the non-blocking all reduce to compute our coefficients
       call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)
       call VecSet(diag_vec, coefficients(1), ierr)
 
-      ! Let's create a matrix to represent the inverse diagonal
-      ! Can't use matdiagonal as we want to do symbolic matmat products
-      ! and don't want to have to define how that is done
-      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
-
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
-         ! The matrix takes ownership of diag_vec
+         ! The matrix takes ownership of diag_vec and increases ref counter
          call MatCreateDiagonal(diag_vec, inv_matrix, ierr)
+         call VecDestroy(diag_vec, ierr)
       else
-         ! Should be able to call MatDiagonalGetDiagonal but it returns
-         ! the wrong vector type with kokkos
-         call MatDiagonalSet(inv_matrix, diag_vec, INSERT_VALUES, ierr)
+         call MatDiagonalRestoreDiagonal(inv_matrix, diag_vec, ierr)
       end if             
-      call VecDestroy(diag_vec, ierr)
 
    end subroutine build_gmres_polynomial_inverse_0th_order
 
@@ -1759,11 +1759,15 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
 
        ! Our matrix has to be square
-      call MatCreateVecs(matrix, rhs_copy, diag_vec, ierr)
+      call MatCreateVecs(matrix, power_vec, diag_vec, ierr)
       call MatGetDiagonal(matrix, diag_vec, ierr)
 
       ! This stores D^order
-      call VecDuplicate(diag_vec, power_vec, ierr)
+      if (.NOT. reuse_triggered) then
+         call VecDuplicate(diag_vec, rhs_copy, ierr)
+      else
+         call MatDiagonalGetDiagonal(inv_matrix, rhs_copy, ierr)
+      end if
       call VecCopy(diag_vec, power_vec, ierr)
 
       ! ~~~~~~~~~~~      
@@ -1778,20 +1782,18 @@ end if
       do order = 1, poly_order
          call VecAXPY(rhs_copy, coefficients(order+1), power_vec, ierr)
          ! Compute power_vec = power_vec * D
-         call VecPointwiseMult(power_vec, power_vec, diag_vec, ierr)
+         if (order /= poly_order) call VecPointwiseMult(power_vec, power_vec, diag_vec, ierr)
       end do
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
          ! The matrix takes ownership of rhs_copy and increases ref counter
          call MatCreateDiagonal(rhs_copy, inv_matrix, ierr)
+         call VecDestroy(rhs_copy, ierr)
       else
-         ! Should be able to call MatDiagonalGetDiagonal but it returns
-         ! the wrong vector type with kokkos
-         call MatDiagonalSet(inv_matrix, rhs_copy, INSERT_VALUES, ierr)
+         call MatDiagonalRestoreDiagonal(inv_matrix, rhs_copy, ierr)
       end if  
 
-      call VecDestroy(rhs_copy, ierr)
       call VecDestroy(diag_vec, ierr)
       call VecDestroy(power_vec, ierr)                      
 

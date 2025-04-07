@@ -1312,7 +1312,7 @@ module air_mg_setup
             if (mat_type_aff == MATDIAGONAL) then
 
                ! Easy to get out Aff if we know its diagonal
-               call MatCreateVecs(air_data%A_ff(our_level), diag_vec_aff, PETSC_NULL_VEC, ierr)
+               call MatDiagonalGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)
                call MatCreateVecs(air_data%coarse_matrix(our_level), diag_vec, PETSC_NULL_VEC, ierr)
                ! Get the matrix diagonal
                call MatGetDiagonal(air_data%coarse_matrix(our_level), diag_vec, ierr)
@@ -1320,8 +1320,7 @@ module air_mg_setup
                ! if this becomes expensive could call something like our version of VecISCopyLocal_kokkos
                call VecISCopy(diag_vec, air_data%IS_fine_index(our_level), &
                         SCATTER_REVERSE, diag_vec_aff, ierr)
-               call MatDiagonalSet(air_data%A_ff(our_level), diag_vec_aff, INSERT_VALUES, ierr)
-               call VecDestroy(diag_vec_aff, ierr)  
+               call MatDiagonalRestoreDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)
                call VecDestroy(diag_vec, ierr)                             
 
             ! If its not matdiagonal we can do reuse as normal
