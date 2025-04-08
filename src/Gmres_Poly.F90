@@ -1304,8 +1304,10 @@ end if
             ! ~~~~~~~~~~~
             ! Has to be critical as can't add to the matrix from multiple threads at once
             !$omp critical
-            call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols(1:ncols), &
+            if (ncols /= 0) then
+               call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols(1:ncols), &
                      coefficients(term) * vals_temp, ADD_VALUES, ierr)   
+            end if
             !$omp end critical
 
             ! This should now have the value of A^(term-1) in it

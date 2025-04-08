@@ -355,8 +355,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       
          ! Get the row
          call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)
-         call MatSetValues(output_mat, one, [ifree], ncols, cols, &
+         if (ncols /= 0) then
+            call MatSetValues(output_mat, one, [ifree], ncols, cols, &
                   vals, INSERT_VALUES, ierr)
+         end if
          call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)                    
  
       end do  
