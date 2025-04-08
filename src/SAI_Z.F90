@@ -89,7 +89,7 @@ module sai_z
          call MatSetType(A_ff, MATAIJ, ierr)
          call MatSeqAIJSetPreallocation(A_ff,one,PETSC_NULL_INTEGER_ARRAY, ierr)
          call MatMPIAIJSetPreallocation(A_ff,one,PETSC_NULL_INTEGER_ARRAY,&
-                  0,PETSC_NULL_INTEGER_ARRAY, ierr)
+                  zero,PETSC_NULL_INTEGER_ARRAY, ierr)
          call MatSetUp(A_ff, ierr)
          call MatSetOption(A_ff, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)                   
          call MatCreateVecs(A_ff_input, diag_vec, PETSC_NULL_VEC, ierr)
