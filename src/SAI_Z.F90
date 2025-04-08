@@ -510,7 +510,10 @@ module sai_z
          ! ~~~~~~~~~~~~~
          ! Set all the row values
          ! ~~~~~~~~~~~~~
-         call MatSetValues(z, one, [i_loc], j_size, col_indices_off_proc_array(j_rows+1), e_row, INSERT_VALUES, ierr)            
+         if (j_size /= 0) then
+            call MatSetValues(z, one, [i_loc], &
+                  j_size, col_indices_off_proc_array(j_rows+1), e_row, INSERT_VALUES, ierr)            
+         end if
 
          deallocate(j_rows, i_rows, e_row, j_vals, j_indices, i_indices)  
          if (allocated(submat_vals)) deallocate(submat_vals)
