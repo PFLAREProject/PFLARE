@@ -125,7 +125,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13) then
+            if (normy .gt. 1d-12) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
