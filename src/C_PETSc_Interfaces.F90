@@ -231,6 +231,18 @@ module c_petsc_interfaces
 
    interface   
       
+      subroutine remove_from_sparse_match_kokkos(A_array, B_array, lump_int) &
+         bind(c, name="remove_from_sparse_match_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+         integer(c_int), value :: lump_int
+      end subroutine remove_from_sparse_match_kokkos         
+ 
+   end interface   
+
+   interface   
+      
       subroutine MatSetAllValues_kokkos(A_array, val) &
          bind(c, name="MatSetAllValues_kokkos")
          use iso_c_binding
