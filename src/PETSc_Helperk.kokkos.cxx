@@ -795,17 +795,26 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
 
    // Find maximum non-zeros per row of the input mat for sizing scratch memory
-   PetscInt max_nnz = 0;
+   PetscInt max_nnz_local = 0, max_nnz_nonlocal = 0;
    if (local_rows > 0) {
 
-      Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows,
+      Kokkos::parallel_reduce("FindMaxNNZ", local_rows,
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_local_i[i + 1] - device_local_i[i];
-            if (mpi) row_nnz += device_nonlocal_i[i + 1] - device_nonlocal_i[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
          },
-         Kokkos::Max<PetscInt>(max_nnz)
+         Kokkos::Max<PetscInt>(max_nnz_local)
       );
+      if (mpi)
+      {
+         Kokkos::parallel_reduce("FindMaxNNZNonLocal", local_rows,
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
+               PetscInt row_nnz = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+               thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
+            },
+            Kokkos::Max<PetscInt>(max_nnz_nonlocal)
+         );         
+      }
    }   
 
    auto exec = PetscGetKokkosExecutionSpace();
@@ -814,8 +823,9 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    // We want scratch space for each row
    // We will have ncols of integers which tell us what the matching indices we have
    // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = max_nnz * sizeof(PetscInt) + \
-               8 * sizeof(PetscScalar);
+   size_t scratch_size_per_team = max_nnz_local * sizeof(PetscInt) + \
+               max_nnz_nonlocal * sizeof(PetscInt) +
+               8 * 2 * sizeof(PetscScalar);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
@@ -827,69 +837,47 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       // Row
       PetscInt i = t.league_rank();
 
-      // ncols is the total number of columns in this row of the input mat
-      PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-      PetscInt ncols = ncols_local;
-      if (mpi) ncols += device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+      // number of columns
+      PetscInt ncols_local, ncols_nonlocal, ncols_local_output, ncols_nonlocal_output;
+      ncols_local = device_local_i[i + 1] - device_local_i[i];
+      if (mpi) ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
-      // ncols is the total number of columns in this row of the input mat
-      PetscInt ncols_output = device_local_i_output[i + 1] - device_local_i_output[i];
-      if (mpi) ncols_output += device_nonlocal_i_output[i + 1] - device_nonlocal_i_output[i];      
+      ncols_local_output = device_local_i_output[i + 1] - device_local_i_output[i];
+      if (mpi) ncols_nonlocal_output = device_nonlocal_i_output[i + 1] - device_nonlocal_i_output[i];      
 
       // Allocate views directly on scratch memory
       // Have to use views here given alignment issues
-      ScratchIntView scratch_indices(t.team_scratch(1), ncols); 
-
-      // This is first nonlocal column of input mat is in this row
-      PetscInt start_nonlocal_idx = 0;
-      if (mpi)
-      {
-         start_nonlocal_idx = ncols_local;  
-      }         
-      else
-      {
-         start_nonlocal_idx = ncols;
-      }
-
-      PetscInt start_nonlocal_idx_output = 0;
-      if (mpi)
-      {
-         start_nonlocal_idx_output = device_local_i_output[i + 1] - device_local_i_output[i];  
-      }         
-      else
-      {
-         start_nonlocal_idx_output = ncols_output;
-      }      
+      ScratchIntView scratch_indices, scratch_indices_nonlocal;
+      scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local); 
+      if (mpi) scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);   
 
       // Initialize scratch
-      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
             scratch_indices(j) = -1;
       });
+      if (mpi)
+      {
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+            scratch_indices_nonlocal(j) = -1;
+         });      
+      }
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier();      
 
       // Perform Sorted Merge using a single thread per team
       // Should be faster than having each input column loop through every output column in parallel
-      Kokkos::single(Kokkos::PerTeam(t), [&]() {
-         PetscInt idx_input = 0;  // Pointer for input columns (0 to ncols-1)
-         PetscInt idx_output = 0; // Pointer for output columns (0 to ncols_output-1)
 
-         while (idx_input < ncols && idx_output < ncols_output) {
+      // Do the local columns
+      Kokkos::single(Kokkos::PerTeam(t), [&]() {
+         PetscInt idx_input = 0;  // Pointer for input columns (0 to ncols_local-1)
+         PetscInt idx_output = 0; // Pointer for output columns (0 to ncols_local_output-1)
+
+         while (idx_input < ncols_local && idx_output < ncols_local_output) {
             // Get current global input column index
-            PetscInt col_input;
-            if (idx_input < start_nonlocal_idx) {
-               col_input = device_local_j[device_local_i[i] + idx_input] + global_col_start;
-            } else {
-               col_input = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + (idx_input - start_nonlocal_idx)]);
-            }
+             PetscInt col_input = device_local_j[device_local_i[i] + idx_input] + global_col_start;
 
             // Get current global output column index
-            PetscInt col_output;
-            if (idx_output < start_nonlocal_idx_output) {
-               col_output = device_local_j_output[device_local_i_output[i] + idx_output] + global_col_start;
-            } else {
-               col_output = colmap_output_d(device_nonlocal_j_output[device_nonlocal_i_output[i] + (idx_output - start_nonlocal_idx_output)]);
-            }
+            PetscInt col_output = device_local_j_output[device_local_i_output[i] + idx_output] + global_col_start;
 
             // Compare and advance pointers
             if (col_input == col_output) {
@@ -905,67 +893,92 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
          }
       });
 
+      // Do the nonlocal columns
+      if (mpi)
+      {
+         Kokkos::single(Kokkos::PerTeam(t), [&]() {
+            PetscInt idx_input = 0;  // Pointer for input columns (0 to ncols_nonlocal-1)
+            PetscInt idx_output = 0; // Pointer for output columns (0 to ncols_nonlocal_output-1)
+
+            while (idx_input < ncols_nonlocal && idx_output < ncols_nonlocal_output) {
+               // Get current global input column index
+               PetscInt col_input = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + idx_input]);
+
+               // Get current global output column index
+               PetscInt col_output = colmap_output_d(device_nonlocal_j_output[device_nonlocal_i_output[i] + idx_output]);
+
+               // Compare and advance pointers
+               if (col_input == col_output) {
+                  // Match found! Record output index
+                  scratch_indices_nonlocal(idx_input) = idx_output;
+                  idx_input++;
+                  idx_output++;
+               } else if (col_input < col_output) {
+                  idx_input++;
+               } else {
+                  idx_output++;
+               }
+            }
+         });  
+      }    
+
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier();      
 
       PetscScalar lump_val = 0.0;
-      // If lumping need to sum all the non-matching non-diagonal terms in input
+      // If lumping need to sum all the non-matching terms in input
       if (lump_int)
       {
-         // Reduce over columns
+         PetscScalar lump_val_local = 0.0, lump_val_nonlocal = 0.0;
+         
+         // Reduce over local columns
          Kokkos::parallel_reduce(
-            Kokkos::TeamThreadRange(t, ncols),
-            [&](const PetscInt j, PetscScalar& thread_sum) {
-
-               // Get the global column index we want to match
-               PetscScalar thread_val = 0.0;
-               if (j < start_nonlocal_idx)
-               {
-                  thread_val = device_local_vals[device_local_i[i] + j];
-               }
-               // Nonlocal part
-               else
-               {
-                  thread_val = device_nonlocal_vals[device_nonlocal_i[i] + (j - start_nonlocal_idx)];
-               }                
+            Kokkos::TeamThreadRange(t, ncols_local),
+            [&](const PetscInt j, PetscScalar& thread_sum) {          
 
                // If this is not being put into output then we lump it
-               if (scratch_indices(j) == -1) thread_sum += thread_val;
+               if (scratch_indices(j) == -1) thread_sum += device_local_vals[device_local_i[i] + j];
             },
-            Kokkos::Sum<PetscScalar>(lump_val)
+            Kokkos::Sum<PetscScalar>(lump_val_local)
          );   
+
+         if (mpi)
+         {
+            // Reduce over nonlocal columns
+            Kokkos::parallel_reduce(
+               Kokkos::TeamThreadRange(t, ncols_nonlocal),
+               [&](const PetscInt j, PetscScalar& thread_sum) {           
+
+                  // If this is not being put into output then we lump it
+                  if (scratch_indices_nonlocal(j) == -1) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
+               },
+               Kokkos::Sum<PetscScalar>(lump_val_nonlocal)
+            );              
+         }
+         lump_val = lump_val_local + lump_val_nonlocal;
       }   
 
       // Now go and write to the output
-      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
-
-         // Get the value we're copying
-         PetscScalar val_input;
-         if (j < start_nonlocal_idx)
-         {
-            val_input = device_local_vals[device_local_i[i] + j];
-         }
-         // Nonlocal part
-         else
-         {
-            val_input = device_nonlocal_vals[device_nonlocal_i[i] + (j - start_nonlocal_idx)];
-         }   
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
          // If we have a match, copy the value
          if (scratch_indices(j) != -1)
          {
-            // If we're in the local part of the matrix
-            if (scratch_indices(j) < start_nonlocal_idx_output)
-            {
-               device_local_vals_output[device_local_i_output[i] + scratch_indices(j)] = val_input;
-            }
-            // Nonlocal part
-            else
-            {
-               device_nonlocal_vals_output[device_nonlocal_i_output[i] + (scratch_indices(j) - start_nonlocal_idx_output)] = val_input;                  
-            }
+            device_local_vals_output[device_local_i_output[i] + scratch_indices(j)] = device_local_vals[device_local_i[i] + j];
          }
-      });     
+      }); 
+      
+      if (mpi)
+      {
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) { 
+   
+            // If we have a match, copy the value
+            if (scratch_indices_nonlocal(j) != -1)
+            {
+               device_nonlocal_vals_output[device_nonlocal_i_output[i] + scratch_indices_nonlocal(j)] = device_nonlocal_vals[device_nonlocal_i[i] + j];                  
+            }
+         });          
+      }      
       
       // Team barrier to ensure all threads have finished writing to output
       t.team_barrier();      
@@ -973,16 +986,35 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       // Add in the lumped value to the diagonal
       if (lump_int)
       {
-         // Only loop over the ncols in the local component
-         // Assuming diagonal is in the local component (ie square matrix)
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, device_local_i_output[i + 1] - device_local_i_output[i]), [&](const PetscInt j) {
+         // For this row, would we expect the diagonal to be in the local block or in the nonlocal?
+         // Trivially true in the local block for square matrices
+         bool expect_local_diagonal = i + global_row_start >= global_col_start && \
+                              i + global_row_start < global_col_end_plus_one;
 
-            // Is this column the diagonal
-            bool is_diagonal = device_local_j_output[device_local_i_output[i] + j] + global_col_start == i + global_row_start;
+         if (expect_local_diagonal)
+         {
+            // Only loop over the ncols in the local component
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local_output), [&](const PetscInt j) {
 
-            // Will only happen for one thread
-            if (is_diagonal) device_local_vals_output[device_local_i_output[i] + j] += lump_val;
-         });   
+               // Is this column the diagonal
+               bool is_diagonal = device_local_j_output[device_local_i_output[i] + j] + global_col_start == i + global_row_start;
+
+               // Will only happen for one thread
+               if (is_diagonal) device_local_vals_output[device_local_i_output[i] + j] += lump_val;
+            });   
+         }
+         else
+         {
+            // Only loop over the ncols in the nonlocal component
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal_output), [&](const PetscInt j) {
+
+               // Is this column the diagonal
+               bool is_diagonal = colmap_output_d(device_nonlocal_j_output[device_nonlocal_i_output[i] + j]) == i + global_row_start;
+
+               // Will only happen for one thread
+               if (is_diagonal) device_nonlocal_vals_output[device_nonlocal_i_output[i] + j] += lump_val;
+            });               
+         }
       }       
    });
 
