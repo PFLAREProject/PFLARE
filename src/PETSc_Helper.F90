@@ -373,6 +373,78 @@ logical, protected :: kokkos_debug_global = .FALSE.
    
    subroutine remove_from_sparse_match(input_mat, output_mat, lump)
 
+      ! Wrapper around remove_from_sparse_match_cpu and remove_from_sparse_match_kokkos
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in) :: input_mat
+      type(tMat), intent(inout) :: output_mat
+      logical, intent(in), optional :: lump
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array
+      integer :: lump_int, errorcode
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat
+      PetscScalar normy;
+#endif      
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         lump_int = 0
+         if (present(lump)) then
+            if (lump) then
+               lump_int = 1
+            end if
+         end if        
+
+         if (kokkos_debug()) then
+            call MatDuplicate(output_mat, &
+                     MAT_DO_NOT_COPY_VALUES, temp_mat, ierr)            
+         end if
+
+         A_array = input_mat%v             
+         B_array = output_mat%v             
+         call remove_from_sparse_match_kokkos(A_array, B_array, lump_int) 
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            call remove_from_sparse_match_cpu(input_mat, temp_mat, lump)      
+
+            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-13) then
+               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of remove_from_sparse_match do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call remove_from_sparse_match_cpu(input_mat, output_mat, lump)          
+
+      end if
+#else
+      call remove_from_sparse_match_cpu(input_mat, output_mat, lump)   
+#endif  
+         
+   end subroutine remove_from_sparse_match   
+
+   !------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine remove_from_sparse_match_cpu(input_mat, output_mat, lump)
+
       ! Returns a copy of a sparse matrix with entries that don't match the sparsity
       ! of the other input matrix dropped
       ! If lumped is true the removed entries are added to the diagonal
@@ -524,7 +596,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
       deallocate(v)  
          
-   end subroutine remove_from_sparse_match
+   end subroutine remove_from_sparse_match_cpu
 
    !------------------------------------------------------------------------------------------------------------------------
    

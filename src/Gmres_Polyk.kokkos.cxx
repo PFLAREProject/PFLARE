@@ -4,13 +4,6 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
-// Create views using scratch memory space
-using ScratchSpace = typename KokkosTeamMemberType::scratch_memory_space;
-using ScratchIntView = Kokkos::View<PetscInt*, ScratchSpace, Kokkos::MemoryUnmanaged>;
-using ScratchScalarView = Kokkos::View<PetscScalar*, ScratchSpace, Kokkos::MemoryUnmanaged>;
-using Scratch2DIntView = Kokkos::View<PetscInt**, ScratchSpace, Kokkos::MemoryUnmanaged>;
-using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::MemoryUnmanaged>;
-
 //------------------------------------------------------------------------------------------------------------------------
 
 // Compute matrix-matrix product with fixed order sparsity but with kokkos - keeping everything on the device
@@ -312,7 +305,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
          PetscInt target_end = device_submat_i[row_idx + 1];
          PetscInt target_ncols = target_end - target_start;
 
-         // We'll perform a binary search to find matching indices
+         // We'll perform a search to find matching indices
          // We're matching indices in sparsity mat to those in submat
          // This is just an intersection between row i and the row of column j
          // This assumes column indices are already sorted 
