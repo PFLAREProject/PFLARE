@@ -57,7 +57,7 @@ module air_mg_setup
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_A_DROP)
          if (.NOT. PetscObjectIsNull(temp_mat)) then
 
-            call remove_from_sparse_match_no_lump(input_mat, air_data%reuse(our_level)%reuse_mat(MAT_A_DROP))     
+            call remove_from_sparse_match(input_mat, air_data%reuse(our_level)%reuse_mat(MAT_A_DROP))     
 
          else
          
@@ -528,7 +528,7 @@ module air_mg_setup
             temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_W_DROP)
             if (.NOT. PetscObjectIsNull(temp_mat)) then
    
-               call remove_from_sparse_match_no_lump(air_data%reuse(our_level)%reuse_mat(MAT_W), &
+               call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_W), &
                         air_data%reuse(our_level)%reuse_mat(MAT_W_DROP))  
                
             ! First time so just drop according to a tolerance 
@@ -773,7 +773,7 @@ module air_mg_setup
       temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP)
       if (.NOT. PetscObjectIsNull(temp_mat)) then
 
-         call remove_from_sparse_match_no_lump(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+         call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                   air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP))     
          
       ! First time so just drop according to a tolerance 
@@ -966,8 +966,12 @@ module air_mg_setup
       temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP)
       if (.NOT. PetscObjectIsNull(temp_mat)) then
 
+         ! Duplicate the sparsity
+         call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
+                  MAT_DO_NOT_COPY_VALUES, coarse_matrix, ierr)
+
          call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
-                  air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), coarse_matrix, &
+                  coarse_matrix, &
                   lump=air_data%options%a_lump)
 
       ! First time so just drop according to a tolerance 
