@@ -33,7 +33,14 @@ module weighted_jacobi
 
       ! ~~~~~~    
 
-      call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+      ! Let's create a matrix to represent the inverse diagonal
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
+
+      if (.NOT. reuse_triggered) then
+         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+      else
+         call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
+      end if
       call MatGetDiagonal(matrix, diag_vec, ierr)
 
       ! If weighting the Jacobi
@@ -69,20 +76,13 @@ module weighted_jacobi
       call VecReciprocal(diag_vec, ierr)
       call VecScale(diag_vec, weight, ierr)      
 
-      ! Let's create a matrix to represent the inverse diagonal
-      ! Can't use matdiagonal as we want to do symbolic matmat products
-      ! and don't want to have to define how that is done
-      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
-
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
          ! The matrix takes ownership of diag_vec
          call MatCreateDiagonal(diag_vec, inv_matrix, ierr)
-      else
-         ! Should be able to call MatDiagonalGetDiagonal but it returns
-         ! the wrong vector type with kokkos
-         call MatDiagonalSet(inv_matrix, diag_vec, INSERT_VALUES, ierr)
          call VecDestroy(diag_vec, ierr)
+      else
+         call MatDiagonalRestoreDiagonal(inv_matrix, diag_vec, ierr)
       end if       
    
    end subroutine calculate_and_build_weighted_jacobi_inverse

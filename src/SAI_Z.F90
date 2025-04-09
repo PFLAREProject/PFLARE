@@ -22,7 +22,7 @@ module sai_z
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_sai_z(A_ff, A_cf, sparsity_mat_cf, incomplete, reuse_mat, z)
+   subroutine calculate_and_build_sai_z(A_ff_input, A_cf, sparsity_mat_cf, incomplete, reuse_mat, z)
 
       ! Computes an approximation to z using sai/isai
       ! If incomplete is true then this is lAIR
@@ -30,7 +30,7 @@ module sai_z
       ! by giving A_cf as the negative identity (of the size A_ff)
 
       ! ~~~~~~
-      type(tMat), intent(in)                            :: A_ff, A_cf, sparsity_mat_cf
+      type(tMat), intent(in)                            :: A_ff_input, A_cf, sparsity_mat_cf
       logical, intent(in)                               :: incomplete
       type(tMat), intent(inout)                         :: reuse_mat, z
 
@@ -44,7 +44,7 @@ module sai_z
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
-      type(tMat) :: transpose_mat
+      type(tMat) :: transpose_mat, A_ff
       type(tIS), dimension(1) :: i_row_is, j_col_is, all_cols_indices
       type(tIS), dimension(1) :: col_indices
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
@@ -56,7 +56,7 @@ module sai_z
       PetscReal, dimension(:,:), allocatable :: submat_vals
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
-      type(tVec) :: solution, rhs
+      type(tVec) :: solution, rhs, diag_vec
       logical :: approx_solve
       type(tMat) :: Ao, Ad, temp_mat
       type(tKSP) :: ksp
@@ -71,13 +71,37 @@ module sai_z
 
       ! ~~~~~~
 
-      call PetscObjectGetComm(A_ff, MPI_COMM_MATRIX, ierr)    
+      call PetscObjectGetComm(A_ff_input, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
 
       ! Get the local sizes
       call MatGetLocalSize(A_cf, local_rows, local_cols, ierr)
-      call MatGetSize(A_cf, global_rows, global_cols, ierr)     
+      call MatGetSize(A_cf, global_rows, global_cols, ierr)   
+      
+      call MatGetType(A_ff_input, mat_type, ierr)
+      if (mat_type == MATDIAGONAL) then
+         ! Convert it to aij just for this routine 
+         ! doesn't work in parallel for some reason
+         !call MatConvert(A_ff_input, MATAIJ, MAT_INITIAL_MATRIX, A_ff, ierr)
+         call MatCreate(MPI_COMM_MATRIX, A_ff, ierr)
+         call MatSetSizes(A_ff, local_cols, local_cols, global_cols, global_cols, ierr)
+         call MatSetType(A_ff, MATAIJ, ierr)
+         call MatSeqAIJSetPreallocation(A_ff,one,PETSC_NULL_INTEGER_ARRAY, ierr)
+         call MatMPIAIJSetPreallocation(A_ff,one,PETSC_NULL_INTEGER_ARRAY,&
+                  zero,PETSC_NULL_INTEGER_ARRAY, ierr)
+         call MatSetUp(A_ff, ierr)
+         call MatSetOption(A_ff, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)                   
+         call MatCreateVecs(A_ff_input, diag_vec, PETSC_NULL_VEC, ierr)
+         call MatGetDiagonal(A_ff_input, diag_vec, ierr)
+         call MatDiagonalSet(A_ff, diag_vec, INSERT_VALUES, ierr)
+         call MatAssemblyBegin(A_ff, MAT_FINAL_ASSEMBLY, ierr)
+         call MatAssemblyEnd(A_ff, MAT_FINAL_ASSEMBLY, ierr)             
+         call VecDestroy(diag_vec, ierr)
+      else
+         A_ff = A_ff_input
+      end if
+      call MatGetType(A_ff, mat_type, ierr)
 
       ! ~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~
@@ -102,7 +126,6 @@ module sai_z
       call MatSetOption(z, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)   
       
       call MatGetOwnershipRange(A_ff, global_row_start_aff, global_row_end_plus_one_aff, ierr)              
-      call MatGetType(A_ff, mat_type, ierr)
 
       ! ~~~~~~~~~~~~
       ! If we're in parallel we need to get the off-process rows of matrix that correspond
@@ -525,6 +548,9 @@ module sai_z
          call MatDestroy(temp_mat, ierr)
       end if     
       if (deallocate_submatrices) deallocate(submatrices_full)   
+      if (mat_type == MATDIAGONAL) then
+         call MatDestroy(A_ff, ierr)
+      end if      
 
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)

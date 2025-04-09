@@ -294,28 +294,42 @@ PETSC_INTERN void mat_mat_symbolic_c(Mat *A, Mat *B, Mat *result)
 {
    MPI_Comm comm;
    int comm_size;
+   MatType mat_type_a, mat_type_b;
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*A, &comm);
    MPI_Comm_size(comm, &comm_size);
 
-   // For some reason in serial matduplicate is not defined on unassembled matrices
-   // ie we call a matduplicate on the symbolic sparsity_mat returned from this
-   // So we just do an ordinary matmatmult in serial
-   if (comm_size == 1) 
-   {
-      MatMatMult(*A, *B, MAT_INITIAL_MATRIX, 1.0, result);
+   MatGetType(*A, &mat_type_a);
+   MatGetType(*B, &mat_type_b);
 
+   if (strcmp(mat_type_a, MATDIAGONAL) == 0)
+   {
+      MatDuplicate(*B, MAT_DO_NOT_COPY_VALUES, result);
+   }
+   else if (strcmp(mat_type_b, MATDIAGONAL) == 0)
+   {  
+      MatDuplicate(*A, MAT_DO_NOT_COPY_VALUES, result);
    }
    else
    {
-      MatProductCreate(*A, *B, NULL, result);
-      MatProductSetType(*result, MATPRODUCT_AB);
-      MatProductSetAlgorithm(*result, "default");
-      MatProductSetFill(*result, PETSC_DEFAULT);
-      MatProductSetFromOptions(*result);
-      MatProductSymbolic(*result);
-      MatProductClear(*result);
+      // For some reason in serial matduplicate is not defined on unassembled matrices
+      // ie we call a matduplicate on the symbolic sparsity_mat returned from this
+      // So we just do an ordinary matmatmult in serial
+      if (comm_size == 1) 
+      {
+         MatMatMult(*A, *B, MAT_INITIAL_MATRIX, 1.0, result);
+      }
+      else
+      {
+         MatProductCreate(*A, *B, NULL, result);
+         MatProductSetType(*result, MATPRODUCT_AB);
+         MatProductSetAlgorithm(*result, "default");
+         MatProductSetFill(*result, PETSC_DEFAULT);
+         MatProductSetFromOptions(*result);
+         MatProductSymbolic(*result);
+         MatProductClear(*result);
+      }
    }
 
    return;
@@ -493,6 +507,69 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
   {
      Mat_SeqAIJ *b = (Mat_SeqAIJ *)mat_nonlocal->data;
      *nnzs_nonlocal = b->nz;
+  }
+
+  PetscFunctionReturn(0);
+}
+
+// Returns true if a matrix is only the diagonal
+PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
+{
+  MPI_Comm        acomm;
+  PetscMPIInt     size;
+  PetscInt local_rows, local_cols;
+  int rank_diag = 0, rank_diag_serial = 0;
+
+  PetscFunctionBegin;
+
+  PetscObjectGetComm((PetscObject)(*A), &acomm);
+  MPI_Comm_size(acomm, &size);
+
+  Mat_MPIAIJ *mat_mpi = NULL;
+  Mat mat_local, mat_nonlocal; 
+
+  // Get the existing output mats
+  if (size != 1)
+  {
+     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
+     mat_local = mat_mpi->A;
+     mat_nonlocal = mat_mpi->B;
+  }
+  else
+  {
+     mat_local = *A;
+  } 
+
+  Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local->data;
+  MatGetLocalSize(*A, &local_rows, &local_cols);
+  *diag_only = 0;
+
+  if (size != 1)
+  {
+      Mat_SeqAIJ *b = (Mat_SeqAIJ *)mat_nonlocal->data;
+
+      // In parallel also have to check the nonlocal has nothing in it
+      if (a->diagonaldense && local_rows == a->nz && b->nz == 0)
+      {
+         rank_diag_serial++;
+      }
+
+      // Reduction to check every rank
+      MPI_Allreduce(&rank_diag_serial, &rank_diag, 1, MPI_INTEGER, MPI_SUM, acomm);
+  }
+  else
+  {
+      // In serial easy 
+      if (a->diagonaldense && local_rows == a->nz)
+      {
+         rank_diag++;
+      }
+  }   
+
+  // If every rank is diagonal only, the entire matrix is diagonal
+  if (rank_diag == size)
+  {
+     *diag_only = 1;
   }
 
   PetscFunctionReturn(0);

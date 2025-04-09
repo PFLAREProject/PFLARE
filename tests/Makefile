@@ -176,6 +176,8 @@ run_tests_no_load_serial:
 	./ex6f -m 10 -n 10 -regen -pc_air_z_type lair_sai -pc_air_reuse_sparsity -ksp_max_it 3
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
+	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
+	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0
 # 
 	@echo ""
 	@echo "Test AIRG with 0th order GMRES polynomials with PC reused with no sparsity change"
@@ -314,8 +316,10 @@ run_tests_no_load_parallel:
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and not classical prolong in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_one_point_classical_prolong 0	
-	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
+	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w	
+	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0	
 # 
 	@echo ""
 	@echo "Test AIRG with 0th order GMRES polynomials with PC reused with no sparsity change in parallel"

@@ -138,7 +138,7 @@ module air_mg_stats
       do our_level = 1, air_data%no_levels-1
 
          ! Round to long
-         maxits_aff_long = int(air_data%options%maxits_a_ff, kind=8)
+         maxits_aff_long = int(air_data%maxits_a_ff_levels(our_level), kind=8)
 
          ! ~~~~~~~~~~~~~
          ! No down smooths
@@ -168,7 +168,7 @@ module air_mg_stats
          if (.NOT. air_data%options%full_smoothing_up_and_down) then
 
             ! MF polynomial order may be different on each level
-            call compute_mf_gmres_poly_num_matvecs(air_data%options%inverse_type, &
+            call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                         air_data%inv_A_ff_poly_data(our_level)%coefficients, &
                         non_zero_order)    
             gmres_size_long = int(non_zero_order, kind=8)
@@ -188,7 +188,7 @@ module air_mg_stats
             if (air_data%options%one_c_smooth) then
 
                ! MF polynomial order may be different on each level
-               call compute_mf_gmres_poly_num_matvecs(air_data%options%c_inverse_type, &
+               call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
                            air_data%inv_A_cc_poly_data(our_level)%coefficients, &
                            non_zero_order)  
                gmres_size_long = int(non_zero_order, kind=8)
@@ -213,7 +213,7 @@ module air_mg_stats
             !nnzs = nnzs + maxits_long * air_data%coarse_matrix_nnzs(our_level) * 2 * 2            
 
             ! MF polynomial order may be different on each level
-            call compute_mf_gmres_poly_num_matvecs(air_data%options%inverse_type, &
+            call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                         air_data%inv_A_ff_poly_data(our_level)%coefficients, &
                         non_zero_order)   
             gmres_size_long = int(non_zero_order, kind=8)                                   

@@ -459,7 +459,7 @@ module fc_smooth
        
       end if     
 
-      do f_its = 1, air_data%options%maxits_a_ff
+      do f_its = 1, air_data%maxits_a_ff_levels(our_level)
 
          ! If we're on the first iteration and we have zero initial guess (ie a down smooth),
          ! we know x_f^0 is zero, hence we don't have to do Aff * x_f^0

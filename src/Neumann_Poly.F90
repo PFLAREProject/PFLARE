@@ -219,7 +219,7 @@ module neumann_poly
          coefficients = 1d0 
 
          ! Need to build an assembled I - D^-1 A
-         call MatConvert(matrix, MATSAME, MAT_INITIAL_MATRIX, temp_mat, ierr)
+         call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)
          call MatCreateVecs(matrix, rhs_copy, diag_vec, ierr)
          call MatGetDiagonal(matrix, diag_vec, ierr)
          call VecReciprocal(diag_vec, ierr)
