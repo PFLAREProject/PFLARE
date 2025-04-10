@@ -160,6 +160,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    PetscIntKokkosView nnz_match_local_row_d("nnz_match_local_row_d", local_rows);             
    PetscIntKokkosView nnz_match_nonlocal_row_d;
    if (mpi) nnz_match_nonlocal_row_d = PetscIntKokkosView("nnz_match_nonlocal_row_d", local_rows);                  
+   // Device memory for whether there is an existing diagonal in each row
+   boolKokkosView existing_diag_d("existing_diag_d", local_rows);     
+   Kokkos::deep_copy(existing_diag_d, false);
    
    // Compute the relative row tolerances if needed
    if (relative_max_row_tolerance_int) 
@@ -255,6 +258,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
             // We have found a diagonal in this row
             if (is_diagonal) {
                thread_data.found_diagonal = true;
+               // Mark that there is a diagonal in this row
+               // Will only happen for one thread
+               existing_diag_d(i) = true;
             }
             
             // If the value is bigger than the tolerance, we keep it
@@ -326,6 +332,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                   // We have found a diagonal in this row
                   if (is_diagonal) {
                      thread_data.found_diagonal = true;
+                     // Mark that there is a diagonal in this row
+                     // Will only happen for one thread
+                     existing_diag_d(i) = true;                     
                   }                  
 
                   // If the value is bigger than the tolerance, we keep it
@@ -369,6 +378,29 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
       });               
    }       
 
+   // Find maximum non-zeros per row of the input mat for sizing scratch memory
+   PetscInt max_nnz_local = 0, max_nnz_nonlocal = 0;
+   if (local_rows > 0) {
+
+      Kokkos::parallel_reduce("FindMaxNNZ", local_rows,
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
+            PetscInt row_nnz = device_local_i[i + 1] - device_local_i[i];
+            thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
+         },
+         Kokkos::Max<PetscInt>(max_nnz_local)
+      );
+      if (mpi)
+      {
+         Kokkos::parallel_reduce("FindMaxNNZNonLocal", local_rows,
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
+               PetscInt row_nnz = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+               thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
+            },
+            Kokkos::Max<PetscInt>(max_nnz_nonlocal)
+         );         
+      }
+   }      
+
    // ~~~~~~~~~~~~~~~~~  
    // We need to assemble our i,j, vals so we can build our matrix
    // ~~~~~~~~~~~~~~~~~
@@ -378,7 +410,12 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    Kokkos::View<PetscInt *> j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
 
    // Initialize first entry to zero - the rest get set below
-   Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
+   Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);     
+
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+      i_local_d(i + 1) = nnz_match_local_row_d(i);
+   });  
 
    // Nonlocal stuff 
    Kokkos::View<PetscScalar *> a_nonlocal_d;
@@ -395,35 +432,71 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
 
       // Initialize first entry to zero - the rest get set below
       Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                 
-   }               
 
-   // Have to use rangepolicy here rather than teampolicy, as we don't want
-   // threads in each team to get their own copies of things like counter
-   // Desperately need to rewrite this whole loop to exploit more parallelism!
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+         i_nonlocal_d(i + 1) = nnz_match_nonlocal_row_d(i);
+      });      
+   }           
+   
+   auto exec = PetscGetKokkosExecutionSpace();
+   
+   // Create a team policy with scratch memory allocation
+   // We want scratch space for each row
+   // We will have ncols of integers which tell us what the matching indices we have
+   // the last bit of memory is to account for 8-byte alignment for each view
+   size_t scratch_size_per_team = 3 * max_nnz_local * sizeof(PetscInt) + \
+               3 * max_nnz_nonlocal * sizeof(PetscInt) +
+               8 * 6 * sizeof(PetscScalar);
+
+   Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
+   // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
+   policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
+
+   // Execute with scratch memory
+   Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
          
-      PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-      
-      // For this row, would we expect the diagonal to be in the local block or in the nonlocal?
-      // Trivially true in the local block for square matrices
-      bool expect_local_diagonal = i + global_row_start >= global_col_start && \
-                           i + global_row_start < global_col_end_plus_one;
+      // Row
+      PetscInt i = t.league_rank();         
+      // number of columns
+      PetscInt ncols_local, ncols_nonlocal;
+      ncols_local = device_local_i[i + 1] - device_local_i[i];
+      if (mpi) ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
-      // The start of our row index comes from the scan
-      i_local_d(i + 1) = nnz_match_local_row_d(i);
-      PetscInt pos = (i == 0) ? 0 : nnz_match_local_row_d(i-1);
-
-      // Keep track of the lumping
-      PetscScalar lump_val = 0;
+      // Allocate views directly on scratch memory
+      // Have to use views here given alignment issues
+      ScratchIntView scratch_indices, scratch_indices_nonlocal, scratch_match, scratch_match_nonlocal;
+      ScratchIntView scratch_lump, scratch_lump_nonlocal;
+      scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local); 
+      if (mpi) scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
+      scratch_match = ScratchIntView(t.team_scratch(1), ncols_local); 
+      if (mpi) scratch_match_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);      
+      scratch_lump = ScratchIntView(t.team_scratch(1), ncols_local); 
+      if (mpi) scratch_lump_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);      
       
-      // Single sequential pass through columns
-      for (int j = 0; j < ncols_local; j++) {
+      // Initialize scratch
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+         scratch_match(j) = 0;
+         scratch_lump(j) = 0;
+      });
+      if (mpi)
+      {
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+            scratch_match_nonlocal(j) = 0;
+            scratch_lump_nonlocal(j) = 0;
+         });      
+      }
+      // Team barrier to ensure all threads have finished filling the scratch space
+      t.team_barrier();
+
+      // Now go and mark which values we're keeping and lumping
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+
          bool keep_col = false;
          bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == i + global_row_start);
 
          // If we hit a diagonal put it in the lump'd value
-         if (is_diagonal && lump_int) lump_val+= device_local_vals[device_local_i[i] + j];            
+         if (is_diagonal && lump_int) scratch_lump(j) = 1;            
          
          // Check if we keep this column because of size
          if (abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
@@ -435,35 +508,27 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
             keep_col = true;
          }
          
-         // Add in this column if we have to keep it
+         // Mark this as a match
          if (keep_col) {
-            j_local_d(pos) = device_local_j[device_local_i[i] + j];
-            a_local_d(pos) = device_local_vals[device_local_i[i] + j];
-            pos++;
+            scratch_match(j) = 1;
          }
          // If we're not on the diagonal and we're small enough to lump
-         // add in
          else if (lump_int && !is_diagonal) {
-            lump_val+= device_local_vals[device_local_i[i] + j];
-         }
-      }  
+            scratch_lump(j) = 1;
+         }         
+      }); 
 
-      // Copy the off-diagonal entries
       if (mpi)
       {
-         PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
-         // The start of our row index comes from the scan
-         i_nonlocal_d(i + 1) = nnz_match_nonlocal_row_d(i);         
-         PetscInt pos_nonlocal = (i == 0) ? 0 : nnz_match_nonlocal_row_d(i-1);
+         // Now go and mark which values we're keeping and lumping
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {       
 
-         // Single sequential pass through columns
-         for (int j = 0; j < ncols_nonlocal; j++) {
             bool keep_col = false;
             // Remember we can have diagonals in the off-diagonal block if we're rectangular
             bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == i + global_row_start);
-
+      
             // If we hit a diagonal put it in the lump'd value
-            if (is_diagonal && lump_int) lump_val+= device_nonlocal_vals[device_nonlocal_i[i] + j];            
+            if (is_diagonal && lump_int) scratch_lump_nonlocal(j) = 1;          
             
             // Check if we keep this column because of size
             if (abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
@@ -475,115 +540,197 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                keep_col = true;
             }
             
-            // Let's not add in the column yet, let's do it below
+            // Mark this as a match
             if (keep_col) {
-               j_nonlocal_d(pos_nonlocal) = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
-               a_nonlocal_d(pos_nonlocal) = device_nonlocal_vals[device_nonlocal_i[i] + j];
-               pos_nonlocal++;               
+               scratch_match_nonlocal(j) = 1;             
             }
             // If we're not on the diagonal and we're small enough to lump
-            // add in
             else if (lump_int && !is_diagonal) {
-               lump_val+= device_nonlocal_vals[device_nonlocal_i[i] + j];
-            }
-         }   
-      }     
+               scratch_lump_nonlocal(j) = 1;
+            }            
+         });
+      }
 
-      // We have two cases here with lumping
-      // One where we have an existing diagonal and one where we don't
+      // Team barrier to ensure all threads have finished filling the scratch space
+      t.team_barrier(); 
+      
+      // Perform exclusive scan over scratch_match to get our output indices in this row
+      Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local), 
+         [&](const PetscInt j, int& partial_sum, const bool is_final) {
+            const int input_value = scratch_match(j);
+            if (is_final) {
+                  scratch_indices(j) = partial_sum;  // Write exclusive prefix
+            }
+            partial_sum += input_value;  // Update running total
+         }
+      );     
+      
+      if (mpi)
+      {
+         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_nonlocal), 
+         [&](const PetscInt j, int& partial_sum, const bool is_final) {
+            const int input_value = scratch_match_nonlocal(j);
+            if (is_final) {
+                  scratch_indices_nonlocal(j) = partial_sum;  // Write exclusive prefix
+            }
+            partial_sum += input_value;  // Update running total
+         }
+      );          
+      }
+
+      PetscScalar lump_val = 0.0;
+      // If lumping need to sum all the non-matching terms in input
       if (lump_int)
       {
-         // Find where the diagonal is - this has to happen after we've put in the existing entries
-         // because the number of columns isn't necessary ncols_local, its i_local_d(i+1) - i_local_d(i)
-         PetscInt diag_index = -1;
-         PetscInt before_diag_index = -1;
+         PetscScalar lump_val_local = 0.0, lump_val_nonlocal = 0.0;
+         
+         // Reduce over local columns
+         Kokkos::parallel_reduce(
+            Kokkos::TeamThreadRange(t, ncols_local),
+            [&](const PetscInt j, PetscScalar& thread_sum) {          
 
-         // Should we have a diagonal in the local block
-         if (expect_local_diagonal) 
+               // If lumping
+               if (scratch_lump(j) == 1) thread_sum += device_local_vals[device_local_i[i] + j];
+            },
+            Kokkos::Sum<PetscScalar>(lump_val_local)
+         );   
+
+         if (mpi)
          {
-            // This is the new ncols_local
-            if (i_local_d(i+1) - i_local_d(i) != 0)
-            {
-               for (int j = 0; j < i_local_d(i+1) - i_local_d(i); j++)
-               {
-                  // Get the index one before where the diagonal would be
-                  if (j_local_d(i_local_d(i) + j) + global_col_start < i + global_row_start) 
-                  {
-                     before_diag_index = j;
-                  }
-                  // Get the diagonal index (if it exists)
-                  else if (j_local_d(i_local_d(i) + j) + global_col_start == i + global_row_start)
-                  {
-                     diag_index = j;
-                  } 
-               }
-               // If we have an existing diagonal, replace the value with the lumped value
-               if (diag_index != -1)
-               {
-                  a_local_d(i_local_d(i) + diag_index) = lump_val;
-               }
-               // If we don't have an existing diagonal, add it in where it would be
-               else
-               {  
-                  for (int j = ncols_local-1; j > before_diag_index; j--)
-                  {
-                     j_local_d(i_local_d(i) + j + 1) = j_local_d(i_local_d(i) + j);
-                     a_local_d(i_local_d(i) + j + 1) = a_local_d(i_local_d(i) + j);                 
-                  }            
+            // Reduce over nonlocal columns
+            Kokkos::parallel_reduce(
+               Kokkos::TeamThreadRange(t, ncols_nonlocal),
+               [&](const PetscInt j, PetscScalar& thread_sum) {           
 
-                  // Has to be the local column index
-                  j_local_d(i_local_d(i) + before_diag_index + 1) = i;
-                  a_local_d(i_local_d(i) + before_diag_index + 1) = lump_val;
-               }
+                  // If lumping
+                  if (scratch_lump_nonlocal(j) == 1) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
+               },
+               Kokkos::Sum<PetscScalar>(lump_val_nonlocal)
+            );              
+         }
+         lump_val = lump_val_local + lump_val_nonlocal;
+      } 
+
+      // Team barrier to ensure all threads have finished scanning scratch_indices
+      t.team_barrier();
+
+      // Now go and write to the output
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+         if (scratch_match(j) == 1)
+         {
+            j_local_d(i_local_d(i) + scratch_indices(j)) = device_local_j[device_local_i[i] + j];
+            a_local_d(i_local_d(i) + scratch_indices(j)) = device_local_vals[device_local_i[i] + j];            
+         }
+      });
+
+      if (mpi)
+      {
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+            if (scratch_match_nonlocal(j) == 1)
+            {
+               // Writing the global column indices, this will get compactified below
+               j_nonlocal_d(i_nonlocal_d(i) + scratch_indices_nonlocal(j)) = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
+               a_nonlocal_d(i_nonlocal_d(i) + scratch_indices_nonlocal(j)) = device_nonlocal_vals[device_nonlocal_i[i] + j];     
+            }
+         });         
+      }
+
+      // Team barrier to ensure all threads have finished updating the output
+      t.team_barrier();      
+
+      // Add in the lumped value to the diagonal
+      if (lump_int)
+      {
+         // For this row, would we expect the diagonal to be in the local block or in the nonlocal?
+         // Trivially true in the local block for square matrices
+         bool expect_local_diagonal = i + global_row_start >= global_col_start && \
+                              i + global_row_start < global_col_end_plus_one;
+
+         // Does this row already have a diagonal?
+         if (existing_diag_d(i))
+         {
+            if (expect_local_diagonal)
+            {
+               // Only loop over the ncols in the local component - make sure this is over the output number of cols
+               Kokkos::parallel_for(Kokkos::TeamThreadRange(t, i_local_d(i+1) - i_local_d(i)), [&](const PetscInt j) {
+
+                  // Is this column the diagonal
+                  bool is_diagonal = j_local_d[i_local_d[i] + j] + global_col_start == i + global_row_start;
+
+                  // Will only happen for one thread - lump_val contains the diagonal so we overwrite
+                  if (is_diagonal) a_local_d[i_local_d[i] + j] = lump_val;
+               });   
+            }
+            else
+            {
+               // Only loop over the ncols in the nonlocal component  - make sure this is over the output number of cols
+               Kokkos::parallel_for(Kokkos::TeamThreadRange(t, i_nonlocal_d(i+1) - i_nonlocal_d(i)), [&](const PetscInt j) {
+
+                  // Is this column the diagonal - j_nonlocal_d contains the global column index
+                  bool is_diagonal = j_nonlocal_d[i_nonlocal_d[i] + j] == i + global_row_start;
+
+                  // Will only happen for one thread - lump_val contains the diagonal so we overwrite
+                  if (is_diagonal) a_nonlocal_d[i_nonlocal_d[i] + j] = lump_val;
+               });               
             }
          }
-         // If we know the diagonal is in the nonlocal block
-         // Shouldn't need the else if (mpi) here
-         else if (mpi)
+         // If this row doesn't have a diagonal already, add it to the end and we'll sort after
+         // We have already correctly allocated extra space for this entry
+         else
          {
-            // This is the new ncols_nonlocal
-            if (i_nonlocal_d(i+1) - i_nonlocal_d(i) != 0)
-            {
-               for (int j = 0; j < i_nonlocal_d(i+1) - i_nonlocal_d(i); j++)
+            // We only need to write a single entry
+            Kokkos::single(Kokkos::PerTeam(t), [&]() {
+               // lump_val contains the diagonal so we overwrite
+               if (expect_local_diagonal)
                {
-                  // Get the index one before where the diagonal would be
-                  // j_nonlocal_d has the global indices in it already
-                  if (j_nonlocal_d(i_nonlocal_d(i) + j) < i + global_row_start) 
-                  {
-                     before_diag_index = j;
-                  }
-                  // Get the diagonal index (if it exists)
-                  else if (j_nonlocal_d(i_nonlocal_d(i) + j) == i + global_row_start)
-                  {
-                     diag_index = j;
-                  } 
+                  // Has to be the local column index
+                  j_local_d[i_local_d[i+1] - 1] = i;
+                  a_local_d[i_local_d[i+1] - 1] = lump_val;
                }
-               // If we have an existing diagonal, replace the value with the lumped value
-               if (diag_index != -1)
-               {
-                  a_nonlocal_d(i_nonlocal_d(i) + diag_index) = lump_val;
-               }
-               // If we don't have an existing diagonal, add it in where it would be
                else
-               {  
-                  for (int j = ncols_local-1; j > before_diag_index; j--)
-                  {
-                     j_nonlocal_d(i_nonlocal_d(i) + j + 1) = j_nonlocal_d(i_nonlocal_d(i) + j);
-                     a_nonlocal_d(i_nonlocal_d(i) + j + 1) = a_nonlocal_d(i_nonlocal_d(i) + j);                 
-                  }            
-
-                  // Has to be the global column index
-                  j_nonlocal_d(i_nonlocal_d(i) + before_diag_index + 1) = i + global_row_start;
-                  a_nonlocal_d(i_nonlocal_d(i) + before_diag_index + 1) = lump_val;
-               }
-            }
-         }            
-      }      
-   });
+               {
+                  // Has to be global column for now
+                  j_nonlocal_d[i_nonlocal_d[i+1] - 1] = i + global_row_start;
+                  a_nonlocal_d[i_nonlocal_d[i+1] - 1] = lump_val;
+               }        
+            });    
+         }
+      }    
+   });  
 
    // Let's make sure everything on the device is finished
-   auto exec = PetscGetKokkosExecutionSpace();
    exec.fence();
+
+   // Now we may have to sort the column indices
+   if (lump_int)
+   {  
+      // Reduce to see if we ever added a diagonal
+      bool added_any_diagonal = false;
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, bool& thread_result) {
+            // If this row had a diagonal added, set the result to true
+            if (!existing_diag_d(i)) thread_result = true;
+         },
+         Kokkos::LOr<bool>(added_any_diagonal)
+      ); 
+
+      // If we did add a diagonal, it got added to the end of the columns on each row, so will have to sort
+      // It also could have been added to either the local or nonlocal components given not square
+      if (added_any_diagonal) 
+      {
+         KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+         KokkosSparse::sort_crs_matrix(csrmat_local); 
+         
+         if (mpi)
+         {
+            // The column size is not right here (it will be <= cols_ao)
+            // but it shouldn't matter as we are only construting an explicit kokkos csr matrix here so it can sort
+            KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, cols_ao, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);  
+            KokkosSparse::sort_crs_matrix(csrmat_nonlocal);         
+         }
+      }
+   }
 
    // We can create our local diagonal block matrix directly on the device
    MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);  
