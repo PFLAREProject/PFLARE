@@ -740,7 +740,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    {
       // Now we need to build garray on the host and rewrite the j_nonlocal_d indices so they are local
       // The default values here are for the case where we 
-      // let do it, it resets this internally in MatSetUpMultiply_MPIAIJ
+      // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
       PetscInt *garray_host = NULL;
       PetscInt col_ao_output = global_cols;
       if (cols_ao == 0)
@@ -2002,7 +2002,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    {
       // Now we need to build garray on the host and rewrite the j_nonlocal_d indices so they are local
       // The default values here are for the case where we 
-      // let do it, it resets this internally in MatSetUpMultiply_MPIAIJ
+      // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
       PetscInt *garray_host = NULL;
       PetscInt col_ao_output = global_cols;
       if (cols_ao == 0)
