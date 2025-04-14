@@ -64,7 +64,6 @@ There are several features used to improve the parallel performance of PCAIR:
 
    - The number of active MPI ranks on lower levels can be reduced where necessary. If this is used then:
      - Repartitioning with graph partitioners can be applied.
-     - OpenMP can be used in the polynomial inverse assembly (i.e., AIRG or nAIR) to reduce setup time (without requiring support for non-busy waits in the MPI library).
      - Calculation of polynomial coefficients can be done on subcommunicators.
    - The PCPFLAREINV methods above can be used as parallel coarse grid solvers, allowing heavy truncation of the multigrid hierarchy.
    - The multigrid hierarchy can be automatically truncated depending on the quality of the coarse grid solver
