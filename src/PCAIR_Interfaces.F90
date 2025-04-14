@@ -632,7 +632,7 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      maxits = options%maxits_a_ff
+      maxits = options%smooth_order(1)
       ierr = 0
 
    end subroutine PCAIRGetMaxitsAff
@@ -651,7 +651,7 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      smooth = options%one_c_smooth
+      smooth = any(options%smooth_order < 0)
       ierr = 0
 
    end subroutine PCAIRGetOneCSmooth
@@ -1417,7 +1417,7 @@ module pcair_interfaces
 
       ! Set the options
       call PCAIRGetOptions(pc, options)    
-      options%maxits_a_ff= int(maxits)
+      options%smooth_order(1) = int(maxits)
       ierr = 0
 
    end subroutine PCAIRSetMaxitsAff
@@ -1436,7 +1436,10 @@ module pcair_interfaces
 
       ! Set the options
       call PCAIRGetOptions(pc, options)    
-      options%one_c_smooth = smooth
+      options%any_c_smooths = smooth
+      if (options%any_c_smooths) then
+         options%smooth_order(2) = -1
+      end if
       ierr = 0
 
    end subroutine PCAIRSetOneCSmooth

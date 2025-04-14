@@ -659,7 +659,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxitsAff(PC pc, PetscInt input_int)
    PCAIRSetMaxitsAff_c(&pc, input_int);
    PetscFunctionReturn(0);
 }
-// Do we do maxits_a_ff F smoothing or maxits_a_ff F smooths then a single C?
+// Do we do a C point smooth after the F
 // Default: false
 // -pc_air_one_c_smooth
 PETSC_EXTERN PetscErrorCode PCAIRSetOneCSmooth(PC pc, PetscBool input_bool)

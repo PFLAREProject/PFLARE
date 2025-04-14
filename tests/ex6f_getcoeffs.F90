@@ -138,7 +138,7 @@ contains
       ! and the coarse grid solver coefficients (COEFFS_INV_COARSE)
       ! If strong R threshold /= 0d0, you will also want to store the 
       ! inv Aff dropped coefficients (COEFFS_INV_AFF_DROPPED)
-      ! If one_c_smooth is true, you will also want to store inv Acc coefficients (COEFFS_INV_COARSE)
+      ! If any C smooths are occuring, you will also want to store inv Acc coefficients (COEFFS_INV_COARSE)
 
       call KSPGetPC(ksp,pc,ierr)
 

@@ -50,7 +50,7 @@ module air_mg_stats
             call get_nnzs_petsc_sparse(air_data%inv_A_ff(our_level), air_data%inv_A_ff_nnzs(our_level))                
          end if
          ! Are we doing C point smoothing
-         if (air_data%options%one_c_smooth .AND. &
+         if (air_data%options%any_c_smooths .AND. &
                   .NOT. air_data%options%full_smoothing_up_and_down) then 
             
             call get_nnzs_petsc_sparse(air_data%A_cc(our_level), air_data%A_cc_nnzs(our_level))
@@ -138,7 +138,7 @@ module air_mg_stats
       do our_level = 1, air_data%no_levels-1
 
          ! Round to long
-         maxits_aff_long = int(air_data%maxits_a_ff_levels(our_level), kind=8)
+         maxits_aff_long = int(air_data%smooth_order_levels(our_level)%array(1), kind=8)
 
          ! ~~~~~~~~~~~~~
          ! No down smooths
@@ -185,7 +185,7 @@ module air_mg_stats
             nnzs = nnzs + maxits_long * air_data%A_fc_nnzs(our_level)    
 
             ! One C-point smooth         
-            if (air_data%options%one_c_smooth) then
+            if (air_data%options%any_c_smooths) then
 
                ! MF polynomial order may be different on each level
                call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
@@ -305,7 +305,7 @@ module air_mg_stats
             mat_storage_nnzs = mat_storage_nnzs + air_data%A_ff_nnzs(our_level)
             mat_storage_nnzs = mat_storage_nnzs + air_data%A_fc_nnzs(our_level)
             ! If we are doing C point smoothing need the other matrices
-            if (air_data%options%one_c_smooth) then
+            if (air_data%options%any_c_smooths) then
                mat_storage_nnzs = mat_storage_nnzs + air_data%A_cc_nnzs(our_level)
                mat_storage_nnzs = mat_storage_nnzs + air_data%inv_A_cc_nnzs(our_level) 
                mat_storage_nnzs = mat_storage_nnzs + air_data%A_cf_nnzs(our_level)                 

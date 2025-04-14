@@ -135,7 +135,7 @@ module air_mg_setup
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       ! If we are doing C point smoothing then we need to pull out Acc 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~        
-      if (air_data%options%one_c_smooth .AND. .NOT. air_data%options%full_smoothing_up_and_down) then
+      if (air_data%options%any_c_smooths .AND. .NOT. air_data%options%full_smoothing_up_and_down) then
 
          if (air_data%allocated_matrices_A_cc(our_level)) then
             call MatCreateSubMatrix(input_mat, &
@@ -839,7 +839,7 @@ module air_mg_setup
       end if      
       
       ! Delete temporary if not reusing
-      if (.NOT. air_data%options%one_c_smooth .AND. .NOT. air_data%options%reuse_sparsity) then      
+      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity) then      
          call MatDestroy(air_data%A_cf(our_level), ierr)       
       end if
             
@@ -852,7 +852,7 @@ module air_mg_setup
       ! ~~~~~~~~~~~
       ! If we are doing C-point smoothing, finish the comms
       ! ~~~~~~~~~~~
-      if (air_data%options%one_c_smooth .AND. &
+      if (air_data%options%any_c_smooths .AND. &
                .NOT. air_data%options%full_smoothing_up_and_down) then      
 
          call timer_start(TIMER_ID_AIR_INVERSE)           
@@ -1082,7 +1082,6 @@ module air_mg_setup
                left_null_vecs, right_null_vecs)
 
       ! ~~~~~~~~~~~~~~~~~~~~~                
-      air_data%maxits_a_ff_levels = air_data%options%maxits_a_ff
 
       if (air_data%options%print_stats_timings .AND. comm_rank == 0) print *, "Timers are cumulative"
 
@@ -1305,6 +1304,11 @@ module air_mg_setup
          ! We need to pull out Aff before we do anything
          ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~         
 
+         if (.NOT. allocated(air_data%smooth_order_levels(our_level)%array)) then
+            allocate(air_data%smooth_order_levels(our_level)%array(size(air_data%options%smooth_order)))
+         end if
+         air_data%smooth_order_levels(our_level)%array = air_data%options%smooth_order
+
          call timer_start(TIMER_ID_AIR_EXTRACT)             
 
          ! Pull out A_ff
@@ -1395,10 +1399,16 @@ module air_mg_setup
             ! So set the number of F smooths to 1
             if (inverse_type_aff /= PFLAREINV_WJACOBI .AND. &
                   air_data%options%poly_order > 2) then
+
+               ! Any F smooths we just make 1 iteration
+               do i_loc = 1, size(air_data%options%smooth_order)
+                  if (air_data%smooth_order_levels(our_level)%array(i_loc) > 0) then
+                     air_data%smooth_order_levels(our_level)%array(i_loc) = 1
+                  end if
+               end do
                      
-               air_data%maxits_a_ff_levels(our_level) = 1
                if (air_data%options%print_stats_timings .AND. comm_rank == 0) then
-                  print *, "Detected diagonal Aff - setting maxits_a_ff to 1 on this level"
+                  print *, "Detected diagonal Aff - setting any F smooth to 1 iteration on this level"
                end if                 
             end if
          end if             
@@ -1427,7 +1437,7 @@ module air_mg_setup
          ! ~~~~~~~~~
          ! If we're doing C-point smoothing we may have a gmres polynomial on C points
          ! ~~~~~~~~~
-         if (air_data%options%one_c_smooth .AND. &
+         if (air_data%options%any_c_smooths .AND. &
                   .NOT. air_data%options%full_smoothing_up_and_down) then                  
                   
             call setup_gmres_poly_data(global_coarse_is_size, &
@@ -1475,7 +1485,7 @@ module air_mg_setup
             call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(4)%array(our_level), ierr)        
 
             ! If we're doing C point smoothing we need some extra temporaries
-            if (air_data%options%one_c_smooth .AND. &
+            if (air_data%options%any_c_smooths .AND. &
                      .NOT. air_data%options%full_smoothing_up_and_down) then
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
@@ -1784,7 +1794,7 @@ module air_mg_setup
          ! ~~~~~~~~~~~~~~
 
          air_data%allocated_matrices_A_ff(our_level) = .TRUE.
-         if (air_data%options%one_c_smooth .AND. &
+         if (air_data%options%any_c_smooths .AND. &
                   .NOT. air_data%options%full_smoothing_up_and_down) then          
             air_data%allocated_matrices_A_cc(our_level) = .TRUE.
          end if         
@@ -2154,7 +2164,7 @@ module air_mg_setup
                   call VecDestroy(air_data%temp_vecs_fine(3)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_fine(4)%array(our_level), ierr)             
                   call VecDestroy(air_data%temp_vecs_coarse(1)%array(our_level), ierr)
-                  if (air_data%options%one_c_smooth .AND. &
+                  if (air_data%options%any_c_smooths .AND. &
                         .NOT. air_data%options%full_smoothing_up_and_down) then               
    
                      call VecDestroy(air_data%temp_vecs_coarse(2)%array(our_level), ierr)
@@ -2238,7 +2248,6 @@ module air_mg_setup
       air_data%inv_A_cc_nnzs        = 0  
       air_data%coarse_matrix_nnzs   = 0   
       air_data%allocated_coarse_matrix = .FALSE.   
-      air_data%maxits_a_ff_levels = -1
 
    end subroutine reset_air_data     
 
@@ -2250,6 +2259,8 @@ module air_mg_setup
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
+
+      integer :: our_level
       ! ~~~~~~    
 
       call reset_air_data(air_data)
@@ -2272,8 +2283,9 @@ module air_mg_setup
       air_data%options%cf_splitting_type = 0
       air_data%options%max_luby_steps = -1
 
-      air_data%options%maxits_a_ff = 2
-      air_data%options%one_c_smooth = .FALSE.
+      air_data%options%smooth_order = 0
+      air_data%options%smooth_order(1) = 2
+      air_data%options%any_c_smooths = .FALSE.
       air_data%options%matrix_free_polys = .FALSE.
       air_data%options%one_point_classical_prolong = .TRUE.
       air_data%options%full_smoothing_up_and_down = .FALSE.
@@ -2340,7 +2352,12 @@ module air_mg_setup
          deallocate(air_data%allocated_is)
          deallocate(air_data%allocated_coarse_matrix)    
          
-         deallocate(air_data%maxits_a_ff_levels)         
+         do our_level = 1, size(air_data%smooth_order_levels)
+            if (allocated(air_data%smooth_order_levels(our_level)%array)) then
+               deallocate(air_data%smooth_order_levels(our_level)%array)
+            end if
+         end do
+         deallocate(air_data%smooth_order_levels)         
     
          deallocate(air_data%temp_vecs(1)%array)
          deallocate(air_data%temp_vecs_fine(1)%array)

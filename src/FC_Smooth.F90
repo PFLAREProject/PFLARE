@@ -62,7 +62,7 @@ module fc_smooth
                   air_data%i_coarse_full_full(our_level))               
 
          ! If we're C point smoothing as well
-         if (air_data%options%one_c_smooth .AND. &
+         if (air_data%options%any_c_smooths .AND. &
                   .NOT. air_data%options%full_smoothing_up_and_down) then     
             
             ! Build identity that sets coarse in full to zero
@@ -115,7 +115,7 @@ module fc_smooth
          call MatDestroy(air_data%i_fine_full(our_level), ierr)
          call MatDestroy(air_data%i_coarse_full(our_level), ierr)
          call MatDestroy(air_data%i_fine_full_full(our_level), ierr)
-         if (air_data%options%one_c_smooth .AND. &
+         if (air_data%options%any_c_smooths .AND. &
                   .NOT. air_data%options%full_smoothing_up_and_down) then     
             call MatDestroy(air_data%i_coarse_full_full(our_level), ierr)                       
          end if 
@@ -405,9 +405,10 @@ module fc_smooth
       PetscErrorCode :: ierr
 
       type(tMat) :: mat, pmat
-      integer :: our_level, f_its, errorcode
+      integer :: our_level, errorcode, i, smooth_its
       type(mat_ctxtype), pointer :: mat_ctx  
       type(air_multigrid_data), pointer :: air_data
+      PetscBool :: first_smooth
 
       ! ~~~~~~
 
@@ -418,7 +419,7 @@ module fc_smooth
       ! Can come in here with zero maxits, have to do nothing
       if (maxits == 0) return
       if (maxits /= 1) then
-         print *, "To change the number of F point smooths adjust maxits_a_ff"
+         print *, "To change the number of smooths adjust smooth_order"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
@@ -429,46 +430,91 @@ module fc_smooth
       our_level = mat_ctx%our_level
       air_data => mat_ctx%air_data  
 
+      ! The first time we go through any smooth, we need to pull out x_f and/or x_c
+      first_smooth = PETSC_TRUE
+
+      ! Loop over all the smooths we need to do
+      do i = 1, size(air_data%smooth_order_levels(our_level)%array)
+
+         smooth_its = air_data%smooth_order_levels(our_level)%array(i)
+
+         if (smooth_its == 0) exit
+
+         ! Do consecutive F point smooths
+         if (smooth_its > 0) then
+
+            call f_smooths(b, x, guess_zero, first_smooth, air_data, our_level, smooth_its)            
+
+         ! Do consecutive C point smooths
+         else
+            
+            call c_smooths(b, x, guess_zero, first_smooth, air_data, our_level, abs(smooth_its))
+         end if
+
+         ! Once we've done our first smooth, we can use the existing values
+         first_smooth = PETSC_FALSE
+
+      end do
+      
+      ! Now technically there should be a new residual that we put into r after this is done
+      ! but I don't think it matters, as it is the solution that is interpolated up 
+      ! and the richardson on the next level up computes its own F-point residual 
+      ! and the norm type is none on the mg levels, as we just do maxits        
+
+      ! have to return zero here!
+      ierr = 0
+      
+   end subroutine mg_FC_point_richardson     
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine f_smooths(b, x, guess_zero, first_smooth, air_data, our_level, its)
+
+      ! This applies consecutive F smooths
+
+      ! ~~~~~~
+      type(tVec), intent(inout)               :: b, x
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level, its
+      PetscBool, intent(in)                   :: guess_zero, first_smooth
+
+      PetscErrorCode :: ierr
+      integer :: f_its
+
+      ! ~~~~~~
+
       ! Get out just the fine points from b - this is b_f
       call VecISCopyLocalWrapper(air_data, our_level, .TRUE., b, &
                SCATTER_REVERSE, air_data%temp_vecs_fine(4)%array(our_level))
 
-      if (.NOT. guess_zero) then 
+      ! If we haven't done any smooth before calling this F point smooth
+      ! we need to pull out x_c^0 and x_f^0              
+      if (first_smooth) then        
 
          ! Get out just the fine points from x - this is x_f^0
          call VecISCopyLocalWrapper(air_data, our_level, .TRUE., x, &
-                  SCATTER_REVERSE, air_data%temp_vecs_fine(1)%array(our_level))           
+                  SCATTER_REVERSE, air_data%temp_vecs_fine(1)%array(our_level))             
 
          ! Get the coarse points from x - this is x_c^0
          call VecISCopyLocalWrapper(air_data, our_level, .FALSE., x, &
-                  SCATTER_REVERSE, air_data%temp_vecs_coarse(1)%array(our_level))                    
+                  SCATTER_REVERSE, air_data%temp_vecs_coarse(1)%array(our_level))   
+                     
+      end if
 
-         ! Compute Afc * x_c^0 - this never changes
-         call MatMult(air_data%A_fc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
-                  air_data%temp_vecs_fine(2)%array(our_level), ierr)               
-         
-         ! This is b_f - A_fc * x_c^0 - this never changes
-         call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), -1d0, &
-                  air_data%temp_vecs_fine(2)%array(our_level), ierr)                      
+      ! Compute Afc * x_c^0 - this never changes
+      call MatMult(air_data%A_fc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
+               air_data%temp_vecs_fine(2)%array(our_level), ierr)               
+      
+      ! This is b_f - A_fc * x_c^0 - this never changes
+      call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), -1d0, &
+               air_data%temp_vecs_fine(2)%array(our_level), ierr)                      
 
-      else
-         ! x_f^0 and x_c^0 are zero
-         ! So don't have to do the multiply by Afc x_c^0 or the first Aff x_f^0
-         ! temp_vecs_fine(4)%array just has b_f in it
-         call VecSet(air_data%temp_vecs_fine(3)%array(our_level), 0.0d0, ierr)
-       
-      end if     
+      ! Do all the consecutive F smooths
+      do f_its = 1, its
 
-      do f_its = 1, air_data%maxits_a_ff_levels(our_level)
-
-         ! If we're on the first iteration and we have zero initial guess (ie a down smooth),
-         ! we know x_f^0 is zero, hence we don't have to do Aff * x_f^0
-         if (.NOT. (f_its == 1 .AND. guess_zero)) then
-
-            ! Then A_ff * x_f^n - this changes at each richardson iteration
-            call MatMult(air_data%A_ff(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
-                        air_data%temp_vecs_fine(3)%array(our_level), ierr)          
-         end if
+         ! Then A_ff * x_f^n - this changes at each richardson iteration
+         call MatMult(air_data%A_ff(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
+                     air_data%temp_vecs_fine(3)%array(our_level), ierr)          
 
          ! This is b_f - A_fc * x_c - A_ff * x_f^n
          call VecAYPX(air_data%temp_vecs_fine(3)%array(our_level), -1d0, &
@@ -491,21 +537,52 @@ module fc_smooth
                SCATTER_FORWARD, air_data%temp_vecs_fine(1)%array(our_level), &
                air_data%temp_vecs(1)%array(our_level))
 
-      ! ~~~~~~~~~~~~~~~~
-      ! If we want to let's do a single C-point smooth
-      ! ~~~~~~~~~~~~~~~~
-      if (air_data%options%one_c_smooth) then        
+   end subroutine f_smooths
 
-         ! Get out just the coarse points from b - this is b_c
-         call VecISCopyLocalWrapper(air_data, our_level, .FALSE., b, &
-                  SCATTER_REVERSE, air_data%temp_vecs_coarse(4)%array(our_level))
+   ! -------------------------------------------------------------------------------------------------------------------------------
 
-         ! Compute Acf * x_f^0 - this never changes
-         call MatMult(air_data%A_cf(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
-                     air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-         ! This is b_c - A_cf * x_f^0 - this never changes
-         call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), -1d0, &
-                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)  
+   subroutine c_smooths(b, x, guess_zero, first_smooth, air_data, our_level, its)
+
+      ! This applies consecutive C smooths
+
+      ! ~~~~~~
+      type(tVec), intent(inout)               :: b, x
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level, its
+      PetscBool, intent(in)                   :: guess_zero, first_smooth
+
+      PetscErrorCode :: ierr
+      integer :: c_its
+
+      ! ~~~~~~  
+
+      ! Get out just the coarse points from b - this is b_c
+      call VecISCopyLocalWrapper(air_data, our_level, .FALSE., b, &
+               SCATTER_REVERSE, air_data%temp_vecs_coarse(4)%array(our_level))
+
+      ! If we haven't done any smooth before calling this C point smooth
+      ! we need to pull out x_c^0 and x_f^0
+      if (first_smooth) then
+
+            ! Get out just the fine points from x - this is x_f^0
+         call VecISCopyLocalWrapper(air_data, our_level, .TRUE., x, &
+                  SCATTER_REVERSE, air_data%temp_vecs_fine(1)%array(our_level))             
+
+         ! Get the coarse points from x - this is x_c^0
+         call VecISCopyLocalWrapper(air_data, our_level, .FALSE., x, &
+                  SCATTER_REVERSE, air_data%temp_vecs_coarse(1)%array(our_level))  
+                  
+      end if
+
+      ! Compute Acf * x_f^0 - this never changes
+      call MatMult(air_data%A_cf(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
+                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+      ! This is b_c - A_cf * x_f^0 - this never changes
+      call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), -1d0, &
+               air_data%temp_vecs_coarse(2)%array(our_level), ierr)  
+
+      ! Do all the consecutive C smooths
+      do c_its = 1, its
 
          ! Then A_cc * x_c^n - this changes at each richardson iteration
          call MatMult(air_data%A_cc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
@@ -521,26 +598,18 @@ module fc_smooth
 
          ! Compute x_c^n + A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
          call VecAXPY(air_data%temp_vecs_coarse(1)%array(our_level), 1d0, &
-                     air_data%temp_vecs_coarse(2)%array(our_level), ierr)         
+                     air_data%temp_vecs_coarse(2)%array(our_level), ierr)    
+                     
+      end do
 
-         ! ~~~~~~~~
-         ! Reverse put coarse x_c back into x
-         ! ~~~~~~~~
-         call VecISCopyLocalWrapper(air_data, our_level, .FALSE., x, &
-                  SCATTER_FORWARD, air_data%temp_vecs_coarse(1)%array(our_level), &
-                  air_data%temp_vecs(1)%array(our_level))                     
-
-      end if 
+      ! ~~~~~~~~
+      ! Reverse put coarse x_c back into x
+      ! ~~~~~~~~
+      call VecISCopyLocalWrapper(air_data, our_level, .FALSE., x, &
+               SCATTER_FORWARD, air_data%temp_vecs_coarse(1)%array(our_level), &
+               air_data%temp_vecs(1)%array(our_level))          
       
-      ! Now technically there should be a new residual that we put into r after this is done
-      ! but I don't think it matters, as it is the solution that is interpolated up 
-      ! and the richardson on the next level up computes its own F-point residual 
-      ! and the norm type is none on the mg levels, as we just do maxits        
-
-      ! have to return zero here!
-      ierr = 0
-      
-   end subroutine mg_FC_point_richardson     
+   end subroutine c_smooths      
  
    !------------------------------------------------------------------------------------------------------------------------
    
