@@ -17,7 +17,7 @@ Some examples of assymetric linear systems that PFLARE can scalably solve includ
 2) Other asymmetric problems such as:
    - Heavily anisotropic Poisson/diffusion equations
 
-## Methods available in PETSC through PFLARE
+## Methods available in PFLARE
 
 Installing and using PFLARE adds new methods to PETSc, including:
 1) Various polynomial approximate inverses, e.g., GMRES polynomials and Neumann polynomials
@@ -385,31 +385,6 @@ Often an outer loop (e.g., eigenvalue) will require solving a series of differen
 
 This means we can cheaply generate the exact same preconditioner when periodically solving the same linear system. An example of this is given in ``tests/ex6f_getcoeffs.F90``, where we solve a linear system, store the resulting GMRES polynomial coefficients, reuse the sparsity to solve a different linear system, then reuse the sparsity and restore the GMRES polynomial coefficients to solve the first linear system again. We should note this type of reuse is not yet available in Python. 
 
-## OpenMP with PCAIR
-
-If processor agglomeration has been enabled (it is by default) and:
-1) ``-pc_air_matrix_free_polys`` has not been set (default).
-2) ``-pc_air_inverse_type`` is one of: power (default), arnoldi or neumann.
-3) ``-pc_air_inverse_sparsity_order=1`` (default)
-
-then OpenMP can be used to reduce the time required to assemble the fixed-sparsity polynomial inverses. The idle MPI ranks that have been left with 0 unknowns after repartitioning will be used to thread. 
-
-The number of threads will automatically increase on lower grids with processor agglomeration. For example, if the number of active MPI ranks is halved each time processor agglomeration is triggered (``-pc_air_processor_agglom_factor 2``), then 2 threads will be used after the first processor agglomeration, with 4 threads used after the second, etc. 
-
-This relies on a repartitioning where the MPI ranks that are made inactive are on the same node (and NUMA region), i.e., each node has fewer active MPI ranks after repartitioning (typically called an "interleaved" partitioning), rather than some nodes being full and others empty. This will depend on how the ranks are numbered by the MPI library. Good performance is also dependent on appropriate pinning of MPI ranks and OpenMP threads to hardware cores. 
-
-Given that the time required to assemble the approximate polynomial inverses is typically small, using OpenMP often has little impact on the overall setup time. If however reuse has been enabled with PCAIR (see above), then the approximate polynomial inverse time is often the largest component of the (reused) setup time and OpenMP can help.
-
-To build PFLARE with OpenMP, add the appropriate OpenMP compiler flag before calling make, e.g., with GNU
-
-     export CFLAGS="-fopenmp"
-     export FFLAGS="-fopenmp" 
-     make
-
-and then before running a problem with PFLARE, set the ``OMP_NUM_THREADS`` environmental variable to be the maximum number of threads to use; typically this would be the number of hardware cores per NUMA region.
-
-It is recommended that PFLARE be linked with unthreaded BLAS/LAPACK libraries, as there is often little gain from using threaded libraries with PFLARE and that ensures the ``OMP_NUM_THREADS`` environmental variable is used purely to control the OpenMP described above.
-
 ## GPU support           
 
 If PETSc has been configured with GPU support then PCPFLAREINV and PCAIR support GPUs. We recommend configuring PETSc with Kokkos and always specifying the matrix/vector types as Kokkos as this works across different GPU hardware (Nvidia, AMD, Intel). PFLARE also contains Kokkos routines to speed-up the setup/solve on GPUs. 
@@ -418,7 +393,7 @@ By default the tests run on the CPU unless the matrix/vector types are specified
 
 ``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_order 30``
 
-To run on GPUs, we set the matrix/vector types as Kokkos, which can be easily set through command line arguments. Our tests use either ``-mat_type`` and ``-vec_type``, or if set by a DM directly use ``-dm_mat_type`` and ``-dm_vec_type``.
+To run on GPUs, we set the matrix/vector types as Kokkos, which can be easily done through command line arguments. Our tests use either ``-mat_type`` and ``-vec_type``, or if set by a DM directly use ``-dm_mat_type`` and ``-dm_vec_type``.
 
 For example, running the same problem on a single GPU with KOKKOS:
 
@@ -430,6 +405,10 @@ Development of the setup on GPUs is ongoing, please get in touch if you would li
 
 1) Processor agglomeration - GPU libraries exist which could replace the CPU-based calls to the PETSc graph partitioners
 2) GPU optimisation - There are several Kokkos routines in PFLARE which would benefit from optimisation
+
+## OpenMP with PCAIR
+
+If PETSc has been configured with OpenMP support then PCPFLAREINV and PCAIR support OpenMP through Kokkos. To enable OpenMP throughout the setup/solve the matrix/vector types must be specified as Kokkos and the ``OMP_NUM_THREADS`` environmental variable must be set. Good performance is dependent on appropriate pinning of MPI ranks and OpenMP threads to CPU cores/NUMA regions.
 
 ### Performance notes
 
