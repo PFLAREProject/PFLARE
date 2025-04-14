@@ -426,7 +426,7 @@ The hierarchy in this case has 29 levels. If we turn on the auto truncation and 
 
 we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve on GPUs with this approach.
 
-## OpenMP with PCAIR
+## OpenMP support
 
 If PETSc has been configured with OpenMP support then PCPFLAREINV and PCAIR support OpenMP through Kokkos. To enable OpenMP throughout the setup/solve the matrix/vector types must be specified as Kokkos and the ``OMP_NUM_THREADS`` environmental variable must be set. Good performance is dependent on appropriate pinning of MPI ranks and OpenMP threads to CPU cores/NUMA regions.
 
