@@ -86,13 +86,14 @@ module air_mg_stats
       type(tPC), intent(in)                  :: pcmg_input
       integer(kind=8), intent(out)           :: nnzs
 
-      integer :: our_level, non_zero_order
+      integer :: our_level, non_zero_order, i
       PetscInt :: maxits, petsc_level
       PetscErrorCode :: ierr
       PCType :: pc_type
       type(tKSP) :: ksp
       PetscReal :: rtol, atol, dtol
       integer(kind=8) maxits_long, maxits_aff_long, gmres_size_long, poly_order_long
+      integer(kind=8) maxits_afc_long, maxits_acf_long, maxits_acc_long
       MatType :: mat_type
 
       ! ~~~~~~    
@@ -137,8 +138,18 @@ module air_mg_stats
       ! Then go over all the levels except the coarse
       do our_level = 1, air_data%no_levels-1
 
+         maxits_aff_long = 0
+         maxits_acc_long = 0
          ! Round to long
-         maxits_aff_long = int(air_data%smooth_order_levels(our_level)%array(1), kind=8)
+         do i = 1, size(air_data%smooth_order_levels(our_level)%array)
+            if (air_data%smooth_order_levels(our_level)%array(i) > 0) then
+               maxits_aff_long = maxits_aff_long + int(air_data%smooth_order_levels(our_level)%array(i), kind=8)
+            else
+               maxits_acc_long = maxits_acc_long + int(abs(air_data%smooth_order_levels(our_level)%array(i)), kind=8)
+            end if
+         end do
+         maxits_afc_long = int(count(air_data%smooth_order_levels(our_level)%array > 0), kind=8)
+         maxits_acf_long = int(count(air_data%smooth_order_levels(our_level)%array < 0), kind=8)
 
          ! ~~~~~~~~~~~~~
          ! No down smooths
@@ -175,14 +186,14 @@ module air_mg_stats
 
             if (mat_type==MATSHELL) then
                nnzs = nnzs + maxits_long * maxits_aff_long * gmres_size_long * air_data%A_ff_nnzs(our_level) + &
-                           maxits_long * (maxits_aff_long) * air_data%A_ff_nnzs(our_level)
+                           maxits_long * maxits_aff_long * air_data%A_ff_nnzs(our_level)
             else
                nnzs = nnzs + maxits_long * maxits_aff_long * air_data%inv_A_ff_nnzs(our_level) + &
-                           maxits_long * (maxits_aff_long) * air_data%A_ff_nnzs(our_level)
+                           maxits_long * maxits_aff_long * air_data%A_ff_nnzs(our_level)
             end if
 
-            ! Add in the minus Afc - this is done once before we F-point smooth
-            nnzs = nnzs + maxits_long * air_data%A_fc_nnzs(our_level)    
+            ! Add in the minus Afc - this is done once before we consecutively F-point smooth
+            nnzs = nnzs + maxits_long * maxits_afc_long * air_data%A_fc_nnzs(our_level)    
 
             ! One C-point smooth         
             if (air_data%options%any_c_smooths) then
@@ -196,14 +207,14 @@ module air_mg_stats
                ! Are we mf?
                call MatGetType(air_data%inv_A_cc(our_level), mat_type, ierr)
                if (mat_type==MATSHELL) then  
-                  nnzs = nnzs + maxits_long * gmres_size_long * air_data%A_cc_nnzs(our_level) + &
-                           maxits_long * air_data%A_cc_nnzs(our_level)
+                  nnzs = nnzs + maxits_long * maxits_acc_long * gmres_size_long * air_data%A_cc_nnzs(our_level) + &
+                           maxits_long * maxits_acc_long * air_data%A_cc_nnzs(our_level)
                else          
-                  nnzs = nnzs + maxits_long * air_data%inv_A_cc_nnzs(our_level) + &
-                           maxits_long * air_data%A_cc_nnzs(our_level)
+                  nnzs = nnzs + maxits_long * maxits_acc_long * air_data%inv_A_cc_nnzs(our_level) + &
+                           maxits_long * maxits_acc_long * air_data%A_cc_nnzs(our_level)
                end if
-               ! Add in the minus Acf
-               nnzs = nnzs + maxits_long * air_data%A_cf_nnzs(our_level)
+               ! Add in the minus Acf  - this is done once before we consecutively C-point smooth
+               nnzs = nnzs + maxits_long * maxits_acf_long * air_data%A_cf_nnzs(our_level)
             end if            
 
          ! Full smoothing up and down
