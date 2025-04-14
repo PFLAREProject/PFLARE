@@ -59,8 +59,7 @@ endif
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 
 # All the files required by PFLARE
-OBJS := $(SRCDIR)/NonBusyWait.o \
-		  $(SRCDIR)/Binary_Tree.o \
+OBJS := $(SRCDIR)/Binary_Tree.o \
 		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \

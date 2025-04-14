@@ -1560,8 +1560,7 @@ module air_mg_setup
                   ! air_data%options%processor_agglom_factor tells us how much we're reducing the number 
                   ! of active mpi ranks by each time
                   
-                  ! proc_stride is fed into the polynomial inverse assembly to tell it how many
-                  ! idle ranks we have, so we can use them as threads in omp if it is enabled
+                  ! can tell us how many idle threads we have on lower grids
                   proc_stride = proc_stride * air_data%options%processor_agglom_factor
 
                   ! If we don't have at least process_eq_limit unknowns per core (on average)

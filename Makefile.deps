@@ -10,12 +10,11 @@ src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.F90 src/PETSc_Helper.o src/C_PETSc
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
 src/FC_Smooth.o : src/FC_Smooth.F90 src/Matshell_PFLARE.o src/PETSc_Helper.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/Gmres_Poly_Data_Type.o : src/Gmres_Poly_Data_Type.F90 src/TSQR.o 
-src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/NonBusyWait.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Matshell_PFLARE.o src/C_PETSc_Interfaces.o src/Sorting.o 
+src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Matshell_PFLARE.o src/C_PETSc_Interfaces.o src/Sorting.o 
 src/Gmres_Poly_Newton.o : src/Gmres_Poly_Newton.F90 src/C_PETSc_Interfaces.o src/Gmres_Poly.o 
 src/Matshell_Data_Type.o : src/Matshell_Data_Type.F90 src/AIR_Data_Type.o 
 src/Matshell_PFLARE.o : src/Matshell_PFLARE.F90 src/Matshell_Data_Type.o 
 src/Neumann_Poly.o : src/Neumann_Poly.F90 src/C_PETSc_Interfaces.o src/Matshell_PFLARE.o src/Gmres_Poly.o 
-src/NonBusyWait.o : src/NonBusyWait.F90 
 src/PCAIR_C_Fortran_Bindings.o : src/PCAIR_C_Fortran_Bindings.F90 src/PCAIR_Interfaces.o 
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.F90 src/AIR_Data_Type.o 
 src/PCAIR_Interfaces.o : src/PCAIR_Interfaces.F90 src/PCAIR_Shell.o 

@@ -139,10 +139,7 @@ module pmisr_ddc
       PetscInt :: jfree
       PetscInt :: rows_ao, cols_ao, n_ad, n_ao
       integer :: comm_size, comm_size_world, loops_through, seed_size
-      integer :: comm_rank, counter_parallel, errorcode
-#ifdef _OPENMP
-      integer :: omp_threads
-#endif        
+      integer :: comm_rank, counter_parallel, errorcode       
       integer :: counter_undecided, counter_in_set_start, kfree
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
