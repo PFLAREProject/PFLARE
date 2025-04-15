@@ -110,7 +110,6 @@ module air_data_type
       ! 2 F smooths by default
       integer, dimension(10) :: smooth_order = (/ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 /)
       ! Do we do any C point smooths?
-      ! -pc_air_one_c_smooth
       logical :: any_c_smooths = .FALSE.
       ! Do we apply our polynomials matrix free when smoothing?
       ! -pc_air_matrix_free_polys

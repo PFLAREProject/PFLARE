@@ -616,45 +616,7 @@ module pcair_interfaces
       steps = options%max_luby_steps
       ierr = 0
 
-   end subroutine PCAIRGetMaxLubySteps   
-   
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRGetMaxitsAff(pc, maxits, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscInt, intent(out)         :: maxits
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      ! ~~~~~~~~
-
-      ! Get the options
-      call PCAIRGetOptions(pc, options)    
-      maxits = options%smooth_order(1)
-      ierr = 0
-
-   end subroutine PCAIRGetMaxitsAff
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRGetOneCSmooth(pc, smooth, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscBool, intent(out)        :: smooth
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      ! ~~~~~~~~
-
-      ! Get the options
-      call PCAIRGetOptions(pc, options)    
-      smooth = any(options%smooth_order < 0)
-      ierr = 0
-
-   end subroutine PCAIRGetOneCSmooth
+   end subroutine PCAIRGetMaxLubySteps
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1401,48 +1363,116 @@ module pcair_interfaces
       options%max_luby_steps = int(steps)
       ierr = 0
 
-   end subroutine PCAIRSetMaxLubySteps   
-   
+   end subroutine PCAIRSetMaxLubySteps
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetMaxitsAff(pc, maxits, ierr) 
+   subroutine PCAIRSetSmoothType(pc, input_string, ierr) 
 
       ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscInt, intent(in)          :: maxits
-      PetscErrorCode, intent(out)   :: ierr
+      type(tPC), intent(inout)       :: pc
+      character(len = *), intent(in) :: input_string
+      PetscErrorCode, intent(out)    :: ierr
 
       type(air_options), pointer :: options
+      character(len = 1) :: current_char, old_char
+      integer :: smooth_order_index
+      integer :: errorcode, n, i
       ! ~~~~~~~~
 
       ! Set the options
       call PCAIRGetOptions(pc, options)    
-      options%smooth_order(1) = int(maxits)
-      ierr = 0
 
-   end subroutine PCAIRSetMaxitsAff
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRSetOneCSmooth(pc, smooth, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscBool, intent(in)         :: smooth
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      ! ~~~~~~~~
-
-      ! Set the options
-      call PCAIRGetOptions(pc, options)    
-      options%any_c_smooths = smooth
-      if (options%any_c_smooths) then
-         options%smooth_order(2) = -1
+      n = len_trim(input_string)
+      if (n == 0) then
+         print *, "Smooth order must be non-zero length"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
       end if
+      
+      old_char = "0"
+      smooth_order_index = 1
+      options%smooth_order = 0
+      options%any_c_smooths = .FALSE.
+      do i = 1, n
+
+         current_char = input_string(i:i)
+
+         if (current_char /= old_char .AND. i /= 1) then
+            smooth_order_index = smooth_order_index + 1
+         end if
+
+         select case (current_char)
+         case ('f', 'F')
+            options%smooth_order(smooth_order_index) = options%smooth_order(smooth_order_index) + 1
+         case ('c', 'C')
+            options%smooth_order(smooth_order_index) = options%smooth_order(smooth_order_index) - 1
+            options%any_c_smooths = .TRUE.
+         case default
+            print *, "Smooth order must be only f or c characters"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+         end select           
+
+         old_char = current_char
+      end do      
+
       ierr = 0
 
-   end subroutine PCAIRSetOneCSmooth
+   end subroutine PCAIRSetSmoothType   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetSmoothType(pc, output_string, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)         :: pc
+      character(len=*), intent(out)    :: output_string
+      PetscErrorCode, intent(out)      :: ierr
+   
+      type(air_options), pointer :: options
+      integer :: i, j, idx, n, absval, total_len
+      character(len=1) :: ch
+      character(len=:), allocatable :: temp_string
+      ! ~~~~~~~~
+   
+      call PCAIRGetOptions(pc, options)
+   
+      ! First, compute the total length needed
+      total_len = 0
+      n = size(options%smooth_order)
+      do i = 1, n
+         if (options%smooth_order(i) /= 0) then
+            total_len = total_len + abs(options%smooth_order(i))
+         end if
+      end do
+   
+      ! Allocate a temporary string of the exact needed length
+      if (total_len > 0) then
+         allocate(character(len=total_len) :: temp_string)
+         idx = 1
+         do i = 1, n
+            if (options%smooth_order(i) > 0) then
+               ch = 'f'
+               absval = options%smooth_order(i)
+            else if (options%smooth_order(i) < 0) then
+               ch = 'c'
+               absval = -options%smooth_order(i)
+            else
+               cycle
+            end if
+            do j = 1, absval
+               temp_string(idx:idx) = ch
+               idx = idx + 1
+            end do
+         end do
+         ! Copy to output, trimming or padding as needed
+         output_string = temp_string
+         deallocate(temp_string)
+      else
+         output_string = ''
+      end if
+   
+      ierr = 0
+   end subroutine PCAIRGetSmoothType
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

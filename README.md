@@ -175,7 +175,7 @@ or in Python with petsc4py:
      
 or via the command line: ``-pc_type air``. 
 
-#### 2) Using PCAIR to apply distance 2 lAIR with FFC Weighted Jacobi smoothing:
+#### 2) Using PCAIR to apply distance 2 lAIR with FCF Weighted Jacobi smoothing:
 
 in Fortran:
 
@@ -184,7 +184,7 @@ in Fortran:
 
      call PCAIRSetZType(pc, AIR_Z_LAIR, ierr)
      call PCAIRSetInverseType(pc, PFLAREINV_WJACOBI, ierr)
-     call PCAIRSetOneCSmooth(pc, PETSC_TRUE, ierr)
+     call PCAIRSetSmoothType(pc, "fcf", ierr)
 
      ...[e.g., KSPSolve somewhere here]
 
@@ -195,7 +195,7 @@ or in C:
 
      ierr = PCAIRSetZType(pc, AIR_Z_LAIR);
      ierr = PCAIRSetInverseType(pc, PFLAREINV_WJACOBI);
-     ierr = PCAIRSetOneCSmooth(pc, PETSC_TRUE);
+     ierr = PCAIRSetSmoothType(pc, "fcf");
 
      ...[e.g., KSPSolve somewhere here]
 
@@ -207,11 +207,11 @@ or in Python with petsc4py:
      petsc_options = PETSc.Options()
      petsc_options['pc_air_z_type'] = 'lair'
      petsc_options['pc_air_inverse_type'] = 'wjacobi'
-     petsc_options['pc_air_one_c_smooth'] = ''     
+     petsc_options['pc_air_smooth_order'] = 'fcf'     
 
      ...[e.g., KSPSolve somewhere here]
      
-or via the command line: ``-pc_type air -pc_air_z_type lair -pc_air_inverse_type wjacobi -pc_air_one_c_smooth``.
+or via the command line: ``-pc_type air -pc_air_z_type lair -pc_air_inverse_type wjacobi -pc_air_smooth_type fcf``.
 
 #### 3) Using PCFLAREINV to apply a 20th order GMRES polynomial in the Newton basis matrix free:
 
@@ -549,12 +549,11 @@ A brief description of the available options in PFLARE are given below and their
    | ``-pc_air_poly_order``  |  PCAIRGetPolyOrder  PCAIRSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_air_inverse_sparsity_order``  |  PCAIRGetInverseSparsityOrder  PCAIRSetInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |        
    | ``-pc_air_matrix_free_polys``  |  PCAIRGetMatrixFreePolys  PCAIRSetMatrixFreePolys  | Do smoothing matrix-free if possible | false |   
-   | ``-pc_air_maxits_a_ff``  |  PCAIRGetMaxitsAff  PCAIRSetMaxitsAff  | Number of F point smooths | 2 |
+   | ``-pc_air_smooth_type``  |  PCAIRGetSmoothType  PCAIRSetSmoothType  | Type and number of smooths | "ff" |
    | ``-pc_air_full_smoothing_up_and_down``  |  PCAIRGetFullSmoothingUpAndDown  PCAIRSetFullSmoothingUpAndDown  | Up and down smoothing on all points at once, rather than only down F and C smoothing which is the default  | false |     
-   | ``-pc_air_one_c_smooth``  |  PCAIRGetOneCSmooth  PCAIRSetOneCSmooth  | Do a C point smooth after the F point smooths | false |
-   | ``-pc_air_c_inverse_type``  |  PCAIRGetCInverseType  PCAIRSetCInverseType  | The inverse type for the C smooth, given above. If unset this defaults to the F point smoother | -pc_air_inverse_type |
-   | ``-pc_air_c_poly_order``  |  PCAIRGetCPolyOrder  PCAIRSetCPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial for the C smooth. If unset this defaults to the F point smoother | -pc_air_poly_order |
-   | ``-pc_air_c_inverse_sparsity_order``  |  PCAIRGetCInverseSparsityOrder  PCAIRSetCInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses for the C smooth. If unset this defaults to the F point smoother | -pc_air_inverse_sparsity_order |    
+   | ``-pc_air_c_inverse_type``  |  PCAIRGetCInverseType  PCAIRSetCInverseType  | The inverse type for the C smooth, given above. If unset this defaults to the same as the F point smoother | -pc_air_inverse_type |
+   | ``-pc_air_c_poly_order``  |  PCAIRGetCPolyOrder  PCAIRSetCPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial for the C smooth. If unset this defaults to the same as the F point smoother | -pc_air_poly_order |
+   | ``-pc_air_c_inverse_sparsity_order``  |  PCAIRGetCInverseSparsityOrder  PCAIRSetCInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses for the C smooth. If unset this defaults to the same as the F point smoother | -pc_air_inverse_sparsity_order |    
    
 
 #### Grid transfer options

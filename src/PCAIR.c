@@ -7,6 +7,7 @@
 // Include the petsc header files
 #include <petsc/private/pcimpl.h>
 #include "pflare.h"
+#include <string.h>
 
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
@@ -28,8 +29,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold_c(PC *pc, PetscReal *input_r
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN PetscErrorCode PCAIRGetMaxitsAff_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN PetscErrorCode PCAIRGetOneCSmooth_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType_c(PC *pc, char* input_string);
 PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRGetOnePointClassicalProlong_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRGetFullSmoothingUpAndDown_c(PC *pc, PetscBool *input_bool);
@@ -72,8 +72,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold_c(PC *pc, PetscReal input_re
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN PetscErrorCode PCAIRSetMaxitsAff_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN PetscErrorCode PCAIRSetOneCSmooth_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType_c(PC *pc, const char* input_string);
 PETSC_EXTERN PetscErrorCode PCAIRSetMatrixFreePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRSetOnePointClassicalProlong_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRSetFullSmoothingUpAndDown_c(PC *pc, PetscBool input_bool);
@@ -271,16 +270,10 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
    PCAIRGetMaxLubySteps_c(&pc, input_int);
    PetscFunctionReturn(0);
 }
-PETSC_EXTERN PetscErrorCode PCAIRGetMaxitsAff(PC pc, PetscInt *input_int)
+PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 {
    PetscFunctionBegin;
-   PCAIRGetMaxitsAff_c(&pc, input_int);
-   PetscFunctionReturn(0);
-}
-PETSC_EXTERN PetscErrorCode PCAIRGetOneCSmooth(PC pc, PetscBool *input_bool)
-{
-   PetscFunctionBegin;
-   PCAIRGetOneCSmooth_c(&pc, input_bool);
+   PCAIRGetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(0);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool)
@@ -646,30 +639,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
    PCAIRSetMaxLubySteps_c(&pc, input_int);
    PetscFunctionReturn(0);
 }
-// How many iterations of F point smoothing to do 
-// Default: 2
-// -pc_air_maxits_a_ff
-PETSC_EXTERN PetscErrorCode PCAIRSetMaxitsAff(PC pc, PetscInt input_int)
+// Set the type/its of the smoothing
+// Default: ff
+// -pc_air_smooth_type
+PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 {
    PetscFunctionBegin;
-   PetscInt old_int;
-   PCAIRGetMaxitsAff(pc, &old_int);
-   if (old_int == input_int) PetscFunctionReturn(0);
+   char old_string[PETSC_MAX_PATH_LEN];
+   PCAIRGetSmoothType(pc, old_string);
+   if (strcmp(input_string, old_string) == 0) PetscFunctionReturn(0);
    PCReset_AIR_c(pc);    
-   PCAIRSetMaxitsAff_c(&pc, input_int);
-   PetscFunctionReturn(0);
-}
-// Do we do a C point smooth after the F
-// Default: false
-// -pc_air_one_c_smooth
-PETSC_EXTERN PetscErrorCode PCAIRSetOneCSmooth(PC pc, PetscBool input_bool)
-{
-   PetscFunctionBegin;
-   PetscBool old_bool;
-   PCAIRGetOneCSmooth(pc, &old_bool);
-   if (old_bool == input_bool) PetscFunctionReturn(0);
-   PCReset_AIR_c(pc);    
-   PCAIRSetOneCSmooth_c(&pc, input_bool);
+   PCAIRSetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(0);
 }
 // Do we apply our polynomials matrix free when smoothing?
@@ -1057,6 +1037,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PCPFLAREINVType old_type, type;
    PCAIRZType old_z_type, z_type;
    CFSplittingType old_cf_type, cf_type;
+   char old_string[PETSC_MAX_PATH_LEN] ,input_string[PETSC_MAX_PATH_LEN];
 
    PetscOptionsHeadBegin(PetscOptionsObject, "PCAIR options");
    // ~~~~
@@ -1074,11 +1055,6 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    flg = old_flag;
    PetscOptionsBool("-pc_air_processor_agglom", "Processor agglomeration", "PCAIRSetProcessorAgglom", old_flag, &flg, NULL);
    PCAIRSetProcessorAgglom(pc, flg);
-   // ~~~~
-   PCAIRGetOneCSmooth(pc, &old_flag);
-   flg = old_flag;
-   PetscOptionsBool("-pc_air_one_c_smooth", "Does one C smooth", "PCAIRSetOneCSmooth", old_flag, &flg, NULL);
-   PCAIRSetOneCSmooth(pc, flg);
    // ~~~~
    PCAIRGetMatrixFreePolys(pc, &old_flag);
    flg = old_flag;
@@ -1181,10 +1157,10 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscOptionsInt("-pc_air_max_luby_steps", "Max Luby steps in CF splitting algorithm", "PCAIRSetMaxLubySteps", old_int, &input_int, NULL);
    PCAIRSetMaxLubySteps(pc, input_int);
    // ~~~~ 
-   PCAIRGetMaxitsAff(pc, &old_int);
-   input_int = old_int;
-   PetscOptionsInt("-pc_air_maxits_a_ff", "Iterations of F smoothing", "PCAIRSetMaxitsAff", old_int, &input_int, NULL);
-   PCAIRSetMaxitsAff(pc, input_int);
+   PCAIRGetSmoothType(pc, old_string);
+   strcpy(input_string, old_string);
+   PetscOptionsString("-pc_air_smooth_type", "The smoothing types/its", "PCAIRSetSmoothType", input_string, input_string, sizeof(input_string), &flg);
+   PCAIRSetSmoothType(pc, input_string);   
    // ~~~~    
    PCAIRGetMaxLevels(pc, &old_int);
    input_int = old_int;
@@ -1286,11 +1262,12 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 
    PetscInt input_int, input_int_two, input_int_three;
    PetscErrorCode ierr = 0;
-   PetscBool flg, flg_two;
+   PetscBool flg, flg_f_smooth, flg_c_smooth;
    PetscReal input_real, input_real_two;
    PCPFLAREINVType input_type;
    PCAIRZType z_type;
    CFSplittingType cf_type;
+   char input_string[PETSC_MAX_PATH_LEN];
 
    // Print out details
    PetscBool  iascii;
@@ -1420,81 +1397,84 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       }
       else
       {
-         ierr =  PCAIRGetMaxitsAff(pc, &input_int);
-         ierr =  PCAIRGetOneCSmooth(pc, &flg_two);
-         if (flg_two) 
-         {
-            PetscViewerASCIIPrintf(viewer, "  Up FC smoothing with number of F smooths=%"PetscInt_FMT" and number of C smooths=1: \n", input_int);      
+         ierr =  PCAIRGetSmoothType(pc, input_string);
+         // Set flags if 'f' or 'c' present in input_string
+         flg_f_smooth = PETSC_FALSE;
+         flg_c_smooth = PETSC_FALSE;
+         for (int i = 0; input_string[i] != '\0'; i++) {
+            if (input_string[i] == 'f' || input_string[i] == 'F') flg_f_smooth = PETSC_TRUE;
+            if (input_string[i] == 'c' || input_string[i] == 'C') flg_c_smooth = PETSC_TRUE;
          }
-         else
-         {
-            PetscViewerASCIIPrintf(viewer, "  Up F smoothing with number of F smooths=%"PetscInt_FMT": \n", input_int);      
-         }
-         ierr =  PCAIRGetInverseType(pc, &input_type);
-         ierr =  PCAIRGetPolyOrder(pc, &input_int_two);
-         ierr =  PCAIRGetInverseSparsityOrder(pc, &input_int_three);
-         ierr =  PCAIRGetMatrixFreePolys(pc, &flg);
+         PetscViewerASCIIPrintf(viewer, "  Up smoothing of type=%s \n", input_string);      
 
-         // What type of inverse
-         if (input_type == PFLAREINV_POWER)
+         if (flg_f_smooth)
          {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, power basis, order %"PetscInt_FMT" \n", input_int_two);
-         }
-         else if (input_type == PFLAREINV_ARNOLDI)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, arnoldi basis, order %"PetscInt_FMT" \n", input_int_two);
-         }
-         else if (input_type == PFLAREINV_NEWTON)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis with extra roots, order %"PetscInt_FMT" \n", input_int_two);      
-         }
-         else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis without extra roots, order %"PetscInt_FMT" \n", input_int_two);             
-         }
-         else if (input_type == PFLAREINV_SAI)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: SAI \n");      
-         }
-         else if (input_type == PFLAREINV_ISAI)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: ISAI \n");      
-         }      
-         else if (input_type == PFLAREINV_NEUMANN)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: Neumann polynomial, order %"PetscInt_FMT" \n", input_int_two);      
-         }     
-         else if (input_type == PFLAREINV_WJACOBI)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: Weighted Jacobi \n");      
-         }
-         else if (input_type == PFLAREINV_JACOBI)
-         {
-            PetscViewerASCIIPrintf(viewer, "    F smooth: Unweighted Jacobi \n");      
-         }                  
-         if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
-         {
-            // If matrix-free or not
-            if (flg)
+            ierr =  PCAIRGetInverseType(pc, &input_type);
+            ierr =  PCAIRGetPolyOrder(pc, &input_int_two);
+            ierr =  PCAIRGetInverseSparsityOrder(pc, &input_int_three);
+            ierr =  PCAIRGetMatrixFreePolys(pc, &flg);
+
+            // What type of inverse
+            if (input_type == PFLAREINV_POWER)
             {
-               PetscViewerASCIIPrintf(viewer, "      matrix-free inverse \n");
+               PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, power basis, order %"PetscInt_FMT" \n", input_int_two);
             }
-            else
+            else if (input_type == PFLAREINV_ARNOLDI)
             {
-               // Only print out if the sparsity is less than the poly order
-               if (input_int_three < input_int_two)
-               {               
-                  PetscViewerASCIIPrintf(viewer, "      assembled inverse, sparsity order %"PetscInt_FMT"\n", input_int_three);
+               PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, arnoldi basis, order %"PetscInt_FMT" \n", input_int_two);
+            }
+            else if (input_type == PFLAREINV_NEWTON)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis with extra roots, order %"PetscInt_FMT" \n", input_int_two);      
+            }
+            else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis without extra roots, order %"PetscInt_FMT" \n", input_int_two);             
+            }
+            else if (input_type == PFLAREINV_SAI)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: SAI \n");      
+            }
+            else if (input_type == PFLAREINV_ISAI)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: ISAI \n");      
+            }      
+            else if (input_type == PFLAREINV_NEUMANN)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: Neumann polynomial, order %"PetscInt_FMT" \n", input_int_two);      
+            }     
+            else if (input_type == PFLAREINV_WJACOBI)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: Weighted Jacobi \n");      
+            }
+            else if (input_type == PFLAREINV_JACOBI)
+            {
+               PetscViewerASCIIPrintf(viewer, "    F smooth: Unweighted Jacobi \n");      
+            }                  
+            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+            {
+               // If matrix-free or not
+               if (flg)
+               {
+                  PetscViewerASCIIPrintf(viewer, "      matrix-free inverse \n");
                }
                else
                {
-                  PetscViewerASCIIPrintf(viewer, "      assembled inverse\n");
-               }                
-            }
-         }  
+                  // Only print out if the sparsity is less than the poly order
+                  if (input_int_three < input_int_two)
+                  {               
+                     PetscViewerASCIIPrintf(viewer, "      assembled inverse, sparsity order %"PetscInt_FMT"\n", input_int_three);
+                  }
+                  else
+                  {
+                     PetscViewerASCIIPrintf(viewer, "      assembled inverse\n");
+                  }                
+               }
+            }  
+         }
 
          // If C smoothing
-         if (flg_two) {
+         if (flg_c_smooth) {
 
             ierr =  PCAIRGetCInverseType(pc, &input_type);
             ierr =  PCAIRGetCPolyOrder(pc, &input_int_two);
