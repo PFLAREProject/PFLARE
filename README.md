@@ -207,7 +207,7 @@ or in Python with petsc4py:
      petsc_options = PETSc.Options()
      petsc_options['pc_air_z_type'] = 'lair'
      petsc_options['pc_air_inverse_type'] = 'wjacobi'
-     petsc_options['pc_air_smooth_order'] = 'fcf'     
+     petsc_options['pc_air_smooth_type'] = 'fcf'     
 
      ...[e.g., KSPSolve somewhere here]
      
