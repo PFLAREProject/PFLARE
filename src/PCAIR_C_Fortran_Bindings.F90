@@ -272,41 +272,7 @@ module pcair_c_fortran_bindings
       pc%v = pc_ptr
       call PCAIRGetMaxLubySteps(pc, steps, ierr)
 
-   end subroutine PCAIRGetMaxLubySteps_c   
-   
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRGetMaxitsAff_c(pc_ptr, maxits) bind(C, name='PCAIRGetMaxitsAff_c')
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(inout) :: pc_ptr
-      PetscInt, intent(out)         :: maxits
-
-      type(tPC)                  :: pc
-      PetscErrorCode         :: ierr
-      ! ~~~~~~~~
-
-      pc%v = pc_ptr
-      call PCAIRGetMaxitsAff(pc, maxits, ierr)
-
-   end subroutine PCAIRGetMaxitsAff_c
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRGetOneCSmooth_c(pc_ptr, smooth) bind(C, name='PCAIRGetOneCSmooth_c')
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(inout) :: pc_ptr
-      PetscBool, intent(out)        :: smooth
-
-      type(tPC)                  :: pc
-      PetscErrorCode         :: ierr
-      ! ~~~~~~~~
-
-      pc%v = pc_ptr
-      call PCAIRGetOneCSmooth(pc, smooth, ierr)
-
-   end subroutine PCAIRGetOneCSmooth_c
+   end subroutine PCAIRGetMaxLubySteps_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1055,40 +1021,72 @@ module pcair_c_fortran_bindings
       call PCAIRSetMaxLubySteps(pc, steps, ierr)
 
    end subroutine PCAIRSetMaxLubySteps_c   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetSmoothType_c(pc_ptr, input_string ) bind (C, name="PCAIRSetSmoothType_c")
+
+      use iso_c_binding, only: C_CHAR, c_null_char
+      implicit none
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      character (kind=c_char, len=1), dimension (10), intent (in) :: input_string
+
+      type(tPC)              :: pc
+      PetscErrorCode         :: ierr
+      character (len=10)     :: regular_string
+      integer :: i      
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr      
    
-! -------------------------------------------------------------------------------------------------------------------------------
+      ! Convert the string to fortran
+      regular_string = " "
+      loop_string: do i=1, 10
+         if ( input_string (i) == c_null_char ) then
+            exit loop_string
+         else
+            regular_string (i:i) = input_string (i)
+         end if
+      end do loop_string
 
-   subroutine PCAIRSetMaxitsAff_c(pc_ptr, maxits) bind(C, name='PCAIRSetMaxitsAff_c')
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(inout) :: pc_ptr
-      PetscInt, value, intent(in)          :: maxits
-
-      type(tPC)                  :: pc
-      PetscErrorCode         :: ierr
-      ! ~~~~~~~~
-
-      pc%v = pc_ptr
-      call PCAIRSetMaxitsAff(pc, maxits, ierr)
-
-   end subroutine PCAIRSetMaxitsAff_c
+      call PCAIRSetSmoothType(pc, regular_string, ierr)
+      
+   end subroutine PCAIRSetSmoothType_c   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetOneCSmooth_c(pc_ptr, smooth) bind(C, name='PCAIRSetOneCSmooth_c')
-
-      ! ~~~~~~~~
+   subroutine PCAIRGetSmoothType_c(pc_ptr, output_string) bind(C, name="PCAIRGetSmoothType_c")
+      use iso_c_binding, only: c_char, c_null_char
+      implicit none
+   
       integer(c_long_long), intent(inout) :: pc_ptr
-      PetscBool, value, intent(in)         :: smooth
-
-      type(tPC)                  :: pc
-      PetscErrorCode         :: ierr
-      ! ~~~~~~~~
-
+      character(kind=c_char, len=1), dimension(*), intent(out) :: output_string
+   
+      type(tPC) :: pc
+      PetscErrorCode :: ierr
+      character(len=10) :: fortran_string
+      integer :: i, n
+   
       pc%v = pc_ptr
-      call PCAIRSetOneCSmooth(pc, smooth, ierr)
-
-   end subroutine PCAIRSetOneCSmooth_c
+   
+      ! Get the Fortran string (trimmed)
+      call PCAIRGetSmoothType(pc, fortran_string, ierr)
+      n = len_trim(fortran_string)
+   
+      ! Copy Fortran string to C array, null-terminate
+      do i = 1, n
+         output_string(i) = fortran_string(i:i)
+      end do
+      output_string(n+1) = c_null_char
+   
+      ! Fill the rest with c_null_char if output_string is longer
+      do i = n+2, 256
+         output_string(i) = c_null_char
+      end do
+   
+   end subroutine PCAIRGetSmoothType_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

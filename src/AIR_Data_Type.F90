@@ -20,6 +20,10 @@ module air_data_type
       type(tVec), allocatable, dimension(:) :: array
    end type petsc_vec_array
 
+   type int_vec_array
+      integer, allocatable, dimension(:) :: array
+   end type int_vec_array   
+
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~        
    
    ! Stores the options needed for air multigrid
@@ -99,12 +103,14 @@ module air_data_type
       ! -pc_air_max_luby_steps
       integer :: max_luby_steps = -1
 
-      ! How many iterations of F point smoothing to do 
-      ! -pc_air_maxits_a_ff
-      integer :: maxits_a_ff = 2
-      ! Do we do maxits_a_ff F smoothing or maxits_a_ff F smooths then a single C?
-      ! -pc_air_one_c_smooth
-      logical :: one_c_smooth = .FALSE.
+      ! Stores what smoothing happens
+      ! Positive means F smooth, negative means C smooth
+      ! The size of the integer is how many consecutive smooths
+      ! e.g., (/ 2 -2 2 /) means 2 F, then 2 C, then 2 F
+      ! 2 F smooths by default
+      integer, dimension(10) :: smooth_order = (/ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 /)
+      ! Do we do any C point smooths?
+      logical :: any_c_smooths = .FALSE.
       ! Do we apply our polynomials matrix free when smoothing?
       ! -pc_air_matrix_free_polys
       logical :: matrix_free_polys = .FALSE.
@@ -314,8 +320,8 @@ module air_data_type
       ! Boolean to tell whether we have allocated petsc matrices
       logical, allocatable, dimension(:)                 :: allocated_coarse_matrix
 
-      ! The number of F smooths we do on each level
-      PetscInt, allocatable, dimension(:)              :: maxits_a_ff_levels
+      ! The number of smooths we do on each level
+      type(int_vec_array), allocatable, dimension(:)     :: smooth_order_levels
 
       ! The coarsest grid is stored in coarse_matrix(no_levels) and this is the 
       ! GMRES polynomial data for the coarsest grid solver
@@ -392,7 +398,7 @@ module air_data_type
       allocate(air_data%allocated_is(air_data%options%max_levels))
       allocate(air_data%allocated_coarse_matrix(air_data%options%max_levels))   
       
-      allocate(air_data%maxits_a_ff_levels(air_data%options%max_levels))      
+      allocate(air_data%smooth_order_levels(air_data%options%max_levels))      
 
       ! Temporary vectors
       allocate(air_data%temp_vecs_fine(1)%array(air_data%options%max_levels))
@@ -422,7 +428,6 @@ module air_data_type
       air_data%allocated_is = .FALSE.
       air_data%allocated_matrices_A_cc = .FALSE. 
       air_data%allocated_coarse_matrix = .FALSE.
-      air_data%maxits_a_ff_levels = -1
      
    end subroutine create_air_data    
 

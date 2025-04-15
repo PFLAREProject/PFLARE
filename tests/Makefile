@@ -46,6 +46,8 @@ run_tests_load_serial:
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem"
 	./ex12f -f data/mat_stream_2364 -ksp_max_it 5
+	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem with fcf smoothing"
+	./ex12f -f data/mat_stream_2364 -ksp_max_it 5 -pc_air_smooth_type fcf
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing"
 	./ex12f -f data/mat_stream_2364 -pc_air_matrix_free_polys -ksp_max_it 5
 #
@@ -220,7 +222,7 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace"
 	./adv_diff_2d -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
-	 -pc_air_one_c_smooth -pc_air_symmetric -pc_air_constrain_z \
+	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
 	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump\
 	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14
 # 
@@ -232,13 +234,13 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test lAIR on steady 2D structured advection"
 	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_one_c_smooth \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_z_type lair -pc_air_inverse_type wjacobi -ksp_max_it 10
 # 
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
 	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_one_c_smooth \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_fraction 0.0 -ksp_max_it 7
 # 
 	@echo ""
@@ -350,7 +352,7 @@ run_tests_no_load_parallel:
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"
 	$(MPIEXEC) -n 4 ./adv_diff_2d -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
-	 -pc_air_one_c_smooth -pc_air_symmetric -pc_air_constrain_z \
+	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
 	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump\
 	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14
 # 
