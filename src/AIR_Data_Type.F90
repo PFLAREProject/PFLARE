@@ -294,8 +294,12 @@ module air_data_type
       ! Storage for ideal restrictors/prolongators that includes I block
       type(tMat), allocatable, dimension(:)              :: restrictors
       type(tMat), allocatable, dimension(:)              :: prolongators
+      type(tMat), allocatable, dimension(:)              :: prolongators_shell
+      type(tIS), allocatable, dimension(:)               :: prolongator_one_point_is_ix
+      type(tIS), allocatable, dimension(:)               :: prolongator_one_point_is_iy
+      type(tVecScatter), allocatable, dimension(:)       :: vec_scatter_prolong
 
-      ! Restrictor style injectors we use as gpus don't currently support veciscopy
+      ! Restrictor style injectors we use if we don't have a native veciscopy
       type(tMat), allocatable, dimension(:)              :: i_fine_full, i_coarse_full
       type(tMat), allocatable, dimension(:)              :: i_fine_full_full, i_coarse_full_full
 

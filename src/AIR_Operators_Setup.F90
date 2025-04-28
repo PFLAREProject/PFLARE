@@ -202,7 +202,7 @@ module air_operators_setup
 
          call timer_start(TIMER_ID_AIR_EXTRACT)        
          
-         ! Drop the entries from A_cf
+         ! May need to create an extra copy of A_cf for dropping
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP)
          if (.NOT. PetscObjectIsNull(temp_mat)) then
             call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
@@ -216,7 +216,6 @@ module air_operators_setup
          end if
 
          if (.NOT. air_data%options%one_point_classical_prolong) then
-            ! Drop the entries from A_fc
             temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP)
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
@@ -608,6 +607,15 @@ module air_operators_setup
                      .TRUE., &
                      reuse_grid_transfer, &
                      air_data%prolongators(our_level))
+
+            temp_is = air_data%prolongator_one_point_is_ix(our_level)
+            if (.NOT. PetscObjectIsNull(temp_is)) then
+               call ISDestroy(air_data%prolongator_one_point_is_ix(our_level), ierr)
+               call ISDestroy(air_data%prolongator_one_point_is_iy(our_level), ierr)
+            end if
+            call generate_is_from_one_point(air_data%prolongators(our_level), &
+                     air_data%prolongator_one_point_is_ix(our_level), &
+                     air_data%prolongator_one_point_is_iy(our_level))
          end if
 
          ! Delete temporary if not reusing

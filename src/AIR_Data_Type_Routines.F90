@@ -37,6 +37,10 @@ module air_data_type_routines
 
       allocate(air_data%restrictors(air_data%options%max_levels))
       allocate(air_data%prolongators(air_data%options%max_levels))
+      allocate(air_data%vec_scatter_prolong(air_data%options%max_levels))
+      allocate(air_data%prolongators_shell(air_data%options%max_levels))
+      allocate(air_data%prolongator_one_point_is_ix(air_data%options%max_levels))
+      allocate(air_data%prolongator_one_point_is_iy(air_data%options%max_levels))
 
       allocate(air_data%i_fine_full(air_data%options%max_levels))
       allocate(air_data%i_coarse_full(air_data%options%max_levels))
@@ -137,6 +141,10 @@ module air_data_type_routines
                   call MatDestroy(air_data%A_fc(our_level), ierr)
                   call MatDestroy(air_data%A_cf(our_level), ierr)                  
                   call MatDestroy(air_data%prolongators(our_level), ierr)
+                  call VecScatterDestroy(air_data%vec_scatter_prolong(our_level), ierr)
+                  call MatDestroy(air_data%prolongators_shell(our_level), ierr)
+                  call ISDestroy(air_data%prolongator_one_point_is_ix(our_level), ierr)
+                  call ISDestroy(air_data%prolongator_one_point_is_iy(our_level), ierr)
                   if (.NOT. air_data%options%symmetric) then
                      call MatDestroy(air_data%restrictors(our_level), ierr)
                   end if                  
@@ -326,6 +334,10 @@ module air_data_type_routines
 
          deallocate(air_data%restrictors)
          deallocate(air_data%prolongators)  
+         deallocate(air_data%vec_scatter_prolong)  
+         deallocate(air_data%prolongators_shell)  
+         deallocate(air_data%prolongator_one_point_is_ix)  
+         deallocate(air_data%prolongator_one_point_is_iy)  
 
          deallocate(air_data%i_fine_full)
          deallocate(air_data%i_coarse_full) 

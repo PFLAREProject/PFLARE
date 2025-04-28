@@ -3,6 +3,7 @@ module grid_transfer
    use petscmat
    use c_petsc_interfaces
    use petsc_helper
+   use matshell_pflare
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -18,6 +19,123 @@ module grid_transfer
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
    contains 
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_one_point_prolong(mat, x, y)
+
+      ! Applies a one point classical prolongator
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      PetscErrorCode :: ierr
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+
+      ! Have to set to zero as there may be missing entries
+      call VecSet(y, 0d0, ierr)
+      call VecScatterBegin(mat_ctx%air_data%vec_scatter_prolong(mat_ctx%our_level), &
+               x, y, &
+               INSERT_VALUES, SCATTER_FORWARD, ierr)      
+      call VecScatterEnd(mat_ctx%air_data%vec_scatter_prolong(mat_ctx%our_level), &
+               x, y, &
+               INSERT_VALUES, SCATTER_FORWARD, ierr)
+
+   end subroutine petsc_matvec_one_point_prolong      
+
+   !------------------------------------------------------------------------------------------------------------------------   
+   
+   subroutine generate_is_from_one_point(P_mat, is_ix, is_iy)
+
+      ! Output an IS that is equivalent to the input one point prolongator
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in) :: P_mat
+      type(tIS), intent(inout) :: is_ix, is_iy
+      
+      PetscInt :: ncols, ifree, counter
+      PetscInt :: local_rows, local_cols
+      PetscInt :: global_row_start, global_row_end_plus_one
+      PetscInt :: global_col_start, global_col_end_plus_one
+      PetscInt, allocatable, dimension(:) :: indices_ix, indices_iy
+      PetscErrorCode :: ierr
+      PetscInt, dimension(:), pointer :: cols
+      PetscReal, dimension(:), pointer :: vals
+      integer :: comm_size, errorcode
+      MPI_Comm :: MPI_COMM_MATRIX
+      PetscInt, dimension(:), pointer :: colmap
+      type(tMat) :: Ad, Ao
+      
+      ! ~~~~~~~~~~
+
+      call PetscObjectGetComm(P_mat, MPI_COMM_MATRIX, ierr)  
+      ! Get the comm size 
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+
+      ! Get the local sizes
+      call MatGetLocalSize(P_mat, local_rows, local_cols, ierr)
+      ! This returns the global index of the local portion of the matrix
+      call MatGetOwnershipRange(P_mat, global_row_start, global_row_end_plus_one, ierr)  
+      call MatGetOwnershipRangeColumn(P_mat, global_col_start, global_col_end_plus_one, ierr)   
+
+      ! We know we only have a max of one entry per row
+      allocate(indices_ix(local_rows))
+      allocate(indices_iy(local_rows))
+
+      ! Get the local/nonlocal components
+      if (comm_size /= 1) then
+         call MatMPIAIJGetSeqAIJ(P_mat, Ad, Ao, colmap, ierr)
+      else
+         Ad = P_mat
+      end if
+      
+      ! Loop over global row indices
+      counter = 0
+      do ifree = global_row_start, global_row_end_plus_one-1             
+
+         ! We know there is a max of one entry per row, it could be local or nonlocal
+         call MatGetRow(Ad, ifree - global_row_start, ncols, cols, vals, ierr) 
+         ! Global column index
+         if (ncols == 1) then
+            counter = counter + 1
+            indices_iy(counter) = ifree
+            indices_ix(counter) = cols(1) + global_col_start
+         end if
+         call MatRestoreRow(Ad, ifree - global_row_start, ncols, cols, vals, ierr)   
+
+         ! Non local component
+         if (comm_size /= 1) then
+            call MatGetRow(Ao, ifree - global_row_start, ncols, cols, vals, ierr) 
+            ! Global column index - need colmap
+            if (ncols == 1) then
+               counter = counter + 1
+               indices_iy(counter) = ifree
+               indices_ix(counter) = colmap(cols(1) + 1)
+            end if
+            call MatRestoreRow(Ao, ifree - global_row_start, ncols, cols, vals, ierr)            
+         end if
+      end do         
+      
+      ! Create the IS
+      call ISCreateGeneral(MPI_COMM_MATRIX, counter, &
+               indices_ix(1:counter), PETSC_COPY_VALUES, is_ix, ierr)
+      call ISCreateGeneral(MPI_COMM_MATRIX, counter, &
+               indices_iy(1:counter), PETSC_COPY_VALUES, is_iy, ierr)                   
+
+      deallocate(indices_ix, indices_iy)
+
+   end subroutine generate_is_from_one_point      
 
    !------------------------------------------------------------------------------------------------------------------------   
    

@@ -51,8 +51,9 @@ module air_mg_setup
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
       type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
+      type(tVec)          :: prolong_left, prolong_right
       type(tIS)           :: is_unchanged, is_full, temp_is
-      type(mat_ctxtype), pointer :: mat_ctx
+      type(mat_ctxtype), pointer :: mat_ctx, mat_ctx_prolong
       PetscInt, parameter :: one=1, zero=0
       type(tVec), dimension(:), allocatable :: left_null_vecs, right_null_vecs
       type(tVec), dimension(:), allocatable :: left_null_vecs_c, right_null_vecs_c
@@ -694,6 +695,17 @@ module air_mg_setup
                                  MAT_COPY_VALUES, air_data%prolongators(our_level), ierr)                                 
                   end if
 
+                  if (air_data%options%one_point_classical_prolong) then
+                        temp_is = air_data%prolongator_one_point_is_ix(our_level)
+                        if (.NOT. PetscObjectIsNull(temp_is)) then
+                           call ISDestroy(air_data%prolongator_one_point_is_ix(our_level), ierr)
+                           call ISDestroy(air_data%prolongator_one_point_is_iy(our_level), ierr)
+                        end if
+                        call generate_is_from_one_point(air_data%prolongators(our_level), &
+                                 air_data%prolongator_one_point_is_ix(our_level), &
+                                 air_data%prolongator_one_point_is_iy(our_level))
+                  end if
+
                   ! Delete temporary if not reusing
                   if (.NOT. air_data%options%reuse_sparsity) then
                      call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_P_REPARTITIONED), ierr)                
@@ -942,7 +954,45 @@ module air_mg_setup
                ! If restrictor is not set petsc will use transpose of prolongator
                call PCMGSetRestriction(pcmg_input, petsc_level, air_data%restrictors(our_level), ierr)
             end if
-            call PCMGSetInterpolation(pcmg_input, petsc_level, air_data%prolongators(our_level), ierr)
+            ! If we are doing a one point classical prolongator then we can do this with a shell
+            if (air_data%options%one_point_classical_prolong) then
+
+               allocate(mat_ctx_prolong)
+               mat_ctx_prolong%our_level = our_level
+               mat_ctx_prolong%air_data => air_data   
+               
+               call MatCreateVecs(air_data%prolongators(our_level), &
+                        prolong_right, prolong_left, ierr)         
+                        
+               call VecScatterCreate(prolong_right, &
+                        air_data%prolongator_one_point_is_ix(our_level), &
+                        prolong_left, air_data%prolongator_one_point_is_iy(our_level), &
+                        air_data%vec_scatter_prolong(our_level),ierr)          
+               call VecDestroy(prolong_left, ierr)     
+               call VecDestroy(prolong_right, ierr)
+
+               call MatGetSize(air_data%prolongators(our_level), &
+                     global_rows_repart, global_cols_repart, ierr)
+               call MatGetLocalSize(air_data%prolongators(our_level), &
+                     local_rows_repart, local_cols_repart, ierr)            
+                           
+               call MatCreateShell(MPI_COMM_MATRIX, local_rows_repart, local_cols_repart, &
+                           global_rows_repart, global_cols_repart, &
+                           mat_ctx_prolong, air_data%prolongators_shell(our_level), ierr)
+               ! The subroutine petsc_matvec_one_point_prolong applies the one point 
+               call MatShellSetOperation(air_data%prolongators_shell(our_level), &
+                           MATOP_MULT, petsc_matvec_one_point_prolong, ierr)                           
+               call MatAssemblyBegin(air_data%prolongators_shell(our_level), MAT_FINAL_ASSEMBLY, ierr)
+               call MatAssemblyEnd(air_data%prolongators_shell(our_level), MAT_FINAL_ASSEMBLY, ierr)   
+               
+               ! Have to make sure to set the type of vectors the shell creates
+               ! Input can be any matrix, we just need the correct type
+               call ShellSetVecType(air_data%A_fc(our_level), air_data%prolongators_shell(our_level))                   
+
+               call PCMGSetInterpolation(pcmg_input, petsc_level, air_data%prolongators_shell(our_level), ierr)
+            else
+               call PCMGSetInterpolation(pcmg_input, petsc_level, air_data%prolongators(our_level), ierr)
+            end if
 
             ! Get smoother for this level
             ! The up smoother is never used or called when doing kaskade, but we set it as a richardson so that petsc doesn't default
