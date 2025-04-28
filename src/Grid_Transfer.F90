@@ -96,6 +96,7 @@ module grid_transfer
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_col_start, global_col_end_plus_one
+      PetscInt :: max_local_col, max_nonlocal_col
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v
@@ -107,6 +108,9 @@ module grid_transfer
       integer :: comm_size, errorcode
       MPI_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
+      PetscInt, dimension(:), pointer :: colmap
+      type(tMat) :: Ad, Ao
+      PetscReal :: max_local_val, max_nonlocal_val
       
       ! ~~~~~~~~~~
 
@@ -141,23 +145,56 @@ module grid_transfer
       allocate(col_indices(local_rows))
       allocate(v(local_rows))
       v = 1d0
+
+      ! Get the local/nonlocal components
+      if (comm_size /= 1) then
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr)
+      else
+         Ad = input_mat
+      end if
       
       ! Now go and fill the new matrix
       ! Loop over global row indices
       counter = 1
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-      
-         ! Get the row
-         call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)   
+      do ifree = global_row_start, global_row_end_plus_one-1             
+         
+         max_local_val = -huge(0d0)
+         max_nonlocal_val = -huge(0d0)
+         max_local_col = -1
+         max_nonlocal_col = -1
+
+         ! Let's get the biggest local component
+         call MatGetRow(Ad, ifree - global_row_start, ncols, cols, vals, ierr) 
          if (ncols /= 0) then
             max_loc = maxloc(abs(vals(1:ncols)))
+            max_local_val = abs(vals(max_loc(1)))
+            ! Global column index
+            max_local_col = cols(max_loc(1)) + global_col_start
+         end if
+         call MatRestoreRow(Ad, ifree - global_row_start, ncols, cols, vals, ierr)   
+
+         ! And the biggest non local component
+         if (comm_size /= 1) then
+            call MatGetRow(Ao, ifree - global_row_start, ncols, cols, vals, ierr) 
+            if (ncols /= 0) then
+               max_loc = maxloc(abs(vals(1:ncols)))
+               max_nonlocal_val = abs(vals(max_loc(1)))
+               ! Global column index - need colmap
+               max_nonlocal_col = colmap(cols(max_loc(1)) + 1)
+            end if
+            call MatRestoreRow(Ao, ifree - global_row_start, ncols, cols, vals, ierr)            
+         end if
+
+         ! If there is a bigger nonlocal entry we have to use that
+         ! If the biggest entry is local or the biggest local or nonlocal entries are equal
+         ! we use the local entry
+         if (max_nonlocal_val > max_local_val) max_local_col = max_nonlocal_col
+
+         if (max_local_col /= -1) then
             row_indices(counter) = ifree
-            col_indices(counter) = cols(max_loc(1))         
+            col_indices(counter) = max_local_col  
             counter = counter + 1
-         end if    
-   
-         ! Must call otherwise petsc leaks memory
-         call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)   
+         end if     
       end do         
       
       ! Set the values
