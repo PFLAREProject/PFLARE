@@ -5,6 +5,7 @@ module c_fortran_bindings
    use air_mg_setup
    use pcair_shell
    use pflare
+   use air_data_type_routines
 
 #include "petsc/finclude/petscksp.h"
 

@@ -30,4 +30,82 @@ using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::Me
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 
+// ~~~~~~~~~~~~~~~~~~
+// Some custom reductions we use 
+// ~~~~~~~~~~~~~~~~~~
+
+struct ReduceData {
+   PetscInt count;
+   bool found_diagonal;
+   
+   // Set count to zero and found_diagonal to false
+   KOKKOS_INLINE_FUNCTION
+   ReduceData() : count(0), found_diagonal(false) {}
+   
+   // We use this in our parallel reduction
+   KOKKOS_INLINE_FUNCTION
+   void operator+=(const ReduceData& src) {
+      // Add all the counts
+      count += src.count;
+      // If we have found a diagonal entry at any point in this row
+      // found_diagonal becomes true      
+      found_diagonal |= src.found_diagonal;
+   }
+
+   // Required for Kokkos reduction
+   KOKKOS_INLINE_FUNCTION
+   static void join(volatile ReduceData& dest, const volatile ReduceData& src) {
+      dest.count += src.count;
+      dest.found_diagonal |= src.found_diagonal;
+   }   
+};
+
+namespace Kokkos {
+    template<>
+    struct reduction_identity<ReduceData> {
+        KOKKOS_INLINE_FUNCTION
+        static ReduceData sum() {
+            return ReduceData();  // Returns {count=0, found_diagonal=false}
+        }
+    };
+}
+
+struct ReduceDataMaxRow {
+   PetscInt col;
+   PetscReal val;
+   
+   // Set col to negative one and val to -1.0
+   KOKKOS_INLINE_FUNCTION
+   ReduceDataMaxRow() : col(-1), val(-1.0) {}
+   
+   // We use this in our parallel reduction to find maximum
+   KOKKOS_INLINE_FUNCTION
+   void operator+=(const ReduceDataMaxRow& src) {
+      // If src has a larger value, take it
+      if (src.val > val) {
+         val = src.val;
+         col = src.col;
+      }
+   }
+
+   // Required for Kokkos reduction
+   KOKKOS_INLINE_FUNCTION
+   static void join(volatile ReduceDataMaxRow& dest, const volatile ReduceDataMaxRow& src) {
+      if (src.val > dest.val) {
+         dest.val = src.val;
+         dest.col = src.col;
+      }
+   }   
+};
+
+namespace Kokkos {
+    template<>
+    struct reduction_identity<ReduceDataMaxRow> {
+        KOKKOS_INLINE_FUNCTION
+        static ReduceDataMaxRow sum() {
+            return ReduceDataMaxRow();  // Returns {col=-1, val=-1}
+        }
+    };
+}
+
 #endif

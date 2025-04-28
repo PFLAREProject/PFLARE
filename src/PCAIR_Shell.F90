@@ -4,6 +4,7 @@ module pcair_shell
    use c_petsc_interfaces
    use pcair_data_type
    use air_mg_setup
+   use air_data_type_routines
 
 #include "petsc/finclude/petscksp.h"
 

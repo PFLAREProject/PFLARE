@@ -73,6 +73,7 @@ OBJS := $(SRCDIR)/Binary_Tree.o \
 # Include kokkos src files
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
+							  $(SRCDIR)/Grid_Transferk.o \
                        $(SRCDIR)/VecISCopyLocalk.o \
 							  $(SRCDIR)/PMISR_DDCk.o \
 							  $(SRCDIR)/Gmres_Polyk.o
@@ -93,6 +94,9 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
+		  $(SRCDIR)/AIR_Data_Type_Routines.o \
+		  $(SRCDIR)/Grid_Transfer.o \
+		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
 		  $(SRCDIR)/PCAIR_Shell.o \
 		  $(SRCDIR)/PCAIR_Interfaces.o \
