@@ -42,7 +42,7 @@ module constrain_z_or_w
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
 
       ! Get the near nullspace if the user has set one 
-      call MatGetNearNullSpace(input_mat, nullspace, ierr)
+      if (left .OR. right) call MatGetNearNullSpace(input_mat, nullspace, ierr)
       ! If the user hasn't set a near nullspace and still wants constraints
       ! we use the constant as a default
       cst_nullspace = .FALSE.
