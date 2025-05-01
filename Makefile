@@ -7,10 +7,10 @@
 # This uses the compilers and flags defined in the PETSc configuration
 # ~~~~~~~~~~~~~~~~~
 
-# Check PETSc version is at least 3.23.0
-PETSC_VERSION_MIN := $(shell ${PETSC_DIR}/lib/petsc/bin/petscversion ge 3.23)
+# Check PETSc version is at least 3.23.1
+PETSC_VERSION_MIN := $(shell ${PETSC_DIR}/lib/petsc/bin/petscversion ge 3.23.1)
 ifeq ($(PETSC_VERSION_MIN),0)
-$(error PETSc version is too old. PFLARE requires at least version 3.23.0)
+$(error PETSc version is too old. PFLARE requires at least version 3.23.1)
 endif
 
 # Get the flags we have on input
