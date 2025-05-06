@@ -7,6 +7,7 @@ module air_operators_setup
    use fc_smooth
    use c_petsc_interfaces
    use grid_transfer
+   use grid_transfer_improve
 
 #include "petsc/finclude/petscksp.h"
 
@@ -759,6 +760,15 @@ module air_operators_setup
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)
       end if        
+
+      ! ~~~~~~~~~
+      ! Improve Z if needed
+      ! ~~~~~~~~~      
+
+      call improve_z(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                     air_data%A_ff(our_level), &
+                     air_data%A_cf(our_level), &
+                     air_data%inv_A_ff(our_level), 3)
       
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~
