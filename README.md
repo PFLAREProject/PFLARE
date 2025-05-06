@@ -10,7 +10,7 @@ It aims to provide fast & scalable iterative methods for asymmetric linear syste
 Some examples of asymmetric linear systems that PFLARE can scalably solve include:   
    - Advection equations
    - Streaming operators from Boltzmann applications
-   - Multigrid in time discretisations
+   - Space-time discretisations
    - Heavily anisotropic Poisson/diffusion equations
    
 without requiring Gauss-Seidel methods. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
