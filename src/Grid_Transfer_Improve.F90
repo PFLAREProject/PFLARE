@@ -33,7 +33,7 @@ module grid_transfer_improve
       PetscInt :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
-      type(tMat) :: residual_mat, Z_temp_no_sparsity, Z_temp_sparsity
+      type(tMat) :: residual_mat, Z_temp_no_sparsity, Z_temp_sparsity, Z_aff
       type(tMat) :: temp_mat
       type(tVec) :: right_vec_aff, right_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
@@ -94,12 +94,20 @@ module grid_transfer_improve
          ! If not matdiagonal
          else
 
+            ! Have to have two separate steps here as kokkos is picky about having the exact
+            ! same matrix when reusing
             if (i == 1) then
                call MatMatMult(Z, A_ff, MAT_INITIAL_MATRIX, 1d0, &
+                     Z_aff, ierr)
+               call MatDuplicate(Z_aff, &
+                     MAT_COPY_VALUES, &
                      residual_mat, ierr)
             else
                call MatMatMult(Z, A_ff, MAT_REUSE_MATRIX, 1d0, &
-                     residual_mat, ierr)            
+                     Z_aff, ierr)      
+               call MatCopy(Z_aff, &
+                     residual_mat, &
+                     DIFFERENT_NONZERO_PATTERN, ierr)                     
             end if
          end if
 
@@ -155,6 +163,7 @@ module grid_transfer_improve
       end do
 
       ! Destroy the temporaries
+      call MatDestroy(Z_aff, ierr)
       call MatDestroy(residual_mat, ierr)
       call MatDestroy(Z_temp_no_sparsity, ierr)      
       call MatDestroy(Z_temp_sparsity, ierr)     
