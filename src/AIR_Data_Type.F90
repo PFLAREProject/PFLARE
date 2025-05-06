@@ -262,6 +262,8 @@ module air_data_type
    integer, parameter :: MAT_SAI_SUB = 18
    integer, parameter :: MAT_Z_AFF = 19
    integer, parameter :: MAT_Z_NO_SPARSITY = 20
+   integer, parameter :: MAT_W_AFF = 21
+   integer, parameter :: MAT_W_NO_SPARSITY = 22
 
    ! Indices into reuse_is
    integer, parameter :: IS_REPARTITION = 1
@@ -272,7 +274,7 @@ module air_data_type
    ! would normally be destroyed during the setup
    type air_reuse_data
 
-      type(tMat), dimension(20) :: reuse_mat
+      type(tMat), dimension(22) :: reuse_mat
       type(tIS), dimension(2) :: reuse_is
 
    end type air_reuse_data
