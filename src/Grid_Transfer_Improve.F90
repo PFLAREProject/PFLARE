@@ -21,19 +21,19 @@ module grid_transfer_improve
 
   !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine improve_z(Z, A_ff, A_cf, A_ff_inv, its)
+   subroutine improve_z(Z, A_ff, A_cf, A_ff_inv, reuse_mat, reuse_mat_two, its)
 
       ! Does a richardson iteration to improve the ideal Z
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), intent(inout) :: Z, A_ff, A_cf, A_ff_inv
+      type(tMat), intent(inout) :: Z, A_ff, A_cf, A_ff_inv, reuse_mat, reuse_mat_two
       PetscInt, intent(in) :: its
 
       PetscInt :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
-      type(tMat) :: residual_mat, Z_temp_no_sparsity, Z_temp_sparsity, Z_aff
+      type(tMat) :: residual_mat, Z_temp_sparsity
       type(tMat) :: temp_mat
       type(tVec) :: right_vec_aff, right_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
@@ -93,21 +93,27 @@ module grid_transfer_improve
 
          ! If not matdiagonal
          else
-
+            temp_mat = reuse_mat
             ! Have to have two separate steps here as kokkos is picky about having the exact
             ! same matrix when reusing
-            if (i == 1) then
+            if (PetscObjectIsNull(temp_mat)) then
                call MatMatMult(Z, A_ff, MAT_INITIAL_MATRIX, 1d0, &
-                     Z_aff, ierr)
-               call MatDuplicate(Z_aff, &
+                     reuse_mat, ierr)
+               call MatDuplicate(reuse_mat, &
                      MAT_COPY_VALUES, &
                      residual_mat, ierr)
             else
                call MatMatMult(Z, A_ff, MAT_REUSE_MATRIX, 1d0, &
-                     Z_aff, ierr)      
-               call MatCopy(Z_aff, &
-                     residual_mat, &
-                     DIFFERENT_NONZERO_PATTERN, ierr)                     
+                     reuse_mat, ierr)      
+               if (i == 1) then
+                  call MatDuplicate(reuse_mat, &
+                        MAT_COPY_VALUES, &
+                        residual_mat, ierr)                  
+               else
+                  call MatCopy(reuse_mat, &
+                        residual_mat, &
+                        DIFFERENT_NONZERO_PATTERN, ierr)     
+               end if                
             end if
          end if
 
@@ -124,37 +130,37 @@ module grid_transfer_improve
          ! (Z^n Aff - Acf) * Aff_inv
 
          ! Special case if Aff inv is matdiagonal
-         temp_mat = Z_temp_no_sparsity
+         temp_mat = reuse_mat_two
          if (mat_type_inv_aff == MATDIAGONAL) then
 
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCopy(residual_mat, &
-                        Z_temp_no_sparsity, &
+                        reuse_mat_two, &
                         SAME_NONZERO_PATTERN, ierr)
             else
                call MatDuplicate(residual_mat, &
                         MAT_COPY_VALUES, &
-                        Z_temp_no_sparsity, ierr)          
+                        reuse_mat_two, ierr)          
             end if
 
             ! Right multiply
-            call MatDiagonalScale(Z_temp_no_sparsity, &
+            call MatDiagonalScale(reuse_mat_two, &
                      PETSC_NULL_VEC, right_vec_inv_aff, ierr)          
 
          ! If not matdiagonal
          else   
-            if (i == 1) then
+            if (PetscObjectIsNull(temp_mat)) then
                call MatMatMult(residual_mat, A_ff_inv, MAT_INITIAL_MATRIX, 1d0, &
-                     Z_temp_no_sparsity, ierr)
+                     reuse_mat_two, ierr)
             else
                call MatMatMult(residual_mat, A_ff_inv, MAT_REUSE_MATRIX, 1d0, &
-                     Z_temp_no_sparsity, ierr)            
+                     reuse_mat_two, ierr)            
             end if
          end if
          
          call timer_start(TIMER_ID_AIR_DROP) 
          ! Drop any non-zeros outside of the sparsity pattern of Z
-         call remove_from_sparse_match(Z_temp_no_sparsity, Z_temp_sparsity)
+         call remove_from_sparse_match(reuse_mat_two, Z_temp_sparsity)
          call timer_finish(TIMER_ID_AIR_DROP) 
 
          ! Z^n+1 = Z^n - (Z^n Aff + Acf) * Aff_inv
@@ -163,9 +169,7 @@ module grid_transfer_improve
       end do
 
       ! Destroy the temporaries
-      call MatDestroy(Z_aff, ierr)
       call MatDestroy(residual_mat, ierr)
-      call MatDestroy(Z_temp_no_sparsity, ierr)      
       call MatDestroy(Z_temp_sparsity, ierr)     
       call VecDestroy(right_vec_aff, ierr) 
       call VecDestroy(right_vec_inv_aff, ierr) 

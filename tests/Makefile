@@ -260,6 +260,8 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test improving Z" 
 	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3
+	@echo "Test improving Z with PC regenerated with no sparsity change"
+	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 3 -ksp_max_it 3		
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
 # Include kokkos examples	 
@@ -368,6 +370,8 @@ run_tests_no_load_parallel:
 	@echo ""
 	@echo "Test improving Z in parallel" 
 	$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3
+	@echo "Test improving Z with PC regenerated with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 3 -ksp_max_it 3			
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

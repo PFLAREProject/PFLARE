@@ -769,7 +769,15 @@ module air_operators_setup
                      air_data%A_ff(our_level), &
                      air_data%A_cf(our_level), &
                      air_data%inv_A_ff(our_level), &
+                     air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), &
+                     air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), &
                      air_data%options%improve_z_its)
+
+      ! Delete temporaries if not reusing
+      if (.NOT. air_data%options%reuse_sparsity) then                     
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), ierr)
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), ierr)
+      end if
       
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~
