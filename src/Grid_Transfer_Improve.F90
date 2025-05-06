@@ -76,7 +76,8 @@ module grid_transfer_improve
             if (.NOT. PetscObjectIsNull(temp_mat)) then
 
                ! The residual will have a different sparsity pattern to Z
-               ! after Z * Aff occurs in the first iteration
+               ! after Z * Aff + A_cf occurs in the first iteration
+               ! (even if Aff is diagonal due to the A_cf)
                call MatCopy(Z, &
                         residual_mat, &
                         DIFFERENT_NONZERO_PATTERN, ierr)
