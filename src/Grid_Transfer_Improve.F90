@@ -34,8 +34,8 @@ module grid_transfer_improve
       PetscReal :: residual
       type(tMat) :: residual_mat, Z_temp_no_sparsity, Z_temp_sparsity
       type(tMat) :: temp_mat
-      type(tVec) :: right_vec
-      MatType :: mat_type            
+      type(tVec) :: right_vec_aff, right_vec_inv_aff
+      MatType :: mat_type_aff, mat_type_inv_aff            
       ! ~~~~~~~~~~
 
       ! Return if nothing to do
@@ -43,10 +43,25 @@ module grid_transfer_improve
 
       ! Copy the sparsity pattern of Z
       call MatDuplicate(Z, MAT_DO_NOT_COPY_VALUES, Z_temp_sparsity, ierr)
-      ! Check if Aff inv is diagonal
-      call MatGetType(A_ff, mat_type, ierr)
 
-      print *, "mat_type", mat_type
+      ! Check if Aff is diagonal
+      call MatGetType(A_ff, mat_type_aff, ierr)
+      ! Pull out the diagonals if Aff is diagonal
+      if (mat_type_aff == MATDIAGONAL) then
+         call MatCreateVecs(Z, right_vec_aff, PETSC_NULL_VEC, ierr)
+         ! Should be able to call MatDiagonalGetDiagonal but it returns
+         ! the wrong vector type with kokkos, even when it is set correctly
+         ! when calling matcreatediagonal
+         call MatGetDiagonal(A_ff, right_vec_aff, ierr)  
+      end if
+
+      ! Check if inv Aff is diagonal
+      call MatGetType(A_ff_inv, mat_type_inv_aff, ierr)
+      ! Pull out the diagonals
+      if (mat_type_inv_aff == MATDIAGONAL) then
+         call MatCreateVecs(Z, right_vec_inv_aff, PETSC_NULL_VEC, ierr)
+         call MatGetDiagonal(A_ff_inv, right_vec_inv_aff, ierr)    
+      end if      
 
       ! Do the number of iterations requested
       do i = 1, its
@@ -54,7 +69,7 @@ module grid_transfer_improve
          ! Compute the residual - Z^n Aff + Acf
          ! Can reuse the same sparsity if doing multiple iterations
          temp_mat = Z_temp_no_sparsity
-         if (mat_type == MATDIAGONAL) then
+         if (mat_type_aff == MATDIAGONAL) then
 
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCopy(Z, &
@@ -65,15 +80,10 @@ module grid_transfer_improve
                         MAT_COPY_VALUES, &
                         residual_mat, ierr)          
             end if
-            call MatCreateVecs(Z, right_vec, PETSC_NULL_VEC, ierr)
-            ! Should be able to call MatDiagonalGetDiagonal but it returns
-            ! the wrong vector type with kokkos, even when it is set correctly
-            ! when calling matcreatediagonal
-            call MatGetDiagonal(A_ff, right_vec, ierr)
+
             ! Right multiply
             call MatDiagonalScale(residual_mat, &
-                     PETSC_NULL_VEC, right_vec, ierr)          
-            call VecDestroy(right_vec, ierr)
+                     PETSC_NULL_VEC, right_vec_aff, ierr)          
 
          ! If not matdiagonal
          else
@@ -98,7 +108,7 @@ module grid_transfer_improve
 
          ! Special case if Aff inv is matdiagonal
          temp_mat = Z_temp_no_sparsity
-         if (mat_type == MATDIAGONAL) then
+         if (mat_type_inv_aff == MATDIAGONAL) then
 
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCopy(residual_mat, &
@@ -109,15 +119,10 @@ module grid_transfer_improve
                         MAT_COPY_VALUES, &
                         Z_temp_no_sparsity, ierr)          
             end if
-            call MatCreateVecs(residual_mat, right_vec, PETSC_NULL_VEC, ierr)
-            ! Should be able to call MatDiagonalGetDiagonal but it returns
-            ! the wrong vector type with kokkos, even when it is set correctly
-            ! when calling matcreatediagonal
-            call MatGetDiagonal(A_ff_inv, right_vec, ierr)
+
             ! Right multiply
             call MatDiagonalScale(Z_temp_no_sparsity, &
-                     PETSC_NULL_VEC, right_vec, ierr)          
-            call VecDestroy(right_vec, ierr)
+                     PETSC_NULL_VEC, right_vec_inv_aff, ierr)          
 
          ! If not matdiagonal
          else   
@@ -140,7 +145,9 @@ module grid_transfer_improve
       ! Destroy the temporaries
       call MatDestroy(residual_mat, ierr)
       call MatDestroy(Z_temp_no_sparsity, ierr)      
-      call MatDestroy(Z_temp_sparsity, ierr)      
+      call MatDestroy(Z_temp_sparsity, ierr)     
+      call VecDestroy(right_vec_aff, ierr) 
+      call VecDestroy(right_vec_inv_aff, ierr) 
          
    end subroutine improve_z   
    
