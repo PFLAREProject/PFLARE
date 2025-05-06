@@ -375,6 +375,40 @@ module pcair_c_fortran_bindings
       call PCAIRGetConstrainZ(pc, constrain, ierr)
 
    end subroutine PCAIRGetConstrainZ_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetImproveWIts_c(pc_ptr, its) bind(C, name='PCAIRGetImproveWIts_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)         :: its
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetImproveWIts(pc, its, ierr)
+
+   end subroutine PCAIRGetImproveWIts_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetImproveZIts_c(pc_ptr, its) bind(C, name='PCAIRGetImproveZIts_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)         :: its
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetImproveZIts(pc, its, ierr)
+
+   end subroutine PCAIRGetImproveZIts_c    
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1189,6 +1223,40 @@ module pcair_c_fortran_bindings
       call PCAIRSetConstrainZ(pc, constrain, ierr)
 
    end subroutine PCAIRSetConstrainZ_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetImproveWIts_c(pc_ptr, its) bind(C, name='PCAIRSetImproveWIts_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)          :: its
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetImproveWIts(pc, its, ierr)
+
+   end subroutine PCAIRSetImproveWIts_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetImproveZIts_c(pc_ptr, its) bind(C, name='PCAIRSetImproveZIts_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)          :: its
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetImproveZIts(pc, its, ierr)
+
+   end subroutine PCAIRSetImproveZIts_c    
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -96,6 +96,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/Grid_Transfer.o \
+		  $(SRCDIR)/Grid_Transfer_Improve.o \
 		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
 		  $(SRCDIR)/PCAIR_Shell.o \

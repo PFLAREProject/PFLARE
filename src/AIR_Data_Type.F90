@@ -130,7 +130,13 @@ module air_data_type
       ! Do we compute a near-nullspace vector and apply it as a constaint 
       ! to the restrictor?
       ! -pc_air_constrain_z
-      logical :: constrain_z = .FALSE.       
+      logical :: constrain_z = .FALSE.    
+      ! How many iterations of improvement do we want to do to Z
+      ! -pc_air_improve_z_its
+      integer :: improve_z_its = 0
+      ! How many iterations of improvement do we want to do to W  
+      ! -pc_air_improve_w_its
+      integer :: improve_w_its = 0   
 
       ! Strong R threshold to apply dropping prior to computing Z
       ! This only applies when computing Z, ie if you build a GMRES polynomial approximation
@@ -254,6 +260,10 @@ module air_data_type
    integer, parameter :: MAT_INV_AFF_DROPPED = 16
    integer, parameter :: MAT_INV_ACC = 17
    integer, parameter :: MAT_SAI_SUB = 18
+   integer, parameter :: MAT_Z_AFF = 19
+   integer, parameter :: MAT_Z_NO_SPARSITY = 20
+   integer, parameter :: MAT_W_AFF = 21
+   integer, parameter :: MAT_W_NO_SPARSITY = 22
 
    ! Indices into reuse_is
    integer, parameter :: IS_REPARTITION = 1
@@ -264,7 +274,7 @@ module air_data_type
    ! would normally be destroyed during the setup
    type air_reuse_data
 
-      type(tMat), dimension(18) :: reuse_mat
+      type(tMat), dimension(22) :: reuse_mat
       type(tIS), dimension(2) :: reuse_is
 
    end type air_reuse_data

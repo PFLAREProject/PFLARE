@@ -731,6 +731,44 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetConstrainZ
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetImproveWIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      its = options%improve_w_its
+      ierr = 0
+
+   end subroutine PCAIRGetImproveWIts     
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetImproveZIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      its = options%improve_z_its
+      ierr = 0
+
+   end subroutine PCAIRGetImproveZIts   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1587,6 +1625,44 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetConstrainZ
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetImproveWIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%improve_w_its = int(its)
+      ierr = 0
+
+   end subroutine PCAIRSetImproveWIts    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetImproveZIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%improve_z_its = int(its)
+      ierr = 0
+
+   end subroutine PCAIRSetImproveZIts   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -7,6 +7,7 @@ module air_operators_setup
    use fc_smooth
    use c_petsc_interfaces
    use grid_transfer
+   use grid_transfer_improve
 
 #include "petsc/finclude/petscksp.h"
 
@@ -518,6 +519,27 @@ module air_operators_setup
                end if
             end if              
 
+            ! ~~~~~~~~~
+            ! Improve W if needed
+            ! ~~~~~~~~~    
+
+            call improve_w(air_data%reuse(our_level)%reuse_mat(MAT_W), &
+                           air_data%A_ff(our_level), &
+                           air_data%A_fc(our_level), &
+                           air_data%inv_A_ff(our_level), &
+                           air_data%reuse(our_level)%reuse_mat(MAT_W_AFF), &
+                           air_data%reuse(our_level)%reuse_mat(MAT_W_NO_SPARSITY), &
+                           air_data%options%improve_w_its) 
+
+            ! Delete temporaries if not reusing
+            if (.NOT. air_data%options%reuse_sparsity) then   
+               call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_W_AFF), ierr)
+               call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_W_NO_SPARSITY), ierr)                           
+            end if         
+            
+            ! ~~~~~~~~~~~~
+            ! ~~~~~~~~~~~~            
+
             call timer_start(TIMER_ID_AIR_DROP)  
 
             ! If we want to reuse, we have to match the original sparsity
@@ -759,6 +781,24 @@ module air_operators_setup
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)
       end if        
+
+      ! ~~~~~~~~~
+      ! Improve Z if needed
+      ! ~~~~~~~~~
+
+      call improve_z(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                     air_data%A_ff(our_level), &
+                     air_data%A_cf(our_level), &
+                     air_data%inv_A_ff(our_level), &
+                     air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), &
+                     air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), &
+                     air_data%options%improve_z_its)
+
+      ! Delete temporaries if not reusing
+      if (.NOT. air_data%options%reuse_sparsity) then   
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), ierr)
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), ierr)                           
+      end if
       
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~

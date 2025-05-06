@@ -256,6 +256,20 @@ run_tests_no_load_serial:
 	./adv_diff_2d -da_grid_x 10 -da_grid_y 10 -ksp_type richardson -pc_type air \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys \
 	 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-2 -ksp_max_it 3
+#
+	@echo ""
+	@echo "Test improving Z" 
+	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3
+	@echo "Test improving Z with PC regenerated with no sparsity change"
+	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 3 -ksp_max_it 3		
+#
+	@echo ""
+	@echo "Test improving W" 
+	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 3 -ksp_max_it 3
+	@echo "Test improving Z with PC regenerated with no sparsity change"
+	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 3 -ksp_max_it 3	
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
 # Include kokkos examples	 
@@ -360,6 +374,20 @@ run_tests_no_load_parallel:
 	@echo "Test AIRG on steady 1D advection in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10
+#
+	@echo ""
+	@echo "Test improving Z in parallel" 
+	$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3
+	@echo "Test improving Z with PC regenerated with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 3 -ksp_max_it 3			
+#
+	@echo ""
+	@echo "Test improving W in parallel" 
+	$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 3 -ksp_max_it 4
+	@echo "Test improving W with PC regenerated with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 3 -ksp_max_it 3		
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

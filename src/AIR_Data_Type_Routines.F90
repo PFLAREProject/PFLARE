@@ -287,7 +287,9 @@ module air_data_type_routines
       air_data%options%full_smoothing_up_and_down = .FALSE.
       air_data%options%symmetric = .FALSE.
       air_data%options%constrain_w = .FALSE.
-      air_data%options%constrain_z = .FALSE.       
+      air_data%options%constrain_z = .FALSE.  
+      air_data%options%improve_z_its = 0
+      air_data%options%improve_w_its = 0     
 
       air_data%options%strong_r_threshold = 0d0
 
