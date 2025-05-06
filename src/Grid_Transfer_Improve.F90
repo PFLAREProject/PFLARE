@@ -64,10 +64,10 @@ module grid_transfer_improve
       end if      
 
       ! Do the number of iterations requested
+      ! Can reuse the same sparsity if doing multiple iterations
       do i = 1, its
 
          ! Compute the residual - Z^n Aff + Acf
-         ! Can reuse the same sparsity if doing multiple iterations
          temp_mat = Z_temp_no_sparsity
          if (mat_type_aff == MATDIAGONAL) then
 
@@ -100,6 +100,7 @@ module grid_transfer_improve
          ! Acf should have a subset of the sparsity of Z
          call MatAXPY(residual_mat, 1d0, A_cf, SUBSET_NONZERO_PATTERN, ierr)
 
+         ! If you want to output the residual
          call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)
          print *, i, "residual = ", residual
 
