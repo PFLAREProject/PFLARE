@@ -384,10 +384,10 @@ run_tests_no_load_parallel:
 	@echo ""
 	@echo "Test improving W in parallel" 
 	$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
-	 -pc_air_improve_w_its 3 -ksp_max_it 3
+	 -pc_air_improve_w_its 3 -ksp_max_it 4
 	@echo "Test improving W with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
-	 -pc_air_improve_w_its 3 -ksp_max_it 4
+	 -pc_air_improve_w_its 3 -ksp_max_it 3		
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
