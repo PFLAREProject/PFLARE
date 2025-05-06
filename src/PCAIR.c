@@ -769,7 +769,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetImproveWIts(PC pc, PetscInt input_int)
    PetscFunctionReturn(0);
 }
 // Maximum number of iterations to do when improving Z
-// Uses a Richardson and Aff^-1 to precondition
+// Uses a Richardson and the diagonal of Aff^-1 to precondition
 // Default: 0
 // -pc_air_improve_z_its
 PETSC_EXTERN PetscErrorCode PCAIRSetImproveZIts(PC pc, PetscInt input_int)

@@ -37,6 +37,7 @@ module grid_transfer_improve
       type(tMat) :: temp_mat
       type(tVec) :: right_vec_aff, right_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
+      logical :: diag_aff_inv
 
       ! ~~~~~~~~~~
 
@@ -60,10 +61,14 @@ module grid_transfer_improve
       ! Check if inv Aff is diagonal
       call MatGetType(A_ff_inv, mat_type_inv_aff, ierr)
       ! Pull out the diagonals
-      if (mat_type_inv_aff == MATDIAGONAL) then
+      diag_aff_inv = .FALSE.
+      ! We now just always pull out the diagonal of Aff^-1, it works very well
+      ! and saves a matmatmult if Aff^-1 is not diagonal
+      !if (mat_type_inv_aff == MATDIAGONAL) then
          call MatCreateVecs(Z, right_vec_inv_aff, PETSC_NULL_VEC, ierr)
          call MatGetDiagonal(A_ff_inv, right_vec_inv_aff, ierr)    
-      end if      
+         diag_aff_inv = .TRUE.
+      !end if      
 
       ! Do the number of iterations requested
       ! Can reuse the same sparsity if doing multiple iterations
@@ -131,7 +136,7 @@ module grid_transfer_improve
 
          ! Special case if Aff inv is matdiagonal
          temp_mat = reuse_mat_two
-         if (mat_type_inv_aff == MATDIAGONAL) then
+         if (diag_aff_inv) then
 
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCopy(residual_mat, &
