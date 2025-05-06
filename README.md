@@ -7,7 +7,7 @@ This library contains methods which can be used to solve linear systems in paral
 
 It aims to provide fast & scalable iterative methods for asymmetric linear systems, in parallel and on both CPUs and GPUs.
    
-Some examples of assymetric linear systems that PFLARE can scalably solve include:   
+Some examples of asymmetric linear systems that PFLARE can scalably solve include:   
 1) Hyperbolic problems such as:
    - Advection equations
    - Streaming operators from Boltzmann transport applications
