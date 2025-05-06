@@ -1,6 +1,7 @@
 module grid_transfer_improve
 
    use petscmat
+   use timers
    use petsc_helper
 
 #include "petsc/finclude/petscmat.h"
@@ -29,17 +30,18 @@ module grid_transfer_improve
       type(tMat), intent(inout) :: Z, A_ff, A_cf, A_ff_inv
       PetscInt, intent(in) :: its
 
-      PetscInt :: i
+      PetscInt :: i, m, n
       PetscErrorCode :: ierr
       PetscReal :: residual
       type(tMat) :: residual_mat, Z_temp_no_sparsity, Z_temp_sparsity
       type(tMat) :: temp_mat
       type(tVec) :: right_vec_aff, right_vec_inv_aff
-      MatType :: mat_type_aff, mat_type_inv_aff            
+      MatType :: mat_type_aff, mat_type_inv_aff      
+
       ! ~~~~~~~~~~
 
       ! Return if nothing to do
-      if (its == 0) return
+      if (its == 0) return 
 
       ! Copy the sparsity pattern of Z
       call MatDuplicate(Z, MAT_DO_NOT_COPY_VALUES, Z_temp_sparsity, ierr)
@@ -68,22 +70,25 @@ module grid_transfer_improve
       do i = 1, its
 
          ! Compute the residual - Z^n Aff + Acf
-         temp_mat = Z_temp_no_sparsity
+         temp_mat = residual_mat
          if (mat_type_aff == MATDIAGONAL) then
 
             if (.NOT. PetscObjectIsNull(temp_mat)) then
+
+               ! The residual will have a different sparsity pattern to Z
+               ! after Z * Aff occurs in the first iteration
                call MatCopy(Z, &
                         residual_mat, &
-                        SAME_NONZERO_PATTERN, ierr)
+                        DIFFERENT_NONZERO_PATTERN, ierr)
             else
                call MatDuplicate(Z, &
                         MAT_COPY_VALUES, &
-                        residual_mat, ierr)          
+                        residual_mat, ierr)
             end if
 
             ! Right multiply
             call MatDiagonalScale(residual_mat, &
-                     PETSC_NULL_VEC, right_vec_aff, ierr)          
+                     PETSC_NULL_VEC, right_vec_aff, ierr)                     
 
          ! If not matdiagonal
          else
@@ -97,8 +102,10 @@ module grid_transfer_improve
             end if
          end if
 
-         ! Acf should have a subset of the sparsity of Z
-         call MatAXPY(residual_mat, 1d0, A_cf, SUBSET_NONZERO_PATTERN, ierr)
+         ! Acf should have a subset of the sparsity of Z if Aff 
+         ! has a diagonal, but just to be safe lets 
+         ! say its different
+         call MatAXPY(residual_mat, 1d0, A_cf, DIFFERENT_NONZERO_PATTERN, ierr)       
 
          ! If you want to output the residual
          call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)
@@ -136,8 +143,11 @@ module grid_transfer_improve
             end if
          end if
          
+         call timer_start(TIMER_ID_AIR_DROP) 
          ! Drop any non-zeros outside of the sparsity pattern of Z
          call remove_from_sparse_match(Z_temp_no_sparsity, Z_temp_sparsity)
+         call timer_finish(TIMER_ID_AIR_DROP) 
+
          ! Z^n+1 = Z^n - (Z^n Aff + Acf) * Aff_inv
          call MatAXPY(Z, -1d0, Z_temp_sparsity, SAME_NONZERO_PATTERN, ierr)
 
