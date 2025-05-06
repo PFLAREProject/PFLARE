@@ -36,6 +36,8 @@ PETSC_EXTERN PetscErrorCode PCAIRGetFullSmoothingUpAndDown_c(PC *pc, PetscBool *
 PETSC_EXTERN PetscErrorCode PCAIRGetSymmetric_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRGetConstrainW_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRGetConstrainZ_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN PetscErrorCode PCAIRGetImproveWIts_c(PC *pc, PetscInt *input_int);
+PETSC_EXTERN PetscErrorCode PCAIRGetImproveZIts_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseType_c(PC *pc, PCPFLAREINVType *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType_c(PC *pc, PCPFLAREINVType *input_int);
@@ -79,6 +81,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetFullSmoothingUpAndDown_c(PC *pc, PetscBool i
 PETSC_EXTERN PetscErrorCode PCAIRSetSymmetric_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRSetConstrainW_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRSetConstrainZ_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN PetscErrorCode PCAIRSetImproveWIts_c(PC *pc, PetscInt input_int);
+PETSC_EXTERN PetscErrorCode PCAIRSetImproveZIts_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN PetscErrorCode PCAIRSetInverseType_c(PC *pc, PCPFLAREINVType input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetZType_c(PC *pc, PCAIRZType input_int);
@@ -310,6 +314,18 @@ PETSC_EXTERN PetscErrorCode PCAIRGetConstrainZ(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetConstrainZ_c(&pc, input_bool);
+   PetscFunctionReturn(0);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetImproveWIts(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PCAIRGetImproveWIts_c(&pc, input_int);
+   PetscFunctionReturn(0);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetImproveZIts(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PCAIRGetImproveZIts_c(&pc, input_int);
    PetscFunctionReturn(0);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_real)
@@ -738,6 +754,34 @@ PETSC_EXTERN PetscErrorCode PCAIRSetConstrainZ(PC pc, PetscBool input_bool)
    PCAIRSetConstrainZ_c(&pc, input_bool);
    PetscFunctionReturn(0);
 }
+// Maximum number of iterations to do when improving W
+// Uses a Richardson and Aff^-1 to precondition
+// Default: 0
+// -pc_air_improve_w_its
+PETSC_EXTERN PetscErrorCode PCAIRSetImproveWIts(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PetscInt old_int;
+   PCAIRGetImproveWIts(pc, &old_int);
+   if (old_int == input_int) PetscFunctionReturn(0);
+   PCReset_AIR_c(pc);    
+   PCAIRSetImproveWIts_c(&pc, input_int);
+   PetscFunctionReturn(0);
+}
+// Maximum number of iterations to do when improving Z
+// Uses a Richardson and Aff^-1 to precondition
+// Default: 0
+// -pc_air_improve_z_its
+PETSC_EXTERN PetscErrorCode PCAIRSetImproveZIts(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PetscInt old_int;
+   PCAIRGetImproveZIts(pc, &old_int);
+   if (old_int == input_int) PetscFunctionReturn(0);
+   PCReset_AIR_c(pc);    
+   PCAIRSetImproveZIts_c(&pc, input_int);
+   PetscFunctionReturn(0);
+}
 // Strong R threshold to apply dropping prior to computing Z
 // This only applies when computing Z, ie if you build a GMRES polynomial approximation
 // to Aff^-1, it applies this dropping, then computes Z, then rebuilds 
@@ -1156,6 +1200,16 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    input_int = old_int;
    PetscOptionsInt("-pc_air_max_luby_steps", "Max Luby steps in CF splitting algorithm", "PCAIRSetMaxLubySteps", old_int, &input_int, NULL);
    PCAIRSetMaxLubySteps(pc, input_int);
+   // ~~~~   
+   PCAIRGetImproveWIts(pc, &old_int);
+   input_int = old_int;
+   PetscOptionsInt("-pc_air_improve_w_its", "Number of iterations to improve W", "PCAIRSetImproveWIts", old_int, &input_int, NULL);
+   PCAIRSetImproveWIts(pc, input_int);   
+   // ~~~~   
+   PCAIRGetImproveZIts(pc, &old_int);
+   input_int = old_int;
+   PetscOptionsInt("-pc_air_improve_z_its", "Number of iterations to improve Z", "PCAIRSetImproveZIts", old_int, &input_int, NULL);
+   PCAIRSetImproveZIts(pc, input_int);
    // ~~~~ 
    PCAIRGetSmoothType(pc, old_string);
    strcpy(input_string, old_string);
@@ -1260,7 +1314,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
    
    PC *pc_air_shell = (PC *)pc->data;
 
-   PetscInt input_int, input_int_two, input_int_three;
+   PetscInt input_int, input_int_two, input_int_three, input_int_four;
    PetscErrorCode ierr = 0;
    PetscBool flg, flg_f_smooth, flg_c_smooth;
    PetscReal input_real, input_real_two;
@@ -1544,6 +1598,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscViewerASCIIPrintf(viewer, "  Grid transfer operators: \n");      
       ierr =  PCAIRGetZType(pc, &z_type);
       ierr =  PCAIRGetLairDistance(pc, &input_int_two);
+      ierr =  PCAIRGetImproveWIts(pc, &input_int_three);
+      ierr =  PCAIRGetImproveZIts(pc, &input_int_four);
       if (z_type == AIR_Z_PRODUCT)
       {
          PetscViewerASCIIPrintf(viewer, "    Mat-Mat product used to form Z \n");      
@@ -1557,8 +1613,15 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          PetscViewerASCIIPrintf(viewer, "    lAIR SAI Z, distance %"PetscInt_FMT" \n", input_int_two);            
       }
       ierr =  PCAIRGetStrongRThreshold(pc, &input_real);
-      PetscViewerASCIIPrintf(viewer, "    Strong R threshold=%f \n", input_real);            
-
+      PetscViewerASCIIPrintf(viewer, "    Strong R threshold=%f \n", input_real);         
+      if (input_int_three > 0)
+      {
+         PetscViewerASCIIPrintf(viewer, "    Improve W %"PetscInt_FMT" iterations \n", input_int_three);      
+      }
+      if (input_int_four > 0)
+      {
+         PetscViewerASCIIPrintf(viewer, "    Improve Z %"PetscInt_FMT" iterations \n", input_int_four);      
+      }
       ierr =  PCAIRGetConstrainZ(pc, &flg);
       if (flg) 
       {

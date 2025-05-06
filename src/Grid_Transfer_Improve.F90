@@ -30,9 +30,9 @@ module grid_transfer_improve
       type(tMat), intent(inout) :: Z, A_ff, A_cf, A_ff_inv
       PetscInt, intent(in) :: its
 
-      PetscInt :: i, m, n
+      PetscInt :: i
       PetscErrorCode :: ierr
-      PetscReal :: residual
+      ! PetscReal :: residual
       type(tMat) :: residual_mat, Z_temp_no_sparsity, Z_temp_sparsity
       type(tMat) :: temp_mat
       type(tVec) :: right_vec_aff, right_vec_inv_aff
@@ -108,9 +108,9 @@ module grid_transfer_improve
          ! say its different
          call MatAXPY(residual_mat, 1d0, A_cf, DIFFERENT_NONZERO_PATTERN, ierr)       
 
-         ! If you want to output the residual
-         call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)
-         print *, i, "residual = ", residual
+         ! If you want to print the residual
+         ! call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)
+         ! print *, i, "residual = ", residual
 
          ! Multiply on the right by the preconditioner
          ! (Z^n Aff - Acf) * Aff_inv

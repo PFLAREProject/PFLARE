@@ -768,7 +768,8 @@ module air_operators_setup
       call improve_z(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                      air_data%A_ff(our_level), &
                      air_data%A_cf(our_level), &
-                     air_data%inv_A_ff(our_level), 3)
+                     air_data%inv_A_ff(our_level), &
+                     air_data%options%improve_z_its)
       
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~

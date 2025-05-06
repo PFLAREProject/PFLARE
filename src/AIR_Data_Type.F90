@@ -130,7 +130,13 @@ module air_data_type
       ! Do we compute a near-nullspace vector and apply it as a constaint 
       ! to the restrictor?
       ! -pc_air_constrain_z
-      logical :: constrain_z = .FALSE.       
+      logical :: constrain_z = .FALSE.    
+      ! How many iterations of improvement do we want to do to Z
+      ! -pc_air_improve_z_its
+      integer :: improve_z_its = 0
+      ! How many iterations of improvement do we want to do to W  
+      ! -pc_air_improve_w_its
+      integer :: improve_w_its = 0   
 
       ! Strong R threshold to apply dropping prior to computing Z
       ! This only applies when computing Z, ie if you build a GMRES polynomial approximation
