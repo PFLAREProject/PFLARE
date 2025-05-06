@@ -28,9 +28,9 @@ module grid_transfer_improve
       ! ~~~~~~~~~~
       ! Input 
       type(tMat), intent(inout) :: W, A_ff, A_fc, A_ff_inv, reuse_mat, reuse_mat_two
-      PetscInt, intent(in) :: its
+      integer, intent(in) :: its
 
-      PetscInt :: i
+      integer :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
       type(tMat) :: residual_mat, temp_sparsity
@@ -190,9 +190,9 @@ module grid_transfer_improve
       ! ~~~~~~~~~~
       ! Input 
       type(tMat), intent(inout) :: Z, A_ff, A_cf, A_ff_inv, reuse_mat, reuse_mat_two
-      PetscInt, intent(in) :: its
+      integer, intent(in) :: its
 
-      PetscInt :: i
+      integer :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
       type(tMat) :: residual_mat, temp_sparsity
