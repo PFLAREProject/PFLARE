@@ -30,7 +30,7 @@ module aggregation
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), allocatable :: indices
-      PetscInt, dimension(:), pointer :: cols
+      PetscInt, dimension(:), pointer :: cols => null()
       logical :: mark_neigh
 
       ! ~~~~~~   

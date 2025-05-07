@@ -21,7 +21,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    if (mpi)
    {
@@ -530,7 +530,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
    {
 
       Mat_MPIAIJ *mat_mpi = nullptr;
-      Mat mat_local, mat_nonlocal;
+      Mat mat_local = NULL, mat_nonlocal = NULL;
 
       if (mpi)
       {

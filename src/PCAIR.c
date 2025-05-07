@@ -144,7 +144,7 @@ static PetscErrorCode PCDestroy_AIR_c(PC pc)
    // destroys the pc_air_data
    PCDestroy(pc_air_shell);
    // Then destroy the heap pointer
-   PetscFree(pc_air_shell);
+   PetscCall(PetscFree(pc_air_shell));
    PetscFunctionReturn(0);
 }
 

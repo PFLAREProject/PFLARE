@@ -286,6 +286,9 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~
 
       allocate(work(1))
+      ! Not used but we have to allocate
+      allocate(VL(0, 0))
+      allocate(VR(0, 0))
       lwork = -1      
 
       ! Compute the eigenvalues
@@ -298,7 +301,7 @@ module gmres_poly_newton
       call dgeev('N', 'N', poly_order + 1, H_n, size(H_n, 1), &
                      coefficients(1, 1), coefficients(1, 2), VL, 1, VR, 1, &
                      work, lwork, errorcode)
-      deallocate(work)
+      deallocate(work, VL, VR)
 
       if (errorcode /= 0) then
          print *, "Eig decomposition failed"

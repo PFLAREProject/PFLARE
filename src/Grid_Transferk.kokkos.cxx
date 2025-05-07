@@ -24,7 +24,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;   
@@ -417,7 +417,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;   
@@ -501,7 +501,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::View<PetscInt *> j_nonlocal_d;  
 
    Mat_MPIAIJ *mat_mpi_output = nullptr;
-   Mat mat_local_output, mat_nonlocal_output;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -696,7 +696,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          mat_local_output = *output_mat;
       }     
       Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-      Mat_SeqAIJKokkos *aijkok_nonlocal_output;
+      Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
       if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
 
       // Annoying we can't just call MatSeqAIJGetKokkosView
@@ -861,7 +861,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;   
@@ -945,7 +945,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
       // We've now built the original fine indices
       ISDestroy(&col_indices);
-      PetscFree(col_indices_off_proc_array);
+      (void)PetscFree(col_indices_off_proc_array);
    }
    else
    {
@@ -1000,7 +1000,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::View<PetscInt *> j_nonlocal_d;  
 
    Mat_MPIAIJ *mat_mpi_output = nullptr;
-   Mat mat_local_output, mat_nonlocal_output;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -1181,7 +1181,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          mat_local_output = *output_mat;
       }     
       Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-      Mat_SeqAIJKokkos *aijkok_nonlocal_output;
+      Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
       if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
 
       // Annoying we can't just call MatSeqAIJGetKokkosView

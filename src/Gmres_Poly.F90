@@ -861,9 +861,9 @@ end if
       integer :: comm_size
       PetscErrorCode :: ierr      
       PetscReal, dimension(:), pointer :: vals_two, vals_power_temp, vals_previous_power_temp
-      PetscReal, dimension(:), pointer :: vals
+      PetscReal, dimension(:), pointer :: vals => null()
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
-      PetscInt, dimension(:), pointer :: cols, cols_two, cols_local
+      PetscInt, dimension(:), pointer :: cols => null(), cols_two, cols_local
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       type(tIS), dimension(1) :: col_indices
       type(tMat) :: Ad, Ao

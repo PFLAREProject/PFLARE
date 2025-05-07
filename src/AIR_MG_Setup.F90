@@ -289,17 +289,17 @@ module air_mg_setup
                do i_loc = 1, size(left_null_vecs)
                   call VecDestroy(left_null_vecs(i_loc), ierr)
                end do
-               deallocate(left_null_vecs)
-               if (allocated(left_null_vecs_c)) deallocate(left_null_vecs_c)
             end if
+            if (allocated(left_null_vecs)) deallocate(left_null_vecs)
+            if (allocated(left_null_vecs_c)) deallocate(left_null_vecs_c)            
             if (air_data%options%constrain_w) then
                ! Destroy our copy of the right near nullspace vectors
                do i_loc = 1, size(right_null_vecs)
                   call VecDestroy(right_null_vecs(i_loc), ierr)
                end do
-               deallocate(right_null_vecs)
-               if (allocated(right_null_vecs_c)) deallocate(right_null_vecs_c)
-            end if            
+            end if   
+            if (allocated(right_null_vecs)) deallocate(right_null_vecs)
+            if (allocated(right_null_vecs_c)) deallocate(right_null_vecs_c)                     
 
             no_levels = our_level
 
@@ -378,6 +378,7 @@ module air_mg_setup
          check_diag_only = .TRUE.
          ! Don't have to check if we have strong threshold of zero 
          ! or its already matdiagonal due to reuse
+         call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
          if (mat_type_aff == MATDIAGONAL .OR. air_data%options%strong_threshold == 0d0) then
             check_diag_only = .FALSE.
          end if
@@ -520,7 +521,9 @@ module air_mg_setup
          ! ~~~~~~~~~
          ! Finish the non-blocking comms and build the approximate inverse, then the 
          ! restrictor and prolongator
-         ! ~~~~~~~~~
+         ! ~~~~~~~~~        
+         if (.NOT. allocated(left_null_vecs_c)) allocate(left_null_vecs_c(size(left_null_vecs)))
+         if (.NOT. allocated(right_null_vecs_c)) allocate(right_null_vecs_c(size(right_null_vecs)))
          call finish_comms_compute_restrict_prolong(air_data%coarse_matrix(our_level), &
                our_level, air_data, &
                left_null_vecs, right_null_vecs, &
