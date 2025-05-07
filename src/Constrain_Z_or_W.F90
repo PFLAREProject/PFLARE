@@ -72,8 +72,8 @@ module constrain_z_or_w
 
       ! Create some storage for all the near nullspace vectors
       ! constant included
-      if (left) allocate(left_null_vecs(no_nullspace_vecs))
-      if (right) allocate(right_null_vecs(no_nullspace_vecs))
+      allocate(left_null_vecs(no_nullspace_vecs))
+      allocate(right_null_vecs(no_nullspace_vecs))
       ! Have to make copies of the nullspace vecs passed in, as MatNullSpaceCreate locks the vectors
       ! to be read-only in newer petsc
       do i_loc = 1, no_nullspace
@@ -228,8 +228,8 @@ module constrain_z_or_w
       MPI_Comm :: MPI_COMM_MATRIX
       type(tMat) :: row_mat, temp_mat_aij
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
-      PetscInt, dimension(:), pointer :: cols
-      PetscReal, dimension(:), pointer :: vals
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: row_vals, diff
       type(tMat) :: new_z_or_w
       type(c_ptr) :: b_c_nonlocal_c_ptr

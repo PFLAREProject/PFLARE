@@ -170,8 +170,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_end_plus_one, max_nnzs_total
       PetscCount :: counter
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), pointer :: cols
-      PetscReal, dimension(:), pointer :: vals
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscReal, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v          
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -331,8 +331,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: ncols, ifree
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), pointer :: cols
-      PetscReal, dimension(:), pointer :: vals
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscReal, dimension(:), pointer :: vals => null()
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       
       ! ~~~~~~~~~~
@@ -462,8 +462,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscCount :: counter
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
-      PetscInt, dimension(:), pointer :: cols, cols_mod
-      PetscReal, dimension(:), pointer :: vals, vals_copy
+      PetscInt, dimension(:), pointer :: cols => null(), cols_mod
+      PetscReal, dimension(:), pointer :: vals => null(), vals_copy
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v        
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
@@ -811,8 +811,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscCount :: counter
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
-      PetscInt, dimension(:), pointer :: cols
-      PetscReal, dimension(:), pointer :: vals
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscReal, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v         
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0

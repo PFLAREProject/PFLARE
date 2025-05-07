@@ -743,8 +743,8 @@ module pmisr_ddc
       PetscInt :: jfree, idx, search_size, diag_index
       integer :: bin_sum, bin_boundary, bin
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), pointer :: cols
-      PetscReal, dimension(:), pointer :: vals
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_small
       PetscInt, dimension(:), pointer :: is_pointer
       type(tMat) :: Aff

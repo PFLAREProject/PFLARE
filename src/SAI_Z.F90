@@ -50,8 +50,8 @@ module sai_z
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
       PetscInt, dimension(:), allocatable :: j_rows, i_rows, ad_indices
       integer, dimension(:), allocatable :: pivots, j_indices, i_indices
-      PetscInt, dimension(:), pointer :: cols
-      PetscReal, dimension(:), pointer :: vals
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: e_row, j_vals
       PetscReal, dimension(:,:), allocatable :: submat_vals
       type(itree) :: i_rows_tree
