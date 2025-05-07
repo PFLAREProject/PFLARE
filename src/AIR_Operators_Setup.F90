@@ -256,7 +256,7 @@ module air_operators_setup
       integer, intent(in)                                   :: our_level
       type(air_multigrid_data), intent(inout)               :: air_data
       type(tVec), dimension(:), intent(inout)               :: left_null_vecs, right_null_vecs
-      type(tVec), dimension(:), allocatable, intent(inout)  :: left_null_vecs_c, right_null_vecs_c
+      type(tVec), dimension(:), intent(inout)               :: left_null_vecs_c, right_null_vecs_c
 
       PetscErrorCode :: ierr
       type(tMat) :: minus_mat, sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat
@@ -432,6 +432,7 @@ module air_operators_setup
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~    
       if (air_data%options%constrain_w) then
+         if (.NOT. allocated(right_null_vecs_f)) allocate(right_null_vecs_f(size(right_null_vecs)))
          ! Create space for the C and F constraints
          call MatCreateVecs(air_data%A_fc(our_level), right_null_vecs_c(1), right_null_vecs_f(1), ierr)       
          do i_loc = 2, size(right_null_vecs) 
@@ -447,6 +448,7 @@ module air_operators_setup
          end do         
       end if
       if (air_data%options%constrain_z) then        
+         if (.NOT. allocated(left_null_vecs_f)) allocate(left_null_vecs_f(size(left_null_vecs)))
          ! Create space for the C and F constraints
          call MatCreateVecs(air_data%A_fc(our_level), left_null_vecs_c(1), left_null_vecs_f(1), ierr)       
          do i_loc = 2, size(left_null_vecs) 
