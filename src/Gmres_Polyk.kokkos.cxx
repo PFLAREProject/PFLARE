@@ -25,7 +25,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local_sparsity, mat_nonlocal_sparsity;
+   Mat mat_local_sparsity = NULL, mat_nonlocal_sparsity = NULL;
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
@@ -119,7 +119,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    }
 
    // Get the existing output mat
-   Mat mat_local_output, mat_nonlocal_output;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
    if (mpi)
    {
       Mat_MPIAIJ *mat_mpi_output = (Mat_MPIAIJ *)(*output_mat)->data;
@@ -424,7 +424,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    });
     
    Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-   Mat_SeqAIJKokkos *aijkok_nonlocal_output;
+   Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
 
    // Have to specify we've modifed data on the device
@@ -457,7 +457,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    }   
    delete[] matrix_powers;
    if (deallocate_submatrices) delete[] submatrices;
-   PetscFree(col_indices_off_proc_array);
+   (void)(col_indices_off_proc_array);
 
    return;
 }

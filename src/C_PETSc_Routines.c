@@ -237,8 +237,8 @@ PETSC_INTERN void MatPartitioning_c(Mat *adj, PetscInt new_size, PetscInt *proc_
    ISInvertPermutation(proc_is_eq_num, counts[rank], index);
    ISDestroy(&proc_is_eq_num);
 
-   PetscFree(counts);
-   PetscFree(newproc_idx);
+   (void)PetscFree(counts);
+   (void)PetscFree(newproc_idx);
    return;
 }
 
@@ -375,7 +375,7 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
   }
   MPI_Comm_group(acomm, &agroup);
   MPI_Group_incl(agroup, nranks, ranks, &bgroup);
-  PetscFree(ranks);
+  (void)PetscFree(ranks);
   MPI_Comm_create(acomm, bgroup, &bcomm);
   MPI_Group_free(&agroup);
   MPI_Group_free(&bgroup);
@@ -526,7 +526,7 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
   MPI_Comm_size(acomm, &size);
 
   Mat_MPIAIJ *mat_mpi = NULL;
-  Mat mat_local, mat_nonlocal; 
+  Mat mat_local = NULL, mat_nonlocal = NULL; 
 
   // Get the existing output mats
   if (size != 1)
@@ -555,7 +555,7 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
       }
 
       // Reduction to check every rank
-      MPI_Allreduce(&rank_diag_serial, &rank_diag, 1, MPI_INTEGER, MPI_SUM, acomm);
+      (void)MPI_Allreduce(&rank_diag_serial, &rank_diag, 1, MPI_INTEGER, MPI_SUM, acomm);
   }
   else
   {

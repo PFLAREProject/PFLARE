@@ -110,7 +110,7 @@ int main(int argc, char **args)
   PetscFree2(oor, ooc);
   // Set the values
   MatSetValuesCOO(A, v, INSERT_VALUES);
-  PetscFree(v);
+  PetscCall(PetscFree(v));
 
   /*
      Create x, b - random initial guess and zero rhs

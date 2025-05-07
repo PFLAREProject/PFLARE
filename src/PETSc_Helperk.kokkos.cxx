@@ -808,7 +808,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local, mat_nonlocal;
    Mat_MPIAIJ *mat_mpi_output = nullptr;
-   Mat mat_local_output, mat_nonlocal_output;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
    PetscIntKokkosViewHost colmap_input_h, colmap_output_h;
    PetscIntKokkosView colmap_input_d, colmap_output_d;   
@@ -864,7 +864,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype); 
 
    Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-   Mat_SeqAIJKokkos *aijkok_nonlocal_output;
+   Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
 
    // Find maximum non-zeros per row of the input mat for sizing scratch memory
@@ -1145,7 +1145,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    PetscInt local_rows, local_cols;
    MatGetLocalSize(*input_mat, &local_rows, &local_cols);
 
-   Mat_SeqAIJKokkos *aijkok_nonlocal;
+   Mat_SeqAIJKokkos *aijkok_nonlocal = NULL;
    Mat_SeqAIJKokkos *aijkok_local = static_cast<Mat_SeqAIJKokkos *>(mat_local->spptr);
    if(mpi) aijkok_nonlocal = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal->spptr);
    
@@ -1273,7 +1273,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
    Kokkos::View<PetscInt *> j_nonlocal_d;  
 
    Mat_MPIAIJ *mat_mpi_output = nullptr;
-   Mat mat_local_output, mat_nonlocal_output;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
    // We always need to know if we found a diagonal in each row of the input_matrix
    auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);    
@@ -1488,7 +1488,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
          mat_local_output = *output_mat;
       }     
       Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-      Mat_SeqAIJKokkos *aijkok_nonlocal_output;
+      Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
       if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
 
       // Annoying we can't just call MatSeqAIJGetKokkosView

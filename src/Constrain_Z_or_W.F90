@@ -303,6 +303,7 @@ module constrain_z_or_w
       call MatGetType(row_mat, mat_type, ierr)
 
       ! Nonlocal if needed
+      allocate(b_c_nonlocal_alloc(0,0))
       if (comm_size /= 1) then
 
          ! Much more annoying in older petsc
@@ -323,6 +324,7 @@ module constrain_z_or_w
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)         
 
+         deallocate(b_c_nonlocal_alloc)
          allocate(b_c_nonlocal_alloc(cols_ao, size(null_vecs_c)))
 
          ! Loop over all the near nullspace vectors and get the nonlocal components
@@ -491,10 +493,7 @@ module constrain_z_or_w
       call MatAssemblyBegin(new_z_or_w, MAT_FINAL_ASSEMBLY, ierr)
       call MatAssemblyEnd(new_z_or_w, MAT_FINAL_ASSEMBLY, ierr)     
       
-      ! Don't forget to restore
-      if (comm_size /= 1) then
-         deallocate(b_c_nonlocal_alloc)
-      end if
+      deallocate(b_c_nonlocal_alloc)
 
       ! Destroy the old input matrix
       call MatDestroy(z_or_w, ierr)      

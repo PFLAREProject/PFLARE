@@ -274,7 +274,7 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
    PCReset_PFLAREINV_c(pc);
 
    // Then destroy the heap pointer
-   PetscFree(inv_data);
+   PetscCall(PetscFree(inv_data));
    PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetType_C", NULL);
    PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetType_C", NULL);
    PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetMatrixFree_C", NULL);
