@@ -861,7 +861,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;   

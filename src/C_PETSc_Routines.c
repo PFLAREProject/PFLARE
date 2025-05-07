@@ -484,7 +484,7 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
   }  
 
   Mat_MPIAIJ *mat_mpi = NULL;
-  Mat mat_local, mat_nonlocal; 
+  Mat mat_local = NULL, mat_nonlocal = NULL; 
 
   // Get the existing output mats
   if (size != 1)

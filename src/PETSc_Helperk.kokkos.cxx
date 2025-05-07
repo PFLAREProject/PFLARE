@@ -24,7 +24,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;   
@@ -806,7 +806,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);      
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
    Mat_MPIAIJ *mat_mpi_output = nullptr;
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
@@ -1130,7 +1130,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
   
    if (mpi)
    {
@@ -1221,7 +1221,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
    bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local, mat_nonlocal;
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;   
