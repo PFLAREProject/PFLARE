@@ -59,7 +59,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
    PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
    PetscScalarKokkosView measure_nonlocal_d;
-   if (mpi) measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
+   PetscScalar *measure_nonlocal_d_ptr = NULL;
+   if (mpi) {
+      measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
+      measure_nonlocal_d_ptr = measure_nonlocal_d.data();
+   }
 
    // Device memory for the mark
    boolKokkosView mark_d("mark_d", local_rows);   
@@ -101,33 +105,28 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
    MatCreateVecs(*strength_mat, &cf_markers_vec, NULL);
 
    // ~~~~~~~~~~~~~
-   // Now we're going to be very careful about when we get kokkos read/write views
-   // because we use vecscatter to do the communication
-   // We have to ensure that when we overwrite device data, that we call restore on 
-   // any non-const views so that petsc knows we have modified device data
-   // Be careful to only use vecgetkokkosviewwrite when we know we are going to overwrite
-   // all the data, calling vecgetkokkosview and passing in a non-const view
-   // is how you do read/write
+   // We just access the device pointers directly and then call the petscsf functions
+   // that take the device pointers
    // ~~~~~~~~~~~~~
 
-   // Get a device pointer for cf_markers_vec
    // We can use a write view here as we know we overwrite all the values
    VecGetKokkosViewWrite(cf_markers_vec, &cf_markers_local_real_d);
    // Copy the measure over
    Kokkos::deep_copy(cf_markers_local_real_d, measure_local_d);  
    VecRestoreKokkosViewWrite(cf_markers_vec, &cf_markers_local_real_d);
 
+   PetscMemType mem_type;
+   PetscScalar *measure_local_d_ptr = NULL;
+   VecGetArrayAndMemType(cf_markers_vec, &measure_local_d_ptr, &mem_type);
+
+   // Scatter the measure
    if (mpi)
    {
-      // Scatter the measure
-      VecScatterBegin(mat_mpi->Mvctx, cf_markers_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD);
-      VecScatterEnd(mat_mpi->Mvctx, cf_markers_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD);
-
-      // Get a device pointer for cf_markers_vec non local components
-      VecGetKokkosView(mat_mpi->lvec, &cf_markers_nonlocal_real_const_d);
-      // Copy the non local measure
-      Kokkos::deep_copy(measure_nonlocal_d, cf_markers_nonlocal_real_const_d);   
-      VecRestoreKokkosView(mat_mpi->lvec, &cf_markers_nonlocal_real_const_d); 
+      PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
+                                 mem_type, measure_local_d_ptr,
+                                 mem_type, measure_nonlocal_d_ptr,
+                                 MPI_REPLACE);
+      PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE);
    }
 
    // Initialise the set
