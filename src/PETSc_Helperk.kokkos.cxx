@@ -1804,11 +1804,30 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    // ~~~~~~~~~
 
    // Now we need to build garray on the host and rewrite the j_nonlocal_d_z indices so they are local
-   // The default values here are for the case where we 
-   // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
+   auto exec = PetscGetKokkosExecutionSpace();
    PetscInt *garray_host = NULL;
-   PetscInt col_ao_output = global_cols;
-   if (cols_ao == 0)
+
+   // We have all the global column indices in j_nonlocal_d_z
+   // We can use unique_copy in kokkos to get us a copy of the unique global column indices
+   // which gives us our garray
+
+   // Need to preallocate to the max size, which we know is only as big as cols_ao_x + cols_ao_y
+   PetscIntKokkosView colmap_output_d("colmap_output_d_big", cols_ao);
+   Kokkos::deep_copy(colmap_output_d, -1); // initialize to -1
+
+   // Take a copy of j and sort it
+   PetscIntKokkosView j_nonlocal_d_z_sorted("j_nonlocal_d_z_sorted", j_nonlocal_d_z.extent(0));
+   Kokkos::deep_copy(j_nonlocal_d_z_sorted, j_nonlocal_d_z);
+   Kokkos::sort(j_nonlocal_d_z_sorted);
+
+   // Unique copy returns a copy of sorted j_nonlocal_d_z in order, but with all the duplicate entries removed
+   auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_z_sorted, colmap_output_d);
+   auto begin_it = Kokkos::Experimental::begin(colmap_output_d);
+   ptrdiff_t count_ptr_arith = unique_end_it - begin_it;
+   PetscInt col_ao_output = static_cast<PetscInt>(count_ptr_arith);
+
+   // Now we need to rewrite our global indices
+   if (col_ao_output == 0)
    {
       // Silly but depending on the compiler this may return a non-null pointer
       col_ao_output = 0;
@@ -1823,67 +1842,22 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    // If we have no off-diagonal entries (either we started with zero or we've dropped them all)
    // just skip all this and leave garray_host as null
 
-   // If we have 4 bit ints, we know cols_ao can never be bigger than the capacity of uint32_t
+   // If we have 4 bit ints, we know col_ao_output can never be bigger than the capacity of uint32_t
    bool size_small_enough = sizeof(PetscInt) == 4 || \
-               (sizeof(PetscInt) > 4 && cols_ao < 4294967295);
-   if (size_small_enough && cols_ao > 0 && nnzs_match_nonlocal > 0)
+               (sizeof(PetscInt) > 4 && col_ao_output < 4294967295);
+   if (size_small_enough && col_ao_output > 0 && nnzs_match_nonlocal > 0)
    {
       // Have to tell it the max capacity, we know we will have no more 
       // than the input off-diag columns
-      Kokkos::UnorderedMap<PetscInt, PetscInt> hashmap((uint32_t)(cols_ao+1));
+      Kokkos::UnorderedMap<PetscInt, PetscInt> hashmap((uint32_t)(col_ao_output+1));
 
       // Let's insert all the existing global col indices as keys (with no value to start)
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(int i) {      
+         Kokkos::RangePolicy<>(0, col_ao_output), KOKKOS_LAMBDA(int i) {      
          
-         // Insert the key (global col indices) without a value
-         // Duplicates will be ignored
-         hashmap.insert(j_nonlocal_d_z(i));
-      });
-
-      // We now know how many unique global columns we have
-      col_ao_output = hashmap.size();
-
-      // Tag which of the original garray stick around  
-      PetscIntKokkosView colmap_output_d_big("colmap_output_d_big", cols_ao);
-      // Now we copy in the original garrays - doesn't matter they are not sorted
-      // as we just loop through, set any that don't exist in Z to -1 and then sort
-      // Copy in the y garray
-      Kokkos::deep_copy(Kokkos::subview(colmap_output_d_big, Kokkos::make_pair(0, cols_ao_y)), colmap_input_d_y);                
-      // Copy in the x garray
-      Kokkos::deep_copy(Kokkos::subview(colmap_output_d_big, Kokkos::make_pair(cols_ao_y, cols_ao)), colmap_input_d_x); 
-
-      // Mark which of the keys don't exist
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(int i) { 
-
-         // If the key doesn't exist set the global index to -1
-         if (!hashmap.exists(colmap_output_d_big(i))) colmap_output_d_big(i) = -1; 
-      });         
-
-      // Now sort the global columns indices
-      // All the -1 should be at the start
-      Kokkos::sort(colmap_output_d_big);
-
-      // Count the number of -1 - this will be the index of the first entry
-      // that isn't -1
-      // It should never be equal to start index, because otherwise we
-      // have dropped all nonlocal entries
-      auto exec = PetscGetKokkosExecutionSpace();
-      PetscInt start_index = Kokkos::Experimental::count(exec, colmap_output_d_big, -1);
-
-      // Our final colmap_output_d is colmap_output_d_big(start_index:end)
-      PetscIntKokkosView colmap_output_d = Kokkos::subview(colmap_output_d_big, \
-               Kokkos::make_pair(start_index, cols_ao));
-
-      // Now we can clear the hash and instead stick in the global indices
-      // but now with the local indices as values
-      hashmap.clear();
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, colmap_output_d.extent(0)), KOKKOS_LAMBDA(int i) { 
-
+         // Insert the key (global col indices) with the local index
          hashmap.insert(colmap_output_d(i), i);
-      });          
+      });
 
       // And now we can overwrite j_nonlocal_d_z with the local indices
       Kokkos::parallel_for(
@@ -1897,16 +1871,16 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       hashmap.clear();
 
       // Create some host space for the output garray (that stays in scope) and copy it
-      PetscMalloc1(colmap_output_d.extent(0), &garray_host);
-      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, colmap_output_d.extent(0));
-      Kokkos::deep_copy(colmap_output_h, colmap_output_d);
+      PetscMalloc1(col_ao_output, &garray_host);
+      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, col_ao_output);
+      Kokkos::deep_copy(colmap_output_h, Kokkos::subview(colmap_output_d, Kokkos::make_pair(0, col_ao_output)));
+
       // Log copy with petsc
-      bytes = colmap_output_d.extent(0) * sizeof(PetscInt);
-      PetscLogGpuToCpu(bytes);            
+      bytes = col_ao_output * sizeof(PetscInt);
+      PetscLogGpuToCpu(bytes);
    }
 
    // Let's make sure everything on the device is finished
-   auto exec = PetscGetKokkosExecutionSpace();
    exec.fence();  
 
    Kokkos::View<PetscScalar *> a_nonlocal_d_copy = Kokkos::View<PetscScalar *>("a_local_d_copy", a_nonlocal_d_z.extent(0));
