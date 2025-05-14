@@ -125,7 +125,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-12) then
+            if (normy .gt. 1d-12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
@@ -421,7 +421,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13) then
+            if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of remove_from_sparse_match do not match"
@@ -763,7 +763,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13) then
+            if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of compute_R_from_Z do not match"

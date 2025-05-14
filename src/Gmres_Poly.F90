@@ -804,7 +804,7 @@ end if
             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
-            if (normy .gt. 1d-11) then
+            if (normy .gt. 1d-11 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of mat_mult_powers_share_sparsity do not match"
