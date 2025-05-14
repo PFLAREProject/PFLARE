@@ -11,6 +11,7 @@
 #include <Kokkos_Random.hpp>
 #include <Kokkos_Core.hpp>
 #include <Kokkos_DualView.hpp>
+#include <KokkosSparse_spadd.hpp>
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
 using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;

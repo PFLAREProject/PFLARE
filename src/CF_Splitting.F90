@@ -131,7 +131,8 @@ module cf_splitting
          ! but its so much simpler to just add the two together - and the symbolic will be the expensive part
          ! anyway
          call MatTranspose(output_mat, MAT_INITIAL_MATRIX, transpose_mat, ierr)
-         call MatAXPY(output_mat, 1d0, transpose_mat, DIFFERENT_NONZERO_PATTERN, ierr)     
+         ! Kokkos + MPI doesn't have a gpu mataxpy yet, so we have a wrapper around our own version
+         call MatAXPYWrapper(output_mat, 1d0, transpose_mat)
 
          ! Don't forget to destroy the explicit transpose
          call MatDestroy(transpose_mat, ierr)
