@@ -951,9 +951,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
 
             call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            print *, "diff", normy
             if (normy .gt. 1d-12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)

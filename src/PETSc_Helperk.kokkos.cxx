@@ -1650,11 +1650,33 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    mat_local_x = mat_mpi_x->A;
    mat_nonlocal_x = mat_mpi_x->B;
 
-   MatView(mat_local_y, PETSC_VIEWER_STDOUT_WORLD);
-   MatView(mat_local_x, PETSC_VIEWER_STDOUT_WORLD);
+   Mat_SeqAIJKokkos *mat_local_ykok = static_cast<Mat_SeqAIJKokkos *>(mat_local_y->spptr);
+   Mat_SeqAIJKokkos *mat_nonlocal_ykok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_y->spptr);
+   Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
+   Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
 
-   MatView(mat_nonlocal_y, PETSC_VIEWER_STDOUT_WORLD);
-   MatView(mat_nonlocal_x, PETSC_VIEWER_STDOUT_WORLD);   
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   // We have to make sure the device data is up to date before we do the axpy
+   if (mat_local_ykok->a_dual.need_sync_device()) {
+      mat_local_ykok->a_dual.sync_device();
+      mat_local_ykok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_local_ykok->hermitian_updated = PETSC_FALSE;
+    }  
+    if (mat_nonlocal_ykok->a_dual.need_sync_device()) {
+      mat_nonlocal_ykok->a_dual.sync_device();
+      mat_nonlocal_ykok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_nonlocal_ykok->hermitian_updated = PETSC_FALSE;
+    } 
+    if (mat_local_xkok->a_dual.need_sync_device()) {
+      mat_local_xkok->a_dual.sync_device();
+      mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_local_xkok->hermitian_updated = PETSC_FALSE;
+    }           
+    if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
+      mat_nonlocal_xkok->a_dual.sync_device();
+      mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
+    }  
 
    PetscInt rows_ao_y, cols_ao_y, rows_ao_x, cols_ao_x;
 
@@ -1692,14 +1714,14 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    xkok_local = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);   
 
    KokkosCsrMatrix zcsr_local;
-   KernelHandle    kh;
-   kh.create_spadd_handle(true); // X, Y are sorted
+   KernelHandle    kh_local;
+   kh_local.create_spadd_handle(true); // X, Y are sorted
 
-   KokkosSparse::spadd_symbolic(&kh, xkok_local->csrmat, ykok_local->csrmat, zcsr_local);
-   KokkosSparse::spadd_numeric(&kh, alpha, xkok_local->csrmat, (PetscScalar)1.0, ykok_local->csrmat, zcsr_local);
+   KokkosSparse::spadd_symbolic(&kh_local, xkok_local->csrmat, ykok_local->csrmat, zcsr_local);
+   KokkosSparse::spadd_numeric(&kh_local, alpha, xkok_local->csrmat, (PetscScalar)1.0, ykok_local->csrmat, zcsr_local);
 
-   kh.destroy_spadd_handle();
-
+   kh_local.destroy_spadd_handle();
+   
    // Get the Kokkos Views from zcsr_local - annoyingly we can't just call MatCreateSeqAIJKokkosWithCSRMatrix
    // as it's petsc intern
    auto a_local_d_z = zcsr_local.values;
@@ -1717,8 +1739,6 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    // We can create our local diagonal block matrix directly on the device
    Mat Z_local;
    MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d_copy, j_local_d_copy, a_local_d_copy, &Z_local);
-
-   MatView(Z_local, PETSC_VIEWER_STDOUT_WORLD);
    
    // ~~~~~~~~~~~~~~~
    // Now let's go and add the non-local components together
@@ -1759,12 +1779,13 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    KokkosCsrMatrix zcsr_nonlocal;
    // Not sure if the indices are sorted once we have replaced them with the global indices, 
    // let's just set to false
-   kh.create_spadd_handle(false); 
+   KernelHandle    kh_nonlocal;
+   kh_nonlocal.create_spadd_handle(false); 
 
-   KokkosSparse::spadd_symbolic(&kh, xkok_nonlocal->csrmat, ykok_nonlocal->csrmat, zcsr_nonlocal);
-   KokkosSparse::spadd_numeric(&kh, alpha, xkok_nonlocal->csrmat, (PetscScalar)1.0, ykok_nonlocal->csrmat, zcsr_nonlocal);
+   KokkosSparse::spadd_symbolic(&kh_nonlocal, xkok_nonlocal->csrmat, ykok_nonlocal->csrmat, zcsr_nonlocal);
+   KokkosSparse::spadd_numeric(&kh_nonlocal, alpha, xkok_nonlocal->csrmat, (PetscScalar)1.0, ykok_nonlocal->csrmat, zcsr_nonlocal);
 
-   kh.destroy_spadd_handle();
+   kh_nonlocal.destroy_spadd_handle();
 
    // Can now destroy the copy
    MatDestroy(&mat_nonlocal_x_copy);
@@ -1779,8 +1800,6 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    // (some might be the same)
    PetscInt cols_ao = cols_ao_x + cols_ao_y;
    PetscInt nnzs_match_nonlocal = j_nonlocal_d_z.extent(0);
-
-   std::cout << "cols_ao: " << cols_ao << std::endl;
 
    // ~~~~~~~~~
 
@@ -1902,15 +1921,12 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    Mat Z_nonlocal;
    MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d_copy, j_nonlocal_d_copy, a_nonlocal_d_copy, &Z_nonlocal);   
 
-   MatView(Z_nonlocal, PETSC_VIEWER_STDOUT_WORLD);
-
    // We can now create our MPI matrix
    Mat Z;
    MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, Z_local, Z_nonlocal, garray_host, &Z);    
 
+   // Stick Z into the input Y (this destroys existing Y)
    MatHeaderReplace(*Y, &Z);
-
-   MatView(*Y, PETSC_VIEWER_STDOUT_WORLD);
 
    return;
 }
