@@ -1873,7 +1873,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       // Create some host space for the output garray (that stays in scope) and copy it
       PetscMalloc1(col_ao_output, &garray_host);
       PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, col_ao_output);
-      Kokkos::deep_copy(colmap_output_h, Kokkos::subview(colmap_output_d, Kokkos::make_pair(0, col_ao_output)));
+      PetscInt zero = 0;
+      Kokkos::deep_copy(colmap_output_h, Kokkos::subview(colmap_output_d, Kokkos::make_pair(zero, col_ao_output)));
 
       // Log copy with petsc
       bytes = col_ao_output * sizeof(PetscInt);
