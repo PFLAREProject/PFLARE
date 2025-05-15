@@ -385,7 +385,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
       // Row
       PetscInt i = t.league_rank();         
       // number of columns
-      PetscInt ncols_local, ncols_nonlocal;
+      PetscInt ncols_local, ncols_nonlocal=-1;
       ncols_local = device_local_i[i + 1] - device_local_i[i];
       if (mpi) ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
@@ -911,7 +911,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       PetscInt i = t.league_rank();
 
       // number of columns
-      PetscInt ncols_local, ncols_nonlocal, ncols_local_output, ncols_nonlocal_output;
+      PetscInt ncols_local, ncols_nonlocal=-1, ncols_local_output, ncols_nonlocal_output=-1;
       ncols_local = device_local_i[i + 1] - device_local_i[i];
       if (mpi) ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
