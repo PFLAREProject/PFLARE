@@ -153,7 +153,7 @@ module cf_splitting
          ! Also have to add in the original distance 1 connections to the square
          ! as the dist 1 strength matrix has had the diagonals removed, so the square won't 
          ! have the dist 1 connetions in it
-         call MatAXPY(transpose_mat, 1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)     
+         call MatAXPYWrapper(transpose_mat, 1d0, output_mat)
          call MatDestroy(output_mat, ierr)
 
          ! Can end up with diagonal entries we have to remove

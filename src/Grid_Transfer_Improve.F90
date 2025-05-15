@@ -125,7 +125,7 @@ module grid_transfer_improve
          ! Afc should have a subset of the sparsity of W if Aff 
          ! has a diagonal, but just to be safe lets 
          ! say its different
-         call MatAXPY(residual_mat, 1d0, A_fc, DIFFERENT_NONZERO_PATTERN, ierr)       
+         call MatAXPYWrapper(residual_mat, 1d0, A_fc)
 
          ! If you want to print the residual
          ! call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)
@@ -287,7 +287,7 @@ module grid_transfer_improve
          ! Acf should have a subset of the sparsity of Z if Aff 
          ! has a diagonal, but just to be safe lets 
          ! say its different
-         call MatAXPY(residual_mat, 1d0, A_cf, DIFFERENT_NONZERO_PATTERN, ierr)       
+         call MatAXPYWrapper(residual_mat, 1d0, A_cf)
 
          ! If you want to print the residual
          ! call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)

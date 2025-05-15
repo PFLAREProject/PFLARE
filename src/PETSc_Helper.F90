@@ -912,8 +912,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), intent(inout) :: y_mat, x_mat
-      PetscScalar, intent(in) :: alpha
+      type(tMat), intent(inout) :: y_mat
+      type(tMat), intent(in)    :: x_mat
+      PetscScalar, intent(in)   :: alpha
       
       MPI_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode

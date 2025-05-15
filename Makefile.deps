@@ -27,7 +27,7 @@ src/PCPFLAREINV_Interfaces.o : src/PCPFLAREINV_Interfaces.F90
 src/PETSc_Helper.o : src/PETSc_Helper.F90 src/C_PETSc_Interfaces.o 
 src/PFLARE.o : src/PFLARE.F90 src/PCAIR_Interfaces.o src/PCPFLAREINV_Interfaces.o src/PCAIR_Shell.o src/AIR_MG_Setup.o 
 src/PMISR_DDC.o : src/PMISR_DDC.F90 src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
-src/Repartition.o : src/Repartition.F90 src/C_PETSc_Interfaces.o 
+src/Repartition.o : src/Repartition.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/SAI_Z.o : src/SAI_Z.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o src/Sorting.o 
 src/Sorting.o : src/Sorting.F90 src/Binary_Tree.o 
 src/Timers.o : src/Timers.F90 
