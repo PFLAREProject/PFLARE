@@ -1078,7 +1078,7 @@ end if
 
          ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
          ! Can use SUBSET_NONZERO_PATTERN as we have put the highest order power in first
-         call MatAXPYWrapper(cmat, coefficients(order+1), matrix_powers(order))
+         call MatAXPY(cmat, coefficients(order+1), matrix_powers(order), SUBSET_NONZERO_PATTERN , ierr) 
       end do 
 
       ! Add in the 0th order term
@@ -1588,7 +1588,7 @@ end if
          ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
          if (reuse_triggered) then
             ! If doing reuse we know our nonzeros are a subset
-            call MatAXPYWrapper(inv_matrix, coefficients(order+1), mat_power)
+            call MatAXPY(inv_matrix, coefficients(order+1), mat_power, SUBSET_NONZERO_PATTERN, ierr)
          else
             ! Have to use the DIFFERENT_NONZERO_PATTERN here
             call MatAXPYWrapper(inv_matrix, coefficients(order+1), mat_power)
