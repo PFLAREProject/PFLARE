@@ -62,6 +62,10 @@ int main(int argc,char **argv)
   ierr = KSPCreate(PETSC_COMM_WORLD,&ksp);CHKERRQ(ierr);
   ierr = DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE,DMDA_STENCIL_STAR,11,11,PETSC_DECIDE,PETSC_DECIDE,1,1,NULL,NULL,&da);CHKERRQ(ierr);
   ierr = DMSetFromOptions(da);CHKERRQ(ierr);
+  // This stops the zero entries in the stencil from being added to the matrix
+  // It still allocates the memory for a 5 point stencil but the sparsity doesn't include the zero entries
+  // We do this instead of calling MatFilter as there is no Kokkos implementation so its very slow
+  ierr = DMSetMatrixPreallocateOnly(da,PETSC_TRUE);CHKERRQ(ierr);
   ierr = DMSetUp(da);CHKERRQ(ierr);
   ierr = KSPSetDM(ksp,(DM)da);CHKERRQ(ierr);
   // We generate the matrix ourselves
@@ -69,6 +73,7 @@ int main(int argc,char **argv)
 
   // Create empty matrix and vectors
   ierr = DMCreateMatrix(da, &A);
+  ierr = MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES ,PETSC_TRUE);CHKERRQ(ierr);
   ierr = DMCreateGlobalVector(da, &x);
   ierr = DMCreateGlobalVector(da, &b);
 
@@ -299,9 +304,6 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
   }
   ierr = MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
   ierr = MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
-
-  // Eliminate the zeros that the 5 point stencil may have in it with only advection
-  MatFilter(A, 0.0, PETSC_TRUE, PETSC_TRUE);
 
   return 0;
 }
