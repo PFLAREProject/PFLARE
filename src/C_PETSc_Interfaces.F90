@@ -416,6 +416,18 @@ module c_petsc_interfaces
  
    end interface   
 
+   interface   
+      
+      subroutine MatAXPY_kokkos(A_array, alpha, B_array) &
+         bind(c, name="MatAXPY_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+         PetscScalar, value :: alpha
+      end subroutine MatAXPY_kokkos         
+ 
+   end interface    
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
 end module c_petsc_interfaces

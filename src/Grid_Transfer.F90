@@ -59,7 +59,7 @@ module grid_transfer
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13) then
+            if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of generate_one_point_with_one_entry_from_sparse do not match"
@@ -273,7 +273,7 @@ module grid_transfer
 
             call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13) then
+            if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of compute_P_from_W do not match"
@@ -518,7 +518,7 @@ module grid_transfer
 
             call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13) then
+            if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Kokkos and CPU versions of compute_R_from_Z do not match"
