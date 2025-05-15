@@ -800,7 +800,7 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
@@ -1078,7 +1078,7 @@ end if
 
          ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
          ! Can use SUBSET_NONZERO_PATTERN as we have put the highest order power in first
-         call MatAXPY(cmat, coefficients(order+1), matrix_powers(order), SUBSET_NONZERO_PATTERN , ierr)       
+         call MatAXPYWrapper(cmat, coefficients(order+1), matrix_powers(order))
       end do 
 
       ! Add in the 0th order term
@@ -1588,10 +1588,10 @@ end if
          ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
          if (reuse_triggered) then
             ! If doing reuse we know our nonzeros are a subset
-            call MatAXPY(inv_matrix, coefficients(order+1), mat_power, SUBSET_NONZERO_PATTERN, ierr)              
+            call MatAXPYWrapper(inv_matrix, coefficients(order+1), mat_power)
          else
             ! Have to use the DIFFERENT_NONZERO_PATTERN here
-            call MatAXPY(inv_matrix, coefficients(order+1), mat_power, DIFFERENT_NONZERO_PATTERN, ierr)              
+            call MatAXPYWrapper(inv_matrix, coefficients(order+1), mat_power)
          end if
          
       end do
