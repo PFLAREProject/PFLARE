@@ -43,7 +43,7 @@ int main(int argc,char **argv)
   PetscScalar theta, alpha, u, v, u_test, v_test;
   PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale;
   Vec x, b, diag_vec;
-  Mat A;
+  Mat A, A_temp;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
 
@@ -147,6 +147,10 @@ int main(int argc,char **argv)
 
   // Compute our matrix
   ComputeMat(da, A, u, v, alpha, adv_nondim);
+  // This will compress out the extra memory
+  MatDuplicate(A, MAT_COPY_VALUES, &A_temp);
+  MatDestroy(&A);
+  A = A_temp;
 
   // Set the operator and options
   ierr = KSPSetOperators(ksp,A,A);CHKERRQ(ierr);
