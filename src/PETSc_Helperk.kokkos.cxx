@@ -21,7 +21,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -399,32 +399,35 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       // number of columns
       PetscInt ncols_local, ncols_nonlocal=-1;
       ncols_local = device_local_i[i + 1] - device_local_i[i];
-      if (mpi) ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
       const PetscInt row_index_global = i + global_row_start;
+      ScratchIntView scratch_indices, scratch_indices_nonlocal, scratch_match, scratch_match_nonlocal;
+      ScratchIntView scratch_lump, scratch_lump_nonlocal;
 
       // Allocate views directly on scratch memory
       // Have to use views here given alignment issues
-      ScratchIntView scratch_indices, scratch_indices_nonlocal, scratch_match, scratch_match_nonlocal;
-      ScratchIntView scratch_lump, scratch_lump_nonlocal;
       scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local); 
-      if (mpi) scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
-      scratch_match = ScratchIntView(t.team_scratch(1), ncols_local); 
-      if (mpi) scratch_match_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);      
-      scratch_lump = ScratchIntView(t.team_scratch(1), ncols_local); 
-      if (mpi) scratch_lump_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);      
+      scratch_match = ScratchIntView(t.team_scratch(1), ncols_local);     
+      scratch_lump = ScratchIntView(t.team_scratch(1), ncols_local);       
+
+      if (mpi) 
+      {
+         ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+         scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
+         scratch_match_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);  
+         scratch_lump_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
+
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+            scratch_match_nonlocal(j) = 0;
+            scratch_lump_nonlocal(j) = 0;
+         });         
+      }     
       
       // Initialize scratch
       Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
          scratch_match(j) = 0;
          scratch_lump(j) = 0;
       });
-      if (mpi)
-      {
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
-            scratch_match_nonlocal(j) = 0;
-            scratch_lump_nonlocal(j) = 0;
-         });      
-      }
+
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier();
 
@@ -808,7 +811,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
@@ -931,27 +934,27 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       // number of columns
       PetscInt ncols_local, ncols_nonlocal=-1, ncols_local_output, ncols_nonlocal_output=-1;
       ncols_local = device_local_i[i + 1] - device_local_i[i];
-      if (mpi) ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
-
-      ncols_local_output = device_local_i_output[i + 1] - device_local_i_output[i];
-      if (mpi) ncols_nonlocal_output = device_nonlocal_i_output[i + 1] - device_nonlocal_i_output[i];      
-
       // Allocate views directly on scratch memory
       // Have to use views here given alignment issues
       ScratchIntView scratch_indices, scratch_indices_nonlocal;
       scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local); 
-      if (mpi) scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);   
+
+      if (mpi) 
+      {
+         ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+         ncols_nonlocal_output = device_nonlocal_i_output[i + 1] - device_nonlocal_i_output[i];
+         scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+            scratch_indices_nonlocal(j) = -1;
+         });          
+      }
+      ncols_local_output = device_local_i_output[i + 1] - device_local_i_output[i];
 
       // Initialize scratch
       Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
             scratch_indices(j) = -1;
       });
-      if (mpi)
-      {
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
-            scratch_indices_nonlocal(j) = -1;
-         });      
-      }
+
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier();      
 
@@ -1145,7 +1148,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -1236,7 +1239,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
