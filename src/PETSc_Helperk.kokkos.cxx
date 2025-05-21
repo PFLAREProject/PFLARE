@@ -111,7 +111,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                   bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == i + global_row_start);
 
                   // If our current tolerance is bigger than the max value we've seen so far
-                  PetscScalar val = abs(device_local_vals[device_local_i[i] + j]);
+                  PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                   // If we're not comparing against the diagonal when computing relative residual
                   if (relative_max_row_tolerance_int == -1 && is_diagonal) val = -1.0;
                   if (val > thread_max) thread_max = val;
@@ -133,7 +133,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                      bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == i + global_row_start);
 
                      // If our current tolerance is bigger than the max value we've seen so far
-                     PetscScalar val = abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                     PetscScalar val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                      // If we're not comparing against the diagonal when computing relative residual
                      if (relative_max_row_tolerance_int == -1 && is_diagonal) val = -1.0;                  
                      if (val > thread_max) thread_max = val;
@@ -190,7 +190,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
             }
             
             // If the value is bigger than the tolerance, we keep it
-            if (abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
+            if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
                // If this is the diagonal and we're dropping all diagonals don't add it
                if (!(allow_drop_diagonal_int == -1 && is_diagonal)) thread_data.count++;
             }
@@ -264,7 +264,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                   }                  
 
                   // If the value is bigger than the tolerance, we keep it
-                  if (abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
+                  if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
                      // If this is the diagonal and we're dropping all diagonals don't add it
                      if (!(allow_drop_diagonal_int == -1 && is_diagonal)) thread_data.count++;
                   }
@@ -425,7 +425,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
          if (is_diagonal && lump_int) scratch_lump(j) = 1;            
          
          // Check if we keep this column because of size
-         if (abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
+         if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
             // If this is the diagonal and we're dropping all diagonals don't add it
             if (!(allow_drop_diagonal_int == -1 && is_diagonal)) keep_col = true;
          }
@@ -457,7 +457,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
             if (is_diagonal && lump_int) scratch_lump_nonlocal(j) = 1;          
             
             // Check if we keep this column because of size
-            if (abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
+            if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
                // If this is the diagonal and we're dropping all diagonals don't add it
                if (!(allow_drop_diagonal_int == -1 && is_diagonal)) keep_col = true;
             }
