@@ -7,7 +7,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 // PMISR cf splitting but on the device
-PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_int, PetscReal *measure_local, int *cf_markers_local, int zero_measure_c_point_int)
+PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, int *cf_markers_local, const int zero_measure_c_point_int)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
@@ -18,7 +18,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
 
    MatGetType(*strength_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -90,7 +90,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
       // measure_local_d(i) = generator.drand(0., 1.);
       // random_pool.free_state(generator);
          
-      PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
       measure_local_d(i) += ncols_local;
 
       if (mpi)
@@ -123,13 +123,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
    int counter_in_set_start = 0;
    // Count how many in the set to begin with
    Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const int i, int& update) {
-      if (abs(measure_local_d[i]) < 1) update++;
+      if (Kokkos::abs(measure_local_d[i]) < 1) update++;
    }, counter_in_set_start);
 
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
-         
-      if (abs(measure_local_d(i)) < 1)
+
+      if (Kokkos::abs(measure_local_d(i)) < 1)
       {
          if (zero_measure_c_point_int == 1) {
             if (pmis_int == 1) {
@@ -225,14 +225,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
             int strong_neighbours = 0;
 
             // Check this row isn't already marked
             if (cf_markers_local_real_d(i) == 0)
             {
-               PetscInt i = t.league_rank();
-               PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+               const PetscInt i = t.league_rank();
+               const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
                // Reduce over local columns to get the number of strong neighbours
                Kokkos::parallel_reduce(
@@ -270,13 +270,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
                // Row
-               PetscInt i = t.league_rank();
+               const PetscInt i = t.league_rank();
                int strong_neighbours = 0;
 
                // Check this row isn't already marked
                if (cf_markers_local_real_d(i) == 0)
                {
-                  PetscInt i = t.league_rank();
+                  const PetscInt i = t.league_rank();
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                   // Reduce over nonlocal columns to get the number of strong neighbours
@@ -320,12 +320,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
                // Row
-               PetscInt i = t.league_rank();
+               const PetscInt i = t.league_rank();
 
                // Check if this node has been assigned during this top loop
                if (cf_markers_local_real_d(i) == loops_through)
                {
-                  PetscInt i = t.league_rank();
+                  const PetscInt i = t.league_rank();
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                   // For over nonlocal columns
@@ -353,13 +353,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
             // Check if this node has been assigned during this top loop
             if (cf_markers_local_real_d(i) == loops_through)
             {
-               PetscInt i = t.league_rank();
-               PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+               const PetscInt i = t.league_rank();
+               const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
                // For over nonlocal columns
                Kokkos::parallel_for(
@@ -431,7 +431,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
 //------------------------------------------------------------------------------------------------------------------------
 
 // ddc cleanup but on the device
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swap, int *cf_markers_local)
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fraction_swap, int *cf_markers_local)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -439,7 +439,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
@@ -537,8 +537,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_aff, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
-         PetscInt i   = t.league_rank(); // row i
-         PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+         const PetscInt i   = t.league_rank(); // row i
+         const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
          // First find diagonal value with Max reduction - originally had this a single parallel reduce
          // rather than two but some kokkos bug was intialising my reduction variable wrong
@@ -546,10 +546,10 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
          Kokkos::parallel_reduce(
             Kokkos::TeamThreadRange(t, ncols_local),
             [&](const PetscInt j, PetscReal& thread_diag) {
-               bool is_diagonal = (device_local_j[device_local_i[i] + j] + 
+               const bool is_diagonal = (device_local_j[device_local_i[i] + j] + 
                                  a_global_col_start_aff == i + a_global_row_start_aff);
                if (is_diagonal) {
-                  thread_diag = abs(device_local_vals[device_local_i[i] + j]);
+                  thread_diag = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                }
             }, 
             Kokkos::Max<PetscReal>(diag_val)
@@ -561,10 +561,10 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
          Kokkos::parallel_reduce(
             Kokkos::TeamThreadRange(t, ncols_local),
             [&](const PetscInt j, PetscReal& thread_sum) {
-               bool is_diagonal = (device_local_j[device_local_i[i] + j] + 
+               const bool is_diagonal = (device_local_j[device_local_i[i] + j] + 
                                  a_global_col_start_aff == i + a_global_row_start_aff);
                if (!is_diagonal) {
-                  thread_sum += abs(device_local_vals[device_local_i[i] + j]);
+                  thread_sum += Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                }
             }, 
             off_diag_sum
@@ -578,7 +578,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
             Kokkos::parallel_reduce(
                Kokkos::TeamThreadRange(t, ncols_nonlocal),
                [&](const PetscInt j, PetscReal& thread_sum) {
-                  thread_sum += abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                  thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                }, 
                off_diag_sum_nonlocal
             );           

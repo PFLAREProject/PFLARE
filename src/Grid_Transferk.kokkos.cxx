@@ -21,7 +21,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -91,8 +91,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
       KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
-      PetscInt i   = t.league_rank(); // row i
-      PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+      const PetscInt i   = t.league_rank(); // row i
+      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
       // We have a custom reduction type defined - ReduceDataMaxRow
       ReduceDataMaxRow local_row_result, nonlocal_row_result;
@@ -103,8 +103,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
             // If it's the biggest value keep it
-            if (abs(device_local_vals[device_local_i[i] + j]) > thread_data.val) {
-               thread_data.val = abs(device_local_vals[device_local_i[i] + j]);
+            if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) > thread_data.val) {
+               thread_data.val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                thread_data.col = device_local_j[device_local_i[i] + j];
             }
          }, local_row_result
@@ -118,8 +118,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
             [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
                // If it's the biggest value keep it
-               if (abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) > thread_data.val) {
-                  thread_data.val = abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+               if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) > thread_data.val) {
+                  thread_data.val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                   // Set the global index
                   thread_data.col = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
                }
@@ -414,7 +414,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -531,7 +531,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
             // Still using i here (the local index into W)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
             nnz_match_local_row_d(row_index) = ncols_local;
 
             if (mpi)
@@ -648,12 +648,12 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
             // Still using i here (the local index into W)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in W
             Kokkos::parallel_for(
@@ -721,12 +721,12 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
             // Still using i here (the local index into W)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in W
             Kokkos::parallel_for(
@@ -858,7 +858,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -1030,7 +1030,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
             // Row index is simple
             PetscInt row_index = i;
             // Still using i here (the local index into Z)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
             nnz_match_local_row_d(row_index) = ncols_local;
             // Add one extra in this local block for the identity
             if (identity_int) nnz_match_local_row_d(row_index)++;
@@ -1119,12 +1119,12 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
             // Row index is simple
             PetscInt row_index = i;
             // Still using i here (the local index into Z)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in Z
             Kokkos::parallel_for(
@@ -1208,12 +1208,12 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
             // Simple row index
             PetscInt row_index = i;
             // Still using i here (the local index into Z)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in Z
             // We have to skip over the identity entries, which we know are always C points

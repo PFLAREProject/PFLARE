@@ -7,13 +7,13 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 // Compute matrix-matrix product with fixed order sparsity but with kokkos - keeping everything on the device
-PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly_order, int poly_sparsity_order, PetscReal *coefficients, \
-               int reuse_int_reuse_mat, Mat *reuse_mat, int reuse_int_cmat, Mat *output_mat)
+PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
+               const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
-   PetscInt global_row_start, global_row_end_plus_one;
-   PetscInt global_col_start, global_col_end_plus_one;
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
+   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao, cols_ao, rows_ad, cols_ad, size_cols;
    MatType mat_type;
    Mat *matrix_powers, *mat_sparsity_match;
@@ -22,7 +22,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
 
    MatGetType(*input_mat, &mat_type);
    // Are we in parallel?
-   bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local_sparsity = NULL, mat_nonlocal_sparsity = NULL;
@@ -31,8 +31,12 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
    MatGetLocalSize(*input_mat, &local_rows, &local_cols);
    // This returns the global index of the local portion of the matrix
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);   
+   MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
+   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
+   const PetscInt global_row_start = global_row_start_temp;
+   //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
+   const PetscInt global_col_start = global_col_start_temp;
+   //const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
 
    // We also copy the coefficients over to the device as we need it
    PetscInt coeff_size = poly_order + 1;
@@ -214,15 +218,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
       KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
       // Row
-      PetscInt i = t.league_rank();
+      const PetscInt i = t.league_rank();
       // ncols_local
-      PetscInt ncols_local = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+      const PetscInt ncols_local = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+      const PetscInt row_index_global = i + global_row_start;
       
       // Loop over all the columns in this row of sparsity mat
       Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
          // Is this column the diagonal
-         bool is_diagonal = (device_local_j_sparsity[device_local_i_sparsity[i] + j] + global_col_start == i + global_row_start);         
+         const bool is_diagonal = (device_local_j_sparsity[device_local_i_sparsity[i] + j] + global_col_start == row_index_global);         
          // This will only happen on a max of one thread per row
          if (is_diagonal) found_diag_row_d(i) = 1;
 
@@ -252,7 +257,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
 
       // Row
-      PetscInt i = t.league_rank();
+      const PetscInt i = t.league_rank();
 
       // ncols is the total number of columns in this row of the sparsity mat
       PetscInt ncols = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
