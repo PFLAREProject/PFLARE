@@ -104,7 +104,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
 
             // Reduce over local columns
             Kokkos::parallel_reduce(
-               Kokkos::TeamThreadRange(t, ncols_local),
+               Kokkos::TeamVectorRange(t, ncols_local),
                [&](const PetscInt j, PetscScalar& thread_max) {
 
                   // Is this column the diagonal
@@ -126,7 +126,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
                
                // Reduce over nonlocal columns
                Kokkos::parallel_reduce(
-                  Kokkos::TeamThreadRange(t, ncols_nonlocal),
+                  Kokkos::TeamVectorRange(t, ncols_nonlocal),
                   [&](const PetscInt j, PetscScalar& thread_max) {
 
                      // Is this column the diagonal
@@ -175,7 +175,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
 
       // Reduce over all the columns
       Kokkos::parallel_reduce(
-         Kokkos::TeamThreadRange(t, ncols_local),
+         Kokkos::TeamVectorRange(t, ncols_local),
          [&](const PetscInt j, ReduceData& thread_data) {
 
             // Is this column the diagonal
@@ -249,7 +249,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
 
             // Reduce over all the columns
             Kokkos::parallel_reduce(
-               Kokkos::TeamThreadRange(t, ncols_nonlocal),
+               Kokkos::TeamVectorRange(t, ncols_nonlocal),
                [&](const PetscInt j, ReduceData& thread_data) {
 
                   // Is this column the diagonal
@@ -512,7 +512,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
          
          // Reduce over local columns
          Kokkos::parallel_reduce(
-            Kokkos::TeamThreadRange(t, ncols_local),
+            Kokkos::TeamVectorRange(t, ncols_local),
             [&](const PetscInt j, PetscScalar& thread_sum) {          
 
                // If lumping
@@ -525,7 +525,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
          {
             // Reduce over nonlocal columns
             Kokkos::parallel_reduce(
-               Kokkos::TeamThreadRange(t, ncols_nonlocal),
+               Kokkos::TeamVectorRange(t, ncols_nonlocal),
                [&](const PetscInt j, PetscScalar& thread_sum) {           
 
                   // If lumping
@@ -1006,7 +1006,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
          
          // Reduce over local columns
          Kokkos::parallel_reduce(
-            Kokkos::TeamThreadRange(t, ncols_local),
+            Kokkos::TeamVectorRange(t, ncols_local),
             [&](const PetscInt j, PetscScalar& thread_sum) {          
 
                // If this is not being put into output then we lump it
@@ -1019,7 +1019,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
          {
             // Reduce over nonlocal columns
             Kokkos::parallel_reduce(
-               Kokkos::TeamThreadRange(t, ncols_nonlocal),
+               Kokkos::TeamVectorRange(t, ncols_nonlocal),
                [&](const PetscInt j, PetscScalar& thread_sum) {           
 
                   // If this is not being put into output then we lump it
@@ -1309,7 +1309,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
 
       // Reduce over all the columns
       Kokkos::parallel_reduce(
-         Kokkos::TeamThreadRange(t, ncols_local),
+         Kokkos::TeamVectorRange(t, ncols_local),
          [&](const PetscInt j, ReduceData& thread_data) {
 
             // Is this column the diagonal
@@ -1438,7 +1438,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
 
             // For over local columns - copy in input
             Kokkos::parallel_for(
-               Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+               Kokkos::TeamVectorRange(t, ncols_local), [&](const PetscInt j) {
 
                // Want the local col indices for the local block
                j_local_d(i_local_d(row_index) + j) = device_local_j[device_local_i[i] + j];
@@ -1452,7 +1452,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
                PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];         
 
                Kokkos::parallel_for(
-                  Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+                  Kokkos::TeamVectorRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                   // We keep the existing local indices in the off-diagonal block here
                   j_nonlocal_d(i_nonlocal_d(row_index) + j) = device_nonlocal_j[device_nonlocal_i[i] + j];
@@ -1547,7 +1547,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
                PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];         
 
                Kokkos::parallel_for(
-                  Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
+                  Kokkos::TeamVectorRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                   // We keep the existing local indices in the off-diagonal block here
                   // we have all the same columns as input and hence the same garray
