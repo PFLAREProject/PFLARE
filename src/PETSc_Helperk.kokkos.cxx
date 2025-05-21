@@ -79,9 +79,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Let's build our i, j, and a on the device
    // ~~~~~~~~~~~~~~~~~~~~~~~
    // We need the relative row tolerance, let's create some device memory to store it
-   PetscScalarKokkosView rel_row_tol_d("rel_row_tol_d", local_rows);    
-   // Copy in the tolerance
-   Kokkos::deep_copy(rel_row_tol_d, tol);     
+   PetscScalarKokkosView rel_row_tol_d("rel_row_tol_d", local_rows);      
    // Log copy with petsc
    size_t bytes = sizeof(PetscReal);
    PetscLogCpuToGpu(bytes);   
@@ -93,6 +91,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Device memory for whether there is an existing diagonal in each row
    boolKokkosView existing_diag_d("existing_diag_d", local_rows);     
    Kokkos::deep_copy(existing_diag_d, false);
+   const bool not_include_diag = relative_max_row_tolerance_int == -1;
    
    // Compute the relative row tolerances if needed
    if (relative_max_row_tolerance_int) 
@@ -118,7 +117,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                   // If our current tolerance is bigger than the max value we've seen so far
                   PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                   // If we're not comparing against the diagonal when computing relative residual
-                  if (relative_max_row_tolerance_int == -1 && is_diagonal) val = -1.0;
+                  if (not_include_diag && is_diagonal) val = -1.0;
                   if (val > thread_max) thread_max = val;
 
                },
@@ -140,7 +139,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                      // If our current tolerance is bigger than the max value we've seen so far
                      PetscScalar val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                      // If we're not comparing against the diagonal when computing relative residual
-                     if (relative_max_row_tolerance_int == -1 && is_diagonal) val = -1.0;                  
+                     if (not_include_diag && is_diagonal) val = -1.0;                  
                      if (val > thread_max) thread_max = val;
 
                   },
@@ -152,9 +151,15 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 
             // Only want one thread in the team to write the result
             Kokkos::single(Kokkos::PerTeam(t), [&]() {
-               rel_row_tol_d(i) *= max_val;
+               rel_row_tol_d(i) = tol * max_val;
             });
       });
+   }
+   // If we're using a constant tolerance, we can just copy it in
+   else
+   {
+      // Copy in the tolerance
+      Kokkos::deep_copy(rel_row_tol_d, tol);   
    }
 
    // ~~~~~~~~~~~~
