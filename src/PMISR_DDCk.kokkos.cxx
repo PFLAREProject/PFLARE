@@ -123,13 +123,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, int max_luby_steps, int pmis_i
    int counter_in_set_start = 0;
    // Count how many in the set to begin with
    Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const int i, int& update) {
-      if (abs(measure_local_d[i]) < 1) update++;
+      if (Kokkos::abs(measure_local_d[i]) < 1) update++;
    }, counter_in_set_start);
 
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
-         
-      if (abs(measure_local_d(i)) < 1)
+
+      if (Kokkos::abs(measure_local_d(i)) < 1)
       {
          if (zero_measure_c_point_int == 1) {
             if (pmis_int == 1) {
@@ -549,7 +549,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
                bool is_diagonal = (device_local_j[device_local_i[i] + j] + 
                                  a_global_col_start_aff == i + a_global_row_start_aff);
                if (is_diagonal) {
-                  thread_diag = abs(device_local_vals[device_local_i[i] + j]);
+                  thread_diag = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                }
             }, 
             Kokkos::Max<PetscReal>(diag_val)
@@ -564,7 +564,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
                bool is_diagonal = (device_local_j[device_local_i[i] + j] + 
                                  a_global_col_start_aff == i + a_global_row_start_aff);
                if (!is_diagonal) {
-                  thread_sum += abs(device_local_vals[device_local_i[i] + j]);
+                  thread_sum += Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                }
             }, 
             off_diag_sum
@@ -578,7 +578,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, PetscReal fraction_swa
             Kokkos::parallel_reduce(
                Kokkos::TeamThreadRange(t, ncols_nonlocal),
                [&](const PetscInt j, PetscReal& thread_sum) {
-                  thread_sum += abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                  thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                }, 
                off_diag_sum_nonlocal
             );           

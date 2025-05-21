@@ -103,8 +103,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
             // If it's the biggest value keep it
-            if (abs(device_local_vals[device_local_i[i] + j]) > thread_data.val) {
-               thread_data.val = abs(device_local_vals[device_local_i[i] + j]);
+            if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) > thread_data.val) {
+               thread_data.val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                thread_data.col = device_local_j[device_local_i[i] + j];
             }
          }, local_row_result
@@ -118,8 +118,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
             [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
                // If it's the biggest value keep it
-               if (abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) > thread_data.val) {
-                  thread_data.val = abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+               if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) > thread_data.val) {
+                  thread_data.val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                   // Set the global index
                   thread_data.col = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
                }
