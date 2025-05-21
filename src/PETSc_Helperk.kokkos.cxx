@@ -7,13 +7,13 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a tolerance but with kokkos - keeping everything on the device
-PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol, Mat *output_mat, \
-                  int relative_max_row_tolerance_int, int lump_int, int allow_drop_diagonal_int)
+PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscReal tol, Mat *output_mat, \
+                  const int relative_max_row_tolerance_int, const int lump_int, const int allow_drop_diagonal_int)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
-   PetscInt global_row_start, global_row_end_plus_one;
-   PetscInt global_col_start, global_col_end_plus_one;
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
+   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao, cols_ao;
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
@@ -53,8 +53,12 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
    MatGetLocalSize(*input_mat, &local_rows, &local_cols);
    MatGetSize(*input_mat, &global_rows, &global_cols);
    // This returns the global index of the local portion of the matrix
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);   
+   MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
+   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
+   const PetscInt global_row_start = global_row_start_temp;
+   //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
+   const PetscInt global_col_start = global_col_start_temp;
+   const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -783,13 +787,13 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, PetscReal tol,
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a existing sparsity in output_mat but with kokkos - keeping everything on the device
-PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, int lump_int)
+PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
-   PetscInt global_row_start, global_row_end_plus_one;
-   PetscInt global_col_start, global_col_end_plus_one;
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
+   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao_input, cols_ao_input, rows_ao_output, cols_ao_output;
    MatType mat_type;
 
@@ -802,8 +806,12 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    MatGetLocalSize(*input_mat, &local_rows, &local_cols);
    MatGetSize(*input_mat, &global_rows, &global_cols);
    // This returns the global index of the local portion of the matrix
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);      
+   MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
+   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
+   const PetscInt global_row_start = global_row_start_temp;
+   //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
+   const PetscInt global_col_start = global_col_start_temp;
+   const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;   
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -1204,11 +1212,11 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 //------------------------------------------------------------------------------------------------------------------------
 
 // Duplicate and copy a matrix ensuring it always has a diagonal but with kokkos - keeping everything on the device
-PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_int, Mat *output_mat)
+PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int reuse_int, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
-   PetscInt global_row_start, global_row_end_plus_one;
-   PetscInt global_col_start, global_col_end_plus_one;
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
+   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao, cols_ao;
    PetscInt global_rows, global_cols;
    PetscInt local_rows, local_cols;
@@ -1246,8 +1254,12 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, int reuse_
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
    MatGetLocalSize(*input_mat, &local_rows, &local_cols); 
    MatGetSize(*input_mat, &global_rows, &global_cols);
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);
+   MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
+   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
+   const PetscInt global_row_start = global_row_start_temp;
+   //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
+   const PetscInt global_col_start = global_col_start_temp;
+   //const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
    MatGetType(*input_mat, &mat_type);
 
    // ~~~~~~~~~~~~

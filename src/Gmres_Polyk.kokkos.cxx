@@ -7,13 +7,13 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 // Compute matrix-matrix product with fixed order sparsity but with kokkos - keeping everything on the device
-PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly_order, int poly_sparsity_order, PetscReal *coefficients, \
-               int reuse_int_reuse_mat, Mat *reuse_mat, int reuse_int_cmat, Mat *output_mat)
+PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
+               const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
-   PetscInt global_row_start, global_row_end_plus_one;
-   PetscInt global_col_start, global_col_end_plus_one;
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
+   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao, cols_ao, rows_ad, cols_ad, size_cols;
    MatType mat_type;
    Mat *matrix_powers, *mat_sparsity_match;
@@ -31,8 +31,12 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, int poly
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
    MatGetLocalSize(*input_mat, &local_rows, &local_cols);
    // This returns the global index of the local portion of the matrix
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);   
+   MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
+   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
+   const PetscInt global_row_start = global_row_start_temp;
+   //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
+   const PetscInt global_col_start = global_col_start_temp;
+   //const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
 
    // We also copy the coefficients over to the device as we need it
    PetscInt coeff_size = poly_order + 1;
