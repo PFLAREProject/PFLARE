@@ -405,7 +405,7 @@ Development of the setup on GPUs is ongoing, please get in touch if you would li
 
 ### Performance notes
 
-1 - Typically we find good performance using between 1-4 million DOFs per GPU. 
+1 - Typically we find good performance using as many DOFs per GPU as possible. 
 
 2 - The processor agglomeration happens through the graph partitioners in PETSc and currently there is no GPU partitioner, hence this could be slow. The default parameters used in the processor agglomeration in PCAIR (e.g., ``-pc_air_process_eq_limit``) have also not been optimised for GPUs. You may wish to disable the processor agglomeration in parallel on GPUs (``-pc_air_processor_agglom 0``). Using heavy truncation may also help mitigate the the impact of turning off processor agglomeration on GPUs, see below.
 
@@ -421,7 +421,7 @@ The hierarchy in this case has 29 levels. If we turn on the auto truncation and 
 
 ``./adv_diff_2d -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1``
 
-we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve on GPUs with this approach.
+we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve in this example. The speedup is typically greater in parallel. 
 
 ## OpenMP support
 
