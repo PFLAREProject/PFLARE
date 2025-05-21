@@ -218,16 +218,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
       // Row
-      PetscInt i = t.league_rank();
+      const PetscInt i = t.league_rank();
       // ncols_local
-      PetscInt ncols_local = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+      const PetscInt ncols_local = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
       const PetscInt row_index_global = i + global_row_start;
       
       // Loop over all the columns in this row of sparsity mat
       Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
          // Is this column the diagonal
-         bool is_diagonal = (device_local_j_sparsity[device_local_i_sparsity[i] + j] + global_col_start == row_index_global);         
+         const bool is_diagonal = (device_local_j_sparsity[device_local_i_sparsity[i] + j] + global_col_start == row_index_global);         
          // This will only happen on a max of one thread per row
          if (is_diagonal) found_diag_row_d(i) = 1;
 
@@ -257,7 +257,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
 
       // Row
-      PetscInt i = t.league_rank();
+      const PetscInt i = t.league_rank();
 
       // ncols is the total number of columns in this row of the sparsity mat
       PetscInt ncols = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];

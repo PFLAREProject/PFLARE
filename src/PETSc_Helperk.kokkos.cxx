@@ -101,8 +101,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
-            PetscInt i = t.league_rank();
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+            const PetscInt i = t.league_rank();
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
             PetscScalar max_val = -1.0;
             const PetscInt row_index_global = i + global_row_start;
 
@@ -112,7 +112,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                [&](const PetscInt j, PetscScalar& thread_max) {
 
                   // Is this column the diagonal
-                  bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
+                  const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
 
                   // If our current tolerance is bigger than the max value we've seen so far
                   PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
@@ -134,7 +134,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                   [&](const PetscInt j, PetscScalar& thread_max) {
 
                      // Is this column the diagonal
-                     bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
+                     const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
 
                      // If our current tolerance is bigger than the max value we've seen so far
                      PetscScalar val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
@@ -170,8 +170,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
       KOKKOS_LAMBDA(const KokkosTeamMemberType &t, PetscInt& thread_total) {
 
-      PetscInt i   = t.league_rank(); // row i
-      PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+      const PetscInt i   = t.league_rank(); // row i
+      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
       const PetscInt row_index_global = i + global_row_start;
 
       // For this row, would we expect the diagonal to be in the local block or in the nonlocal?
@@ -190,7 +190,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          [&](const PetscInt j, ReduceData& thread_data) {
 
             // Is this column the diagonal
-            bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
+            const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
             
             // We have found a diagonal in this row
             if (is_diagonal) {
@@ -249,8 +249,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t, PetscInt& thread_total) {
             
-            PetscInt i = t.league_rank();
-            PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+            const PetscInt i = t.league_rank();
+            const PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
             const PetscInt row_index_global = i + global_row_start;
 
             // For this row, would we expect the diagonal to be in the local block or in the nonlocal?
@@ -265,7 +265,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                [&](const PetscInt j, ReduceData& thread_data) {
 
                   // Is this column the diagonal
-                  bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
+                  const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
 
                   // We have found a diagonal in this row
                   if (is_diagonal) {
@@ -395,7 +395,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
          
       // Row
-      PetscInt i = t.league_rank();         
+      const PetscInt i = t.league_rank();         
       // number of columns
       PetscInt ncols_local, ncols_nonlocal=-1;
       ncols_local = device_local_i[i + 1] - device_local_i[i];
@@ -435,7 +435,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
          bool keep_col = false;
-         bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
+         const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
 
          // If we hit a diagonal put it in the lump'd value
          if (is_diagonal && lump_int) scratch_lump(j) = 1;            
@@ -467,7 +467,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 
             bool keep_col = false;
             // Remember we can have diagonals in the off-diagonal block if we're rectangular
-            bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
+            const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
       
             // If we hit a diagonal put it in the lump'd value
             if (is_diagonal && lump_int) scratch_lump_nonlocal(j) = 1;          
@@ -597,7 +597,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                Kokkos::parallel_for(Kokkos::TeamThreadRange(t, i_local_d(i+1) - i_local_d(i)), [&](const PetscInt j) {
 
                   // Is this column the diagonal
-                  bool is_diagonal = j_local_d[i_local_d[i] + j] + global_col_start == row_index_global;
+                  const bool is_diagonal = j_local_d[i_local_d[i] + j] + global_col_start == row_index_global;
 
                   // Will only happen for one thread - lump_val contains the diagonal so we overwrite
                   if (is_diagonal) a_local_d[i_local_d[i] + j] = lump_val;
@@ -609,7 +609,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                Kokkos::parallel_for(Kokkos::TeamThreadRange(t, i_nonlocal_d(i+1) - i_nonlocal_d(i)), [&](const PetscInt j) {
 
                   // Is this column the diagonal - j_nonlocal_d contains the global column index
-                  bool is_diagonal = j_nonlocal_d[i_nonlocal_d[i] + j] == row_index_global;
+                  const bool is_diagonal = j_nonlocal_d[i_nonlocal_d[i] + j] == row_index_global;
 
                   // Will only happen for one thread - lump_val contains the diagonal so we overwrite
                   if (is_diagonal) a_nonlocal_d[i_nonlocal_d[i] + j] = lump_val;
@@ -928,7 +928,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
 
       // Row
-      PetscInt i = t.league_rank();
+      const PetscInt i = t.league_rank();
       const PetscInt row_index_global = i + global_row_start;
 
       // number of columns
@@ -1091,7 +1091,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
             Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local_output), [&](const PetscInt j) {
 
                // Is this column the diagonal
-               bool is_diagonal = device_local_j_output[device_local_i_output[i] + j] + global_col_start == row_index_global;
+               const bool is_diagonal = device_local_j_output[device_local_i_output[i] + j] + global_col_start == row_index_global;
 
                // Will only happen for one thread
                if (is_diagonal) device_local_vals_output[device_local_i_output[i] + j] += lump_val;
@@ -1103,7 +1103,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
             Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal_output), [&](const PetscInt j) {
 
                // Is this column the diagonal
-               bool is_diagonal = colmap_output_d(device_nonlocal_j_output[device_nonlocal_i_output[i] + j]) == row_index_global;
+               const bool is_diagonal = colmap_output_d(device_nonlocal_j_output[device_nonlocal_i_output[i] + j]) == row_index_global;
 
                // Will only happen for one thread
                if (is_diagonal) device_nonlocal_vals_output[device_nonlocal_i_output[i] + j] += lump_val;
@@ -1324,8 +1324,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
       KOKKOS_LAMBDA(const KokkosTeamMemberType &t, PetscInt& thread_total) {
 
-      PetscInt i   = t.league_rank(); // row i
-      PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+      const PetscInt i   = t.league_rank(); // row i
+      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
       const PetscInt row_index_global = i + global_row_start;
 
       // We have a custom reduction type defined - ReduceData
@@ -1339,7 +1339,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
          [&](const PetscInt j, ReduceData& thread_data) {
 
             // Is this column the diagonal
-            bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
+            const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
             
             // We have found a diagonal in this row
             if (is_diagonal) {
@@ -1438,14 +1438,11 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
-
-            // Row index is simple
-            PetscInt row_index = i;       
+         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {      
 
             // The start of our row index comes from the scan
-            i_local_d(row_index + 1) = nnz_match_local_row_d(row_index);   
-            if (mpi) i_nonlocal_d(row_index + 1) = nnz_match_nonlocal_row_d(row_index);         
+            i_local_d(i + 1) = nnz_match_local_row_d(i);   
+            if (mpi) i_nonlocal_d(i + 1) = nnz_match_nonlocal_row_d(i);         
       });            
 
 
@@ -1455,20 +1452,18 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
-            // Row index is simple
-            PetscInt row_index = i;
             // Still using i here (the local index into input)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in input
             Kokkos::parallel_for(
                Kokkos::TeamVectorRange(t, ncols_local), [&](const PetscInt j) {
 
                // Want the local col indices for the local block
-               j_local_d(i_local_d(row_index) + j) = device_local_j[device_local_i[i] + j];
-               a_local_d(i_local_d(row_index) + j) = device_local_vals[device_local_i[i] + j];
+               j_local_d(i_local_d(i) + j) = device_local_j[device_local_i[i] + j];
+               a_local_d(i_local_d(i) + j) = device_local_vals[device_local_i[i] + j];
                      
             });     
 
@@ -1481,8 +1476,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
                   Kokkos::TeamVectorRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                   // We keep the existing local indices in the off-diagonal block here
-                  j_nonlocal_d(i_nonlocal_d(row_index) + j) = device_nonlocal_j[device_nonlocal_i[i] + j];
-                  a_nonlocal_d(i_nonlocal_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  j_nonlocal_d(i_nonlocal_d(i) + j) = device_nonlocal_j[device_nonlocal_i[i] + j];
+                  a_nonlocal_d(i_nonlocal_d(i) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
                         
                });          
             }
@@ -1493,8 +1488,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
                if (!found_diag_row_d(i))
                {
                   // Let's just stick it at the end and we will sort after
-                  j_local_d(i_local_d(row_index) + ncols_local) = i;
-                  a_local_d(i_local_d(row_index) + ncols_local) = 0.0;
+                  j_local_d(i_local_d(i) + ncols_local) = i;
+                  a_local_d(i_local_d(i) + ncols_local) = 0.0;
                }
             });              
       }); 
@@ -1544,12 +1539,10 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
-            PetscInt i = t.league_rank();
+            const PetscInt i = t.league_rank();
 
-            // Simple row index
-            PetscInt row_index = i;
             // Still using i here (the local index into input)
-            PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in input
             // We have to skip over the identity entries, which we know are always C points
@@ -1561,10 +1554,10 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
                // If we're at or after the diagonal and there isn't actually a diagonal in the input
                // we know the output has a diagonal, so we skip ahead one in the output and 
                // leave it unassigned in the output (it gets set to zero above)
-               if (j_local_const_d(i_local_const_d(row_index) + j) >= i && \
+               if (j_local_const_d(i_local_const_d(i) + j) >= i && \
                      !found_diag_row_d(i)) offset = 1;
 
-               a_local_d(i_local_const_d(row_index) + j + offset) = device_local_vals[device_local_i[i] + j];
+               a_local_d(i_local_const_d(i) + j + offset) = device_local_vals[device_local_i[i] + j];
             });  
            
             // For over nonlocal columns - copy in input - identical structure in the off-diag block
@@ -1577,7 +1570,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
 
                   // We keep the existing local indices in the off-diagonal block here
                   // we have all the same columns as input and hence the same garray
-                  a_nonlocal_d(i_nonlocal_const_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  a_nonlocal_d(i_nonlocal_const_d(i) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
                         
                });          
             }
