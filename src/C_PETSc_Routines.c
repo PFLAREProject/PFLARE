@@ -82,6 +82,16 @@ PETSC_INTERN void MatSeqAIJGetArrayF90_mine(Mat *matrix, double **array)
    return;
 }
 
+// Annoying as MPIU_INTEGER is defined in fortran, but not if we call that fortran
+// routine from C - so we have to do the allreduce here
+PETSC_INTERN void allreducesum_petscint_mine(Mat *matrix, PetscInt first_int, PetscInt *return_int)
+{
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)*matrix, &MPI_COMM_MATRIX);
+   (void)MPI_Allreduce(&first_int, return_int, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
+   return;
+}
+
 // MatPartitioningSetNParts doesn't have a fortran interface (and can't pass around
 // a matpartioning object as it doesnt have a %v), so have to do 
 // all the partitioning in C
@@ -518,7 +528,7 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
   MPI_Comm        acomm;
   PetscMPIInt     size;
   PetscInt local_rows, local_cols;
-  int rank_diag = 0, rank_diag_serial = 0;
+  PetscInt rank_diag = 0, rank_diag_serial = 0;
 
   PetscFunctionBegin;
 
@@ -555,7 +565,7 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
       }
 
       // Reduction to check every rank
-      (void)MPI_Allreduce(&rank_diag_serial, &rank_diag, 1, MPI_INTEGER, MPI_SUM, acomm);
+      (void)MPI_Allreduce(&rank_diag_serial, &rank_diag, 1, MPIU_INT, MPI_SUM, acomm);
   }
   else
   {

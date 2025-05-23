@@ -2,6 +2,7 @@ module pmisr_ddc
 
    use iso_c_binding
    use petscmat
+   use petscsys
    use petsc_helper
    use c_petsc_interfaces
 
@@ -138,9 +139,10 @@ module pmisr_ddc
       PetscInt :: global_row_start, global_row_end_plus_one, ifree, ncols
       PetscInt :: jfree
       PetscInt :: rows_ao, cols_ao, n_ad, n_ao
+      PetscInt :: counter_undecided, counter_in_set_start, counter_parallel
       integer :: comm_size, comm_size_world, loops_through, seed_size
-      integer :: comm_rank, counter_parallel, errorcode       
-      integer :: counter_undecided, counter_in_set_start, kfree
+      integer :: comm_rank, errorcode       
+      integer :: kfree
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
       integer, dimension(:), allocatable :: seed
@@ -329,12 +331,15 @@ module pmisr_ddc
 
       ! Check the total number of undecided in parallel
       if (max_luby_steps < 0) then
-         ! Assuming here we don't have more than 2B local rows
-         counter_undecided = int(local_rows) - counter_in_set_start
+         counter_undecided = local_rows - counter_in_set_start
          ! Parallel reduction!
-         call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
+         ! This is just an allreduce sum, but we can't use MPIU_INTEGER, as if we call the pmisr
+         ! cf splitting from C it is not defined - also have to pass the matrix so we can get the comm
+         ! given they're different in C and fortran
+         A_array = strength_mat%v
+         call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
          counter_undecided = counter_parallel
-         
+
       ! If we're doing a fixed number of steps, then we don't care
       ! how many undecided nodes we have - have to take care here not to use
       ! local_rows for counter_undecided, as we may have zero DOFs on some procs
@@ -582,7 +587,8 @@ module pmisr_ddc
             ! Count how many are undecided
             counter_undecided = count(cf_markers_local_real == 0)
             ! Parallel reduction!
-            call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
+            A_array = strength_mat%v
+            call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
             counter_undecided = counter_parallel            
          end if
       end do
