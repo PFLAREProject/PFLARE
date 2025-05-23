@@ -746,7 +746,7 @@ module pmisr_ddc
       PetscInt :: local_rows, local_cols
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
       PetscInt :: input_row_start, input_row_end_plus_one
-      PetscInt :: jfree, idx, search_size, diag_index
+      PetscInt :: jfree, idx, search_size, diag_index, fine_size
       integer :: bin_sum, bin_boundary, bin
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
@@ -761,17 +761,18 @@ module pmisr_ddc
       ! ~~~~~~  
 
       ! The indices are the numbering in Aff matrix
-      call ISGetIndices(is_fine, is_pointer, ierr)   
+      call ISGetIndices(is_fine, is_pointer, ierr)  
+      call ISGetLocalSize(is_fine, fine_size, ierr) 
       
       ! Do a fixed alpha_diag
       if (fraction_swap < 0) then
          ! We have to look through all the local rows
-         search_size = size(is_pointer)
+         search_size = fine_size
 
       ! Or pick alpha_diag based on the worst % of rows
       else
          ! Only need to go through the biggest % of indices
-         search_size = int(dble(size(is_pointer)) * fraction_swap)          
+         search_size = int(dble(fine_size) * fraction_swap)
       end if
       
       ! ~~~~~~~~~~~~~
