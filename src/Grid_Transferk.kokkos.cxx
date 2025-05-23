@@ -171,12 +171,12 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    });      
 
    // Get number of nnzs
-   Kokkos::parallel_reduce ("ReductionLocal", local_rows, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+   Kokkos::parallel_reduce ("ReductionLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
       update += nnz_match_local_row_d(i); 
    }, nnzs_match_local);   
    if (mpi)
    {
-      Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+      Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
          update += nnz_match_nonlocal_row_d(i); 
       }, nnzs_match_nonlocal);       
    }   
@@ -256,7 +256,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    
    // Filling the matrix is easy as we know we only have one non-zero per row
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
       // If our max val is in the local block
       if (has_entry_local_d(i) > 0) {
@@ -311,7 +311,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 
          // Let's insert all the existing global col indices as keys (with no value to start)
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(int i) {      
+            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(PetscInt i) {      
             
             // Insert the key (global col indices) without a value
             // Duplicates will be ignored
@@ -327,7 +327,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 
          // Mark which of the keys don't exist
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(int i) { 
+            Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) { 
 
             // If the key doesn't exist set the global index to -1
             if (!hashmap.exists(colmap_output_d_big(i))) colmap_output_d_big(i) = -1; 
@@ -352,14 +352,14 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          // but now with the local indices as values
          hashmap.clear();
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, colmap_output_d.extent(0)), KOKKOS_LAMBDA(int i) { 
+            Kokkos::RangePolicy<>(0, colmap_output_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
 
             hashmap.insert(colmap_output_d(i), i);
          });          
 
          // And now we can overwrite j_nonlocal_d with the local indices
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(int i) {     
+            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(PetscInt i) {     
 
             // Find where our global col index is at
             uint32_t loc = hashmap.find(j_nonlocal_d(i));
@@ -526,7 +526,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // ~~~~~~~~~~~~
       // Loop over the rows of W
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_fine), KOKKOS_LAMBDA(int i) {
+         Kokkos::RangePolicy<>(0, local_rows_fine), KOKKOS_LAMBDA(PetscInt i) {
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
@@ -545,7 +545,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       if (identity_int) 
       {
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(int i) {
+            Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(PetscInt i) {
 
             // Convert to global coarse index into a local index into the full matrix
             PetscInt row_index = coarse_view_d(i) - global_row_start;
@@ -554,12 +554,12 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       }  
 
       // Get number of nnzs
-      Kokkos::parallel_reduce ("ReductionLocal", local_rows, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+      Kokkos::parallel_reduce ("ReductionLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
          update += nnz_match_local_row_d(i); 
       }, nnzs_match_local);   
       if (mpi)
       {
-         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             update += nnz_match_nonlocal_row_d(i); 
          }, nnzs_match_nonlocal);       
       }
@@ -618,7 +618,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // is row_index 
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_fine), KOKKOS_LAMBDA(int i) {
+         Kokkos::RangePolicy<>(0, local_rows_fine), KOKKOS_LAMBDA(PetscInt i) {
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;       
@@ -631,7 +631,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // Always have to set the i_local_d for C points, regardless of if we are setting
       // 1 in the identity part for them
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(int i) {
+         Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(PetscInt i) {
 
          // Convert to global coarse index into a local index into the full matrix
          PetscInt row_index = coarse_view_d(i) - global_row_start;
@@ -787,7 +787,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       if (identity_int) 
       {
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(int i) {
+            Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(PetscInt i) {
 
             // Convert to global coarse index into a local index into the full matrix
             PetscInt row_index = coarse_view_d(i) - global_row_start;
@@ -816,7 +816,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          // We just take a copy of the original garray
          PetscInt *garray_host = NULL; 
          PetscMalloc1(cols_ao, &garray_host);
-         for (int i = 0; i < cols_ao; i++)
+         for (PetscInt i = 0; i < cols_ao; i++)
          {
             garray_host[i] = mat_mpi->garray[i];
          }
@@ -916,11 +916,11 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       {
          PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array);
          size_cols = cols_ad + cols_ao;
-         for (int i = 0; i < cols_ad; i++)
+         for (PetscInt i = 0; i < cols_ad; i++)
          {
             col_indices_off_proc_array[i] = global_col_start_Z + i;
          }
-         for (int i = 0; i < cols_ao; i++)
+         for (PetscInt i = 0; i < cols_ao; i++)
          {
             col_indices_off_proc_array[cols_ad + i] = mat_mpi->garray[i];
          }                   
@@ -929,7 +929,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       {
          PetscMalloc1(cols_ad, &col_indices_off_proc_array);
          size_cols = cols_ad;
-         for (int i = 0; i < cols_ad; i++)
+         for (PetscInt i = 0; i < cols_ad; i++)
          {
             col_indices_off_proc_array[i] = global_col_start_Z + i;
          }
@@ -1025,7 +1025,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // ~~~~~~~~~~~~
       // Loop over the rows of Z
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_z), KOKKOS_LAMBDA(int i) {
+         Kokkos::RangePolicy<>(0, local_rows_z), KOKKOS_LAMBDA(PetscInt i) {
 
             // Row index is simple
             PetscInt row_index = i;
@@ -1043,12 +1043,12 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       });
 
       // Get number of nnzs
-      Kokkos::parallel_reduce ("ReductionLocal", local_rows_z, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+      Kokkos::parallel_reduce ("ReductionLocal", local_rows_z, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
          update += nnz_match_local_row_d(i); 
       }, nnzs_match_local);   
       if (mpi)
       {
-         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows_z, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows_z, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             update += nnz_match_nonlocal_row_d(i); 
          }, nnzs_match_nonlocal);       
       }
@@ -1102,7 +1102,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_z), KOKKOS_LAMBDA(int i) {
+         Kokkos::RangePolicy<>(0, local_rows_z), KOKKOS_LAMBDA(PetscInt i) {
 
             // Row index is simple
             PetscInt row_index = i;       
@@ -1298,7 +1298,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          // the full indices, which we have in in is_pointer_orig_fine_col(cols_ad:end)
          PetscInt *garray_host = NULL; 
          PetscMalloc1(cols_ao, &garray_host);
-         for (int i = 0; i < cols_ao; i++)
+         for (PetscInt i = 0; i < cols_ao; i++)
          {
             garray_host[i] = is_pointer_orig_fine_col[i + cols_ad];
          }    

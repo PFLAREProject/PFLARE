@@ -162,7 +162,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Check the total number of undecided in parallel
    PetscInt counter_undecided, counter_parallel;
    if (max_luby_steps < 0) {
-      // Assuming here we don't have more than 2B local rows
       counter_undecided = local_rows - counter_in_set_start;
       // Parallel reduction!
       MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
