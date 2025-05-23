@@ -105,7 +105,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Copy the measure over
    Kokkos::deep_copy(cf_markers_local_real_d, measure_local_d);  
 
-   // Scatter the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
+   // Start the scatter of the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
    // one of the kokkos backends like PETSC_MEMTYPE_HIP
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
    if (mpi)
@@ -113,10 +113,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, cf_markers_local_real_d_ptr,
                                  mem_type, cf_markers_nonlocal_real_d_ptr,
-                                 MPI_REPLACE);
-      PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, cf_markers_local_real_d_ptr, cf_markers_nonlocal_real_d_ptr, MPI_REPLACE);
-      // Copy the non local measure
-      Kokkos::deep_copy(measure_nonlocal_d, cf_markers_nonlocal_real_d);       
+                                 MPI_REPLACE);      
    }
 
    // Initialise the set
@@ -176,6 +173,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       counter_undecided = 1;
    }   
 
+   // Finish the broadcast for the nonlocal measure
+   if (mpi)
+   {
+      PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, cf_markers_local_real_d_ptr, cf_markers_nonlocal_real_d_ptr, MPI_REPLACE);
+      // Copy the non local measure
+      Kokkos::deep_copy(measure_nonlocal_d, cf_markers_nonlocal_real_d);       
+   }   
+
    // ~~~~~~~~~~~~
    // Now go through the outer Luby loop
    // ~~~~~~~~~~~~      
@@ -184,6 +189,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    int loops_through = -1;
    do 
    {
+      // Match the fortran version and include a pre-test on the do-while
+      if (counter_undecided == 0) break;
+
       // If max_luby_steps is positive, then we only take that many times through this top loop
       // We typically find 2-3 iterations decides >99% of the nodes 
       // and a fixed number of outer loops means we don't have to do any parallel reductions
