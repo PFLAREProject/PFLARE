@@ -78,11 +78,11 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
       PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array);
       size_cols = cols_ad + cols_ao;
-      for (int i = 0; i < cols_ad; i++)
+      for (PetscInt i = 0; i < cols_ad; i++)
       {
          col_indices_off_proc_array[i] = global_row_start + i;
       }
-      for (int i = 0; i < cols_ao; i++)
+      for (PetscInt i = 0; i < cols_ao; i++)
       {
          col_indices_off_proc_array[cols_ad + i] = mat_mpi->garray[i];
       }           
@@ -116,7 +116,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       mat_local_sparsity = *mat_sparsity_match;
       cols_ad = local_cols;
       PetscMalloc1(local_rows, &col_indices_off_proc_array);
-      for (int i = 0; i < local_rows; i++)
+      for (PetscInt i = 0; i < local_rows; i++)
       {
          col_indices_off_proc_array[i] = i;
       }

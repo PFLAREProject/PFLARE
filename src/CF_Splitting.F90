@@ -33,7 +33,7 @@ module cf_splitting
       PetscInt, dimension(:), allocatable :: fine_indices, coarse_indices
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: fine_counter, coarse_counter, i_loc
-      integer :: n, n_fine, n_coarse
+      PetscInt :: n, n_fine, n_coarse
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX      
       
@@ -93,8 +93,8 @@ module cf_splitting
       PetscInt :: ifree
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: global_col_start, global_col_end_plus_one
-      integer :: counter, errorcode, comm_size
+      PetscInt :: global_col_start, global_col_end_plus_one, counter
+      integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPI_Comm :: MPI_COMM_MATRIX

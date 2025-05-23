@@ -351,7 +351,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);     
 
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
       i_local_d(i + 1) = nnz_match_local_row_d(i);
    });  
 
@@ -372,7 +372,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                 
 
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          i_nonlocal_d(i + 1) = nnz_match_nonlocal_row_d(i);
       });      
    }           
@@ -711,7 +711,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 
          // Let's insert all the existing global col indices as keys (with no value to start)
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(int i) {      
+            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(PetscInt i) {      
             
             // Insert the key (global col indices) without a value
             // Duplicates will be ignored
@@ -727,7 +727,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 
          // Mark which of the keys don't exist
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(int i) { 
+            Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) { 
 
             // If the key doesn't exist set the global index to -1
             if (!hashmap.exists(colmap_output_d_big(i))) colmap_output_d_big(i) = -1; 
@@ -752,14 +752,14 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          // but now with the local indices as values
          hashmap.clear();
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, colmap_output_d.extent(0)), KOKKOS_LAMBDA(int i) { 
+            Kokkos::RangePolicy<>(0, colmap_output_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
 
             hashmap.insert(colmap_output_d(i), i);
          });          
 
          // And now we can overwrite j_nonlocal_d with the local indices
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(int i) {     
+            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(PetscInt i) {     
 
             // Find where our global col index is at
             uint32_t loc = hashmap.find(j_nonlocal_d(i));
@@ -1376,7 +1376,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       if (mpi)
       {      
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {
+            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
                PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
                nnz_match_nonlocal_row_d(i) = ncols_nonlocal;
@@ -1384,7 +1384,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       }
       if (mpi)
       {
-         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const int i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             update += nnz_match_nonlocal_row_d(i); 
          }, nnzs_match_nonlocal);       
       }
@@ -1438,7 +1438,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(int i) {      
+         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {      
 
             // The start of our row index comes from the scan
             i_local_d(i + 1) = nnz_match_local_row_d(i);   
@@ -1629,7 +1629,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
          // We know the garray is just the original
          PetscInt *garray_host = NULL; 
          PetscMalloc1(cols_ao, &garray_host);
-         for (int i = 0; i < cols_ao; i++)
+         for (PetscInt i = 0; i < cols_ao; i++)
          {
             garray_host[i] = mat_mpi->garray[i];
          }    
@@ -1780,14 +1780,14 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
    // Rewrite the Y nonlocal indices to be global
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, ykok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(int i) { 
+      Kokkos::RangePolicy<>(0, ykok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(PetscInt i) { 
 
          device_nonlocal_y_j[i] = colmap_input_d_y(device_nonlocal_y_j[i]);
    }); 
 
    // Rewrite the X nonlocal indices to be global
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, xkok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(int i) { 
+      Kokkos::RangePolicy<>(0, xkok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(PetscInt i) { 
 
          device_nonlocal_x_j[i] = colmap_input_d_x(device_nonlocal_x_j[i]);
    });    
@@ -1872,7 +1872,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
       // Let's insert all the existing global col indices as keys (with no value to start)
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, col_ao_output), KOKKOS_LAMBDA(int i) {      
+         Kokkos::RangePolicy<>(0, col_ao_output), KOKKOS_LAMBDA(PetscInt i) {      
          
          // Insert the key (global col indices) with the local index
          hashmap.insert(colmap_output_d(i), i);
@@ -1880,7 +1880,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
       // And now we can overwrite j_nonlocal_d_z with the local indices
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(int i) {     
+         Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(PetscInt i) {     
 
          // Find where our global col index is at
          uint32_t loc = hashmap.find(j_nonlocal_d_z(i));
