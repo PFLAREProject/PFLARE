@@ -214,8 +214,6 @@ module air_data_type_routines
          end do
 
          if (air_data%no_levels /= -1) then
-            ! We also build some things on the coarse grid that must be destroyed
-            call VecDestroy(air_data%temp_vecs_fine(1)%array(air_data%no_levels), ierr)
             ! Coarse grid solver
             if (.NOT. reuse) then
                call reset_inverse_mat(air_data%inv_A_ff(air_data%no_levels))
