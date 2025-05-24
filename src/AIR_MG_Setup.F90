@@ -551,8 +551,44 @@ module air_mg_setup
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))  
 
+         air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
+
          ! ~~~~~~~~~~~
-         ! ~~~~~~~~~~~            
+         ! We may be able to destroy the coarse matrix on our_level from here
+         ! If so we build a shell as a placeholder
+         ! ~~~~~~~~~~~
+         
+         ! Get the nnzs for these matrices here, in case we destroy them below
+         if (air_data%options%print_stats_timings) then
+            call get_nnzs_petsc_sparse(air_data%coarse_matrix(our_level), &
+                     air_data%coarse_matrix_nnzs(our_level))
+         end if
+
+         ! On every level but the top and the bottom we can destroy the full operator matrix
+         if (our_level /= 1) then
+            if (.NOT. air_data%options%full_smoothing_up_and_down) then
+               call MatDestroy(air_data%coarse_matrix(our_level), ierr)
+            end if
+         end if         
+         
+         ! If we are just doing F point smoothing, we no longer have our coarse matrix
+         ! But we use the mat_ctx in our F-point smoother to tell what level 
+         ! we're on, so let's just create an empty matshell to pass in that has the right sizes           
+         if (.NOT. air_data%options%full_smoothing_up_and_down) then
+            
+            allocate(mat_ctx)
+            mat_ctx%our_level = our_level
+            mat_ctx%air_data => air_data  
+
+            call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
+                        mat_ctx, air_data%coarse_matrix(our_level), ierr)
+            call MatAssemblyBegin(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)
+            call MatAssemblyEnd(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)   
+            
+            ! Have to make sure to set the type of vectors the shell creates
+            ! Input can be any matrix, we just need the correct type
+            call ShellSetVecType(air_data%A_fc(our_level), air_data%coarse_matrix(our_level))                   
+         end if         
 
          ! ~~~~~~~~~~~~
          ! Do processor agglomeration if desired
@@ -826,39 +862,7 @@ module air_mg_setup
             air_data%allocated_matrices_A_cc(our_level) = .TRUE.
          end if         
 
-         ! ~~~~~~~~~~~~ 
-
-         ! Get the nnzs for these matrices here, in case we destroy them below
-         if (air_data%options%print_stats_timings) then
-            call get_nnzs_petsc_sparse(air_data%coarse_matrix(our_level), air_data%coarse_matrix_nnzs(our_level))
-         end if
-
-         ! On every level but the top and the bottom we can destroy the full operator matrix
-         if (our_level /= 1) then
-            if (.NOT. air_data%options%full_smoothing_up_and_down) then
-               call MatDestroy(air_data%coarse_matrix(our_level), ierr)
-            end if
-         end if         
-         
-         ! If we are just doing F point smoothing, we no longer have our coarse matrix
-         ! But we use the mat_ctx in our F-point smoother to tell what level 
-         ! we're on, so let's just create an empty matshell to pass in that has the right sizes         
-         allocate(mat_ctx)
-         mat_ctx%our_level = our_level
-         mat_ctx%air_data => air_data     
-
-         if (.NOT. air_data%options%full_smoothing_up_and_down) then
-            call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
-                        mat_ctx, air_data%coarse_matrix(our_level), ierr)
-            call MatAssemblyBegin(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)
-            call MatAssemblyEnd(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)   
-            
-            ! Have to make sure to set the type of vectors the shell creates
-            ! Input can be any matrix, we just need the correct type
-            call ShellSetVecType(air_data%A_fc(our_level), air_data%coarse_matrix(our_level))                   
-         end if
-         
-         air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.
+         ! ~~~~~~~~~~~~         
 
          ! ~~~~~~~~~~~~
          ! Output some timing results
