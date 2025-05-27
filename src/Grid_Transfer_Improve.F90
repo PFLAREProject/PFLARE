@@ -21,7 +21,7 @@ module grid_transfer_improve
 
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine improve_w(W, A_ff, A_fc, A_ff_inv, reuse_mat, reuse_mat_two, its)
+   subroutine improve_w(W, A_ff, A_fc, A_ff_inv, reuse_mat, reuse_mat_two, its, reuse_sparsity)
 
       ! Does a richardson iteration to improve the ideal W
    
@@ -29,14 +29,15 @@ module grid_transfer_improve
       ! Input 
       type(tMat), intent(inout) :: W, A_ff, A_fc, A_ff_inv, reuse_mat, reuse_mat_two
       integer, intent(in) :: its
+      logical, intent(in) :: reuse_sparsity
 
       integer :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
-      type(tMat) :: residual_mat, temp_mat
+      type(tMat) :: temp_mat_residual_copy, temp_mat, temp_mat_axpy, temp_mat_sparsity
       type(tVec) :: left_vec_aff, left_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
-      logical :: diag_aff_inv
+      logical :: diag_aff_inv, trigger_delete
 
       ! ~~~~~~~~~~
 
@@ -66,110 +67,126 @@ module grid_transfer_improve
          diag_aff_inv = .TRUE.
       !end if      
 
+      trigger_delete = .FALSE.
+
       ! Do the number of iterations requested
       ! Can reuse the same sparsity if doing multiple iterations
       do i = 1, its
 
          ! Compute the residual - Aff W^n + Afc
-         temp_mat = residual_mat
          if (mat_type_aff == MATDIAGONAL) then
 
+            temp_mat = reuse_mat
             if (.NOT. PetscObjectIsNull(temp_mat)) then
 
                ! The residual will have a different sparsity pattern to W
                ! after Aff W^n + Afc occurs in the first iteration
                ! (even if Aff is diagonal due to the A_fc)
                call MatCopy(W, &
-                        residual_mat, &
+                        reuse_mat, &
                         DIFFERENT_NONZERO_PATTERN, ierr)
             else
                call MatDuplicate(W, &
                         MAT_COPY_VALUES, &
-                        residual_mat, ierr)
+                        reuse_mat, ierr)
             end if
 
             ! Left multiply
-            call MatDiagonalScale(residual_mat, &
-                     left_vec_aff, PETSC_NULL_VEC, ierr)                     
+            call MatDiagonalScale(reuse_mat, &
+                     left_vec_aff, PETSC_NULL_VEC, ierr)  
+                     
+            temp_mat_axpy = reuse_mat                     
 
          ! If not matdiagonal
          else
             temp_mat = reuse_mat
-            ! Have to have two separate steps here as kokkos is picky about having the exact
-            ! same matrix when reusing
+
+            ! Now because kokkos is picky about having the exact
+            ! same matrix in the MatMatMult when reusing
+            ! We cannot just use reuse_mat everywhere
+            ! as MatAXPY rebuilds a new matrix internally and replaces it
+            ! Therefore have to keep around an extra copy just 
+            ! for reuse in kokkos  
+            ! But if we are only doing a max of 1 iteration and not doing external reuse            
             if (PetscObjectIsNull(temp_mat)) then
                call MatMatMult(A_ff, W, MAT_INITIAL_MATRIX, 1d0, &
                      reuse_mat, ierr)
-               call MatDuplicate(reuse_mat, &
-                     MAT_COPY_VALUES, &
-                     residual_mat, ierr)
+               temp_mat_axpy = reuse_mat
+
+               ! Only need to duplicate if we are doing more than 1 iteration
+               if (its > 1 .OR. reuse_sparsity) then
+                  call MatDuplicate(reuse_mat, &
+                        MAT_COPY_VALUES, &
+                        temp_mat_residual_copy, ierr)
+
+                  trigger_delete = .TRUE.
+                  temp_mat_axpy = temp_mat_residual_copy
+               end if               
+
             else
                call MatMatMult(A_ff, W, MAT_REUSE_MATRIX, 1d0, &
                      reuse_mat, ierr)      
                if (i == 1) then
                   call MatDuplicate(reuse_mat, &
                         MAT_COPY_VALUES, &
-                        residual_mat, ierr)                  
+                        temp_mat_residual_copy, ierr)                  
                else
                   call MatCopy(reuse_mat, &
-                        residual_mat, &
+                        temp_mat_residual_copy, &
                         DIFFERENT_NONZERO_PATTERN, ierr)     
-               end if                
+               end if    
+
+               trigger_delete = .TRUE.      
+               temp_mat_axpy = temp_mat_residual_copy               
             end if
          end if
 
          ! Afc should have a subset of the sparsity of W if Aff 
          ! has a diagonal, but just to be safe lets 
          ! say its different
-         call MatAXPYWrapper(residual_mat, 1d0, A_fc)
+         call MatAXPYWrapper(temp_mat_axpy, 1d0, A_fc)
 
          ! If you want to print the residual
-         ! call MatNorm(residual_mat, NORM_FROBENIUS, residual, ierr)
+         ! call MatNorm(temp_mat_axpy, NORM_FROBENIUS, residual, ierr)
          ! print *, i, "residual = ", residual
 
          ! Multiply on the left by the preconditioner
          ! Aff_inv (Aff W^n - Afc)
 
          ! Special case if Aff inv is matdiagonal
-         temp_mat = reuse_mat_two
          if (diag_aff_inv) then
 
-            if (.NOT. PetscObjectIsNull(temp_mat)) then
-               call MatCopy(residual_mat, &
-                        reuse_mat_two, &
-                        SAME_NONZERO_PATTERN, ierr)
-            else
-               call MatDuplicate(residual_mat, &
-                        MAT_COPY_VALUES, &
-                        reuse_mat_two, ierr)          
-            end if
-
             ! Left multiply
-            call MatDiagonalScale(reuse_mat_two, &
-                     left_vec_inv_aff, PETSC_NULL_VEC, ierr)          
+            call MatDiagonalScale(temp_mat_axpy, &
+                     left_vec_inv_aff, PETSC_NULL_VEC, ierr)      
+                     
+            temp_mat_sparsity = temp_mat_axpy                     
 
          ! If not matdiagonal
          else   
+
+            temp_mat = reuse_mat_two
             if (PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(A_ff_inv, residual_mat, MAT_INITIAL_MATRIX, 1d0, &
+               call MatMatMult(A_ff_inv, temp_mat_axpy, MAT_INITIAL_MATRIX, 1d0, &
                      reuse_mat_two, ierr)
             else
-               call MatMatMult(A_ff_inv, residual_mat, MAT_REUSE_MATRIX, 1d0, &
+               call MatMatMult(A_ff_inv, temp_mat_axpy, MAT_REUSE_MATRIX, 1d0, &
                      reuse_mat_two, ierr)            
             end if
+            temp_mat_sparsity = reuse_mat_two
          end if
          
          call timer_start(TIMER_ID_AIR_DROP) 
          ! Compute
          ! W^n+1 = W^n - Aff_inv * (Aff W^n + Afc)
          ! and drop any non-zeros outside of the sparsity pattern of W
-         call remove_from_sparse_match(reuse_mat_two, W, alpha=-1d0)
+         call remove_from_sparse_match(temp_mat_sparsity, W, alpha=-1d0)
          call timer_finish(TIMER_ID_AIR_DROP)
 
       end do
 
       ! Destroy the temporaries
-      call MatDestroy(residual_mat, ierr)
+      if (trigger_delete) call MatDestroy(temp_mat_residual_copy, ierr)
       call VecDestroy(left_vec_aff, ierr) 
       call VecDestroy(left_vec_inv_aff, ierr) 
          
