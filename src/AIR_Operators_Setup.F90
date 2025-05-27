@@ -1009,12 +1009,19 @@ module air_operators_setup
 
       ! First time so just drop according to a tolerance 
       else
-         call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
-                  air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
-                  relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
+         ! If we know we're not reusing save a copy
+         if (.NOT. air_data%options%reuse_sparsity) then
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
+                     air_data%options%a_drop, coarse_matrix, &
+                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump)            
+         else
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
+                     air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
+                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
 
-         call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
-                     MAT_COPY_VALUES, coarse_matrix, ierr)
+            call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
+                        MAT_COPY_VALUES, coarse_matrix, ierr)
+         end if
       end if
 
       ! Delete temporary if not reusing
