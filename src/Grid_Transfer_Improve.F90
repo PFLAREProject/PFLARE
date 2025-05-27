@@ -177,7 +177,7 @@ module grid_transfer_improve
 
   !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine improve_z(Z, A_ff, A_cf, A_ff_inv, reuse_mat, reuse_mat_two, its)
+   subroutine improve_z(Z, A_ff, A_cf, A_ff_inv, reuse_mat, reuse_mat_two, its, reuse_sparsity)
 
       ! Does a richardson iteration to improve the ideal Z
    
@@ -185,6 +185,7 @@ module grid_transfer_improve
       ! Input 
       type(tMat), intent(inout) :: Z, A_ff, A_cf, A_ff_inv, reuse_mat, reuse_mat_two
       integer, intent(in) :: its
+      logical, intent(in) :: reuse_sparsity
 
       integer :: i
       PetscErrorCode :: ierr
@@ -192,7 +193,7 @@ module grid_transfer_improve
       type(tMat) :: temp_mat_residual_copy, temp_mat, temp_mat_axpy, temp_mat_sparsity
       type(tVec) :: right_vec_aff, right_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
-      logical :: diag_aff_inv
+      logical :: diag_aff_inv, trigger_delete
 
       ! ~~~~~~~~~~
 
@@ -221,6 +222,8 @@ module grid_transfer_improve
          call MatGetDiagonal(A_ff_inv, right_vec_inv_aff, ierr)    
          diag_aff_inv = .TRUE.
       !end if      
+
+      trigger_delete = .FALSE.
 
       ! Do the number of iterations requested
       ! Can reuse the same sparsity if doing multiple iterations
@@ -255,16 +258,27 @@ module grid_transfer_improve
             temp_mat = reuse_mat
 
             ! Now because kokkos is picky about having the exact
-            ! same matrix when reusing, we cannot just use reuse_mat everywhere
+            ! same matrix in the MatMatMult when reusing
+            ! We cannot just use reuse_mat everywhere
             ! as MatAXPY rebuilds a new matrix internally and replaces it
             ! Therefore have to keep around an extra copy just 
             ! for reuse in kokkos  
+            ! But if we are only doing a max of 1 iteration and not doing external reuse
             if (PetscObjectIsNull(temp_mat)) then
                call MatMatMult(Z, A_ff, MAT_INITIAL_MATRIX, 1d0, &
                      reuse_mat, ierr)
-               call MatDuplicate(reuse_mat, &
-                     MAT_COPY_VALUES, &
-                     temp_mat_residual_copy, ierr)
+               temp_mat_axpy = reuse_mat
+
+               ! Only need to duplicate if we are doing more than 1 iteration
+               if (its > 1 .OR. reuse_sparsity) then
+                  call MatDuplicate(reuse_mat, &
+                        MAT_COPY_VALUES, &
+                        temp_mat_residual_copy, ierr)
+
+                  trigger_delete = .TRUE.
+                  temp_mat_axpy = temp_mat_residual_copy
+               end if
+
             else
                call MatMatMult(Z, A_ff, MAT_REUSE_MATRIX, 1d0, &
                      reuse_mat, ierr)      
@@ -276,9 +290,11 @@ module grid_transfer_improve
                   call MatCopy(reuse_mat, &
                         temp_mat_residual_copy, &
                         DIFFERENT_NONZERO_PATTERN, ierr)     
-               end if                
+               end if  
+
+               trigger_delete = .TRUE.      
+               temp_mat_axpy = temp_mat_residual_copy
             end if
-            temp_mat_axpy = temp_mat_residual_copy
          end if
 
          ! Acf should have a subset of the sparsity of Z if Aff 
@@ -326,7 +342,7 @@ module grid_transfer_improve
       end do
 
       ! Destroy the temporaries
-      if (mat_type_aff /= MATDIAGONAL) call MatDestroy(temp_mat_residual_copy, ierr)
+      if (trigger_delete) call MatDestroy(temp_mat_residual_copy, ierr)
       call VecDestroy(right_vec_aff, ierr) 
       call VecDestroy(right_vec_inv_aff, ierr) 
          
