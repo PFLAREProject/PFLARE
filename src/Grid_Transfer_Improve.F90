@@ -33,7 +33,7 @@ module grid_transfer_improve
       integer :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
-      type(tMat) :: residual_mat, temp_sparsity
+      type(tMat) :: residual_mat
       type(tMat) :: temp_mat
       type(tVec) :: left_vec_aff, left_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
@@ -43,9 +43,6 @@ module grid_transfer_improve
 
       ! Return if nothing to do
       if (its == 0) return 
-
-      ! Copy the sparsity pattern of Z
-      call MatDuplicate(W, MAT_DO_NOT_COPY_VALUES, temp_sparsity, ierr)
 
       ! Check if Aff is diagonal
       call MatGetType(A_ff, mat_type_aff, ierr)
@@ -164,18 +161,16 @@ module grid_transfer_improve
          end if
          
          call timer_start(TIMER_ID_AIR_DROP) 
-         ! Drop any non-zeros outside of the sparsity pattern of Z
-         call remove_from_sparse_match(reuse_mat_two, temp_sparsity)
-         call timer_finish(TIMER_ID_AIR_DROP) 
-
+         ! Compute
          ! W^n+1 = W^n - Aff_inv * (Aff W^n + Afc)
-         call MatAXPY(W, -1d0, temp_sparsity, SAME_NONZERO_PATTERN, ierr)
+         ! and drop any non-zeros outside of the sparsity pattern of W
+         call remove_from_sparse_match(reuse_mat_two, W, alpha=-1d0)
+         call timer_finish(TIMER_ID_AIR_DROP)
 
       end do
 
       ! Destroy the temporaries
       call MatDestroy(residual_mat, ierr)
-      call MatDestroy(temp_sparsity, ierr)     
       call VecDestroy(left_vec_aff, ierr) 
       call VecDestroy(left_vec_inv_aff, ierr) 
          
@@ -195,7 +190,7 @@ module grid_transfer_improve
       integer :: i
       PetscErrorCode :: ierr
       ! PetscReal :: residual
-      type(tMat) :: residual_mat, temp_sparsity
+      type(tMat) :: residual_mat
       type(tMat) :: temp_mat
       type(tVec) :: right_vec_aff, right_vec_inv_aff
       MatType :: mat_type_aff, mat_type_inv_aff      
@@ -205,9 +200,6 @@ module grid_transfer_improve
 
       ! Return if nothing to do
       if (its == 0) return 
-
-      ! Copy the sparsity pattern of Z
-      call MatDuplicate(Z, MAT_DO_NOT_COPY_VALUES, temp_sparsity, ierr)
 
       ! Check if Aff is diagonal
       call MatGetType(A_ff, mat_type_aff, ierr)
@@ -326,18 +318,16 @@ module grid_transfer_improve
          end if
          
          call timer_start(TIMER_ID_AIR_DROP) 
-         ! Drop any non-zeros outside of the sparsity pattern of Z
-         call remove_from_sparse_match(reuse_mat_two, temp_sparsity)
-         call timer_finish(TIMER_ID_AIR_DROP) 
-
+         ! Compute 
          ! Z^n+1 = Z^n - (Z^n Aff + Acf) * Aff_inv
-         call MatAXPY(Z, -1d0, temp_sparsity, SAME_NONZERO_PATTERN, ierr)
+         ! and drop any non-zeros outside of the sparsity pattern of Z
+         call remove_from_sparse_match(reuse_mat_two, Z, alpha=-1d0)
+         call timer_finish(TIMER_ID_AIR_DROP) 
 
       end do
 
       ! Destroy the temporaries
       call MatDestroy(residual_mat, ierr)
-      call MatDestroy(temp_sparsity, ierr)     
       call VecDestroy(right_vec_aff, ierr) 
       call VecDestroy(right_vec_inv_aff, ierr) 
          

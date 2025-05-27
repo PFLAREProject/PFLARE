@@ -799,7 +799,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a existing sparsity in output_mat but with kokkos - keeping everything on the device
-PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int)
+PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int, const int alpha_int, const PetscReal alpha)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
@@ -1031,7 +1031,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
             [&](const PetscInt j, PetscScalar& thread_sum) {          
 
                // If this is not being put into output then we lump it
-               if (scratch_indices(j) == -1) thread_sum += device_local_vals[device_local_i[i] + j];
+               if (scratch_indices(j) == -1) thread_sum += alpha * device_local_vals[device_local_i[i] + j];
             },
             Kokkos::Sum<PetscScalar>(lump_val_local)
          );   
@@ -1044,7 +1044,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
                [&](const PetscInt j, PetscScalar& thread_sum) {           
 
                   // If this is not being put into output then we lump it
-                  if (scratch_indices_nonlocal(j) == -1) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  if (scratch_indices_nonlocal(j) == -1) thread_sum += alpha * device_nonlocal_vals[device_nonlocal_i[i] + j];
                },
                Kokkos::Sum<PetscScalar>(lump_val_nonlocal)
             );              
@@ -1058,7 +1058,14 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
          // If we have a match, copy the value
          if (scratch_indices(j) != -1)
          {
-            device_local_vals_output[device_local_i_output[i] + scratch_indices(j)] = device_local_vals[device_local_i[i] + j];
+            if (alpha_int)
+            {
+               device_local_vals_output[device_local_i_output[i] + scratch_indices(j)] += alpha * device_local_vals[device_local_i[i] + j];
+            }
+            else
+            {
+               device_local_vals_output[device_local_i_output[i] + scratch_indices(j)] = device_local_vals[device_local_i[i] + j];
+            }
          }
       }); 
       
@@ -1069,7 +1076,15 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
             // If we have a match, copy the value
             if (scratch_indices_nonlocal(j) != -1)
             {
-               device_nonlocal_vals_output[device_nonlocal_i_output[i] + scratch_indices_nonlocal(j)] = device_nonlocal_vals[device_nonlocal_i[i] + j];                  
+               // Writing the global column indices, this will get compactified below
+               if (alpha_int)
+               {
+                  device_nonlocal_vals_output[device_nonlocal_i_output[i] + scratch_indices_nonlocal(j)] += alpha * device_nonlocal_vals[device_nonlocal_i[i] + j];
+               }
+               else
+               {
+                  device_nonlocal_vals_output[device_nonlocal_i_output[i] + scratch_indices_nonlocal(j)] = device_nonlocal_vals[device_nonlocal_i[i] + j];
+               }
             }
          });          
       }      
