@@ -797,6 +797,11 @@ module air_operators_setup
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), ierr)
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), ierr)                           
       end if
+
+      ! Delete temporary if not reusing
+      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity) then      
+         call MatDestroy(air_data%A_cf(our_level), ierr)       
+      end if      
       
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~
@@ -856,7 +861,13 @@ module air_operators_setup
                reuse_grid_transfer, &
                air_data%restrictors(our_level))
 
-      call timer_finish(TIMER_ID_AIR_RESTRICT)      
+      call timer_finish(TIMER_ID_AIR_RESTRICT) 
+      
+      ! Delete temporary if not reusing
+      if (.NOT. air_data%options%reuse_sparsity) then
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), ierr)      
+         call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
+      end if        
 
       call timer_start(TIMER_ID_AIR_IDENTITY)            
            
@@ -866,18 +877,7 @@ module air_operators_setup
          call create_VecISCopyLocalWrapper(air_data, our_level, A)
       end if       
       
-      call timer_finish(TIMER_ID_AIR_IDENTITY)            
-      
-      ! Delete temporary if not reusing
-      if (.NOT. air_data%options%reuse_sparsity) then
-         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), ierr)      
-         call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
-      end if      
-      
-      ! Delete temporary if not reusing
-      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity) then      
-         call MatDestroy(air_data%A_cf(our_level), ierr)       
-      end if
+      call timer_finish(TIMER_ID_AIR_IDENTITY)
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
