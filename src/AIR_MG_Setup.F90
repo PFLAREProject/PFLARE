@@ -278,10 +278,7 @@ module air_mg_setup
                local_fine_is_size = local_rows
             else
                call ISGetSize(air_data%IS_coarse_index(our_level-1), global_fine_is_size, ierr)
-               call ISGetLocalSize(air_data%IS_coarse_index(our_level-1), local_fine_is_size, ierr)
-
-               call MatCreateVecs(air_data%A_fc(our_level-1), &
-                        air_data%temp_vecs_fine(1)%array(our_level), PETSC_NULL_VEC, ierr)               
+               call ISGetLocalSize(air_data%IS_coarse_index(our_level-1), local_fine_is_size, ierr)            
             end if
 
             if (air_data%options%constrain_z) then
@@ -480,50 +477,14 @@ module air_mg_setup
          call get_submatrices_start_poly_coeff_comms(air_data%coarse_matrix(our_level), &
                our_level, air_data)
                
-         ! ~~~~~~~
-         ! Temporary vecs we use in the smoother
-         ! ~~~~~~~
-         ! If we haven't built them already
-         if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
-            call MatCreateVecs(air_data%A_ff(our_level), &
-                     air_data%temp_vecs_fine(1)%array(our_level), PETSC_NULL_VEC, ierr)
-            call MatCreateVecs(air_data%A_fc(our_level), &
-                     air_data%temp_vecs_coarse(1)%array(our_level), PETSC_NULL_VEC, ierr)  
-            call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                     air_data%temp_vecs(1)%array(our_level), PETSC_NULL_VEC, ierr)                                                  
-
-            if (our_level == no_levels - 1) then
-               call MatCreateVecs(air_data%A_fc(our_level), PETSC_NULL_VEC, &
-                        air_data%temp_vecs_fine(1)%array(our_level+1), ierr)                                         
-            end if                  
-         end if   
-         
-         ! ~~~~~~~~~~~~~~
-         ! If we got here then we want to generate a new coarse matrix
-         ! ~~~~~~~~~~~~~~
-
-         ! Generate the temporary vectors we use to smooth with
-         ! If we haven't built them already
-         if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then         
-            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(2)%array(our_level), ierr)
-            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(3)%array(our_level), ierr)
-            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(4)%array(our_level), ierr)        
-
-            ! If we're doing C point smoothing we need some extra temporaries
-            if (air_data%options%any_c_smooths .AND. &
-                     .NOT. air_data%options%full_smoothing_up_and_down) then
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)         
-            end if
-         end if         
-
          ! ~~~~~~~~~
          ! Finish the non-blocking comms and build the approximate inverse, then the 
          ! restrictor and prolongator
          ! ~~~~~~~~~        
+               
          if (.NOT. allocated(left_null_vecs_c)) allocate(left_null_vecs_c(size(left_null_vecs)))
          if (.NOT. allocated(right_null_vecs_c)) allocate(right_null_vecs_c(size(right_null_vecs)))
+
          call finish_comms_compute_restrict_prolong(air_data%coarse_matrix(our_level), &
                our_level, air_data, &
                left_null_vecs, right_null_vecs, &
@@ -551,8 +512,44 @@ module air_mg_setup
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))  
 
+         air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
+
          ! ~~~~~~~~~~~
-         ! ~~~~~~~~~~~            
+         ! We may be able to destroy the coarse matrix on our_level from here
+         ! If so we build a shell as a placeholder
+         ! ~~~~~~~~~~~
+         
+         ! Get the nnzs for these matrices here, in case we destroy them below
+         if (air_data%options%print_stats_timings) then
+            call get_nnzs_petsc_sparse(air_data%coarse_matrix(our_level), &
+                     air_data%coarse_matrix_nnzs(our_level))
+         end if
+
+         ! On every level but the top we can destroy the full operator matrix
+         if (our_level /= 1) then
+            if (.NOT. air_data%options%full_smoothing_up_and_down) then
+               call MatDestroy(air_data%coarse_matrix(our_level), ierr)
+            end if
+         end if         
+         
+         ! If we are just doing F point smoothing, we no longer have our coarse matrix
+         ! But we use the mat_ctx in our F-point smoother to tell what level 
+         ! we're on, so let's just create an empty matshell to pass in that has the right sizes           
+         if (.NOT. air_data%options%full_smoothing_up_and_down) then
+            
+            allocate(mat_ctx)
+            mat_ctx%our_level = our_level
+            mat_ctx%air_data => air_data  
+
+            call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
+                        mat_ctx, air_data%coarse_matrix(our_level), ierr)
+            call MatAssemblyBegin(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)
+            call MatAssemblyEnd(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)   
+            
+            ! Have to make sure to set the type of vectors the shell creates
+            ! Input can be any matrix, we just need the correct type
+            call ShellSetVecType(air_data%A_fc(our_level), air_data%coarse_matrix(our_level))                   
+         end if         
 
          ! ~~~~~~~~~~~~
          ! Do processor agglomeration if desired
@@ -820,45 +817,12 @@ module air_mg_setup
 
          ! ~~~~~~~~~~~~~~
 
-         air_data%allocated_matrices_A_ff(our_level) = .TRUE.
          if (air_data%options%any_c_smooths .AND. &
                   .NOT. air_data%options%full_smoothing_up_and_down) then          
             air_data%allocated_matrices_A_cc(our_level) = .TRUE.
          end if         
 
-         ! ~~~~~~~~~~~~ 
-
-         ! Get the nnzs for these matrices here, in case we destroy them below
-         if (air_data%options%print_stats_timings) then
-            call get_nnzs_petsc_sparse(air_data%coarse_matrix(our_level), air_data%coarse_matrix_nnzs(our_level))
-         end if
-
-         ! On every level but the top and the bottom we can destroy the full operator matrix
-         if (our_level /= 1) then
-            if (.NOT. air_data%options%full_smoothing_up_and_down) then
-               call MatDestroy(air_data%coarse_matrix(our_level), ierr)
-            end if
-         end if         
-         
-         ! If we are just doing F point smoothing, we no longer have our coarse matrix
-         ! But we use the mat_ctx in our F-point smoother to tell what level 
-         ! we're on, so let's just create an empty matshell to pass in that has the right sizes         
-         allocate(mat_ctx)
-         mat_ctx%our_level = our_level
-         mat_ctx%air_data => air_data     
-
-         if (.NOT. air_data%options%full_smoothing_up_and_down) then
-            call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
-                        mat_ctx, air_data%coarse_matrix(our_level), ierr)
-            call MatAssemblyBegin(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)
-            call MatAssemblyEnd(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)   
-            
-            ! Have to make sure to set the type of vectors the shell creates
-            ! Input can be any matrix, we just need the correct type
-            call ShellSetVecType(air_data%A_fc(our_level), air_data%coarse_matrix(our_level))                   
-         end if
-         
-         air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.
+         ! ~~~~~~~~~~~~         
 
          ! ~~~~~~~~~~~~
          ! Output some timing results
@@ -1034,7 +998,6 @@ module air_mg_setup
          ! Then at the bottom of the PCMG we need to build the coarse grid solve
          ! ~~~~~~~~~~~    
 
-         ! Let's do a Richardson
          call PCMGGetCoarseSolve(pcmg_input, ksp_coarse_solver, ierr)
          ! If you want to apply more iterations of the coarse solver, change this to 
          ! a richardson (can do via command line -mg_coarse_ksp_type richardson)
@@ -1116,6 +1079,40 @@ module air_mg_setup
 
       ! Call the setup on our PC
       call PCSetUp(pcmg_input, ierr)
+
+      ! ~~~~~~~~~
+      ! Build the temporary vectors we use during smoothing
+      ! ~~~~~~~~~   
+      do our_level = 1, air_data%no_levels-1
+
+         if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
+            call MatCreateVecs(air_data%A_ff(our_level), &
+                     air_data%temp_vecs_fine(1)%array(our_level), PETSC_NULL_VEC, ierr)
+            call MatCreateVecs(air_data%A_fc(our_level), &
+                     air_data%temp_vecs_coarse(1)%array(our_level), PETSC_NULL_VEC, ierr)  
+            call MatCreateVecs(air_data%coarse_matrix(our_level), &
+                     air_data%temp_vecs(1)%array(our_level), PETSC_NULL_VEC, ierr)
+     
+            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(2)%array(our_level), ierr)
+            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(3)%array(our_level), ierr)
+            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(4)%array(our_level), ierr)        
+
+            ! If we're doing C point smoothing we need some extra temporaries
+            if (air_data%options%any_c_smooths .AND. &
+                     .NOT. air_data%options%full_smoothing_up_and_down) then
+               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
+               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)         
+            end if
+         end if     
+         
+         air_data%allocated_matrices_A_ff(our_level) = .TRUE.
+
+      end do
+
+      ! ~~~~~~~~~
+      ! We are done, print out info
+      ! ~~~~~~~~~       
 
       call timer_finish(TIMER_ID_AIR_SETUP)                
       ! Print out the coarse grid info

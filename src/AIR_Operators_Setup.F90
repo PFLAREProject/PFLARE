@@ -259,7 +259,7 @@ module air_operators_setup
       type(tVec), dimension(:), intent(inout)               :: left_null_vecs_c, right_null_vecs_c
 
       PetscErrorCode :: ierr
-      type(tMat) :: minus_mat, sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat
+      type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat
       type(tMat) :: temp_mat
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
@@ -270,7 +270,7 @@ module air_operators_setup
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer
-      MatType:: mat_type, mat_type_minus
+      MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
 
@@ -407,14 +407,7 @@ module air_operators_setup
             end if
          end if
 
-         ! Copy inv_A_ff and multiply by -1
-         call MatDuplicate(inv_dropped_Aff, MAT_COPY_VALUES, minus_mat, ierr) 
-         call MatScale(minus_mat, -1d0, ierr)
-         call MatGetType(minus_mat, mat_type_minus, ierr)       
-
-         if (destroy_mat) then
-            call MatDestroy(inv_dropped_Aff, ierr)         
-         end if
+         call MatGetType(inv_dropped_Aff, mat_type_inv_aff, ierr)
       end if
 
       call timer_finish(TIMER_ID_AIR_INVERSE)           
@@ -486,7 +479,7 @@ module air_operators_setup
             temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_W)
             ! If we know our inv_aff is diagonal we don't have to do a matmatmult
             ! It is just a row/column scaling
-            if (mat_type_minus == MATDIAGONAL) then
+            if (mat_type_inv_aff == MATDIAGONAL) then
                if (.NOT. PetscObjectIsNull(temp_mat)) then
                   call MatCopy(air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
                            air_data%reuse(our_level)%reuse_mat(MAT_W), &
@@ -496,24 +489,26 @@ module air_operators_setup
                            MAT_COPY_VALUES, &
                            air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)          
                end if
-               call MatCreateVecs(minus_mat, PETSC_NULL_VEC, diag_vec, ierr)
+               call MatCreateVecs(inv_dropped_Aff, PETSC_NULL_VEC, diag_vec, ierr)
                ! Should be able to call MatDiagonalGetDiagonal but it returns
                ! the wrong vector type with kokkos, even when it is set correctly
                ! when calling matcreatediagonal
-               call MatGetDiagonal(minus_mat, diag_vec, ierr)
+               call MatGetDiagonal(inv_dropped_Aff, diag_vec, ierr)
+               call VecScale(diag_vec, -1d0, ierr)
                ! Left multiply
                call MatDiagonalScale(air_data%reuse(our_level)%reuse_mat(MAT_W), &
                         diag_vec, PETSC_NULL_VEC, ierr)          
                call VecDestroy(diag_vec, ierr)
             else
                if (.NOT. PetscObjectIsNull(temp_mat)) then
-                  call MatMatMult(minus_mat, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                  call MatMatMult(inv_dropped_Aff, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
                            MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)
                else
-                  call MatMatMult(minus_mat, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                  call MatMatMult(inv_dropped_Aff, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
                            MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)  
                end if
-            end if              
+               call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_W), -1d0, ierr)                       
+            end if   
 
             ! ~~~~~~~~~
             ! Improve W if needed
@@ -525,7 +520,8 @@ module air_operators_setup
                            air_data%inv_A_ff(our_level), &
                            air_data%reuse(our_level)%reuse_mat(MAT_W_AFF), &
                            air_data%reuse(our_level)%reuse_mat(MAT_W_NO_SPARSITY), &
-                           air_data%options%improve_w_its) 
+                           air_data%options%improve_w_its, &
+                           air_data%options%reuse_sparsity) 
 
             ! Delete temporaries if not reusing
             if (.NOT. air_data%options%reuse_sparsity) then   
@@ -737,7 +733,7 @@ module air_operators_setup
 
          ! If we know our inv_aff is diagonal we don't have to do a matmatmult
          ! It is just a row/column scaling
-         if (mat_type_minus == MATDIAGONAL) then
+         if (mat_type_inv_aff == MATDIAGONAL) then
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCopy(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
                         air_data%reuse(our_level)%reuse_mat(MAT_Z), &
@@ -747,20 +743,22 @@ module air_operators_setup
                         MAT_COPY_VALUES, &
                         air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
             end if
-            call MatCreateVecs(minus_mat, PETSC_NULL_VEC, diag_vec, ierr)
-            call MatGetDiagonal(minus_mat, diag_vec, ierr)
+            call MatCreateVecs(inv_dropped_Aff, PETSC_NULL_VEC, diag_vec, ierr)
+            call MatGetDiagonal(inv_dropped_Aff, diag_vec, ierr)
+            call VecScale(diag_vec, -1d0, ierr)
             ! Right multiply
             call MatDiagonalScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                      PETSC_NULL_VEC, diag_vec, ierr)          
             call VecDestroy(diag_vec, ierr)
          else         
             if (.NOT. PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), minus_mat, &
+               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                      MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
             else
-               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), minus_mat, &
+               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                      MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
             end if
+            call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), -1d0, ierr)
          end if
       end if
 
@@ -788,13 +786,19 @@ module air_operators_setup
                      air_data%inv_A_ff(our_level), &
                      air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), &
                      air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), &
-                     air_data%options%improve_z_its)
+                     air_data%options%improve_z_its, &
+                     air_data%options%reuse_sparsity)
 
       ! Delete temporaries if not reusing
       if (.NOT. air_data%options%reuse_sparsity) then   
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_AFF), ierr)
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_NO_SPARSITY), ierr)                           
       end if
+
+      ! Delete temporary if not reusing
+      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity) then      
+         call MatDestroy(air_data%A_cf(our_level), ierr)       
+      end if      
       
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~
@@ -822,9 +826,9 @@ module air_operators_setup
       if (.NOT. air_data%options%reuse_sparsity) then
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)       
       end if       
-      if (air_data%options%z_type == AIR_Z_PRODUCT) then
-         call MatDestroy(minus_mat, ierr)
-      end if
+      if (air_data%options%z_type == AIR_Z_PRODUCT .AND. destroy_mat) then
+         call MatDestroy(inv_dropped_Aff, ierr)
+      end if 
 
       ! ~~~~~~~~~
       ! Apply constraints to Z if needed
@@ -854,7 +858,13 @@ module air_operators_setup
                reuse_grid_transfer, &
                air_data%restrictors(our_level))
 
-      call timer_finish(TIMER_ID_AIR_RESTRICT)      
+      call timer_finish(TIMER_ID_AIR_RESTRICT) 
+      
+      ! Delete temporary if not reusing
+      if (.NOT. air_data%options%reuse_sparsity) then
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), ierr)      
+         call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
+      end if        
 
       call timer_start(TIMER_ID_AIR_IDENTITY)            
            
@@ -864,18 +874,7 @@ module air_operators_setup
          call create_VecISCopyLocalWrapper(air_data, our_level, A)
       end if       
       
-      call timer_finish(TIMER_ID_AIR_IDENTITY)            
-      
-      ! Delete temporary if not reusing
-      if (.NOT. air_data%options%reuse_sparsity) then
-         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), ierr)      
-         call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
-      end if      
-      
-      ! Delete temporary if not reusing
-      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity) then      
-         call MatDestroy(air_data%A_cf(our_level), ierr)       
-      end if
+      call timer_finish(TIMER_ID_AIR_IDENTITY)
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
@@ -1010,12 +1009,19 @@ module air_operators_setup
 
       ! First time so just drop according to a tolerance 
       else
-         call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
-                  air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
-                  relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
+         ! If we know we're not reusing save a copy
+         if (.NOT. air_data%options%reuse_sparsity) then
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
+                     air_data%options%a_drop, coarse_matrix, &
+                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump)            
+         else
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
+                     air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
+                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
 
-         call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
-                     MAT_COPY_VALUES, coarse_matrix, ierr)
+            call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
+                        MAT_COPY_VALUES, coarse_matrix, ierr)
+         end if
       end if
 
       ! Delete temporary if not reusing

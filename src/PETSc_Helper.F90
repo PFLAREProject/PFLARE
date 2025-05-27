@@ -318,7 +318,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_from_sparse_match_no_lump(input_mat, output_mat)
+   subroutine remove_from_sparse_match_no_lump(input_mat, output_mat, alpha)
 
       ! Returns a copy of a sparse matrix with entries that don't match the sparsity
       ! of the other input matrix dropped
@@ -327,6 +327,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Input 
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
+      PetscReal, intent(in), optional :: alpha
 
       PetscInt :: ncols, ifree
       PetscInt :: global_row_start, global_row_end_plus_one
@@ -348,20 +349,39 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Not sure if this is respected by the new COO interface so we will keep the 
       ! matsetvalues use below for now
       call MatSetOption(output_mat, MAT_NEW_NONZERO_LOCATIONS, PETSC_FALSE, ierr)
-      
+
       ! Now go and fill the new matrix
-      ! Loop over global row indices
-      do ifree = global_row_start, global_row_end_plus_one-1                  
+      ! Loop over global row indices     
       
-         ! Get the row
-         call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)
-         if (ncols /= 0) then
-            call MatSetValues(output_mat, one, [ifree], ncols, cols, &
-                  vals, INSERT_VALUES, ierr)
-         end if
-         call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)                    
- 
-      end do  
+      ! Add values to existing matrix
+      if (present(alpha)) then
+
+         do ifree = global_row_start, global_row_end_plus_one-1                  
+         
+            ! Get the row
+            call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)
+            if (ncols /= 0) then
+               call MatSetValues(output_mat, one, [ifree], ncols, cols, &
+                     alpha * vals, ADD_VALUES, ierr)
+            end if
+            call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)                    
+   
+         end do           
+
+      ! Replace
+      else
+         do ifree = global_row_start, global_row_end_plus_one-1                  
+         
+            ! Get the row
+            call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)
+            if (ncols /= 0) then
+               call MatSetValues(output_mat, one, [ifree], ncols, cols, &
+                     vals, INSERT_VALUES, ierr)
+            end if
+            call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)                    
+   
+         end do           
+      end if
             
       call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
       call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr) 
@@ -371,7 +391,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_from_sparse_match(input_mat, output_mat, lump)
+   subroutine remove_from_sparse_match(input_mat, output_mat, lump, alpha)
 
       ! Wrapper around remove_from_sparse_match_cpu and remove_from_sparse_match_kokkos
    
@@ -380,20 +400,23 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       logical, intent(in), optional :: lump
+      PetscReal, intent(in), optional :: alpha
 
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array
-      integer :: lump_int, errorcode
+      integer :: lump_int, errorcode, alpha_int
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy;
+      PetscScalar normy
+      PetscReal :: alpha_val
 #endif      
       ! ~~~~~~~~~~
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
       call MatGetType(input_mat, mat_type, ierr)
+
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
@@ -403,21 +426,28 @@ logical, protected :: kokkos_debug_global = .FALSE.
                lump_int = 1
             end if
          end if        
+         alpha_int = 0
+         alpha_val = 1.0
+         if (present(alpha)) then
+            alpha_int = 1
+            alpha_val = alpha
+         end if
 
          if (kokkos_debug()) then
+            ! Make sure to copy the values here as we may be doing with alpha
             call MatDuplicate(output_mat, &
-                     MAT_DO_NOT_COPY_VALUES, temp_mat, ierr)            
+                     MAT_COPY_VALUES, temp_mat, ierr)            
          end if
 
          A_array = input_mat%v             
          B_array = output_mat%v             
-         call remove_from_sparse_match_kokkos(A_array, B_array, lump_int) 
+         call remove_from_sparse_match_kokkos(A_array, B_array, lump_int, alpha_int, alpha_val) 
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
 
             ! Debug check if the CPU and Kokkos versions are the same
-            call remove_from_sparse_match_cpu(input_mat, temp_mat, lump)      
+            call remove_from_sparse_match_cpu(input_mat, temp_mat, lump, alpha)      
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
@@ -432,28 +462,31 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       else
 
-         call remove_from_sparse_match_cpu(input_mat, output_mat, lump)          
+         call remove_from_sparse_match_cpu(input_mat, output_mat, lump, alpha)          
 
       end if
 #else
-      call remove_from_sparse_match_cpu(input_mat, output_mat, lump)   
+      call remove_from_sparse_match_cpu(input_mat, output_mat, lump, alpha)   
 #endif  
          
    end subroutine remove_from_sparse_match   
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_from_sparse_match_cpu(input_mat, output_mat, lump)
+   subroutine remove_from_sparse_match_cpu(input_mat, output_mat, lump, alpha)
 
       ! Returns a copy of a sparse matrix with entries that don't match the sparsity
       ! of the other input matrix dropped
       ! If lumped is true the removed entries are added to the diagonal
+      ! If alpha is present, it does output_mat += alpha * input_mat 
+      ! on the given sparsity, rather than output_mat = input_mat
    
       ! ~~~~~~~~~~
       ! Input 
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       logical, intent(in), optional :: lump
+      PetscReal, intent(in), optional :: alpha
 
       PetscInt :: col, ncols, ifree, max_nnzs, ncols_mod, index1, index2
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start 
@@ -467,7 +500,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v        
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      logical :: lump_entries
+      logical :: lump_entries, alpha_present
       PetscReal :: lump_sum
       MPI_Comm :: MPI_COMM_MATRIX
       
@@ -480,10 +513,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       lump_entries = .FALSE.
       if (present(lump)) lump_entries = lump
+      alpha_present = .FALSE.
+      if (present(alpha)) alpha_present = .TRUE.
 
       if (.NOT. lump_entries) then
          ! This version is faster
-         call remove_from_sparse_match_no_lump(input_mat, output_mat)
+         call remove_from_sparse_match_no_lump(input_mat, output_mat, alpha)
          return
       end if
 
@@ -536,7 +571,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
          lump_sum = 0
          ncols_mod = ncols
          cols_mod(1:ncols) = cols(1:ncols)
-         vals_copy(1:ncols) = vals(1:ncols)
+         if (alpha_present) then
+            vals_copy(1:ncols) = alpha * vals(1:ncols)
+         else
+            vals_copy(1:ncols) = vals(1:ncols)
+         end if
 
          ! Must call otherwise petsc leaks memory
          call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)  
@@ -593,7 +632,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Set the values
       call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
       deallocate(row_indices, col_indices)
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
+      if (alpha_present) then
+         ! If alpha is present, we add the values to the output matrix
+         call MatSetValuesCOO(output_mat, v, ADD_VALUES, ierr)    
+      else
+         ! Otherwise we just copy the values across
+         call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
+      end if
       deallocate(v)  
          
    end subroutine remove_from_sparse_match_cpu
