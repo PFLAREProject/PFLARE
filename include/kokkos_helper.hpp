@@ -30,6 +30,7 @@ using Scratch2DIntView = Kokkos::View<PetscInt**, ScratchSpace, Kokkos::MemoryUn
 using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::MemoryUnmanaged>;
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
+PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
 
 // ~~~~~~~~~~~~~~~~~~
 // Some custom reductions we use 

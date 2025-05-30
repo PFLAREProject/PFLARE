@@ -284,80 +284,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       // The default values here are for the case where we 
       // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
       PetscInt *garray_host = NULL;
-
-      // We can use unique_copy in kokkos to get us a copy of the unique global column indices
-      // which gives us our garray
-
-      // Need to preallocate to the max size, which we know cannot be bigger than cols_ao 
-      PetscIntKokkosView colmap_output_d("colmap_output_d", cols_ao);
-      Kokkos::deep_copy(colmap_output_d, -1); // initialize to -1
-
-      // Take a copy of j and sort it
-      PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
-      Kokkos::deep_copy(j_nonlocal_d_sorted, j_nonlocal_d);
-      Kokkos::sort(j_nonlocal_d_sorted);
-
-      // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
-      auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
-      auto begin_it = Kokkos::Experimental::begin(colmap_output_d);
-      ptrdiff_t count_ptr_arith = unique_end_it - begin_it;
-      PetscInt col_ao_output = static_cast<PetscInt>(count_ptr_arith);
-
-      if (col_ao_output == 0)
-      {
-         // Silly but depending on the compiler this may return a non-null pointer
-         col_ao_output = 0;
-         PetscMalloc1(col_ao_output, &garray_host);
-      }
-
-      // We can use the Kokkos::UnorderedMap to do this if our 
-      // off diagonal block has fewer than 4 billion non-zero columns (max capacity of uint32_t)
-      // Otherwise we can just tell petsc to do do it on the host (in MatSetUpMultiply_MPIAIJ)
-      // and rely on the hash tables in petsc on the host which can handle more than 4 billion entries
-      // We trigger petsc doing it by passing in null as garray_host to MatSetMPIAIJKokkosWithSplitSeqAIJKokkosMatrices
-      // If we have no off-diagonal entries (either we started with zero or we've dropped them all)
-      // just skip all this and leave garray_host as null
-
-      // If we have 4 bit ints, we know cols_ao can never be bigger than the capacity of uint32_t
-      bool size_small_enough = sizeof(PetscInt) == 4 || \
-                  (sizeof(PetscInt) > 4 && col_ao_output < 4294967295);
-      if (size_small_enough && col_ao_output > 0 && nnzs_match_nonlocal > 0)
-      {
-         // Have to tell it the max capacity, we know we will have no more 
-         // than the input off-diag columns
-         Kokkos::UnorderedMap<PetscInt, PetscInt> hashmap((uint32_t)(col_ao_output+1));
-
-         // Let's insert all the existing global col indices as keys (with no value to start)
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, col_ao_output), KOKKOS_LAMBDA(PetscInt i) {      
-            
-            // Insert the key (global col indices) with the local index
-            hashmap.insert(colmap_output_d(i), i);
-         });
-
-         // And now we can overwrite j_nonlocal_d with the local indices
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, nnzs_match_nonlocal), KOKKOS_LAMBDA(PetscInt i) {     
-
-            // Find where our global col index is at
-            uint32_t loc = hashmap.find(j_nonlocal_d(i));
-            // And get the value (the new local index)
-            j_nonlocal_d(i) = hashmap.value_at(loc);
-         });      
-         hashmap.clear();
-
-         // Create some host space for the output garray (that stays in scope) and copy it
-         PetscMalloc1(colmap_output_d.extent(0), &garray_host);
-         PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, colmap_output_d.extent(0));
-         Kokkos::deep_copy(colmap_output_h, colmap_output_d);
-         // Log copy with petsc
-         size_t bytes = colmap_output_d.extent(0) * sizeof(PetscInt);
-         PetscLogGpuToCpu(bytes);            
-      }
-
-      // Let's make sure everything on the device is finished
-      auto exec = PetscGetKokkosExecutionSpace();
-      exec.fence();      
+      PetscInt col_ao_output = 0;
+      rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
       
       // We can create our nonlocal diagonal block matrix directly on the device
       MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
