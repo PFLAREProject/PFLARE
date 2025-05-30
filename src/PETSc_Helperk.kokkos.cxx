@@ -14,16 +14,20 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
 
    // Need to preallocate to the max size
    PetscIntKokkosView colmap_output_d("colmap_output_d", colmap_max_size);   
+   ptrdiff_t count_ptr_arith = -1;
 
    // Take a copy of j and sort it
-   PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
-   Kokkos::deep_copy(j_nonlocal_d_sorted, j_nonlocal_d);
-   Kokkos::sort(j_nonlocal_d_sorted);
+   // Scoped so we don't keep the copy of j around very long
+   {
+      PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
+      Kokkos::deep_copy(j_nonlocal_d_sorted, j_nonlocal_d);
+      Kokkos::sort(j_nonlocal_d_sorted);
 
-   // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
-   auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
-   auto begin_it = Kokkos::Experimental::begin(colmap_output_d);
-   ptrdiff_t count_ptr_arith = unique_end_it - begin_it;
+      // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
+      auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
+      auto begin_it = Kokkos::Experimental::begin(colmap_output_d);
+      count_ptr_arith = unique_end_it - begin_it;
+   }
    col_ao_output = static_cast<PetscInt>(count_ptr_arith);
 
    if (col_ao_output == 0)
