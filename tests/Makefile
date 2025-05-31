@@ -241,7 +241,13 @@ run_tests_no_load_serial:
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
 	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
-	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_fraction 0.0 -ksp_max_it 7
+	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 0 -ksp_max_it 7
+# 
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and multiple DDC its"
+	./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 2 -pc_air_ddc_fraction 0.02 -ksp_max_it 7	 
 # 
 	@echo ""
 	@echo "Test high order GMRES polynomials in small linear system"

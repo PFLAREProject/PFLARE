@@ -86,6 +86,9 @@ module air_data_type
       ! This is used in the CF splitting to define strong dependencies/influences
       ! -pc_air_strong_threshold
       PetscReal :: strong_threshold = 0.5
+      ! How many passes of DDC to do
+      ! -pc_air_ddc_its
+      integer :: ddc_its = 1
       ! Second pass in the PMISR DDC CF splitting converts 
       ! this fraction of local F points to C based on diagonal dominance
       ! -pc_air_ddc_fraction

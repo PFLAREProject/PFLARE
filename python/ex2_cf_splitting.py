@@ -152,20 +152,23 @@ b = A(u)
 # ~~~~~~~~~~~~~~
 
 # Threshold for a strong connection
-strong_threshold = 0.5;
-# Second pass cleanup
-ddc_fraction = 0.1;
+strong_threshold = 0.5
+# Second pass cleanup - one iteration
+ddc_its = 1
+# Fraction of F points to convert to C
+ddc_fraction = 0.1
 # As many steps as needed
-max_luby_steps = -1;
+max_luby_steps = -1
 # PMISR DDC
-algorithm = pflare.CF_PMISR_DDC;
+algorithm = pflare.CF_PMISR_DDC
 # Is the matrix symmetric?
-symmetric = False;
+symmetric = False
 
 [is_fine, is_coarse] = pflare.pflare_defs.compute_cf_splitting(A,\
       symmetric,\
       strong_threshold, max_luby_steps,\
       algorithm,\
+      ddc_its, \
       ddc_fraction)
 
 # ~~~~~~~~~~~~~~~

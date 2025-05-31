@@ -335,7 +335,7 @@ module cf_splitting
 
    subroutine compute_cf_splitting(input_mat, symmetric, &
                      strong_threshold, max_luby_steps, &
-                     cf_splitting_type, fraction_swap, &
+                     cf_splitting_type, ddc_its, fraction_swap, &
                      is_fine, is_coarse)
 
       ! Computes a CF splitting and returns the F and C point ISs
@@ -343,13 +343,14 @@ module cf_splitting
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
       logical, intent(in)                 :: symmetric
-      PetscReal, intent(in)                    :: strong_threshold
-      integer, intent(in)                 :: max_luby_steps, cf_splitting_type
-      PetscReal, intent(in)                    :: fraction_swap
+      PetscReal, intent(in)               :: strong_threshold
+      integer, intent(in)                 :: max_luby_steps, cf_splitting_type, ddc_its
+      PetscReal, intent(in)               :: fraction_swap
       type(tIS), intent(inout)            :: is_fine, is_coarse
 
       PetscErrorCode :: ierr
       integer, dimension(:), allocatable :: cf_markers_local
+      integer :: its
 
       ! ~~~~~~  
 
@@ -364,19 +365,21 @@ module cf_splitting
       ! as this gives diagonal Aff)
       if (strong_threshold /= 0d0 .AND. cf_splitting_type == CF_PMISR_DDC) then
 
-         ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
-         call ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
+         do its = 1, ddc_its
+            ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
+            call ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
 
-         ! If we did anything in our ddc second pass
-         if (fraction_swap /= 0d0) then
-         
-            ! These are now outdated
-            call ISDestroy(is_fine, ierr)
-            call ISDestroy(is_coarse, ierr)
+            ! If we did anything in our ddc second pass
+            if (fraction_swap /= 0d0) then
+            
+               ! These are now outdated
+               call ISDestroy(is_fine, ierr)
+               call ISDestroy(is_coarse, ierr)
 
-            ! Create the new CF ISs
-            call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse) 
-         end if
+               ! Create the new CF ISs
+               call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse) 
+            end if
+         end do
       end if
 
       deallocate(cf_markers_local)
