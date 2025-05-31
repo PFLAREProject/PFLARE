@@ -436,10 +436,12 @@ in Fortran:
      IS :: is_fine, is_coarse
      ! Threshold for a strong connection
      PetscReal :: strong_threshold = 0.5
-     ! Second pass cleanup
+     ! Second pass cleanup - one iteration
+     int :: ddc_its = 1
+     ! Fraction of F points to convert to C
      PetscReal :: ddc_fraction = 0.1
      ! As many steps as needed
-     PetscInt :: max_luby_steps = -1
+     int :: max_luby_steps = -1
      ! PMISR DDC
      integer :: algorithm = CF_PMISR_DDC
      ! Is the matrix symmetric?
@@ -449,6 +451,7 @@ in Fortran:
            symmetric, &
            strong_threshold, max_luby_steps, &
            algorithm, &
+           ddc_its, &
            ddc_fraction, &
            is_fine, is_coarse) 
 
@@ -457,10 +460,12 @@ or in C (please note the slightly modified name in C):
      IS is_fine, is_coarse;
      // Threshold for a strong connection
      PetscReal strong_threshold = 0.5;
-     // Second pass cleanup
+     // Second pass cleanup - one iteration
+     int ddc_its = 1;
+     // Fraction of F points to convert to C
      PetscReal ddc_fraction = 0.1;
      // As many steps as needed
-     PetscInt max_luby_steps = -1;
+     int max_luby_steps = -1;
      // PMISR DDC
      int algorithm = CF_PMISR_DDC;
      // Is the matrix symmetric?
@@ -470,26 +475,30 @@ or in C (please note the slightly modified name in C):
          symmetric, \
          strong_threshold, max_luby_steps, \
          algorithm, \
+         ddc_its, \
          ddc_fraction, \
          &is_fine, &is_coarse);
 
 or in Python with petsc4py:
 
      # Threshold for a strong connection
-     strong_threshold = 0.5;
-     # Second pass cleanup
-     ddc_fraction = 0.1;
+     strong_threshold = 0.5
+     # Second pass cleanup - one iteration
+     ddc_its = 1
+     # Fraction of F points to convert to C
+     ddc_fraction = 0.1
      # As many steps as needed
-     max_luby_steps = -1;
+     max_luby_steps = -1
      # PMISR DDC
-     algorithm = pflare.CF_PMISR_DDC;
+     algorithm = pflare.CF_PMISR_DDC
      # Is the matrix symmetric?
-     symmetric = False;
+     symmetric = False
 
      [is_fine, is_coarse] = pflare.pflare_defs.compute_cf_splitting(A, \
            symmetric, \
            strong_threshold, max_luby_steps, \
            algorithm, \
+           ddc_its, \
            ddc_fraction)
 
 ## Options         
@@ -536,6 +545,7 @@ A brief description of the available options in PFLARE are given below and their
    | ------------- | -- | ------------- | --- |
    | ``-pc_air_cf_splitting_type``  |  PCAIRGetCFSplittingType  PCAIRSetCFSplittingType  | The type of CF splitting to use, given above | pmisr_ddc |    
    | ``-pc_air_strong_threshold``  |  PCAIRGetStrongThreshold  PCAIRSetStrongThreshold  | The strong threshold to use in the CF splitting | 0.5 |
+   | ``-pc_air_ddc_its``  |  PCAIRGetDDCIts  PCAIRSetDDCIts  | If using CF splitting type pmisr_ddc, this is the number of iterations of DDC performed | 1 |   
    | ``-pc_air_ddc_fraction``  |  PCAIRGetDDCFraction  PCAIRSetDDCFraction  | If using CF splitting type pmisr_ddc, this is the local fraction of F points to convert to C points based on diagonal dominance. If negative, any row which has a diagonal dominance ratio less than the absolute value will be converted from F to C | 0.1 |
    | ``-pc_air_max_luby_steps``  |  PCAIRGetMaxLubySteps  PCAIRSetMaxLubySteps  | If using CF splitting type pmisr_ddc, pmis, or pmis_dist2, this is the maximum number of Luby steps to use. If negative, use as many steps as necessary | -1 |
 

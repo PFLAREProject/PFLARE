@@ -563,6 +563,25 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetDDCIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      its = options%ddc_its
+      ierr = 0
+
+   end subroutine PCAIRGetDDCIts 
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetDDCFraction(pc, frac, ierr) 
 
       ! ~~~~~~~~
@@ -1345,6 +1364,25 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetStrongThreshold   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDDCIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%ddc_its = int(its)
+      ierr = 0
+
+   end subroutine PCAIRSetDDCIts
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -41,7 +41,7 @@ typedef enum {
 PETSC_EXTERN void PCRegister_PFLARE();
 
 /* Can call the CF splitting separate to everything */
-PETSC_EXTERN void compute_cf_splitting_c(Mat *, int, double, int, int, double, IS*, IS*);
+PETSC_EXTERN void compute_cf_splitting_c(Mat *, int, double, int, int, int, double, IS*, IS*);
 
 /* Define PCPFLAREINV get routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetOrder(PC, PetscInt *);
@@ -65,6 +65,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomFactor(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC, PetscReal *);
+PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC, PetscReal *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC, CFSplittingType *);
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC, PetscInt *);
@@ -109,6 +110,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomFactor(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold(PC, PetscReal);
+PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC, PetscReal);
 PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType(PC, CFSplittingType);
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC, PetscInt);

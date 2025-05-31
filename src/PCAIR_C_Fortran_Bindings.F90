@@ -225,6 +225,23 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetDDCIts_c(pc_ptr, its) bind(C, name='PCAIRGetDDCIts_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)               :: its
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetDDCIts(pc, its, ierr)
+
+   end subroutine PCAIRGetDDCIts_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetDDCFraction_c(pc_ptr, frac) bind(C, name='PCAIRGetDDCFraction_c')
 
       ! ~~~~~~~~
@@ -1003,7 +1020,24 @@ module pcair_c_fortran_bindings
       pc%v = pc_ptr
       call PCAIRSetStrongThreshold(pc, thresh, ierr)
 
-   end subroutine PCAIRSetStrongThreshold_c   
+   end subroutine PCAIRSetStrongThreshold_c  
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDDCIts_c(pc_ptr, its) bind(C, name='PCAIRSetDDCIts_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)         :: its
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetDDCIts(pc, its, ierr)
+
+   end subroutine PCAIRSetDDCIts_c
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -151,7 +151,7 @@ module c_fortran_bindings
 
    subroutine compute_cf_splitting_c(input_mat_ptr, symmetric_int, &
          strong_threshold, max_luby_steps, &
-         cf_splitting_type, fraction_swap, &
+         cf_splitting_type, ddc_its, fraction_swap, &
          is_fine_ptr, is_coarse_ptr) &
          bind(C,name='compute_cf_splitting_c')
 
@@ -159,7 +159,7 @@ module c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
-      integer(c_int), value, intent(in)      :: symmetric_int, max_luby_steps, cf_splitting_type
+      integer(c_int), value, intent(in)      :: symmetric_int, max_luby_steps, cf_splitting_type, ddc_its
       real(c_double), value, intent(in)      :: strong_threshold, fraction_swap
       integer(c_long_long), intent(inout)    :: is_fine_ptr, is_coarse_ptr
 
@@ -176,7 +176,7 @@ module c_fortran_bindings
       if (symmetric_int == 1) symmetric = .TRUE.
       call compute_cf_splitting(input_mat, symmetric, &
                         strong_threshold, max_luby_steps, &
-                        cf_splitting_type, fraction_swap, &
+                        cf_splitting_type, ddc_its, fraction_swap, &
                         is_fine, is_coarse)
 
       ! Pass out the IS's

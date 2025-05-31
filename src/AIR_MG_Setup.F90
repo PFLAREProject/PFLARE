@@ -226,6 +226,7 @@ module air_mg_setup
                   air_data%options%strong_threshold, &
                   air_data%options%max_luby_steps, &
                   air_data%options%cf_splitting_type, &
+                  air_data%options%ddc_its, &
                   air_data%options%ddc_fraction, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level))      
             air_data%allocated_is(our_level) = .TRUE.

@@ -80,10 +80,12 @@ int main(int argc,char **args)
 
  // Threshold for a strong connection
  PetscReal strong_threshold = 0.5;
- // Second pass cleanup
+ // Second pass cleanup - one iteration
+ int ddc_its = 1;
+ // Fraction of F points to convert to C
  PetscReal ddc_fraction = 0.1;
  // As many steps as needed
- PetscInt max_luby_steps = -1;
+ int max_luby_steps = -1;
  // PMISR DDC
  int algorithm = CF_PMISR_DDC;
  // Is the matrix symmetric?
@@ -93,6 +95,7 @@ int main(int argc,char **args)
      symmetric, \
      strong_threshold, max_luby_steps, \
      algorithm, \
+     ddc_its, \
      ddc_fraction, \
      &is_fine, &is_coarse);
 

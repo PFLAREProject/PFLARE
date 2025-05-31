@@ -26,6 +26,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomFactor_c(PC *pc, PetscInt *in
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold_c(PC *pc, PetscReal *input_real);
+PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
@@ -71,6 +72,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomFactor_c(PC *pc, PetscInt inp
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold_c(PC *pc, PetscReal input_real);
+PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
@@ -266,6 +268,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *inpu
 {
    PetscFunctionBegin;
    PCAIRGetCFSplittingType_c(&pc, input_int);
+   PetscFunctionReturn(0);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PCAIRGetDDCIts_c(&pc, input_int);
    PetscFunctionReturn(0);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
@@ -608,6 +616,19 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold(PC pc, PetscReal input_real)
    if (old_real == input_real) PetscFunctionReturn(0);
    PCReset_AIR_c(pc);    
    PCAIRSetStrongThreshold_c(&pc, input_real);
+   PetscFunctionReturn(0);
+}
+// How many passes of DDC to do
+// Default: 1
+// -pc_air_ddc_its
+PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PetscInt old_int;
+   PCAIRGetDDCIts(pc, &old_int);
+   if (old_int == input_int) PetscFunctionReturn(0);
+   PCReset_AIR_c(pc);     
+   PCAIRSetDDCIts_c(&pc, input_int);
    PetscFunctionReturn(0);
 }
 // Second pass in the PMISR DDC CF splitting converts 
@@ -1195,6 +1216,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    cf_type = old_cf_type;
    PetscOptionsEnum("-pc_air_cf_splitting_type", "CF splitting algorithm", "PCAIRSetCFSplittingType", CFSplittingTypes, (PetscEnum)old_cf_type, (PetscEnum *)&cf_type, &flg);
    PCAIRSetCFSplittingType(pc, cf_type);
+   // ~~~~ 
+   PCAIRGetDDCIts(pc, &old_int);
+   input_int = old_int;
+   PetscOptionsInt("-pc_air_ddc_its", "DDC iterations for CF splitting", "PCAIRGetDDCIts", old_int, &input_int, NULL);
+   PCAIRSetDDCIts(pc, input_int);   
    // ~~~~   
    PCAIRGetMaxLubySteps(pc, &old_int);
    input_int = old_int;
@@ -1361,26 +1387,33 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       
       ierr =  PCAIRGetCFSplittingType(pc, &cf_type);
       ierr =  PCAIRGetStrongThreshold(pc, &input_real);
+      ierr =  PCAIRGetDDCIts(pc, &input_int_three);
       ierr =  PCAIRGetDDCFraction(pc, &input_real_two);
       ierr =  PCAIRGetMaxLubySteps(pc, &input_int_two);
       if (cf_type == CF_PMISR_DDC)
       {
          PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMISR_DDC \n");
+         PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f, DDC its=%"PetscInt_FMT", DDC fraction=%f \n", \
+                  input_int_two, input_real, input_int_three, input_real_two);           
       }
       else if (cf_type == CF_PMIS)
       {
          PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMIS \n");
+         PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f \n", \
+                  input_int_two, input_real);          
       }
       else if (cf_type == CF_PMIS_DIST2)
       {
          PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMIS_DIST2 \n");         
+         PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f \n", \
+                  input_int_two, input_real);         
       }      
       else if (cf_type == CF_AGG)
       {
          PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=AGG \n");         
-      }
-         PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f, DDC fraction=%f \n", \
-                  input_int_two, input_real, input_real_two);            
+         PetscViewerASCIIPrintf(viewer, "    Strong threshold=%f \n", \
+                  input_real);        
+      }          
       
       ierr =  PCAIRGetFullSmoothingUpAndDown(pc, &flg);
       if (flg) 
