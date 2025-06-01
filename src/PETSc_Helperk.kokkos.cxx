@@ -506,13 +506,13 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       t.team_barrier();
 
       // Now go and mark which values we're keeping and lumping
-      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j, PetscScalar& thread_sum) {
 
          bool keep_col = false;
          const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
 
          // If we hit a diagonal put it in the lump'd value
-         if (is_diagonal && lump_int) Kokkos::atomic_add(&lump_val_local, device_local_vals[device_local_i[i] + j]);           
+         if (is_diagonal && lump_int) thread_sum += device_local_vals[device_local_i[i] + j];           
          
          // Check if we keep this column because of size
          if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
@@ -529,22 +529,22 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
             scratch_indices(j) = 1;
          }
          // If we're not on the diagonal and we're small enough to lump
-         else if (lump_int && !is_diagonal) {
-            Kokkos::atomic_add(&lump_val_local, device_local_vals[device_local_i[i] + j]);
-         }         
-      }); 
+         else if (lump_int && !is_diagonal) thread_sum += device_local_vals[device_local_i[i] + j];       
+         },
+         Kokkos::Sum<PetscScalar>(lump_val_local)
+      ); 
 
       if (mpi)
       {
          // Now go and mark which values we're keeping and lumping
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {       
+         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j, PetscScalar& thread_sum) {
 
             bool keep_col = false;
             // Remember we can have diagonals in the off-diagonal block if we're rectangular
             const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
       
             // If we hit a diagonal put it in the lump'd value
-            if (is_diagonal && lump_int) Kokkos::atomic_add(&lump_val_nonlocal, device_nonlocal_vals[device_nonlocal_i[i] + j]);
+            if (is_diagonal && lump_int) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
 
             // Check if we keep this column because of size
             if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
@@ -561,11 +561,13 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                scratch_indices_nonlocal(j) = 1;             
             }
             // If we're not on the diagonal and we're small enough to lump
-            else if (lump_int && !is_diagonal) {
-               Kokkos::atomic_add(&lump_val_nonlocal, device_nonlocal_vals[device_nonlocal_i[i] + j]);
-            }            
-         });
+            else if (lump_int && !is_diagonal) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
+            },
+            Kokkos::Sum<PetscScalar>(lump_val_nonlocal)
+         );
       }
+      // Sum the local and nonlocal lumped values
+      PetscScalar lump_val = lump_val_local + lump_val_nonlocal;      
 
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier(); 
@@ -594,9 +596,6 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          }
       );          
       }
-
-      // Sum the local and nonlocal lumped values
-      PetscScalar lump_val = lump_val_local + lump_val_nonlocal;
 
       // Team barrier to ensure all threads have finished scanning scratch_indices
       t.team_barrier();
