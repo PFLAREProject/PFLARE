@@ -1082,10 +1082,11 @@ module air_mg_setup
       call PCSetUp(pcmg_input, ierr)
 
       ! ~~~~~~~~~
-      ! Build the temporary vectors we use during smoothing
+      ! Build the temporary data we use during smoothing
       ! ~~~~~~~~~   
       do our_level = 1, air_data%no_levels-1
 
+         ! Build the temporary vectors we need for smoothing
          if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
             call MatCreateVecs(air_data%A_ff(our_level), &
                      air_data%temp_vecs_fine(1)%array(our_level), PETSC_NULL_VEC, ierr)
@@ -1105,7 +1106,13 @@ module air_mg_setup
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)         
             end if
-         end if     
+
+            ! Copy over the IS's to the device for fc smoothing if needed
+            call timer_start(TIMER_ID_AIR_IDENTITY)            
+            call create_VecISCopyLocalWrapper(air_data, our_level, &
+                  mat_type, air_data%coarse_matrix(our_level))
+            call timer_finish(TIMER_ID_AIR_IDENTITY)              
+         end if              
          
          air_data%allocated_matrices_A_ff(our_level) = .TRUE.
 

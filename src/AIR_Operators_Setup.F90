@@ -865,16 +865,6 @@ module air_operators_setup
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), ierr)      
          call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
       end if        
-
-      call timer_start(TIMER_ID_AIR_IDENTITY)            
-           
-      ! We need to calculate any data we need during the fc smooth which 
-      ! uses (something like) a VecISCopy
-      if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
-         call create_VecISCopyLocalWrapper(air_data, our_level, A)
-      end if       
-      
-      call timer_finish(TIMER_ID_AIR_IDENTITY)
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
