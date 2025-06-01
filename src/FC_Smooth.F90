@@ -22,7 +22,7 @@ module fc_smooth
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine create_VecISCopyLocalWrapper(air_data, our_level, input_mat)
+   subroutine create_VecISCopyLocalWrapper(air_data, our_level, mat_type, input_mat)
 
       ! Creates any data we might need in VecISCopyLocalWrapper for a given level
       ! air_data%fast_veciscopy_exists must have been set before the 
@@ -32,10 +32,10 @@ module fc_smooth
       ! Input 
       type(air_multigrid_data), intent(inout) :: air_data
       integer, intent(in)                     :: our_level
-      type(tMat), intent(in)                  :: input_mat     
+      MatType, intent(in)                     :: mat_type
+      type(tMat), intent(in)                  :: input_mat
 
 #if defined(PETSC_HAVE_KOKKOS)                     
-      MatType :: mat_type
       PetscErrorCode :: ierr
       integer(c_long_long) :: is_fine_array, is_coarse_array
       PetscInt global_row_start, global_row_end_plus_one
@@ -74,7 +74,6 @@ module fc_smooth
       else
 #if defined(PETSC_HAVE_KOKKOS) 
 
-         call MatGetType(input_mat, mat_type, ierr)
          ! If our mat type is kokkos we need to build some things
          ! If not we just use the petsc veciscopy and don't have to setup anything
          if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &

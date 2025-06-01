@@ -458,11 +458,11 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
-   // We will have ncols of integers which tell us what the matching indices we have
+   // We will ncols+1 of integers which tell us what the matching indices we have
    // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = 3 * max_nnz_local * sizeof(PetscInt) + \
-               3 * max_nnz_nonlocal * sizeof(PetscInt) +
-               8 * 6 * sizeof(PetscScalar);
+   size_t scratch_size_per_team = 1 * (max_nnz_local+1) * sizeof(PetscInt) + \
+               1 * (max_nnz_nonlocal+1) * sizeof(PetscInt) +
+               8 * 2 * sizeof(PetscScalar);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
@@ -477,45 +477,42 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       PetscInt ncols_local, ncols_nonlocal=-1;
       ncols_local = device_local_i[i + 1] - device_local_i[i];
       const PetscInt row_index_global = i + global_row_start;
-      ScratchIntView scratch_indices, scratch_indices_nonlocal, scratch_match, scratch_match_nonlocal;
-      ScratchIntView scratch_lump, scratch_lump_nonlocal;
+      ScratchIntView scratch_indices, scratch_indices_nonlocal;
 
       // Allocate views directly on scratch memory
       // Have to use views here given alignment issues
-      scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local); 
-      scratch_match = ScratchIntView(t.team_scratch(1), ncols_local);     
-      scratch_lump = ScratchIntView(t.team_scratch(1), ncols_local);       
+      // We have of size ncols+1 to account for the exclusive scan
+      scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1); 
+      
+      // Lumped values we compute as we go for this row
+      PetscScalar lump_val_local = 0.0, lump_val_nonlocal = 0.0;
 
       if (mpi) 
       {
          ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
-         scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
-         scratch_match_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);  
-         scratch_lump_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal);
+         scratch_indices_nonlocal = ScratchIntView(t.team_scratch(1), ncols_nonlocal+1);
 
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
-            scratch_match_nonlocal(j) = 0;
-            scratch_lump_nonlocal(j) = 0;
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal+1), [&](const PetscInt j) {
+            scratch_indices_nonlocal(j) = 0;
          });         
       }     
       
       // Initialize scratch
-      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-         scratch_match(j) = 0;
-         scratch_lump(j) = 0;
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local+1), [&](const PetscInt j) {
+         scratch_indices(j) = 0;
       });
 
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier();
 
       // Now go and mark which values we're keeping and lumping
-      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j, PetscScalar& thread_sum) {
 
          bool keep_col = false;
          const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
 
          // If we hit a diagonal put it in the lump'd value
-         if (is_diagonal && lump_int) scratch_lump(j) = 1;            
+         if (is_diagonal && lump_int) thread_sum += device_local_vals[device_local_i[i] + j];           
          
          // Check if we keep this column because of size
          if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) >= rel_row_tol_d(i)) {
@@ -529,26 +526,26 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          
          // Mark this as a match
          if (keep_col) {
-            scratch_match(j) = 1;
+            scratch_indices(j) = 1;
          }
          // If we're not on the diagonal and we're small enough to lump
-         else if (lump_int && !is_diagonal) {
-            scratch_lump(j) = 1;
-         }         
-      }); 
+         else if (lump_int && !is_diagonal) thread_sum += device_local_vals[device_local_i[i] + j];       
+         },
+         Kokkos::Sum<PetscScalar>(lump_val_local)
+      ); 
 
       if (mpi)
       {
          // Now go and mark which values we're keeping and lumping
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {       
+         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j, PetscScalar& thread_sum) {
 
             bool keep_col = false;
             // Remember we can have diagonals in the off-diagonal block if we're rectangular
             const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
       
             // If we hit a diagonal put it in the lump'd value
-            if (is_diagonal && lump_int) scratch_lump_nonlocal(j) = 1;          
-            
+            if (is_diagonal && lump_int) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
+
             // Check if we keep this column because of size
             if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) >= rel_row_tol_d(i)) {
                // If this is the diagonal and we're dropping all diagonals don't add it
@@ -561,22 +558,25 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
             
             // Mark this as a match
             if (keep_col) {
-               scratch_match_nonlocal(j) = 1;             
+               scratch_indices_nonlocal(j) = 1;             
             }
             // If we're not on the diagonal and we're small enough to lump
-            else if (lump_int && !is_diagonal) {
-               scratch_lump_nonlocal(j) = 1;
-            }            
-         });
+            else if (lump_int && !is_diagonal) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
+            },
+            Kokkos::Sum<PetscScalar>(lump_val_nonlocal)
+         );
       }
+      // Sum the local and nonlocal lumped values
+      PetscScalar lump_val = lump_val_local + lump_val_nonlocal;      
 
       // Team barrier to ensure all threads have finished filling the scratch space
       t.team_barrier(); 
       
-      // Perform exclusive scan over scratch_match to get our output indices in this row
-      Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local), 
+      // Perform exclusive scan over scratch_indices to get our output indices in this row
+      // Have to be careful to go up to ncols_local+1
+      Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local+1), 
          [&](const PetscInt j, int& partial_sum, const bool is_final) {
-            const int input_value = scratch_match(j);
+            const int input_value = scratch_indices(j);
             if (is_final) {
                   scratch_indices(j) = partial_sum;  // Write exclusive prefix
             }
@@ -586,9 +586,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       
       if (mpi)
       {
-         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_nonlocal), 
+         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_nonlocal+1), 
          [&](const PetscInt j, int& partial_sum, const bool is_final) {
-            const int input_value = scratch_match_nonlocal(j);
+            const int input_value = scratch_indices_nonlocal(j);
             if (is_final) {
                   scratch_indices_nonlocal(j) = partial_sum;  // Write exclusive prefix
             }
@@ -597,45 +597,14 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       );          
       }
 
-      PetscScalar lump_val = 0.0;
-      // If lumping need to sum all the non-matching terms in input
-      if (lump_int)
-      {
-         PetscScalar lump_val_local = 0.0, lump_val_nonlocal = 0.0;
-         
-         // Reduce over local columns
-         Kokkos::parallel_reduce(
-            Kokkos::TeamVectorRange(t, ncols_local),
-            [&](const PetscInt j, PetscScalar& thread_sum) {          
-
-               // If lumping
-               if (scratch_lump(j) == 1) thread_sum += device_local_vals[device_local_i[i] + j];
-            },
-            Kokkos::Sum<PetscScalar>(lump_val_local)
-         );   
-
-         if (mpi)
-         {
-            // Reduce over nonlocal columns
-            Kokkos::parallel_reduce(
-               Kokkos::TeamVectorRange(t, ncols_nonlocal),
-               [&](const PetscInt j, PetscScalar& thread_sum) {           
-
-                  // If lumping
-                  if (scratch_lump_nonlocal(j) == 1) thread_sum += device_nonlocal_vals[device_nonlocal_i[i] + j];
-               },
-               Kokkos::Sum<PetscScalar>(lump_val_nonlocal)
-            );              
-         }
-         lump_val = lump_val_local + lump_val_nonlocal;
-      } 
-
       // Team barrier to ensure all threads have finished scanning scratch_indices
       t.team_barrier();
 
       // Now go and write to the output
       Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-         if (scratch_match(j) == 1)
+         // We can tell if scratch_indices had 1 in it in this position by comparing the result
+         // of the exclusive scan for this index and the next one
+         if (scratch_indices(j+1) > scratch_indices(j))
          {
             j_local_d(i_local_d(i) + scratch_indices(j)) = device_local_j[device_local_i[i] + j];
             a_local_d(i_local_d(i) + scratch_indices(j)) = device_local_vals[device_local_i[i] + j];            
@@ -645,7 +614,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       if (mpi)
       {
          Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
-            if (scratch_match_nonlocal(j) == 1)
+            if (scratch_indices_nonlocal(j+1) > scratch_indices_nonlocal(j))
             {
                // Writing the global column indices, this will get compactified below
                j_nonlocal_d(i_nonlocal_d(i) + scratch_indices_nonlocal(j)) = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
