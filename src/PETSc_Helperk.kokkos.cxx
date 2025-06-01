@@ -55,62 +55,29 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
    }
    else
    {
-      // We can use the Kokkos::UnorderedMap to do this in some circumstances
-      // Unordered map has a max capacity of uint32_t which is 4B
-      // but we have to be careful if we have more entries than the power of 2 before that
+      // Binary search sorted colmap to find our local index
+      // Originally used Kokkos::UnorderedMap here but it only handles up to uint32_t
+      // entries
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
 
-      // If we have 4 bit ints, we know col_ao_output can never be bigger than the capacity of uint32_t
-      bool size_small_enough = sizeof(PetscInt) == 4 || \
-                  (sizeof(PetscInt) > 4 && col_ao_output < 2147483647);
-      if (size_small_enough)
-      {
-         // Have to tell it the max capacity which we know from the size of garray
-         Kokkos::UnorderedMap<PetscInt, PetscInt> hashmap((uint32_t)(col_ao_output));
-
-         // Let's insert all the existing global col indices as keys with their local index into 
-         // garray as the value
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, col_ao_output), KOKKOS_LAMBDA(const PetscInt i) {      
+            PetscInt low = 0;
+            PetscInt count = col_ao_output; // Number of elements in colmap_output_d
+            PetscInt step = -1;
+            PetscInt mid_idx = -1;
             
-            hashmap.insert(colmap_output_d(i), i);
-         });
-
-         // And now we can overwrite j_nonlocal_d with the local indices
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) {     
-
-            // Find where our global col index is at in garray
-            const uint32_t loc = hashmap.find(j_nonlocal_d(i));
-            // And get the value (the new local index)
-            j_nonlocal_d(i) = hashmap.value_at(loc);
-         });      
-         hashmap.clear();         
-      }
-      // Do we have too many unique nonlocal columns to use the unordered map
-      else
-      {
-         // Device-side alternative for large col_ao_output: Binary Search
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
-
-               PetscInt low = 0;
-               PetscInt count = col_ao_output; // Number of elements in colmap_output_d
-               PetscInt step = -1;
-               PetscInt mid_idx = -1;
-               
-               while (count > 0) {
-                  step = count / 2;
-                  mid_idx = low + step;
-                  if (colmap_output_d(mid_idx) < j_nonlocal_d(i)) {
-                     low = mid_idx + 1;
-                     count -= (step + 1);
-                  } else {
-                     count = step;
-                  }
+            while (count > 0) {
+               step = count / 2;
+               mid_idx = low + step;
+               if (colmap_output_d(mid_idx) < j_nonlocal_d(i)) {
+                  low = mid_idx + 1;
+                  count -= (step + 1);
+               } else {
+                  count = step;
                }
-               j_nonlocal_d(i) = low;
-         });         
-      }
+            }
+            j_nonlocal_d(i) = low;
+      });         
    }
 }
 
