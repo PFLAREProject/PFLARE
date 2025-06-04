@@ -252,14 +252,19 @@ module air_mg_stats
          else
             ! Applying restrictor matrix-free
             if (air_data%options%matrix_free_polys) then 
-               ! MF polynomial order may be different on each level
-               call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
-                           air_data%inv_A_ff_poly_data(our_level)%coefficients, &
-                           non_zero_order)    
-               gmres_size_long = int(non_zero_order, kind=8)
 
-               nnzs = nnzs + air_data%A_cf_nnzs(our_level) + &
-                           gmres_size_long * air_data%A_ff_nnzs(our_level)                     
+               nnzs = nnzs + air_data%A_cf_nnzs(our_level)
+
+               if (mat_type==MATSHELL) then
+                  ! MF polynomial order may be different on each level
+                  call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+                              air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                              non_zero_order)    
+                  gmres_size_long = int(non_zero_order, kind=8)
+                  nnzs = nnzs + gmres_size_long * air_data%A_ff_nnzs(our_level)     
+               else
+                  nnzs = nnzs + air_data%inv_A_ff_nnzs(our_level)     
+               end if                
             else            
                nnzs = nnzs + air_data%restrictor_nnzs(our_level)
             end if
@@ -338,11 +343,13 @@ module air_mg_stats
             if (air_data%options%any_c_smooths) then
                mat_storage_nnzs = mat_storage_nnzs + air_data%A_cc_nnzs(our_level)
                mat_storage_nnzs = mat_storage_nnzs + air_data%inv_A_cc_nnzs(our_level) 
-               mat_storage_nnzs = mat_storage_nnzs + air_data%A_cf_nnzs(our_level)                 
-            end if            
+            end if      
          else
             mat_storage_nnzs = mat_storage_nnzs + air_data%coarse_matrix_nnzs(our_level)      
          end if
+         ! If C smoothing or matrix-free prolongating
+         mat_storage_nnzs = mat_storage_nnzs + air_data%A_cf_nnzs(our_level)                 
+
          mat_storage_nnzs = mat_storage_nnzs + air_data%inv_A_ff_nnzs(our_level)
          mat_storage_nnzs = mat_storage_nnzs + air_data%restrictor_nnzs(our_level)
          mat_storage_nnzs = mat_storage_nnzs + air_data%prolongator_nnzs(our_level)        
