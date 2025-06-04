@@ -40,7 +40,7 @@ module air_mg_setup
       PetscInt            :: prolongator_start, prolongator_end_plus_one, proc_stride
       PetscInt            :: petsc_level, no_levels_petsc_int
       PetscInt            :: local_vec_size, ystart, yend, local_rows_repart, local_cols_repart
-      PetscInt            :: global_rows_repart, global_cols_repart
+      PetscInt            :: global_rows_repart, global_cols_repart, counter, ifree
       integer             :: i_loc, inverse_type_aff, inverse_sparsity_aff
       integer             :: no_levels, our_level, our_level_coarse, errorcode, comm_rank, comm_size
       PetscErrorCode      :: ierr
@@ -62,6 +62,8 @@ module air_mg_setup
       PetscRandom :: rctx
       MatType:: mat_type, mat_type_aff
       integer(c_int) :: diag_only
+      PetscInt, dimension(:), allocatable :: indices
+      PetscInt, dimension(:), pointer :: idx_ptr
 
       ! ~~~~~~     
 
@@ -304,7 +306,82 @@ module air_mg_setup
             ! Exit out of the coarsening loop
             exit level_loop
 
-         end if    
+         end if  
+         
+         ! ~~~~~~~~~~~~~~     
+         ! We can reorder the matrix on this level to have the F points followed
+         ! by the c points
+         ! This makes the is_fine and is_coarse trivial (as the indices are contiguous)
+         ! That makes the solve faster and reduces memory use
+         ! We can't do this on the top grid as this would reorder the input matrix
+         ! Also then reorder the prolongator and restrictor on the level above us
+         ! to automatically do this reordering during the solve
+         ! ~~~~~~~~~~~~~~   
+
+         if (our_level /= 1) then     
+
+            call timer_start(TIMER_ID_AIR_IDENTITY)        
+            
+            allocate(indices(local_fine_is_size + local_coarse_is_size))
+            counter = 1
+            call ISGetIndices(air_data%IS_fine_index(our_level), idx_ptr, ierr)
+            do ifree = 1, local_fine_is_size
+               indices(counter) = idx_ptr(ifree)
+               counter = counter + 1
+            end do
+            call ISRestoreIndices(air_data%IS_fine_index(our_level), idx_ptr, ierr)
+            call ISGetIndices(air_data%IS_coarse_index(our_level), idx_ptr, ierr)
+            do ifree = 1, local_coarse_is_size
+               indices(counter) = idx_ptr(ifree)
+               counter = counter + 1
+            end do
+            call ISRestoreIndices(air_data%IS_coarse_index(our_level), idx_ptr, ierr)            
+
+            call ISCreateGeneral(MPI_COMM_MATRIX, size(indices), &
+                  indices, &
+                  PETSC_COPY_VALUES, temp_is, ierr) 
+            deallocate(indices)                     
+
+            ! Reorder the matrix on this level
+            call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
+                        temp_is, temp_is, &
+                        MAT_INITIAL_MATRIX, &
+                        temp_mat, ierr)                  
+            call MatDestroy(air_data%coarse_matrix(our_level), ierr)
+            air_data%coarse_matrix(our_level) = temp_mat          
+
+            ! Reorder the prolongator columns above this level
+            call MatGetOwnershipRange(air_data%prolongators(our_level-1), prolongator_start, &
+                     prolongator_end_plus_one, ierr)                     
+            call ISCreateStride(MPI_COMM_MATRIX, prolongator_end_plus_one - prolongator_start, &
+                     prolongator_start, one, is_unchanged, ierr)                      
+                     
+            call MatCreateSubMatrix(air_data%prolongators(our_level-1), &
+                        is_unchanged, temp_is, &
+                        MAT_INITIAL_MATRIX, &
+                        temp_mat, ierr)
+            call MatDestroy(air_data%prolongators(our_level-1), ierr)                 
+            air_data%prolongators(our_level-1) = temp_mat
+
+            ! Reorder the restrictor rows above this level                     
+            call MatCreateSubMatrix(air_data%restrictors(our_level-1), &
+                        temp_is, is_unchanged, &
+                        MAT_INITIAL_MATRIX, &
+                        temp_mat, ierr)
+            call MatDestroy(air_data%restrictors(our_level-1), ierr)                 
+            air_data%restrictors(our_level-1) = temp_mat            
+
+            call ISDestroy(air_data%IS_fine_index(our_level), ierr)
+            call ISDestroy(air_data%IS_coarse_index(our_level), ierr)
+            call ISCreateStride(MPI_COMM_MATRIX, local_fine_is_size, &
+                     global_row_start, one, air_data%IS_fine_index(our_level), ierr)
+            call ISCreateStride(MPI_COMM_MATRIX, local_coarse_is_size, &
+                     global_row_start + local_fine_is_size, one, air_data%IS_coarse_index(our_level), ierr)
+                  
+            call ISDestroy(temp_is, ierr)
+            call timer_finish(TIMER_ID_AIR_IDENTITY)
+
+         end if               
 
          ! ~~~~~~~~~~~~~~     
          ! Now let's go and build all our operators
