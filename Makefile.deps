@@ -14,7 +14,7 @@ src/FC_Smooth.o : src/FC_Smooth.F90 src/Matshell_PFLARE.o src/PETSc_Helper.o src
 src/Gmres_Poly_Data_Type.o : src/Gmres_Poly_Data_Type.F90 src/TSQR.o 
 src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Matshell_PFLARE.o src/C_PETSc_Interfaces.o src/Sorting.o 
 src/Gmres_Poly_Newton.o : src/Gmres_Poly_Newton.F90 src/C_PETSc_Interfaces.o src/Gmres_Poly.o 
-src/Grid_Transfer.o : src/Grid_Transfer.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
+src/Grid_Transfer.o : src/Grid_Transfer.F90 src/FC_Smooth.o src/Matshell_PFLARE.o src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/Grid_Transfer_Improve.o : src/Grid_Transfer_Improve.F90 src/PETSc_Helper.o src/Timers.o 
 src/Matshell_Data_Type.o : src/Matshell_Data_Type.F90 src/AIR_Data_Type.o 
 src/Matshell_PFLARE.o : src/Matshell_PFLARE.F90 src/Matshell_Data_Type.o 

@@ -3,6 +3,8 @@ module grid_transfer
    use petscmat
    use c_petsc_interfaces
    use petsc_helper
+   use matshell_pflare
+   use fc_smooth
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -37,7 +39,7 @@ module grid_transfer
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy;
+      PetscScalar normy
 #endif      
       ! ~~~~~~~~~~
 
@@ -224,7 +226,7 @@ module grid_transfer
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-      PetscScalar normy;
+      PetscScalar normy
 #endif        
       ! ~~~~~~~~~~
 
@@ -460,7 +462,7 @@ module grid_transfer
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-      PetscScalar normy;
+      PetscScalar normy
 #endif        
       ! ~~~~~~~~~~
 
@@ -475,7 +477,7 @@ module grid_transfer
          if (identity) identity_int = 1
          reuse_int = 0
          if (reuse) reuse_int = 1
-         reuse_indices_int = 0;
+         reuse_indices_int = 0
          if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) then
             reuse_indices_int = 1
          end if
@@ -781,6 +783,55 @@ module grid_transfer
       call ISRestoreIndices(is_fine, is_pointer_fine, ierr)       
          
    end subroutine compute_R_from_Z_cpu
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_mf_restrict(mat, x, y)
+
+      ! Applies the restrictor matrix-free
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      PetscErrorCode :: ierr
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+      type(air_multigrid_data), pointer :: air_data
+      integer :: our_level
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      our_level = mat_ctx%our_level
+      air_data => mat_ctx%air_data
+
+      ! Get out just the fine points from x - this is x_f
+      call VecISCopyLocalWrapper(air_data, our_level, .TRUE., x, &
+               SCATTER_REVERSE, air_data%temp_vecs_fine(1)%array(our_level))
+               
+      ! Get out just the coarse points from x - this is x_c
+      call VecISCopyLocalWrapper(air_data, our_level, .FALSE., x, &
+               SCATTER_REVERSE, air_data%temp_vecs_coarse(1)%array(our_level))               
+               
+      ! Then A_ff^-1 * x_f
+      call MatMult(air_data%inv_A_ff(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
+                  air_data%temp_vecs_fine(2)%array(our_level), ierr)
+                  
+      ! y = Acf * A_ff^-1 * x_f
+      call MatMult(air_data%A_cf(our_level), air_data%temp_vecs_fine(2)%array(our_level), &
+                  y, ierr)    
+
+      ! y = -Z x_f + I * x_c
+      ! y = -Acf * A_ff^-1 * x_f + x_c
+      call VecAXPBY(y, 1d0, -1d0, &
+               air_data%temp_vecs_coarse(1)%array(our_level), ierr)        
+
+   end subroutine petsc_matvec_mf_restrict     
 
    !-------------------------------------------------------------------------------------------------------------------------------
 

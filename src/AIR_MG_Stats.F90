@@ -65,7 +65,14 @@ module air_mg_stats
          
          ! Add in the nnzs from the restrictor
          if (.NOT. air_data%options%symmetric) then
-            call get_nnzs_petsc_sparse(air_data%restrictors(our_level), air_data%restrictor_nnzs(our_level))                                             
+            ! Are we mf?
+            call MatGetType(air_data%restrictors(our_level), mat_type, ierr)
+            if (mat_type/=MATSHELL) then   
+               call get_nnzs_petsc_sparse(air_data%restrictors(our_level), air_data%restrictor_nnzs(our_level))                                             
+            ! If we're doing mf restrictor then we also have acf
+            else
+               call get_nnzs_petsc_sparse(air_data%A_cf(our_level), air_data%A_cf_nnzs(our_level))
+            end if
          end if
          ! Add in the nnzs from the prolongator
          call get_nnzs_petsc_sparse(air_data%prolongators(our_level), air_data%prolongator_nnzs(our_level))                                             
@@ -243,7 +250,19 @@ module air_mg_stats
          if (air_data%options%symmetric) then
             nnzs = nnzs + air_data%prolongator_nnzs(our_level)
          else
-            nnzs = nnzs + air_data%restrictor_nnzs(our_level)
+            ! Applying restrictor matrix-free
+            if (air_data%options%matrix_free_polys) then 
+               ! MF polynomial order may be different on each level
+               call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+                           air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                           non_zero_order)    
+               gmres_size_long = int(non_zero_order, kind=8)
+
+               nnzs = nnzs + air_data%A_cf_nnzs(our_level) + &
+                           gmres_size_long * air_data%A_ff_nnzs(our_level)                     
+            else            
+               nnzs = nnzs + air_data%restrictor_nnzs(our_level)
+            end if
          end if
          ! Prolongator
          nnzs = nnzs + air_data%prolongator_nnzs(our_level)

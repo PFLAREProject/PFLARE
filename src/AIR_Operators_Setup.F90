@@ -796,7 +796,8 @@ module air_operators_setup
       end if
 
       ! Delete temporary if not reusing
-      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity) then      
+      if (.NOT. air_data%options%any_c_smooths .AND. .NOT. air_data%options%reuse_sparsity &
+            .AND. .NOT. air_data%options%matrix_free_polys) then      
          call MatDestroy(air_data%A_cf(our_level), ierr)       
       end if      
       
