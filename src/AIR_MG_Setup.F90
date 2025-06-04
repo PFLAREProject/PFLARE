@@ -1092,8 +1092,10 @@ module air_mg_setup
                      air_data%temp_vecs_fine(1)%array(our_level), PETSC_NULL_VEC, ierr)
             call MatCreateVecs(air_data%A_fc(our_level), &
                      air_data%temp_vecs_coarse(1)%array(our_level), PETSC_NULL_VEC, ierr)  
-            call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                     air_data%temp_vecs(1)%array(our_level), PETSC_NULL_VEC, ierr)
+            if (.NOT. air_data%fast_veciscopy_exists) then
+               call MatCreateVecs(air_data%coarse_matrix(our_level), &
+                        air_data%temp_vecs(1)%array(our_level), PETSC_NULL_VEC, ierr)
+            end if
      
             call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(2)%array(our_level), ierr)
             call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(3)%array(our_level), ierr)
