@@ -337,7 +337,7 @@ module air_mg_setup
             end do
             call ISRestoreIndices(air_data%IS_coarse_index(our_level), idx_ptr, ierr)            
 
-            call ISCreateGeneral(MPI_COMM_MATRIX, size(indices), &
+            call ISCreateGeneral(MPI_COMM_MATRIX, local_fine_is_size + local_coarse_is_size, &
                   indices, &
                   PETSC_COPY_VALUES, temp_is, ierr) 
             deallocate(indices)                     
