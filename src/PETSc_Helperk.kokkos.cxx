@@ -1857,6 +1857,7 @@ PETSC_INTERN void vec_random_kokkos(Vec *input_vec)
 
       // Randoms on the device
       auto generator = random_pool.get_state();
+      // Values between [0, 1.0)
       input_vec_d(i) = generator.drand(0., 1.);
       random_pool.free_state(generator);
 

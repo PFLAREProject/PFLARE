@@ -7,7 +7,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 // PMISR cf splitting but on the device
-PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, int *cf_markers_local, const int zero_measure_c_point_int)
+PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int device_random_int, int *cf_markers_local, const int zero_measure_c_point_int)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
@@ -37,6 +37,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*strength_mat, &MPI_COMM_MATRIX);
+   int rank;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);   
    MatGetLocalSize(*strength_mat, &local_rows, &local_cols);
    MatGetSize(*strength_mat, &global_rows, &global_cols);
    // This returns the global index of the local portion of the matrix
@@ -61,7 +63,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    cf_markers_local_real_d_ptr = cf_markers_local_real_d.data();
 
    // Host and device memory for the measure
-   PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
    PetscScalarKokkosView measure_nonlocal_d;
    if (mpi) {
@@ -74,21 +75,36 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    boolKokkosView mark_d("mark_d", local_rows);   
 
    // If you want to generate the randoms on the device
-   //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
-   // Copy the input measure from host to device
-   Kokkos::deep_copy(measure_local_d, measure_local_h);  
-   // Log copy with petsc
-   size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
-   PetscLogCpuToGpu(bytes);   
+   if (device_random_int) 
+   {
+      // Seed with the mpi rank so we get different randoms on each rank
+      int seed = rank + 1000;      
+      Kokkos::Random_XorShift64_Pool<> random_pool(seed);
+      // Compute the measure
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+
+         // Randoms on the device
+         auto generator = random_pool.get_state();
+         // Values between [0, 1.0)
+         measure_local_d(i) = generator.drand(0., 1.);
+         random_pool.free_state(generator);
+      });      
+   }
+   // If the randoms were generated on the host, copy them over
+   else
+   {
+      PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
+      // Copy the input measure from host to device
+      Kokkos::deep_copy(measure_local_d, measure_local_h);  
+      // Log copy with petsc
+      size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
+      PetscLogCpuToGpu(bytes);   
+   }
 
    // Compute the measure
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-
-      // Randoms on the device
-      // auto generator = random_pool.get_state();
-      // measure_local_d(i) = generator.drand(0., 1.);
-      // random_pool.free_state(generator);
          
       const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
       measure_local_d(i) += ncols_local;
@@ -429,7 +445,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Now copy device cf_markers_local_d back to host
    Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
    // Log copy with petsc
-   bytes = cf_markers_local_d.extent(0) * sizeof(PetscInt);
+   size_t bytes = cf_markers_local_d.extent(0) * sizeof(PetscInt);
    PetscLogGpuToCpu(bytes);
 
    return;
