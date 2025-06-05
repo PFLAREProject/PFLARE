@@ -154,8 +154,8 @@ module gmres_poly
       logical :: device_muller
 #if defined(PETSC_HAVE_KOKKOS)
       MatType :: mat_type
-#endif         
       integer(c_long_long) :: A_array
+#endif         
 
       ! ~~~~~~    
 
@@ -194,8 +194,10 @@ module gmres_poly
       ! Create the numbers on the device
       if (device_muller) then
 
+#if defined(PETSC_HAVE_KOKKOS)         
          A_array = V_n(1)%v             
          call vec_box_muller_kokkos(A_array) 
+#endif         
 
       ! Do it on the host
       else  
