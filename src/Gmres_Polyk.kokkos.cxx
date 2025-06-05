@@ -460,3 +460,46 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
    return;
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Generate box muller numbers on the device and fill the input_vec
+PETSC_INTERN void vec_box_muller_kokkos(Vec *input_vec)
+{
+
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)*input_vec, &MPI_COMM_MATRIX);
+   int rank;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+
+   // Seed with the mpi rank so we get different randoms on each rank
+   // Have to make sure the seed is different than when random is used to evaluate 
+   // the auto truncation, ie different than the seed in vec_random_kokkos
+   int seed = rank + 100;
+   // If you want to generate the randoms on the device
+   Kokkos::Random_XorShift64_Pool<> random_pool(seed); 
+
+   // Get the view
+   PetscScalarKokkosView input_vec_d;
+   VecGetKokkosViewWrite(*input_vec, &input_vec_d);
+
+   // Loop over the vector
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, input_vec_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+
+      // Randoms on the device
+      auto generator = random_pool.get_state();
+      // Values between [0, 1.0)
+      double val_one = generator.drand(0., 1.);
+      double val_two = generator.drand(0., 1.);
+      constexpr auto pi = Kokkos::numbers::pi_v<double>;
+      // Box-Muller transform
+      input_vec_d(i) = Kokkos::sqrt(-2.0 * Kokkos::log(val_one)) * Kokkos::cos(2.0 * pi * val_two);
+      random_pool.free_state(generator);
+
+   });
+
+   VecRestoreKokkosViewWrite(*input_vec, &input_vec_d);
+
+   return;
+}
