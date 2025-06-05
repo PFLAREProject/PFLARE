@@ -229,7 +229,7 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test AIRG on steady 1D advection"
 	./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
-	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 11 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1
 # 
 	@echo ""
 	@echo "Test lAIR on steady 2D structured advection"
@@ -295,7 +295,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	@echo ""
 	@echo "Test AIRG on steady 1D advection KOKKOS"
 	./adv_1dk -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
-	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 11 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
 	 -vec_type kokkos -mat_type aijkokkos
 
 endif
@@ -389,7 +389,7 @@ run_tests_no_load_parallel:
 	@echo ""
 	@echo "Test AIRG on steady 1D advection in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
-	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 11 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10
 #
 	@echo ""
 	@echo "Test improving Z in parallel" 
@@ -414,7 +414,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	@echo ""
 	@echo "Test AIRG on steady 1D advection in parallel KOKKOS"
 	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
-	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 11 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -vec_type kokkos -mat_type aijkokkos	
 
 endif
