@@ -154,8 +154,8 @@ module gmres_poly
       logical :: device_muller
 #if defined(PETSC_HAVE_KOKKOS)
       MatType :: mat_type
-      integer(c_long_long) :: A_array
 #endif         
+      integer(c_long_long) :: A_array
 
       ! ~~~~~~    
 
