@@ -453,6 +453,16 @@ module c_petsc_interfaces
  
    end interface    
 
+   interface   
+      
+      subroutine vec_box_muller_kokkos(A_array) &
+         bind(c, name="vec_box_muller_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+      end subroutine vec_box_muller_kokkos         
+ 
+   end interface      
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
 end module c_petsc_interfaces

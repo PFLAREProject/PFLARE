@@ -151,6 +151,12 @@ module gmres_poly
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:, :), allocatable, target   :: random_data
       PetscInt, parameter :: one=1, zero=0
+      logical :: device_muller
+#if defined(PETSC_HAVE_KOKKOS)
+      MatType :: mat_type
+      integer(c_long_long) :: A_array
+#endif         
+
       ! ~~~~~~    
 
       ! We might want to call the gmres poly creation on a sub communicator
@@ -166,60 +172,70 @@ module gmres_poly
       call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)  
 
       ! ~~~~~~~~~~
-      ! Create random vector - this happens on the cpu
-      ! We could do most of the box-muller on the gpu, but currently the random numbers in petsc 
-      ! are still generated on the host (and we don't have portable trig functions in petsc across the different
-      ! gpu vec types), so that would cause more copies to/from the gpu     
-      ! If that changes this should be rewritten so this all happens on the gpu  
-      ! ~~~~~~~~~~      
-
-      ! If you ever change this to use PetscRandomCreate and VecSetRandom in petsc
-      ! make sure the seed is different than when random is used to evaluate 
-      ! the auto truncation in AIR_MG_Setup
-
-      call random_seed(size=seed_size)
-      allocate(seed(seed_size))
-      ! Ensure we seed the same so subsequent runs get the same random
-      ! Seed different on each process so we don't have the same random numbers on each processor      
-      do i_loc = 1, seed_size
-         seed(i_loc) = comm_rank + 1 + i_loc
-      end do   
-      call random_seed(put=seed)    
-
-      ! Gives random numbers between 0 <= u < 1  
-      allocate(random_data(local_rows, 2))
-      ! Random numbers returned in fortran don't include one so don't have to 
-      ! remove 1 
-      call random_number(random_data(:, 1:2))
-
-      ! We want our random rhs to be a normal distribution with zero mean as that preserves
-      ! white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
-      ! Do a box-muller to take two numbers with uniform distribution and produce a number
-      ! that is normally distributed       
-      random_data(:, 1) = sqrt(-2 * log(random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
-      deallocate(seed)
-
-      ! ~~~~~~~~~~
       ! Create some petsc vecs and assign the data in them to point at K_m+1
       ! ~~~~~~~~~~ 
       ! Create vectors pointing at the columns in K_m+1
       do i_loc = 1, subspace_size+1
          call MatCreateVecs(matrix, V_n(i_loc), PETSC_NULL_VEC, ierr)         
-      end do     
-      
-      allocate(indices(local_rows))
-      ! Set the random values into the first vector
-      ! V_n(1) data will be copied to the gpu when needed
-      do row_i = 1, local_rows
-         indices(row_i) = global_row_start + row_i-1
-      end do
-      ! PetscCount vs PetscInt??
-      vec_size = local_rows
-      call VecSetPreallocationCOO(V_n(1), vec_size, indices, ierr)
-      deallocate(indices)
-      call VecSetValuesCOO(V_n(1), random_data(:, 1), INSERT_VALUES, ierr)
-      
-      deallocate(random_data)
+      end do        
+
+      ! Generate the random numbers and the box muller on the device?
+      device_muller = .FALSE.
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(matrix, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then 
+
+         if (.NOT. kokkos_debug()) device_muller = .TRUE.
+      end if
+#endif
+
+      ! Create the numbers on the device
+      if (device_muller) then
+
+         A_array = V_n(1)%v             
+         call vec_box_muller_kokkos(A_array) 
+
+      ! Do it on the host
+      else  
+
+         call random_seed(size=seed_size)
+         allocate(seed(seed_size))
+         ! Ensure we seed the same so subsequent runs get the same random
+         ! Seed different on each process so we don't have the same random numbers on each processor      
+         do i_loc = 1, seed_size
+            seed(i_loc) = comm_rank + 1 + i_loc
+         end do   
+         call random_seed(put=seed)    
+
+         ! Gives random numbers between 0 <= u < 1  
+         allocate(random_data(local_rows, 2))
+         ! Random numbers returned in fortran don't include one so don't have to 
+         ! remove 1 
+         call random_number(random_data(:, 1:2))
+
+         ! We want our random rhs to be a normal distribution with zero mean as that preserves
+         ! white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
+         ! Do a box-muller to take two numbers with uniform distribution and produce a number
+         ! that is normally distributed       
+         random_data(:, 1) = sqrt(-2 * log(random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
+         deallocate(seed)   
+         
+         allocate(indices(local_rows))
+         ! Set the random values into the first vector
+         do row_i = 1, local_rows
+            indices(row_i) = global_row_start + row_i-1
+         end do
+         ! PetscCount vs PetscInt??
+         vec_size = local_rows
+         call VecSetPreallocationCOO(V_n(1), vec_size, indices, ierr)
+         deallocate(indices)
+         call VecSetValuesCOO(V_n(1), random_data(:, 1), INSERT_VALUES, ierr)
+         
+         deallocate(random_data)
+
+      end if
 
       ! ~~~~~~~~~~~~
 
