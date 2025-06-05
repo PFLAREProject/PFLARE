@@ -440,6 +440,16 @@ module c_petsc_interfaces
          PetscScalar, value :: alpha
       end subroutine MatAXPY_kokkos         
  
+   end interface
+   
+   interface   
+      
+      subroutine vec_random_kokkos(A_array) &
+         bind(c, name="vec_random_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+      end subroutine vec_random_kokkos         
+ 
    end interface    
 
 ! -------------------------------------------------------------------------------------------------------------------------------

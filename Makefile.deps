@@ -1,7 +1,7 @@
 src/Aggregation.o : src/Aggregation.F90 
 src/AIR_Data_Type.o : src/AIR_Data_Type.F90 src/Gmres_Poly_Data_Type.o src/TSQR.o 
 src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.F90 src/FC_Smooth.o src/Approx_Inverse_Setup.o src/AIR_Data_Type.o 
-src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/AIR_Operators_Setup.o src/Grid_Transfer.o src/C_PETSc_Interfaces.o src/FC_Smooth.o src/AIR_MG_Stats.o src/Timers.o src/Approx_Inverse_Setup.o src/Matshell_Data_Type.o src/CF_Splitting.o src/Constrain_Z_or_W.o 
+src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/Truncate.o src/AIR_Operators_Setup.o src/Grid_Transfer.o src/C_PETSc_Interfaces.o src/FC_Smooth.o src/AIR_MG_Stats.o src/Timers.o src/Approx_Inverse_Setup.o src/Matshell_Data_Type.o src/CF_Splitting.o src/Constrain_Z_or_W.o 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.F90 src/Gmres_Poly.o src/AIR_Data_Type.o src/PETSc_Helper.o 
 src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/Grid_Transfer_Improve.o src/Grid_Transfer.o src/C_PETSc_Interfaces.o src/FC_Smooth.o src/Timers.o src/Approx_Inverse_Setup.o src/Constrain_Z_or_W.o 
 src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/Matshell_PFLARE.o src/Repartition.o src/SAI_Z.o src/Weighted_Jacobi.o src/Neumann_Poly.o src/Gmres_Poly_Newton.o src/Gmres_Poly.o 
@@ -31,5 +31,6 @@ src/Repartition.o : src/Repartition.F90 src/PETSc_Helper.o src/C_PETSc_Interface
 src/SAI_Z.o : src/SAI_Z.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o src/Sorting.o 
 src/Sorting.o : src/Sorting.F90 src/Binary_Tree.o 
 src/Timers.o : src/Timers.F90 
+src/Truncate.o : src/Truncate.F90 src/C_PETSc_Interfaces.o src/PETSc_Helper.o src/Approx_Inverse_Setup.o 
 src/TSQR.o : src/TSQR.F90 
 src/Weighted_Jacobi.o : src/Weighted_Jacobi.F90 

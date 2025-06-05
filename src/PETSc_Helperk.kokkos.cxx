@@ -1830,3 +1830,39 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
    return;
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Generate random values on the device and fill the input_vec
+PETSC_INTERN void vec_random_kokkos(Vec *input_vec)
+{
+
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)*input_vec, &MPI_COMM_MATRIX);
+   int rank;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+
+   // Seed with the mpi rank so we get different randoms on each rank
+   int seed = rank + 1;
+   // If you want to generate the randoms on the device
+   Kokkos::Random_XorShift64_Pool<> random_pool(seed); 
+
+   // Get the view
+   PetscScalarKokkosView input_vec_d;
+   VecGetKokkosViewWrite(*input_vec, &input_vec_d);
+
+   // Loop over the vector
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, input_vec_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+
+      // Randoms on the device
+      auto generator = random_pool.get_state();
+      input_vec_d(i) = generator.drand(0., 1.);
+      random_pool.free_state(generator);
+
+   });
+
+   VecRestoreKokkosViewWrite(*input_vec, &input_vec_d);
+
+   return;
+}
