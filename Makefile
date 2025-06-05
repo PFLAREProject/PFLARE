@@ -94,6 +94,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
+		  $(SRCDIR)/Truncate.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \

@@ -11,6 +11,7 @@ module air_mg_setup
    use c_petsc_interfaces
    use grid_transfer
    use air_operators_setup
+   use truncate
 
 #include "petsc/finclude/petscksp.h"
 
@@ -35,8 +36,7 @@ module air_mg_setup
       ! Local
       PetscInt            :: local_rows, local_cols, global_rows, global_cols
       PetscInt            :: local_fine_is_size, local_coarse_is_size
-      PetscInt            :: global_coarse_is_size, global_fine_is_size, global_row_start
-      PetscInt            :: global_row_end_plus_one, no_active_cores
+      PetscInt            :: global_coarse_is_size, global_fine_is_size, no_active_cores
       PetscInt            :: prolongator_start, prolongator_end_plus_one, proc_stride
       PetscInt            :: petsc_level, no_levels_petsc_int
       PetscInt            :: local_vec_size, ystart, yend, local_rows_repart, local_cols_repart
@@ -45,12 +45,12 @@ module air_mg_setup
       integer             :: no_levels, our_level, our_level_coarse, errorcode, comm_rank, comm_size
       PetscErrorCode      :: ierr
       MPI_Comm            :: MPI_COMM_MATRIX
-      PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b
+      PetscReal           :: ratio_local_nnzs_off_proc
       logical             :: continue_coarsening, trigger_proc_agglom
       type(tMat)          :: temp_mat
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
-      type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
+      type(tVec)          :: temp_coarse_vec, diag_vec, diag_vec_aff
       type(tIS)           :: is_unchanged, is_full, temp_is
       type(mat_ctxtype), pointer :: mat_ctx
       PetscInt, parameter :: one=1, zero=0
@@ -58,8 +58,7 @@ module air_mg_setup
       type(tVec), dimension(:), allocatable :: left_null_vecs_c, right_null_vecs_c
       VecScatter :: vec_scatter
       VecType :: vec_type
-      logical :: auto_truncated, aff_diag, check_diag_only
-      PetscRandom :: rctx
+      logical :: auto_truncate, aff_diag, check_diag_only
       MatType:: mat_type, mat_type_aff
       integer(c_int) :: diag_only
 
@@ -109,7 +108,7 @@ module air_mg_setup
 
       if (air_data%options%print_stats_timings .AND. comm_rank == 0) print *, "Timers are cumulative"
 
-      auto_truncated = .FALSE.
+      auto_truncate = .FALSE.
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
       ! Loop over the number of levels
@@ -122,15 +121,13 @@ module air_mg_setup
 
          ! Get matrix sizes
          call MatGetSize(air_data%coarse_matrix(our_level), global_rows, global_cols, ierr)
-         call MatGetLocalSize(air_data%coarse_matrix(our_level), local_rows, local_cols, ierr)
-         ! This returns the global index of the local portion of the matrix
-         call MatGetOwnershipRange(air_data%coarse_matrix(our_level), global_row_start, global_row_end_plus_one, ierr)           
+         call MatGetLocalSize(air_data%coarse_matrix(our_level), local_rows, local_cols, ierr)         
 
          continue_coarsening = .TRUE.
 
          ! ~~~~~~~~~~
-         ! We can also check if our coarse grid approximations are good enough to work as a coarse grid solver
-         ! If so we can stop coarsening here   
+         ! We can check here if our coarse grid approximations are good enough to work as a coarse grid solver
+         ! If so we can stop coarsening   
          ! This is really only a sensible idea when using a matrix-free polynomial for the coarse grid solve
          ! Otherwise building assembled approximation inverses can be very expensive!      
          ! ~~~~~~~~~~
@@ -140,75 +137,7 @@ module air_mg_setup
                      air_data%options%auto_truncate_start_level /= -1) then         
 
             call timer_start(TIMER_ID_AIR_TRUNCATE)   
-
-            ! Set up our coarse inverse data
-            call setup_gmres_poly_data(global_rows, &
-                     air_data%options%coarsest_inverse_type, &
-                     air_data%options%coarsest_poly_order, &
-                     air_data%options%coarsest_inverse_sparsity_order, &
-                     air_data%options%coarsest_subcomm, &
-                     proc_stride, &
-                     air_data%inv_coarsest_poly_data)  
-
-            ! Start the approximate inverse we'll use on this level
-            call start_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)                       
-
-            ! This will be a vec of randoms that differ from those used to create the gmres polynomials
-            ! We will solve Ax = rand_vec to test how good our coarse solver is
-            call PetscRandomCreate(MPI_COMM_MATRIX, rctx, ierr)
-            call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                     rand_vec, PETSC_NULL_VEC, ierr)            
-
-            call VecSetRandom(rand_vec, rctx, ierr)
-            call PetscRandomDestroy(rctx, ierr)
-
-            call VecDuplicate(rand_vec, sol_vec, ierr)
-            call VecDuplicate(rand_vec, temp_vec, ierr)
-
-            ! Finish our approximate inverse
-            call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients, &
-                  air_data%options%coarsest_matrix_free_polys, &
-                  air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-                  air_data%inv_A_ff(our_level))             
-
-            ! sol_vec = A^-1 * rand_vec
-            call MatMult(air_data%inv_A_ff(our_level), rand_vec, sol_vec, ierr)
-            ! Now calculate a residual
-            ! A * sol_vec
-            call MatMult(air_data%coarse_matrix(our_level), sol_vec, temp_vec, ierr)
-            ! Now A * sol_vec - rand_vec
-            call VecAXPY(temp_vec, -1d0, rand_vec, ierr)
-            call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
-            call VecNorm(rand_vec, NORM_2, norm_b, ierr)    
-
-            ! If it's good enough we can truncate on this level and our coarse solver has been computed
-            if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol) then
-               auto_truncated = .TRUE.
-
-               ! Delete temporary if not reusing
-               if (.NOT. air_data%options%reuse_sparsity) then
-                  call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), ierr)        
-               end if                  
-
-            ! If this isn't good enough, destroy everything we used - no chance for reuse
-            else
-               call MatDestroy(air_data%inv_A_ff(our_level), ierr)               
-               call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), ierr)             
-            end if      
-
-            call VecDestroy(rand_vec, ierr)
-            call VecDestroy(sol_vec, ierr)
-            call VecDestroy(temp_vec, ierr)
-
+            call test_truncate(our_level, proc_stride, MPI_COMM_MATRIX, air_data, auto_truncate)
             call timer_finish(TIMER_ID_AIR_TRUNCATE)   
          end if
 
@@ -218,7 +147,7 @@ module air_mg_setup
          call timer_start(TIMER_ID_AIR_COARSEN)     
          
          ! Are we reusing our CF splitting
-         if (.NOT. air_data%allocated_is(our_level) .AND. .NOT. auto_truncated) then
+         if (.NOT. air_data%allocated_is(our_level) .AND. .NOT. auto_truncate) then
 
             ! Do the CF splitting
             call compute_cf_splitting(air_data%coarse_matrix(our_level), &
@@ -237,7 +166,7 @@ module air_mg_setup
          ! ~~~~~~~~~~~~~~
          ! Get the sizes of C and F points
          ! ~~~~~~~~~~~~~~
-         if (.NOT. auto_truncated) then
+         if (.NOT. auto_truncate) then
 
             call ISGetSize(air_data%IS_fine_index(our_level), global_fine_is_size, ierr)
             call ISGetLocalSize(air_data%IS_fine_index(our_level), local_fine_is_size, ierr)
@@ -256,7 +185,7 @@ module air_mg_setup
          ! if the problem is still big enough and
          ! that the coarsening resulted in any fine points, sometimes
          ! you can have it such that no fine points are selected                  
-         continue_coarsening = .NOT. auto_truncated .AND. &
+         continue_coarsening = .NOT. auto_truncate .AND. &
                   (global_coarse_is_size > air_data%options%coarse_eq_limit .AND. global_fine_is_size /= 0)  
 
          ! Did we end up with a coarse grid we still want to coarsen?
@@ -859,7 +788,7 @@ module air_mg_setup
                   .AND. air_data%options%reuse_poly_coeffs)) then
 
          ! We've already created our coarse solver if we've auto truncated         
-         if (.NOT. auto_truncated) then
+         if (.NOT. auto_truncate) then
             call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
@@ -1017,7 +946,7 @@ module air_mg_setup
          call timer_start(TIMER_ID_AIR_INVERSE) 
 
          ! We've already created our coarse solver if we've auto truncated
-         if (.NOT. auto_truncated) then
+         if (.NOT. auto_truncate) then
 
             call finish_approximate_inverse(air_data%coarse_matrix(no_levels), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
@@ -1062,7 +991,7 @@ module air_mg_setup
       ! If we've only got one level 
       else
          ! Precondition with the "coarse grid" solver we used to determine auto truncation
-         if (auto_truncated) then
+         if (auto_truncate) then
             call PetscObjectReference(amat, ierr) 
             call PCSetOperators(pcmg_input, amat, &
                         air_data%inv_A_ff(no_levels), ierr)         
