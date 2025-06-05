@@ -27,7 +27,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! This checks if an environmental variable is defined 
       ! If it is we check if the Kokkos and CPU versions of routines
-      ! are the same
+      ! are the same and always genreate randoms on the host and copy them 
+      ! to the device so everything matches
 
       ! ~~~~~~~~~~~~
       logical      :: kokkos_debug
@@ -1360,7 +1361,59 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       call ShellSetVecType_c(A_array, B_array) 
   
-    end subroutine ShellSetVecType      
+    end subroutine ShellSetVecType   
+    
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine vec_random(comm, input_vec)
+
+      ! Wrapper around vec_random_kokkos to fill vector with random
+
+      ! ~~~~~~~~~~
+      ! Input 
+      type(MPI_Comm), intent(in) :: comm
+      type(tVec), intent(in)     :: input_vec
+
+      PetscRandom          :: rctx
+      PetscErrorCode       :: ierr
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array
+      VecType :: vec_type
+#endif        
+      ! ~~~~~~~~~~
+
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call VecGetType(input_vec, vec_type, ierr)
+      ! Call the kokkos version
+      if (vec_type == VECMPIKOKKOS .OR. vec_type == VECSEQKOKKOS) then
+
+         ! Generate on the host if in debugging so tests can match
+         if (kokkos_debug()) then 
+            call PetscRandomCreate(comm, rctx, ierr)
+            call VecSetRandom(input_vec, rctx, ierr)
+            call PetscRandomDestroy(rctx, ierr)            
+         else
+            A_array = input_vec%v             
+            call vec_random_kokkos(A_array) 
+         end if
+
+      ! The host version
+      else
+
+         call PetscRandomCreate(comm, rctx, ierr)
+         call VecSetRandom(input_vec, rctx, ierr)
+         call PetscRandomDestroy(rctx, ierr)
+
+      end if
+#else
+      call PetscRandomCreate(comm, rctx, ierr)
+      call VecSetRandom(input_vec, rctx, ierr)
+      call PetscRandomDestroy(rctx, ierr)
+#endif       
+
+   end subroutine vec_random    
 
    !-------------------------------------------------------------------------------------------------------------------------------
 

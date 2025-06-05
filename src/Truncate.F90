@@ -29,7 +29,6 @@ module truncate
       PetscErrorCode      :: ierr
       type(tVec)          :: rand_vec, sol_vec, temp_vec
       PetscInt, parameter :: one=1, zero=0
-      PetscRandom         :: rctx
       PetscReal           :: achieved_rel_tol, norm_b
       PetscInt            :: global_rows, global_cols, local_rows, local_cols     
 
@@ -55,14 +54,12 @@ module truncate
             air_data%inv_coarsest_poly_data%buffers, &
             air_data%inv_coarsest_poly_data%coefficients)                       
 
+      call MatCreateVecs(air_data%coarse_matrix(our_level), &
+               rand_vec, PETSC_NULL_VEC, ierr)              
+
       ! This will be a vec of randoms that differ from those used to create the gmres polynomials
       ! We will solve Ax = rand_vec to test how good our coarse solver is
-      call PetscRandomCreate(comm, rctx, ierr)
-      call MatCreateVecs(air_data%coarse_matrix(our_level), &
-               rand_vec, PETSC_NULL_VEC, ierr)            
-
-      call VecSetRandom(rand_vec, rctx, ierr)
-      call PetscRandomDestroy(rctx, ierr)
+      call vec_random(comm, rand_vec)
 
       call VecDuplicate(rand_vec, sol_vec, ierr)
       call VecDuplicate(rand_vec, temp_vec, ierr)

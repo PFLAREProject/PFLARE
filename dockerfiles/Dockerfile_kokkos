@@ -23,8 +23,16 @@ WORKDIR /build
 # Clone PFLARE and run all the tests
 RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
+    echo "Running tests with PFLARE_KOKKOS_DEBUG=1" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
     cd PFLARE && \
     make -j2 && make -j2 tests
+
+# Rerun the tests with PFLARE_KOKKOS_DEBUG=0
+ENV PFLARE_KOKKOS_DEBUG=0
+RUN set -e; \
+    echo "Running tests with PFLARE_KOKKOS_DEBUG=0" && \
+    cd PFLARE && \
+    make -j2 tests
 
 WORKDIR /build/PFLARE
