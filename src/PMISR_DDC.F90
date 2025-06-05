@@ -38,6 +38,7 @@ module pmisr_ddc
       PetscErrorCode :: ierr
       MatType :: mat_type
       integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank, errorcode
+      integer :: device_random_int
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable, target :: measure_local
       PetscInt :: local_rows, local_cols
@@ -63,27 +64,37 @@ module pmisr_ddc
          if (present(zero_measure_c_point)) then
             if (zero_measure_c_point) zero_measure_c_point_int = 1
          end if
-
-         ! Let's generate the random values on the host for now so they match
-         ! for comparisons with pmisr_cpu
          call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
-         allocate(measure_local(local_rows))   
-         call random_seed(size=seed_size)
-         allocate(seed(seed_size))
-         do kfree = 1, seed_size
-            seed(kfree) = comm_rank + 1 + kfree
-         end do   
-         call random_seed(put=seed) 
-         ! Fill the measure with random numbers
-         call random_number(measure_local)
-         deallocate(seed)   
-         
-         measure_local_ptr = c_loc(measure_local)
+
+         ! Do we generate the random numbers on the host or device
+         device_random_int = 1
+         measure_local_ptr = C_NULL_PTR
+         if (kokkos_debug()) then
+            
+            ! Let's generate the random values on the host so they match
+            ! for comparisons with pmisr_cpu            
+            ! They'll be copied onto the device in pmisr_kokkos
+            device_random_int = 0
+
+            allocate(measure_local(local_rows))   
+            call random_seed(size=seed_size)
+            allocate(seed(seed_size))
+            do kfree = 1, seed_size
+               seed(kfree) = comm_rank + 1 + kfree
+            end do   
+            call random_seed(put=seed) 
+            ! Fill the measure with random numbers
+            ! Gives random numbers between 0 <= u < 1
+            call random_number(measure_local)
+            deallocate(seed)   
+            
+            measure_local_ptr = c_loc(measure_local)
+         end if
 
          allocate(cf_markers_local(local_rows))  
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
-         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, cf_markers_local_ptr, zero_measure_c_point_int)
+         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, device_random_int, cf_markers_local_ptr, zero_measure_c_point_int)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then         
