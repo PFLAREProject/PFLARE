@@ -312,7 +312,8 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, device_random_int, cf_markers_local, zero_measure_c_point_int) &
+      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, &
+                     device_random_int, cf_markers_local, zero_measure_c_point_int) &
          bind(c, name="pmisr_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
