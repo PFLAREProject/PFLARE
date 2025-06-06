@@ -307,6 +307,7 @@ module approx_inverse_setup
       ! Neumann polynomial
       else if (inverse_type == PFLAREINV_NEUMANN) then
 
+         coefficients = 1d0
          call calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
                      buffers, inverse_sparsity_order, matrix_free, reuse_mat, inv_matrix)        
                  
