@@ -191,43 +191,28 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
    // ~~~~~~~~~~~~~~
-   PetscInt max_nnz = 0, sparsity_max_nnz = 0, input_max_nnz = 0;
-   // First the non-local rows we might have received from other ranks
-   if (local_rows_submat > 0) {
-      // First get max number of columns from submat
-      Kokkos::parallel_reduce("FindMaxNNZ", local_rows_submat,
-         KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
-            PetscInt row_nnz = device_submat_i[i + 1] - device_submat_i[i];
-            thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
-         },
-         Kokkos::Max<PetscInt>(max_nnz)
-      );
-   }
-   if (local_rows > 0) {     
-      // The input matrix 
+   PetscInt sparsity_max_nnz = 0, sparsity_max_nnz_local = 0, sparsity_max_nnz_nonlocal = 0;
+   if (local_rows > 0) {        
+      // Also consider sparsity matrix row width if needed
       Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows,
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
-            PetscInt row_nnz = device_local_i_input[i + 1] - device_local_i_input[i];
-            if (mpi) row_nnz += device_nonlocal_i_input[i + 1] - device_nonlocal_i_input[i];
+            PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
          },
-         Kokkos::Max<PetscInt>(input_max_nnz)
-      );     
-      // Also consider sparsity matrix row width if needed
-      if(poly_sparsity_order != 1) {
-         Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows,
+         Kokkos::Max<PetscInt>(sparsity_max_nnz_local)
+      );
+      if (mpi)
+      {
+         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", local_rows,
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
-               PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
-               if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
+               PetscInt row_nnz = device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
                thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
             },
-            Kokkos::Max<PetscInt>(sparsity_max_nnz)
-         );
-      }
-   }   
-   // Take the larger of the maxes
-   if (sparsity_max_nnz > max_nnz) max_nnz = sparsity_max_nnz;  
-   if (input_max_nnz > max_nnz) max_nnz = input_max_nnz;
+            Kokkos::Max<PetscInt>(sparsity_max_nnz_nonlocal)
+         );   
+      }  
+      sparsity_max_nnz = sparsity_max_nnz_local + sparsity_max_nnz_nonlocal; 
+   }
 
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -276,7 +261,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // We want scratch space for each row
    // We then want a vals_temp and vals_prev to store the accumulated matrix powers
    // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = max_nnz * 2 * sizeof(PetscScalar) + \
+   size_t scratch_size_per_team = sparsity_max_nnz * 2 * sizeof(PetscScalar) + \
                8 * 2 * sizeof(PetscScalar);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
