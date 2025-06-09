@@ -486,6 +486,18 @@ module c_petsc_interfaces
       end subroutine MatCreateSubMatrix_kokkos
 
    end interface
+   end interface 
+   
+   interface   
+      
+      subroutine MatTranspose_kokkos(A_array, B_array) &
+         bind(c, name="MatTranspose_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+      end subroutine MatTranspose_kokkos         
+ 
+   end interface    
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

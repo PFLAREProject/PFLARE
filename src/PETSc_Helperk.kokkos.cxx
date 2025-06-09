@@ -2510,3 +2510,148 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 
    return;
 }
+
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Does a MatTranspose for a MPIAIJ Kokkos matrix - the petsc version currently uses the host making it slow
+PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y)
+{
+
+   Mat_MPIAIJ *mat_mpi_x = nullptr;
+   Mat mat_local_x = NULL;
+   Mat mat_nonlocal_x = NULL;
+
+   mat_mpi_x = (Mat_MPIAIJ *)(*X)->data;
+   mat_local_x = mat_mpi_x->A;
+   mat_nonlocal_x = mat_mpi_x->B;
+
+   Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
+   Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
+
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   // We have to make sure the device data is up to date before we do the transpose
+   if (mat_local_xkok->a_dual.need_sync_device()) {
+   mat_local_xkok->a_dual.sync_device();
+   mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+   mat_local_xkok->hermitian_updated = PETSC_FALSE;
+   }           
+   if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
+   mat_nonlocal_xkok->a_dual.sync_device();
+   mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+   mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
+   }  
+
+   // Get the number of non-zeros in the matrix
+   PetscInt nnzs_local = 0, nnzs_nonlocal = 0, nnzs = 0;
+   Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local_x->data;
+   nnzs_local = a->nz;
+   a = (Mat_SeqAIJ *)mat_nonlocal_x->data;
+   nnzs_nonlocal = a->nz;
+   nnzs = nnzs_local + nnzs_nonlocal;
+
+   // We're going to use the COO interface to do the preallocation and comms
+   // for the transpose in one go
+   // Then we can use the device values to set the values so should be faster on GPUs
+   // The existing mpiaij version just uses calls to matsetvalues for each row
+   PetscInt *row_indices = NULL, *col_indices = NULL;
+   PetscMalloc1(nnzs, &row_indices);
+   PetscMalloc1(nnzs, &col_indices);
+
+   MPI_Comm MPI_COMM_MATRIX;
+   // Get the comm
+   PetscInt local_rows, local_cols, global_rows, global_cols;
+   PetscObjectGetComm((PetscObject)*X, &MPI_COMM_MATRIX);
+   MatGetLocalSize(*X, &local_rows, &local_cols);
+   MatGetSize(*X, &global_rows, &global_cols);   
+
+   // This returns the global index of the local portion of the matrix
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
+   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
+   MatGetOwnershipRange(*X, &global_row_start_temp, &global_row_end_plus_one_temp);
+   MatGetOwnershipRangeColumn(*X, &global_col_start_temp, &global_col_end_plus_one_temp);
+
+   PetscInt shift = 0;
+   PetscBool symmetric = PETSC_FALSE;
+   PetscBool inode = PETSC_FALSE;
+   const PetscInt *ia, *ja;
+   PetscBool done;
+
+   PetscInt counter = 0;
+   // Let's loop over the local parts
+   MatGetRowIJ(mat_local_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
+   for (PetscInt i = 0; i < local_rows; i++)
+   {
+      const PetscInt ncols = ia[i + 1] - ia[i];
+      for (PetscInt j = 0; j < ncols; j++)
+      {
+         // Transpose the indices
+         // Make sure they're the global indices
+         row_indices[counter] = ja[ia[i] + j] + global_col_start_temp;
+         col_indices[counter] = i + global_row_start_temp;
+         counter++;
+      }
+   }
+   MatRestoreRowIJ(mat_local_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
+
+   // Let's loop over the nonlocal parts
+   MatGetRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
+   for (PetscInt i = 0; i < local_rows; i++)
+   {
+      const PetscInt ncols = ia[i + 1] - ia[i];
+      for (PetscInt j = 0; j < ncols; j++)
+      {
+         // Transpose the indices
+         // Make sure they're the global indices
+         // Have to get the garray for the non-local
+         row_indices[counter] = mat_mpi_x->garray[ja[ia[i] + j]];
+         col_indices[counter] = i + global_row_start_temp;
+         counter++;
+      }
+   }
+   MatRestoreRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
+
+   // Create the output matrix
+   MatCreate(MPI_COMM_MATRIX, Y);
+   // Transposed size
+   MatSetSizes(*Y, (*X)->cmap->n, (*X)->rmap->n, global_cols, global_rows);
+   // Match the output type
+   MatType mat_type;
+   MatGetType(*X, &mat_type);
+   MatSetType(*Y, mat_type);
+   MatSetUp(*Y);
+
+   // Set the indices
+   MatSetPreallocationCOO(*Y, nnzs, row_indices, col_indices);
+   // Can delete indices now
+   (void)PetscFree2(row_indices, col_indices);
+
+   // Now let's set the values on the device
+   // Have to be in the same order as the preallocation
+   Kokkos::View<PetscScalar *> v_d = Kokkos::View<PetscScalar *>("v_d", nnzs);
+
+   // ~~~~~~~~~~~~
+   // Get pointers to the i,j,vals on the device
+   // ~~~~~~~~~~~~
+   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+   PetscMemType mtype;
+   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
+   MatSeqAIJGetCSRAndMemType(mat_local_x, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
+   MatSeqAIJGetCSRAndMemType(mat_nonlocal_x, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
+
+   PetscScalarKokkosView a_local_d, a_nonlocal_d;
+   a_local_d = PetscScalarKokkosView(device_local_vals, nnzs_local);   
+   a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, nnzs_nonlocal); 
+
+   // Copy the values into our values array
+   PetscInt zero = 0;
+   auto v_d_local_range = Kokkos::subview(v_d, Kokkos::make_pair(zero, nnzs_local));
+   Kokkos::deep_copy(v_d_local_range, a_local_d);
+   auto v_d_nonlocal_range = Kokkos::subview(v_d, Kokkos::make_pair(nnzs_local, nnzs));
+   Kokkos::deep_copy(v_d_nonlocal_range, a_nonlocal_d);
+
+   // Set the values
+   MatSetValuesCOO(*Y, v_d.data(), INSERT_VALUES);
+
+   return;
+}
