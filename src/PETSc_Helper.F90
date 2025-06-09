@@ -1022,7 +1022,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine MatTransposeWrapper(x_mat, y_mat)
+   subroutine MatTransposeWrapper(x_mat, y_mat, symbolic)
 
       ! Wrapper around MatAXPY_kokkos
    
@@ -1030,6 +1030,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Input 
       type(tMat), intent(inout) :: y_mat
       type(tMat), intent(in)    :: x_mat
+      logical, intent(in), optional :: symbolic
       
       MPI_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
@@ -1038,7 +1039,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer(c_long_long) :: A_array, B_array
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy;
+      PetscScalar normy
+      integer :: symbolic_int
 #endif      
       ! ~~~~~~~~~~
 
@@ -1055,13 +1057,23 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
          A_array = x_mat%v   
          B_array = y_mat%v      
-         call MatTranspose_kokkos(A_array, B_array) 
+         symbolic_int = 0;
+         if (present(symbolic)) then
+            if (symbolic) symbolic_int = 1
+         end if
+         call MatTranspose_kokkos(A_array, B_array, symbolic_int) 
          y_mat%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
 
             call MatTranspose(x_mat, MAT_INITIAL_MATRIX, temp_mat, ierr)    
+
+            if (symbolic_int == 1) then
+               ! If symbolic and we're trying to compare, we set the values to one
+               call MatSetAllValues(temp_mat, 1d0)
+               call MatSetAllValues(y_mat, 1d0)
+            end if
 
             call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)

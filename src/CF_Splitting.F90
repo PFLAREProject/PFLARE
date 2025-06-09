@@ -127,10 +127,8 @@ module cf_splitting
       ! Now symmetrize if desired
       if (symmetrize) then
 
-         ! We could just do a symbolic transpose and add the two sets of indices together, 
-         ! but its so much simpler to just add the two together - and the symbolic will be the expensive part
-         ! anyway
-         call MatTransposeWrapper(output_mat, transpose_mat)
+         ! Compute transpose, only need symbolic
+         call MatTransposeWrapper(output_mat, transpose_mat, symbolic = .TRUE.)
          ! Kokkos + MPI doesn't have a gpu mataxpy yet, so we have a wrapper around our own version
          call MatAXPYWrapper(output_mat, 1d0, transpose_mat)
 
