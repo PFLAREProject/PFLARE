@@ -130,7 +130,7 @@ module cf_splitting
          ! We could just do a symbolic transpose and add the two sets of indices together, 
          ! but its so much simpler to just add the two together - and the symbolic will be the expensive part
          ! anyway
-         call MatTranspose(output_mat, MAT_INITIAL_MATRIX, transpose_mat, ierr)
+         call MatTransposeWrapper(output_mat, transpose_mat)
          ! Kokkos + MPI doesn't have a gpu mataxpy yet, so we have a wrapper around our own version
          call MatAXPYWrapper(output_mat, 1d0, transpose_mat)
 

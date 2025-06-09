@@ -440,6 +440,17 @@ module c_petsc_interfaces
          PetscScalar, value :: alpha
       end subroutine MatAXPY_kokkos         
  
+   end interface 
+   
+   interface   
+      
+      subroutine MatTranspose_kokkos(A_array, B_array) &
+         bind(c, name="MatTranspose_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+      end subroutine MatTranspose_kokkos         
+ 
    end interface    
 
 ! -------------------------------------------------------------------------------------------------------------------------------
