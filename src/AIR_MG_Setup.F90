@@ -840,7 +840,6 @@ module air_mg_setup
       ! We can now start the comms for the coarse grid solver
       ! ~~~~~~~~~~~
 
-      call timer_start(TIMER_ID_AIR_INVERSE)   
       call MatGetSize(air_data%coarse_matrix(no_levels), global_rows, global_cols, ierr)
 
       ! Set up a GMRES polynomial inverse data for the coarse grid solve
@@ -860,14 +859,16 @@ module air_mg_setup
 
          ! We've already created our coarse solver if we've auto truncated         
          if (.NOT. auto_truncated) then
+            call timer_start(TIMER_ID_AIR_INVERSE)   
+
             call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)                   
+                  air_data%inv_coarsest_poly_data%coefficients)         
+            call timer_finish(TIMER_ID_AIR_INVERSE)
          end if
       end if
-      call timer_finish(TIMER_ID_AIR_INVERSE)  
 
       ! ~~~~~~~~~~~~~~~
       ! Let's setup the PETSc pc we need
@@ -1013,11 +1014,12 @@ module air_mg_setup
          ! ~~~~~~~~~~~~~~~
          ! Finish the comms for the coarse grid solver
          ! ~~~~~~~~~~~~~~~
-         ! Coarse grid polynomial coefficients
-         call timer_start(TIMER_ID_AIR_INVERSE) 
 
          ! We've already created our coarse solver if we've auto truncated
          if (.NOT. auto_truncated) then
+
+            ! Coarse grid polynomial coefficients
+            call timer_start(TIMER_ID_AIR_INVERSE)             
 
             call finish_approximate_inverse(air_data%coarse_matrix(no_levels), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
@@ -1033,7 +1035,10 @@ module air_mg_setup
             if (.NOT. air_data%options%reuse_sparsity) then
                call MatDestroy(air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), ierr)          
             end if                      
-         end if  
+
+            ! Now we've finished the coarse grid solver, output the time
+            call timer_finish(TIMER_ID_AIR_INVERSE)              
+         end if        
 
          ! Use the mf coarse grid solver or not
          ! Let's store the coarse grid solver in inv_A_ff(no_levels)
@@ -1042,10 +1047,7 @@ module air_mg_setup
                call get_nnzs_petsc_sparse(air_data%inv_A_ff(air_data%no_levels), &
                         air_data%inv_A_ff_nnzs(air_data%no_levels))
             end if
-         end if      
-
-         ! Now we've finished the coarse grid solver, output the time
-         call timer_finish(TIMER_ID_AIR_INVERSE)               
+         end if                    
 
          ! This has to be called after we've built the coarse grid inverse
          call KSPSetOperators(ksp_coarse_solver, air_data%coarse_matrix(no_levels), &
