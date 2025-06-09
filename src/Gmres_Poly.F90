@@ -731,6 +731,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       PetscScalar normy;
       logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
       type(c_ptr)  :: coefficients_ptr
+      type(tMat) :: reuse_mat_cpu
 #endif      
       ! ~~~~~~~~~~
 
@@ -794,8 +795,12 @@ end if
             end if            
 
             ! Debug check if the CPU and Kokkos versions are the same
+            ! We send in an empty reuse_mat_cpu here always, as we can't pass through
+            ! the same one Kokkos uses as it now only gets out the non-local rows we need
+            ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
             call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
-                     buffers, coefficients, reuse_mat, temp_mat)
+                     buffers, coefficients, reuse_mat_cpu, temp_mat)
+            call MatDestroy(reuse_mat_cpu, ierr)
                      
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
