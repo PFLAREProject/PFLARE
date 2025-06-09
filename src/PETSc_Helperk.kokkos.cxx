@@ -1777,10 +1777,9 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    {
       // Now we can add the non-local components together
       KokkosCsrMatrix zcsr_nonlocal;
-      // Not sure if the indices are sorted once we have replaced them with the global indices, 
-      // let's just set to false
+      // Global indices are sorted
       KernelHandle    kh_nonlocal;      
-      kh_nonlocal.create_spadd_handle(false); 
+      kh_nonlocal.create_spadd_handle(true); 
 
       KokkosSparse::spadd_symbolic(&kh_nonlocal, xkok_nonlocal->csrmat, ykok_nonlocal->csrmat, zcsr_nonlocal);
       KokkosSparse::spadd_numeric(&kh_nonlocal, alpha, xkok_nonlocal->csrmat, (PetscScalar)1.0, ykok_nonlocal->csrmat, zcsr_nonlocal);
