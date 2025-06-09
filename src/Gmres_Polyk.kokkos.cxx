@@ -11,7 +11,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
                const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
-   PetscInt target_row_locals, local_cols;
+   PetscInt local_rows, local_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
    PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao, cols_ao, rows_ad, cols_ad, size_cols;
@@ -29,7 +29,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
-   MatGetLocalSize(*input_mat, &target_row_locals, &local_cols);
+   MatGetLocalSize(*input_mat, &local_rows, &local_cols);
    // This returns the global index of the local portion of the matrix
    MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
    MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
@@ -63,8 +63,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Duplicate & copy the matrix, but ensure there is a diagonal present
    mat_duplicate_copy_plus_diag_kokkos(mat_sparsity_match, reuse_int_cmat, output_mat);
 
-   PetscInt *col_indices_off_proc_array;
-   IS col_indices;
+   PetscInt *col_indices_off_proc_array, *row_indices_array;
+   IS col_indices, row_indices;
    Mat *submatrices;
 
    // Pull out the local and nonlocal parts of the sparsity match we need
@@ -77,6 +77,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       MatGetSize(mat_local_sparsity, &rows_ad, &cols_ad);
 
       PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array);
+      PetscMalloc1(cols_ao, &row_indices_array);
       size_cols = cols_ad + cols_ao;
       for (PetscInt i = 0; i < cols_ad; i++)
       {
@@ -85,11 +86,14 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       for (PetscInt i = 0; i < cols_ao; i++)
       {
          col_indices_off_proc_array[cols_ad + i] = mat_mpi->garray[i];
+         row_indices_array[i] = mat_mpi->garray[i];
       }           
       
       // Create the sequential IS we want with the cols we want (written as global indices)
       ISCreateGeneral(PETSC_COMM_SELF, size_cols, \
                   col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices);
+      ISCreateGeneral(PETSC_COMM_SELF, cols_ao, \
+                  row_indices_array, PETSC_USE_POINTER, &row_indices);
 
       MatSetOption(*input_mat, MAT_SUBMAT_SINGLEIS, PETSC_TRUE); 
       // @@ will need a separtae row_indices, col_indices should stay the same
@@ -108,6 +112,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
          MatCreateSubMatrices(*input_mat, one, &col_indices, &col_indices, MAT_REUSE_MATRIX, &submatrices);         
       }
       ISDestroy(&col_indices);
+      ISDestroy(&row_indices);
    }
    // In serial
    else
@@ -117,8 +122,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       submatrices[0] = *input_mat;
       mat_local_sparsity = *mat_sparsity_match;
       cols_ad = local_cols;
-      PetscMalloc1(target_row_locals, &col_indices_off_proc_array);
-      for (PetscInt i = 0; i < target_row_locals; i++)
+      PetscMalloc1(local_rows, &col_indices_off_proc_array);
+      for (PetscInt i = 0; i < local_rows; i++)
       {
          col_indices_off_proc_array[i] = i;
       }
@@ -167,22 +172,26 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Add in the 0th order term
    MatShift(*output_mat, coefficients[0]);
 
+   PetscInt local_rows_submat, local_cols_submat;
+   MatGetLocalSize(submatrices[0], &local_rows_submat, &local_cols_submat);
+
    // Find maximum non-zeros per row for sizing scratch memory
    PetscInt max_nnz = 0;
-   if (target_row_locals > 0) {
+   if (local_rows_submat > 0) {
       // First get max row width from submat
-      Kokkos::parallel_reduce("FindMaxNNZ", target_row_locals,
+      Kokkos::parallel_reduce("FindMaxNNZ", local_rows_submat,
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_submat_i[i + 1] - device_submat_i[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
          },
          Kokkos::Max<PetscInt>(max_nnz)
       );
-      
-      // Also consider sparsity matrix row width if needed
+   }
+   PetscInt sparsity_max_nnz = 0;
+   // Also consider sparsity matrix row width if needed
+   if (local_rows > 0) {      
       if(poly_sparsity_order != 1) {
-         PetscInt sparsity_max_nnz = 0;
-         Kokkos::parallel_reduce("FindMaxNNZSparsity", target_row_locals,
+         Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows,
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
                PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
                if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
@@ -190,11 +199,10 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
             },
             Kokkos::Max<PetscInt>(sparsity_max_nnz)
          );
-         
-         // Take the larger of the two maxes
-         if (sparsity_max_nnz > max_nnz) max_nnz = sparsity_max_nnz;
       }
    }   
+   // Take the larger of the two maxes
+   if (sparsity_max_nnz > max_nnz) max_nnz = sparsity_max_nnz;   
 
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -212,11 +220,11 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // matsetvalues to write out to output_mat, rather than writing out to the csr directly
    // ~~~~~~~~~~~~~
 
-   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", target_row_locals);    
+   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);    
    Kokkos::deep_copy(found_diag_row_d, 0); 
 
    Kokkos::parallel_for(
-      Kokkos::TeamPolicy<>(exec, target_row_locals, Kokkos::AUTO()),
+      Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
       KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
       // Row
@@ -246,7 +254,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    size_t scratch_size_per_team = max_nnz * 2 * sizeof(PetscScalar) + \
                8 * 2 * sizeof(PetscScalar);
 
-   Kokkos::TeamPolicy<> policy(exec, target_row_locals, Kokkos::AUTO());
+   Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
    policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
 
