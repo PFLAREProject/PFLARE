@@ -1123,6 +1123,73 @@ logical, protected :: kokkos_debug_global = .FALSE.
          
    end subroutine MatCreateSubMatrixWrapper   
 
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatTransposeWrapper(x_mat, y_mat)
+
+      ! Wrapper around MatAXPY_kokkos
+
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(inout) :: y_mat
+      type(tMat), intent(in)    :: x_mat
+
+      MPI_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errorcode
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array
+      MatType :: mat_type
+      Mat :: temp_mat
+      PetscScalar normy;
+#endif      
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(x_mat, mat_type, ierr)
+      call PetscObjectGetComm(x_mat, MPI_COMM_MATRIX, ierr)  
+      ! Get the comm size 
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
+
+      ! If doing parallel Kokkos
+      if ((mat_type == MATMPIAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) .AND. comm_size /= 1) then
+
+         A_array = x_mat%v   
+         B_array = y_mat%v      
+         call MatTranspose_kokkos(A_array, B_array) 
+         y_mat%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            call MatTranspose(x_mat, MAT_INITIAL_MATRIX, temp_mat, ierr)    
+
+            call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-12 .OR. normy/=normy) then
+               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of MatTranspose do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call MatTranspose(x_mat, MAT_INITIAL_MATRIX, y_mat, ierr)        
+
+      end if
+#else
+         call MatTranspose(x_mat, MAT_INITIAL_MATRIX, y_mat, ierr) 
+#endif  
+
+
+   end subroutine MatTransposeWrapper     
+
    !------------------------------------------------------------------------------------------------------------------------
    
    subroutine generate_identity(input_mat, output_mat)

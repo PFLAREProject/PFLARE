@@ -879,7 +879,7 @@ module air_operators_setup
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
-         call MatTranspose(air_data%restrictors(our_level), MAT_INITIAL_MATRIX, air_data%prolongators(our_level), ierr)
+         call MatTransposeWrapper(air_data%restrictors(our_level), air_data%prolongators(our_level))
          call MatDestroy(air_data%restrictors(our_level), ierr)
       end if
 
