@@ -2531,16 +2531,19 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 
    // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
    // We have to make sure the device data is up to date before we do the transpose
-   if (mat_local_xkok->a_dual.need_sync_device()) {
-   mat_local_xkok->a_dual.sync_device();
-   mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-   mat_local_xkok->hermitian_updated = PETSC_FALSE;
-   }           
-   if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
-   mat_nonlocal_xkok->a_dual.sync_device();
-   mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-   mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
-   }  
+   if (!symbolic_int)
+   {
+      if (mat_local_xkok->a_dual.need_sync_device()) {
+      mat_local_xkok->a_dual.sync_device();
+      mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_local_xkok->hermitian_updated = PETSC_FALSE;
+      }           
+      if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
+      mat_nonlocal_xkok->a_dual.sync_device();
+      mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
+      }  
+   }
 
    // Get the number of non-zeros in the matrix
    PetscInt nnzs_local = 0, nnzs_nonlocal = 0, nnzs = 0;
