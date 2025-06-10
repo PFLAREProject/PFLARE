@@ -250,7 +250,7 @@ module constrain_z_or_w
 
       ! Have to do an explicit transpose if applying constraints to columns of Z
       if (is_z) then
-         call MatTranspose(z_or_w, MAT_INITIAL_MATRIX, row_mat, ierr)
+         call MatTransposeWrapper(z_or_w, row_mat)
       else
          row_mat = z_or_w
       end if
@@ -502,7 +502,7 @@ module constrain_z_or_w
          ! Destroy the transposed original matrix 
          call MatDestroy(row_mat, ierr)
          ! Now go and transpose the new one back to the original sizes
-         call MatTranspose(new_z_or_w, MAT_INITIAL_MATRIX, row_mat, ierr)
+         call MatTransposeWrapper(new_z_or_w, row_mat)
          ! And set the output to the newly constrained mat
          z_or_w = row_mat
          call MatDestroy(new_z_or_w, ierr)
