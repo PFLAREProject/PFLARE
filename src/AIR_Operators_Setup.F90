@@ -80,7 +80,7 @@ module air_operators_setup
          else
             call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)  
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)              
          end if
                      
          call timer_finish(TIMER_ID_AIR_EXTRACT)                             
