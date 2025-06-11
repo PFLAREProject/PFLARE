@@ -1931,7 +1931,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
    PetscLogCpuToGpu(bytes);        
    bytes = is_col_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);      
+   PetscLogCpuToGpu(bytes);  
+   
+   ISRestoreIndices(*is_row, &is_row_indices_ptr);   
+   ISRestoreIndices(*is_col, &is_col_indices_ptr);        
    
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -1993,10 +1996,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       const PetscInt i   = is_row_view_d(i_idx_is_row) - global_row_start;
       const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
-      // We have a custom reduction type defined - ReduceData
-      // Which has both a nnz count for this row, but also tracks whether we 
-      // found the diagonal
-      PetscInt row_result;
+      // nnz count for this row
+      PetscInt row_result = 0;
 
       // Reduce over all the columns
       Kokkos::parallel_reduce(

@@ -778,9 +778,12 @@ module pmisr_ddc
       ! ~~~~~~~~~~~~~
  
       ! Pull out Aff for ease of use
-      call MatCreateSubMatrix(input_mat, &
-            is_fine, is_fine, MAT_INITIAL_MATRIX, &
-            Aff, ierr)
+      ! call MatCreateSubMatrix(input_mat, &
+      !       is_fine, is_fine, MAT_INITIAL_MATRIX, &
+      !       Aff, ierr)
+      call MatCreateSubMatrixWrapper(input_mat, &
+            is_fine, is_fine, &
+            Aff)      
 
       ! Can't put this above because of collective operations in parallel (namely the getsubmatrix)
       ! If we have local points to swap

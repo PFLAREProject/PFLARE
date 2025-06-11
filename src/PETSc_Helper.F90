@@ -1030,8 +1030,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), intent(inout) :: input_mat
-      IS, intent(inout)         :: is_row, is_col
+      type(tMat), intent(in)    :: input_mat
+      IS, intent(in)            :: is_row, is_col
       type(tMat), intent(inout) :: output_mat
 
       MPI_Comm :: MPI_COMM_MATRIX

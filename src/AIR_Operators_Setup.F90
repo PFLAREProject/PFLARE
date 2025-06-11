@@ -78,9 +78,12 @@ module air_operators_setup
                         air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)              
          else
-            call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)              
+            ! call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+            !             air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+            !             air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)
+            call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+                        air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), &
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP))                           
          end if
                      
          call timer_finish(TIMER_ID_AIR_EXTRACT)                             
@@ -141,9 +144,12 @@ module air_operators_setup
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
                   air_data%A_cc(our_level), ierr)             
          else
-            call MatCreateSubMatrix(input_mat, &
-                  air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-                  air_data%A_cc(our_level), ierr)   
+            ! call MatCreateSubMatrix(input_mat, &
+            !       air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
+            !       air_data%A_cc(our_level), ierr)   
+            call MatCreateSubMatrixWrapper(input_mat, &
+                  air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%A_cc(our_level))             
          end if
 
          call timer_start(TIMER_ID_AIR_INVERSE)    
@@ -176,12 +182,18 @@ module air_operators_setup
                air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
                air_data%A_cf(our_level), ierr)                     
       else
-         call MatCreateSubMatrix(input_mat, &
-               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_fc(our_level), ierr) 
-         call MatCreateSubMatrix(input_mat, &
-               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_cf(our_level), ierr)                                                          
+         ! call MatCreateSubMatrix(input_mat, &
+         !       air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
+         !       air_data%A_fc(our_level), ierr) 
+         ! call MatCreateSubMatrix(input_mat, &
+         !       air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+         !       air_data%A_cf(our_level), ierr)  
+         call MatCreateSubMatrixWrapper(input_mat, &
+               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+               air_data%A_fc(our_level)) 
+         call MatCreateSubMatrixWrapper(input_mat, &
+               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), &
+               air_data%A_cf(our_level))                                                                   
       end if
 
       call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -211,9 +223,12 @@ module air_operators_setup
                         air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)              
          else
 
-            call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)  
+            ! call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+            !             air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+            !             air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)  
+            call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+                        air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), &
+                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))            
          end if
 
          if (.NOT. air_data%options%one_point_classical_prolong) then
@@ -224,9 +239,12 @@ module air_operators_setup
                         air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)
             else
-               call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)  
+               ! call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+               !          air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
+               !          air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)  
+               call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+                        air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP))                
             end if
          end if                  
          
