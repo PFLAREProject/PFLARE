@@ -2184,6 +2184,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;   
+   Mat output_mat_local, output_mat_nonlocal;
 
    PetscIntKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;    
@@ -2202,11 +2203,19 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       
       // Log copy with petsc
       size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
-      PetscLogCpuToGpu(bytes);      
+      PetscLogCpuToGpu(bytes);   
+      
+      if (reuse_int)
+      {
+         Mat_MPIAIJ *mat_mpi_output = (Mat_MPIAIJ *)(*output_mat)->data;
+         output_mat_local = mat_mpi_output->A;
+         output_mat_nonlocal = mat_mpi_output->B;
+      }
    }
    else
    {
       mat_local = *input_mat;
+      if (reuse_int) output_mat_local = *output_mat;
    }   
 
    // ~~~~~~~~~~~~
@@ -2256,8 +2265,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 
          is_col_d_d(i) -= global_col_start; // Make local
    });
-
-   Mat output_mat_local, output_mat_nonlocal;
 
    // The diagonal component
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
