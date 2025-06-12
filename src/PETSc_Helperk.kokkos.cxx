@@ -1986,9 +1986,10 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 
       // Execute with scratch memory
       Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-            
+         
+         // i_idx_is_row is the row index into the output
          const PetscInt i_idx_is_row = t.league_rank();
-         // The indices in is_row will be global, but we want the local index
+         // i is the row index into the input
          const PetscInt i = is_row_view_d(i_idx_is_row);       
 
          // number of columns
@@ -2066,9 +2067,10 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       // Execute with scratch memory
       Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
             
+         // i_idx_is_row is the row index into the output
          const PetscInt i_idx_is_row = t.league_rank();
-         // The indices in is_row will be global, but we want the local index
-         const PetscInt i = is_row_view_d(i_idx_is_row);       
+         // i is the row index into the input
+         const PetscInt i = is_row_view_d(i_idx_is_row);     
 
          // number of columns
          PetscInt ncols_local;
