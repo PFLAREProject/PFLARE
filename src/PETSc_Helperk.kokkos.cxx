@@ -2392,7 +2392,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                if (is_col_o_match_d(i+1) > is_col_o_match_d(i))
                {
                   is_col_o_d(is_col_o_match_d(i)) = i;
-                  // Is this not just is_col_o_match_d(i) + isstart??
                   garray_output_d(is_col_o_match_d(i)) = (PetscInt)lcmap_d_ptr[i];
                }
          });      
