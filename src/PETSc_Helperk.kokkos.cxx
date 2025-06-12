@@ -2389,9 +2389,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       // Copy the garray output to the host
       PetscInt *garray_host = NULL; 
       PetscMalloc1(col_ao_output, &garray_host);
-      PetscIntKokkosViewHost colmap_input_h = PetscIntKokkosViewHost(garray_host, col_ao_output);
+      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, col_ao_output);
       // Copy the garray output to the host
-      Kokkos::deep_copy(colmap_input_h, garray_output_d);
+      Kokkos::deep_copy(colmap_output_h, garray_output_d);
       
       // We can now create our MPI matrix
       MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_row, global_cols_col, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
