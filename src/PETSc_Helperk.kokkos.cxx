@@ -1929,6 +1929,8 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       }
    });  
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
    {
@@ -1967,8 +1969,6 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
             Kokkos::Max<PetscInt>(max_nnz_local)
          );
       }        
-
-      auto exec = PetscGetKokkosExecutionSpace();
       
       // Create a team policy with scratch memory allocation
       // We want scratch space for each row
@@ -2043,117 +2043,129 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
             }
          });
       });  
-
-      // Let's make sure everything on the device is finished
-      exec.fence();
    }
-   // // If we're reusing, we can just write directly to the existing views
-   // else
-   // {
-   //    // Get the existing output mats
-   //    if (mpi)
-   //    {
-   //       mat_mpi_output = (Mat_MPIAIJ *)(*output_mat)->data;
-   //       mat_local_output = mat_mpi_output->A;
-   //       mat_nonlocal_output = mat_mpi_output->B;     
-   //    }
-   //    else
-   //    {
-   //       mat_local_output = *output_mat;
-   //    }     
-   //    Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-   //    Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
-   //    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
+   // If we're reusing, we can just write directly to the existing views
+   else
+   {
+      Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>((*output_mat)->spptr);
 
-   //    // Annoying we can't just call MatSeqAIJGetKokkosView
-   //    a_local_d = aijkok_local_output->a_dual.view_device();
-   //    if (mpi) a_nonlocal_d = aijkok_nonlocal_output->a_dual.view_device();
-   //    // Because we might be missing diagonals and we're going to skip some of them 
-   //    // in the writing loop below
-   //    Kokkos::deep_copy(a_local_d, 0.0);
+      // Annoying we can't just call MatSeqAIJGetKokkosView
+      a_local_d = aijkok_local_output->a_dual.view_device();
 
-   //    // Annoyingly there isn't currently the ability to get views for i (or j)
-   //    const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_ouput = nullptr;
-   //    PetscMemType mtype;
-   //    MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype);  
-   //    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype);  
+      // Annoyingly there isn't currently the ability to get views for i (or j)
+      const PetscInt *device_local_i_output = nullptr;
+      PetscMemType mtype;
+      MatSeqAIJGetCSRAndMemType(*output_mat, &device_local_i_output, NULL, NULL, &mtype);  
 
-   //    // Have these point at the existing i pointers - we only need the local j
-   //    ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows_row+1);
-   //    ConstMatRowMapKokkosView j_local_const_d = ConstMatRowMapKokkosView(device_local_j_output, aijkok_local_output->csrmat.nnz());
-   //    ConstMatRowMapKokkosView i_nonlocal_const_d;
-   //    if (mpi) i_nonlocal_const_d = ConstMatRowMapKokkosView(device_nonlocal_i_ouput, local_rows_row+1);         
+      // Have these point at the existing i pointers
+      ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows_row+1);
 
-   //    // Only have to write a but have to be careful as we may not have diagonals in some rows
-   //    // in the input, but they are in the output
-   //    // Loop over the rows - annoying we have const views as this is just the same loop as above
-   //    Kokkos::parallel_for(
-   //       Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_row, Kokkos::AUTO()),
-   //       KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+      // Loop over the rows - annoying we have const views as this is just the same loop as above
+      // Find maximum non-zeros over each of the is_row of the input mat for sizing scratch memory
+      PetscInt max_nnz_local = 0;
+      if (local_rows_row > 0) {
 
-   //          // Row
-   //          const PetscInt i = t.league_rank();
+         Kokkos::parallel_reduce("FindMaxNNZ", local_rows_row,
+            KOKKOS_LAMBDA(const PetscInt i_idx_is_row, PetscInt& thread_max) {
+               // The indices in is_row will be global, but we want the local index
+               const PetscInt i = is_row_view_d(i_idx_is_row);
+               PetscInt row_nnz = device_local_i[i + 1] - device_local_i[i];
+               thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
+            },
+            Kokkos::Max<PetscInt>(max_nnz_local)
+         );
+      }        
+      
+      // Create a team policy with scratch memory allocation
+      // We want scratch space for each row
+      // We will ncols+1 of integers which tell us what the matching indices we have
+      // the last bit of memory is to account for 8-byte alignment for each view
+      size_t scratch_size_per_team = (max_nnz_local+1) * sizeof(PetscInt) + \
+                  8 * 2 * sizeof(PetscScalar);
 
-   //          // Still using i here (the local index into input)
-   //          const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+      Kokkos::TeamPolicy<> policy(exec, local_rows_row, Kokkos::AUTO());
+      // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
+      policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));      
 
-   //          // For over local columns - copy in input
-   //          // We have to skip over the identity entries, which we know are always C points
-   //          Kokkos::parallel_for(
-   //             Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+      // Execute with scratch memory
+      Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
+            
+         const PetscInt i_idx_is_row = t.league_rank();
+         // The indices in is_row will be global, but we want the local index
+         const PetscInt i = is_row_view_d(i_idx_is_row);       
 
-   //             PetscInt offset = 0;
+         // number of columns
+         PetscInt ncols_local;
+         ncols_local = device_local_i[i + 1] - device_local_i[i];
+         ScratchIntView scratch_indices, scratch_indices_nonlocal;
 
-   //             // If we're at or after the diagonal and there isn't actually a diagonal in the input
-   //             // we know the output has a diagonal, so we skip ahead one in the output and 
-   //             // leave it unassigned in the output (it gets set to zero above)
-   //             if (j_local_const_d(i_local_const_d(i) + j) >= i && \
-   //                   !found_diag_row_d(i)) offset = 1;
+         // Allocate views directly on scratch memory
+         // Have to use views here given alignment issues
+         // We have of size ncols+1 to account for the exclusive scan
+         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);  
+         
+         // Initialize scratch
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local+1), [&](const PetscInt j) {
+            scratch_indices(j) = 0;
+         });
 
-   //             a_local_d(i_local_const_d(i) + j + offset) = device_local_vals[device_local_i[i] + j];
-   //          });  
-           
-   //          // For over nonlocal columns - copy in input - identical structure in the off-diag block
-   //          if (mpi)
-   //          {
-   //             PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];         
+         // Team barrier to ensure all threads have finished filling the scratch space
+         t.team_barrier();
 
-   //             Kokkos::parallel_for(
-   //                Kokkos::TeamVectorRange(t, ncols_nonlocal), [&](const PetscInt j) {
+         // Now go and mark which values we're keeping
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+            // Mark this as a match
+            if (smap_d(device_local_j[device_local_i[i] + j])){
+               scratch_indices(j) = 1;
+            }     
+         });    
 
-   //                // We keep the existing local indices in the off-diagonal block here
-   //                // we have all the same columns as input and hence the same garray
-   //                a_nonlocal_d(i_nonlocal_const_d(i) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
-                        
-   //             });          
-   //          }
-   //    });   
+         // Team barrier to ensure all threads have finished filling the scratch space
+         t.team_barrier(); 
+         
+         // Perform exclusive scan over scratch_indices to get our output indices in this row
+         // Have to be careful to go up to ncols_local+1
+         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local+1), 
+            [&](const PetscInt j, int& partial_sum, const bool is_final) {
+               const int input_value = scratch_indices(j);
+               if (is_final) {
+                     scratch_indices(j) = partial_sum;  // Write exclusive prefix
+               }
+               partial_sum += input_value;  // Update running total
+         });
 
-   //    // Have to specify we've modifed data on the device
-   //    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
-   //    aijkok_local_output->a_dual.clear_sync_state();
-   //    aijkok_local_output->a_dual.modify_device();
-   //    aijkok_local_output->transpose_updated = PETSC_FALSE;
-   //    aijkok_local_output->hermitian_updated = PETSC_FALSE;
-   //    // Invalidate diagonals
-   //    Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local_output->data;
-   //    a->idiagvalid  = PETSC_FALSE;
-   //    a->ibdiagvalid = PETSC_FALSE;      
-   //    a->inode.ibdiagvalid = PETSC_FALSE;      
-   //    if (mpi)
-   //    {
-   //       aijkok_nonlocal_output->a_dual.clear_sync_state();
-   //       aijkok_nonlocal_output->a_dual.modify_device();
-   //       aijkok_nonlocal_output->transpose_updated = PETSC_FALSE;
-   //       aijkok_nonlocal_output->hermitian_updated = PETSC_FALSE;
-   //       a = (Mat_SeqAIJ *)mat_nonlocal_output->data;
-   //       a->idiagvalid  = PETSC_FALSE;
-   //       a->ibdiagvalid = PETSC_FALSE;   
-   //       a->inode.ibdiagvalid = PETSC_FALSE;       
-   //    }        
-   //    PetscObjectStateIncrease((PetscObject)(*output_mat));    
+         // Team barrier to ensure all threads have finished scanning scratch_indices
+         t.team_barrier();
 
-   //  }
+         // Now go and write to the output
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+            // We can tell if scratch_indices had 1 in it in this position by comparing the result
+            // of the exclusive scan for this index and the next one
+            if (scratch_indices(j+1) > scratch_indices(j))
+            {
+               // Be careful to use the correct i_idx_is_row index into i_local_const_d here
+               a_local_d(i_local_const_d(i_idx_is_row) + scratch_indices(j)) = device_local_vals[device_local_i[i] + j];            
+            }
+         });
+      });        
+
+      // Have to specify we've modifed data on the device
+      // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
+      aijkok_local_output->a_dual.clear_sync_state();
+      aijkok_local_output->a_dual.modify_device();
+      aijkok_local_output->transpose_updated = PETSC_FALSE;
+      aijkok_local_output->hermitian_updated = PETSC_FALSE;
+      // Invalidate diagonals
+      Mat_SeqAIJ *a = (Mat_SeqAIJ *)(*output_mat)->data;
+      a->idiagvalid  = PETSC_FALSE;
+      a->ibdiagvalid = PETSC_FALSE;      
+      a->inode.ibdiagvalid = PETSC_FALSE;      
+      PetscObjectStateIncrease((PetscObject)(*output_mat));    
+
+   }
+
+   // Let's make sure everything on the device is finished
+   exec.fence();   
 
    // ~~~~~~~~~~~~~~~
    // ~~~~~~~~~~~~~~~   
