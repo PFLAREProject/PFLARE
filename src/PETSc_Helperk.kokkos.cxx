@@ -2023,7 +2023,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          
          // Perform exclusive scan over scratch_indices to get our output indices in this row
          // Have to be careful to go up to ncols_local+1
-         Kokkos::parallel_scan(Kokkos::TeamVectorRange(t, ncols_local+1), 
+         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local+1), 
             [&](const PetscInt j, int& partial_sum, const bool is_final) {
                const int input_value = scratch_indices(j);
                if (is_final) {
@@ -2103,7 +2103,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          
          // Perform exclusive scan over scratch_indices to get our output indices in this row
          // Have to be careful to go up to ncols_local+1
-         Kokkos::parallel_scan(Kokkos::TeamVectorRange(t, ncols_local+1), 
+         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local+1), 
             [&](const PetscInt j, int& partial_sum, const bool is_final) {
                const int input_value = scratch_indices(j);
                if (is_final) {
