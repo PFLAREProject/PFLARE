@@ -2198,7 +2198,11 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
       colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);        
+      Kokkos::deep_copy(colmap_input_d, colmap_input_h);       
+      
+      // Log copy with petsc
+      size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
+      PetscLogCpuToGpu(bytes);      
    }
    else
    {
@@ -2392,6 +2396,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, col_ao_output);
       // Copy the garray output to the host
       Kokkos::deep_copy(colmap_output_h, garray_output_d);
+      bytes = colmap_output_h.extent(0) * sizeof(PetscInt);
+      PetscLogGpuToCpu(bytes);       
       
       // We can now create our MPI matrix
       MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_row, global_cols_col, output_mat_local, output_mat_nonlocal, garray_host, output_mat);
