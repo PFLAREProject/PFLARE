@@ -493,10 +493,9 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fracti
 
    // Pull out Aff for ease of use
    Mat Aff;
-   // MatCreateSubMatrix(*input_mat, \
-   //          *is_fine, *is_fine, MAT_INITIAL_MATRIX, \
-   //          &Aff);
-   MatCreateSubMatrix_kokkos(input_mat, is_fine, is_fine, &Aff);
+   const int reuse_int = 0;
+   // Call our device version
+   MatCreateSubMatrix_kokkos(input_mat, is_fine, is_fine, reuse_int, &Aff);
 
    // Can't put this above because of collective operations in parallel (namely the getsubmatrix)
    // If we have local points to swap

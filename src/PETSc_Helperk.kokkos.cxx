@@ -1835,10 +1835,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 // Does a MatGetSubMatrix for a sequential Kokkos matrix - the petsc version currently uses the host making it very slow
 // is_row_view_d and is_col_view_d must have the local indices in them
 // is_col must be sorted
-PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_view_d, PetscIntKokkosView &is_col_view_d, Mat *output_mat)
+PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_view_d, PetscIntKokkosView &is_col_view_d, const int reuse_int, Mat *output_mat)
 {
-   int reuse_int = 0;
-
    PetscInt local_rows, local_cols;
    PetscInt nnzs_match_local;
 
@@ -2175,7 +2173,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 // This version only works  works if the input IS have the same parallel row/column distribution 
 // as the matrices, ie equivalent to MatCreateSubMatrix_MPIAIJ_SameRowDist
 // is_col must be sorted
-PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_col, Mat *output_mat)
+PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_col, const int reuse_int, Mat *output_mat)
 {
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
@@ -2239,7 +2237,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    });
 
    // Call the sequential code
-   MatCreateSubMatrix_Seq_kokkos(input_mat, is_row_view_d, is_col_view_d, output_mat);
+   MatCreateSubMatrix_Seq_kokkos(input_mat, is_row_view_d, is_col_view_d, reuse_int, output_mat);
 
    return;
 }

@@ -74,15 +74,12 @@ module air_operators_setup
          ! Pull out A_ff
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP)
          if (.NOT. PetscObjectIsNull(temp_mat)) then
-            call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)              
-         else
-            ! call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-            !             air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-            !             air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), ierr)
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), &
+                        air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP))              
+         else
+            call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+                        air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP))                           
          end if
                      
@@ -140,15 +137,12 @@ module air_operators_setup
       if (air_data%options%any_c_smooths .AND. .NOT. air_data%options%full_smoothing_up_and_down) then
 
          if (air_data%allocated_matrices_A_cc(our_level)) then
-            call MatCreateSubMatrix(input_mat, &
-                  air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
-                  air_data%A_cc(our_level), ierr)             
-         else
-            ! call MatCreateSubMatrix(input_mat, &
-            !       air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-            !       air_data%A_cc(our_level), ierr)   
             call MatCreateSubMatrixWrapper(input_mat, &
-                  air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
+                  air_data%A_cc(our_level))             
+         else
+            call MatCreateSubMatrixWrapper(input_mat, &
+                  air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_cc(our_level))             
          end if
 
@@ -175,24 +169,18 @@ module air_operators_setup
       call timer_start(TIMER_ID_AIR_EXTRACT)             
                         
       if (air_data%allocated_matrices_A_ff(our_level)) then
-         call MatCreateSubMatrix(input_mat, &
-               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
-               air_data%A_fc(our_level), ierr)   
-      call MatCreateSubMatrix(input_mat, &
-               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-               air_data%A_cf(our_level), ierr)                     
-      else
-         ! call MatCreateSubMatrix(input_mat, &
-         !       air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-         !       air_data%A_fc(our_level), ierr) 
-         ! call MatCreateSubMatrix(input_mat, &
-         !       air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-         !       air_data%A_cf(our_level), ierr)  
          call MatCreateSubMatrixWrapper(input_mat, &
-               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
+               air_data%A_fc(our_level))   
+      call MatCreateSubMatrixWrapper(input_mat, &
+               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
+               air_data%A_cf(our_level))                     
+      else 
+         call MatCreateSubMatrixWrapper(input_mat, &
+               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                air_data%A_fc(our_level)) 
          call MatCreateSubMatrixWrapper(input_mat, &
-               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), &
+               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                air_data%A_cf(our_level))                                                                   
       end if
 
@@ -218,16 +206,12 @@ module air_operators_setup
          ! Drop the entries from A_cf
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP)
          if (.NOT. PetscObjectIsNull(temp_mat)) then
-            call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)              
-         else
-
-            ! call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-            !             air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-            !             air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), ierr)  
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), &
+                        air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))              
+         else
+            call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+                        air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))            
          end if
 
@@ -235,15 +219,12 @@ module air_operators_setup
             ! Drop the entries from A_fc
             temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP)
             if (.NOT. PetscObjectIsNull(temp_mat)) then
-               call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)
-            else
-               ! call MatCreateSubMatrix(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-               !          air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-               !          air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), ierr)  
                call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
-                        air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                        air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP))
+            else
+               call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
+                        air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP))                
             end if
          end if                  

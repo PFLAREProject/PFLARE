@@ -1021,7 +1021,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, output_mat)
+   subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, reuse, output_mat)
 
       ! Wrapper around MatCreateSubMatrix_kokkos
       ! Only works if the input IS have the same parallel row/column distribution 
@@ -1032,6 +1032,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Input 
       type(tMat), intent(in)    :: input_mat
       IS, intent(in)            :: is_row, is_col
+      MatReuse, intent(in)      :: reuse
       type(tMat), intent(inout) :: output_mat
 
       MPI_Comm :: MPI_COMM_MATRIX
@@ -1039,6 +1040,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
+      integer :: reuse_int
+      logical :: reuse_logical
       MatType :: mat_type
       Mat :: temp_mat
       PetscScalar normy
@@ -1056,11 +1059,16 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
+         ! Are we reusing
+         reuse_logical = reuse == MAT_REUSE_MATRIX
+         reuse_int = 0
+         if (reuse_logical) reuse_int = 1
+
          A_array = input_mat%v   
          B_array = output_mat%v      
          is_row_ptr = is_row%v
          is_col_ptr = is_col%v
-         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, B_array) 
+         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, reuse_int, B_array)
          output_mat%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -1083,12 +1091,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       else
 
          call MatCreateSubMatrix(input_mat, is_row, is_col, &
-               MAT_INITIAL_MATRIX, output_mat, ierr)        
+               reuse, output_mat, ierr)        
 
       end if
 #else
          call MatCreateSubMatrix(input_mat, is_row, is_col, &
-               MAT_INITIAL_MATRIX, output_mat, ierr) 
+               reuse, output_mat, ierr) 
 #endif  
          
    end subroutine MatCreateSubMatrixWrapper   
