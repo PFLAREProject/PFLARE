@@ -1019,6 +1019,88 @@ logical, protected :: kokkos_debug_global = .FALSE.
          
    end subroutine MatAXPYWrapper   
 
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, reuse, output_mat)
+
+      ! Wrapper around MatCreateSubMatrix_kokkos
+      ! Only works if the input IS have the same parallel row/column distribution 
+      ! as the matrices
+      ! is_col must be sorted
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in)    :: input_mat
+      IS, intent(in)            :: is_row, is_col
+      MatReuse, intent(in)      :: reuse
+      type(tMat), intent(inout) :: output_mat
+
+      MPI_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errorcode
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
+      integer :: reuse_int
+      logical :: reuse_logical
+      MatType :: mat_type
+      Mat :: temp_mat
+      PetscScalar normy
+#endif      
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
+      ! Get the comm size 
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
+
+      ! If doing parallel Kokkos
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         ! Are we reusing
+         reuse_logical = reuse == MAT_REUSE_MATRIX
+         reuse_int = 0
+         if (reuse_logical) reuse_int = 1
+
+         A_array = input_mat%v   
+         B_array = output_mat%v      
+         is_row_ptr = is_row%v
+         is_col_ptr = is_col%v
+         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, reuse_int, B_array)
+         output_mat%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            call MatCreateSubMatrix(input_mat, is_row, is_col, &
+                  MAT_INITIAL_MATRIX, temp_mat, ierr)    
+
+            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            if (normy .gt. 1d-12 .OR. normy/=normy) then
+               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of MatCreateSubMatrix do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call MatCreateSubMatrix(input_mat, is_row, is_col, &
+               reuse, output_mat, ierr)        
+
+      end if
+#else
+         call MatCreateSubMatrix(input_mat, is_row, is_col, &
+               reuse, output_mat, ierr) 
+#endif  
+         
+   end subroutine MatCreateSubMatrixWrapper   
+
    !------------------------------------------------------------------------------------------------------------------------
    
    subroutine generate_identity(input_mat, output_mat)

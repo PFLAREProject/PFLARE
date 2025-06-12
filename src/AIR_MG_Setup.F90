@@ -355,14 +355,14 @@ module air_mg_setup
 
             ! If its not matdiagonal we can do reuse as normal
             else
-               call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
+               call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
                      air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                     air_data%A_ff(our_level), ierr)         
+                     air_data%A_ff(our_level))         
             end if
          else
-            call MatCreateSubMatrix(air_data%coarse_matrix(our_level), &
+            call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
                   air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                  air_data%A_ff(our_level), ierr)
+                  air_data%A_ff(our_level))                 
          end if
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
