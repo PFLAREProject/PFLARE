@@ -351,7 +351,7 @@ module cf_splitting
       PetscErrorCode :: ierr
       integer, dimension(:), allocatable, target :: cf_markers_local
       integer :: its
-
+      logical :: need_intermediate_is
 #if defined(PETSC_HAVE_KOKKOS)                     
       type(c_ptr)  :: cf_markers_local_ptr
       MatType :: mat_type
@@ -359,11 +359,30 @@ module cf_splitting
 
       ! ~~~~~~  
 
+      ! In Kokkos the DDC and PMISR do everything on the device
+      ! that means we don't need to create intermediate is_fine and is_coarse ISs
+      need_intermediate_is = .TRUE.
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then 
+
+            ! If kokkos debugging is on, the pmisr and ddc do 
+            ! copy to the host after they finish in order to do the comparisons
+            ! and hence we do need the intermediate ISs
+            if (.NOT. kokkos_debug()) then 
+               need_intermediate_is = .FALSE.  
+            end if
+      end if                     
+#endif
+
       ! Call the first pass CF splitting with a symmetrized strength matrix
       call first_pass_splitting(input_mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
 
       ! Create the IS for the CF splittings
-      call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)   
+      if (need_intermediate_is) call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)   
       
       ! Only do the DDC pass if we're doing PMISR_DDC
       ! and if we haven't requested an exact independent set, ie strong threshold is not zero
@@ -372,10 +391,12 @@ module cf_splitting
 
          do its = 1, ddc_its
             ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
+            ! (or the equivalent device cf_markers)
             call ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
 
-            ! If we did anything in our ddc second pass
-            if (fraction_swap /= 0d0) then
+            ! If we did anything in our ddc second pass and hence need to rebuild
+            ! the is_fine and is_coarse
+            if (fraction_swap /= 0d0 .AND. need_intermediate_is) then
             
                ! These are now outdated
                call ISDestroy(is_fine, ierr)
@@ -389,16 +410,22 @@ module cf_splitting
 
       ! The Kokkos PMISR and DDC no longer copy back to the host to save copies
       ! during an arbritrary number of iterations above     
+      ! We need to explicitly copy the cf_markers_local back to the host once 
+      ! we've finished both the PMISR and all the DDC iterations      
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then 
+         call MatGetType(input_mat, mat_type, ierr)
+         if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+               mat_type == MATAIJKOKKOS) then 
 
          cf_markers_local_ptr = c_loc(cf_markers_local)
          ! This copies the device cf markers back to the host and destroys 
          ! the device data          
-         call copy_cf_markers_d2h_and_delete(cf_markers_local_ptr)  
+         call copy_cf_markers_d2h_and_delete(cf_markers_local_ptr)                   
+         if (.NOT. kokkos_debug()) then 
+            ! Create the host is_fine and is_coarse ISs
+            call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)  
+         end if
       end if    
 #endif       
 

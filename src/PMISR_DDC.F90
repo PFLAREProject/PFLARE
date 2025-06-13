@@ -670,7 +670,7 @@ module pmisr_ddc
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
 #if defined(PETSC_HAVE_KOKKOS)                     
-      integer(c_long_long) :: A_array, indices
+      integer(c_long_long) :: A_array
       PetscErrorCode :: ierr
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
@@ -692,7 +692,6 @@ module pmisr_ddc
             mat_type == MATAIJKOKKOS) then  
 
          A_array = input_mat%v  
-         indices = is_fine%v
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -702,7 +701,7 @@ module pmisr_ddc
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, indices, fraction_swap)
+         call ddc_kokkos(A_array, fraction_swap)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then  
