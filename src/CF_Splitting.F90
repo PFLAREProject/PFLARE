@@ -349,16 +349,45 @@ module cf_splitting
       type(tIS), intent(inout)            :: is_fine, is_coarse
 
       PetscErrorCode :: ierr
-      integer, dimension(:), allocatable :: cf_markers_local
+      integer, dimension(:), allocatable, target :: cf_markers_local
       integer :: its
+      logical :: need_intermediate_is
+#if defined(PETSC_HAVE_KOKKOS)                     
+      MatType :: mat_type
+      integer(c_long_long) :: A_array, is_fine_array, is_coarse_array
+      type(tIS) :: is_fine_kokkos, is_coarse_kokkos
+      PetscBool :: fine_equal, coarse_equal
+#endif       
 
       ! ~~~~~~  
+
+      ! In Kokkos the DDC and PMISR do everything on the device
+      ! that means we don't need to create intermediate is_fine and is_coarse ISs
+      need_intermediate_is = .TRUE.
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then 
+
+            ! If kokkos debugging is on, the pmisr and ddc do 
+            ! copy to the host after they finish in order to do the comparisons
+            ! and hence we do need the intermediate ISs
+            ! If doing pmis agg, the initial pmis will be on the device so always
+            ! trigger the d2h copy and build the intermediate is
+            if (.NOT. kokkos_debug() .AND. &
+                  (cf_splitting_type /= CF_AGG .AND. cf_splitting_type /= CF_PMIS_AGG)) then 
+               need_intermediate_is = .FALSE.  
+            end if
+      end if                     
+#endif
 
       ! Call the first pass CF splitting with a symmetrized strength matrix
       call first_pass_splitting(input_mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
 
       ! Create the IS for the CF splittings
-      call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)   
+      if (need_intermediate_is) call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)   
       
       ! Only do the DDC pass if we're doing PMISR_DDC
       ! and if we haven't requested an exact independent set, ie strong threshold is not zero
@@ -367,10 +396,12 @@ module cf_splitting
 
          do its = 1, ddc_its
             ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
+            ! (or the equivalent device cf_markers, is_fine is ignored if on the device)
             call ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
 
-            ! If we did anything in our ddc second pass
-            if (fraction_swap /= 0d0) then
+            ! If we did anything in our ddc second pass and hence need to rebuild
+            ! the is_fine and is_coarse
+            if (fraction_swap /= 0d0 .AND. need_intermediate_is) then
             
                ! These are now outdated
                call ISDestroy(is_fine, ierr)
@@ -381,6 +412,66 @@ module cf_splitting
             end if
          end do
       end if
+
+      ! The Kokkos PMISR and DDC no longer copy back to the host to save copies
+      ! during an arbritrary number of iterations above     
+      ! We need to explicitly copy the cf_markers_local back to the host once 
+      ! we've finished both the PMISR and all the DDC iterations  
+      ! And we also need to build the host IS's    
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         ! The initial pmis will be on the device, so need to destroy
+         ! Intermediate ISs are created in that case
+         if (cf_splitting_type == CF_PMIS_AGG) then
+            ! Destroys the device cf_markers_local
+            call delete_device_cf_markers()
+         end if
+      
+         ! Aggregation is not on the device at all
+         if (cf_splitting_type /= CF_AGG .AND. cf_splitting_type /= CF_PMIS_AGG) then
+
+            A_array = input_mat%v
+            is_fine_array = is_fine_kokkos%v
+            is_coarse_array = is_coarse_kokkos%v
+
+            ! Create the host is_fine and is_coarse based on device cf_markers
+            call create_cf_is_kokkos(A_array, is_fine_array, is_coarse_array)  
+            is_fine_kokkos%v = is_fine_array
+            is_coarse_kokkos%v = is_coarse_array         
+            
+            ! If we are doing debugging the IS's are already created above
+            ! so let's compare them to our kokkos ones
+            if (kokkos_debug()) then 
+
+               call ISEqual(is_fine, is_fine_kokkos, fine_equal, ierr)
+               if (.NOT. fine_equal) then
+                  print *, "Kokkos and CPU versions of create_cf_is_kokkos for fine do not match"
+                  call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, ierr)
+               end if
+               call ISEqual(is_coarse, is_coarse_kokkos, coarse_equal, ierr)
+               if (.NOT. coarse_equal) then
+                  print *, "Kokkos and CPU versions of create_cf_is_kokkos for coarse do not match"
+                  call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, ierr)
+               end if
+               ! Destroy the extra IS's
+               call ISDestroy(is_fine_kokkos, ierr)
+               call ISDestroy(is_coarse_kokkos, ierr)
+
+            ! If we're not debugging just copy over the ones we built on the device            
+            else
+               is_fine = is_fine_kokkos
+               is_coarse = is_coarse_kokkos
+            end if
+
+            ! Destroys the device cf_markers_local
+            call delete_device_cf_markers()
+         end if
+
+      end if    
+#endif       
 
       deallocate(cf_markers_local)
 
