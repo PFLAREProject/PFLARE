@@ -27,15 +27,26 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Delete the global cf_markers_local_d
+PETSC_INTERN void delete_device_cf_markers()
+{
+   // Delete the device view - this assigns an empty view
+   // and hence the old view has its ref counter decremented
+   cf_markers_local_d = intKokkosView(); 
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Copy the global cf_markers_local_d back to the host and delete
 PETSC_INTERN void copy_cf_markers_d2h_and_delete(int *cf_markers_local)
 {
    // Copy to host
    copy_cf_markers_d2h(cf_markers_local);
 
-   // Delete the device view - this assigns an empty view
-   // and hence the old view has its ref counter decremented
-   cf_markers_local_d = intKokkosView(); 
+   // Delete the device view
+   delete_device_cf_markers();
 
    return;
 }
@@ -472,6 +483,61 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Creates the device local indices for F or C points based on the global cf_markers_local_d
+PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d)
+{
+   PetscInt local_rows, local_cols;
+   MatGetLocalSize(*input_mat, &local_rows, &local_cols); 
+
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
+
+   // ~~~~~~~~~~~~
+   // Get the F point local indices from cf_markers_local_d
+   // ~~~~~~~~~~~~   
+   PetscIntKokkosView point_offsets_d("point_offsets_d", local_rows+1);
+
+   // Doing an exclusive scan to get the offsets for our local indices
+   // Doing one larger so we can get the total number of points
+   Kokkos::parallel_scan("point_offsets_d_scan",
+      Kokkos::RangePolicy<>(0, local_rows+1),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
+         bool is_f_point = false;
+         if (i < local_rows) { // Predicate is based on original data up to local_rows-1
+               is_f_point = (cf_markers_d(i) == match_cf);
+         }         
+         if (final_pass) {
+               point_offsets_d(i) = update;
+         }
+         if (is_f_point) {
+               update++;
+         }
+      }
+   ); 
+
+   // The last entry in point_offsets_d is the total number of points that match match_cf
+   PetscInt local_rows_row = 0;
+   Kokkos::deep_copy(local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
+
+   // This will be equivalent to is_fine - global_row_start, ie the local indices
+   is_local_d = PetscIntKokkosView("is_local_d", local_rows_row);    
+
+   // ~~~~~~~~~~~~
+   // Write the local indices
+   // ~~~~~~~~~~~~     
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
+         // Is this point fine? F_POINT == -1
+         if (cf_markers_d(i) == -1) {
+            // point_offsets_d(i) gives the correct local index
+            is_local_d(point_offsets_d(i)) = i;
+         }              
+   });
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
@@ -513,47 +579,13 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
-   // ~~~~~~~~~~~~   
-   PetscIntKokkosView f_point_offsets_d("f_point_offsets_d", local_rows+1);
-
-   // Doing an exclusive scan to get the offsets for our local F indices
-   // Doing one larger so we can get the total number of F points
-   Kokkos::parallel_scan("f_point_offsets_d_scan",
-      Kokkos::RangePolicy<>(0, local_rows+1),
-      KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
-         bool is_f_point = false;
-         if (i < local_rows) { // Predicate is based on original data up to local_rows-1
-               is_f_point = (cf_markers_d(i) == -1);
-         }         
-         if (final_pass) {
-               f_point_offsets_d(i) = update;
-         }
-         if (is_f_point) {
-               update++;
-         }
-      }
-   ); 
-
-   // The last entry in f_point_offsets_d is the total number of F points
-   PetscInt local_rows_row = 0;
-   Kokkos::deep_copy(local_rows_row, Kokkos::subview(f_point_offsets_d, local_rows));
+   // ~~~~~~~~~~~~
+   const int match_cf = -1; // F_POINT == -1
+   create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
+   PetscInt local_rows_row = is_fine_local_d.extent(0);
 
    // Create device memory for the diag_dom_ratio
-   diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_row); 
-   // This will be equivalent to is_fine - global_row_start, ie the local indices
-   is_fine_local_d = PetscIntKokkosView("is_fine_local_d", local_rows_row);    
-
-   // ~~~~~~~~~~~~
-   // Write the local indices
-   // ~~~~~~~~~~~~     
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
-         // Is this point fine? F_POINT == -1
-         if (cf_markers_d(i) == -1) {
-            // f_point_offsets_d(i) gives the correct local index
-            is_fine_local_d(f_point_offsets_d(i)) = i;
-         }              
-   });
+   diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_row);    
 
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
