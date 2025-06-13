@@ -523,7 +523,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
          bool is_f_point = false;
          if (i < local_rows) { // Predicate is based on original data up to local_rows-1
-               is_f_point = (cf_markers_local_d(i) == -1);
+               is_f_point = (cf_markers_d(i) == -1);
          }         
          if (final_pass) {
                f_point_offsets_d(i) = update;
