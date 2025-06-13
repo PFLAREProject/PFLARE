@@ -509,14 +509,54 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
    });
 
    // ~~~~~~~~~~~~~~~
-   // Can now go and compute the sum over the diagonal component
+   // Can now go and compute the diagonal dominance sums
+   // ~~~~~~~~~~~~~~~
+   Vec x, lvec;
+   PetscScalarKokkosView x_d, lvec_d;
+   PetscScalar *x_d_ptr = NULL;
+   PetscScalar *lvec_d_ptr = NULL;
+   PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
+   PetscMemType mtype;
+
+   // The off-diagonal component requires some comms which we can start now
+   if (mpi)
+   {
+      // Basically a copy of ISGetSeqIS_SameColDist_Private
+      /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
+      lvec = mat_mpi->lvec;
+      MatCreateVecs(*input_mat, &x, NULL);
+      VecSet(x, -1.0);
+
+      // Use the vecs in the scatter provided by the input mat
+      VecGetKokkosView(x, &x_d);
+      VecGetKokkosView(lvec, &lvec_d);
+
+      // Loop over all the cols in is_col
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {      
+
+            x_d(is_row_d_d(i)) = (PetscScalar)is_row_d_d(i); 
+      });
+
+      x_d_ptr = x_d.data();      
+      lvec_d_ptr = lvec_d.data();       
+
+      // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
+      // one of the kokkos backends like PETSC_MEMTYPE_HIP
+      PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
+                  mem_type, x_d_ptr,
+                  mem_type, lvec_d_ptr,
+                  MPI_REPLACE);
+   }   
+
+   // ~~~~~~~~~~~~~~~
+   // Do the local component so work/comms are overlapped
    // ~~~~~~~~~~~~~~~
 
    // ~~~~~~~~~~~~
-   // Get pointers to the i,j,vals on the device
+   // Get pointers to the local i,j,vals on the device
    // ~~~~~~~~~~~~
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr;
-   PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr;
    MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
 
@@ -586,59 +626,26 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
    }
 
    // ~~~~~~~~~~~~~~~
-   // Now need to go and add the non-local entries to diag_dom_ratio_d
+   // Finish the comms and add the non-local entries to diag_dom_ratio_d
    // before we divide by the diagonal entry
    // ~~~~~~~~~~~~~~~
 
    // The off-diagonal component requires some comms
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
    if (mpi)
-   {
-      // Basically a copy of ISGetSeqIS_SameColDist_Private
-      /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
-      Vec x;
-      Vec lvec = mat_mpi->lvec;
-      MatCreateVecs(*input_mat, &x, NULL);
-      VecSet(x, -1.0);
-
-      // Use the vecs in the scatter provided by the input mat
-      PetscScalarKokkosView x_d;
-      VecGetKokkosView(x, &x_d);
-      PetscScalarKokkosView lvec_d;
-      VecGetKokkosView(lvec, &lvec_d);
-
-      // Loop over all the cols in is_col
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {      
-
-            x_d(is_row_d_d(i)) = (PetscScalar)is_row_d_d(i); 
-      });
-
-      PetscScalar *x_d_ptr = NULL;
-      x_d_ptr = x_d.data();      
-      PetscScalar *lvec_d_ptr = NULL;
-      lvec_d_ptr = lvec_d.data();       
-
-      // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
-      // one of the kokkos backends like PETSC_MEMTYPE_HIP
-      PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;      
-      PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
-                  mem_type, x_d_ptr,
-                  mem_type, lvec_d_ptr,
-                  MPI_REPLACE);        
-                  
-      // ~~~~~~~~~~~~
-      // Get pointers to the i,j,vals on the device
-      // ~~~~~~~~~~~~
-      const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-      PetscScalar *device_nonlocal_vals = nullptr;
-      MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);                  
-
+   {           
       // Finish the x scatter
       PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, x_d_ptr, lvec_d_ptr, MPI_REPLACE);      
       // We're done with x now
       VecRestoreKokkosView(x, &x_d);
       VecDestroy(&x);
+
+      // ~~~~~~~~~~~~
+      // Get pointers to the nonlocal i,j,vals on the device
+      // ~~~~~~~~~~~~
+      const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+      PetscScalar *device_nonlocal_vals = nullptr;        
+      MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);        
 
       // Sum up the nonlocal matching entries into diag_dom_ratio_d
       if (cols_ao > 0) 
@@ -679,7 +686,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
       }       
 
       VecRestoreKokkosView(lvec, &lvec_d);
-      
    }
 
    // ~~~~~~~~~~~~~
