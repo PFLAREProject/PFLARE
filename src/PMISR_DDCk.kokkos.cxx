@@ -90,7 +90,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
 
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
-   cf_markers_local_d = intKokkosViewHost("cf_markers_local_d", local_rows);
+   cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
    PetscScalar *cf_markers_local_real_d_ptr = NULL, *cf_markers_nonlocal_real_d_ptr = NULL;
    // The real equivalents so we can use the existing petscsf from the input matrix
    PetscScalarKokkosView cf_markers_local_real_d("cf_markers_local_real_d", local_rows);
