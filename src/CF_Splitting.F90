@@ -349,8 +349,13 @@ module cf_splitting
       type(tIS), intent(inout)            :: is_fine, is_coarse
 
       PetscErrorCode :: ierr
-      integer, dimension(:), allocatable :: cf_markers_local
+      integer, dimension(:), allocatable, target :: cf_markers_local
       integer :: its
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      type(c_ptr)  :: cf_markers_local_ptr
+      MatType :: mat_type
+#endif       
 
       ! ~~~~~~  
 
@@ -381,6 +386,21 @@ module cf_splitting
             end if
          end do
       end if
+
+      ! The Kokkos PMISR and DDC no longer copy back to the host to save copies
+      ! during an arbritrary number of iterations above     
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then 
+
+         cf_markers_local_ptr = c_loc(cf_markers_local)
+         ! This copies the device cf markers back to the host and destroys 
+         ! the device data          
+         call copy_cf_markers_d2h_and_delete(cf_markers_local_ptr)  
+      end if    
+#endif       
 
       deallocate(cf_markers_local)
 

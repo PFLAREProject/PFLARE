@@ -83,10 +83,15 @@ module pmisr_ddc
          allocate(cf_markers_local(local_rows))  
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
-         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, cf_markers_local_ptr, zero_measure_c_point_int)
+         ! Creates a cf_markers on the device
+         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then         
+
+            ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls 
+            ! use the device data
+            call copy_cf_markers_d2h(cf_markers_local_ptr)
             call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local_two, zero_measure_c_point)  
             
             if (any(cf_markers_local /= cf_markers_local_two)) then
@@ -696,10 +701,15 @@ module pmisr_ddc
             cf_markers_local_two = cf_markers_local
          end if
 
-         call ddc_kokkos(A_array, indices, fraction_swap, cf_markers_local_ptr)
+         ! Modifies the existing device cf_markers created by the pmisr
+         call ddc_kokkos(A_array, indices, fraction_swap)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then  
+
+            ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
+            ! use the existing device data
+            call copy_cf_markers_d2h(cf_markers_local_ptr)            
             call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local_two)  
 
             if (any(cf_markers_local /= cf_markers_local_two)) then

@@ -4,10 +4,48 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
+// This is a device copy of the cf markers on a given level
+// to save having to copy it to/from the host between pmisr and ddc calls
+intKokkosView cf_markers_local_d;
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Copy the global cf_markers_local_d back to the host
+PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
+{
+   // Host wrapper for cf_markers_local
+   intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
+
+   // Now copy device cf_markers_local_d back to host
+   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
+   // Log copy with petsc
+   size_t bytes = cf_markers_local_d.extent(0) * sizeof(int);
+   PetscLogGpuToCpu(bytes);
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Copy the global cf_markers_local_d back to the host and delete
+PETSC_INTERN void copy_cf_markers_d2h_and_delete(int *cf_markers_local)
+{
+   // Copy to host
+   copy_cf_markers_d2h(cf_markers_local);
+
+   // Delete the device view - this assigns an empty view
+   // and hence the old view has its ref counter decremented
+   cf_markers_local_d = intKokkosView(); 
+
+   return;
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // PMISR cf splitting but on the device
-PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, int *cf_markers_local, const int zero_measure_c_point_int)
+// This no longer copies back to the host pointer cf_markers_local at the end
+// You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
+PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
@@ -51,9 +89,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
 
-   // Host and device memory for the cf_markers - be careful these aren't petsc ints
-   intKokkosViewHost cf_markers_local_h(cf_markers_local, local_rows);
-   intKokkosView cf_markers_local_d("cf_markers_local_d", local_rows);
+   // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
+   cf_markers_local_d = intKokkosViewHost("cf_markers_local_d", local_rows);
    PetscScalar *cf_markers_local_real_d_ptr = NULL, *cf_markers_nonlocal_real_d_ptr = NULL;
    // The real equivalents so we can use the existing petscsf from the input matrix
    PetscScalarKokkosView cf_markers_local_real_d("cf_markers_local_real_d", local_rows);
@@ -426,20 +463,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int) cf_markers_local_d(i) *= -1;
    });
 
-   // Now copy device cf_markers_local_d back to host
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
-   // Log copy with petsc
-   bytes = cf_markers_local_d.extent(0) * sizeof(int);
-   PetscLogGpuToCpu(bytes);
-
    return;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Computes the diagonal dominance ratio of the input matrix over fine points in cf_markers_local_d
+// Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
 // This code is very similar to MatCreateSubMatrix_kokkos
-PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, intKokkosView &cf_markers_local_d, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
+PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
 {
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
@@ -690,22 +721,15 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, intKokkosView &cf_marke
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// ddc cleanup but on the device
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fraction_swap, int *cf_markers_local)
+// ddc cleanup but on the device - uses the global variable cf_markers_local_d
+// This no longer copies back to the host pointer cf_markers_local at the end
+// You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fraction_swap)
 {
    PetscInt local_rows, local_cols;
 
    // Get the comm
-   MatGetLocalSize(*input_mat, &local_rows, &local_cols);
-
-   // Host and device memory for the cf_markers - be careful these aren't petsc ints
-   intKokkosViewHost cf_markers_local_h(cf_markers_local, local_rows);
-   intKokkosView cf_markers_local_d("cf_markers_local_d", local_rows);   
-   // Now copy cf markers to device
-   Kokkos::deep_copy(cf_markers_local_d, cf_markers_local_h);  
-   // Log copy with petsc
-   size_t bytes = cf_markers_local_h.extent(0) * sizeof(int);
-   PetscLogCpuToGpu(bytes);     
+   MatGetLocalSize(*input_mat, &local_rows, &local_cols); 
 
    PetscInt local_rows_aff = 0;
    ISGetLocalSize(*is_fine, &local_rows_aff);
@@ -728,7 +752,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fracti
    auto is_fine_local_d = PetscIntKokkosView("is_fine_local_d", local_rows_aff);    
    // Compute the diagonal dominance ratio over the fine points in cf_markers_local_d
    // ie the diag domminance ratio of Aff
-   MatDiagDomRatio_kokkos(input_mat, cf_markers_local_d, is_fine_local_d, diag_dom_ratio_d);
+   MatDiagDomRatio_kokkos(input_mat, is_fine_local_d, diag_dom_ratio_d);
 
    // Can't put this above because of collective operations in parallel (namely the MatDiagDomRatio_kokkos)
    // If we have local points to swap
@@ -799,12 +823,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fracti
                cf_markers_local_d(idx) *= -1;
             }
       }); 
-   }
-
-   // Now copy device cf_markers_local_d back to host
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
-   bytes = cf_markers_local_d.extent(0) * sizeof(int);
-   PetscLogGpuToCpu(bytes);       
+   }   
 
    return;
 }

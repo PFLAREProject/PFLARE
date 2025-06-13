@@ -28,15 +28,15 @@ using ScratchIntView = Kokkos::View<PetscInt*, ScratchSpace, Kokkos::MemoryUnman
 using ScratchScalarView = Kokkos::View<PetscScalar*, ScratchSpace, Kokkos::MemoryUnmanaged>;
 using Scratch2DIntView = Kokkos::View<PetscInt**, ScratchSpace, Kokkos::MemoryUnmanaged>;
 using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::MemoryUnmanaged>;
+using ViewPetscIntPtr = std::shared_ptr<PetscIntKokkosView>;
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
 
 // Define array of shared pointers representing fine and coarse IS's 
 // on each level on the device
-using ViewPtr = std::shared_ptr<PetscIntKokkosView>;
-extern ViewPtr* IS_fine_views_local;
-extern ViewPtr* IS_coarse_views_local;
+extern ViewPetscIntPtr* IS_fine_views_local;
+extern ViewPetscIntPtr* IS_coarse_views_local;
 extern int max_levels;
 
 // ~~~~~~~~~~~~~~~~~~
