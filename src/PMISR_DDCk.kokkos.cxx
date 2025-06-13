@@ -511,7 +511,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
-   Vec x, lvec;
+   Vec x, lvec = NULL;
    PetscScalarKokkosView x_d, lvec_d;
    PetscScalar *x_d_ptr = NULL;
    PetscScalar *lvec_d_ptr = NULL;
