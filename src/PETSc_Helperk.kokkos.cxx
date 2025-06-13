@@ -2162,14 +2162,15 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 // This version only works  works if the input IS have the same parallel row/column distribution 
 // as the matrices, ie equivalent to MatCreateSubMatrix_MPIAIJ_SameRowDist
 // is_col must be sorted
-PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_col, const int reuse_int, Mat *output_mat)
+// This one uses the views is_row_d_d and is_col_d_d directly, rewritten to be the local indices
+PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
+         PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
 {
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
-   PetscInt global_col_start, global_col_end_plus_one;   
    MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);
+   PetscInt local_cols_col = is_col_d_d.extent(0);
 
    // Are we in parallel?
    MatType mat_type;
@@ -2204,55 +2205,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    {
       mat_local = *input_mat;
       if (reuse_int) output_mat_local = *output_mat;
-   }   
-
-   // ~~~~~~~~~~~~
-   // Transfer the IS's to the device
-   // ~~~~~~~~~~~~   
-
-   // Get pointers to the indices on the host
-   const PetscInt *is_row_indices_ptr, *is_col_indices_ptr;
-   ISGetIndices(*is_row, &is_row_indices_ptr);   
-   ISGetIndices(*is_col, &is_col_indices_ptr); 
-
-   PetscInt local_rows_row, local_cols_col;
-   PetscInt global_rows_row, global_cols_col;
-   ISGetLocalSize(*is_row, &local_rows_row);   
-   ISGetLocalSize(*is_col, &local_cols_col);
-   ISGetSize(*is_row, &global_rows_row);
-   ISGetSize(*is_col, &global_cols_col);
-
-   // Create a host view of the existing indices
-   auto is_row_view_h = PetscIntConstKokkosViewHost(is_row_indices_ptr, local_rows_row);    
-   auto is_row_d_d = PetscIntKokkosView("is_row_d_d", local_rows_row);   
-   auto is_col_view_h = PetscIntConstKokkosViewHost(is_col_indices_ptr, local_cols_col);    
-   auto is_col_d_d = PetscIntKokkosView("is_col_d_d", local_cols_col);      
-   // Copy indices to the device
-   Kokkos::deep_copy(is_row_d_d, is_row_view_h);     
-   Kokkos::deep_copy(is_col_d_d, is_col_view_h);
-   // Log copy with petsc
-   size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);        
-   bytes = is_col_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);  
-
-   ISRestoreIndices(*is_row, &is_row_indices_ptr);   
-   ISRestoreIndices(*is_col, &is_col_indices_ptr); 
-
-   // ~~~~~~~~~~~~
-   // Rewrite to local indices
-   // ~~~~~~~~~~~~     
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
-
-         is_row_d_d(i) -= global_row_start; // Make local
-   });
-
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
-
-         is_col_d_d(i) -= global_col_start; // Make local
-   });
+   }
+   size_t bytes = 0;
 
    // The diagonal component
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
@@ -2416,7 +2370,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
          ISRestoreIndices(iscol_o, &iscol_o_indices_ptr);
       }
 
-      // We can now create the off-diagonal diagonal component
+      // We can now create the off-diagonal component
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal);
 
       // If it's our first time through we have to create our output matrix
@@ -2459,6 +2413,100 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    {
       *output_mat = output_mat_local;
    }
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Does a MatGetSubMatrix for a Kokkos matrix - the petsc version currently uses the host making it very slow
+// This version only works  works if the input IS have the same parallel row/column distribution 
+// as the matrices, ie equivalent to MatCreateSubMatrix_MPIAIJ_SameRowDist
+// is_col must be sorted
+// If you pass in our_level != -1 then it uses the fine/coarse indices stored in IS_fine_views_local
+// and IS_coarse_views_local - they should match the passed in is_row and is_col though!
+PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_col, \
+                     const int reuse_int, Mat *output_mat, \
+                     const int our_level, const int is_row_fine_int, const int is_col_fine_int)
+{
+
+   PetscInt global_row_start, global_row_end_plus_one;
+   PetscInt global_col_start, global_col_end_plus_one;   
+   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);  
+   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one); 
+   PetscInt global_rows_row, global_cols_col;
+   ISGetSize(*is_row, &global_rows_row);
+   ISGetSize(*is_col, &global_cols_col);    
+   
+   PetscIntKokkosView is_row_d_d, is_col_d_d;
+
+   // If we want the input is_row and is_col to be used
+   if (our_level == -1)
+   {
+      // Get pointers to the indices on the host
+      const PetscInt *is_row_indices_ptr, *is_col_indices_ptr;
+      ISGetIndices(*is_row, &is_row_indices_ptr);   
+      ISGetIndices(*is_col, &is_col_indices_ptr); 
+
+      PetscInt local_rows_row, local_cols_col;
+      ISGetLocalSize(*is_row, &local_rows_row);   
+      ISGetLocalSize(*is_col, &local_cols_col);
+
+      // Create a host view of the existing indices
+      auto is_row_view_h = PetscIntConstKokkosViewHost(is_row_indices_ptr, local_rows_row);    
+      is_row_d_d = PetscIntKokkosView("is_row_d_d", local_rows_row);   
+      auto is_col_view_h = PetscIntConstKokkosViewHost(is_col_indices_ptr, local_cols_col);    
+      is_col_d_d = PetscIntKokkosView("is_col_d_d", local_cols_col);      
+      // Copy indices to the device
+      Kokkos::deep_copy(is_row_d_d, is_row_view_h);     
+      Kokkos::deep_copy(is_col_d_d, is_col_view_h);
+      // Log copy with petsc
+      size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
+      PetscLogCpuToGpu(bytes);        
+      bytes = is_col_view_h.extent(0) * sizeof(PetscInt);
+      PetscLogCpuToGpu(bytes);  
+
+      ISRestoreIndices(*is_row, &is_row_indices_ptr);   
+      ISRestoreIndices(*is_col, &is_col_indices_ptr);   
+
+      // ~~~~~~~~~~~~
+      // Rewrite to local indices
+      // ~~~~~~~~~~~~     
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
+
+            is_row_d_d(i) -= global_row_start; // Make local
+      });
+
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+
+            is_col_d_d(i) -= global_col_start; // Make local
+      }); 
+   }
+   // Instead if we tell the routine that the is_row and is_col are fine/coarse local indices
+   // that already are on the device
+   else
+   {
+      if (is_row_fine_int)
+      {
+         is_row_d_d = *IS_fine_views_local[our_level];
+      }
+      else
+      {
+         is_row_d_d = *IS_coarse_views_local[our_level];
+      }       
+      if (is_col_fine_int)
+      {
+         is_col_d_d = *IS_fine_views_local[our_level];
+      }
+      else
+      {
+         is_col_d_d = *IS_coarse_views_local[our_level];
+      }        
+   }  
+
+   MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat);
 
    return;
 }

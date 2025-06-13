@@ -444,13 +444,15 @@ module c_petsc_interfaces
    
    interface   
       
-      subroutine MatCreateSubMatrix_kokkos(A_array, is_row, is_col, reuse_int, B_array) &
+      subroutine MatCreateSubMatrix_kokkos(A_array, is_row, is_col, &
+                     reuse_int, B_array, &
+                     our_level, is_row_fine_int, is_col_fine_int) &
          bind(c, name="MatCreateSubMatrix_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_long_long) :: is_row, is_col
-         integer(c_int), value :: reuse_int
+         integer(c_int), value :: our_level, is_row_fine_int, is_col_fine_int, reuse_int
 
       end subroutine MatCreateSubMatrix_kokkos
 

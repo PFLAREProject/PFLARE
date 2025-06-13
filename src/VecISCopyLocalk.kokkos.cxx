@@ -2,10 +2,8 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 
-using ViewPtr = std::shared_ptr<PetscIntKokkosView>;
-
-// Define array of shared pointers representing fine and coarse IS's 
-// on each level on the device
+// These are defined as extern in kokkos_helper.hpp but we allocate
+// them in this .cxx
 ViewPtr* IS_fine_views_local = nullptr;
 ViewPtr* IS_coarse_views_local = nullptr;
 int max_levels = -1;

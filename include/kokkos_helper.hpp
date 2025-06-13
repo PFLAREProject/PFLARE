@@ -31,7 +31,13 @@ using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::Me
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
-PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat*, IS*, IS*, const int, Mat*);
+
+// Define array of shared pointers representing fine and coarse IS's 
+// on each level on the device
+using ViewPtr = std::shared_ptr<PetscIntKokkosView>;
+extern ViewPtr* IS_fine_views_local;
+extern ViewPtr* IS_coarse_views_local;
+extern int max_levels;
 
 // ~~~~~~~~~~~~~~~~~~
 // Some custom reductions we use 

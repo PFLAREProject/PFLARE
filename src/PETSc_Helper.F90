@@ -1021,7 +1021,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, reuse, output_mat)
+   subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, &
+                  reuse, output_mat, &
+                  our_level, is_row_fine, is_col_fine)
 
       ! Wrapper around MatCreateSubMatrix_kokkos
       ! Only works if the input IS have the same parallel row/column distribution 
@@ -1030,17 +1032,19 @@ logical, protected :: kokkos_debug_global = .FALSE.
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), intent(in)    :: input_mat
-      IS, intent(in)            :: is_row, is_col
-      MatReuse, intent(in)      :: reuse
-      type(tMat), intent(inout) :: output_mat
+      type(tMat), intent(in)        :: input_mat
+      IS, intent(in)                :: is_row, is_col
+      integer, intent(in), optional :: our_level
+      logical, intent(in), optional :: is_row_fine, is_col_fine
+      MatReuse, intent(in)          :: reuse
+      type(tMat), intent(inout)     :: output_mat
 
       MPI_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
-      integer :: reuse_int
+      integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
       logical :: reuse_logical
       MatType :: mat_type
       Mat :: temp_mat
@@ -1068,7 +1072,25 @@ logical, protected :: kokkos_debug_global = .FALSE.
          B_array = output_mat%v      
          is_row_ptr = is_row%v
          is_col_ptr = is_col%v
-         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, reuse_int, B_array)
+
+         our_level_int = -1
+         is_row_fine_int = 0
+         is_col_fine_int = 0
+
+         if (present(our_level)) then
+            our_level_int = our_level
+         end if
+         if (present(is_row_fine)) then
+            if (is_row_fine) is_row_fine_int = 1
+         end if
+         if (present(is_col_fine)) then
+            if (is_col_fine) is_col_fine_int = 1
+         end if
+
+         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
+                  reuse_int, B_array, &
+                  our_level_int, is_row_fine_int, is_col_fine_int)
+
          output_mat%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results
