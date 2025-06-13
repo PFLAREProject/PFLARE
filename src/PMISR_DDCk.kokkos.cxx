@@ -39,20 +39,6 @@ PETSC_INTERN void delete_device_cf_markers()
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Copy the global cf_markers_local_d back to the host and delete
-PETSC_INTERN void copy_cf_markers_d2h_and_delete(int *cf_markers_local)
-{
-   // Copy to host
-   copy_cf_markers_d2h(cf_markers_local);
-
-   // Delete the device view
-   delete_device_cf_markers();
-
-   return;
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-
 // PMISR cf splitting but on the device
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
@@ -505,7 +491,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
       KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
          bool is_f_point = false;
          if (i < local_rows) { // Predicate is based on original data up to local_rows-1
-               is_f_point = (cf_markers_d(i) == match_cf);
+               is_f_point = (cf_markers_d(i) == match_cf); // is this point match_cf
          }         
          if (final_pass) {
                point_offsets_d(i) = update;
@@ -528,12 +514,68 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // ~~~~~~~~~~~~     
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
-         // Is this point fine? F_POINT == -1
-         if (cf_markers_d(i) == -1) {
+         // Is this point match_cf
+         if (cf_markers_d(i) == match_cf) {
             // point_offsets_d(i) gives the correct local index
             is_local_d(point_offsets_d(i)) = i;
          }              
    });
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Creates the host IS is_fine and is_coarse based on the global cf_markers_local_d
+PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse)
+{
+   PetscIntKokkosView is_fine_local_d, is_coarse_local_d;
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
+
+   // Create the local f point indices
+   const int match_fine = -1; // F_POINT == -1
+   create_cf_is_device_kokkos(input_mat, match_fine, is_fine_local_d);
+
+   // Create the local C point indices
+   const int match_coarse = 1; // C_POINT == 1
+   create_cf_is_device_kokkos(input_mat, match_coarse, is_coarse_local_d);
+
+   // Now convert them back to global indices
+   PetscInt global_row_start, global_row_end_plus_one;
+   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);   
+
+   // Convert F points
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, is_fine_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
+   
+      is_fine_local_d(i) += global_row_start;
+   });
+   // Convert C points
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, is_coarse_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
+   
+      is_coarse_local_d(i) += global_row_start;
+   });       
+
+   // Create some host space for the indices
+   PetscInt *is_fine_array = nullptr, *is_coarse_array = nullptr;
+   PetscInt n_fine = is_fine_local_d.extent(0);
+   PetscMalloc1(n_fine, &is_fine_array);
+   PetscIntKokkosViewHost is_fine_h = PetscIntKokkosViewHost(is_fine_array, is_fine_local_d.extent(0));   
+   PetscInt n_coarse = is_coarse_local_d.extent(0);
+   PetscMalloc1(n_coarse, &is_coarse_array);
+   PetscIntKokkosViewHost is_coarse_h = PetscIntKokkosViewHost(is_coarse_array, n_coarse);   
+
+   // Copy over the indices to the host
+   Kokkos::deep_copy(is_fine_h, is_fine_local_d);
+   Kokkos::deep_copy(is_coarse_h, is_coarse_local_d);
+   // Log copy with petsc
+   size_t bytes_fine = is_fine_local_d.extent(0) * sizeof(PetscInt);
+   size_t bytes_coarse = is_coarse_local_d.extent(0) * sizeof(PetscInt);
+   PetscLogGpuToCpu(bytes_fine + bytes_coarse);
+
+   // Now we can create the IS objects
+   ISCreateGeneral(MPI_COMM_MATRIX, is_fine_local_d.extent(0), is_fine_array, PETSC_OWN_POINTER, is_fine);
+   ISCreateGeneral(MPI_COMM_MATRIX, is_coarse_local_d.extent(0), is_coarse_array, PETSC_OWN_POINTER, is_coarse);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -543,9 +585,6 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
 {
    PetscInt local_rows, local_cols;
-   PetscInt global_rows, global_cols;
-   PetscInt global_row_start, global_row_end_plus_one;
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
 
    // Are we in parallel?
    MatType mat_type;
@@ -554,7 +593,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
-   MatGetSize(*input_mat, &global_rows, &global_cols); 
    MatGetLocalSize(*input_mat, &local_rows, &local_cols); 
    
    Mat_MPIAIJ *mat_mpi = nullptr;

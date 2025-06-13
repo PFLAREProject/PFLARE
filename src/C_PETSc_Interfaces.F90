@@ -312,6 +312,18 @@ module c_petsc_interfaces
 
    interface   
       
+      subroutine create_cf_is_kokkos(A_array, index_fine, index_coarse) &
+         bind(c, name="create_cf_is_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: index_fine
+         integer(c_long_long) :: index_coarse
+      end subroutine create_cf_is_kokkos         
+ 
+   end interface   
+
+   interface   
+      
       subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, zero_meaure_c_point_int) &
          bind(c, name="pmisr_kokkos")
          use iso_c_binding
@@ -341,17 +353,16 @@ module c_petsc_interfaces
          type(c_ptr), value :: cf_markers_local
       end subroutine copy_cf_markers_d2h         
  
-   end interface     
+   end interface 
    
    interface   
       
-      subroutine copy_cf_markers_d2h_and_delete(cf_markers_local) &
-         bind(c, name="copy_cf_markers_d2h_and_delete")
+      subroutine delete_device_cf_markers() &
+         bind(c, name="delete_device_cf_markers")
          use iso_c_binding
-         type(c_ptr), value :: cf_markers_local
-      end subroutine copy_cf_markers_d2h_and_delete         
+      end subroutine delete_device_cf_markers         
  
-   end interface     
+   end interface       
 
    interface   
       
