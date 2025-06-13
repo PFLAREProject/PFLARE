@@ -664,7 +664,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
                      if (lvec_d_ptr[target_col] > -1.0)
                      {               
                         // Get the abs value of the entry
-                        sum_val += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                        thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
                      }
                   },
                   Kokkos::Sum<PetscScalar>(sum_val)
