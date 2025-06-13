@@ -445,22 +445,26 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~
    // Now assign our final cf markers
    // ~~~~~~~~~
+
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          
       if (cf_markers_local_real_d(i) == 0)
       {
-         cf_markers_local_d(i) = 1;
+         cf_markers_d(i) = 1;
       }
       else if (cf_markers_local_real_d(i) < 0)
       {
-         cf_markers_local_d(i) = -1;
+         cf_markers_d(i) = -1;
       }
       else
       {
-         cf_markers_local_d(i) = 1;
+         cf_markers_d(i) = 1;
       }
-      if (pmis_int) cf_markers_local_d(i) *= -1;
+      if (pmis_int) cf_markers_d(i) *= -1;
    });
 
    return;
@@ -503,6 +507,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       mat_local = *input_mat;
    }   
 
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
+
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
    // ~~~~~~~~~~~~   
@@ -516,7 +524,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
          if (final_pass) {
                f_point_offsets_d(i) = update;
          }
-         if (cf_markers_local_d(i) == -1) {
+         if (cf_markers_d(i) == -1) {
                update++;
          }
       }
@@ -528,7 +536,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
          // Is this point fine? F_POINT == -1
-         if (cf_markers_local_d(i) == -1) {
+         if (cf_markers_d(i) == -1) {
             // f_point_offsets_d(i) gives the correct local index
             is_fine_local_d(f_point_offsets_d(i)) = i;
          }              
@@ -558,7 +566,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       VecGetKokkosViewWrite(lvec, &lvec_d);
 
       // Copy in cf markers to x
-      Kokkos::deep_copy(x_d, cf_markers_local_d);   
+      Kokkos::deep_copy(x_d, cf_markers_d);   
 
       x_d_ptr = x_d.data();      
       lvec_d_ptr = lvec_d.data();       
@@ -608,7 +616,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
                   // Get this local column in the input_mat
                   PetscInt target_col = device_local_j[device_local_i[i] + j];
                   // Is this column fine? F_POINT == -1
-                  if (cf_markers_local_d(target_col) == -1)
+                  if (cf_markers_d(target_col) == -1)
                   {               
                      // Is this column the diagonal
                      const bool is_diagonal = i == target_col;
@@ -746,6 +754,10 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fracti
       search_size = static_cast<PetscInt>(double(local_rows_aff) * fraction_swap);
    }
 
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
+
    // Create device memory for the diag_dom_ratio
    auto diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_aff); 
    // This will be equivalent to is_fine - global_row_start, ie the local indices
@@ -820,7 +832,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fracti
             {
                // This is the actual numbering in A, rather than Aff
                PetscInt idx = is_fine_local_d(i);
-               cf_markers_local_d(idx) *= -1;
+               cf_markers_d(idx) *= -1;
             }
       }); 
    }   
