@@ -34,16 +34,21 @@ static void rhs_source_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const Pet
   f0[0] = 0.0;
 }
 
-static void f1_u(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
+static void diffusion_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
 {
+  // Get the diffusion coefficient
+  const PetscReal alpha = constants[0];
   PetscInt d;
-  for (d = 0; d < dim; ++d) f1[d] = u_x[d];
+  for (d = 0; d < dim; ++d) f1[d] = alpha * u_x[d];
 }
 
-static void g3_uu(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g3[])
+// The Jacobian for the diffusion term
+static void g3_jacobian_diffusion_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g3[])
 {
+  // Get the diffusion coefficient
+  const PetscReal alpha = constants[0];   
   PetscInt d;
-  for (d = 0; d < dim; ++d) g3[d * dim + d] = 1.0;
+  for (d = 0; d < dim; ++d) g3[d * dim + d] = alpha;
 }
 
 static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
@@ -52,7 +57,7 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscOptionsBegin(comm, "", "Advection Problem Options", "DMPLEX");
   // Diffusion coefficient
   // Default alpha is 0 - pure advection
-  options->alpha = 0.0;
+  options->alpha = 2.0;
   PetscOptionsGetReal(NULL, NULL, "-alpha", &options->alpha, NULL);
 
   // Initialize advection to zero
@@ -128,12 +133,24 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   PetscFunctionBeginUser;
   PetscCall(DMGetDS(dm, &ds));
   PetscCall(DMGetLabel(dm, "Face Sets", &label));
-  PetscCall(PetscDSSetResidual(ds, 0, rhs_source_term, f1_u));
-  PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, NULL, NULL, g3_uu));
+  PetscCall(PetscDSSetResidual(ds, 0, rhs_source_term, diffusion_term));
+  PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, NULL, NULL, g3_jacobian_diffusion_term));
   // Dirichlet condition on bottom surface as inflow
   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflowids, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow, NULL, user, NULL));
   // Neumann condition (outflow - zero flux) on other surfaces
   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "outflow", label, numOutflow, outflowids, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
+
+  /* Setup constants that get passed into the FEM functions*/
+  {
+    PetscScalar constants[4];
+
+    constants[0] = user->alpha;
+    constants[1] = user->advection_velocity[0];
+    constants[2] = user->advection_velocity[1];
+    constants[3] = user->advection_velocity[2];
+    PetscCall(PetscDSSetConstants(ds, 4, constants));
+  }
+
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
