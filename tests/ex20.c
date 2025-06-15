@@ -1,13 +1,10 @@
-static char help[] = "Poisson Problem with finite elements.\n\
-This example supports automatic convergence estimation for multilevel solvers\n\
-and solver adaptivity.\n\n\n";
+static char help[] = "Advection diffusion FEM problem.\n\n\n";
 
 #include <petscdmplex.h>
 #include <petscsnes.h>
 #include <petscds.h>
 #include <petscconvest.h>
 #include "pflare.h"
-
 typedef struct {
   PetscReal alpha; /* Diffusion coefficient */
   PetscReal advection_velocity[3]; // Advection velocity, in 2D or 3D
@@ -28,18 +25,45 @@ static PetscErrorCode neumann_bc_zero_flux(PetscInt dim, PetscReal time, const P
   return PETSC_SUCCESS;
 }
 
-// RHS source term
-static void rhs_source_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f0[])
+// The f0 term in the weak form integral
+static void advection_diffusion_f0(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f0[])
 {
-  f0[0] = 0.0;
+  // constants[1] is u, constants[2] is v, constants[3] is w
+  // Pointer to the first component of the velocity in the constants array
+  const PetscReal *advection_velocity = &constants[1]; 
+
+  PetscReal adv_dot_grad_u = 0.0;
+  PetscReal volumetric_source = 0.0; // Assuming f = 0 for now
+
+  // Compute the advection term: v . grad(u)
+  for (PetscInt d = 0; d < dim; ++d) {
+    adv_dot_grad_u += advection_velocity[d] * u_x[d];
+  }
+
+  // integral ( (v . grad u) - f ) phi dx
+  f0[0] = adv_dot_grad_u - volumetric_source;
 }
 
-static void diffusion_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
+// The f1 term in the weak form integral
+static void advection_diffusion_f1(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
 {
   // Get the diffusion coefficient
   const PetscReal alpha = constants[0];
   PetscInt d;
   for (d = 0; d < dim; ++d) f1[d] = alpha * u_x[d];
+}
+
+// The Jacobian for advection term
+static void g1_jacobian_advection_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g1[])
+{
+  // constants[1] is u, constants[2] is v, constants[3] is w
+  // Pointer to the first component of the velocity
+  const PetscReal *advection_velocity = &constants[1]; 
+
+  PetscInt d;
+  for (d = 0; d < dim; ++d) {
+    g1[d] = advection_velocity[d];
+  }
 }
 
 // The Jacobian for the diffusion term
@@ -56,8 +80,8 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionBeginUser;
   PetscOptionsBegin(comm, "", "Advection Problem Options", "DMPLEX");
   // Diffusion coefficient
-  // Default alpha is 0 - pure advection
-  options->alpha = 2.0;
+  // Default alpha is 1 - pure diffusion
+  options->alpha = 1.0;
   PetscOptionsGetReal(NULL, NULL, "-alpha", &options->alpha, NULL);
 
   // Initialize advection to zero
@@ -84,15 +108,9 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v);
   PetscOptionsGetReal(NULL, NULL, "-w", &w_test, &option_found_w);
 
-  if (option_found_u) PetscCheck(u_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
-  if (option_found_v) PetscCheck(v_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
-  if (option_found_w) PetscCheck(w_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "w must be positive");
-
-  if (option_found_u && option_found_v && option_found_w) {
-   options->advection_velocity[0] = u_test;
-   options->advection_velocity[1] = v_test;
-   options->advection_velocity[2] = w_test;
-  }
+  if (option_found_u) options->advection_velocity[0] = u_test;
+  if (option_found_v) options->advection_velocity[1] = v_test;
+  if (option_found_w) options->advection_velocity[2] = w_test;
 
   PetscOptionsEnd();
   PetscFunctionReturn(PETSC_SUCCESS);
@@ -133,12 +151,17 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   PetscFunctionBeginUser;
   PetscCall(DMGetDS(dm, &ds));
   PetscCall(DMGetLabel(dm, "Face Sets", &label));
-  PetscCall(PetscDSSetResidual(ds, 0, rhs_source_term, diffusion_term));
-  PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, NULL, NULL, g3_jacobian_diffusion_term));
+  PetscCall(PetscDSSetResidual(ds, 0, advection_diffusion_f0, advection_diffusion_f1));
+  // Set the Jacobian terms
+  // g0_uu: d(f0)/d(u) - NULL (advection term is v . grad u, no direct u dependence)
+  // g1_uu: d(f0)/d(grad u) - g1_jacobian_advection_term (contribution from advection)
+  // g2_uu: d(f1)/d(u) - NULL (diffusion term is alpha grad u, no direct u dependence)
+  // g3_uu: d(f1)/d(grad u) - g3_jacobian_diffusion_term (contribution from diffusion)  
+  PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, g1_jacobian_advection_term, NULL, g3_jacobian_diffusion_term));
   // Dirichlet condition on bottom surface as inflow
   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflowids, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow, NULL, user, NULL));
   // Neumann condition (outflow - zero flux) on other surfaces
-  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "outflow", label, numOutflow, outflowids, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
+  PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "outflow", label, numOutflow, outflowids, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
 
   /* Setup constants that get passed into the FEM functions*/
   {
