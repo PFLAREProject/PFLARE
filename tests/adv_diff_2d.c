@@ -1,17 +1,17 @@
 /*   DMDA/KSP solving a system of linear equations.
      Steady advection-diffusion equation in 2D with finite difference, advection is upwinded
 
-     ./adv_diff_2d.o 
+     ./adv_diff_2d
              : pure advection with theta = pi/4, dimensionless
                BCs left and bottom dirichlet, top and right outflow
                Same equation as advection_2d in PyAMG, except we don't eliminate the dirichlet dofs
-     ./adv_diff_2d.o -adv_nondim 0
+     ./adv_diff_2d -adv_nondim 0
              : pure advection with theta = pi/4, scaled by Hx * Hy
                BCs left and bottom dirichlet, top and right outflow
-     ./adv_diff_2d.o -u 0 -v 0 -alpha 1.0 
+     ./adv_diff_2d -u 0 -v 0 -alpha 1.0 
              : pure diffusion scaled by Hx * Hy
                BCs dirichlet on all sides
-     ./adv_diff_2d.o -alpha 1.0 
+     ./adv_diff_2d -alpha 1.0 
              : advection-diffusion scaled by Hx * Hy with theta=pi/4             
                BCs dirichlet on all sides
 

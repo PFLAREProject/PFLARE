@@ -126,6 +126,12 @@ run_tests_load_parallel:
 run_tests_no_load_serial:
 #
 	@echo ""
+	@echo "Test AIRG with SUPG CG FEM in 2D"
+	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
+	@echo "Test AIRG with SUPG CG FEM in 3D"
+	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
+#
+	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil"
 	./adv_diff_2d -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 5
 	@echo "Test AIRG with GMRES polynomials Arnoldi basis for 2D finite difference stencil"
@@ -301,6 +307,12 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 endif
 
 run_tests_no_load_parallel:
+#
+	@echo ""
+	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
+	@echo "Test AIRG with SUPG CG FEM in 3D in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil in parallel"
