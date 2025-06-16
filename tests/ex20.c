@@ -1,11 +1,36 @@
-static char help[] = "Advection diffusion FEM problem with SUPG stabilization.\n\n\n";
+/*   DMPlex/SNES/KSP solving a system of linear equations.
+     Steady advection-diffusion equation with SUPG stabilised CG FEM
+     Default is 2D triangles
+     Can control dimension with -dm_plex_dim
+     Can control quad/hex tri/tet with -dm_plex_simplex
+     Can control number of faces with -dm_plex_box_faces
+     Can refine with -dm_refine
+     Can read in an unstructured gmsh file with -dm_plex_filename
+         - have to make sure boundary ids match (1 through 6)
+
+     ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1
+             : pure advection with linear FEM with theta = pi/4
+               BCs left and bottom and back dirichlet, the others outflow
+     ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -u 0 -v 0 -alpha 1.0
+             : pure diffusion with linear FEM
+               BCs dirichlet on all sides
+     ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -alpha 1.0
+             : advection-diffusion with linear FEM with theta=pi/4
+               BCs dirichlet on all sides
+
+     Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
+
+*/
+
+static char help[] = "Solves steady advection-diffusion FEM problem with SUPG stabilization.\n\n\n";
 
 #include <petscdmplex.h>
 #include <petscsnes.h>
 #include <petscds.h>
 #include <petscconvest.h>
+#include <math.h>
+
 #include "pflare.h"
-#include <math.h> // Required for tanh and pow
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
@@ -48,7 +73,7 @@ static inline PetscErrorCode ComputeSUPGStabilization(PetscInt dim, PetscReal h,
 }
 
 // Dirichlet BC: u = 1.0 (for inflow boundaries)
-static PetscErrorCode dirichlet_bc_inflow(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
+static PetscErrorCode dirichlet_bc(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
 {
   u[0] = 1.0;
   return PETSC_SUCCESS;
@@ -175,19 +200,18 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *user, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
   PetscCall(DMCreate(comm, dm));
   PetscCall(DMSetType(*dm, DMPLEX));
   PetscCall(DMSetFromOptions(*dm));
-  PetscCall(DMSetApplicationContext(*dm, user));
+  PetscCall(DMSetApplicationContext(*dm, options));
   PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-
-static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
+static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
 {
   PetscDS        ds;
   DMLabel        label;
@@ -196,7 +220,7 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
 
   PetscInt numInflow = 0, numOutflow = 0;
   PetscInt *inflow = NULL, *outflow = NULL;
-  
+
   // ~~~~~~~~~~~~~~~~~
   // For advection we just apply dirichlet inflow conditions of 1 on incoming faces
   // and Neumann outflow conditions (zero flux) on the other faces.
@@ -234,26 +258,36 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   // g2_uu: d(f1)/d(u) - NULL (diffusion term is alpha grad u, no direct u dependence)
   // g3_uu: d(f1)/d(grad u) - g3_jacobian_diffusion_term (contribution from diffusion)  
   PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, g1_jacobian_advection_term, NULL, g3_jacobian_diffusion_term_supg));
+  
   // Dirichlet condition on bottom surface as inflow
-  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow, NULL, user, NULL));
-  // Neumann condition (outflow - zero flux) on other surfaces
-  PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "outflow", label, numOutflow, outflow, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
+  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
+  // If no diffusion, Neumann condition (outflow - zero flux) on other surfaces
+  if (options->alpha == 0.0)
+  {
+   PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "outflow", label, numOutflow, outflow, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, options, NULL));
+  }
+  // If we have diffusion we have dirichlet bcs on the other surfaces
+  else
+  {
+   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "outflow", label, numOutflow, outflow, 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
+  }
 
   /* Setup constants that get passed into the FEM functions*/
   {
     PetscScalar constants[4];
 
-    constants[0] = user->alpha;
-    constants[1] = user->advection_velocity[0];
-    constants[2] = user->advection_velocity[1];
-    constants[3] = user->advection_velocity[2];
+    constants[0] = options->alpha;
+    constants[1] = options->advection_velocity[0];
+    constants[2] = options->advection_velocity[1];
+    constants[3] = options->advection_velocity[2];
     PetscCall(PetscDSSetConstants(ds, 4, constants));
   }
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Sets up the auxiliary DM and vector for cell size (h)
+// Sets up the auxiliary DM and vector for characteristic length (h)
+// We stabilize with a scaled version of the element volume - very simple
 static PetscErrorCode SetupSUPG(DM dm)
 {
   DM           aux_dm;
@@ -313,7 +347,7 @@ static PetscErrorCode SetupSUPG(DM dm)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode SetupDiscretization(DM dm, const char name[], PetscErrorCode (*setup)(DM, AppCtx *), AppCtx *user)
+static PetscErrorCode SetupDiscretization(DM dm, const char name[], PetscErrorCode (*setup)(DM, AppCtx *), AppCtx *options)
 {
   DM             cdm = dm;
   PetscFE        fe;
@@ -333,7 +367,7 @@ static PetscErrorCode SetupDiscretization(DM dm, const char name[], PetscErrorCo
   PetscCall(PetscObjectSetName((PetscObject)fe, name));
   PetscCall(DMSetField(dm, 0, NULL, (PetscObject)fe));
   PetscCall(DMCreateDS(dm));
-  PetscCall((*setup)(dm, user));
+  PetscCall((*setup)(dm, options));
   while (cdm) {
     PetscCall(DMCopyDisc(dm, cdm));
     PetscCall(DMGetCoarseDM(cdm, &cdm));
@@ -347,27 +381,27 @@ int main(int argc, char **argv)
   DM     dm;   /* Problem specification */
   SNES   snes; /* Nonlinear solver */
   Vec    u;    /* Solutions */
-  AppCtx user; /* User-defined work context */
+  AppCtx options; /* options-defined work context */
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &argv, NULL, help));
-  PetscCall(ProcessOptions(PETSC_COMM_WORLD, &user));
+  PetscCall(ProcessOptions(PETSC_COMM_WORLD, &options));
 
   // Register the pflare types
   PCRegister_PFLARE();
 
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, &user, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD, &options, &dm));
   PetscCall(SNESSetDM(snes, dm));
-  PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &user));
+  PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &options));
   // *** Set up the auxiliary vector for SUPG stabilization ***
   PetscCall(SetupSUPG(dm));
 
   PetscCall(DMCreateGlobalVector(dm, &u));
   PetscCall(VecSet(u, 0.0));
   PetscCall(PetscObjectSetName((PetscObject)u, "adv_diff"));
-  PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, &user));
+  PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, &options));
 
   // Only solving a linear problem for now
   PetscCall(SNESSetType(snes, SNESKSPONLY));
