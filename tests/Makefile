@@ -127,9 +127,9 @@ run_tests_no_load_serial:
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
-	./adv_diff_cg_supg -dm_refine 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 7
+	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with SUPG CG FEM in 3D"
-	./adv_diff_cg_supg -dm_plex_dim 3 -dm_refine 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 6	
+	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_dim 3 -dm_refine 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil"
@@ -310,9 +310,9 @@ run_tests_no_load_parallel:
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_refine 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 7
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with SUPG CG FEM in 3D in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_dim 3 -dm_refine 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 6	
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_dim 3 -dm_refine 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil in parallel"
