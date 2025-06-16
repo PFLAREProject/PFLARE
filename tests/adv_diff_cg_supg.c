@@ -2,7 +2,7 @@
      Steady advection-diffusion equation with SUPG stabilised CG FEM
      Default is 2D triangles
      Can control dimension with -dm_plex_dim
-     Can control quad/hex tri/tet with -dm_plex_simplex
+     Can control quad/hex tri/tet with -dm_plex_simplex (if tri/tet need to configure petsc with triangle/ctetgen)
      Can control number of faces with -dm_plex_box_faces
      Can refine with -dm_refine
      Can read in an unstructured gmsh file with -dm_plex_filename
