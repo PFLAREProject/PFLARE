@@ -53,12 +53,6 @@ static PetscErrorCode dirichlet_bc_inflow(PetscInt dim, PetscReal time, const Pe
   u[0] = 1.0;
   return PETSC_SUCCESS;
 }
-// Dirichlet BC: u = 0.0 (for inflow boundaries)
-static PetscErrorCode dirichlet_bc_inflow_zero(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
-{
-  u[0] = 0.0;
-  return PETSC_SUCCESS;
-}
 
 // Neumann BC: du/dn = 0.0 (for outflow/zero flux boundaries)
 // This function must provide the flux value.
@@ -169,6 +163,10 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v);
   PetscOptionsGetReal(NULL, NULL, "-w", &w_test, &option_found_w);
 
+  if (option_found_u) PetscCheck(u_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
+  if (option_found_v) PetscCheck(v_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
+  if (option_found_w) PetscCheck(w_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "w must be positive");
+
   if (option_found_u) options->advection_velocity[0] = u_test;
   if (option_found_v) options->advection_velocity[1] = v_test;
   if (option_found_w) options->advection_velocity[2] = w_test;
@@ -196,19 +194,34 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   PetscInt       dim;
   PetscCall(DMGetDimension(dm, &dim));
 
-  PetscInt numInflow = 1, numOutflow = 0;
-  // This is the boundary id we apply the inflow condition to, which is the bottom face
-  PetscInt inflowids[] = {1};
-  PetscInt inflowids_zero[] = {4};
-  // The remaining boundary ids for outflow conditions
-  PetscInt outflowids[] = {2, 3, 4, 5, 6}; // Default for 3D
+  PetscInt numInflow = 0, numOutflow = 0;
+  PetscInt *inflow = NULL, *outflow = NULL;
+  
+  // ~~~~~~~~~~~~~~~~~
+  // For advection we just apply dirichlet inflow conditions of 1 on incoming faces
+  // and Neumann outflow conditions (zero flux) on the other faces.
+  // Solution should just be 1 across the domain
+  // ~~~~~~~~~~~~~~~~~
+
+  // In 2D its bottom and left
+  PetscInt inflowids_2d[] = {1,4};
+  PetscInt outflowids_2d[] =  {2,3};
+  // In 3D its bottom, left and back face
+  PetscInt inflowids_3d[] = {1,3,6};
+  PetscInt outflowids_3d[] =  {2,4,5};
   if (dim == 2)
   {
+    numInflow = 2;
+    inflow = &inflowids_2d[0];
     numOutflow = 2;
+    outflow = &outflowids_2d[0];
   }
   else
   {
-    numOutflow = 5;
+    numInflow = 3;
+    inflow = &inflowids_3d[0];
+    numOutflow = 3;
+    outflow = &outflowids_3d[0];
   }
 
   PetscFunctionBeginUser;
@@ -222,10 +235,9 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   // g3_uu: d(f1)/d(grad u) - g3_jacobian_diffusion_term (contribution from diffusion)  
   PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, g1_jacobian_advection_term, NULL, g3_jacobian_diffusion_term_supg));
   // Dirichlet condition on bottom surface as inflow
-  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflowids, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow, NULL, user, NULL));
-  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflowids_zero, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow_zero, NULL, user, NULL));
+  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow, NULL, user, NULL));
   // Neumann condition (outflow - zero flux) on other surfaces
-  PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "outflow", label, numOutflow, outflowids, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
+  PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "outflow", label, numOutflow, outflow, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
 
   /* Setup constants that get passed into the FEM functions*/
   {
