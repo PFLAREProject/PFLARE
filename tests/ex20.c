@@ -1,19 +1,62 @@
-static char help[] = "Advection diffusion FEM problem.\n\n\n";
+static char help[] = "Advection diffusion FEM problem with SUPG stabilization.\n\n\n";
 
 #include <petscdmplex.h>
 #include <petscsnes.h>
 #include <petscds.h>
 #include <petscconvest.h>
 #include "pflare.h"
+#include <math.h> // Required for tanh and pow
+
 typedef struct {
-  PetscReal alpha; /* Diffusion coefficient */
-  PetscReal advection_velocity[3]; // Advection velocity, in 2D or 3D
+  PetscReal alpha;                   // Diffusion coefficient
+  PetscReal advection_velocity[3];   // Advection velocity, in 2D or 3D
 } AppCtx;
+
+// Helper function to compute the SUPG stabilization parameter tau
+static inline PetscErrorCode ComputeSUPGStabilization(PetscInt dim, PetscReal h, PetscReal alpha, const PetscReal v[], PetscReal *tau)
+{
+  PetscReal v_mag = 0.0;
+  PetscReal Pe, xi;
+  PetscInt  d;
+
+  PetscFunctionBeginUser;
+  for (d = 0; d < dim; ++d) v_mag += v[d] * v[d];
+  v_mag = PetscSqrtReal(v_mag);
+
+  if (v_mag < 1.e-12) {
+    *tau = 0.0;
+  } else {
+    // Peclet number: Pe = |v|*h / (2*alpha)
+    if (alpha < 1.e-12) { // Handle pure advection
+      Pe = 1.0e12;
+    } else {
+      Pe = (v_mag * h) / (2.0 * alpha);
+    }
+
+    // Upwinding function: xi(Pe) = coth(Pe) - 1/Pe
+    if (Pe < 1.e-6) { // Taylor expansion for small Pe
+      xi = Pe / 3.0 - Pe * Pe * Pe / 45.0;
+    } else if (Pe > 1.0e8) { // Asymptotic limit for large Pe
+      xi = 1.0;
+    } else {
+      xi = (1.0 / tanh(Pe)) - (1.0 / Pe);
+    }
+    // Stabilization parameter: tau = (h / 2|v|) * xi(Pe)
+    *tau = (h / (2.0 * v_mag)) * xi;
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 // Dirichlet BC: u = 1.0 (for inflow boundaries)
 static PetscErrorCode dirichlet_bc_inflow(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
 {
   u[0] = 1.0;
+  return PETSC_SUCCESS;
+}
+// Dirichlet BC: u = 0.0 (for inflow boundaries)
+static PetscErrorCode dirichlet_bc_inflow_zero(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
+{
+  u[0] = 0.0;
   return PETSC_SUCCESS;
 }
 
@@ -44,13 +87,22 @@ static void advection_diffusion_f0(PetscInt dim, PetscInt Nf, PetscInt NfAux, co
   f0[0] = adv_dot_grad_u - volumetric_source;
 }
 
-// The f1 term in the weak form integral
-static void advection_diffusion_f1(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
+// The f1 term in the weak form integral, now with SUPG stabilization
+static void advection_diffusion_f1_supg(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
 {
-  // Get the diffusion coefficient
-  const PetscReal alpha = constants[0];
-  PetscInt d;
-  for (d = 0; d < dim; ++d) f1[d] = alpha * u_x[d];
+  const PetscReal  alpha = constants[0];
+  const PetscReal *v     = &constants[1];
+  const PetscReal  h     = a[0]; // Cell size from auxiliary field
+  PetscReal        tau, v_dot_grad_u = 0.0;
+  PetscInt         d;
+
+  //printf("h = %g\n", (double)h);
+  PetscCallAbort(PETSC_COMM_SELF, ComputeSUPGStabilization(dim, h, alpha, v, &tau));
+  //printf("tau = %g\n", (double)tau);
+  for (d = 0; d < dim; ++d) v_dot_grad_u += v[d] * u_x[d];
+
+  // f1[d] = alpha * u_x[d] (diffusion) + tau * (v . grad_u) * v[d] (SUPG)
+  for (d = 0; d < dim; ++d) f1[d] = alpha * u_x[d] + tau * v_dot_grad_u * v[d];
 }
 
 // The Jacobian for advection term
@@ -66,13 +118,22 @@ static void g1_jacobian_advection_term(PetscInt dim, PetscInt Nf, PetscInt NfAux
   }
 }
 
-// The Jacobian for the diffusion term
-static void g3_jacobian_diffusion_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g3[])
+// The Jacobian for the diffusion term, now with SUPG stabilization
+static void g3_jacobian_diffusion_term_supg(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g3[])
 {
-  // Get the diffusion coefficient
-  const PetscReal alpha = constants[0];   
-  PetscInt d;
-  for (d = 0; d < dim; ++d) g3[d * dim + d] = alpha;
+  const PetscReal  alpha = constants[0];
+  const PetscReal *v     = &constants[1];
+  const PetscReal  h     = a[0]; // Cell size from auxiliary field
+  PetscReal        tau;
+  PetscInt         d, c;
+
+  PetscCallAbort(PETSC_COMM_SELF, ComputeSUPGStabilization(dim, h, alpha, v, &tau));
+
+  // g3[d,c] = d(f1[d])/d(u_x[c]) = alpha * delta_dc + tau * v[d] * v[c]
+  for (d = 0; d < dim; ++d) {
+    for (c = 0; c < dim; ++c) g3[d * dim + c] = tau * v[d] * v[c];
+    g3[d * dim + d] += alpha;
+  }
 }
 
 static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
@@ -80,8 +141,8 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionBeginUser;
   PetscOptionsBegin(comm, "", "Advection Problem Options", "DMPLEX");
   // Diffusion coefficient
-  // Default alpha is 1 - pure diffusion
-  options->alpha = 1.0;
+  // Default alpha is 0 - pure advection
+  options->alpha = 0.0;
   PetscOptionsGetReal(NULL, NULL, "-alpha", &options->alpha, NULL);
 
   // Initialize advection to zero
@@ -127,6 +188,7 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *user, DM *dm)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+
 static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
 {
   PetscDS        ds;
@@ -137,11 +199,12 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   PetscInt numInflow = 1, numOutflow = 0;
   // This is the boundary id we apply the inflow condition to, which is the bottom face
   PetscInt inflowids[] = {1};
+  PetscInt inflowids_zero[] = {4};
   // The remaining boundary ids for outflow conditions
   PetscInt outflowids[] = {2, 3, 4, 5, 6}; // Default for 3D
   if (dim == 2)
   {
-    numOutflow = 3;
+    numOutflow = 2;
   }
   else
   {
@@ -151,15 +214,16 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
   PetscFunctionBeginUser;
   PetscCall(DMGetDS(dm, &ds));
   PetscCall(DMGetLabel(dm, "Face Sets", &label));
-  PetscCall(PetscDSSetResidual(ds, 0, advection_diffusion_f0, advection_diffusion_f1));
+  PetscCall(PetscDSSetResidual(ds, 0, advection_diffusion_f0, advection_diffusion_f1_supg));
   // Set the Jacobian terms
   // g0_uu: d(f0)/d(u) - NULL (advection term is v . grad u, no direct u dependence)
   // g1_uu: d(f0)/d(grad u) - g1_jacobian_advection_term (contribution from advection)
   // g2_uu: d(f1)/d(u) - NULL (diffusion term is alpha grad u, no direct u dependence)
   // g3_uu: d(f1)/d(grad u) - g3_jacobian_diffusion_term (contribution from diffusion)  
-  PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, g1_jacobian_advection_term, NULL, g3_jacobian_diffusion_term));
+  PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, g1_jacobian_advection_term, NULL, g3_jacobian_diffusion_term_supg));
   // Dirichlet condition on bottom surface as inflow
   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflowids, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow, NULL, user, NULL));
+  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflowids_zero, 0, 0, NULL, (void (*)(void))dirichlet_bc_inflow_zero, NULL, user, NULL));
   // Neumann condition (outflow - zero flux) on other surfaces
   PetscCall(DMAddBoundary(dm, DM_BC_NATURAL, "outflow", label, numOutflow, outflowids, 0, 0, NULL, (void (*)(void))neumann_bc_zero_flux, NULL, user, NULL));
 
@@ -174,6 +238,66 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *user)
     PetscCall(PetscDSSetConstants(ds, 4, constants));
   }
 
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Sets up the auxiliary DM and vector for cell size (h)
+static PetscErrorCode SetupSUPG(DM dm)
+{
+  DM           aux_dm;
+  PetscDS      ds;
+  PetscSection  aux_section; // The section for the auxiliary data
+  PetscFE      fe, fe_aux;
+  Vec          h_vec;
+  PetscScalar *h_arr;
+  PetscInt     dim, c, cStart = 0, cEnd, zero = 0;
+  DMPolytopeType ct;
+
+  PetscFunctionBeginUser;
+  // Get the quadrature rule from the main field's FE
+  PetscCall(DMGetDS(dm, &ds));
+  PetscCall(PetscDSGetDiscretization(ds, 0, (PetscObject *)&fe));
+
+  // Clone the DM to create a DM for the auxiliary data
+  PetscCall(DMGetDimension(dm, &dim));
+  // Clone the DM to create a DM for the auxiliary data
+  PetscCall(DMClone(dm, &aux_dm));
+
+  PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
+  PetscCall(DMPlexGetCellType(dm, cStart, &ct));
+
+  // Create a P0 FE space and FORCE it to use the main field's quadrature
+  PetscCall(PetscFECreateLagrangeByCell(PETSC_COMM_SELF, dim, 1, ct, zero, PETSC_DETERMINE, &fe_aux));
+  PetscCall(PetscObjectSetName((PetscObject)fe_aux, "h"));
+  PetscCall(PetscFECopyQuadrature(fe, fe_aux));
+
+   // Set this FE in the auxiliary DM
+  PetscCall(DMSetField(aux_dm, 0, NULL, (PetscObject)fe_aux));
+  PetscCall(PetscFEDestroy(&fe_aux));
+  // Create the DS for the auxiliary DM
+  PetscCall(DMCreateDS(aux_dm));
+  // Create a local vector to hold the cell-size data
+  PetscCall(DMCreateLocalVector(aux_dm, &h_vec));
+  PetscCall(PetscObjectSetName((PetscObject)h_vec, "h"));
+  PetscCall(DMGetLocalSection(aux_dm, &aux_section));
+  // Compute cell geometry and fill the vector
+  PetscCall(VecGetArray(h_vec, &h_arr));
+  for (c = cStart; c < cEnd; ++c) {
+    PetscReal vol;
+    PetscInt off;
+    PetscCall(DMPlexComputeCellGeometryFVM(dm, c, &vol, NULL, NULL));
+    PetscCall(PetscSectionGetOffset(aux_section, c, &off));
+    //printf("Cell %d: vol = %g, off = %d\n", c, (double)vol, off);
+    // Characteristic length h = V^(1/d)
+    h_arr[off] = pow(vol, 1.0 / ((PetscReal)dim));
+  }
+  PetscCall(VecRestoreArray(h_vec, &h_arr));
+
+  // Set this vector as the source for auxiliary fields in the main DM's DS
+  PetscCall(DMSetAuxiliaryVec(dm, NULL, 0, 0, h_vec));
+  // Clean up
+  PetscCall(VecDestroy(&h_vec));
+  PetscCall(DMDestroy(&aux_dm));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -224,10 +348,13 @@ int main(int argc, char **argv)
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
   PetscCall(CreateMesh(PETSC_COMM_WORLD, &user, &dm));
   PetscCall(SNESSetDM(snes, dm));
-  PetscCall(SetupDiscretization(dm, "potential", SetupPrimalProblem, &user));
+  PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &user));
+  // *** Set up the auxiliary vector for SUPG stabilization ***
+  PetscCall(SetupSUPG(dm));
+
   PetscCall(DMCreateGlobalVector(dm, &u));
   PetscCall(VecSet(u, 0.0));
-  PetscCall(PetscObjectSetName((PetscObject)u, "potential"));
+  PetscCall(PetscObjectSetName((PetscObject)u, "adv_diff"));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, &user));
   PetscCall(SNESSetFromOptions(snes));
   PetscCall(SNESSolve(snes, NULL, u));
