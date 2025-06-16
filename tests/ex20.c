@@ -356,6 +356,10 @@ int main(int argc, char **argv)
   PetscCall(VecSet(u, 0.0));
   PetscCall(PetscObjectSetName((PetscObject)u, "adv_diff"));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, &user));
+
+  // Only solving a linear problem for now
+  PetscCall(SNESSetType(snes, SNESKSPONLY));
+
   PetscCall(SNESSetFromOptions(snes));
   PetscCall(SNESSolve(snes, NULL, u));
   PetscCall(SNESGetSolution(snes, &u));
