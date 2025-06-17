@@ -1243,7 +1243,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPI_Comm :: MPI_COMM_MATRIX
-      PetscInt :: local_nnzs_petsc
+      PetscInt :: local_nnzs_petsc, offdiag_nnzs_petsc
       integer(kind=8) :: local_nnzs
       
       ! ~~~~~~~~~~
@@ -1252,10 +1252,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
 
-      ! Get local nnzs without using getrow
-      
-      call MatGetNNZs_local_c(input_mat%v, local_nnzs_petsc)      
-      local_nnzs = local_nnzs_petsc
+      ! Get nnzs without using getrow
+      call MatGetNNZs_both_c(input_mat%v, local_nnzs_petsc, offdiag_nnzs_petsc)      
+      local_nnzs = local_nnzs_petsc + offdiag_nnzs_petsc
 
       ! Do an accumulate if in parallel
       if (comm_size/=1) then
