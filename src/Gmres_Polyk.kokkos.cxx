@@ -65,7 +65,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Duplicate & copy the matrix, but ensure there is a diagonal present
    mat_duplicate_copy_plus_diag_kokkos(mat_sparsity_match, reuse_int_cmat, output_mat);
 
-   PetscInt *col_indices_off_proc_array, *row_indices_array;
+   PetscInt *col_indices_off_proc_array;
    IS col_indices, row_indices;
    Mat *submatrices;
 
@@ -86,7 +86,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       // and the nonlocal rows that correspond to the nonlocal columns
       // from the input mat      
       PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array);
-      PetscMalloc1(cols_ao, &row_indices_array);
       size_cols = cols_ad + cols_ao;
       for (PetscInt i = 0; i < cols_ad; i++)
       {
@@ -95,14 +94,13 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       for (PetscInt i = 0; i < cols_ao; i++)
       {
          col_indices_off_proc_array[cols_ad + i] = mat_mpi->garray[i];
-         row_indices_array[i] = mat_mpi->garray[i];
       }           
       
       // Create the sequential IS we want with the cols we want (written as global indices)
       ISCreateGeneral(PETSC_COMM_SELF, size_cols, \
                   col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices);
       ISCreateGeneral(PETSC_COMM_SELF, cols_ao, \
-                  row_indices_array, PETSC_USE_POINTER, &row_indices);
+                  mat_mpi->garray, PETSC_USE_POINTER, &row_indices);
 
       MatSetOption(*input_mat, MAT_SUBMAT_SINGLEIS, PETSC_TRUE); 
       // Now this will be doing comms to get the non-local rows we want and returns in a sequential matrix
@@ -184,9 +182,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
    // Add in the 0th order term
    MatShift(*output_mat, coefficients[0]);
-
-   PetscInt local_rows_submat, local_cols_submat;
-   MatGetLocalSize(submatrices[0], &local_rows_submat, &local_cols_submat);
 
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
@@ -514,7 +509,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    }   
    delete[] matrix_powers;
    if (deallocate_submatrices) delete[] submatrices;
-   (void)(col_indices_off_proc_array);
+   (void)PetscFree(col_indices_off_proc_array);
 
    return;
 }
