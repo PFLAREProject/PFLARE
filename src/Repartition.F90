@@ -114,7 +114,7 @@ module repartition
 
          ! Have to symmetrize the input matrix or it won't work in parmetis
          ! as it expects a symmetric graph
-         call MatTransposeWrapper(input_mat, input_transpose)
+         call MatTransposeWrapper(input_mat, input_transpose, symbolic = .TRUE.)
          call MatAXPYWrapper(input_transpose, 1d0, input_mat)
 
          ! Compute the adjancency graph of the symmetrized input matrix
