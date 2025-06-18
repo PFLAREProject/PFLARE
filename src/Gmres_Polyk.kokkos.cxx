@@ -334,17 +334,19 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
                PetscInt row_of_col_j;
                // Do we have this row locally or have we retrieved it from other ranks?
                const bool row_of_col_j_local = j < local_cols_row_i;
+               // This is only accesssed below if row_of_col_j_local is true
+               PetscInt local_cols_row_of_col_j = 0;
                if (row_of_col_j_local)
                {
                   row_of_col_j = device_local_j_sparsity[device_local_i_sparsity[i] + j];
+                  local_cols_row_of_col_j = device_local_i_input[row_of_col_j + 1] - device_local_i_input[row_of_col_j];    
                }
                else
                {
                   row_of_col_j = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + (j - local_cols_row_i)];
                }
 
-               // Get how many local and non-local columns there are in the row of column j
-               const PetscInt local_cols_row_of_col_j = device_local_i_input[row_of_col_j + 1] - device_local_i_input[row_of_col_j];          
+               // Get how many local and non-local columns there are in the row of column j     
                PetscInt ncols_row_of_col_j = 0;
                if (row_of_col_j_local)
                {
