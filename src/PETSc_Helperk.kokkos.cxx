@@ -1889,7 +1889,6 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t, PetscInt& thread_total) {
 
          const PetscInt i_idx_is_row = t.league_rank();
-         // The indices in is_row will be global, but we want the local index
          const PetscInt i   = is_row_d_d(i_idx_is_row);
          const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
@@ -2185,9 +2184,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;   
    Mat output_mat_local, output_mat_nonlocal;
-
-   PetscIntKokkosViewHost colmap_input_h;
-   PetscIntKokkosView colmap_input_d;    
+  
    PetscInt rows_ao, cols_ao;
    if (mpi)
    {
@@ -2195,15 +2192,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       mat_local = mat_mpi->A;
       mat_nonlocal = mat_mpi->B;
       MatGetSize(mat_nonlocal, &rows_ao, &cols_ao); 
-
-      // We also copy the input mat colmap over to the device as we need it
-      colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
-      colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);       
-      
-      // Log copy with petsc
-      size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
-      PetscLogCpuToGpu(bytes);   
       
       if (reuse_int)
       {
