@@ -486,7 +486,6 @@ module c_petsc_interfaces
       end subroutine MatCreateSubMatrix_kokkos
 
    end interface
-   end interface 
    
    interface   
       
