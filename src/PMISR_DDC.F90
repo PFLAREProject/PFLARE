@@ -83,10 +83,15 @@ module pmisr_ddc
          allocate(cf_markers_local(local_rows))  
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
-         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, cf_markers_local_ptr, zero_measure_c_point_int)
+         ! Creates a cf_markers on the device
+         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then         
+
+            ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls 
+            ! use the device data
+            call copy_cf_markers_d2h(cf_markers_local_ptr)
             call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local_two, zero_measure_c_point)  
             
             if (any(cf_markers_local /= cf_markers_local_two)) then
@@ -665,7 +670,7 @@ module pmisr_ddc
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
 #if defined(PETSC_HAVE_KOKKOS)                     
-      integer(c_long_long) :: A_array, indices
+      integer(c_long_long) :: A_array
       PetscErrorCode :: ierr
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
@@ -687,7 +692,6 @@ module pmisr_ddc
             mat_type == MATAIJKOKKOS) then  
 
          A_array = input_mat%v  
-         indices = is_fine%v
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -696,10 +700,15 @@ module pmisr_ddc
             cf_markers_local_two = cf_markers_local
          end if
 
-         call ddc_kokkos(A_array, indices, fraction_swap, cf_markers_local_ptr)
+         ! Modifies the existing device cf_markers created by the pmisr
+         call ddc_kokkos(A_array, fraction_swap)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then  
+
+            ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
+            ! use the existing device data
+            call copy_cf_markers_d2h(cf_markers_local_ptr)            
             call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local_two)  
 
             if (any(cf_markers_local /= cf_markers_local_two)) then
@@ -778,9 +787,9 @@ module pmisr_ddc
       ! ~~~~~~~~~~~~~
  
       ! Pull out Aff for ease of use
-      call MatCreateSubMatrixWrapper(input_mat, &
+      call MatCreateSubMatrix(input_mat, &
             is_fine, is_fine, MAT_INITIAL_MATRIX, &
-            Aff)      
+            Aff, ierr)      
 
       ! Can't put this above because of collective operations in parallel (namely the getsubmatrix)
       ! If we have local points to swap

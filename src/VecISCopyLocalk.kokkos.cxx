@@ -2,12 +2,10 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 
-using ViewPtr = std::shared_ptr<PetscIntKokkosView>;
-
-// Define array of shared pointers representing fine and coarse IS's 
-// on each level on the device
-ViewPtr* IS_fine_views_local = nullptr;
-ViewPtr* IS_coarse_views_local = nullptr;
+// These are defined as extern in kokkos_helper.hpp but we allocate
+// them in this .cxx
+ViewPetscIntPtr* IS_fine_views_local = nullptr;
+ViewPetscIntPtr* IS_coarse_views_local = nullptr;
 int max_levels = -1;
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -40,14 +38,14 @@ PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
       max_levels = max_levels_input;
 
       // Initialise fine
-      IS_fine_views_local = new ViewPtr[max_levels];
+      IS_fine_views_local = new ViewPetscIntPtr[max_levels];
       // Initialize each element as null until it's set
       // we don't want to accidently call the constructor on any of the views
       for (int i = 0; i < max_levels; i++) {
          IS_fine_views_local[i] = nullptr;
       }
       // Initialise coarse
-      IS_coarse_views_local = new ViewPtr[max_levels];
+      IS_coarse_views_local = new ViewPetscIntPtr[max_levels];
       for (int i = 0; i < max_levels; i++) {
          IS_coarse_views_local[i] = nullptr;
       }      

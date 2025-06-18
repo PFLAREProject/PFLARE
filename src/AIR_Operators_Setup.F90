@@ -76,11 +76,13 @@ module air_operators_setup
          if (.NOT. PetscObjectIsNull(temp_mat)) then
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP))              
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)              
          else
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP))                           
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)                              
          end if
                      
          call timer_finish(TIMER_ID_AIR_EXTRACT)                             
@@ -139,11 +141,13 @@ module air_operators_setup
          if (air_data%allocated_matrices_A_cc(our_level)) then
             call MatCreateSubMatrixWrapper(input_mat, &
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
-                  air_data%A_cc(our_level))             
+                  air_data%A_cc(our_level), &
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE.)            
          else
             call MatCreateSubMatrixWrapper(input_mat, &
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-                  air_data%A_cc(our_level))             
+                  air_data%A_cc(our_level), &
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE.)                
          end if
 
          call timer_start(TIMER_ID_AIR_INVERSE)    
@@ -171,17 +175,21 @@ module air_operators_setup
       if (air_data%allocated_matrices_A_ff(our_level)) then
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
-               air_data%A_fc(our_level))   
+               air_data%A_fc(our_level), &
+               our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)   
       call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-               air_data%A_cf(our_level))                     
+               air_data%A_cf(our_level), &
+               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)                      
       else 
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_fc(our_level)) 
+               air_data%A_fc(our_level), &
+               our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.) 
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_cf(our_level))                                                                   
+               air_data%A_cf(our_level), &
+               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)                                                                    
       end if
 
       call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -208,11 +216,13 @@ module air_operators_setup
          if (.NOT. PetscObjectIsNull(temp_mat)) then
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))              
+                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
+                        our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)               
          else
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))            
+                        air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
+                        our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)             
          end if
 
          if (.NOT. air_data%options%one_point_classical_prolong) then
@@ -221,11 +231,13 @@ module air_operators_setup
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP))
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)
             else
                call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
-                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP))                
+                        air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)
             end if
          end if                  
          

@@ -312,28 +312,57 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, cf_markers_local, zero_meaure_c_point_int) &
+      subroutine create_cf_is_kokkos(A_array, index_fine, index_coarse) &
+         bind(c, name="create_cf_is_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: index_fine
+         integer(c_long_long) :: index_coarse
+      end subroutine create_cf_is_kokkos         
+ 
+   end interface   
+
+   interface   
+      
+      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, zero_meaure_c_point_int) &
          bind(c, name="pmisr_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
          type(c_ptr), value :: measure_local
          integer(c_int), value :: max_luby_steps, pmis_int, zero_meaure_c_point_int
-         type(c_ptr), value :: cf_markers_local
       end subroutine pmisr_kokkos         
  
    end interface     
 
    interface   
       
-      subroutine ddc_kokkos(A_array, indices, fraction_swap, cf_markers_local) &
+      subroutine ddc_kokkos(A_array, fraction_swap) &
          bind(c, name="ddc_kokkos")
          use iso_c_binding
-         integer(c_long_long) :: A_array, indices
+         integer(c_long_long) :: A_array
          PetscReal, value :: fraction_swap
-         type(c_ptr), value :: cf_markers_local
       end subroutine ddc_kokkos         
  
-   end interface      
+   end interface 
+   
+   interface   
+      
+      subroutine copy_cf_markers_d2h(cf_markers_local) &
+         bind(c, name="copy_cf_markers_d2h")
+         use iso_c_binding
+         type(c_ptr), value :: cf_markers_local
+      end subroutine copy_cf_markers_d2h         
+ 
+   end interface 
+   
+   interface   
+      
+      subroutine delete_device_cf_markers() &
+         bind(c, name="delete_device_cf_markers")
+         use iso_c_binding
+      end subroutine delete_device_cf_markers         
+ 
+   end interface       
 
    interface   
       
@@ -444,13 +473,15 @@ module c_petsc_interfaces
    
    interface   
       
-      subroutine MatCreateSubMatrix_kokkos(A_array, is_row, is_col, reuse_int, B_array) &
+      subroutine MatCreateSubMatrix_kokkos(A_array, is_row, is_col, &
+                     reuse_int, B_array, &
+                     our_level, is_row_fine_int, is_col_fine_int) &
          bind(c, name="MatCreateSubMatrix_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_long_long) :: is_row, is_col
-         integer(c_int), value :: reuse_int
+         integer(c_int), value :: our_level, is_row_fine_int, is_col_fine_int, reuse_int
 
       end subroutine MatCreateSubMatrix_kokkos
 

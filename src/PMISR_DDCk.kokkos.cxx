@@ -4,10 +4,45 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
+// This is a device copy of the cf markers on a given level
+// to save having to copy it to/from the host between pmisr and ddc calls
+intKokkosView cf_markers_local_d;
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Copy the global cf_markers_local_d back to the host
+PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
+{
+   // Host wrapper for cf_markers_local
+   intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
+
+   // Now copy device cf_markers_local_d back to host
+   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
+   // Log copy with petsc
+   size_t bytes = cf_markers_local_d.extent(0) * sizeof(int);
+   PetscLogGpuToCpu(bytes);
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Delete the global cf_markers_local_d
+PETSC_INTERN void delete_device_cf_markers()
+{
+   // Delete the device view - this assigns an empty view
+   // and hence the old view has its ref counter decremented
+   cf_markers_local_d = intKokkosView(); 
+
+   return;
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // PMISR cf splitting but on the device
-PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, int *cf_markers_local, const int zero_measure_c_point_int)
+// This no longer copies back to the host pointer cf_markers_local at the end
+// You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
+PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
@@ -51,9 +86,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
 
-   // Host and device memory for the cf_markers - be careful these aren't petsc ints
-   intKokkosViewHost cf_markers_local_h(cf_markers_local, local_rows);
-   intKokkosView cf_markers_local_d("cf_markers_local_d", local_rows);
+   // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
+   cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
    PetscScalar *cf_markers_local_real_d_ptr = NULL, *cf_markers_nonlocal_real_d_ptr = NULL;
    // The real equivalents so we can use the existing petscsf from the input matrix
    PetscScalarKokkosView cf_markers_local_real_d("cf_markers_local_real_d", local_rows);
@@ -408,46 +442,149 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~
    // Now assign our final cf markers
    // ~~~~~~~~~
+
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          
       if (cf_markers_local_real_d(i) == 0)
       {
-         cf_markers_local_d(i) = 1;
+         cf_markers_d(i) = 1;
       }
       else if (cf_markers_local_real_d(i) < 0)
       {
-         cf_markers_local_d(i) = -1;
+         cf_markers_d(i) = -1;
       }
       else
       {
-         cf_markers_local_d(i) = 1;
+         cf_markers_d(i) = 1;
       }
-      if (pmis_int) cf_markers_local_d(i) *= -1;
+      if (pmis_int) cf_markers_d(i) *= -1;
    });
-
-   // Now copy device cf_markers_local_d back to host
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
-   // Log copy with petsc
-   bytes = cf_markers_local_d.extent(0) * sizeof(int);
-   PetscLogGpuToCpu(bytes);
 
    return;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Computes the diagonal dominance ratio of the input matrix over the input IS row/cols
-// This version only works if the input IS have the same parallel row/column distribution 
-// as the matrices
-// is_col must be sorted
-// This code is very similar to MatCreateSubMatrix_kokkos
-PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalarKokkosView &diag_dom_ratio_d)
+// Creates the device local indices for F or C points based on the global cf_markers_local_d
+PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d)
 {
    PetscInt local_rows, local_cols;
-   PetscInt global_rows, global_cols;
+   MatGetLocalSize(*input_mat, &local_rows, &local_cols); 
+
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
+
+   // ~~~~~~~~~~~~
+   // Get the F point local indices from cf_markers_local_d
+   // ~~~~~~~~~~~~   
+   PetscIntKokkosView point_offsets_d("point_offsets_d", local_rows+1);
+
+   // Doing an exclusive scan to get the offsets for our local indices
+   // Doing one larger so we can get the total number of points
+   Kokkos::parallel_scan("point_offsets_d_scan",
+      Kokkos::RangePolicy<>(0, local_rows+1),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
+         bool is_f_point = false;
+         if (i < local_rows) { // Predicate is based on original data up to local_rows-1
+               is_f_point = (cf_markers_d(i) == match_cf); // is this point match_cf
+         }         
+         if (final_pass) {
+               point_offsets_d(i) = update;
+         }
+         if (is_f_point) {
+               update++;
+         }
+      }
+   ); 
+
+   // The last entry in point_offsets_d is the total number of points that match match_cf
+   PetscInt local_rows_row = 0;
+   Kokkos::deep_copy(local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
+
+   // This will be equivalent to is_fine - global_row_start, ie the local indices
+   is_local_d = PetscIntKokkosView("is_local_d", local_rows_row);    
+
+   // ~~~~~~~~~~~~
+   // Write the local indices
+   // ~~~~~~~~~~~~     
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
+         // Is this point match_cf
+         if (cf_markers_d(i) == match_cf) {
+            // point_offsets_d(i) gives the correct local index
+            is_local_d(point_offsets_d(i)) = i;
+         }              
+   });
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Creates the host IS is_fine and is_coarse based on the global cf_markers_local_d
+PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse)
+{
+   PetscIntKokkosView is_fine_local_d, is_coarse_local_d;
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
+
+   // Create the local f point indices
+   const int match_fine = -1; // F_POINT == -1
+   create_cf_is_device_kokkos(input_mat, match_fine, is_fine_local_d);
+
+   // Create the local C point indices
+   const int match_coarse = 1; // C_POINT == 1
+   create_cf_is_device_kokkos(input_mat, match_coarse, is_coarse_local_d);
+
+   // Now convert them back to global indices
    PetscInt global_row_start, global_row_end_plus_one;
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
+   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);   
+
+   // Convert F points
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, is_fine_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
+   
+      is_fine_local_d(i) += global_row_start;
+   });
+   // Convert C points
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, is_coarse_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
+   
+      is_coarse_local_d(i) += global_row_start;
+   });       
+
+   // Create some host space for the indices
+   PetscInt *is_fine_array = nullptr, *is_coarse_array = nullptr;
+   PetscInt n_fine = is_fine_local_d.extent(0);
+   PetscMalloc1(n_fine, &is_fine_array);
+   PetscIntKokkosViewHost is_fine_h = PetscIntKokkosViewHost(is_fine_array, is_fine_local_d.extent(0));   
+   PetscInt n_coarse = is_coarse_local_d.extent(0);
+   PetscMalloc1(n_coarse, &is_coarse_array);
+   PetscIntKokkosViewHost is_coarse_h = PetscIntKokkosViewHost(is_coarse_array, n_coarse);   
+
+   // Copy over the indices to the host
+   Kokkos::deep_copy(is_fine_h, is_fine_local_d);
+   Kokkos::deep_copy(is_coarse_h, is_coarse_local_d);
+   // Log copy with petsc
+   size_t bytes_fine = is_fine_local_d.extent(0) * sizeof(PetscInt);
+   size_t bytes_coarse = is_coarse_local_d.extent(0) * sizeof(PetscInt);
+   PetscLogGpuToCpu(bytes_fine + bytes_coarse);
+
+   // Now we can create the IS objects
+   ISCreateGeneral(MPI_COMM_MATRIX, is_fine_local_d.extent(0), is_fine_array, PETSC_OWN_POINTER, is_fine);
+   ISCreateGeneral(MPI_COMM_MATRIX, is_coarse_local_d.extent(0), is_coarse_array, PETSC_OWN_POINTER, is_coarse);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
+// This code is very similar to MatCreateSubMatrix_kokkos
+PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
+{
+   PetscInt local_rows, local_cols;
 
    // Are we in parallel?
    MatType mat_type;
@@ -456,7 +593,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
 
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
-   MatGetSize(*input_mat, &global_rows, &global_cols); 
    MatGetLocalSize(*input_mat, &local_rows, &local_cols); 
    
    Mat_MPIAIJ *mat_mpi = nullptr;
@@ -475,38 +611,19 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
       mat_local = *input_mat;
    }   
 
-   // ~~~~~~~~~~~~
-   // Transfer the IS's to the device
-   // ~~~~~~~~~~~~   
-
-   // Get pointers to the indices on the host
-   const PetscInt *is_row_indices_ptr;
-   ISGetIndices(*is_row, &is_row_indices_ptr);   
-
-   PetscInt local_rows_row, global_rows_row;
-   ISGetLocalSize(*is_row, &local_rows_row);   
-   ISGetSize(*is_row, &global_rows_row);
-
-   // Create a host view of the existing indices
-   auto is_row_view_h = PetscIntConstKokkosViewHost(is_row_indices_ptr, local_rows_row);    
-   auto is_row_d_d = PetscIntKokkosView("is_row_d_d", local_rows_row);   
-     
-   // Copy indices to the device
-   Kokkos::deep_copy(is_row_d_d, is_row_view_h);     
-   // Log copy with petsc
-   size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);        
-
-   ISRestoreIndices(*is_row, &is_row_indices_ptr);   
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;   
 
    // ~~~~~~~~~~~~
-   // Rewrite to local indices
-   // ~~~~~~~~~~~~     
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
+   // Get the F point local indices from cf_markers_local_d
+   // ~~~~~~~~~~~~
+   const int match_cf = -1; // F_POINT == -1
+   create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
+   PetscInt local_rows_row = is_fine_local_d.extent(0);
 
-         is_row_d_d(i) -= global_row_start; // Make local
-   });
+   // Create device memory for the diag_dom_ratio
+   diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_row);    
 
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
@@ -525,18 +642,14 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
       /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
       lvec = mat_mpi->lvec;
       MatCreateVecs(*input_mat, &x, NULL);
-      VecSet(x, -1.0);
 
       // Use the vecs in the scatter provided by the input mat
-      VecGetKokkosView(x, &x_d);
-      VecGetKokkosView(lvec, &lvec_d);
+      // We're going to overwrite everything in x and lvec
+      VecGetKokkosViewWrite(x, &x_d);
+      VecGetKokkosViewWrite(lvec, &lvec_d);
 
-      // Loop over all the cols in is_col
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {      
-
-            x_d(is_row_d_d(i)) = (PetscScalar)is_row_d_d(i); 
-      });
+      // Copy in cf markers to x
+      Kokkos::deep_copy(x_d, cf_markers_d);   
 
       x_d_ptr = x_d.data();      
       lvec_d_ptr = lvec_d.data();       
@@ -566,16 +679,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
 
    // Scoping to reduce peak memory
    {
-      // Map which columns in the original mat are in is_row
-      PetscIntKokkosView smap_d = PetscIntKokkosView("smap_d", local_cols);  
-      Kokkos::deep_copy(smap_d, 0); 
-      // Loop over all the cols in is_row
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {      
-
-            smap_d(is_row_d_d(i)) = i + 1; 
-      });    
-
       // We now go and do a reduce to get the diagonal entry, while also 
       // summing up the local non-diagonals into diag_dom_ratio_d
       Kokkos::parallel_for(
@@ -583,7 +686,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             const PetscInt i_idx_is_row = t.league_rank();
-            const PetscInt i = is_row_d_d(i_idx_is_row);
+            const PetscInt i = is_fine_local_d(i_idx_is_row);
             const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
             PetscScalar sum_val = 0.0;
@@ -595,11 +698,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
 
                   // Get this local column in the input_mat
                   PetscInt target_col = device_local_j[device_local_i[i] + j];
-                  // Is this column in the input IS?
-                  if (smap_d(target_col))
+                  // Is this column fine? F_POINT == -1
+                  if (cf_markers_d(target_col) == -1)
                   {               
                      // Is this column the diagonal
-                     const bool is_diagonal = smap_d(target_col) - 1 == i_idx_is_row;
+                     const bool is_diagonal = i == target_col;
 
                      // Get the abs value of the entry
                      PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);   
@@ -637,7 +740,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
       // Finish the x scatter
       PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, x_d_ptr, lvec_d_ptr, MPI_REPLACE);      
       // We're done with x now
-      VecRestoreKokkosView(x, &x_d);
+      VecRestoreKokkosViewWrite(x, &x_d);
       VecDestroy(&x);
 
       // ~~~~~~~~~~~~
@@ -655,7 +758,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
                const PetscInt i_idx_is_row = t.league_rank();
-               const PetscInt i = is_row_d_d(i_idx_is_row);
+               const PetscInt i = is_fine_local_d(i_idx_is_row);
                const PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                PetscScalar sum_val = 0.0;
@@ -667,8 +770,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
 
                      // This is the non-local column we have to check is present
                      PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
-                     // Is this column in the input IS?
-                     if (lvec_d_ptr[target_col] > -1.0)
+                     // Is this column in the input IS? F_POINT == -1
+                     if (lvec_d_ptr[target_col] < 0.0)
                      {               
                         // Get the abs value of the entry
                         thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
@@ -685,7 +788,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
          });  
       }       
 
-      VecRestoreKokkosView(lvec, &lvec_d);
+      VecRestoreKokkosViewWrite(lvec, &lvec_d);
    }
 
    // ~~~~~~~~~~~~~
@@ -709,61 +812,33 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, IS *is_row, PetscScalar
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// ddc cleanup but on the device
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fraction_swap, int *cf_markers_local)
+// ddc cleanup but on the device - uses the global variable cf_markers_local_d
+// This no longer copies back to the host pointer cf_markers_local at the end
+// You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
 {
-   PetscInt local_rows, local_cols;
-
-   // Get the comm
-   MatGetLocalSize(*input_mat, &local_rows, &local_cols);
-
-   // Host and device memory for the cf_markers - be careful these aren't petsc ints
-   intKokkosViewHost cf_markers_local_h(cf_markers_local, local_rows);
-   intKokkosView cf_markers_local_d("cf_markers_local_d", local_rows);   
-   // Now copy cf markers to device
-   Kokkos::deep_copy(cf_markers_local_d, cf_markers_local_h);  
-   // Log copy with petsc
-   size_t bytes = cf_markers_local_h.extent(0) * sizeof(int);
-   PetscLogCpuToGpu(bytes);     
-
-   // Get pointers to the indices on the host
-   const PetscInt *fine_indices_ptr;
-   ISGetIndices(*is_fine, &fine_indices_ptr);
-
-   PetscInt fine_local_size;
-   ISGetLocalSize(*is_fine, &fine_local_size);    
+   // Can't use the global directly within the parallel 
+   // regions on the device
+   intKokkosView cf_markers_d = cf_markers_local_d;  
+   PetscScalarKokkosView diag_dom_ratio_d;
+   PetscIntKokkosView is_fine_local_d;
    
-   PetscInt local_rows_aff;
-   local_rows_aff = fine_local_size;
-   PetscInt input_row_start, input_row_end_plus_one;
-   MatGetOwnershipRange(*input_mat, &input_row_start, &input_row_end_plus_one);      
-
-   // Create a host view of the existing indices
-   auto fine_view_h = PetscIntConstKokkosViewHost(fine_indices_ptr, fine_local_size);    
-   auto fine_view_d = PetscIntKokkosView("fine_view_d", fine_local_size);   
-   // Copy fine indices to the device
-   Kokkos::deep_copy(fine_view_d, fine_view_h);
-   // Log copy with petsc
-   bytes = fine_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);   
+   // Compute the diagonal dominance ratio over the fine points in cf_markers_local_d
+   // ie the diag domminance ratio of Aff
+   MatDiagDomRatio_kokkos(input_mat, is_fine_local_d, diag_dom_ratio_d);
+   PetscInt local_rows_aff = is_fine_local_d.extent(0);
 
    // Do a fixed alpha_diag
    PetscInt search_size;
    if (fraction_swap < 0) {
       // We have to look through all the local rows
-      search_size = fine_local_size;
+      search_size = local_rows_aff;
    }
    // Or pick alpha_diag based on the worst % of rows
    else {
       // Only need to go through the biggest % of indices
-      search_size = static_cast<PetscInt>(double(fine_local_size) * fraction_swap);
-   }
-
-   // Create device memory for the diag_dom_ratio
-   auto diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_aff); 
-   // Compute the diagonal dominance ratio over the is_fine rows/cols
-   // ie the diag domminance ratio of Aff
-   MatDiagDomRatio_kokkos(input_mat, is_fine, diag_dom_ratio_d);
+      search_size = static_cast<PetscInt>(double(local_rows_aff) * fraction_swap);
+   }   
 
    // Can't put this above because of collective operations in parallel (namely the MatDiagDomRatio_kokkos)
    // If we have local points to swap
@@ -830,18 +905,11 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, IS *is_fine, const PetscReal fracti
             if (diag_dom_ratio_d(i) != 0.0 && diag_dom_ratio_d(i) >= swap_dom_val)
             {
                // This is the actual numbering in A, rather than Aff
-               PetscInt idx = fine_view_d(i) - input_row_start;
-               cf_markers_local_d(idx) *= -1;
+               PetscInt idx = is_fine_local_d(i);
+               cf_markers_d(idx) *= -1;
             }
       }); 
-   }
-
-   // Now copy device cf_markers_local_d back to host
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
-   bytes = cf_markers_local_d.extent(0) * sizeof(int);
-   PetscLogGpuToCpu(bytes);       
-
-   ISRestoreIndices(*is_fine, &fine_indices_ptr);
+   }   
 
    return;
 }

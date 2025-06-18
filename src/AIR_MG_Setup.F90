@@ -304,7 +304,17 @@ module air_mg_setup
             ! Exit out of the coarsening loop
             exit level_loop
 
-         end if    
+         end if   
+         
+         ! ~~~~~~~~~~~~~~  
+         ! Copy over the fine/coarse IS's to the device, we use them 
+         ! in our matrix extract to save h2d copies, and they are also used 
+         ! in the fc smooth
+         ! ~~~~~~~~~~~~~~  
+         call timer_start(TIMER_ID_AIR_IDENTITY)            
+         call create_VecISCopyLocalWrapper(air_data, our_level, &
+               mat_type, air_data%coarse_matrix(our_level))
+         call timer_finish(TIMER_ID_AIR_IDENTITY)            
 
          ! ~~~~~~~~~~~~~~     
          ! Now let's go and build all our operators
@@ -357,12 +367,14 @@ module air_mg_setup
             else
                call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
                      air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
-                     air_data%A_ff(our_level))         
+                     air_data%A_ff(our_level), &
+                     our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)         
             end if
          else
             call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
                   air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                  air_data%A_ff(our_level))                 
+                  air_data%A_ff(our_level), &
+                  our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)               
          end if
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -1109,13 +1121,7 @@ module air_mg_setup
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
                call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)         
-            end if
-
-            ! Copy over the IS's to the device for fc smoothing if needed
-            call timer_start(TIMER_ID_AIR_IDENTITY)            
-            call create_VecISCopyLocalWrapper(air_data, our_level, &
-                  mat_type, air_data%coarse_matrix(our_level))
-            call timer_finish(TIMER_ID_AIR_IDENTITY)              
+            end if            
          end if              
          
          air_data%allocated_matrices_A_ff(our_level) = .TRUE.
