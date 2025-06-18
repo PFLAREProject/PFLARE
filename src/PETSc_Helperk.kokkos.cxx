@@ -2515,7 +2515,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 //------------------------------------------------------------------------------------------------------------------------
 
 // Does a MatTranspose for a MPIAIJ Kokkos matrix - the petsc version currently uses the host making it slow
-PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y)
+PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 {
 
    Mat_MPIAIJ *mat_mpi_x = nullptr;
@@ -2626,32 +2626,35 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y)
    // Can delete indices now
    (void)PetscFree2(row_indices, col_indices);
 
-   // Now let's set the values on the device
-   // Have to be in the same order as the preallocation
-   Kokkos::View<PetscScalar *> v_d = Kokkos::View<PetscScalar *>("v_d", nnzs);
+   // Now let's set the values on the device if we're not just doing a symbolic
+   if (!symbolic_int)
+   {
+      // Have to be in the same order as the preallocation
+      Kokkos::View<PetscScalar *> v_d = Kokkos::View<PetscScalar *>("v_d", nnzs);
 
-   // ~~~~~~~~~~~~
-   // Get pointers to the i,j,vals on the device
-   // ~~~~~~~~~~~~
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-   PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local_x, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
-   MatSeqAIJGetCSRAndMemType(mat_nonlocal_x, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
+      // ~~~~~~~~~~~~
+      // Get pointers to the i,j,vals on the device
+      // ~~~~~~~~~~~~
+      const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+      PetscMemType mtype;
+      PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
+      MatSeqAIJGetCSRAndMemType(mat_local_x, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
+      MatSeqAIJGetCSRAndMemType(mat_nonlocal_x, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
 
-   PetscScalarKokkosView a_local_d, a_nonlocal_d;
-   a_local_d = PetscScalarKokkosView(device_local_vals, nnzs_local);   
-   a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, nnzs_nonlocal); 
+      PetscScalarKokkosView a_local_d, a_nonlocal_d;
+      a_local_d = PetscScalarKokkosView(device_local_vals, nnzs_local);   
+      a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, nnzs_nonlocal); 
 
-   // Copy the values into our values array
-   PetscInt zero = 0;
-   auto v_d_local_range = Kokkos::subview(v_d, Kokkos::make_pair(zero, nnzs_local));
-   Kokkos::deep_copy(v_d_local_range, a_local_d);
-   auto v_d_nonlocal_range = Kokkos::subview(v_d, Kokkos::make_pair(nnzs_local, nnzs));
-   Kokkos::deep_copy(v_d_nonlocal_range, a_nonlocal_d);
+      // Copy the values into our values array
+      PetscInt zero = 0;
+      auto v_d_local_range = Kokkos::subview(v_d, Kokkos::make_pair(zero, nnzs_local));
+      Kokkos::deep_copy(v_d_local_range, a_local_d);
+      auto v_d_nonlocal_range = Kokkos::subview(v_d, Kokkos::make_pair(nnzs_local, nnzs));
+      Kokkos::deep_copy(v_d_nonlocal_range, a_nonlocal_d);
 
-   // Set the values
-   MatSetValuesCOO(*Y, v_d.data(), INSERT_VALUES);
+      // Set the values
+      MatSetValuesCOO(*Y, v_d.data(), INSERT_VALUES);
+   }
 
    return;
 }
