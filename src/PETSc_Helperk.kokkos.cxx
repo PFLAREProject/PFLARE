@@ -2630,13 +2630,14 @@ void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& ou
 
     // Perform the merge in a tree fashion
     while (current_level.extent(0) > 1) {
+
         size_t next_level_size = (current_level.extent(0) + 1) / 2;
         Kokkos::View<ViewType*> next_level("next_level", next_level_size);
         Kokkos::View<ViewType*> next_permutations("next_permutations", next_level_size);
         Kokkos::View<size_t*> next_offsets("next_offsets", next_level_size);
 
         // Merge pairs of arrays
-        Kokkos::parallel_for("MergePairs", current_level.extent(0) / 2, KOKKOS_LAMBDA(const size_t i) {
+        for (size_t i = 0; i < current_level.extent(0) / 2; ++i) {
             size_t idx1 = 2 * i;
             size_t idx2 = idx1 + 1;
 
@@ -2650,12 +2651,12 @@ void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& ou
             size_t offset1 = current_offsets(idx1);
             size_t offset2 = current_offsets(idx2);
 
+            // Now this combine can be on the device - will not be efficient at the bottom of the tree, 
+            // but should be at the top
             Kokkos::parallel_for("CombinePermutation", merged_permutation.extent(0), KOKKOS_LAMBDA(const size_t j) {
                 if (static_cast<size_t>(merged_permutation(j)) < current_level(idx1).extent(0)) {
-                    // Index from first array: add offset1 to the permutation from first array
                     combined_permutation(j) = current_permutations(idx1)(merged_permutation(j)) + offset1;
                 } else {
-                    // Index from second array: add offset2 to the permutation from second array
                     combined_permutation(j) = current_permutations(idx2)(merged_permutation(j) - current_level(idx1).extent(0)) + offset2;
                 }
             });
@@ -2663,7 +2664,7 @@ void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& ou
             next_level(i) = merged_array;
             next_permutations(i) = combined_permutation;
             next_offsets(i) = offset1; // The merged array starts at the same offset as the first array
-        });
+        }
 
         // Handle odd array if it exists
         if (current_level.extent(0) % 2 == 1) {
