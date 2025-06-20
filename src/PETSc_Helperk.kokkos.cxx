@@ -2737,54 +2737,69 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // ~~~~~~~~~~~~~~   
 
    MatView(mat_nonlocal_x, PETSC_VIEWER_STDOUT_SELF);
-
-   PetscInt *g_nnz, *o_nnz;
-   PetscSF sf;
-
    for (PetscInt i = 0; i < cols_ao; i++) {
       fprintf(stderr,"garray[%d] = %d\n", i, mat_mpi_x->garray[i]);
    }
 
-   PetscInt shift = 0, n = 0;
-   PetscBool symmetric = PETSC_FALSE;
-   PetscBool inode = PETSC_FALSE;
-   const PetscInt *i_nonlocal, *j_nonlocal;
-   PetscBool done;
-   MatGetRowIJ(mat_nonlocal_x, shift, symmetric, inode, &n, &i_nonlocal, &j_nonlocal, &done);      
+   // Annoyingly there isn't currently the ability to get views for i (or j)
+   const PetscInt *device_i_nonlocal = nullptr, *device_j_nonlocal = nullptr;
+   PetscMemType mtype;
+   MatSeqAIJGetCSRAndMemType(mat_nonlocal_x, &device_i_nonlocal, &device_j_nonlocal, NULL, &mtype);
+   Kokkos::View<PetscInt *> g_nnz_d = PetscIntKokkosView("g_nnz_d", cols_ao);
+   Kokkos::deep_copy(g_nnz_d, 0);
 
-   PetscMalloc2(cols_ao, &g_nnz, local_rows, &o_nnz);
-   PetscArrayzero(g_nnz, cols_ao);
-   PetscArrayzero(o_nnz, local_rows);
    // Work out how many entries in our non-local matrix per non-local column
-   // Can do this on the device
-   for (int i = 0; i < i_nonlocal[local_rows]; i++) g_nnz[j_nonlocal[i]]++;
+   Kokkos::parallel_for(
+      Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
+      KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
-   MatRestoreRowIJ(mat_nonlocal_x, shift, symmetric, inode, &n, &i_nonlocal, &j_nonlocal, &done);
+         // Row
+         const PetscInt i = t.league_rank();
 
+         // Still using i here (the local index into input)
+         const PetscInt ncols = device_i_nonlocal[i + 1] - device_i_nonlocal[i];         
+
+         // For over local columns
+         Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
+
+            // Has to be atomic! Potentially lots of contention so maybe not 
+            // the most performant way to do this
+            Kokkos::atomic_add(&g_nnz_d(device_j_nonlocal[device_i_nonlocal[i] + j]), 1);    
+         });  
+   });   
+
+   // We also need a copy of g_nnz on the host
+   PetscInt *g_nnz;
+   PetscMalloc1(cols_ao, &g_nnz);
+   PetscIntKokkosViewHost g_nnz_h = PetscIntKokkosViewHost(g_nnz, cols_ao);
+   // Copy g_nnz to the host
+   Kokkos::deep_copy(g_nnz_h, g_nnz_d); 
+   // Log copy with petsc
+   bytes = g_nnz_h.extent(0) * sizeof(PetscInt);
+   PetscLogGpuToCpu(bytes);        
+
+   PetscSF sf;   
    PetscSFCreate(MPI_COMM_MATRIX, &sf);
    PetscSFSetGraphLayout(sf, (*X)->cmap, cols_ao, NULL, PETSC_USE_POINTER, mat_mpi_x->garray);
-   // After this reduction, o_nnz will have how many entries we have in each row of the resulting
+
+   PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
+   PetscInt *g_nnz_d_ptr = g_nnz_d.data();
+   Kokkos::View<PetscInt *> i_transpose_d = PetscIntKokkosView("i_transpose_d", local_rows+1);
+   PetscInt *i_transpose_d_ptr = i_transpose_d.data();
+
+   // After this reduction, i_transpose_d will have how many entries we have in each row of the resulting
    // non-local portion of the transpose
-   // A scan of this will tell us the i_indices
-   PetscSFReduceBegin(sf, MPIU_INT, g_nnz, o_nnz, MPI_SUM);
-   PetscSFReduceEnd(sf, MPIU_INT, g_nnz, o_nnz, MPI_SUM);
+   // A scan of this will tell us the i_indices   
+   PetscSFReduceWithMemTypeBegin(sf, MPIU_INT,
+      mem_type, g_nnz_d_ptr,
+      mem_type, i_transpose_d_ptr,
+      MPIU_SUM);   
+   PetscSFReduceEnd(sf, MPIU_INT, g_nnz_d_ptr, i_transpose_d_ptr, MPIU_SUM);         
 
    for (PetscInt i = 0; i < local_rows; i++) {
-      fprintf(stderr,"o_nnz[%d] = %d\n", i, o_nnz[i]);
+      fprintf(stderr,"i_transpose_d[%d] = %d\n", i, i_transpose_d[i]);
    }      
-
-   // We also copy the o_nnz to the device
-   PetscIntKokkosViewHost o_nnz_h = PetscIntKokkosViewHost(o_nnz, local_rows);
-   Kokkos::View<PetscInt *> i_transpose_d = PetscIntKokkosView("i_transpose_d", local_rows+1);
-   // Set the i_transpose_d to 0
-   Kokkos::deep_copy(i_transpose_d, 0);
-
-   // Copy o_nnz_h to i_transpose_d[0:local_rows]
-   Kokkos::deep_copy(Kokkos::subview(i_transpose_d, Kokkos::make_pair(0, local_rows)), o_nnz_h);
-
-   // Log copy with petsc
-   bytes = o_nnz_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);
 
    // Perform exclusive scan - this modifies i_transpose_d in-place
    Kokkos::parallel_scan(local_rows + 1, KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final) {
@@ -2878,7 +2893,6 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 
    // Annoyingly there isn't currently the ability to get views for i (or j)
    const PetscInt *device_i_transpose = nullptr, *device_j_transpose = nullptr, *device_vals_transpose = nullptr;
-   PetscMemType mtype;
    MatSeqAIJGetCSRAndMemType(mat_nonlocal_x_transpose, &device_i_transpose, &device_j_transpose, NULL, &mtype);  
 
    // Write the i,j indices into send_rows_d and send_cols_d
