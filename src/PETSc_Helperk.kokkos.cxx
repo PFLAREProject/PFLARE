@@ -2515,16 +2515,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 //------------------------------------------------------------------------------------------------------------------------
 
 // Does a MatTranspose for a MPIAIJ Kokkos matrix - the petsc version currently uses the host making it slow
+// Parts of this are taken from MatTranspose_MPIAIJ
 PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 {
-
-   Mat_MPIAIJ *mat_mpi_x = nullptr;
-   Mat mat_local_x = NULL;
-   Mat mat_nonlocal_x = NULL;
-
-   mat_mpi_x = (Mat_MPIAIJ *)(*X)->data;
-   mat_local_x = mat_mpi_x->A;
-   mat_nonlocal_x = mat_mpi_x->B;
+   Mat_MPIAIJ *mat_mpi_x = (Mat_MPIAIJ *)(*X)->data;
+   Mat mat_local_x = mat_mpi_x->A;
+   Mat mat_nonlocal_x = mat_mpi_x->B;
 
    Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
    Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
@@ -2545,6 +2541,8 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       }  
    }
 
+   // ~~~~~~~~~~~~~~
+
    // Get the number of non-zeros in the matrix
    PetscInt nnzs_local = 0, nnzs_nonlocal = 0, nnzs = 0;
    Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local_x->data;
@@ -2552,14 +2550,6 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    a = (Mat_SeqAIJ *)mat_nonlocal_x->data;
    nnzs_nonlocal = a->nz;
    nnzs = nnzs_local + nnzs_nonlocal;
-
-   // We're going to use the COO interface to do the preallocation and comms
-   // for the transpose in one go
-   // Then we can use the device values to set the values so should be faster on GPUs
-   // The existing mpiaij version just uses calls to matsetvalues for each row
-   PetscInt *row_indices = NULL, *col_indices = NULL;
-   PetscMalloc1(nnzs, &row_indices);
-   PetscMalloc1(nnzs, &col_indices);
 
    MPI_Comm MPI_COMM_MATRIX;
    // Get the comm
@@ -2569,95 +2559,291 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    MatGetSize(*X, &global_rows, &global_cols);   
 
    // This returns the global index of the local portion of the matrix
-   PetscInt global_row_start_temp, global_row_end_plus_one_temp;
-   PetscInt global_col_start_temp, global_col_end_plus_one_temp;
-   MatGetOwnershipRange(*X, &global_row_start_temp, &global_row_end_plus_one_temp);
-   MatGetOwnershipRangeColumn(*X, &global_col_start_temp, &global_col_end_plus_one_temp);
+   PetscInt global_row_start, global_row_end_plus_one;
+   PetscInt global_col_start, global_col_end_plus_one;
+   MatGetOwnershipRange(*X, &global_row_start, &global_row_end_plus_one);
+   MatGetOwnershipRangeColumn(*X, &global_col_start, &global_col_end_plus_one);
+
+   // ~~~~~~~~~~~~~~
+   // Let's do some comms to work out how many entries are coming/going
+   // We are going to use an sf based on garray
+   // The sf would normally be used for a matvec
+   // ~~~~~~~~~~~~~~   
+
+   MatView(mat_nonlocal_x, PETSC_VIEWER_STDOUT_SELF);
+
+   PetscInt *g_nnz;
+   PetscSF sf;
+   PetscInt cols_ao = mat_nonlocal_x->cmap->n;   
+
+   for (PetscInt i = 0; i < cols_ao; i++) {
+      fprintf(stderr,"garray[%d] = %d\n", i, mat_mpi_x->garray[i]);
+   }
 
    PetscInt shift = 0;
    PetscBool symmetric = PETSC_FALSE;
    PetscBool inode = PETSC_FALSE;
-   const PetscInt *ia, *ja;
+   const PetscInt *i_nonlocal, *j_nonlocal;
    PetscBool done;
+   MatGetRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &i_nonlocal, &j_nonlocal, &done);      
 
+   // ~~~~~~~~~~~~~~~
+
+   PetscMalloc1(cols_ao, &g_nnz);
+   PetscArrayzero(g_nnz, cols_ao);
+   // Work out how many entries in our non-local matrix per non-local column
+   for (int i = 0; i < i_nonlocal[local_rows]; i++) g_nnz[j_nonlocal[i]]++;
+   PetscSFCreate(MPI_COMM_MATRIX, &sf);
+   PetscSFSetGraphLayout(sf, (*X)->cmap, cols_ao, NULL, PETSC_USE_POINTER, mat_mpi_x->garray);
+   PetscSFSetUp(sf);
+
+   const PetscInt    *roffset, *rmine, *rremote;
+   const PetscMPIInt *ranks;
+   PetscMPIInt        rank, nranks, size;   
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   MPI_Comm_size(MPI_COMM_MATRIX, &size);
+
+   // ~~~~~~~~~~~~~~
+   // We can query the sf to get some information we need
+   // The information below is talking about what we would receive during a matvec
+   // ~~~~~~~~~~~~~~ 
+   // nranks is how many ranks we receive from
+   // roffset[rank+1] - roffset[rank] is how many items we expect to receive from this rank
+   // if we have an array of length garray to receive into, rmine are the indices into that array for each rank
+   //  ie garray[rmine] gives the non-local cols that we have just received
+   // rremote are the local column indices on the remote ranks that we have received
+   //  if we call MatGetOwnershipRangesColumns(*X, &ranges), then
+   //  ie ranges[sender] + rremote gives the global column indices that we have just received, 
+   //  ie garray[rmine] = ranges[sender] + rremote
+   PetscSFGetRootRanks(sf, &nranks, &ranks, &roffset, &rmine, &rremote);
+
+   // We can use this information to tell us how many things we have to send during a transpose
+   // As we now know where each non-local column is going, and we know how many of each non-local column
+   // we have in g_nnz
+   PetscInt *send_rank_no_vals;
+   PetscMalloc1(nranks, &send_rank_no_vals);
+   PetscArrayzero(send_rank_no_vals, nranks);
+
+   for (int i = 0; i < nranks; i++) {
+      PetscMPIInt sender = ranks[i];
+      PetscInt start = roffset[i];
+      PetscInt end   = roffset[i+1];
+      PetscInt nitems = end - start;
+
+      fprintf(stderr, "[%d] expecting %d items from rank %d\n",
+                  rank, nitems, sender);
+
+      for (PetscInt j = 0; j < nitems; j++) {
+         fprintf(stderr, "[%d] expecting local index %d local remote index %d, remote index %d from rank %d\n",
+                     rank, rmine[start + j], rremote[start+j], mat_mpi_x->garray[rmine[start + j]], sender);
+
+         // During the transpose we have to send this many things to rank sender
+         send_rank_no_vals[i] += g_nnz[rmine[start + j]];                     
+      }
+   }
+
+   for (int i = 0; i < nranks; i++) {
+      PetscMPIInt sender = ranks[i];
+      fprintf(stderr, "[%d] in the transpose we are sending %d items to rank %d\n",
+                  rank, send_rank_no_vals[i], sender);
+   }
+
+   // ~~~~~~~~~~~~~~
+   // Let's start all our sends
+   // ~~~~~~~~~~~~~~ 
+   PetscInt no_send_entries = 0;
+   PetscInt *send_rank_no_vals_scan;
+   PetscMalloc1(nranks+1, &send_rank_no_vals_scan);
+   send_rank_no_vals_scan[0] = 0;
+   for (int i = 0; i < nranks; i++) {
+      send_rank_no_vals_scan[i+1] = send_rank_no_vals_scan[i] + send_rank_no_vals[i];
+      no_send_entries += send_rank_no_vals[i];
+   }
+   // This is the memory we store our global i,j entries to send
+   PetscInt *send_entries;
+   // We send both the row and column indices for convenience 
+   PetscMalloc1(2 * no_send_entries, &send_entries);
+   // Now we pack up all the non-local entries into blocks of which rank we want to send it to
+   // Let's use the sequential transpose on the non-local block to make that easier
+   // This happens on the device
+   Mat mat_nonlocal_x_transpose = NULL;
+   MatTranspose(mat_nonlocal_x, MAT_INITIAL_MATRIX, &mat_nonlocal_x_transpose);   
+
+   PetscInt local_rows_transpose, local_cols_transpose;
+   MatGetLocalSize(mat_nonlocal_x_transpose, &local_rows_transpose, &local_cols_transpose);
+   const PetscInt *i_transpose, *j_transpose;
+   MatGetRowIJ(mat_nonlocal_x_transpose, shift, symmetric, inode, &local_rows_transpose, &i_transpose, &j_transpose, &done);
+
+   // a scan of i_transpose will get you the indices
    PetscInt counter = 0;
-   // Let's loop over the local parts
-   MatGetRowIJ(mat_local_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
-   for (PetscInt i = 0; i < local_rows; i++)
+   for (PetscInt i = 0; i < local_rows_transpose; i++)
    {
-      const PetscInt ncols = ia[i + 1] - ia[i];
+      PetscInt ncols = i_transpose[i + 1] - i_transpose[i];
       for (PetscInt j = 0; j < ncols; j++)
       {
-         // Transpose the indices
-         // Make sure they're the global indices
-         row_indices[counter] = ja[ia[i] + j] + global_col_start_temp;
-         col_indices[counter] = i + global_row_start_temp;
+         // Rewrite the indices as global
+         send_entries[2 * counter] = mat_mpi_x->garray[i];
+         send_entries[2 * counter + 1] = j_transpose[i_transpose[i] + j] + global_row_start;
          counter++;
       }
    }
-   MatRestoreRowIJ(mat_local_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
+   // We can destroy our local transpose
+   MatRestoreRowIJ(mat_nonlocal_x_transpose, shift, symmetric, inode, &local_rows_transpose, &i_transpose, &j_transpose, &done);
+   MatDestroy(&mat_nonlocal_x_transpose);
 
-   // Let's loop over the nonlocal parts
-   MatGetRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
-   for (PetscInt i = 0; i < local_rows; i++)
-   {
-      const PetscInt ncols = ia[i + 1] - ia[i];
-      for (PetscInt j = 0; j < ncols; j++)
-      {
-         // Transpose the indices
-         // Make sure they're the global indices
-         // Have to get the garray for the non-local
-         row_indices[counter] = mat_mpi_x->garray[ja[ia[i] + j]];
-         col_indices[counter] = i + global_row_start_temp;
-         counter++;
+   for (PetscInt i = 0; i < 2 * no_send_entries; i += 2) {
+      fprintf(stderr, "sending global row index %d global col index %d\n",
+                  send_entries[i], send_entries[i+1]);
+   }
+
+   const PetscInt *iranks, *ioffset, *irootloc;
+   PetscMPIInt niranks;
+
+   // ~~~~~~~~~~~~~~
+   // We can query the sf to get some information we need
+   // The information below is talking about what we would send during a matvec
+   // ~~~~~~~~~~~~~~    
+   // niranks is how many ranks we send to
+   // ioffset[i+1] - ioffset[i] is how many items we send to this rank
+   // irootloc is the local column indices on this rank that we send
+   //  ie the global column indices that we send are irootloc + global_col_start
+   PetscSFGetLeafRanks(sf, &niranks, &iranks, &ioffset, &irootloc);
+
+   // In the sf, we have a one to many relationship
+   // Each of our local entries we may have to send to multiple ranks
+   // So we when we think of the transpose we don't actually know how many entries we 
+   // have to receive
+   // ie we're not receiving ioffset[i+1] - ioffset[i] entries from iranks[i]
+   // But we do know we are receiving from only the ranks in iranks
+   // So we will just probe those ranks and find out how big the incoming messages are
+
+   // Let's store how many things we are going to receive from each rank during
+   // the transpose
+   PetscInt *receive_rank_no_vals;
+   PetscMalloc1(niranks, &receive_rank_no_vals);
+
+   for (int i = 0; i < niranks; i++) {
+      PetscMPIInt receiver = iranks[i];
+      PetscInt start = ioffset[i];
+      PetscInt end   = ioffset[i+1];
+      PetscInt nitems = end - start;
+
+      fprintf(stderr, "[%d] sending %d items to rank %d\n",
+                  rank, nitems, receiver);
+      for (PetscInt j = 0; j < nitems; j++) {
+
+         fprintf(stderr, "[%d] sending local index %d remote index %d to rank %d\n",
+                     rank, irootloc[start + j], irootloc[start + j] + global_col_start, receiver);
       }
    }
-   MatRestoreRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &ia, &ja, &done);
 
-   // Create the output matrix
-   MatCreate(MPI_COMM_MATRIX, Y);
-   // Transposed size
-   MatSetSizes(*Y, (*X)->cmap->n, (*X)->rmap->n, global_cols, global_rows);
-   // Match the output type
-   MatType mat_type;
-   MatGetType(*X, &mat_type);
-   MatSetType(*Y, mat_type);
-   MatSetUp(*Y);
+   // ~~~~~~~~~~~~~~
+   // Now let's start our non-blocking sends
+   // ~~~~~~~~~~~~~~     
 
-   // Set the indices
-   MatSetPreallocationCOO(*Y, nnzs, row_indices, col_indices);
-   // Can delete indices now
-   (void)PetscFree2(row_indices, col_indices);
+   // Now the start index for each rank into send_entries comes from 2 * send_rank_no_vals_scan
+   MPI_Status *send_status;
+   MPI_Request *send_request;   
+   PetscMalloc1(nranks, &send_request);
+   PetscMalloc1(nranks, &send_status);
 
-   // Now let's set the values on the device if we're not just doing a symbolic
-   if (!symbolic_int)
+   for (int i = 0; i < nranks; i++) {      
+      fprintf(stderr, "rank %d start index into send %d \n", ranks[i], 2 * send_rank_no_vals_scan[i]);
+
+      // Start an async send of our transposed data
+      send_request[i] = MPI_REQUEST_NULL;
+      // Tag 0 for the i,j entries
+      MPI_Isend(&send_entries[2 * send_rank_no_vals_scan[i]], 2 * send_rank_no_vals[i], MPIU_INT, ranks[i], 0, MPI_COMM_MATRIX, &send_request[i]);
+   }   
+
+   // ~~~~~~~~~~~~~~
+   // We do our local transpose now to try and overlap work and comms
+   // The tranpose of the local matrix happens on the device
+   // ~~~~~~~~~~~~~~
+   Mat mat_local_y = NULL, mat_nonlocal_y = NULL;
+   MatTranspose(mat_local_x, MAT_INITIAL_MATRIX, &mat_local_y);   
+
+   // ~~~~~~~~~~~~~~
+   // Now let's post our non-blocking receives after our sends as we have a blocking 
+   // probe
+   // ~~~~~~~~~~~~~~   
+   // First we have to find out how big our message is going to be
+   // We can do this by probing the ranks we are going to receive from            
+   for (int i = 0; i < niranks; i++)
    {
-      // Have to be in the same order as the preallocation
-      Kokkos::View<PetscScalar *> v_d = Kokkos::View<PetscScalar *>("v_d", nnzs);
-
-      // ~~~~~~~~~~~~
-      // Get pointers to the i,j,vals on the device
-      // ~~~~~~~~~~~~
-      const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-      PetscMemType mtype;
-      PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-      MatSeqAIJGetCSRAndMemType(mat_local_x, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
-      MatSeqAIJGetCSRAndMemType(mat_nonlocal_x, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
-
-      PetscScalarKokkosView a_local_d, a_nonlocal_d;
-      a_local_d = PetscScalarKokkosView(device_local_vals, nnzs_local);   
-      a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, nnzs_nonlocal); 
-
-      // Copy the values into our values array
-      PetscInt zero = 0;
-      auto v_d_local_range = Kokkos::subview(v_d, Kokkos::make_pair(zero, nnzs_local));
-      Kokkos::deep_copy(v_d_local_range, a_local_d);
-      auto v_d_nonlocal_range = Kokkos::subview(v_d, Kokkos::make_pair(nnzs_local, nnzs));
-      Kokkos::deep_copy(v_d_nonlocal_range, a_nonlocal_d);
-
-      // Set the values
-      MatSetValuesCOO(*Y, v_d.data(), INSERT_VALUES);
+      // Tag 0 for the i,j entries
+      MPI_Status probe_status;
+      MPI_Probe(iranks[i], 0, MPI_COMM_MATRIX, &probe_status);
+      // Get the message size
+      MPI_Get_count(&probe_status, MPIU_INT, &receive_rank_no_vals[i]);
    }
+   PetscInt no_receive_entries = 0;
+   PetscInt *receive_rank_no_vals_scan;
+   PetscMalloc1(niranks+1, &receive_rank_no_vals_scan);
+   receive_rank_no_vals_scan[0] = 0;
+   for (int i = 0; i < niranks; i++) {
+      receive_rank_no_vals_scan[i+1] = receive_rank_no_vals_scan[i] + receive_rank_no_vals[i];
+      no_receive_entries += receive_rank_no_vals[i];
+      fprintf(stderr, "rank %d start index into receive %d \n", iranks[i], 2 * receive_rank_no_vals_scan[i]);
+   }
+
+   // This is the memory we store our received global i,j entries in
+   PetscInt *receive_entries;
+   PetscMalloc1(no_receive_entries, &receive_entries);
+
+   MPI_Status *receive_status;
+   MPI_Request *receive_request;
+   PetscMalloc1(niranks, &receive_request);
+   PetscMalloc1(niranks, &receive_status);
+
+   for (int i = 0; i < niranks; i++)
+   {
+      // Start an async receive of our transposed data
+      receive_request[i] = MPI_REQUEST_NULL;
+      // Tag 0 for the i,j entries
+      MPI_Irecv(&receive_entries[receive_rank_no_vals_scan[i]], receive_rank_no_vals[i], MPIU_INT, iranks[i], 0, MPI_COMM_MATRIX, &receive_request[i]);
+   }
+
+   // Wait for all send/receives to complete
+   MPI_Waitall(nranks, send_request, send_status);
+   MPI_Waitall(niranks, receive_request, receive_status);
+
+   // ~~~~~~~~~~~~~~
+   // Now we should have our transposed data
+   // ~~~~~~~~~~~~~~ 
+   fprintf(stderr, "global row start %d global row end %d\n",
+                  global_row_start, global_row_end_plus_one);
+   for (int i = 0; i < no_receive_entries; i += 2) {
+      fprintf(stderr, "received global row index %d global col index %d\n",
+                  receive_entries[i], receive_entries[i+1]);
+   }
+
+   // @@@ can now do a sort by key on the row entries and the column entries
+
+   // ~~~~~~~~~~~~~~
+   // Cleanup
+   // ~~~~~~~~~~~~~~ 
+
+
+
+   PetscSFDestroy(&sf);
+
+   MatRestoreRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &i_nonlocal, &j_nonlocal, &done);
+   (void)PetscFree(g_nnz);
+   (void)PetscFree(send_rank_no_vals);
+   (void)PetscFree(receive_rank_no_vals);
+   (void)PetscFree(send_entries);
+   (void)PetscFree(receive_entries);
+   (void)PetscFree(send_rank_no_vals_scan);
+   (void)PetscFree(receive_rank_no_vals_scan);
+   (void)PetscFree(send_request);
+   (void)PetscFree(send_status);
+   (void)PetscFree(receive_request);
+   (void)PetscFree(receive_status);
+
+   exit(0);
+
+
 
    return;
 }
