@@ -2603,8 +2603,9 @@ void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& ou
     if (input_arrays.size() == 1) {
         output_array = ViewType("output_array", input_arrays[0].extent(0));
         permutation_vector = ViewType("permutation_vector", input_arrays[0].extent(0));
+        // Copy the input array to the output array and create an identity permutation
+        Kokkos::deep_copy(output_array, input_arrays[0]);
         Kokkos::parallel_for("CopyPermutation", input_arrays[0].extent(0), KOKKOS_LAMBDA(const size_t i) {
-            output_array(i) = input_arrays[0](i);
             permutation_vector(i) = i; // Identity permutation
         });
         return;
