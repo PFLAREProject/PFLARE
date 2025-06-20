@@ -2814,7 +2814,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    //    fprintf(stderr,"i_transpose_d[%d] = %d\n", i, i_transpose_d(i));
    // }   
 
-   const PetscInt    *roffset, *rmine, *rremote;
+   const PetscInt    *roffset, *rmine;
    const PetscMPIInt *ranks;
    PetscMPIInt        rank, nranks, size;   
    MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
@@ -2832,7 +2832,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    //  if we call MatGetOwnershipRangesColumns(*X, &ranges), then
    //  ie ranges[sender] + rremote gives the global column indices that we have just received, 
    //  ie garray[rmine] = ranges[sender] + rremote
-   PetscSFGetRootRanks(sf, &nranks, &ranks, &roffset, &rmine, &rremote);
+   PetscSFGetRootRanks(sf, &nranks, &ranks, &roffset, &rmine, NULL);
 
    // We can use this information to tell us how many things we have to send during a transpose
    // As we now know where each non-local column is going, and we know how many of each non-local column
@@ -2925,7 +2925,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    //                send_rows_d[i], send_cols_d[i]);
    // }
 
-   const PetscInt *iranks, *ioffset, *irootloc;
+   const PetscInt *iranks;
    PetscMPIInt niranks;
 
    // ~~~~~~~~~~~~~~
@@ -2936,7 +2936,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // ioffset[i+1] - ioffset[i] is how many items we send to this rank
    // irootloc is the local column indices on this rank that we send
    //  ie the global column indices that we send are irootloc + global_col_start
-   PetscSFGetLeafRanks(sf, &niranks, &iranks, &ioffset, &irootloc);
+   PetscSFGetLeafRanks(sf, &niranks, &iranks, NULL, NULL);
 
    // In the sf, we have a one to many relationship
    // Each of our local entries we may have to send to multiple ranks
