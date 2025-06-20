@@ -2511,6 +2511,172 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    return;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+
+// Parallel merge function
+template <typename ViewType>
+void parallel_merge(const ViewType& array1, const ViewType& array2, ViewType& output_array, ViewType& permutation_vector) {
+
+    // Sizes of the input arrays
+    const size_t size1 = array1.extent(0);
+    const size_t size2 = array2.extent(0);
+
+    // Resize the output array
+    output_array = ViewType("output_array", size1 + size2);
+    permutation_vector = ViewType("permutation_vector", size1 + size2);
+
+    // Team policy for parallel merge
+    const size_t total_size = size1 + size2;
+    Kokkos::TeamPolicy<> policy(total_size / 256 + 1, Kokkos::AUTO());
+
+    // Each team will handle a chunk of the output array
+    // The chunk size is determined by the number of teams
+    // and the total size of the output array
+    // Each team will assign corresponding ranges in array1 and array2
+    // and then merge the assigned ranges into the output array
+    // Each team will handle a chunk of the output array
+    Kokkos::parallel_for("ParallelMerge", policy, KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type& team) {
+        const size_t team_rank = team.league_rank();
+        const size_t team_size = team.league_size();
+
+        // Divide the output array among teams
+        const size_t chunk_size = (total_size + team_size - 1) / team_size;
+        const size_t start = team_rank * chunk_size;
+        const size_t end = Kokkos::min(start + chunk_size, total_size);
+
+        // Find the corresponding ranges in array1 and array2
+        size_t start1 = Kokkos::min(size1, start);
+        size_t start2 = start - start1;
+        if (start2 > size2) {
+            start2 = size2;
+            start1 = start - start2;
+        }
+
+        size_t end1 = Kokkos::min(size1, end);
+        size_t end2 = end - end1;
+        if (end2 > size2) {
+            end2 = size2;
+            end1 = end - end2;
+        }
+
+        // Merge the assigned ranges
+        size_t i = start1, j = start2, k = start;
+        while (i < end1 && j < end2) {
+            if (array1(i) <= array2(j)) {
+                output_array(k) = array1(i);
+                permutation_vector(k++) = i; // Store the index from array1
+                i++;
+            } else {
+                output_array(k) = array2(j);
+                permutation_vector(k++) = size1 + j; // Store the index from array2
+                j++;
+            }
+        }
+        while (i < end1) {
+            output_array(k) = array1(i);
+            permutation_vector(k++) = i; // Store the index from array1
+            i++;
+        }
+        while (j < end2) {
+            output_array(k) = array2(j);
+            permutation_vector(k++) = size1 + j; // Store the index from array2
+            j++;
+        }
+   });
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Merges sorted views together into one view
+// Won't necessarily be very efficient if we have many input_arrays and they are small
+// as the only parallelism is coming from the inside parallel_merge
+template <typename ViewType>
+void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& output_array, ViewType& permutation_vector) {
+    // If there are no input arrays, return an empty output array and permutation vector
+    if (input_arrays.empty()) {
+        output_array = ViewType("output_array", 0);
+        permutation_vector = ViewType("permutation_vector", 0);
+        return;
+    }
+
+    // If there is only one input array, copy it directly to the output
+    if (input_arrays.size() == 1) {
+        output_array = ViewType("output_array", input_arrays[0].extent(0));
+        permutation_vector = ViewType("permutation_vector", input_arrays[0].extent(0));
+        Kokkos::parallel_for("CopyPermutation", input_arrays[0].extent(0), KOKKOS_LAMBDA(const size_t i) {
+            output_array(i) = input_arrays[0](i);
+            permutation_vector(i) = i; // Identity permutation
+        });
+        return;
+    }
+
+    // Create a working vector to hold intermediate results
+    std::vector<ViewType> current_level = input_arrays;
+    std::vector<ViewType> current_permutations;
+    std::vector<size_t> current_offsets;
+
+    // Initialize permutation vectors and offsets for the input arrays
+    size_t cumulative_offset = 0;
+    for (const auto& array : input_arrays) {
+        ViewType perm("perm", array.extent(0));
+        Kokkos::parallel_for("InitPermutation", array.extent(0), KOKKOS_LAMBDA(const size_t i) {
+            perm(i) = i; // Identity permutation for each input array
+        });
+        current_permutations.push_back(perm);
+        current_offsets.push_back(cumulative_offset);
+        cumulative_offset += array.extent(0);
+    }
+
+    // Perform the merge in a tree fashion
+    while (current_level.size() > 1) {
+        std::vector<ViewType> next_level;
+        std::vector<ViewType> next_permutations;
+        std::vector<size_t> next_offsets;
+
+        // Merge pairs of arrays
+        for (size_t i = 0; i < current_level.size(); i += 2) {
+            if (i + 1 < current_level.size()) {
+                // Merge two arrays
+                ViewType merged_array;
+                ViewType merged_permutation;
+                parallel_merge(current_level[i], current_level[i + 1], merged_array, merged_permutation);
+
+                // Map the merged permutation back to the original indices
+                ViewType combined_permutation("combined_permutation", merged_permutation.extent(0));
+                size_t offset1 = current_offsets[i];
+                size_t offset2 = current_offsets[i + 1];
+                
+                Kokkos::parallel_for("CombinePermutation", merged_permutation.extent(0), KOKKOS_LAMBDA(const size_t j) {
+                    if (static_cast<size_t>(merged_permutation(j)) < current_level[i].extent(0)) {
+                        // Index from first array: add offset1 to the permutation from first array
+                        combined_permutation(j) = current_permutations[i](merged_permutation(j)) + offset1;
+                    } else {
+                        // Index from second array: add offset2 to the permutation from second array
+                        combined_permutation(j) = current_permutations[i + 1](merged_permutation(j) - current_level[i].extent(0)) + offset2;
+                    }
+                });
+
+                next_level.push_back(merged_array);
+                next_permutations.push_back(combined_permutation);
+                next_offsets.push_back(offset1); // The merged array starts at the same offset as the first array
+            } else {
+                // If there's an odd array, move it to the next level as is
+                next_level.push_back(current_level[i]);
+                next_permutations.push_back(current_permutations[i]);
+                next_offsets.push_back(current_offsets[i]);
+            }
+        }
+
+        // Move to the next level
+        current_level = std::move(next_level);
+        current_permutations = std::move(next_permutations);
+        current_offsets = std::move(next_offsets);
+    }
+
+    // The final merged array and permutation vector are the only ones left in the current level
+    output_array = current_level[0];
+    permutation_vector = current_permutations[0];
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -2542,27 +2708,27 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    }
 
    // ~~~~~~~~~~~~~~
-
-   // Get the number of non-zeros in the matrix
-   PetscInt nnzs_local = 0, nnzs_nonlocal = 0, nnzs = 0;
-   Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local_x->data;
-   nnzs_local = a->nz;
-   a = (Mat_SeqAIJ *)mat_nonlocal_x->data;
-   nnzs_nonlocal = a->nz;
-   nnzs = nnzs_local + nnzs_nonlocal;
-
+   // Get the comm   
    MPI_Comm MPI_COMM_MATRIX;
-   // Get the comm
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscObjectGetComm((PetscObject)*X, &MPI_COMM_MATRIX);
    MatGetLocalSize(*X, &local_rows, &local_cols);
    MatGetSize(*X, &global_rows, &global_cols);   
+   PetscInt cols_ao = mat_nonlocal_x->cmap->n;
 
    // This returns the global index of the local portion of the matrix
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;
    MatGetOwnershipRange(*X, &global_row_start, &global_row_end_plus_one);
    MatGetOwnershipRangeColumn(*X, &global_col_start, &global_col_end_plus_one);
+
+   // We also copy the input mat colmap over to the device as we need it
+   PetscIntKokkosViewHost colmap_input_h = PetscIntKokkosViewHost(mat_mpi_x->garray, cols_ao);
+   PetscIntKokkosView colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
+   Kokkos::deep_copy(colmap_input_d, colmap_input_h);      
+   // Log copy with petsc
+   size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);    
 
    // ~~~~~~~~~~~~~~
    // Let's do some comms to work out how many entries are coming/going
@@ -2572,30 +2738,66 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 
    MatView(mat_nonlocal_x, PETSC_VIEWER_STDOUT_SELF);
 
-   PetscInt *g_nnz;
+   PetscInt *g_nnz, *o_nnz;
    PetscSF sf;
-   PetscInt cols_ao = mat_nonlocal_x->cmap->n;   
 
    for (PetscInt i = 0; i < cols_ao; i++) {
       fprintf(stderr,"garray[%d] = %d\n", i, mat_mpi_x->garray[i]);
    }
 
-   PetscInt shift = 0;
+   PetscInt shift = 0, n = 0;
    PetscBool symmetric = PETSC_FALSE;
    PetscBool inode = PETSC_FALSE;
    const PetscInt *i_nonlocal, *j_nonlocal;
    PetscBool done;
-   MatGetRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &i_nonlocal, &j_nonlocal, &done);      
+   MatGetRowIJ(mat_nonlocal_x, shift, symmetric, inode, &n, &i_nonlocal, &j_nonlocal, &done);      
 
-   // ~~~~~~~~~~~~~~~
-
-   PetscMalloc1(cols_ao, &g_nnz);
+   PetscMalloc2(cols_ao, &g_nnz, local_rows, &o_nnz);
    PetscArrayzero(g_nnz, cols_ao);
+   PetscArrayzero(o_nnz, local_rows);
    // Work out how many entries in our non-local matrix per non-local column
+   // Can do this on the device
    for (int i = 0; i < i_nonlocal[local_rows]; i++) g_nnz[j_nonlocal[i]]++;
+
+   MatRestoreRowIJ(mat_nonlocal_x, shift, symmetric, inode, &n, &i_nonlocal, &j_nonlocal, &done);
+
    PetscSFCreate(MPI_COMM_MATRIX, &sf);
    PetscSFSetGraphLayout(sf, (*X)->cmap, cols_ao, NULL, PETSC_USE_POINTER, mat_mpi_x->garray);
-   PetscSFSetUp(sf);
+   // After this reduction, o_nnz will have how many entries we have in each row of the resulting
+   // non-local portion of the transpose
+   // A scan of this will tell us the i_indices
+   PetscSFReduceBegin(sf, MPIU_INT, g_nnz, o_nnz, MPI_SUM);
+   PetscSFReduceEnd(sf, MPIU_INT, g_nnz, o_nnz, MPI_SUM);
+
+   for (PetscInt i = 0; i < local_rows; i++) {
+      fprintf(stderr,"o_nnz[%d] = %d\n", i, o_nnz[i]);
+   }      
+
+   // We also copy the o_nnz to the device
+   PetscIntKokkosViewHost o_nnz_h = PetscIntKokkosViewHost(o_nnz, local_rows);
+   Kokkos::View<PetscInt *> i_transpose_d = PetscIntKokkosView("i_transpose_d", local_rows+1);
+   // Set the i_transpose_d to 0
+   Kokkos::deep_copy(i_transpose_d, 0);
+
+   // Copy o_nnz_h to i_transpose_d[0:local_rows]
+   Kokkos::deep_copy(Kokkos::subview(i_transpose_d, Kokkos::make_pair(0, local_rows)), o_nnz_h);
+
+   // Log copy with petsc
+   bytes = o_nnz_h.extent(0) * sizeof(PetscInt);
+   PetscLogCpuToGpu(bytes);
+
+   // Perform exclusive scan - this modifies i_transpose_d in-place
+   Kokkos::parallel_scan(local_rows + 1, KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final) {
+      const PetscInt input_value = i_transpose_d(i);
+      if (final) {
+         i_transpose_d(i) = update; // Write exclusive prefix
+      }
+      update += input_value; // Update running total
+   }); 
+
+   for (PetscInt i = 0; i < local_rows+1; i++) {
+      fprintf(stderr,"i_transpose_d[%d] = %d\n", i, i_transpose_d(i));
+   }   
 
    const PetscInt    *roffset, *rmine, *rremote;
    const PetscMPIInt *ranks;
@@ -2659,41 +2861,54 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       send_rank_no_vals_scan[i+1] = send_rank_no_vals_scan[i] + send_rank_no_vals[i];
       no_send_entries += send_rank_no_vals[i];
    }
-   // This is the memory we store our global i,j entries to send
-   PetscInt *send_entries;
-   // We send both the row and column indices for convenience 
-   PetscMalloc1(2 * no_send_entries, &send_entries);
+   // This is the device memory we store our global i,j entries to send
+   // We could just pack it up into 1 array and send that in one message, but then we need extra memory to unpack
+   // There is also probably enough data that we will be bandwidth bound rather than latency so sending
+   // two messages will probably not be slower
+   Kokkos::View<PetscInt *> send_rows_d = Kokkos::View<PetscInt *>("send_rows_d", no_send_entries);
+   Kokkos::View<PetscInt *> send_cols_d = Kokkos::View<PetscInt *>("send_cols_d", no_send_entries);
+
    // Now we pack up all the non-local entries into blocks of which rank we want to send it to
    // Let's use the sequential transpose on the non-local block to make that easier
    // This happens on the device
    Mat mat_nonlocal_x_transpose = NULL;
    MatTranspose(mat_nonlocal_x, MAT_INITIAL_MATRIX, &mat_nonlocal_x_transpose);   
-
    PetscInt local_rows_transpose, local_cols_transpose;
    MatGetLocalSize(mat_nonlocal_x_transpose, &local_rows_transpose, &local_cols_transpose);
-   const PetscInt *i_transpose, *j_transpose;
-   MatGetRowIJ(mat_nonlocal_x_transpose, shift, symmetric, inode, &local_rows_transpose, &i_transpose, &j_transpose, &done);
 
-   // a scan of i_transpose will get you the indices
-   PetscInt counter = 0;
-   for (PetscInt i = 0; i < local_rows_transpose; i++)
-   {
-      PetscInt ncols = i_transpose[i + 1] - i_transpose[i];
-      for (PetscInt j = 0; j < ncols; j++)
-      {
-         // Rewrite the indices as global
-         send_entries[2 * counter] = mat_mpi_x->garray[i];
-         send_entries[2 * counter + 1] = j_transpose[i_transpose[i] + j] + global_row_start;
-         counter++;
-      }
-   }
+   // Annoyingly there isn't currently the ability to get views for i (or j)
+   const PetscInt *device_i_transpose = nullptr, *device_j_transpose = nullptr, *device_vals_transpose = nullptr;
+   PetscMemType mtype;
+   MatSeqAIJGetCSRAndMemType(mat_nonlocal_x_transpose, &device_i_transpose, &device_j_transpose, NULL, &mtype);  
+
+   // Write the i,j indices into send_rows_d and send_cols_d
+   // Start with the i indices
+   Kokkos::parallel_for(
+      Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_transpose, Kokkos::AUTO()),
+      KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+
+         // Row
+         const PetscInt i = t.league_rank();
+
+         // Still using i here (the local index into input)
+         const PetscInt ncols = device_i_transpose[i + 1] - device_i_transpose[i];         
+
+         // For over local columns
+         Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
+
+            // Row index is the old column index
+            send_rows_d(device_i_transpose[i] + j) = colmap_input_d(i);
+            // Column index is the old row index
+            send_cols_d(device_i_transpose[i] + j) = device_j_transpose[device_i_transpose[i] + j] + global_row_start;            
+         });  
+   });
    // We can destroy our local transpose
-   MatRestoreRowIJ(mat_nonlocal_x_transpose, shift, symmetric, inode, &local_rows_transpose, &i_transpose, &j_transpose, &done);
    MatDestroy(&mat_nonlocal_x_transpose);
 
-   for (PetscInt i = 0; i < 2 * no_send_entries; i += 2) {
+   for (PetscInt i = 0; i < no_send_entries; i++) {
       fprintf(stderr, "sending global row index %d global col index %d\n",
-                  send_entries[i], send_entries[i+1]);
+                  send_rows_d[i], send_cols_d[i]);
    }
 
    const PetscInt *iranks, *ioffset, *irootloc;
@@ -2741,19 +2956,33 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // Now let's start our non-blocking sends
    // ~~~~~~~~~~~~~~     
 
-   // Now the start index for each rank into send_entries comes from 2 * send_rank_no_vals_scan
+   // Now the start index for each rank into send_rows_d comes from send_rank_no_vals_scan
    MPI_Status *send_status;
    MPI_Request *send_request;   
-   PetscMalloc1(nranks, &send_request);
-   PetscMalloc1(nranks, &send_status);
+   PetscMalloc1(nranks*2, &send_request);
+   PetscMalloc1(nranks*2, &send_status);
 
+   // We can give it the device pointer directly given gpu aware mpi
    for (int i = 0; i < nranks; i++) {      
-      fprintf(stderr, "rank %d start index into send %d \n", ranks[i], 2 * send_rank_no_vals_scan[i]);
+      fprintf(stderr, "rank %d start index into send %d \n", ranks[i], send_rank_no_vals_scan[i]);
 
       // Start an async send of our transposed data
-      send_request[i] = MPI_REQUEST_NULL;
-      // Tag 0 for the i,j entries
-      MPI_Isend(&send_entries[2 * send_rank_no_vals_scan[i]], 2 * send_rank_no_vals[i], MPIU_INT, ranks[i], 0, MPI_COMM_MATRIX, &send_request[i]);
+      send_request[2*i] = MPI_REQUEST_NULL;
+      send_request[2*i+1] = MPI_REQUEST_NULL;
+
+      // Get the subset of rows we are sending to rank ranks[i]
+      auto subview_send_rank_d = Kokkos::subview(send_rows_d, Kokkos::make_pair(send_rank_no_vals_scan[i], send_rank_no_vals_scan[i+1]));
+      PetscInt *subview_send_rank_d_ptr = subview_send_rank_d.data();
+
+      // Tag 0 for the i entries
+      MPI_Isend(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 0, MPI_COMM_MATRIX, &send_request[2 * i]);
+
+      // Get the subset of cols we are sending to rank ranks[i]
+      subview_send_rank_d = Kokkos::subview(send_cols_d, Kokkos::make_pair(send_rank_no_vals_scan[i], send_rank_no_vals_scan[i+1]));
+      subview_send_rank_d_ptr = subview_send_rank_d.data();
+
+      // Tag 1 for the j entries
+      MPI_Isend(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 1, MPI_COMM_MATRIX, &send_request[2 * i + 1]);      
    }   
 
    // ~~~~~~~~~~~~~~
@@ -2784,24 +3013,42 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    for (int i = 0; i < niranks; i++) {
       receive_rank_no_vals_scan[i+1] = receive_rank_no_vals_scan[i] + receive_rank_no_vals[i];
       no_receive_entries += receive_rank_no_vals[i];
-      fprintf(stderr, "rank %d start index into receive %d \n", iranks[i], 2 * receive_rank_no_vals_scan[i]);
+      fprintf(stderr, "rank %d start index into receive %d \n", iranks[i], receive_rank_no_vals_scan[i]);
    }
 
-   // This is the memory we store our received global i,j entries in
-   PetscInt *receive_entries;
-   PetscMalloc1(no_receive_entries, &receive_entries);
+   // This is the device memory we store our received global i,j entries in
+   Kokkos::View<PetscInt *> receive_rows_d = Kokkos::View<PetscInt *>("receive_rows_d", no_receive_entries);
+   Kokkos::View<PetscInt *> receive_cols_d = Kokkos::View<PetscInt *>("receive_cols_d", no_receive_entries);
 
    MPI_Status *receive_status;
    MPI_Request *receive_request;
-   PetscMalloc1(niranks, &receive_request);
-   PetscMalloc1(niranks, &receive_status);
+   PetscMalloc1(niranks*2, &receive_request);
+   PetscMalloc1(niranks*2, &receive_status);
 
+   // We can give it the device pointer directly given gpu aware mpi
+   std::vector< Kokkos::View<PetscInt *> > sorted_views;
    for (int i = 0; i < niranks; i++)
    {
       // Start an async receive of our transposed data
-      receive_request[i] = MPI_REQUEST_NULL;
-      // Tag 0 for the i,j entries
-      MPI_Irecv(&receive_entries[receive_rank_no_vals_scan[i]], receive_rank_no_vals[i], MPIU_INT, iranks[i], 0, MPI_COMM_MATRIX, &receive_request[i]);
+      receive_request[2 * i] = MPI_REQUEST_NULL;
+      receive_request[2 * i + 1] = MPI_REQUEST_NULL;
+
+      // Get the subset of rows we are sending to rank ranks[i]
+      auto subview_receive_rank_d = Kokkos::subview(receive_rows_d, Kokkos::make_pair(receive_rank_no_vals_scan[i], receive_rank_no_vals_scan[i+1]));
+      // Store the subview
+      sorted_views.push_back(subview_receive_rank_d);
+
+      PetscInt *subview_receive_rank_d_ptr = subview_receive_rank_d.data();
+
+      // Tag 0 for the i entries
+      MPI_Irecv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 0, MPI_COMM_MATRIX, &receive_request[2 * i]);
+
+      // Get the subset of rows we are sending to rank ranks[i]
+      subview_receive_rank_d = Kokkos::subview(receive_cols_d, Kokkos::make_pair(receive_rank_no_vals_scan[i], receive_rank_no_vals_scan[i+1]));
+      subview_receive_rank_d_ptr = subview_receive_rank_d.data();
+
+      // Tag 1 for the j entries
+      MPI_Irecv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 1, MPI_COMM_MATRIX, &receive_request[2 * i + 1]);
    }
 
    // Wait for all send/receives to complete
@@ -2809,41 +3056,84 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    MPI_Waitall(niranks, receive_request, receive_status);
 
    // ~~~~~~~~~~~~~~
-   // Now we should have our transposed data
-   // ~~~~~~~~~~~~~~ 
+   // Now we should have our transposed data on the device
+   // which are stored [[rows], [rows], ...] and [[cols], [cols], ...] from each rank we've received from
+   // We now need to assemble our nonlocal_matrix
+   // ~~~~~~~~~~~~~~  
+
    fprintf(stderr, "global row start %d global row end %d\n",
-                  global_row_start, global_row_end_plus_one);
-   for (int i = 0; i < no_receive_entries; i += 2) {
+                  global_row_start, global_row_end_plus_one);                 
+   for (int i = 0; i < no_receive_entries; i++) {
       fprintf(stderr, "received global row index %d global col index %d\n",
-                  receive_entries[i], receive_entries[i+1]);
+                  receive_rows_d[i], receive_cols_d[i]);
    }
 
-   // @@@ can now do a sort by key on the row entries and the column entries
+   // This sort should be reasonably efficient as long as we have a small number
+   // of large arrays to merge, which is what our comms pattern looks like for a transpose
+   Kokkos::View<PetscInt *> receive_rows_d_sorted;
+   Kokkos::View<PetscInt *> receive_cols_d_sorted = Kokkos::View<PetscInt *>("receive_cols_d_sorted", no_receive_entries);
+   Kokkos::View<PetscInt *> permutation_vector_d;
+   parallel_merge_tree(sorted_views, receive_rows_d_sorted, permutation_vector_d);
+
+   Kokkos::parallel_for("ApplyPermutation", receive_cols_d.extent(0), KOKKOS_LAMBDA(const int i) {
+      receive_cols_d_sorted(i) = receive_cols_d(permutation_vector_d(i));
+   });   
+
+   for (int i = 0; i < no_receive_entries; i++) {
+      fprintf(stderr, "sorted receives global row index %d global col index %d\n",
+                  receive_rows_d_sorted[i], receive_cols_d_sorted[i]);
+   }    
+
+   Kokkos::View<PetscScalar *> a_transpose_d_sorted = Kokkos::View<PetscScalar *>("a_transpose_d_sorted", no_receive_entries);
+   Kokkos::deep_copy(a_transpose_d_sorted, 1);
+
+   // Now all the row entries are sorted, but the columns within each row aren't sorted
+   // So we call the sort_csr_matrix to do this
+   // The column size is not right here (it will be <= receive_cols_d_sorted)
+   // but it shouldn't matter as we are only construting an explicit kokkos csr matrix here so it can sort
+   KokkosCsrMatrix csrmat_transpose = KokkosCsrMatrix("csrmat_local", local_rows, receive_cols_d_sorted.extent(0), receive_cols_d_sorted.extent(0), \
+                                             a_transpose_d_sorted, i_transpose_d, receive_cols_d_sorted);  
+   KokkosSparse::sort_crs_matrix(csrmat_transpose);
+
+   // Let's make sure everything on the device is finished
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();     
+
+   // Now we need to build garray on the host and rewrite the receive_cols_d_sorted indices so they are local
+   // The default values here are for the case where we 
+   // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
+   PetscInt *garray_host = NULL;
+   PetscInt col_ao_output = 0;
+   // We don't have a good max bound on the number of unique non-local columns we received
+   // so we just give how many non-local columns we received total as we know the unique number is less than that
+   rewrite_j_global_to_local(receive_cols_d_sorted.extent(0), col_ao_output, receive_cols_d_sorted, &garray_host);  
+
+   for (int i = 0; i < col_ao_output; i++) {
+      fprintf(stderr, "garray_host[%d] = %d\n", i, garray_host[i]);
+   }
+   
+   // We can create our nonlocal diagonal block matrix directly on the device
+   MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_transpose_d, receive_cols_d_sorted, a_transpose_d_sorted, &mat_nonlocal_y);
+
+   MatView(mat_nonlocal_y, PETSC_VIEWER_STDOUT_SELF);      
+
+   // We can now create our MPI matrix - make sure dimensions are transposed
+   MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_cols, global_rows, mat_local_y, mat_nonlocal_y, garray_host, Y);              
 
    // ~~~~~~~~~~~~~~
    // Cleanup
    // ~~~~~~~~~~~~~~ 
 
-
-
    PetscSFDestroy(&sf);
-
-   MatRestoreRowIJ(mat_nonlocal_x, shift, symmetric, inode, &local_rows, &i_nonlocal, &j_nonlocal, &done);
    (void)PetscFree(g_nnz);
    (void)PetscFree(send_rank_no_vals);
    (void)PetscFree(receive_rank_no_vals);
-   (void)PetscFree(send_entries);
-   (void)PetscFree(receive_entries);
    (void)PetscFree(send_rank_no_vals_scan);
    (void)PetscFree(receive_rank_no_vals_scan);
    (void)PetscFree(send_request);
    (void)PetscFree(send_status);
    (void)PetscFree(receive_request);
    (void)PetscFree(receive_status);
-
-   exit(0);
-
-
 
    return;
 }
