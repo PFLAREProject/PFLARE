@@ -2990,14 +2990,16 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       PetscInt *subview_send_rank_d_ptr = subview_send_rank_d.data();
 
       // Tag 0 for the i entries
-      MPI_Isend(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 0, MPI_COMM_MATRIX, &send_request[2 * i]);
+      //MPI_ISend(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 0, MPI_COMM_MATRIX, &send_request[2 * i]);
+      MPI_Send(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 0, MPI_COMM_MATRIX);
 
       // Get the subset of cols we are sending to rank ranks[i]
       subview_send_rank_d = Kokkos::subview(send_cols_d, Kokkos::make_pair(send_rank_no_vals_scan[i], send_rank_no_vals_scan[i+1]));
       subview_send_rank_d_ptr = subview_send_rank_d.data();
 
       // Tag 1 for the j entries
-      MPI_Isend(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 1, MPI_COMM_MATRIX, &send_request[2 * i + 1]);      
+      //MPI_ISend(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 1, MPI_COMM_MATRIX, &send_request[2 * i + 1]);      
+      MPI_Send(subview_send_rank_d_ptr, send_rank_no_vals[i], MPIU_INT, ranks[i], 1, MPI_COMM_MATRIX);
    }   
 
    // ~~~~~~~~~~~~~~
@@ -3057,19 +3059,21 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       PetscInt *subview_receive_rank_d_ptr = subview_receive_rank_d.data();
 
       // Tag 0 for the i entries
-      MPI_Irecv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 0, MPI_COMM_MATRIX, &receive_request[2 * i]);
+      //MPI_IRecv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 0, MPI_COMM_MATRIX, &receive_request[2 * i]);
+      MPI_Recv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 0, MPI_COMM_MATRIX, &receive_status[2 * i]);
 
       // Get the subset of rows we are sending to rank ranks[i]
       subview_receive_rank_d = Kokkos::subview(receive_cols_d, Kokkos::make_pair(receive_rank_no_vals_scan[i], receive_rank_no_vals_scan[i+1]));
       subview_receive_rank_d_ptr = subview_receive_rank_d.data();
 
       // Tag 1 for the j entries
-      MPI_Irecv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 1, MPI_COMM_MATRIX, &receive_request[2 * i + 1]);
+      //MPI_IRecv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 1, MPI_COMM_MATRIX, &receive_request[2 * i + 1]);
+      MPI_Recv(subview_receive_rank_d_ptr, receive_rank_no_vals[i], MPIU_INT, iranks[i], 1, MPI_COMM_MATRIX, &receive_status[2 * i + 1]);
    }
 
    // Wait for all send/receives to complete
-   MPI_Waitall(nranks, send_request, send_status);
-   MPI_Waitall(niranks, receive_request, receive_status);
+   //MPI_Waitall(nranks, send_request, send_status);
+   //MPI_Waitall(niranks, receive_request, receive_status);
 
    // ~~~~~~~~~~~~~~
    // Now we should have our transposed data on the device
