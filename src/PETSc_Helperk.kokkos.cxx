@@ -2513,6 +2513,44 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Helper function to find the split point for a given rank 'k'.
+// It determines how many elements from array1 (k1) and array2 (k2)
+// constitute the first 'k' elements of the merged array.
+// This function must be callable from the device.
+template <typename ViewType>
+KOKKOS_INLINE_FUNCTION void find_split(
+    size_t k, const ViewType& array1, const ViewType& array2, size_t& k1, size_t& k2) {
+    const size_t size1 = array1.extent(0);
+    const size_t size2 = array2.extent(0);
+
+    // Determine the search range for the split point in array1.
+    // The number of elements from array1 can't be less than k - size2
+    // or more than size1.
+    size_t low1 = (k > size2) ? k - size2 : 0;
+    size_t high1 = Kokkos::min(k, size1);
+    
+    // Binary search for the correct number of elements to take from array1.
+    while (low1 < high1) {
+        size_t mid1 = low1 + (high1 - low1) / 2;
+        size_t mid2 = k - mid1;
+
+        // If the last element of the array1 partition is smaller than the
+        // last element of the array2 partition, it means the split point
+        // in array1 is too early, and we need to search in the upper half.
+        if (array1(mid1) < array2(mid2 - 1)) {
+            low1 = mid1 + 1;
+        } else {
+            // Otherwise, the split point may be at mid1 or earlier.
+            high1 = mid1;
+        }
+    }
+    
+    k1 = low1;
+    k2 = k - k1;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Parallel merge function
 template <typename ViewType>
 void parallel_merge(const ViewType& array1, const ViewType& array2, ViewType& output_array, ViewType& permutation_vector) {
@@ -2535,53 +2573,52 @@ void parallel_merge(const ViewType& array1, const ViewType& array2, ViewType& ou
     // Each team will assign corresponding ranges in array1 and array2
     // and then merge the assigned ranges into the output array
     // Each team will handle a chunk of the output array
-    Kokkos::parallel_for("ParallelMerge", policy, KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type& team) {
-        const size_t team_rank = team.league_rank();
-        const size_t team_size = team.league_size();
+   Kokkos::parallel_for("ParallelMerge", policy, KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type& team) {
+      const size_t team_rank = team.league_rank();
+      const size_t team_size = team.league_size();
 
-        // Divide the output array among teams
-        const size_t chunk_size = (total_size + team_size - 1) / team_size;
-        const size_t start = team_rank * chunk_size;
-        const size_t end = Kokkos::min(start + chunk_size, total_size);
+      // Divide the output array among teams
+      const size_t chunk_size = (total_size + team_size - 1) / team_size;
+      const size_t start = team_rank * chunk_size;
+      const size_t end = Kokkos::min(start + chunk_size, total_size);
 
-        // Find the corresponding ranges in array1 and array2
-        size_t start1 = Kokkos::min(size1, start);
-        size_t start2 = start - start1;
-        if (start2 > size2) {
-            start2 = size2;
-            start1 = start - start2;
-        }
+      if (start >= end) {
+         return; // No work for this team
+      }
 
-        size_t end1 = Kokkos::min(size1, end);
-        size_t end2 = end - end1;
-        if (end2 > size2) {
-            end2 = size2;
-            end1 = end - end2;
-        }
+      // Find the corresponding ranges in array1 and array2 using binary search
+      size_t start1, start2, end1, end2;
+      find_split(start, array1, array2, start1, start2);
+      find_split(end, array1, array2, end1, end2);
 
-        // Merge the assigned ranges
-        size_t i = start1, j = start2, k = start;
-        while (i < end1 && j < end2) {
-            if (array1(i) <= array2(j)) {
-                output_array(k) = array1(i);
-                permutation_vector(k++) = i; // Store the index from array1
-                i++;
-            } else {
-                output_array(k) = array2(j);
-                permutation_vector(k++) = size1 + j; // Store the index from array2
-                j++;
-            }
-        }
-        while (i < end1) {
-            output_array(k) = array1(i);
-            permutation_vector(k++) = i; // Store the index from array1
-            i++;
-        }
-        while (j < end2) {
-            output_array(k) = array2(j);
-            permutation_vector(k++) = size1 + j; // Store the index from array2
-            j++;
-        }
+      // Merge the assigned ranges
+      size_t i = start1;
+      size_t j = start2;
+
+      for (size_t k = start; k < end; ++k) {
+         // Determine whether to take the next element from array1 or array2
+         bool take_from_1;
+         if (i >= end1) {
+               // array1's range is exhausted, must take from array2
+               take_from_1 = false;
+         } else if (j >= end2) {
+               // array2's range is exhausted, must take from array1
+               take_from_1 = true;
+         } else {
+               // Neither range is exhausted, compare elements
+               take_from_1 = (array1(i) <= array2(j));
+         }
+
+         if (take_from_1) {
+               output_array(k) = array1(i);
+               permutation_vector(k) = i; // Store original index from array1
+               i++;
+         } else {
+               output_array(k) = array2(j);
+               permutation_vector(k) = size1 + j; // Store original index from array2 (with offset)
+               j++;
+         }
+      }
    });
 }
 
@@ -2740,10 +2777,10 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // The sf would normally be used for a matvec
    // ~~~~~~~~~~~~~~   
 
-   // MatView(mat_nonlocal_x, PETSC_VIEWER_STDOUT_SELF);
-   // for (PetscInt i = 0; i < cols_ao; i++) {
-   //    fprintf(stderr,"garray[%d] = %d\n", i, mat_mpi_x->garray[i]);
-   // }
+   MatView(mat_nonlocal_x, PETSC_VIEWER_STDOUT_SELF);
+   for (PetscInt i = 0; i < cols_ao; i++) {
+      fprintf(stderr,"garray[%d] = %d\n", i, mat_mpi_x->garray[i]);
+   }
 
    // Annoyingly there isn't currently the ability to get views for i (or j)
    const PetscInt *device_i_nonlocal = nullptr, *device_j_nonlocal = nullptr;
@@ -2924,10 +2961,12 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // We can destroy our local transpose
    MatDestroy(&mat_nonlocal_x_transpose);
 
-   // for (PetscInt i = 0; i < no_send_entries; i++) {
-   //    fprintf(stderr, "sending global row index %d global col index %d\n",
-   //                send_rows_d[i], send_cols_d[i]);
-   // }
+   fprintf(stderr, "rank %d sending %d entries in the transpose\n", rank, no_send_entries);
+
+   for (PetscInt i = 0; i < no_send_entries; i++) {
+      fprintf(stderr, "sending global row index %d global col index %d\n",
+                  send_rows_d[i], send_cols_d[i]);
+   }
 
    const PetscInt *iranks, *ioffset, *irootloc;
    PetscMPIInt niranks;
@@ -3105,12 +3144,18 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // We now need to assemble our nonlocal_matrix
    // ~~~~~~~~~~~~~~  
 
-   // fprintf(stderr, "global row start %d global row end %d\n",
-   //                global_row_start, global_row_end_plus_one);                 
-   // for (int i = 0; i < no_receive_entries; i++) {
-   //    fprintf(stderr, "received global row index %d global col index %d\n",
-   //                receive_rows_d[i], receive_cols_d[i]);
-   // }
+   fprintf(stderr, "global row start %d global row end %d\n",
+                  global_row_start, global_row_end_plus_one);                 
+   for (int i = 0; i < no_receive_entries; i++) {
+      fprintf(stderr, "i %d received global row index %d global col index %d\n",
+                  i, receive_rows_d[i], receive_cols_d[i]);
+   }
+
+   fprintf(stderr, "receive_cols_d before sorted");
+   for (int i = 0; i < receive_cols_d.extent(0); i++) {
+      fprintf(stderr, "%d ", receive_cols_d(i));
+   }         
+   fprintf(stderr, "receive_cols_d before sorted \n");   
 
    // This sort should be reasonably efficient as long as we have a small number
    // of large arrays to merge, which is what our comms pattern looks like for a transpose
@@ -3120,6 +3165,11 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    fprintf(stderr, "rank [%d] is starting parallel merge tree \n", rank);
    parallel_merge_tree(sorted_views, receive_rows_d_sorted, permutation_vector_d);
    fprintf(stderr, "rank [%d] is finished parallel merge tree \n", rank);
+
+   for (int i = 0; i < no_receive_entries; i++) {
+      fprintf(stderr, "i %d permutation_vector_d %d\n",
+                  i, permutation_vector_d[i]);
+   }   
 
    Kokkos::parallel_for("ApplyPermutation", receive_cols_d.extent(0), KOKKOS_LAMBDA(const int i) {
       receive_cols_d_sorted(i) = receive_cols_d(permutation_vector_d(i));
@@ -3149,6 +3199,10 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    auto exec = PetscGetKokkosExecutionSpace();
    exec.fence();     
 
+   for (int i = 0; i < receive_cols_d_sorted.extent(0); i++) {
+      fprintf(stderr, "receive_cols_d_sorted global[%d] = %d\n", i, receive_cols_d_sorted(i));
+   }    
+
    // Now we need to build garray on the host and rewrite the receive_cols_d_sorted indices so they are local
    // The default values here are for the case where we 
    // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
@@ -3158,11 +3212,13 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // so we just give how many non-local columns we received total as we know the unique number is less than that
    rewrite_j_global_to_local(receive_cols_d_sorted.extent(0), col_ao_output, receive_cols_d_sorted, &garray_host);  
 
-      fprintf(stderr, "rank [%d] rewriting indices \n", rank);
+   for (int i = 0; i < receive_cols_d_sorted.extent(0); i++) {
+      fprintf(stderr, "receive_cols_d_sorted rewritten local[%d] = %d\n", i, receive_cols_d_sorted(i));
+   }      
 
-   // for (int i = 0; i < col_ao_output; i++) {
-   //    fprintf(stderr, "garray_host[%d] = %d\n", i, garray_host[i]);
-   // }
+   for (int i = 0; i < col_ao_output; i++) {
+      fprintf(stderr, "garray_host[%d] = %d\n", i, garray_host[i]);
+   }
    
    // We can create our nonlocal diagonal block matrix directly on the device
    MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_transpose_d, receive_cols_d_sorted, a_transpose_d_sorted, &mat_nonlocal_y);
@@ -3177,6 +3233,13 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 
       fprintf(stderr, "rank [%d] built full mat \n", rank);
 
+   Mat tempy;
+   MatTranspose(*X, MAT_INITIAL_MATRIX, &tempy);
+   Mat_MPIAIJ *mat_tempy = (Mat_MPIAIJ *)tempy->data;
+
+   for (int i = 0; i < col_ao_output; i++) {
+      fprintf(stderr, "garray_correct[%d] = %d\n", i, mat_tempy->garray[i]);
+   }   
 
    // ~~~~~~~~~~~~~~
    // Cleanup
