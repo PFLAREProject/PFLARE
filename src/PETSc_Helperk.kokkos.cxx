@@ -2572,53 +2572,58 @@ void parallel_merge(const ViewType& array1, const ViewType& array2, ViewType& ou
     // and the total size of the output array
     // Each team will assign corresponding ranges in array1 and array2
     // and then merge the assigned ranges into the output array
-    // Each team will handle a chunk of the output array
    Kokkos::parallel_for("ParallelMerge", policy, KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type& team) {
       const size_t team_rank = team.league_rank();
       const size_t team_size = team.league_size();
 
       // Divide the output array among teams
       const size_t chunk_size = (total_size + team_size - 1) / team_size;
-      const size_t start = team_rank * chunk_size;
-      const size_t end = Kokkos::min(start + chunk_size, total_size);
+      const size_t team_start = team_rank * chunk_size;
+      const size_t team_end = Kokkos::min(team_start + chunk_size, total_size);
 
-      if (start >= end) {
+      if (team_start >= team_end) {
          return; // No work for this team
       }
 
       // Find the corresponding ranges in array1 and array2 using binary search
       size_t start1, start2, end1, end2;
-      find_split(start, array1, array2, start1, start2);
-      find_split(end, array1, array2, end1, end2);
+      find_split(team_start, array1, array2, start1, start2);
+      find_split(team_end, array1, array2, end1, end2);
 
-      // Merge the assigned ranges
-      size_t i = start1;
-      size_t j = start2;
+      // Create sub-views for the team's working set. This helps simplify indexing later.
+      auto team_array1 = Kokkos::subview(array1, Kokkos::make_pair(start1, end1));
+      auto team_array2 = Kokkos::subview(array2, Kokkos::make_pair(start2, end2));
 
-      for (size_t k = start; k < end; ++k) {
-         // Determine whether to take the next element from array1 or array2
-         bool take_from_1;
-         if (i >= end1) {
-               // array1's range is exhausted, must take from array2
-               take_from_1 = false;
-         } else if (j >= end2) {
-               // array2's range is exhausted, must take from array1
-               take_from_1 = true;
+      // Now each thread in each team will be responsible for assigning a single entry output_array(k)
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(team, team_start, team_end), [&](const size_t k) {
+         
+         // To do this, we find the rank of this element 'k' relative to the team's chunk.
+         const size_t local_k = k - team_start;
+         
+         // Now, find the split for 'local_k' within the team's sub-arrays.
+         // This is a second, smaller binary search on this team's data range.
+         size_t thread_split1, thread_split2;
+         find_split(local_k + 1, team_array1, team_array2, thread_split1, thread_split2);
+         
+         // The (local_k)-th element is the one just before the (local_k+1) split.
+         // We check which array partition provided the last element.
+         size_t prev_thread_split1, prev_thread_split2;
+         find_split(local_k, team_array1, team_array2, prev_thread_split1, prev_thread_split2);
+
+         // If the number of elements from array1 increased, the element came from array1.
+         if (thread_split1 > prev_thread_split1) {
+               // The index within the team's sub-view is prev_thread_split1.
+               // We add start1 to get the index in the original array1.
+               const size_t original_index = start1 + prev_thread_split1;
+               output_array(k) = array1(original_index);
+               permutation_vector(k) = original_index;
          } else {
-               // Neither range is exhausted, compare elements
-               take_from_1 = (array1(i) <= array2(j));
+               // Otherwise, the element came from array2.
+               const size_t original_index = start2 + prev_thread_split2;
+               output_array(k) = array2(original_index);
+               permutation_vector(k) = size1 + original_index; // Add size1 for global permutation
          }
-
-         if (take_from_1) {
-               output_array(k) = array1(i);
-               permutation_vector(k) = i; // Store original index from array1
-               i++;
-         } else {
-               output_array(k) = array2(j);
-               permutation_vector(k) = size1 + j; // Store original index from array2 (with offset)
-               j++;
-         }
-      }
+      });
    });
 }
 
