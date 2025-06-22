@@ -2858,7 +2858,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    PetscMalloc1(nranks, &send_rank_no_vals);
    PetscArrayzero(send_rank_no_vals, nranks);
 
-   for (int i = 0; i < nranks; i++) {
+   for (PetscMPIInt i = 0; i < nranks; i++) {
       PetscInt start = roffset[i];
       PetscInt end   = roffset[i+1];
       PetscInt nitems = end - start;
@@ -2875,7 +2875,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    PetscInt *send_rank_no_vals_scan;
    PetscMalloc1(nranks+1, &send_rank_no_vals_scan);
    send_rank_no_vals_scan[0] = 0;
-   for (int i = 0; i < nranks; i++) {
+   for (PetscMPIInt i = 0; i < nranks; i++) {
       send_rank_no_vals_scan[i+1] = send_rank_no_vals_scan[i] + send_rank_no_vals[i];
       no_send_entries += send_rank_no_vals[i];
    }
@@ -2924,7 +2924,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // ~~~~~~~~~~~~~~   
 
    // Non-blocking receive the sizes
-   for (int i = 0; i < niranks; i++)
+   for (PetscMPIInt i = 0; i < niranks; i++)
    {
       receive_request[i] = MPI_REQUEST_NULL;
       // Tag 3 for the size
@@ -2932,7 +2932,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    }
 
    // Non-blocking send the sizes
-   for (int i = 0; i < nranks; i++) {      
+   for (PetscMPIInt i = 0; i < nranks; i++) {      
 
       send_request[i] = MPI_REQUEST_NULL;
       // Tag 3 for the size
@@ -3004,7 +3004,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    PetscInt *receive_rank_no_vals_scan;
    PetscMalloc1(niranks+1, &receive_rank_no_vals_scan);
    receive_rank_no_vals_scan[0] = 0;
-   for (int i = 0; i < niranks; i++) {
+   for (PetscMPIInt i = 0; i < niranks; i++) {
       receive_rank_no_vals_scan[i+1] = receive_rank_no_vals_scan[i] + receive_rank_no_vals[i];
       
       no_receive_entries += receive_rank_no_vals[i];
@@ -3016,7 +3016,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 
    // We can give it the device pointer directly given gpu aware mpi
    std::vector< Kokkos::View<PetscInt *> > sorted_views;
-   for (int i = 0; i < niranks; i++)
+   for (PetscMPIInt i = 0; i < niranks; i++)
    {
       // Start an async receive of our transposed data
       receive_request[2 * i] = MPI_REQUEST_NULL;
@@ -3045,7 +3045,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // ~~~~~~~~~~~~~~     
 
    // We can give it the device pointer directly given gpu aware mpi
-   for (int i = 0; i < nranks; i++) {      
+   for (PetscMPIInt i = 0; i < nranks; i++) {      
 
       // Start an async send of our transposed data
       send_request[2*i] = MPI_REQUEST_NULL;
