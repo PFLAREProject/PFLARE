@@ -2767,7 +2767,6 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    PetscLogCpuToGpu(bytes);    
 
    // ~~~~~~~~~~~~~~
-   // Let's do some comms to work out how many entries are coming/going
    // We are going to use an sf based on garray
    // The sf would normally be used for a matvec
    // ~~~~~~~~~~~~~~   
@@ -2819,23 +2818,18 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    Kokkos::View<PetscInt *> i_transpose_d = PetscIntKokkosView("i_transpose_d", local_rows+1);
    PetscInt *i_transpose_d_ptr = i_transpose_d.data();
 
+   // ~~~~~~~~~~~~~~
+   // Now let's start some of our comms
+   // ~~~~~~~~~~~~~~   
+
    // After this reduction, i_transpose_d will have how many entries we have in each row of the resulting
    // non-local portion of the transpose
    // A scan of this will tell us the i_indices   
+   // We don't finish it until we actually need the i_indices
    PetscSFReduceWithMemTypeBegin(sf, MPIU_INT,
       mem_type, g_nnz_d_ptr,
       mem_type, i_transpose_d_ptr,
-      MPIU_SUM);   
-   PetscSFReduceEnd(sf, MPIU_INT, g_nnz_d_ptr, i_transpose_d_ptr, MPIU_SUM);             
-
-   // Perform exclusive scan - this modifies i_transpose_d in-place
-   Kokkos::parallel_scan(local_rows + 1, KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final) {
-      const PetscInt input_value = i_transpose_d(i);
-      if (final) {
-         i_transpose_d(i) = update; // Write exclusive prefix
-      }
-      update += input_value; // Update running total
-   });  
+      MPIU_SUM);
 
    const PetscInt    *roffset, *rmine,*rremote;
    const PetscMPIInt *ranks;
@@ -2876,9 +2870,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       }
    }
 
-   // ~~~~~~~~~~~~~~
-   // Let's start all our sends
-   // ~~~~~~~~~~~~~~ 
+   // Total entries to send
    PetscInt no_send_entries = 0;
    PetscInt *send_rank_no_vals_scan;
    PetscMalloc1(nranks+1, &send_rank_no_vals_scan);
@@ -2887,6 +2879,70 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       send_rank_no_vals_scan[i+1] = send_rank_no_vals_scan[i] + send_rank_no_vals[i];
       no_send_entries += send_rank_no_vals[i];
    }
+
+   const PetscInt *iranks, *ioffset, *irootloc;
+   PetscMPIInt niranks;   
+   // ~~~~~~~~~~~~~~
+   // We can query the sf to get some information we need
+   // The information below is talking about what we would send during a matvec
+   // ~~~~~~~~~~~~~~    
+   // niranks is how many ranks we send to
+   // ioffset[i+1] - ioffset[i] is how many items we send to this rank
+   // irootloc is the local column indices on this rank that we send
+   //  ie the global column indices that we send are irootloc + global_col_start
+   PetscSFGetLeafRanks(sf, &niranks, &iranks, &ioffset, &irootloc);
+
+   // In the sf, we have a one to many relationship
+   // Each of our local entries we may have to send to multiple ranks
+   // So we when we think of the transpose we don't actually know how many entries we 
+   // have to receive
+   // ie we're not receiving ioffset[i+1] - ioffset[i] entries from iranks[i]
+   // But we do know we are receiving from only the ranks in iranks
+
+   // ~~~~~~~~~~~~~~
+   // Now let's start some of our comms
+   // ~~~~~~~~~~~~~~
+
+   // Let's store how many things we are going to receive from each rank during
+   // the transpose
+   PetscInt *receive_rank_no_vals;
+   PetscMalloc1(niranks, &receive_rank_no_vals);
+
+   MPI_Status *receive_status;
+   MPI_Request *receive_request;
+   PetscMalloc1(niranks*2, &receive_request);
+   PetscMalloc1(niranks*2, &receive_status);   
+
+   MPI_Status *send_status;
+   MPI_Request *send_request;   
+   PetscMalloc1(nranks*2, &send_request);
+   PetscMalloc1(nranks*2, &send_status);
+
+   // ~~~~~~~~~~~~~~
+   // Let's start the comms for comm how many entries we will be receiving 
+   // ~~~~~~~~~~~~~~   
+
+   // Non-blocking receive the sizes
+   for (int i = 0; i < niranks; i++)
+   {
+      receive_request[i] = MPI_REQUEST_NULL;
+      // Tag 3 for the size
+      MPI_Irecv(&receive_rank_no_vals[i], 1, MPIU_INT, iranks[i], 3, MPI_COMM_MATRIX, &receive_request[i]);
+   }
+
+   // Non-blocking send the sizes
+   for (int i = 0; i < nranks; i++) {      
+
+      send_request[i] = MPI_REQUEST_NULL;
+      // Tag 3 for the size
+      MPI_Isend(&send_rank_no_vals[i], 1, MPIU_INT, ranks[i], 3, MPI_COMM_MATRIX, &send_request[i]);      
+   }    
+
+   // ~~~~~~~~~~~~~~
+   // Let's overlap some works and comms
+   // Fill the arrays with the data we're sending
+   // ~~~~~~~~~~~~~~      
+
    // This is the device memory we store our global i,j entries to send
    // We could just pack it up into 1 array and send that in one message, but then we need extra memory to unpack
    // There is also probably enough data that we will be bandwidth bound rather than latency so sending
@@ -2931,65 +2987,12 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    // We can destroy our local transpose
    MatDestroy(&mat_nonlocal_x_transpose);
 
-   const PetscInt *iranks, *ioffset, *irootloc;
-   PetscMPIInt niranks;
-
    // ~~~~~~~~~~~~~~
-   // We can query the sf to get some information we need
-   // The information below is talking about what we would send during a matvec
-   // ~~~~~~~~~~~~~~    
-   // niranks is how many ranks we send to
-   // ioffset[i+1] - ioffset[i] is how many items we send to this rank
-   // irootloc is the local column indices on this rank that we send
-   //  ie the global column indices that we send are irootloc + global_col_start
-   PetscSFGetLeafRanks(sf, &niranks, &iranks, &ioffset, &irootloc);
-
-   // In the sf, we have a one to many relationship
-   // Each of our local entries we may have to send to multiple ranks
-   // So we when we think of the transpose we don't actually know how many entries we 
-   // have to receive
-   // ie we're not receiving ioffset[i+1] - ioffset[i] entries from iranks[i]
-   // But we do know we are receiving from only the ranks in iranks
-   // So we will just probe those ranks and find out how big the incoming messages are
-
-   // Let's store how many things we are going to receive from each rank during
-   // the transpose
-   PetscInt *receive_rank_no_vals;
-   PetscMalloc1(niranks, &receive_rank_no_vals);
-
-   // ~~~~~~~~~~~~~~
-   // Now let's start our comms
+   // Finish our comms of the receive sizes
    // ~~~~~~~~~~~~~~    
 
-   MPI_Status *receive_status;
-   MPI_Request *receive_request;
-   PetscMalloc1(niranks*2, &receive_request);
-   PetscMalloc1(niranks*2, &receive_status);   
-
-   MPI_Status *send_status;
-   MPI_Request *send_request;   
-   PetscMalloc1(nranks*2, &send_request);
-   PetscMalloc1(nranks*2, &send_status);
-
-   // Non-blocking receive the sizes
-   for (int i = 0; i < niranks; i++)
-   {
-      receive_request[i] = MPI_REQUEST_NULL;
-      // Tag 3 for the size
-      MPI_Irecv(&receive_rank_no_vals[i], 1, MPIU_INT, iranks[i], 3, MPI_COMM_MATRIX, &receive_request[i]);
-   }
-
-   // Non-blocking send the sizes
-   for (int i = 0; i < nranks; i++) {      
-
-      send_request[i] = MPI_REQUEST_NULL;
-      // Tag 3 for the size
-      MPI_Isend(&send_rank_no_vals[i], 1, MPIU_INT, ranks[i], 3, MPI_COMM_MATRIX, &send_request[i]);      
-   }    
-
-   // Wait for all send/receives of sizes to complete
    MPI_Waitall(nranks, send_request, send_status);
-   MPI_Waitall(niranks, receive_request, receive_status);
+   MPI_Waitall(niranks, receive_request, receive_status);   
 
    // ~~~~~~~~~~~~~~
    // We now know the sizes to expect to receive
@@ -3069,8 +3072,10 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    Mat mat_local_y = NULL, mat_nonlocal_y = NULL;
    MatTranspose(mat_local_x, MAT_INITIAL_MATRIX, &mat_local_y);      
 
-   // Wait for all send/receives to complete - remember we have 2 times given 
-   // we send/receive two messages
+   // ~~~~~~~~~~~~~~
+   // Finish our comms of the transpose data
+   // ~~~~~~~~~~~~~~  
+   // Remember we have 2 times given we send/receive two messages
    MPI_Waitall(nranks*2, send_request, send_status);
    MPI_Waitall(niranks*2, receive_request, receive_status);
 
@@ -3094,6 +3099,22 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
 
    Kokkos::View<PetscScalar *> a_transpose_d_sorted = Kokkos::View<PetscScalar *>("a_transpose_d_sorted", no_receive_entries);
    Kokkos::deep_copy(a_transpose_d_sorted, 1);
+
+   // ~~~~~~~~~~~~~~
+   // Finish our comms of the reduction of the transposed i indices
+   // ~~~~~~~~~~~~~~
+   PetscSFReduceEnd(sf, MPIU_INT, g_nnz_d_ptr, i_transpose_d_ptr, MPIU_SUM);             
+
+   // Perform exclusive scan - this modifies i_transpose_d in-place
+   Kokkos::parallel_scan(local_rows + 1, KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final) {
+      const PetscInt input_value = i_transpose_d(i);
+      if (final) {
+         i_transpose_d(i) = update; // Write exclusive prefix
+      }
+      update += input_value; // Update running total
+   });   
+   
+   // ~~~~~~~~~~~~~~
 
    // Now all the row entries are sorted, but the columns within each row aren't sorted
    // So we call the sort_csr_matrix to do this
