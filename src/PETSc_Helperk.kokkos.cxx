@@ -2656,25 +2656,20 @@ void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& ou
     // Create a working vector to hold intermediate results
     std::vector<ViewType> current_level = input_arrays;
     std::vector<ViewType> current_permutations;
-    std::vector<size_t> current_offsets;
 
-    // Initialize permutation vectors and offsets for the input arrays
-    size_t cumulative_offset = 0;
+    // Initialize permutation vectors for the input arrays
     for (const auto& array : input_arrays) {
         ViewType perm("perm", array.extent(0));
         Kokkos::parallel_for("InitPermutation", array.extent(0), KOKKOS_LAMBDA(const size_t i) {
             perm(i) = i; // Identity permutation for each input array
         });
         current_permutations.push_back(perm);
-        current_offsets.push_back(cumulative_offset);
-        cumulative_offset += array.extent(0);
     }
 
     // Perform the merge in a tree fashion
     while (current_level.size() > 1) {
         std::vector<ViewType> next_level;
         std::vector<ViewType> next_permutations;
-        std::vector<size_t> next_offsets;
 
         // Merge pairs of arrays
         for (size_t i = 0; i < current_level.size(); i += 2) {
@@ -2686,37 +2681,32 @@ void parallel_merge_tree(const std::vector<ViewType>& input_arrays, ViewType& ou
 
                 // Map the merged permutation back to the original indices
                 ViewType combined_permutation("combined_permutation", merged_permutation.extent(0));
-                size_t offset1 = current_offsets[i];
-                size_t offset2 = current_offsets[i + 1];
                 size_t size1 = current_level[i].extent(0);
                 ViewType curr_perm_i = current_permutations[i];
                 ViewType curr_perm_i_plus_one = current_permutations[i+1];
                 
                 Kokkos::parallel_for("CombinePermutation", merged_permutation.extent(0), KOKKOS_LAMBDA(const size_t j) {
                     if (static_cast<size_t>(merged_permutation(j)) < size1) {
-                        // Index from first array: add offset1 to the permutation from first array
-                        combined_permutation(j) = curr_perm_i(merged_permutation(j)) + offset1;
+                        // Index from first array
+                        combined_permutation(j) = curr_perm_i(merged_permutation(j));
                     } else {
-                        // Index from second array: add offset2 to the permutation from second array
-                        combined_permutation(j) = curr_perm_i_plus_one(merged_permutation(j) - size1) + offset2;
+                        // Index from second array: add size1 to the permutation from second array
+                        combined_permutation(j) = curr_perm_i_plus_one(merged_permutation(j) - size1) + size1;
                     }
                 });
 
                 next_level.push_back(merged_array);
                 next_permutations.push_back(combined_permutation);
-                next_offsets.push_back(offset1); // The merged array starts at the same offset as the first array
             } else {
                 // If there's an odd array, move it to the next level as is
                 next_level.push_back(current_level[i]);
                 next_permutations.push_back(current_permutations[i]);
-                next_offsets.push_back(current_offsets[i]);
             }
         }
 
         // Move to the next level
         current_level = std::move(next_level);
         current_permutations = std::move(next_permutations);
-        current_offsets = std::move(next_offsets);
     }
 
     // The final merged array and permutation vector are the only ones left in the current level
