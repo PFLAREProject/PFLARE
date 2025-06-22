@@ -384,16 +384,19 @@ int main(int argc, char **argv)
   SNES   snes; /* Nonlinear solver */
   Vec    u;    /* Solutions */
   AppCtx options; /* options-defined work context */
+  PetscLogStage setup, gpu_copy;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &argv, NULL, help));
+  // Register the pflare types
+  PCRegister_PFLARE();
+
+  PetscLogStageRegister("Setup", &setup);
+  PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy);  
   PetscCall(ProcessOptions(PETSC_COMM_WORLD, &options));
 
   PetscBool second_solve= PETSC_FALSE;
   PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);    
-
-  // Register the pflare types
-  PCRegister_PFLARE();
 
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
@@ -414,9 +417,15 @@ int main(int argc, char **argv)
 
   // Only solving a linear problem for now
   PetscCall(SNESSetType(snes, SNESKSPONLY));
-
   PetscCall(SNESSetFromOptions(snes));
+
+  PetscCall(PetscLogStagePush(setup));
+  PetscCall(SNESSetUp(snes));
+  PetscCall(PetscLogStagePop());  
+
+  PetscCall(PetscLogStagePush(gpu_copy));
   PetscCall(SNESSolve(snes, NULL, u));
+  PetscCall(PetscLogStagePop());
 
   // Solve
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
