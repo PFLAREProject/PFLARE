@@ -74,10 +74,10 @@ static inline PetscErrorCode ComputeSUPGStabilization(PetscInt dim, PetscReal h,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Dirichlet BC: u = 1.0 (for inflow boundaries)
+// Dirichlet BC: u = 0.0 (for inflow boundaries)
 static PetscErrorCode dirichlet_bc(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
 {
-  u[0] = 1.0;
+  u[0] = 0.0;
   return PETSC_SUCCESS;
 }
 
@@ -389,6 +389,9 @@ int main(int argc, char **argv)
   PetscCall(PetscInitialize(&argc, &argv, NULL, help));
   PetscCall(ProcessOptions(PETSC_COMM_WORLD, &options));
 
+  PetscBool second_solve= PETSC_FALSE;
+  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);    
+
   // Register the pflare types
   PCRegister_PFLARE();
 
@@ -401,15 +404,29 @@ int main(int argc, char **argv)
   PetscCall(SetupSUPG(dm));
 
   PetscCall(DMCreateGlobalVector(dm, &u));
-  PetscCall(VecSet(u, 0.0));
+  PetscCall(VecSet(u, 1.0));
   PetscCall(PetscObjectSetName((PetscObject)u, "adv_diff"));
   PetscCall(DMPlexSetSNESLocalFEM(dm, PETSC_FALSE, &options));
+  // Only compute the jacobian once in case we're doing a second solve
+  PetscInt lag = -2;
+  PetscCall(SNESSetLagPreconditioner(snes, lag));
+  PetscCall(SNESSetLagJacobian(snes, lag));
 
   // Only solving a linear problem for now
   PetscCall(SNESSetType(snes, SNESKSPONLY));
 
   PetscCall(SNESSetFromOptions(snes));
   PetscCall(SNESSolve(snes, NULL, u));
+
+  // Solve
+  // We set x to 1 rather than random as the vecrandom doesn't yet have a
+  // gpu implementation and we don't want a copy occuring back to the cpu
+  if (second_solve)
+  {
+   PetscCall(VecSet(u, 1.0));
+   PetscCall(SNESSolve(snes, NULL, u));
+  }  
+
   PetscCall(SNESGetSolution(snes, &u));
   /* Cleanup */
   PetscCall(VecDestroy(&u));
