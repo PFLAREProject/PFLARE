@@ -2982,15 +2982,7 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    MPI_Status *send_status;
    MPI_Request *send_request;   
    PetscMalloc1(nranks*2, &send_request);
-   PetscMalloc1(nranks*2, &send_status);   
-
-   // ~~~~~~~~~~~~~~
-   // We do our local transpose now to try and overlap work and comms
-   // The tranpose of the local matrix happens on the device
-   // ~~~~~~~~~~~~~~
-   Mat mat_local_y = NULL, mat_nonlocal_y = NULL;
-   MatTranspose(mat_local_x, MAT_INITIAL_MATRIX, &mat_local_y);   
-
+   PetscMalloc1(nranks*2, &send_status);
 
    // Non-blocking receive the sizes
    for (int i = 0; i < niranks; i++)
@@ -3092,6 +3084,13 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
    }    
 
    fprintf(stderr, "rank [%d] is now about to do waitalls \n", rank);
+
+   // ~~~~~~~~~~~~~~
+   // We do our local transpose now to try and overlap work and comms
+   // The tranpose of the local matrix happens on the device
+   // ~~~~~~~~~~~~~~
+   Mat mat_local_y = NULL, mat_nonlocal_y = NULL;
+   MatTranspose(mat_local_x, MAT_INITIAL_MATRIX, &mat_local_y);      
 
    // Wait for all send/receives to complete - remember we have 2 times given 
    // we send/receive two messages
