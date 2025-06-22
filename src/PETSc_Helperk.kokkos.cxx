@@ -2880,8 +2880,9 @@ PETSC_INTERN void MatTranspose_kokkos(Mat *X, Mat *Y, const int symbolic_int)
       no_send_entries += send_rank_no_vals[i];
    }
 
-   const PetscInt *iranks, *ioffset, *irootloc;
+   const PetscInt *ioffset, *irootloc;
    PetscMPIInt niranks;   
+   const PetscMPIInt *iranks;
    // ~~~~~~~~~~~~~~
    // We can query the sf to get some information we need
    // The information below is talking about what we would send during a matvec
