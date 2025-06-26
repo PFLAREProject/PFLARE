@@ -245,17 +245,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      MPI_REPLACE);
       }
 
-      // This keeps track of which of the candidate nodes can become in the set
+      // mark_d keeps track of which of the candidate nodes can become in the set
       // Only need this because we want to do async comms so we need a way to trigger
       // a node not being in the set due to either strong local neighbours *or* strong offproc neighbours
-      Kokkos::deep_copy(mark_d, true);   
-
-      // Any that aren't zero cf marker are already assigned so set to to false
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-
-            if (cf_markers_d(i) != 0) mark_d(i) = false;
-      });
 
       // ~~~~~~~~
       // Go and do the local component
@@ -292,7 +284,22 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Only want one thread in the team to write the result
                Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
                   // If we have any strong neighbours
-                  if (strong_neighbours > 0) mark_d(i) = false;     
+                  if (strong_neighbours > 0) 
+                  {
+                     mark_d(i) = false;     
+                  }
+                  else
+                  {
+                     mark_d(i) = true;  
+                  }
+               });
+            }
+            // Any that aren't zero cf marker are already assigned so set to to false
+            else
+            {
+               // Only want one thread in the team to write the result
+               Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
+                  mark_d(i) = false;
                });
             }
       });
