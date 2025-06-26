@@ -88,10 +88,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
    cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
-   PetscScalar *cf_markers_local_real_d_ptr = NULL, *cf_markers_nonlocal_real_d_ptr = NULL;
+
+   int *cf_markers_local_real_d_ptr = NULL, *cf_markers_nonlocal_real_d_ptr = NULL;
    // The real equivalents so we can use the existing petscsf from the input matrix
-   PetscScalarKokkosView cf_markers_local_real_d("cf_markers_local_real_d", local_rows);
-   PetscScalarKokkosView cf_markers_nonlocal_real_d;
+   intKokkosView cf_markers_local_real_d("cf_markers_local_real_d", local_rows);
+   intKokkosView cf_markers_nonlocal_real_d;
    cf_markers_local_real_d_ptr = cf_markers_local_real_d.data();
 
    // Host and device memory for the measure
@@ -100,10 +101,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
    measure_local_d_ptr = measure_local_d.data();
    PetscScalarKokkosView measure_nonlocal_d;
+
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
       measure_nonlocal_d_ptr = measure_nonlocal_d.data();
-      cf_markers_nonlocal_real_d = PetscScalarKokkosView("cf_markers_nonlocal_real_d", cols_ao); 
+      cf_markers_nonlocal_real_d = intKokkosView("cf_markers_nonlocal_real_d", cols_ao); 
       cf_markers_nonlocal_real_d_ptr = cf_markers_nonlocal_real_d.data();
    }
 
@@ -239,7 +241,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // ~~~~~~~~~
       if (mpi) {
          // We can't overwrite any of the values in cf_markers_local_real_d while the forward scatter is still going
-         PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
+         PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_local_real_d_ptr,
                      mem_type, cf_markers_nonlocal_real_d_ptr,
                      MPI_REPLACE);
@@ -303,7 +305,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (mpi) {
 
          // Finish the async scatter
-         PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, cf_markers_local_real_d_ptr, cf_markers_nonlocal_real_d_ptr, MPI_REPLACE);
+         PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_local_real_d_ptr, cf_markers_nonlocal_real_d_ptr, MPI_REPLACE);
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
@@ -381,7 +383,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
          // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
-         PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
+         PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
             mem_type, cf_markers_nonlocal_real_d_ptr,
             mem_type, cf_markers_local_real_d_ptr,
             MPIU_SUM);
@@ -414,7 +416,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (mpi) 
       {
          // Finish the scatter
-         PetscSFReduceEnd(mat_mpi->Mvctx, MPIU_SCALAR, cf_markers_nonlocal_real_d_ptr, cf_markers_local_real_d_ptr, MPIU_SUM);         
+         PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_real_d_ptr, cf_markers_local_real_d_ptr, MPIU_SUM);         
       }
 
       // We've done another top level loop
