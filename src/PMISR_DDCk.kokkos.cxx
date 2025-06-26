@@ -156,15 +156,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
    // Initialise the set
    PetscInt counter_in_set_start = 0;
-   // Count how many in the set to begin with
+   // Count how many in the set to begin with and set their CF markers
    Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
-      if (Kokkos::abs(measure_local_d[i]) < 1) update++;
-   }, counter_in_set_start);
-
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-
-      if (Kokkos::abs(measure_local_d(i)) < 1)
+      if (Kokkos::abs(measure_local_d[i]) < 1) 
       {
          if (zero_measure_c_point_int == 1) {
             if (pmis_int == 1) {
@@ -186,13 +180,15 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Becomes F
                cf_markers_d(i) = -1;
             }
-         }
+         }         
+         // Count
+         update++;
       }
       else
       {
          cf_markers_d(i) = 0;
-      }
-   });  
+      }      
+   }, counter_in_set_start);
 
    // Check the total number of undecided in parallel
    PetscInt counter_undecided, counter_parallel;
