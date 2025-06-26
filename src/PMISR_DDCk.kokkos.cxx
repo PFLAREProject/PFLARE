@@ -97,10 +97,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Host and device memory for the measure
    PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
-   PetscScalar *measure_local_d_ptr = measure_local_d.data();
+   PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
+   measure_local_d_ptr = measure_local_d.data();
    PetscScalarKokkosView measure_nonlocal_d;
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
+      measure_nonlocal_d_ptr = measure_nonlocal_d.data();
       cf_markers_nonlocal_real_d = PetscScalarKokkosView("cf_markers_nonlocal_real_d", cols_ao); 
       cf_markers_nonlocal_real_d_ptr = cf_markers_nonlocal_real_d.data();
    }
@@ -145,7 +147,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Have to make sure we don't modify measure_local_d while the comms is in progress
       PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
-                                 mem_type, cf_markers_nonlocal_real_d_ptr,
+                                 mem_type, measure_nonlocal_d_ptr,
                                  MPI_REPLACE);      
    }
 
@@ -209,9 +211,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Finish the broadcast for the nonlocal measure
    if (mpi)
    {
-      PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, cf_markers_nonlocal_real_d_ptr, MPI_REPLACE);
-      // Copy the non local measure
-      Kokkos::deep_copy(measure_nonlocal_d, cf_markers_nonlocal_real_d);       
+      PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE);     
    }   
 
    // ~~~~~~~~~~~~
@@ -378,7 +378,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                }
          });
 
-         // We've updated the values in cf_markers_nonlocal, which is a pointer to lvec
+         // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
          // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
          PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
