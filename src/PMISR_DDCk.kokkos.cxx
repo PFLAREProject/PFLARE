@@ -414,6 +414,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
                      // Needs to be atomic as may being set by many threads
+                     // Tried a version where instead of a "push" approach I tried a pull approach
+                     // that doesn't need an atomic, but it was slower
                      Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1.0);     
                });     
             }
