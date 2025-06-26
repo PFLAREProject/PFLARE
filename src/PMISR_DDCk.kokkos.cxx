@@ -581,7 +581,7 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
 
 // Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
 // This code is very similar to MatCreateSubMatrix_kokkos
-PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
+PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d, PetscInt &non_diag_rows_local)
 {
    PetscInt local_rows, local_cols;
 
@@ -793,18 +793,24 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // ~~~~~~~~~~~~~
    // Compute the diag dominance ratio
    // ~~~~~~~~~~~~~
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {     
-         
-      // If diag_val is zero we didn't find a diagonal
-      if (diag_entry_d(i) != 0.0){
-         // Compute the diagonal dominance ratio
-         diag_dom_ratio_d(i) = diag_dom_ratio_d(i) / diag_entry_d(i);
-      }
-      else{
-         diag_dom_ratio_d(i) = 0.0;
-      }
-   });   
+   non_diag_rows_local = 0;
+   Kokkos::parallel_reduce("non_diag_rows_local", local_rows_row,
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
+
+         // If diag_val is zero we didn't find a diagonal
+         if (diag_entry_d(i) != 0.0){
+
+            // Count how many rows have non-diagonal entries
+            if (diag_dom_ratio_d(i) != 0.0) thread_sum++;
+            // Compute the diagonal dominance ratio
+            diag_dom_ratio_d(i) = diag_dom_ratio_d(i) / diag_entry_d(i);
+         }
+         else{
+            diag_dom_ratio_d(i) = 0.0;
+         }
+      },
+      Kokkos::Sum<PetscInt>(non_diag_rows_local)
+   );
 
    return;
 }
@@ -814,8 +820,12 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 // ddc cleanup but on the device - uses the global variable cf_markers_local_d
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, int *zero_points_swapped_int)
 {
+   // Let's keep track of how many points we swapped
+   *zero_points_swapped_int = 1;
+   PetscInt points_swapped_local = 0, points_swapped = 0;
+
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
@@ -824,7 +834,17 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
    
    // Compute the diagonal dominance ratio over the fine points in cf_markers_local_d
    // ie the diag domminance ratio of Aff
-   MatDiagDomRatio_kokkos(input_mat, is_fine_local_d, diag_dom_ratio_d);
+   PetscInt non_diag_rows_local = 0, non_diag_rows_parallel = 0;
+   MatDiagDomRatio_kokkos(input_mat, is_fine_local_d, diag_dom_ratio_d, non_diag_rows_local);
+
+   MPI_Comm MPI_COMM_MATRIX; 
+   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);   
+
+   // Parallel reduction! Let's work out if the input_mat on F points is diagonal
+   // If it is we can skip everything below and just return without changing any F points
+   MPI_Allreduce(&non_diag_rows_local, &non_diag_rows_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
+   if (non_diag_rows_parallel == 0) return;
+
    PetscInt local_rows_aff = is_fine_local_d.extent(0);
 
    // Do a fixed alpha_diag
@@ -897,18 +917,26 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
 
       }
 
-      // Go and swap F points to C points
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
+      // Swap the F points that need it and count how many we've swapped
+      Kokkos::parallel_reduce("FindMatches", local_rows_aff,
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
 
             if (diag_dom_ratio_d(i) != 0.0 && diag_dom_ratio_d(i) >= swap_dom_val)
             {
                // This is the actual numbering in A, rather than Aff
-               PetscInt idx = is_fine_local_d(i);
+               const PetscInt idx = is_fine_local_d(i);
                cf_markers_d(idx) *= -1;
+               thread_sum++;
             }
-      }); 
+         },
+         Kokkos::Sum<PetscInt>(points_swapped_local)
+      );
    }   
+
+   // Parallel reduction to check how many points were swapped globally
+   MPI_Allreduce(&points_swapped_local, &points_swapped, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
+   PetscInt zero = 0;
+   if (points_swapped != zero) *zero_points_swapped_int = 0;
 
    return;
 }

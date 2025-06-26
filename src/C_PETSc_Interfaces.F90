@@ -336,11 +336,12 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine ddc_kokkos(A_array, fraction_swap) &
+      subroutine ddc_kokkos(A_array, fraction_swap, zero_points_swapped_int) &
          bind(c, name="ddc_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
          PetscReal, value :: fraction_swap
+         integer(c_int) :: zero_points_swapped_int
       end subroutine ddc_kokkos         
  
    end interface 

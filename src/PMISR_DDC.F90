@@ -653,7 +653,7 @@ module pmisr_ddc
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
+   subroutine ddc(input_mat, is_fine, fraction_swap, cf_markers_local, zero_points_swapped)
 
       ! Second pass diagonal dominance cleanup 
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -668,6 +668,7 @@ module pmisr_ddc
       type(tIS), intent(in)               :: is_fine
       PetscReal, intent(in)               :: fraction_swap
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
+      logical, intent(out)                :: zero_points_swapped
 
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array
@@ -677,13 +678,15 @@ module pmisr_ddc
       integer :: errorcode
       !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
+      integer(c_int) :: zero_points_swapped_int
 #endif 
       ! ~~~~~~  
+      zero_points_swapped = .TRUE.
 
       ! If we don't need to swap anything, return
       if (fraction_swap == 0d0) then
          return
-      end if      
+      end if
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
@@ -701,7 +704,8 @@ module pmisr_ddc
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, fraction_swap)
+         call ddc_kokkos(A_array, fraction_swap, zero_points_swapped_int)
+         if (zero_points_swapped_int == 0) zero_points_swapped = .FALSE.
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then  
@@ -709,7 +713,7 @@ module pmisr_ddc
             ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
             ! use the existing device data
             call copy_cf_markers_d2h(cf_markers_local_ptr)            
-            call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local_two)  
+            call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local_two, zero_points_swapped)  
 
             if (any(cf_markers_local /= cf_markers_local_two)) then
 
@@ -725,17 +729,17 @@ module pmisr_ddc
          end if
 
       else
-         call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)     
+         call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local, zero_points_swapped)     
       end if
 #else
-      call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)
+      call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local, zero_points_swapped)
 #endif        
       
    end subroutine ddc
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)
+   subroutine ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local, zero_points_swapped)
 
       ! Second pass diagonal dominance cleanup 
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -750,6 +754,7 @@ module pmisr_ddc
       type(tIS), intent(in)               :: is_fine
       PetscReal, intent(in)               :: fraction_swap
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
+      logical, intent(out)                :: zero_points_swapped
 
       ! Local
       PetscInt :: local_rows, local_cols
@@ -766,8 +771,17 @@ module pmisr_ddc
       PetscReal :: diag_val
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
+      integer(c_int) :: diag_only
+      MPI_Comm :: MPI_COMM_MATRIX    
+      integer :: errorcode
+      integer(kind=8) :: points_swapped_temp, points_swapped_local_temp
 
       ! ~~~~~~  
+
+      ! Let's keep track of how many points we swapped
+      points_swapped_temp = 0
+      points_swapped_local_temp = 0
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
 
       ! The indices are the numbering in Aff matrix
       call ISGetIndices(is_fine, is_pointer, ierr)  
@@ -790,6 +804,14 @@ module pmisr_ddc
       call MatCreateSubMatrix(input_mat, &
             is_fine, is_fine, MAT_INITIAL_MATRIX, &
             Aff, ierr)      
+
+      ! Parallel reduction! Let's work out if Aff is diagonal
+      ! If it is we can skip everything below and just return without changing any F points
+      call MatGetDiagonalOnly_c(Aff%v, diag_only)  
+      if (diag_only == 1) then
+         call MatDestroy(Aff, ierr)     
+         return          
+      end if
 
       ! Can't put this above because of collective operations in parallel (namely the getsubmatrix)
       ! If we have local points to swap
@@ -887,10 +909,19 @@ module pmisr_ddc
 
             ! Swap by multiplying by -1
             cf_markers_local(idx) = cf_markers_local(idx) * (-1)
+
+            ! Keep track of how many points we swapped
+            points_swapped_local_temp = points_swapped_local_temp + 1
          end do
          deallocate(diag_dom_ratio)
          if (allocated(diag_dom_ratio_small)) deallocate(diag_dom_ratio_small)
       end if
+
+      ! Parallel reduction to check how many points were swapped globally
+      ! For some reason MPIU_INT isn't defined in fortran
+      call MPI_Allreduce(points_swapped_local_temp, points_swapped_temp, 1, MPI_INTEGER8, MPI_SUM, MPI_COMM_MATRIX, errorcode)
+      zero_points_swapped = .TRUE.
+      if (points_swapped_temp /= 0) zero_points_swapped = .FALSE.
 
       call ISRestoreIndices(is_fine, is_pointer, ierr)
       call MatDestroy(Aff, ierr)     

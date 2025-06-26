@@ -352,6 +352,7 @@ module cf_splitting
       integer, dimension(:), allocatable, target :: cf_markers_local
       integer :: its
       logical :: need_intermediate_is
+      logical :: zero_points_swapped
 #if defined(PETSC_HAVE_KOKKOS)                     
       MatType :: mat_type
       integer(c_long_long) :: A_array, is_fine_array, is_coarse_array
@@ -394,15 +395,17 @@ module cf_splitting
       ! as this gives diagonal Aff)
       if (strong_threshold /= 0d0 .AND. cf_splitting_type == CF_PMISR_DDC) then
 
-         do its = 1, ddc_its
+         ! Do DDC iterations
+         ddc_its_loop: do its = 1, ddc_its
+
             ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
             ! (or the equivalent device cf_markers, is_fine is ignored if on the device)
-            call ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
+            call ddc(input_mat, is_fine, fraction_swap, cf_markers_local, zero_points_swapped)
 
             ! If we did anything in our ddc second pass and hence need to rebuild
             ! the is_fine and is_coarse
-            if (fraction_swap /= 0d0 .AND. need_intermediate_is) then
-            
+            if ((fraction_swap /= 0d0 .OR. zero_points_swapped) .AND. need_intermediate_is) then
+
                ! These are now outdated
                call ISDestroy(is_fine, ierr)
                call ISDestroy(is_coarse, ierr)
@@ -410,7 +413,12 @@ module cf_splitting
                ! Create the new CF ISs
                call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse) 
             end if
-         end do
+
+            ! If we didn't swap any points in this iteration, then we don't 
+            ! need to do any more
+            if (zero_points_swapped) exit ddc_its_loop
+            
+         end do ddc_its_loop
       end if
 
       ! The Kokkos PMISR and DDC no longer copy back to the host to save copies
