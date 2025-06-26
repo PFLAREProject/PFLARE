@@ -394,26 +394,31 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       }
 
       // Go and do local
+      // Rather than finding each node that has been assigned during this top loop and then 
+      // setting its neighbours to 1 (with an atomic), instead we are going over each node and checking if any of its 
+      // neighbours were assigned during this loop. If they were then we know this node has to be 1, this means we don't
+      // need any atomics
       Kokkos::parallel_for(
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
             const PetscInt i = t.league_rank();
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
-            // Check if this node has been assigned during this top loop
-            if (cf_markers_d(i) == loops_through)
-            {
-               const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-
-               // For over nonlocal columns
-               Kokkos::parallel_for(
-                  Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-
-                     // Needs to be atomic as may being set by many threads
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1.0);     
-               });     
-            }
+            // Reduce to see if any of our neighbours were assigned in this loop
+            bool neighbours_assigned_this_loop = false;           
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j, bool& thread_result) {
+               if (cf_markers_d(device_local_j[device_local_i[i] + j]) == loops_through) thread_result = true;
+               },
+               Kokkos::LOr<bool>(neighbours_assigned_this_loop)
+            );        
+            
+            // Only want one thread in the team to write the result
+            Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
+               // If we have any strong neighbours assigned this top loop
+               if (neighbours_assigned_this_loop > 0) cf_markers_d(i) = 1;     
+            });
       });   
 
       if (mpi) 
