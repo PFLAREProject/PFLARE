@@ -368,12 +368,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Row
                const PetscInt i = t.league_rank();
 
-               // Check if this node has been assigned during this top loop
+               // Check if this local node has been assigned during this top loop
                if (cf_markers_d(i) == loops_through)
                {
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
-                  // For over nonlocal columns
+                  // And then set all the nonlocal neighbour nodes as 1
                   Kokkos::parallel_for(
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
@@ -397,7 +397,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Rather than finding each node that has been assigned during this top loop and then 
       // setting its neighbours to 1 (with an atomic), instead we are going over each node and checking if any of its 
       // neighbours were assigned during this loop. If they were then we know this node has to be 1, this means we don't
-      // need any atomics
+      // need any atomics      
+      // We can't do this easily for the nonlocal nodes above as we would need to work with the transpose of 
+      // mat_nonlocal
       Kokkos::parallel_for(
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
