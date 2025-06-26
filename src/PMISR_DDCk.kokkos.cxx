@@ -341,20 +341,23 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
                   // Only want one thread in the team to write the result
                   Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
-                     // If we have any strong neighbours
-                     if (strong_neighbours > 0) mark_d(i) = false;     
+                     // If we don't have any strong neighbours
+                     if (strong_neighbours == 0) cf_markers_d(i) = loops_through;
                   });
                }
          });
       }
+      // This cf_markers_d(i) = loops_through happens above in the case of mpi, saves a kernel launch
+      else
+      {
+         // The nodes that have mark equal to true have no strong active neighbours in the IS
+         // hence they can be in the IS
+         Kokkos::parallel_for(
+            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
-      // The nodes that have mark equal to true have no strong active neighbours in the IS
-      // hence they can be in the IS
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-
-            if (mark_d(i)) cf_markers_d(i) = loops_through;
-      });      
+               if (mark_d(i)) cf_markers_d(i) = loops_through;
+         });      
+      }
 
       if (mpi) 
       {
