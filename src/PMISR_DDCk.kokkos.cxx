@@ -263,7 +263,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             // Check this row isn't already marked
             if (cf_markers_d(i) == 0)
             {
-               const PetscInt i = t.league_rank();
                const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
                // Reduce over local columns to get the number of strong neighbours
@@ -324,7 +323,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Check this row isn't already marked
                if (mark_d(i))
                {
-                  const PetscInt i = t.league_rank();
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                   // Reduce over nonlocal columns to get the number of strong neighbours
@@ -373,7 +371,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Check if this node has been assigned during this top loop
                if (cf_markers_d(i) == loops_through)
                {
-                  const PetscInt i = t.league_rank();
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                   // For over nonlocal columns
@@ -407,7 +404,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             // Check if this node has been assigned during this top loop
             if (cf_markers_d(i) == loops_through)
             {
-               const PetscInt i = t.league_rank();
                const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
                // For over nonlocal columns
