@@ -322,7 +322,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                PetscInt strong_neighbours = 0;
 
                // Check this row isn't already marked
-               if (cf_markers_d(i) == 0)
+               if (mark_d(i))
                {
                   const PetscInt i = t.league_rank();
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
