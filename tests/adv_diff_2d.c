@@ -31,7 +31,7 @@ static char help[] = "Solves 2D steady advection-diffusion on a structured grid.
 
 #include "pflare.h"
 
-extern PetscErrorCode ComputeMat(DM,Mat,PetscScalar,PetscScalar, PetscScalar, PetscBool);
+extern PetscErrorCode ComputeMat(DM,Mat,PetscScalar,PetscScalar,PetscScalar,PetscScalar, PetscScalar, PetscBool);
 
 int main(int argc,char **argv)
 {
@@ -40,7 +40,7 @@ int main(int argc,char **argv)
   DM             da;
   PetscErrorCode ierr;
   PetscInt its, M, N;
-  PetscScalar theta, alpha, u, v, u_test, v_test;
+  PetscScalar theta, alpha, u, v, u_test, v_test, L_x, L_y, L_x_test, L_y_test;
   PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale;
   Vec x, b, diag_vec;
   Mat A, A_temp;
@@ -59,6 +59,22 @@ int main(int argc,char **argv)
   PetscLogStageRegister("Setup", &setup);
   PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy);
 
+  // Dimensions of box, L_y x L_x - default to [0, 1]^2
+  L_x = 1.0;
+  L_y = 1.0;
+  PetscOptionsGetReal(NULL, NULL, "-L_x", &L_x_test, &option_found_u);
+  PetscOptionsGetReal(NULL, NULL, "-L_y", &L_y_test, &option_found_v);
+
+  if (option_found_u) PetscCheck(L_x_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_x must be positive");
+  if (option_found_v) PetscCheck(L_y_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_y must be positive");
+
+  if (option_found_u) {
+   L_x = L_x_test;
+  }
+  if (option_found_v) {
+   L_y = L_y_test;
+  }    
+
   ierr = KSPCreate(PETSC_COMM_WORLD,&ksp);CHKERRQ(ierr);
   ierr = DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE,DMDA_STENCIL_STAR,11,11,PETSC_DECIDE,PETSC_DECIDE,1,1,NULL,NULL,&da);CHKERRQ(ierr);
   ierr = DMSetFromOptions(da);CHKERRQ(ierr);
@@ -67,6 +83,7 @@ int main(int argc,char **argv)
   // We do this instead of calling MatFilter as there is no Kokkos implementation so its very slow
   ierr = DMSetMatrixPreallocateOnly(da,PETSC_TRUE);CHKERRQ(ierr);
   ierr = DMSetUp(da);CHKERRQ(ierr);
+  ierr = DMDASetUniformCoordinates(da, 0.0, L_x, 0.0, L_y, 0.0, 0.0);CHKERRQ(ierr);
   ierr = KSPSetDM(ksp,(DM)da);CHKERRQ(ierr);
   // We generate the matrix ourselves
   ierr = KSPSetDMActive(ksp, PETSC_FALSE);CHKERRQ(ierr);
@@ -146,7 +163,7 @@ int main(int argc,char **argv)
   // ~~~~~~~~~~~~~~
 
   // Compute our matrix
-  ComputeMat(da, A, u, v, alpha, adv_nondim);
+  ComputeMat(da, A, u, v, L_x, L_y, alpha, adv_nondim);
   // This will compress out the extra memory
   MatDuplicate(A, MAT_COPY_VALUES, &A_temp);
   MatDestroy(&A);
@@ -215,7 +232,7 @@ int main(int argc,char **argv)
   return 0;
 }
 
-PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar alpha, PetscBool adv_nondim)
+PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar L_x, PetscScalar L_y, PetscScalar alpha, PetscBool adv_nondim)
 {
   PetscErrorCode ierr;
   PetscInt       i, j, M, N, xm, ym, xs, ys;
@@ -223,16 +240,16 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
   MatStencil     row, col[5];
 
   ierr  = DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0);CHKERRQ(ierr);
-  Hx    = 1.0 / (PetscReal)(M);
-  Hy    = 1.0 / (PetscReal)(N);
+  Hx    = L_x / (PetscReal)(M);
+  Hy    = L_y / (PetscReal)(N);
   HxdHy = Hx/Hy;
   HydHx = Hy/Hx;
   adv_x_scale = Hx;
   adv_y_scale = Hy;
-  // Don't need to scale the advection terms if dimensionless
+  // If dimensionless
   if (adv_nondim) {
    adv_x_scale = 1;
-   adv_y_scale = 1;   
+   adv_y_scale = HydHx;   
   }
 
   ierr  = DMDAGetCorners(da,&xs,&ys,0,&xm,&ym,0);CHKERRQ(ierr);
