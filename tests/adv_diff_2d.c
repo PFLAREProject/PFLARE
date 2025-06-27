@@ -229,10 +229,10 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
   HydHx = Hy/Hx;
   adv_x_scale = Hx;
   adv_y_scale = Hy;
-  // Don't need to scale the advection terms if dimensionless
+  // If dimensionless
   if (adv_nondim) {
    adv_x_scale = 1;
-   adv_y_scale = 1;   
+   adv_y_scale = HydHx;   
   }
 
   ierr  = DMDAGetCorners(da,&xs,&ys,0,&xm,&ym,0);CHKERRQ(ierr);
