@@ -621,6 +621,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
+   intKokkosView cf_markers_nonlocal_d;
 
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
@@ -635,37 +636,23 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
-   Vec x, lvec = NULL;
-   PetscScalarKokkosView x_d, lvec_d;
-   PetscScalar *x_d_ptr = NULL;
-   PetscScalar *lvec_d_ptr = NULL;
+   int *cf_markers_d_ptr = cf_markers_d.data();
+   int *cf_markers_nonlocal_d_ptr = NULL;
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
    PetscMemType mtype;
 
    // The off-diagonal component requires some comms which we can start now
    if (mpi)
    {
-      // Basically a copy of ISGetSeqIS_SameColDist_Private
-      /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
-      lvec = mat_mpi->lvec;
-      MatCreateVecs(*input_mat, &x, NULL);
+      cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
+      cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();   
 
-      // Use the vecs in the scatter provided by the input mat
-      // We're going to overwrite everything in x and lvec
-      VecGetKokkosViewWrite(x, &x_d);
-      VecGetKokkosViewWrite(lvec, &lvec_d);
-
-      // Copy in cf markers to x
-      Kokkos::deep_copy(x_d, cf_markers_d);   
-
-      x_d_ptr = x_d.data();      
-      lvec_d_ptr = lvec_d.data();       
-
-      // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
+      // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
       // one of the kokkos backends like PETSC_MEMTYPE_HIP
-      PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
-                  mem_type, x_d_ptr,
-                  mem_type, lvec_d_ptr,
+      // Be careful these aren't petscints
+      PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
+                  mem_type, cf_markers_d_ptr,
+                  mem_type, cf_markers_nonlocal_d_ptr,
                   MPI_REPLACE);
    }   
 
@@ -704,7 +691,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
                [&](const PetscInt j, PetscScalar& thread_sum) {
 
                   // Get this local column in the input_mat
-                  PetscInt target_col = device_local_j[device_local_i[i] + j];
+                  const PetscInt target_col = device_local_j[device_local_i[i] + j];
                   // Is this column fine? F_POINT == -1
                   if (cf_markers_d(target_col) == -1)
                   {               
@@ -744,11 +731,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
    if (mpi)
    {           
-      // Finish the x scatter
-      PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, x_d_ptr, lvec_d_ptr, MPI_REPLACE);      
-      // We're done with x now
-      VecRestoreKokkosViewWrite(x, &x_d);
-      VecDestroy(&x);
+      // Finish the scatter of the cf splitting
+      // Be careful these aren't petscints
+      PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);
 
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device
@@ -776,9 +761,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
                   [&](const PetscInt j, PetscScalar& thread_sum) {
 
                      // This is the non-local column we have to check is present
-                     PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                     const PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
                      // Is this column in the input IS? F_POINT == -1
-                     if (lvec_d_ptr[target_col] < 0.0)
+                     if (cf_markers_nonlocal_d(target_col) == -1)
                      {               
                         // Get the abs value of the entry
                         thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
@@ -794,8 +779,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
                });
          });  
       }       
-
-      VecRestoreKokkosViewWrite(lvec, &lvec_d);
    }
 
    // ~~~~~~~~~~~~~
