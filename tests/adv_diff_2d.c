@@ -31,7 +31,7 @@ static char help[] = "Solves 2D steady advection-diffusion on a structured grid.
 
 #include "pflare.h"
 
-extern PetscErrorCode ComputeMat(DM,Mat,PetscScalar,PetscScalar, PetscScalar, PetscBool);
+extern PetscErrorCode ComputeMat(DM,Mat,PetscScalar,PetscScalar,PetscScalar,PetscScalar, PetscScalar, PetscBool);
 
 int main(int argc,char **argv)
 {
@@ -40,7 +40,7 @@ int main(int argc,char **argv)
   DM             da;
   PetscErrorCode ierr;
   PetscInt its, M, N;
-  PetscScalar theta, alpha, u, v, u_test, v_test;
+  PetscScalar theta, alpha, u, v, u_test, v_test, L_x, L_y, L_x_test, L_y_test;
   PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale;
   Vec x, b, diag_vec;
   Mat A, A_temp;
@@ -111,6 +111,22 @@ int main(int argc,char **argv)
    v = v_test;
   }
 
+  // Dimensions of box, L_y x L_x - default to [0, 1]^2
+  L_x = 1.0;
+  L_y = 1.0;
+  PetscOptionsGetReal(NULL, NULL, "-L_x", &L_x_test, &option_found_u);
+  PetscOptionsGetReal(NULL, NULL, "-L_y", &L_y_test, &option_found_v);
+
+  if (option_found_u) PetscCheck(L_x_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_x must be positive");
+  if (option_found_v) PetscCheck(L_y_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_y must be positive");
+
+  if (option_found_u) {
+   L_x = L_x_test;
+  }
+  if (option_found_v) {
+   L_y = L_y_test;
+  }  
+
   // Diffusion coefficient
   // Default alpha is 0 - pure advection
   alpha = 0.0;
@@ -146,7 +162,7 @@ int main(int argc,char **argv)
   // ~~~~~~~~~~~~~~
 
   // Compute our matrix
-  ComputeMat(da, A, u, v, alpha, adv_nondim);
+  ComputeMat(da, A, u, v, L_x, L_y, alpha, adv_nondim);
   // This will compress out the extra memory
   MatDuplicate(A, MAT_COPY_VALUES, &A_temp);
   MatDestroy(&A);
@@ -215,7 +231,7 @@ int main(int argc,char **argv)
   return 0;
 }
 
-PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar alpha, PetscBool adv_nondim)
+PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar L_x, PetscScalar L_y, PetscScalar alpha, PetscBool adv_nondim)
 {
   PetscErrorCode ierr;
   PetscInt       i, j, M, N, xm, ym, xs, ys;
