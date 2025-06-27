@@ -239,8 +239,8 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
   MatStencil     row, col[5];
 
   ierr  = DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0);CHKERRQ(ierr);
-  Hx    = 1.0 / (PetscReal)(M);
-  Hy    = 1.0 / (PetscReal)(N);
+  Hx    = L_x / (PetscReal)(M);
+  Hy    = L_y / (PetscReal)(N);
   HxdHy = Hx/Hy;
   HydHx = Hy/Hx;
   adv_x_scale = Hx;
