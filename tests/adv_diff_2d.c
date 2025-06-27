@@ -59,6 +59,22 @@ int main(int argc,char **argv)
   PetscLogStageRegister("Setup", &setup);
   PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy);
 
+  // Dimensions of box, L_y x L_x - default to [0, 1]^2
+  L_x = 1.0;
+  L_y = 1.0;
+  PetscOptionsGetReal(NULL, NULL, "-L_x", &L_x_test, &option_found_u);
+  PetscOptionsGetReal(NULL, NULL, "-L_y", &L_y_test, &option_found_v);
+
+  if (option_found_u) PetscCheck(L_x_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_x must be positive");
+  if (option_found_v) PetscCheck(L_y_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_y must be positive");
+
+  if (option_found_u) {
+   L_x = L_x_test;
+  }
+  if (option_found_v) {
+   L_y = L_y_test;
+  }    
+
   ierr = KSPCreate(PETSC_COMM_WORLD,&ksp);CHKERRQ(ierr);
   ierr = DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE,DMDA_STENCIL_STAR,11,11,PETSC_DECIDE,PETSC_DECIDE,1,1,NULL,NULL,&da);CHKERRQ(ierr);
   ierr = DMSetFromOptions(da);CHKERRQ(ierr);
@@ -67,6 +83,7 @@ int main(int argc,char **argv)
   // We do this instead of calling MatFilter as there is no Kokkos implementation so its very slow
   ierr = DMSetMatrixPreallocateOnly(da,PETSC_TRUE);CHKERRQ(ierr);
   ierr = DMSetUp(da);CHKERRQ(ierr);
+  ierr = DMDASetUniformCoordinates(da, 0.0, L_x, 0.0, L_y, 0.0, 0.0);CHKERRQ(ierr);
   ierr = KSPSetDM(ksp,(DM)da);CHKERRQ(ierr);
   // We generate the matrix ourselves
   ierr = KSPSetDMActive(ksp, PETSC_FALSE);CHKERRQ(ierr);
@@ -110,22 +127,6 @@ int main(int argc,char **argv)
    u = u_test;
    v = v_test;
   }
-
-  // Dimensions of box, L_y x L_x - default to [0, 1]^2
-  L_x = 1.0;
-  L_y = 1.0;
-  PetscOptionsGetReal(NULL, NULL, "-L_x", &L_x_test, &option_found_u);
-  PetscOptionsGetReal(NULL, NULL, "-L_y", &L_y_test, &option_found_v);
-
-  if (option_found_u) PetscCheck(L_x_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_x must be positive");
-  if (option_found_v) PetscCheck(L_y_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_y must be positive");
-
-  if (option_found_u) {
-   L_x = L_x_test;
-  }
-  if (option_found_v) {
-   L_y = L_y_test;
-  }  
 
   // Diffusion coefficient
   // Default alpha is 0 - pure advection
