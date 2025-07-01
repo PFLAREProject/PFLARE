@@ -545,7 +545,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      // Needs to be atomic as may being set by many threads
                      // Tried a version where instead of a "push" approach I tried a pull approach
                      // that doesn't need an atomic, but it was slower
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
+                     // Only do the atomic store if the value isn't already one
+                     if (cf_markers_d(device_local_j[device_local_i[i] + j]) != 1) 
+                     {
+                        Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
+                     }
                });
                
                // Do the strong influences
@@ -555,7 +559,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
                      // Needs to be atomic as may being set by many threads
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]), 1);     
+                     if (cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]) != 1)
+                     {
+                        Kokkos::atomic_store(&cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]), 1);     
+                     }
                });                 
             }
       });  
@@ -641,7 +648,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 1);     
+                        if (cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) != 1)
+                        {
+                           Kokkos::atomic_store(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 1);     
+                        }
                   });     
                }
          });
