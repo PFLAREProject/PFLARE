@@ -191,7 +191,7 @@ module cf_splitting
       end if   
       
       ! Reset the entries in the strength matrix back to 1
-      if (symmetrize .OR. square) call MatSetAllValues(output_mat, 1d0)
+      call MatSetAllValues(output_mat, 1d0)
 
    end subroutine generate_sabs     
 
@@ -242,14 +242,20 @@ module cf_splitting
 
          ! Square the strength of connection graph - S'S + S
          ! Note we are symmetrizing the strength matrix here
-         call generate_sabs(input_mat, strong_threshold, .TRUE., .TRUE., strength_mat)
+         call generate_sabs(input_mat, strong_threshold, .FALSE., .TRUE., strength_mat)
 
       else if (cf_splitting_type == CF_PMIS) then
 
-         ! Note we are symmetrizing the strength matrix here
-         call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
+         ! Don't symmetrize as pmis does that implicitly
+         call generate_sabs(input_mat, strong_threshold, .FALSE., .FALSE., strength_mat)
 
-      ! PMISR DDC and Aggregation
+      ! PMISR DDC
+      else if (cf_splitting_type == CF_PMISR_DDC) then
+
+         ! Don't symmetrize as pmisr does that implicitly
+         call generate_sabs(input_mat, strong_threshold, .FALSE., .FALSE., strength_mat)          
+
+      ! Aggregation
       else 
          ! Only symmetrize if not already symmetric
          call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat)         

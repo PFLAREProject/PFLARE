@@ -96,11 +96,11 @@ module pmisr_ddc
             
             if (any(cf_markers_local /= cf_markers_local_two)) then
 
-               ! do kfree = 1, local_rows
-               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
-               !       print *, kfree, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
-               !    end if
-               ! end do
+               do kfree = 1, local_rows
+                  if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
+                     print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
+                  end if
+               end do
                print *, "Kokkos and CPU versions of pmisr do not match"
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
             end if
@@ -130,6 +130,7 @@ module pmisr_ddc
       ! PMISR should give an Aff with no off-diagonal strong connections 
       ! If you set positive max_luby_steps, it will avoid all parallel reductions
       ! by taking a fixed number of times in the Luby top loop
+      ! The strength_mat input here is no longer S + S^T, we do that internally
 
       ! ~~~~~~
 
@@ -156,7 +157,7 @@ module pmisr_ddc
       logical, dimension(:), allocatable :: mark
       type(c_ptr) :: cf_markers_nonlocal_ptr
       real(c_double), pointer :: cf_markers_nonlocal(:) => null()
-      type(tMat) :: Ad, Ao
+      type(tMat) :: Ad, Ao, transpose_mat, temp_mat
       type(tVec) :: cf_markers_vec
       PetscInt, dimension(:), pointer :: colmap
       integer(c_long_long) :: A_array, vec_long
@@ -170,24 +171,33 @@ module pmisr_ddc
 
       if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
 
+      ! Compute S + S^T - should just do this implicitly like the kokkos version does
+      call MatTranspose(strength_mat, MAT_INITIAL_MATRIX, transpose_mat, ierr)
+      call MatDuplicate(strength_mat, MAT_COPY_VALUES, temp_mat, ierr)
+      ! Kokkos + MPI doesn't have a gpu mataxpy yet, so we have a wrapper around our own version
+      call MatAXPYWrapper(temp_mat, 1d0, transpose_mat)
+      ! Don't forget to destroy the explicit transpose
+      call MatDestroy(transpose_mat, ierr)  
+      call MatSetAllValues(temp_mat, 1d0)    
+
       ! Get the comm size 
-      call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
+      call PetscObjectGetComm(temp_mat, MPI_COMM_MATRIX, ierr)    
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
       call MPI_Comm_size(MPI_COMM_WORLD, comm_size_world, errorcode)      
       ! Get the comm rank 
       call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
 
       ! Get the local sizes
-      call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
-      call MatGetSize(strength_mat, global_rows, global_cols, ierr)      
-      call MatGetOwnershipRange(strength_mat, global_row_start, global_row_end_plus_one, ierr)   
+      call MatGetLocalSize(temp_mat, local_rows, local_cols, ierr)
+      call MatGetSize(temp_mat, global_rows, global_cols, ierr)      
+      call MatGetOwnershipRange(temp_mat, global_row_start, global_row_end_plus_one, ierr)   
 
       if (comm_size /= 1) then
-         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
+         call MatMPIAIJGetSeqAIJ(temp_mat, Ad, Ao, colmap, ierr) 
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
       else
-         Ad = strength_mat    
+         Ad = temp_mat    
       end if
 
       ! ~~~~~~~~
@@ -280,7 +290,7 @@ module pmisr_ddc
          ! Let's scatter the measure now
          cf_markers_local_real = measure_local
 
-         A_array = strength_mat%v
+         A_array = temp_mat%v
          vec_long = cf_markers_vec%v
          ! Have to call restore after we're done with lvec (ie cf_markers_nonlocal_ptr)
          call vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal_ptr)
@@ -341,7 +351,7 @@ module pmisr_ddc
          ! This is just an allreduce sum, but we can't use MPIU_INTEGER, as if we call the pmisr
          ! cf splitting from C it is not defined - also have to pass the matrix so we can get the comm
          ! given they're different in C and fortran
-         A_array = strength_mat%v
+         A_array = temp_mat%v
          call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
          counter_undecided = counter_parallel
 
@@ -592,7 +602,7 @@ module pmisr_ddc
             ! Count how many are undecided
             counter_undecided = count(cf_markers_local_real == 0)
             ! Parallel reduction!
-            A_array = strength_mat%v
+            A_array = temp_mat%v
             call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
             counter_undecided = counter_parallel            
          end if
@@ -639,6 +649,8 @@ module pmisr_ddc
       if (pmis) then
          cf_markers_local = cf_markers_local * (-1)
       end if
+
+      call MatDestroy(temp_mat, ierr)
 
       ! ~~~~~~~~~
       ! Cleanup
