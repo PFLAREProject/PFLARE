@@ -564,6 +564,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // to be not in the set
       if (mpi) 
       {
+         // Now for the influences, we need to broadcast the cf_markers so that 
+         // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
+         // Be careful these aren't petscints
+         PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
+                     mem_type, cf_markers_d_ptr,
+                     mem_type, cf_markers_nonlocal_d_ptr,
+                     MPI_REPLACE); 
+                     
+         // We can overlap this with setting the non-local dependencies
+
          // We use the veto arrays here to do this comms
          Kokkos::deep_copy(veto_nonlocal_d, false);
          Kokkos::deep_copy(veto_local_d, false);
@@ -597,24 +607,20 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             mem_type, veto_nonlocal_d_ptr,
             mem_type, veto_local_d_ptr,
             MPI_LOR);
+         // Not sure if there is anywhere to overlap these comms
          PetscSFReduceEnd(mat_mpi->Mvctx, MPI_C_BOOL, veto_nonlocal_d_ptr, veto_local_d_ptr, MPI_LOR);
+         
+         // Finish this before we write to cf_markers_d
+         PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);
 
+         // Let's finish the non-local dependencies
          // If this node has been veto'd, then set it to not in the set
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
                if (veto_local_d(i)) {
                   cf_markers_d(i) = 1.0;
                }
-         });         
-
-         // Now for the influences, we need to broadcast the cf_markers so that 
-         // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
-         // Be careful these aren't petscints
-         PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-                     mem_type, cf_markers_d_ptr,
-                     mem_type, cf_markers_nonlocal_d_ptr,
-                     MPI_REPLACE);        
-         PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);       
+         });           
 
          // And now we have the information we need to set any of the non-local influences
          Kokkos::parallel_for(
