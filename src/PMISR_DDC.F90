@@ -97,9 +97,9 @@ module pmisr_ddc
             if (any(cf_markers_local /= cf_markers_local_two)) then
 
                do kfree = 1, local_rows
-                  if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
-                     print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
-                  end if
+                  ! if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
+                  !    print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
+                  ! end if
                end do
                print *, "Kokkos and CPU versions of pmisr do not match"
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
