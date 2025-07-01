@@ -60,6 +60,19 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL, mat_local_transpose = NULL, mat_nonlocal_transpose = NULL;   
 
+   // ~~~~~~~~~~~~~~~~~~~~~
+   // PMISR needs to work with S+S^T to keep out large entries from Aff
+   // but we never want to form S+S^T explicitly as it is expensive
+   // So instead we do several comms steps in our Luby loop to get/send the data we need
+   // We do compute local copies of the transpose of S (which happen on the device)
+   // but we never have the full parallel S+S^T 
+   // On this rank we have the number of:
+   // local strong dependencies (from the local S) 
+   // local strong influences (from the local S^T)
+   // non-local strong dependencies (from the non-local part of S)
+   // But we don't have the number of non-local strong influences (from the non-local part of S^T)   
+   // ~~~~~~~~~~~~~~~~~~~~~
+
    if (mpi)
    {
       mat_mpi = (Mat_MPIAIJ *)(*strength_mat)->data;
@@ -71,10 +84,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    else
    {
       mat_local = *strength_mat;
-   }
-
-   // Compute the local transpose
-   MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_transpose);     
+   }   
 
    // Get the comm
    PetscObjectGetComm((PetscObject)*strength_mat, &MPI_COMM_MATRIX);
@@ -93,7 +103,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);   
    const PetscInt *device_local_i_transpose = nullptr, *device_local_j_transpose = nullptr, *device_nonlocal_i_transpose = nullptr, *device_nonlocal_j_transpose = nullptr;
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_transpose, &device_nonlocal_i_transpose, &device_nonlocal_j_transpose, NULL, &mtype);   
-   MatSeqAIJGetCSRAndMemType(mat_local_transpose, &device_local_i_transpose, &device_local_j_transpose, NULL, &mtype);
 
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
    cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
@@ -140,16 +149,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
    // ~~~~~~~~~~~~
    // Compute the measure for S + S^T
-   // On this rank we have the number of:
-   // local strong dependencies (from the local S) 
-   // local strong influences (from the local S^T)
-   // non-local strong dependencies (from the non-local part of S)
-   // But we don't have the number of non-local strong influences (from the non-local part of S^T)
    // ~~~~~~~~~~~~
    if (mpi)
    {
-      // We start by filling in the non-local strong influences, we need to comm 
-      // these to other ranks
+      // We start by filling in the non-local strong influences
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
 
@@ -157,15 +160,26 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          measure_nonlocal_d(i) = device_nonlocal_i_transpose[i + 1] - device_nonlocal_i_transpose[i];
       });
 
-      // Have to make sure we don't modify measure_nonlocal_d while the comms is in progress
       // We need a sum here as there are many ranks that might contribute
       PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_nonlocal_d_ptr,
                                  mem_type, measure_local_d_ptr,
                                  MPI_SUM);    
-                                 
+
+
+      // Compute the local transpose while we wait
+      MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_transpose);  
+
+      // Finish the comms                            
       PetscSFReduceEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_nonlocal_d_ptr, measure_local_d_ptr, MPI_SUM);                                      
    }
+   else
+   {
+      MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_transpose); 
+   }
+
+   // Get pointers to the local transpose
+   MatSeqAIJGetCSRAndMemType(mat_local_transpose, &device_local_i_transpose, &device_local_j_transpose, NULL, &mtype);
 
    // Scope this as we don't need the device copy of the randoms for very long
    {
@@ -207,7 +221,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       });
    }
 
-   // Now our local measure_local_d has the measure for S + S^T + rand
+   // Now our local measure_local_d is correct 
    // We need to comm it to other ranks
    if (mpi)
    {
@@ -301,6 +315,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Start the async scatter of the nonlocal cf_markers
       // ~~~~~~~~~
       if (mpi) {
+
          // We can't overwrite any of the values in cf_markers_d while the forward scatter is still going
          // Be careful these aren't petscints
          PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
@@ -567,7 +582,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      mem_type, cf_markers_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE);        
-                     
+
          PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);       
 
          // And now the influences
