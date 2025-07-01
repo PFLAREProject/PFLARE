@@ -440,7 +440,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
                      // Have to only check active strong influences
                      if (measure_nonlocal_d(i) >= measure_local_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) && \
-                              cf_markers_local_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) == 0)
+                              cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) == 0)
                      {
                         strong_count++;
                      }
