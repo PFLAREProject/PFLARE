@@ -115,23 +115,23 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscScalarKokkosView measure_nonlocal_d;
 
    // ~~~~~~~~~~~~~~~
-   // Mark stores whether a node has been veto'd as a candidate
-   // mark(i) == 0 means the node can be in the set
-   // mark(i) == 1 means the node cannot be in the set
+   // veto stores whether a node has been veto'd as a candidate
+   // .NOT. veto(i) means the node can be in the set
+   // veto(i) means the node cannot be in the set
    // ~~~~~~~~~~~~~~~
-   // Device memory for the mark
-   intKokkosView mark_local_d("mark_local_d", local_rows);       
-   intKokkosView mark_nonlocal_d;   
-   int *mark_local_d_ptr = nullptr, *mark_nonlocal_d_ptr = nullptr;
-   mark_local_d_ptr = mark_local_d.data();
+   // Device memory for the veto
+   boolKokkosView veto_local_d("veto_local_d", local_rows);       
+   boolKokkosView veto_nonlocal_d;   
+   bool *veto_local_d_ptr = nullptr, *veto_nonlocal_d_ptr = nullptr;
+   veto_local_d_ptr = veto_local_d.data();
 
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
       measure_nonlocal_d_ptr = measure_nonlocal_d.data();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();
-      mark_nonlocal_d = intKokkosView("mark_nonlocal_d", cols_ao); 
-      mark_nonlocal_d_ptr = mark_nonlocal_d.data();
+      veto_nonlocal_d = boolKokkosView("veto_nonlocal_d", cols_ao); 
+      veto_nonlocal_d_ptr = veto_nonlocal_d.data();
    }
 
    // The PETSC_MEMTYPE_KOKKOS is either as PETSC_MEMTYPE_HOST or 
@@ -309,8 +309,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      MPI_REPLACE);
       }
 
-      // mark_local_d keeps track of which of the candidate nodes can become in the set
-
       // ~~~~~~~~
       // Go and do the local component
       // ~~~~~~~~      
@@ -368,11 +366,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   // If we have any strong neighbours
                   if (strong_dependencies > 0 || strong_influences > 0) 
                   {
-                     mark_local_d(i) = 1;     
+                     veto_local_d(i) = true;     
                   }
                   else
                   {
-                     mark_local_d(i) = 0;  
+                     veto_local_d(i) = false;  
                   }
                });
             }
@@ -381,7 +379,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             {
                // Only want one thread in the team to write the result
                Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
-                  mark_local_d(i) = 1;
+                  veto_local_d(i) = true;
                });
             }
       });
@@ -391,8 +389,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // ~~~~~~~~           
       if (mpi) {
 
-         // Initialise to 1 
-         Kokkos::deep_copy(mark_nonlocal_d, 1);                    
+         // Initialise to true
+         Kokkos::deep_copy(veto_nonlocal_d, true);                    
 
          // Let's go and mark any non-local entries that don't have strong influences and comm to them other ranks
          Kokkos::parallel_for(
@@ -426,18 +424,17 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Only want one thread in the team to write the result
                Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
                   // If we don't have any strong neighbours, this node may be a candidate to be in the set
-                  if (strong_neighbours == 0) mark_nonlocal_d(i) = 0;
+                  if (strong_neighbours == 0) veto_nonlocal_d(i) = false;
                });
          });
 
-         // Now we reduce the marks with a sum
-         PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-            mem_type, mark_nonlocal_d_ptr,
-            mem_type, mark_local_d_ptr,
-            MPIU_SUM);  
-         PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, mark_nonlocal_d_ptr, mark_local_d_ptr, MPIU_SUM);
-
-         // Now any mark(i) which is zero can be in the set
+         // Now we reduce the vetos with a lor, so if any of the vetos are true we know
+         // Any .NOT. veto(i) can now be in the set
+         PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_C_BOOL,
+            mem_type, veto_nonlocal_d_ptr,
+            mem_type, veto_local_d_ptr,
+            MPI_LOR);
+         PetscSFReduceEnd(mat_mpi->Mvctx, MPI_C_BOOL, veto_nonlocal_d_ptr, veto_local_d_ptr, MPI_LOR);
 
          // Finish the async scatter
          // Be careful these aren't petscints
@@ -452,7 +449,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                PetscInt strong_neighbours = 0;
 
                // Check this row isn't already marked
-               if (mark_local_d(i) == 0)
+               if (!veto_local_d(i))
                {
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
@@ -473,7 +470,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   // Only want one thread in the team to write the result
                   Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
                      // If we don't have any non-local strong dependencies and no non-local strong influences
-                     if (strong_neighbours == 0 && mark_local_d(i) == 0) cf_markers_d(i) = loops_through;
+                     if (strong_neighbours == 0 && !veto_local_d(i)) cf_markers_d(i) = loops_through;
                   });
                }
          });
@@ -481,12 +478,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // This cf_markers_d(i) = loops_through happens above in the case of mpi, saves a kernel launch
       else
       {
-         // The nodes that have mark(i) = 0 have no strong active neighbours in the IS
+         // The nodes that have .NOT. veto(i) have no strong active neighbours in the IS
          // hence they can be in the IS
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
-               if (mark_local_d(i) == 0) cf_markers_d(i) = loops_through;
+               if (!veto_local_d(i)) cf_markers_d(i) = loops_through;
          });      
       }
 
@@ -570,6 +567,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      mem_type, cf_markers_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE);        
+                     
          PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);       
 
          // And now the influences
@@ -594,14 +592,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   });     
                }
          });
-
-         // // Scatter all the cf_markers_d again now we have marked any non-local strong influences
-         // // Be careful these aren't petscints
-         // PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-         //             mem_type, cf_markers_d_ptr,
-         //             mem_type, cf_markers_nonlocal_d_ptr,
-         //             MPI_REPLACE);        
-         // PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);
       }
 
       // We've done another top level loop
