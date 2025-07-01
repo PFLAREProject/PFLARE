@@ -150,9 +150,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~~~~
    // Compute the measure for S + S^T
    // ~~~~~~~~~~~~
+
+   // We start by filling in the non-local strong influences
    if (mpi)
    {
-      // We start by filling in the non-local strong influences
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
 
@@ -232,7 +233,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                                  MPI_REPLACE);      
    }
 
+   // ~~~~~~~~~~~~
    // Initialise the set
+   // ~~~~~~~~~~~~
    PetscInt counter_in_set_start = 0;
    // Count how many in the set to begin with and set their CF markers
    Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
@@ -325,8 +328,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       }
 
       // ~~~~~~~~
-      // Go and do the local component
+      // Now we use veto to keep track of which candidates can be in the set
+      // Locally we know which ones cannot be in the set due to local strong dependencies (mat_local),
+      // strong influences (mat_local_tranpose), and non-local dependencies (mat_nonlocal)
+      // but not the non-local influences as they are stored on many other ranks (ie in S^T)
       // ~~~~~~~~      
+
+      // Let's start by veto'ing any candidates that have strong local dependencies or influences
       Kokkos::parallel_for(
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -400,12 +408,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       });
 
       // ~~~~~~~~
-      // Now go through and do the non-local part of the matrix
+      // Now let's go through and veto candidates which have strong influences on this rank
       // ~~~~~~~~           
       if (mpi) {
 
          // Initialise to true
-         Kokkos::deep_copy(veto_nonlocal_d, true);                    
+         Kokkos::deep_copy(veto_nonlocal_d, true);     
+         
+         // Finish the async scatter
+         // Be careful these aren't petscints
+         PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);         
 
          // Let's go and mark any non-local entries that don't have strong influences and comm to them other ranks
          Kokkos::parallel_for(
@@ -414,47 +426,50 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
                // Row
                const PetscInt i = t.league_rank();
-               PetscInt strong_neighbours = 0;
+               PetscInt strong_influences = 0;
 
                // Check this row is unassigned
                if (cf_markers_nonlocal_d(i) == 0) 
                {
                   PetscInt ncols_nonlocal = device_nonlocal_i_transpose[i + 1] - device_nonlocal_i_transpose[i];
 
-                  // Reduce over nonlocal columns in the transpose to get the number of strong unassigned neighbours
+                  // Reduce over nonlocal columns in the transpose to get the number of strong unassigned influences
                   Kokkos::parallel_reduce(
                      Kokkos::TeamThreadRange(t, ncols_nonlocal),
                      [&](const PetscInt j, PetscInt& strong_count) {     
 
+                     // Have to only check active strong influences
                      if (measure_nonlocal_d(i) >= measure_local_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) && \
                               cf_markers_local_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) == 0)
                      {
                         strong_count++;
                      }
                   
-                  }, strong_neighbours
+                  }, strong_influences
                   );    
                } 
 
                // Only want one thread in the team to write the result
                Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
-                  // If we don't have any strong neighbours, this node may be a candidate to be in the set
-                  if (strong_neighbours == 0) veto_nonlocal_d(i) = false;
+                  // If this non-local node doesn't have strong influences on this rank
+                  // it may be a candidate to be in the set
+                  if (strong_influences == 0) veto_nonlocal_d(i) = false;
                });
          });
 
-         // Now we reduce the vetos with a lor, so if any of the vetos are true we know
-         // Any .NOT. veto(i) can now be in the set
+         // Now we reduce the vetos with a lor
          PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_C_BOOL,
             mem_type, veto_nonlocal_d_ptr,
             mem_type, veto_local_d_ptr,
             MPI_LOR);
+         // Not sure we have any chance to overlap this with anything else
          PetscSFReduceEnd(mat_mpi->Mvctx, MPI_C_BOOL, veto_nonlocal_d_ptr, veto_local_d_ptr, MPI_LOR);
 
-         // Finish the async scatter
-         // Be careful these aren't petscints
-         PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);
-
+         // Now the comms have finished, we know exactly which local nodes on this rank have no 
+         // local strong dependencies, influences, non-local influences but not yet non-local dependencies
+         // Let's do the non-local dependencies and then now that the comms are done on veto_local_d
+         // the combination of both of those gives us all our vetos, so we can assign anything without
+         // a veto into the set 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -484,7 +499,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
                   // Only want one thread in the team to write the result
                   Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
-                     // If we don't have any non-local strong dependencies and no non-local strong influences
+                     // If we don't have any non-local strong dependencies and the rest of our vetos are false
+                     // we know we are in the set
                      if (strong_neighbours == 0 && !veto_local_d(i)) cf_markers_d(i) = loops_through;
                   });
                }
@@ -502,9 +518,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          });      
       }
 
-      // At this point all the local cf_markers that have been marked in this loop are correct
-      // We need to set all the strong neighbours as not marked, so we need to do comms to 
-      // get at the non-local strong influences 
+      // ~~~~~~~~~~~~~
+      // At this point all the local cf_markers that have been included in the set in this loop are correct
+      // We need to set all the strong neighbours of these as not in the set
+      // We can do all the local strong dependencies and influences without comms, but we need to do 
+      // comms to set the non-local strong dependencies and influences
+      // ~~~~~~~~~~~~~
 
       // Go and do local strong dependencies and influences
       Kokkos::parallel_for(
@@ -541,12 +560,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             }
       });  
 
-
+      // Now we need to set any non-local dependencies or influences of local nodes added to the set in this loop
+      // to be not in the set
       if (mpi) 
       {
-
          Kokkos::deep_copy(cf_markers_nonlocal_d, 0); // Reset the non-local markers
 
+         // Set non-local strong dependencies 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -570,22 +590,24 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          });
 
          // Now we reduce the cf_markers_nonlocal_d with a sum
+         // This will add 1 to cf markers from every non-local strong dependency
+         // After this our local cf_markers are correct except for any non-local strong influences that 
+         // have to be set from another rank
          PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
             mem_type, cf_markers_nonlocal_d_ptr,
             mem_type, cf_markers_d_ptr,
             MPIU_SUM);
          PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM);
 
-         // Scatter all the cf_markers_d
+         // So this time we broadcast the local cf_markers 
          // Be careful these aren't petscints
          PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE);        
-
          PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE);       
 
-         // And now the influences
+         // And now we have the information we need to set any of the non-local influences
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), cols_ao, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
