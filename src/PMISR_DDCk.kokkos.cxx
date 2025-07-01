@@ -564,7 +564,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // to be not in the set
       if (mpi) 
       {
-         Kokkos::deep_copy(cf_markers_nonlocal_d, 0); // Reset the non-local markers
+         // We use the veto arrays here to do this comms
+         Kokkos::deep_copy(veto_nonlocal_d, false);
+         Kokkos::deep_copy(veto_local_d, false);
 
          // Set non-local strong dependencies 
          Kokkos::parallel_for(
@@ -584,22 +586,29 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), 1.0);
+                        Kokkos::atomic_store(&veto_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), true);
                   });
                }
          });
 
-         // Now we reduce the cf_markers_nonlocal_d with a sum
-         // This will add 1 to cf markers from every non-local strong dependency
-         // After this our local cf_markers are correct except for any non-local strong influences that 
-         // have to be set from another rank
-         PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-            mem_type, cf_markers_nonlocal_d_ptr,
-            mem_type, cf_markers_d_ptr,
-            MPIU_SUM);
-         PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM);
+         // Now we reduce the veto_nonlocal_d with a lor
+         // Any local node with veto set to true is not in the set
+         PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_C_BOOL,
+            mem_type, veto_nonlocal_d_ptr,
+            mem_type, veto_local_d_ptr,
+            MPI_LOR);
+         PetscSFReduceEnd(mat_mpi->Mvctx, MPI_C_BOOL, veto_nonlocal_d_ptr, veto_local_d_ptr, MPI_LOR);
 
-         // So this time we broadcast the local cf_markers 
+         // If this node has been veto'd, then set it to not in the set
+         Kokkos::parallel_for(
+            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+               if (veto_local_d(i)) {
+                  cf_markers_d(i) = 1.0;
+               }
+         });         
+
+         // Now for the influences, we need to broadcast the cf_markers so that 
+         // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
          // Be careful these aren't petscints
          PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_d_ptr,
