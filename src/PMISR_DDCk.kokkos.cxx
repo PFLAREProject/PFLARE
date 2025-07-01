@@ -58,7 +58,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
    Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local = NULL, mat_nonlocal = NULL, mat_local_transpose = NULL, mat_nonlocal_transpose = NULL;   
+   Mat mat_local = NULL, mat_nonlocal = NULL, mat_local_spst = NULL, mat_nonlocal_transpose = NULL;   
 
    // ~~~~~~~~~~~~~~~~~~~~~
    // PMISR needs to work with S+S^T to keep out large entries from Aff
@@ -71,6 +71,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // local strong influences (from the local S^T)
    // non-local strong dependencies (from the non-local part of S)
    // But we don't have the number of non-local strong influences (from the non-local part of S^T)   
+   // Now we have to be careful as the local part of S and S^T may have entries in the same
+   // row/column position, so we have to be sure not to count them twice (the same can't happen 
+   // for the non-local components)
    // ~~~~~~~~~~~~~~~~~~~~~
 
    if (mpi)
@@ -96,12 +99,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+   const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);   
-   const PetscInt *device_local_i_transpose = nullptr, *device_local_j_transpose = nullptr, *device_nonlocal_i_transpose = nullptr, *device_nonlocal_j_transpose = nullptr;
+   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype);   
+   const PetscInt *device_local_i_spst = nullptr, *device_local_j_spst = nullptr, *device_nonlocal_i_transpose = nullptr, *device_nonlocal_j_transpose = nullptr;
    if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_transpose, &device_nonlocal_i_transpose, &device_nonlocal_j_transpose, NULL, &mtype);   
 
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
@@ -152,6 +153,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~~~~
 
    // We start by filling in the non-local strong influences
+   PetscScalar one = 1.0;
    if (mpi)
    {
       Kokkos::parallel_for(
@@ -168,19 +170,23 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                                  MPI_SUM);    
 
 
-      // Compute the local transpose while we wait
-      MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_transpose);  
+      // These both happen on the device for serial kokkos matrices
+      MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_spst);  
+      // We explicitly compute the local part of S+S^T so we don't have to 
+      // match the row/column indices - could do this as a symbolic as we don't need the values
+      MatAXPY(mat_local_spst, one, mat_local, DIFFERENT_NONZERO_PATTERN);
 
       // Finish the comms                            
       PetscSFReduceEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_nonlocal_d_ptr, measure_local_d_ptr, MPI_SUM);                                      
    }
    else
    {
-      MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_transpose); 
+      MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_spst); 
+      MatAXPY(mat_local_spst, one, mat_local, DIFFERENT_NONZERO_PATTERN);
    }
 
-   // Get pointers to the local transpose
-   MatSeqAIJGetCSRAndMemType(mat_local_transpose, &device_local_i_transpose, &device_local_j_transpose, NULL, &mtype);
+   // Get pointers to the local S+S^T
+   MatSeqAIJGetCSRAndMemType(mat_local_spst, &device_local_i_spst, &device_local_j_spst, NULL, &mtype);
 
    // Scope this as we don't need the device copy of the randoms for very long
    {
@@ -206,11 +212,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Add in the random number
          measure_local_d(i) += measure_rand_d(i);
 
-         // This is all the local strong dependencies
-         measure_local_d(i) += device_local_i[i + 1] - device_local_i[i];
-
-         // This is all the local strong influences
-         measure_local_d(i) += device_local_i_transpose[i + 1] - device_local_i_transpose[i];
+         // This is all the local strong dependencies and influences
+         measure_local_d(i) += device_local_i_spst[i + 1] - device_local_i_spst[i];
 
          // This is the non-local strong dependencies
          if (mpi)
@@ -341,53 +344,32 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
             // Row
             const PetscInt i = t.league_rank();
-            PetscInt strong_influences = 0, strong_dependencies = 0;
+            PetscInt strong_neighbours = 0;
 
             // Check this row is unassigned
             if (cf_markers_d(i) == 0)
             {
-               PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+               PetscInt ncols_local = device_local_i_spst[i + 1] - device_local_i_spst[i];
 
-               // Reduce over local columns to get the number of strong unassigned dependencies
+               // Reduce over local columns to get the number of strong unassigned influences
                Kokkos::parallel_reduce(
                   Kokkos::TeamThreadRange(t, ncols_local),
                   [&](const PetscInt j, PetscInt& strong_count) {     
 
-                  // Have to only check active strong dependencies
-                  if (measure_local_d(i) >= measure_local_d(device_local_j[device_local_i[i] + j]) && \
-                           cf_markers_d(device_local_j[device_local_i[i] + j]) == 0)
+                  // Have to only check active strong influences
+                  if (measure_local_d(i) >= measure_local_d(device_local_j_spst[device_local_i_spst[i] + j]) && \
+                           cf_markers_d(device_local_j_spst[device_local_i_spst[i] + j]) == 0)
                   {
                      strong_count++;
                   }
-               
-               }, strong_dependencies
-               );     
 
-               // Only bother doing the influences if needed
-               if (strong_dependencies == 0) 
-               {
-                  ncols_local = device_local_i_transpose[i + 1] - device_local_i_transpose[i];
-
-                  // Reduce over local columns to get the number of strong unassigned influences
-                  Kokkos::parallel_reduce(
-                     Kokkos::TeamThreadRange(t, ncols_local),
-                     [&](const PetscInt j, PetscInt& strong_count) {     
-
-                     // Have to only check active strong influences
-                     if (measure_local_d(i) >= measure_local_d(device_local_j_transpose[device_local_i_transpose[i] + j]) && \
-                              cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]) == 0)
-                     {
-                        strong_count++;
-                     }
-
-                  }, strong_influences
-                  );      
-               }           
+               }, strong_neighbours
+               );             
 
                // Only want one thread in the team to write the result
                Kokkos::single(Kokkos::PerTeam(t), [&]() {                  
                   // If we have any strong neighbours
-                  if (strong_dependencies > 0 || strong_influences > 0) 
+                  if (strong_neighbours > 0) 
                   {
                      veto_local_d(i) = true;     
                   }
@@ -536,32 +518,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             // Check if this node has been assigned during this top loop
             if (cf_markers_d(i) == loops_through)
             {
-               // Do the strong dependencies
-               PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+               // Do the strong dependencies and influences
+               PetscInt ncols_local = device_local_i_spst[i + 1] - device_local_i_spst[i];
 
                Kokkos::parallel_for(
                   Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
                      // Needs to be atomic as may being set by many threads
-                     // Tried a version where instead of a "push" approach I tried a pull approach
-                     // that doesn't need an atomic, but it was slower
-                     // Only do the atomic store if the value isn't already one
-                     if (cf_markers_d(device_local_j[device_local_i[i] + j]) != 1) 
+                     if (cf_markers_d(device_local_j_spst[device_local_i_spst[i] + j]) != 1)
                      {
-                        Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
-                     }
-               });
-               
-               // Do the strong influences
-               ncols_local = device_local_i_transpose[i + 1] - device_local_i_transpose[i];
-
-               Kokkos::parallel_for(
-                  Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-
-                     // Needs to be atomic as may being set by many threads
-                     if (cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]) != 1)
-                     {
-                        Kokkos::atomic_store(&cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]), 1);     
+                        Kokkos::atomic_store(&cf_markers_d(device_local_j_spst[device_local_i_spst[i] + j]), 1);     
                      }
                });                 
             }
