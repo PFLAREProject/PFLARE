@@ -545,7 +545,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      // Needs to be atomic as may being set by many threads
                      // Tried a version where instead of a "push" approach I tried a pull approach
                      // that doesn't need an atomic, but it was slower
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1.0);     
+                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
                });
                
                // Do the strong influences
@@ -555,7 +555,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
                      // Needs to be atomic as may being set by many threads
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]), 1.0);     
+                     Kokkos::atomic_store(&cf_markers_d(device_local_j_transpose[device_local_i_transpose[i] + j]), 1);     
                });                 
             }
       });  
@@ -596,7 +596,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&veto_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), true);
+                        // If false set it with true, if not do nothing
+                        Kokkos::atomic_compare_exchange(&veto_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), false, true);
                   });
                }
          });
@@ -618,7 +619,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
                if (veto_local_d(i)) {
-                  cf_markers_d(i) = 1.0;
+                  cf_markers_d(i) = 1;
                }
          });           
 
@@ -640,7 +641,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 1.0);     
+                        Kokkos::atomic_store(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 1);     
                   });     
                }
          });
