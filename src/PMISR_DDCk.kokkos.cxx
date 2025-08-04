@@ -829,7 +829,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
    // Or pick alpha_diag based on the worst % of rows
    else {
       // Only need to go through the biggest % of indices
-      search_size = std::max(1, static_cast<PetscInt>(double(local_rows_aff) * fraction_swap));
+      PetscInt one = 1;
+      search_size = std::max(one, static_cast<PetscInt>(double(local_rows_aff) * fraction_swap));
    }
    
    bool trigger_dd_ratio_compute = *max_dd_ratio > 0;

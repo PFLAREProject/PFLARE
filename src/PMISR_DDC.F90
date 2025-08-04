@@ -715,8 +715,7 @@ module pmisr_ddc
             max_dd_ratio_cpu = max_dd_ratio     
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, cf_markers_local_two)  
 
-            if (any(cf_markers_local /= cf_markers_local_two) &
-                  .OR. max_dd_ratio_cpu /= max_dd_ratio_kokkos) then
+            if (any(cf_markers_local /= cf_markers_local_two)) then
 
                ! do kfree = 1, size(cf_markers_local)
                !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
@@ -759,10 +758,10 @@ module pmisr_ddc
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
 
       ! Local
-      PetscInt :: local_rows, local_cols
+      PetscInt :: local_rows, local_cols, one=1
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
       PetscInt :: input_row_start, input_row_end_plus_one
-      PetscInt :: jfree, idx, search_size, diag_index, fine_size
+      PetscInt :: jfree, idx, search_size, diag_index, fine_size, frac_size
       integer :: bin_sum, bin_boundary, bin, errorcode
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
@@ -790,7 +789,8 @@ module pmisr_ddc
       ! Or pick alpha_diag based on the worst % of rows
       else
          ! Only need to go through the biggest % of indices
-         search_size = max(1, int(dble(fine_size) * fraction_swap))
+         frac_size = int(dble(fine_size) * fraction_swap)
+         search_size = max(one, frac_size)
       end if
       
       ! ~~~~~~~~~~~~~
