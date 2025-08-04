@@ -350,8 +350,9 @@ module cf_splitting
 
       PetscErrorCode :: ierr
       integer, dimension(:), allocatable, target :: cf_markers_local
-      integer :: its
+      integer :: its, ddc_its_max
       logical :: need_intermediate_is
+      PetscReal :: max_dd_ratio, max_dd_ratio_achieved
 #if defined(PETSC_HAVE_KOKKOS)                     
       MatType :: mat_type
       integer(c_long_long) :: A_array, is_fine_array, is_coarse_array
@@ -394,14 +395,24 @@ module cf_splitting
       ! as this gives diagonal Aff)
       if (strong_threshold /= 0d0 .AND. cf_splitting_type == CF_PMISR_DDC) then
 
-         do its = 1, ddc_its
+         max_dd_ratio = 0.0
+
+         ! Do a set number of ddc iterations, unless we are aiming for a set diagonal 
+         ! dominance ratio, in which case we do as many iterations as necessary
+         ddc_its_max = ddc_its
+         if (max_dd_ratio > 0) ddc_its_max = huge(ddc_its_max)
+
+         ddc_its_loop: do its = 1, ddc_its_max
+
             ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
             ! (or the equivalent device cf_markers, is_fine is ignored if on the device)
-            call ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
+            max_dd_ratio_achieved = max_dd_ratio
+            call ddc(input_mat, is_fine, fraction_swap, max_dd_ratio_achieved, cf_markers_local)
 
             ! If we did anything in our ddc second pass and hence need to rebuild
             ! the is_fine and is_coarse
-            if (fraction_swap /= 0d0 .AND. need_intermediate_is) then
+            if ((fraction_swap /= 0d0 .OR. max_dd_ratio_achieved /= max_dd_ratio) &
+                  .AND. need_intermediate_is) then
             
                ! These are now outdated
                call ISDestroy(is_fine, ierr)
@@ -410,7 +421,10 @@ module cf_splitting
                ! Create the new CF ISs
                call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse) 
             end if
-         end do
+
+            ! Terminate if we've reached the ratio
+            if (max_dd_ratio > 0 .AND. max_dd_ratio_achieved < max_dd_ratio) exit ddc_its_loop
+         end do ddc_its_loop
       end if
 
       ! The Kokkos PMISR and DDC no longer copy back to the host to save copies

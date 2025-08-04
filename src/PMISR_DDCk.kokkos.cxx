@@ -805,7 +805,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 // ddc cleanup but on the device - uses the global variable cf_markers_local_d
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, PetscReal *max_dd_ratio)
 {
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -817,6 +817,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
    // ie the diag domminance ratio of Aff
    MatDiagDomRatio_kokkos(input_mat, is_fine_local_d, diag_dom_ratio_d);
    PetscInt local_rows_aff = is_fine_local_d.extent(0);
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
 
    // Do a fixed alpha_diag
    PetscInt search_size;
@@ -827,13 +829,41 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap)
    // Or pick alpha_diag based on the worst % of rows
    else {
       // Only need to go through the biggest % of indices
-      search_size = static_cast<PetscInt>(double(local_rows_aff) * fraction_swap);
+      search_size = std::max(1, static_cast<PetscInt>(double(local_rows_aff) * fraction_swap));
+   }
+   
+   bool trigger_dd_ratio_compute = *max_dd_ratio > 0;
+   PetscReal max_dd_ratio_achieved = 0.0;
+   // Compute the maximum diagonal dominance ratio
+   if (trigger_dd_ratio_compute) 
+   {
+      PetscReal max_dd_ratio_local = 0.0;
+      // Do a reduction to get the local max
+      Kokkos::parallel_reduce("max_dd_ratio", local_rows_aff,
+         KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
+            PetscReal dd_ratio = diag_dom_ratio_d(i);
+            thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;
+         },
+         Kokkos::Max<PetscReal>(max_dd_ratio_local)
+      );
+      // Comms to get the global max
+      (void)MPI_Allreduce(&max_dd_ratio_local, &max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX);
+
+      //printf("computed diag dom ratio %f \n", max_dd_ratio_achieved);
+      // If we have hit the required diagonal dominance ratio, then return without swapping any F points
+      if (max_dd_ratio_achieved < *max_dd_ratio)
+      {
+         *max_dd_ratio = max_dd_ratio_achieved;
+         return;
+      }
    }   
 
    // Can't put this above because of collective operations in parallel (namely the MatDiagDomRatio_kokkos)
    // If we have local points to swap
    if (search_size > 0)
    {
+      // If we reach here then we want to swap some local F points to C points
+
       // Create device memory for bins
       auto dom_bins_d = PetscIntKokkosView("dom_bins_d", 1000);
       Kokkos::deep_copy(dom_bins_d, 0);

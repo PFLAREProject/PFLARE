@@ -653,7 +653,7 @@ module pmisr_ddc
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine ddc(input_mat, is_fine, fraction_swap, cf_markers_local)
+   subroutine ddc(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
 
       ! Second pass diagonal dominance cleanup 
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -667,6 +667,7 @@ module pmisr_ddc
       type(tMat), target, intent(in)      :: input_mat
       type(tIS), intent(in)               :: is_fine
       PetscReal, intent(in)               :: fraction_swap
+      PetscReal, intent(inout)            :: max_dd_ratio
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
 #if defined(PETSC_HAVE_KOKKOS)                     
@@ -701,7 +702,7 @@ module pmisr_ddc
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, fraction_swap)
+         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then  
@@ -709,7 +710,7 @@ module pmisr_ddc
             ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
             ! use the existing device data
             call copy_cf_markers_d2h(cf_markers_local_ptr)            
-            call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local_two)  
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local_two)  
 
             if (any(cf_markers_local /= cf_markers_local_two)) then
 
@@ -725,17 +726,17 @@ module pmisr_ddc
          end if
 
       else
-         call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)     
+         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)     
       end if
 #else
-      call ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)
+      call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
 #endif        
-      
+
    end subroutine ddc
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine ddc_cpu(input_mat, is_fine, fraction_swap, cf_markers_local)
+   subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
 
       ! Second pass diagonal dominance cleanup 
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -749,6 +750,7 @@ module pmisr_ddc
       type(tMat), target, intent(in)      :: input_mat
       type(tIS), intent(in)               :: is_fine
       PetscReal, intent(in)               :: fraction_swap
+      PetscReal, intent(inout)            :: max_dd_ratio
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
 
       ! Local
@@ -756,16 +758,18 @@ module pmisr_ddc
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
       PetscInt :: input_row_start, input_row_end_plus_one
       PetscInt :: jfree, idx, search_size, diag_index, fine_size
-      integer :: bin_sum, bin_boundary, bin
+      integer :: bin_sum, bin_boundary, bin, errorcode
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
       PetscReal, dimension(:), pointer :: vals => null()
-      PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_small
+      PetscReal, dimension(:), allocatable :: diag_dom_ratio
       PetscInt, dimension(:), pointer :: is_pointer
       type(tMat) :: Aff
-      PetscReal :: diag_val
+      PetscReal :: diag_val, max_dd_ratio_local, max_dd_ratio_achieved
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
+      MPI_Comm :: MPI_COMM_MATRIX      
+      logical :: trigger_dd_ratio_compute
 
       ! ~~~~~~  
 
@@ -781,62 +785,89 @@ module pmisr_ddc
       ! Or pick alpha_diag based on the worst % of rows
       else
          ! Only need to go through the biggest % of indices
-         search_size = int(dble(fine_size) * fraction_swap)
+         search_size = max(1, int(dble(fine_size) * fraction_swap))
       end if
       
       ! ~~~~~~~~~~~~~
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)      
+      trigger_dd_ratio_compute = max_dd_ratio > 0
  
       ! Pull out Aff for ease of use
       call MatCreateSubMatrix(input_mat, &
             is_fine, is_fine, MAT_INITIAL_MATRIX, &
-            Aff, ierr)      
+            Aff, ierr)     
+            
+      ! Get the local sizes
+      call MatGetLocalSize(Aff, local_rows, local_cols, ierr)
+      call MatGetOwnershipRange(Aff, a_global_row_start, a_global_row_end_plus_one, ierr)
+      call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
+
+      ! ~~~~~~~~~~~~~
+      ! Compute diagonal dominance ratio
+      ! ~~~~~~~~~~~~~
+      allocate(diag_dom_ratio(local_rows))   
+      diag_dom_ratio = 0
+      dom_bins = 0
+      
+      ! Sum the rows and find the diagonal entry in each local row
+      do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
+         call MatGetRow(Aff, ifree, ncols, cols, vals, ierr)
+
+         ! Index of the diagonal
+         diag_index = -1
+         diag_val = 1.0d0
+
+         do jfree = 1, ncols
+            ! Store the diagonal
+            if (cols(jfree) == ifree) then
+               diag_val = abs(vals(jfree))
+               diag_index = jfree
+            else
+               ! Row sum of off-diagonals
+               diag_dom_ratio(ifree - a_global_row_start + 1) = diag_dom_ratio(ifree - a_global_row_start + 1) + abs(vals(jfree))
+            end if
+         end do
+
+         ! If we don't have a diagonal entry in this row there is no point trying to 
+         ! compute a diagonal dominance ratio
+         ! We set diag_dom_ratio to zero and that means this row will stay as an F point
+         if (diag_index == -1) then
+            diag_dom_ratio(ifree - a_global_row_start + 1) = 0.0
+            call MatRestoreRow(Aff, ifree, ncols, cols, vals, ierr)    
+            cycle
+         end if 
+
+         ! If we have non-diagonal entries
+         if (diag_dom_ratio(ifree - a_global_row_start + 1) /= 0d0) then
+            ! Compute the diagonal dominance ratio
+            diag_dom_ratio(ifree - a_global_row_start + 1) = diag_dom_ratio(ifree - a_global_row_start + 1) / diag_val
+         end if
+
+         call MatRestoreRow(Aff, ifree, ncols, cols, vals, ierr) 
+      end do
+
+      ! Get the maximum diagonal dominance ratio
+      if (trigger_dd_ratio_compute) then
+         max_dd_ratio_local = maxval(diag_dom_ratio)
+         call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX, errorcode)
+         ! print *, "computed diag dom ratio", max_dd_ratio_achieved
+         ! If we have hit the required diagonal dominance ratio, then return without swapping any F points
+         if (max_dd_ratio_achieved < max_dd_ratio) then
+            max_dd_ratio = max_dd_ratio_achieved
+            return
+         end if
+      end if  
+      
+      ! ~~~~~~~~~~~~~
 
       ! Can't put this above because of collective operations in parallel (namely the getsubmatrix)
       ! If we have local points to swap
-      if (search_size > 0) then            
+      if (search_size > 0) then     
 
-         ! Get the local sizes
-         call MatGetLocalSize(Aff, local_rows, local_cols, ierr)
-         call MatGetOwnershipRange(Aff, a_global_row_start, a_global_row_end_plus_one, ierr)
-         call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
-   
-         allocate(diag_dom_ratio(local_rows))   
-         diag_dom_ratio = 0
-         dom_bins = 0
-         
-         ! Sum the rows and find the diagonal entry in each local row
-         do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-            call MatGetRow(Aff, ifree, ncols, cols, vals, ierr)
+         ! If we reach here then we want to swap some local F points to C points
 
-            ! Index of the diagonal
-            diag_index = -1
-            diag_val = 1.0d0
-
-            do jfree = 1, ncols
-               ! Store the diagonal
-               if (cols(jfree) == ifree) then
-                  diag_val = abs(vals(jfree))
-                  diag_index = jfree
-               else
-                  ! Row sum of off-diagonals
-                  diag_dom_ratio(ifree - a_global_row_start + 1) = diag_dom_ratio(ifree - a_global_row_start + 1) + abs(vals(jfree))
-               end if
-            end do
-
-            ! If we don't have a diagonal entry in this row there is no point trying to 
-            ! compute a diagonal dominance ratio
-            ! We set diag_dom_ratio to zero and that means this row will stay as an F point
-            if (diag_index == -1) then
-               diag_dom_ratio(ifree - a_global_row_start + 1) = 0.0
-               call MatRestoreRow(Aff, ifree, ncols, cols, vals, ierr)    
-               cycle
-            end if 
-
-            ! If we have non-diagonal entries
-            if (diag_dom_ratio(ifree - a_global_row_start + 1) /= 0d0) then
-               ! Compute the diagonal dominance ratio
-               diag_dom_ratio(ifree - a_global_row_start + 1) = diag_dom_ratio(ifree - a_global_row_start + 1) / diag_val
-            end if
+         do ifree = a_global_row_start, a_global_row_end_plus_one-1           
 
             ! Bin the entries between 0 and 1
             ! The top bin has entries greater than 0.9 (including greater than 1)
@@ -848,8 +879,7 @@ module pmisr_ddc
             end if
             dom_bins(bin) = dom_bins(bin) + 1
 
-            call MatRestoreRow(Aff, ifree, ncols, cols, vals, ierr)                                 
-         end do   
+         end do      
       
          ! Do a fixed alpha_diag
          if (fraction_swap< 0) then    
@@ -888,10 +918,9 @@ module pmisr_ddc
             ! Swap by multiplying by -1
             cf_markers_local(idx) = cf_markers_local(idx) * (-1)
          end do
-         deallocate(diag_dom_ratio)
-         if (allocated(diag_dom_ratio_small)) deallocate(diag_dom_ratio_small)
       end if
 
+      deallocate(diag_dom_ratio)
       call ISRestoreIndices(is_fine, is_pointer, ierr)
       call MatDestroy(Aff, ierr)     
 
