@@ -41,7 +41,7 @@ typedef enum {
 PETSC_EXTERN void PCRegister_PFLARE();
 
 /* Can call the CF splitting separate to everything */
-PETSC_EXTERN void compute_cf_splitting_c(Mat *, int, double, int, int, int, double, IS*, IS*);
+PETSC_EXTERN void compute_cf_splitting_c(Mat *, int, double, int, int, int, double, double, IS*, IS*);
 
 /* Define PCPFLAREINV get routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetOrder(PC, PetscInt *);

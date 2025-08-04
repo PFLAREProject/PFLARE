@@ -438,8 +438,11 @@ in Fortran:
      PetscReal :: strong_threshold = 0.5
      ! Second pass cleanup - one iteration
      int :: ddc_its = 1
-     ! Fraction of F points to convert to C
+     ! Fraction of F points to convert to C per ddc it
      PetscReal :: ddc_fraction = 0.1
+     ! If not 0, keep doing ddc its until this diagonal dominance
+     ! ratio is hit
+     PetscReal :: max_dd_ratio = 0.0
      ! As many steps as needed
      int :: max_luby_steps = -1
      ! PMISR DDC
@@ -453,6 +456,7 @@ in Fortran:
            algorithm, &
            ddc_its, &
            ddc_fraction, &
+           max_dd_ratio, &
            is_fine, is_coarse) 
 
 or in C (please note the slightly modified name in C):
@@ -462,8 +466,11 @@ or in C (please note the slightly modified name in C):
      PetscReal strong_threshold = 0.5;
      // Second pass cleanup - one iteration
      int ddc_its = 1;
-     // Fraction of F points to convert to C
+     // Fraction of F points to convert to C per ddc it
      PetscReal ddc_fraction = 0.1;
+     // If not 0, keep doing ddc its until this diagonal dominance
+     // ratio is hit
+     PetscReal max_dd_ratio = 0.0;
      // As many steps as needed
      int max_luby_steps = -1;
      // PMISR DDC
@@ -477,6 +484,7 @@ or in C (please note the slightly modified name in C):
          algorithm, \
          ddc_its, \
          ddc_fraction, \
+         max_dd_ratio, \
          &is_fine, &is_coarse);
 
 or in Python with petsc4py:
@@ -485,8 +493,11 @@ or in Python with petsc4py:
      strong_threshold = 0.5
      # Second pass cleanup - one iteration
      ddc_its = 1
-     # Fraction of F points to convert to C
+     # Fraction of F points to convert to C per ddc it
      ddc_fraction = 0.1
+     # If not 0, keep doing ddc its until this diagonal dominance
+     # ratio is hit
+     max_dd_ratio = 0.0     
      # As many steps as needed
      max_luby_steps = -1
      # PMISR DDC
@@ -499,7 +510,8 @@ or in Python with petsc4py:
            strong_threshold, max_luby_steps, \
            algorithm, \
            ddc_its, \
-           ddc_fraction)
+           ddc_fraction, \
+           max_dd_ratio)
 
 ## Options         
 

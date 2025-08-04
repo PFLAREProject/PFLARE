@@ -335,7 +335,7 @@ module cf_splitting
 
    subroutine compute_cf_splitting(input_mat, symmetric, &
                      strong_threshold, max_luby_steps, &
-                     cf_splitting_type, ddc_its, fraction_swap, &
+                     cf_splitting_type, ddc_its, fraction_swap, max_dd_ratio, &
                      is_fine, is_coarse)
 
       ! Computes a CF splitting and returns the F and C point ISs
@@ -343,7 +343,7 @@ module cf_splitting
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
       logical, intent(in)                 :: symmetric
-      PetscReal, intent(in)               :: strong_threshold
+      PetscReal, intent(in)               :: strong_threshold, max_dd_ratio
       integer, intent(in)                 :: max_luby_steps, cf_splitting_type, ddc_its
       PetscReal, intent(in)               :: fraction_swap
       type(tIS), intent(inout)            :: is_fine, is_coarse
@@ -352,7 +352,7 @@ module cf_splitting
       integer, dimension(:), allocatable, target :: cf_markers_local
       integer :: its, ddc_its_max
       logical :: need_intermediate_is
-      PetscReal :: max_dd_ratio, max_dd_ratio_achieved
+      PetscReal :: max_dd_ratio_achieved
 #if defined(PETSC_HAVE_KOKKOS)                     
       MatType :: mat_type
       integer(c_long_long) :: A_array, is_fine_array, is_coarse_array
@@ -394,8 +394,6 @@ module cf_splitting
       ! and if we haven't requested an exact independent set, ie strong threshold is not zero
       ! as this gives diagonal Aff)
       if (strong_threshold /= 0d0 .AND. cf_splitting_type == CF_PMISR_DDC) then
-
-         max_dd_ratio = 0.0
 
          ! Do a set number of ddc iterations, unless we are aiming for a set diagonal 
          ! dominance ratio, in which case we do as many iterations as necessary
