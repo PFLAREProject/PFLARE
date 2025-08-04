@@ -485,8 +485,8 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    // Approx_Inverse_Setup.F90
    inv_data->mat_inverse = NULL;   
    // What type of inverse to apply
-   // Default to gmres polynomial with the power basis
-   inv_data->inverse_type = PFLAREINV_POWER;
+   // Default to gmres polynomial with the Arnoldi basis
+   inv_data->inverse_type = PFLAREINV_ARNOLDI;
    // The polynomial order
    inv_data->poly_order = 6;
    // The power of the sparsity we use (if assembled)

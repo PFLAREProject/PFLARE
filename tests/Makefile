@@ -64,6 +64,8 @@ run_tests_load_serial:
 	./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_z_type lair -pc_air_strong_r_threshold 0.01 -ksp_max_it 5
 # 
 	@echo ""
+	@echo "Test single level GMRES polynomial preconditioning for hyperbolic streaming problem in C with default options"
+	./ex6 -f data/mat_stream_2364 -pc_type pflareinv -ksp_max_it 21		
 	@echo "Test single level GMRES polynomial preconditioning for hyperbolic streaming problem in C"
 	./ex6 -f data/mat_stream_2364 -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 21	
 # 
@@ -227,9 +229,9 @@ run_tests_no_load_serial:
 # 
 	@echo ""
 	@echo "Test single level GMRES polynomials with PC reused with no sparsity change"
-	./ex6f -m 10 -n 10 -pc_type pflareinv -ksp_max_it 8
+	./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 8
 	@echo "Test single level GMRES polynomials with PC regenerated with no sparsity change"
-	./ex6f -m 10 -n 10 -pc_type pflareinv -regen -ksp_max_it 8
+	./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -regen -ksp_max_it 8
 # 
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace"
