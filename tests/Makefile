@@ -256,6 +256,12 @@ run_tests_no_load_serial:
 	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 2 -pc_air_ddc_fraction 0.02 -ksp_max_it 7	 
 # 
 	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio"
+	./adv_diff_2d -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+    -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7		 
+# 
+	@echo ""
 	@echo "Test high order GMRES polynomials in small linear system"
 	./adv_diff_2d -da_grid_x 5 -da_grid_y 5 -pc_type pflareinv -pc_pflareinv_type newton \
 	 -pc_pflareinv_matrix_free -pc_pflareinv_order 16 -ksp_max_it 1
@@ -354,6 +360,12 @@ run_tests_no_load_parallel:
 	$(MPIEXEC) -n 2 ./adv_diff_2d -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air \
 	 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 -pc_air_inverse_type jacobi \
 	 -mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it 10 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 1
+# 
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+	 -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7		 
 # 
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change in parallel"

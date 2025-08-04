@@ -242,6 +242,23 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetMaxDDRatio_c(pc_ptr, ratio) bind(C, name='PCAIRGetMaxDDRatio_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscReal, intent(out)        :: ratio
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetMaxDDRatio(pc, ratio, ierr)
+
+   end subroutine PCAIRGetMaxDDRatio_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetDDCFraction_c(pc_ptr, frac) bind(C, name='PCAIRGetDDCFraction_c')
 
       ! ~~~~~~~~
@@ -1038,6 +1055,23 @@ module pcair_c_fortran_bindings
       call PCAIRSetDDCIts(pc, its, ierr)
 
    end subroutine PCAIRSetDDCIts_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetMaxDDRatio_c(pc_ptr, ratio) bind(C, name='PCAIRSetMaxDDRatio_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscReal, value, intent(in)         :: ratio
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetMaxDDRatio(pc, ratio, ierr)
+
+   end subroutine PCAIRSetMaxDDRatio_c   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

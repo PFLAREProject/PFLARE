@@ -678,6 +678,7 @@ module pmisr_ddc
       integer :: errorcode
       !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
+      PetscReal :: max_dd_ratio_cpu, max_dd_ratio_kokkos
 #endif 
       ! ~~~~~~  
 
@@ -702,17 +703,20 @@ module pmisr_ddc
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio)
+         max_dd_ratio_kokkos = max_dd_ratio
+         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio_kokkos)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then  
 
             ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
             ! use the existing device data
-            call copy_cf_markers_d2h(cf_markers_local_ptr)            
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local_two)  
+            call copy_cf_markers_d2h(cf_markers_local_ptr)       
+            max_dd_ratio_cpu = max_dd_ratio     
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, cf_markers_local_two)  
 
-            if (any(cf_markers_local /= cf_markers_local_two)) then
+            if (any(cf_markers_local /= cf_markers_local_two) &
+                  .OR. max_dd_ratio_cpu /= max_dd_ratio_kokkos) then
 
                ! do kfree = 1, size(cf_markers_local)
                !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
@@ -724,6 +728,7 @@ module pmisr_ddc
             end if
             deallocate(cf_markers_local_two)
          end if
+         max_dd_ratio = max_dd_ratio_kokkos
 
       else
          call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)     

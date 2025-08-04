@@ -275,6 +275,7 @@ module air_data_type_routines
       air_data%options%strong_threshold = 0.5
       air_data%options%ddc_its = 1
       air_data%options%ddc_fraction = 0.1
+      air_data%options%max_dd_ratio = 0.0
       air_data%options%cf_splitting_type = 0
       air_data%options%max_luby_steps = -1
 

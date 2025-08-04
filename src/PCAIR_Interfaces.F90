@@ -582,6 +582,25 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetMaxDDRatio(pc, ratio, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: ratio
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ratio = options%max_dd_ratio
+      ierr = 0
+
+   end subroutine PCAIRGetMaxDDRatio
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetDDCFraction(pc, frac, ierr) 
 
       ! ~~~~~~~~
@@ -1383,6 +1402,25 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetDDCIts
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetMaxDDRatio(pc, ratio, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: ratio
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%max_dd_ratio = ratio
+      ierr = 0
+
+   end subroutine PCAIRSetMaxDDRatio   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
