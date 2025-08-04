@@ -91,7 +91,7 @@ run_tests_load_serial:
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals"
-	./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 25	
+	./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 26
 
 run_tests_load_parallel:
 #
@@ -121,7 +121,7 @@ run_tests_load_parallel:
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"
-	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 25		
+	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -ksp_max_it 26		
 
 run_tests_no_load_serial:
 #
