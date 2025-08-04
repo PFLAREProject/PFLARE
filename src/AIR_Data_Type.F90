@@ -177,7 +177,7 @@ module air_data_type
       ! 6 - Weighted Jacobi with weight 3 / ( 4 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
       ! 7 - Unweighted Jacobi
       ! -pc_air_inverse_type
-      integer :: inverse_type = 0      
+      integer :: inverse_type = 1      
 
       ! This is the order of polynomial we use in air if inverse_type is 
       ! power, arnoldi, newton or neumann
@@ -218,7 +218,7 @@ module air_data_type
       ! -pc_air_r_drop
       PetscReal :: r_drop = 0.01
       ! -pc_air_a_drop
-      PetscReal :: a_drop = 0.001
+      PetscReal :: a_drop = 1e-4
       ! Whether to lump in A or drop
       ! -pc_air_a_lump
       logical :: a_lump = .FALSE.
