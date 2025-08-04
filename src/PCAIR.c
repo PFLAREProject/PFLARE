@@ -27,6 +27,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit_c(PC *pc, PetscInt *input_int
 PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts_c(PC *pc, PetscInt *input_int);
+PETSC_EXTERN PetscErrorCode PCAIRGetMaxDDRatio_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
@@ -73,6 +74,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit_c(PC *pc, PetscInt input_int)
 PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts_c(PC *pc, PetscInt input_int);
+PETSC_EXTERN PetscErrorCode PCAIRSetMaxDDRatio_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
@@ -256,6 +258,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC pc, PetscReal *input_real
 {
    PetscFunctionBegin;
    PCAIRGetStrongThreshold_c(&pc, input_real);
+   PetscFunctionReturn(0);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetMaxDDRatio(PC pc, PetscReal *input_real)
+{
+   PetscFunctionBegin;
+   PCAIRGetMaxDDRatio_c(&pc, input_real);
    PetscFunctionReturn(0);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
@@ -629,6 +637,20 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
    if (old_int == input_int) PetscFunctionReturn(0);
    PCReset_AIR_c(pc);     
    PCAIRSetDDCIts_c(&pc, input_int);
+   PetscFunctionReturn(0);
+}
+// If using CF splitting type pmisr_ddc, do as many DDC iterations as necessary to 
+// hit this diagonal dominance ratio. If 0.0 do the number in -pc_air_ddc_its
+// Default: 0.0
+// -pc_air_max_dd_ratio
+PETSC_EXTERN PetscErrorCode PCAIRSetMaxDDRatio(PC pc, PetscReal input_real)
+{
+   PetscFunctionBegin;
+   PetscReal old_real;
+   PCAIRGetMaxDDRatio(pc, &old_real);
+   if (old_real == input_real) PetscFunctionReturn(0);
+   PCReset_AIR_c(pc);
+   PCAIRSetMaxDDRatio_c(&pc, input_real);
    PetscFunctionReturn(0);
 }
 // Second pass in the PMISR DDC CF splitting converts 
@@ -1191,6 +1213,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscOptionsReal("-pc_air_strong_threshold", "Strong threshold for CF splitting", "PCAIRSetStrongThreshold", old_real, &input_real, NULL);
    PCAIRSetStrongThreshold(pc, input_real);
    // ~~~~ 
+   PCAIRGetMaxDDRatio(pc, &old_real);
+   input_real = old_real;
+   PetscOptionsReal("-pc_air_max_dd_ratio", "Max DDC ratio for CF splitting", "PCAIRGetMaxDDRatio", old_real, &input_real, NULL);
+   PCAIRSetMaxDDRatio(pc, input_real);
+   // ~~~~ 
    PCAIRGetDDCFraction(pc, &old_real);
    input_real = old_real;
    PetscOptionsReal("-pc_air_ddc_fraction", "DDC fraction for CF splitting", "PCAIRGetDDCFraction", old_real, &input_real, NULL);
@@ -1343,7 +1370,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
    PetscInt input_int, input_int_two, input_int_three, input_int_four;
    PetscErrorCode ierr = 0;
    PetscBool flg, flg_f_smooth, flg_c_smooth;
-   PetscReal input_real, input_real_two;
+   PetscReal input_real, input_real_two, input_real_three;
    PCPFLAREINVType input_type;
    PCAIRZType z_type;
    CFSplittingType cf_type;
@@ -1388,13 +1415,22 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       ierr =  PCAIRGetCFSplittingType(pc, &cf_type);
       ierr =  PCAIRGetStrongThreshold(pc, &input_real);
       ierr =  PCAIRGetDDCIts(pc, &input_int_three);
+      ierr =  PCAIRGetMaxDDRatio(pc, &input_real_three);
       ierr =  PCAIRGetDDCFraction(pc, &input_real_two);
       ierr =  PCAIRGetMaxLubySteps(pc, &input_int_two);
       if (cf_type == CF_PMISR_DDC)
       {
          PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMISR_DDC \n");
-         PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f, DDC its=%"PetscInt_FMT", DDC fraction=%f \n", \
-                  input_int_two, input_real, input_int_three, input_real_two);           
+         if (input_real_three == 0.0)
+         {
+            PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f, DDC its=%"PetscInt_FMT", DDC fraction=%f \n", \
+                  input_int_two, input_real, input_int_three, input_real_two); 
+         }
+         else
+         {
+            PetscViewerASCIIPrintf(viewer, "    %"PetscInt_FMT" Luby steps \n      Strong threshold=%f, Max DD Ratio=%f, DDC fraction=%f \n", \
+                  input_int_two, input_real, input_real_three, input_real_two);             
+         }     
       }
       else if (cf_type == CF_PMIS)
       {

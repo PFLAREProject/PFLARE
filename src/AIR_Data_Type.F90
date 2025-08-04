@@ -89,6 +89,9 @@ module air_data_type
       ! How many passes of DDC to do
       ! -pc_air_ddc_its
       integer :: ddc_its = 1
+      ! The max diagonal dominace ratio we want in ddc iterations
+      ! -pc_air_max_dd_ratio
+      PetscReal :: max_dd_ratio = 0.0
       ! Second pass in the PMISR DDC CF splitting converts 
       ! this fraction of local F points to C based on diagonal dominance
       ! -pc_air_ddc_fraction

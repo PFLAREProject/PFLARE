@@ -438,8 +438,11 @@ in Fortran:
      PetscReal :: strong_threshold = 0.5
      ! Second pass cleanup - one iteration
      int :: ddc_its = 1
-     ! Fraction of F points to convert to C
+     ! Fraction of F points to convert to C per ddc it
      PetscReal :: ddc_fraction = 0.1
+     ! If not 0, keep doing ddc its until this diagonal dominance
+     ! ratio is hit
+     PetscReal :: max_dd_ratio = 0.0
      ! As many steps as needed
      int :: max_luby_steps = -1
      ! PMISR DDC
@@ -453,6 +456,7 @@ in Fortran:
            algorithm, &
            ddc_its, &
            ddc_fraction, &
+           max_dd_ratio, &
            is_fine, is_coarse) 
 
 or in C (please note the slightly modified name in C):
@@ -462,8 +466,11 @@ or in C (please note the slightly modified name in C):
      PetscReal strong_threshold = 0.5;
      // Second pass cleanup - one iteration
      int ddc_its = 1;
-     // Fraction of F points to convert to C
+     // Fraction of F points to convert to C per ddc it
      PetscReal ddc_fraction = 0.1;
+     // If not 0, keep doing ddc its until this diagonal dominance
+     // ratio is hit
+     PetscReal max_dd_ratio = 0.0;
      // As many steps as needed
      int max_luby_steps = -1;
      // PMISR DDC
@@ -477,6 +484,7 @@ or in C (please note the slightly modified name in C):
          algorithm, \
          ddc_its, \
          ddc_fraction, \
+         max_dd_ratio, \
          &is_fine, &is_coarse);
 
 or in Python with petsc4py:
@@ -485,8 +493,11 @@ or in Python with petsc4py:
      strong_threshold = 0.5
      # Second pass cleanup - one iteration
      ddc_its = 1
-     # Fraction of F points to convert to C
+     # Fraction of F points to convert to C per ddc it
      ddc_fraction = 0.1
+     # If not 0, keep doing ddc its until this diagonal dominance
+     # ratio is hit
+     max_dd_ratio = 0.0     
      # As many steps as needed
      max_luby_steps = -1
      # PMISR DDC
@@ -499,7 +510,8 @@ or in Python with petsc4py:
            strong_threshold, max_luby_steps, \
            algorithm, \
            ddc_its, \
-           ddc_fraction)
+           ddc_fraction, \
+           max_dd_ratio)
 
 ## Options         
 
@@ -545,9 +557,10 @@ A brief description of the available options in PFLARE are given below and their
    | ------------- | -- | ------------- | --- |
    | ``-pc_air_cf_splitting_type``  |  PCAIRGetCFSplittingType  PCAIRSetCFSplittingType  | The type of CF splitting to use, given above | pmisr_ddc |    
    | ``-pc_air_strong_threshold``  |  PCAIRGetStrongThreshold  PCAIRSetStrongThreshold  | The strong threshold to use in the CF splitting | 0.5 |
+   | ``-pc_air_max_luby_steps``  |  PCAIRGetMaxLubySteps  PCAIRSetMaxLubySteps  | If using CF splitting type pmisr_ddc, pmis, or pmis_dist2, this is the maximum number of Luby steps to use. If negative, use as many steps as necessary | -1 |   
    | ``-pc_air_ddc_its``  |  PCAIRGetDDCIts  PCAIRSetDDCIts  | If using CF splitting type pmisr_ddc, this is the number of iterations of DDC performed | 1 |   
    | ``-pc_air_ddc_fraction``  |  PCAIRGetDDCFraction  PCAIRSetDDCFraction  | If using CF splitting type pmisr_ddc, this is the local fraction of F points to convert to C points based on diagonal dominance. If negative, any row which has a diagonal dominance ratio less than the absolute value will be converted from F to C | 0.1 |
-   | ``-pc_air_max_luby_steps``  |  PCAIRGetMaxLubySteps  PCAIRSetMaxLubySteps  | If using CF splitting type pmisr_ddc, pmis, or pmis_dist2, this is the maximum number of Luby steps to use. If negative, use as many steps as necessary | -1 |
+   | ``-pc_air_max_dd_ratio``  |  PCAIRGetMaxDDRatio  PCAIRSetMaxDDRatio  | If using CF splitting type pmisr_ddc, do as many DDC iterations as necessary to hit this diagonal dominance ratio. If 0.0 do the number in -pc_air_ddc_its | 0.0 |   
 
 #### Approximate inverse options
 

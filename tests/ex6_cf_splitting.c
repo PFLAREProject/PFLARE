@@ -82,8 +82,11 @@ int main(int argc,char **args)
  PetscReal strong_threshold = 0.5;
  // Second pass cleanup - one iteration
  int ddc_its = 1;
- // Fraction of F points to convert to C
+ // Fraction of F points to convert to C per ddc it
  PetscReal ddc_fraction = 0.1;
+ // If not 0, keep doing ddc its until this diagonal dominance
+ // ratio is hit
+ PetscReal max_dd_ratio = 0.0;
  // As many steps as needed
  int max_luby_steps = -1;
  // PMISR DDC
@@ -97,6 +100,7 @@ int main(int argc,char **args)
      algorithm, \
      ddc_its, \
      ddc_fraction, \
+     max_dd_ratio, \
      &is_fine, &is_coarse);
 
   PetscInt n_fine, n_coarse;
