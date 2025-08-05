@@ -1,0 +1,28 @@
+ARG BASE_IMAGE=stevendargaville/petsc_old
+
+FROM ${BASE_IMAGE}
+# Checkout the main branch by default
+ARG BRANCH=main
+# Use the debug petsc build by default
+ARG ARCH=arch-linux-c-debug
+
+LABEL maintainer="Steven Dargaville"
+LABEL description="PFLARE"
+
+ENV CHECKOUT_BRANCH=$BRANCH
+ENV PETSC_ARCH=$ARCH
+# Ensure any test failures are caught and the build fails
+ENV PETSC_OPTIONS="-on_error_abort"
+
+WORKDIR /build
+
+# Clone PFLARE and run all the tests
+RUN set -e; \
+    echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
+    git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
+    cd PFLARE && \
+    make -j2 && \
+    make -j2 tests && \
+    make python && make tests_python
+
+WORKDIR /build/PFLARE
