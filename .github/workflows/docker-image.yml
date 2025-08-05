@@ -5,6 +5,10 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  # run on the 1st of the month for new petsc release
+  # do it at 1am UTC so that the CI builds have finished
+  schedule:
+    - cron: '0 1 1 * *'    
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:       
