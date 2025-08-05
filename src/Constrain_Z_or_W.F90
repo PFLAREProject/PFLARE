@@ -6,6 +6,7 @@ module constrain_z_or_w
    use petsc_helper
 
 #include "petsc/finclude/petscksp.h"
+#include "petscversion.h"
 
    implicit none
    public     
@@ -31,7 +32,7 @@ module constrain_z_or_w
       PetscBool :: has_constant
       PetscInt :: no_nullspace, no_nullspace_vecs, i_loc
       type(tVec), dimension(:), pointer :: null_vecs      
-      logical :: cst_nullspace
+      logical :: cst_nullspace, called_get_vecs
 
       ! ~~~~~
 
@@ -39,7 +40,8 @@ module constrain_z_or_w
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)      
 
       ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)     
+      called_get_vecs = .FALSE. 
 
       ! Get the near nullspace if the user has set one 
       if (left .OR. right) call MatGetNearNullSpace(input_mat, nullspace, ierr)
@@ -59,7 +61,8 @@ module constrain_z_or_w
                   (left .OR. right)) then    
 
          ! Get the nullspace vectors
-         call MatNullSpaceGetVecs(nullspace, has_constant, no_nullspace, null_vecs, ierr)       
+         call MatNullSpaceGetVecs(nullspace, has_constant, no_nullspace, null_vecs, ierr)    
+         called_get_vecs = .TRUE.   
          no_nullspace_vecs = no_nullspace
          
          ! If has_constant is true, then null_vecs won't contain the constant vector
@@ -101,7 +104,14 @@ module constrain_z_or_w
             ! Set to the constant
             call VecSet(right_null_vecs(no_nullspace_vecs), 1d0, ierr)
          end if         
-      end if      
+      end if   
+      
+      if (called_get_vecs) then
+#if PETSC_VERSION_GE(3,24,0)
+         ! Restore the nullspace vectors if >= petsc 3.24
+         call MatNullSpaceRestoreVecs(nullspace, has_constant, no_nullspace, null_vecs, ierr)
+#endif         
+      end if
       
    end subroutine get_near_nullspace
 
