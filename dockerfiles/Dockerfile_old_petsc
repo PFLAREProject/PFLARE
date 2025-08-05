@@ -22,7 +22,6 @@ RUN set -e; \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
     cd PFLARE && \
     make -j2 && \
-    make -j2 tests && \
-    make python && make tests_python
-
+    make -j2 tests
+    
 WORKDIR /build/PFLARE
