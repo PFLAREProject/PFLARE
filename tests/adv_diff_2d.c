@@ -83,10 +83,10 @@ int main(int argc,char **argv)
   // We do this instead of calling MatFilter as there is no Kokkos implementation so its very slow
   ierr = DMSetMatrixPreallocateOnly(da,PETSC_TRUE);CHKERRQ(ierr);
   ierr = DMSetUp(da);CHKERRQ(ierr);
-  ierr = DMDASetUniformCoordinates(da, 0.0, L_x, 0.0, L_y, 0.0, 0.0);CHKERRQ(ierr);
   ierr = KSPSetDM(ksp,(DM)da);CHKERRQ(ierr);
   // We generate the matrix ourselves
   ierr = KSPSetDMActive(ksp, PETSC_FALSE);CHKERRQ(ierr);
+  ierr = DMDASetUniformCoordinates(da, 0.0, L_x, 0.0, L_y, 0.0, 0.0);CHKERRQ(ierr);
 
   // Create empty matrix and vectors
   ierr = DMCreateMatrix(da, &A);
@@ -171,8 +171,93 @@ int main(int argc,char **argv)
 
   // Set the operator and options
   ierr = KSPSetOperators(ksp,A,A);CHKERRQ(ierr);
+  ierr = KSPGetPC(ksp, &pc);CHKERRQ(ierr);
   ierr = KSPSetFromOptions(ksp);CHKERRQ(ierr);
-  ierr = KSPSetInitialGuessNonzero(ksp, PETSC_TRUE);
+  ierr = KSPSetInitialGuessNonzero(ksp, PETSC_TRUE);  
+
+  // ~~~~~~~~~~~~~~
+  // If in parallel we can do a fieldsplit for the local dofs
+  // This is useful if we have a local sweep we want to use, we can just use 
+  // PFLARE for the interface dofs
+  // ~~~~~~~~~~~~~~
+
+  Vec vec_interface, vec_rank;
+  PetscBool *local_indices_bool;
+  PetscInt local_rows, local_cols;
+  MatGetLocalSize(A, &local_rows, &local_cols);
+  PetscMalloc1(local_rows, &local_indices_bool);
+  for (PetscInt i = 0; i < local_rows; i++) {
+    local_indices_bool[i] = PETSC_FALSE;
+  }
+
+  PetscBool ismpi;
+  Mat Aseq, Ampi;
+  PetscObjectBaseTypeCompare((PetscObject)A, MATMPIAIJ, &ismpi);
+  if (ismpi) {
+
+   MatMPIAIJGetSeqAIJ(A, &Aseq, &Ampi, NULL);
+   PetscInt Istart, Iend;
+   MatGetOwnershipRange(A, &Istart, &Iend);
+
+   PetscInt local_indices_size = 0;
+   for (PetscInt i = Istart; i < Iend; i++) {
+      PetscInt ncols;
+      MatGetRow(Ampi, i - Istart, &ncols, NULL, NULL);
+      if (ncols == 0) {
+         local_indices_bool[i - Istart] = PETSC_TRUE; // This row is empty
+         local_indices_size = local_indices_size + 1;
+      }
+      MatRestoreRow(Ampi, i - Istart, &ncols, NULL, NULL);
+   }
+   PetscInt *local_indices;
+   PetscMalloc1(local_indices_size, &local_indices);
+
+   // Fill in the local indices
+   PetscInt idx = 0;
+   for (PetscInt i = Istart; i < Iend; i++) {
+      if (local_indices_bool[i-Istart]) {
+         local_indices[idx++] = i;
+      }
+   }
+
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscObjectGetComm((PetscObject)A, &MPI_COMM_MATRIX);
+
+   IS local_is;
+   ISCreateGeneral(MPI_COMM_MATRIX, local_indices_size, local_indices, PETSC_COPY_VALUES, &local_is);
+   PCFieldSplitSetIS(pc, NULL, local_is);
+
+   ierr = DMCreateGlobalVector(da, &vec_interface);
+   ierr = PetscObjectSetName((PetscObject)vec_interface, "interface");
+   ierr = PetscObjectSetName((PetscObject)x, "solution");
+   ierr = VecSet(vec_interface, 0.0);CHKERRQ(ierr);
+   PetscScalar *interface_vals;
+   ierr = VecGetArray(vec_interface, &interface_vals);CHKERRQ(ierr);
+   // Set the interface values to 1
+   for (PetscInt i = 0; i < local_indices_size; i++) {
+      interface_vals[local_indices[i] - Istart] = 1.0;
+   }
+   ierr = VecRestoreArray(vec_interface, &interface_vals);CHKERRQ(ierr);   
+
+     
+   ierr = DMCreateGlobalVector(da, &vec_rank);
+   ierr = PetscObjectSetName((PetscObject)vec_rank, "rank");   
+   int rank;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   ierr = VecGetArray(vec_rank, &interface_vals);CHKERRQ(ierr);
+   // Set the interface values to 1
+   for (PetscInt i = 0; i < local_rows; i++) {
+      interface_vals[i] = (double)rank;
+   }
+   ierr = VecRestoreArray(vec_rank, &interface_vals);CHKERRQ(ierr);      
+
+   (void)PetscFree(local_indices_bool);
+   (void)PetscFree(local_indices);
+   ISDestroy(&local_is);
+
+  }
+  
+  // ~~~~~~~~~~~~~~
 
   ierr  = DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0);CHKERRQ(ierr); 
 
@@ -190,8 +275,6 @@ int main(int argc,char **argv)
   ierr = PetscLogStagePush(setup);
   ierr = KSPSetUp(ksp);CHKERRQ(ierr);
   ierr = PetscLogStagePop();CHKERRQ(ierr);
-
-  ierr = KSPGetPC(ksp, &pc);CHKERRQ(ierr);
   ierr = VecSet(x, 1.0);CHKERRQ(ierr);
 
   // Do a preliminary KSPSolve so all the vecs and mats get copied to the gpu
@@ -215,6 +298,14 @@ int main(int argc,char **argv)
    
   ierr = PetscPrintf(PETSC_COMM_WORLD, "Number of iterations = %3" PetscInt_FMT "\n", its);
 
+//   PetscViewer viewer;
+//   PetscViewerHDF5Open(PETSC_COMM_WORLD, "solution.h5", FILE_MODE_WRITE, &viewer);
+//   // Save the solution vector (Vec)
+//   VecView(x, viewer);
+//   VecView(vec_interface, viewer);
+//   VecView(vec_rank, viewer);
+//   PetscViewerDestroy(&viewer);  
+
   // ~~~~~~~~~~~~~~
   // ~~~~~~~~~~~~~~  
 
@@ -222,6 +313,7 @@ int main(int argc,char **argv)
   ierr = DMDestroy(&da);CHKERRQ(ierr);
   ierr = KSPDestroy(&ksp);CHKERRQ(ierr);
   ierr = VecDestroy(&x);CHKERRQ(ierr);
+  ierr = VecDestroy(&vec_interface);CHKERRQ(ierr);
   ierr = VecDestroy(&b);CHKERRQ(ierr);
   ierr = MatDestroy(&A);CHKERRQ(ierr);
   ierr = PetscFinalize();
