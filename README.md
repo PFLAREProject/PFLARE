@@ -211,7 +211,7 @@ or in Python with petsc4py:
      
 or via the command line: ``-pc_type air -pc_air_z_type lair -pc_air_inverse_type wjacobi -pc_air_smooth_type fcf``.
 
-#### 3) Using PCFLAREINV to apply a 20th order GMRES polynomial in the Newton basis matrix free:
+#### 3) Using PCPFLAREINV to apply a 20th order GMRES polynomial in the Newton basis matrix free:
 
 in Fortran:
 
