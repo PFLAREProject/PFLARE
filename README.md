@@ -18,11 +18,11 @@ without requiring Gauss-Seidel methods. This includes time dependent or independ
 ## Methods available in PFLARE
 
 Installing and using PFLARE adds new methods to PETSc, including:
-1) Various polynomial approximate inverses, e.g., GMRES polynomials and Neumann polynomials
+1) Various polynomial approximate inverses, e.g., GMRES and Neumann polynomials
 2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
 3) CF splittings, e.g., PMISR DDC
 
-Details for each are given below, please also see references [1-7]. 
+Details for each are given below, please also see references [1-8]. 
 
 Note: for methods with GPU setup labelled "No" in the tables below, this indicates that some/all of the setup occurs on the CPU before being transferred to the GPU. The setup for these methods may therefore be slow. The solves however all occur on the GPU.   
 
@@ -58,7 +58,7 @@ PCAIR contains different types of reduction multigrids. PCAIR can be used with t
 
 Different combinations of these types can also be used, e.g., ``-pc_air_z_type lair -pc_air_inverse_type power`` uses a lAIR grid transfer operator and GMRES polynomial smoothing with the power basis.
 
-There are several features used to improve the parallel performance of PCAIR:
+There are several features used to improve the parallel performance of PCAIR [2-3]:
 
    - The number of active MPI ranks on lower levels can be reduced where necessary. If this is used then:
      - Repartitioning with graph partitioners can be applied.
@@ -384,7 +384,7 @@ This means we can cheaply generate the exact same preconditioner when periodical
 
 ## GPU support           
 
-If PETSc has been configured with GPU support then PCPFLAREINV and PCAIR support GPUs. We recommend configuring PETSc with Kokkos and always specifying the matrix/vector types as Kokkos as this works across different GPU hardware (Nvidia, AMD, Intel). PFLARE also contains Kokkos routines to speed-up the setup/solve on GPUs. 
+If PETSc has been configured with GPU support then PCPFLAREINV and PCAIR support GPUs [3]. We recommend configuring PETSc with Kokkos and always specifying the matrix/vector types as Kokkos as this works across different GPU hardware (Nvidia, AMD, Intel). PFLARE also contains Kokkos routines to speed-up the setup/solve on GPUs. 
 
 By default the tests run on the CPU unless the matrix/vector types are specified as those compatible with GPUs. For example, the following arguments specify that the 1D advection problem ``tests/adv_1d`` will use a 30th order GMRES polynomial applied matrix-free to solve on the CPU:
 
@@ -401,7 +401,7 @@ Note: all the tests allow the option ``-second_solve`` which turns on two solves
 Development of the setup on GPUs is ongoing, please get in touch if you would like to contribute. The main areas requiring development are:
 
 1) Processor agglomeration - GPU libraries exist which could replace the CPU-based calls to the PETSc graph partitioners
-2) GPU optimisation - There are several Kokkos routines in PFLARE which would benefit from optimisation
+2) GPU optimisation - There are several Kokkos routines in PFLARE which would benefit from further optimisation
 
 ### Performance notes
 
@@ -411,7 +411,7 @@ Development of the setup on GPUs is ongoing, please get in touch if you would li
 
 3 - Multigrid methods on GPUs will often pin the coarse grids to the CPU, as GPUs are not very fast at the small solves that occur on coarse grids. We do not do this in PCAIR; instead we use the same approach we used in [2] to improve parallel scaling on CPUs. 
 
-This is based around using the high-order polynomials applied matrix free as a coarse solver. For many problems GMRES polynomials in the Newton basis are stable at high order and can therefore be combined with heavy truncation of the multigrid hierarchy. We now also have an automated way to determine at what level of the multigrid hierarchy to truncate. 
+This is based around using the high-order polynomials applied matrix free as a coarse solver. For many problems GMRES polynomials in the Newton basis are stable at high order and can therefore be combined with heavy truncation of the multigrid hierarchy. We also have an automated way to determine at what level of the multigrid hierarchy to truncate. 
 
 For example, on a single GPU with a 2D structured grid advection problem we apply a high order (10th order) Newton polynomial matrix-free as a coarse grid solver:
 
@@ -421,7 +421,7 @@ The hierarchy in this case has 29 levels. If we turn on the auto truncation and 
 
 ``./adv_diff_2d -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1``
 
-we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve in this example. The speedup is typically greater in parallel. 
+we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve in this example. The speedup is typically greater in parallel. Please see [3] for more details.
 
 ## OpenMP support
 
@@ -612,15 +612,16 @@ A brief description of the available options in PFLARE are given below and their
 
 For more ways to use the library please see the Fortran/C examples and the Makefile in `tests/`, along with the Python examples in `python/`.
 
-## References
+## References \& citing
 
-Please see these references for more details:
+Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3].
 
-[1] S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, Journal of Computational Physics 518 (2024) 113342  
-[2] S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, The International Journal of High Performance Computing Applications 39(3) (2025) 364-384  
-[3] T. A. Manteuffel, S. Münzenmaier, J. Ruge, B. Southworth, Nonsymmetric Reduction-Based Algebraic Multigrid, SIAM Journal on Scientific Computing 41 (2019) S242–S268  
-[4] T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), SIAM Journal on Scientific Computing 40 (2018) A4105–A4130   
-[5] A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, SIAM Journal on Scientific Computing (2024) S96–S122  
-[6] T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, Numerical Linear
+1. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, Journal of Computational Physics 518 (2024) 113342  
+2. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, The International Journal of High Performance Computing Applications 39(3) (2025) 364-384  
+3. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Solving advection equations with reduction multigrids on GPUs (2025) http://arxiv.org/abs/2508.17517  
+4. T. A. Manteuffel, S. Münzenmaier, J. Ruge, B. Southworth, Nonsymmetric Reduction-Based Algebraic Multigrid, SIAM Journal on Scientific Computing 41 (2019) S242–S268  
+5. T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), SIAM Journal on Scientific Computing 40 (2018) A4105–A4130   
+6. A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, SIAM Journal on Scientific Computing (2024) S96–S122  
+7. T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, Numerical Linear
 Algebra with Applications 31(3) (2024) e2543   
-[7] Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. Numerical Linear Algebra with Applications 29 (2022) e2427 
+8. Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. Numerical Linear Algebra with Applications 29 (2022) e2427 
