@@ -538,7 +538,7 @@ A brief description of the available options in PFLARE are given below and their
    | ``-pc_air_auto_truncate_start_level``  |  PCAIRGetAutoTruncateStartLevel  PCAIRSetAutoTruncateStartLevel  | Build a coarse solver on each level from this one and use it to determine if we can truncate the hierarchy | -1 |
    | ``-pc_air_auto_truncate_tol``  |  PCAIRGetAutoTruncateTol  PCAIRSetAutoTruncateTol  | Tolerance used to determine if the coarse solver is good enough to truncate at a given level | 1e-14 | 
    | ``-pc_air_r_drop``  |  PCAIRGetRDrop  PCAIRSetRDrop  | Drop tolerance applied to R on each level after it is built | 0.01 |
-   | ``-pc_air_a_drop``  |  PCAIRGetADrop  PCAIRSetADrop  | Drop tolerance applied to the coarse matrix on each level after it is built | 0.001 |
+   | ``-pc_air_a_drop``  |  PCAIRGetADrop  PCAIRSetADrop  | Drop tolerance applied to the coarse matrix on each level after it is built | 0.0001 |
    | ``-pc_air_a_lump``  |  PCAIRSetALump  PCAIRSetALump  | Lump rather than drop for the coarse matrix | false |         
 
 #### Parallel options
