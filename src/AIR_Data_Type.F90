@@ -204,7 +204,7 @@ module air_data_type
       
       ! These are for the coarse grid solver
       ! -pc_air_coarsest_inverse_type
-      integer :: coarsest_inverse_type = 0
+      integer :: coarsest_inverse_type = 1
       ! -pc_air_coarsest_poly_order
       integer :: coarsest_poly_order = 6
       ! -pc_air_coarsest_inverse_sparsity_order
