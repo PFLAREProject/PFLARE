@@ -521,7 +521,7 @@ A brief description of the available options in PFLARE are given below and their
 
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
-   | ``-pc_pflareinv_type``  |  PCPFLAREINVGetType  PCPFLAREINVSetType  | The inverse type, given above | power |   
+   | ``-pc_pflareinv_type``  |  PCPFLAREINVGetType  PCPFLAREINVSetType  | The inverse type, given above | arnoldi |   
    | ``-pc_pflareinv_order``  |  PCPFLAREINVGetOrder  PCPFLAREINVSetOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_pflareinv_sparsity_order``  |  PCPFLAREINVGetSparsityOrder  PCPFLAREINVSetSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |   
    | ``-pc_pflareinv_matrix_free``  |  PCPFLAREINVGetMatrixFree  PCPFLAREINVSetMatrixFree  | Is the inverse applied matrix free, or is an assembled matrix built and used | false |                                        
@@ -566,7 +566,7 @@ A brief description of the available options in PFLARE are given below and their
 
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
-   | ``-pc_air_inverse_type``  |  PCAIRGetInverseType  PCAIRSetInverseType  | The inverse type, given above | power |
+   | ``-pc_air_inverse_type``  |  PCAIRGetInverseType  PCAIRSetInverseType  | The inverse type, given above | arnoldi |
    | ``-pc_air_poly_order``  |  PCAIRGetPolyOrder  PCAIRSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_air_inverse_sparsity_order``  |  PCAIRGetInverseSparsityOrder  PCAIRSetInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |        
    | ``-pc_air_matrix_free_polys``  |  PCAIRGetMatrixFreePolys  PCAIRSetMatrixFreePolys  | Do smoothing matrix-free if possible | false |   
