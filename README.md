@@ -128,21 +128,21 @@ For Fortran/C, the user must call a single function which registers the new PC t
 in Fortran:
 
      #include "finclude/pflare.h"
-     ...
+     ! ...
      call PCRegister_PFLARE()
-     ...
+     ! ...
 
 or in C:
 
      #include "pflare.h"
-     ...
+     // ...
      PCRegister_PFLARE();
-     ...
+     // ...
 
 or in Python with petsc4py:
 
      import pflare
-     ...
+     # ...
 
 ## Using PFLARE
 
@@ -155,21 +155,21 @@ in Fortran:
      call KSPGetPC(ksp, pc, ierr)
      call PCSetType(pc, PCAIR, ierr)
 
-     ...[e.g., KSPSolve somewhere here]
+     ! ...[e.g., KSPSolve somewhere here]
 
 or in C:
 
      ierr = KSPGetPC(ksp, &pc);
      ierr = PCSetType(pc, PCAIR);
 
-     ...[e.g., KSPSolve somewhere here]
+     // ...[e.g., KSPSolve somewhere here]
 
 or in Python with petsc4py:
 
      pc = ksp.getPC()
      pc.setType("air")
 
-     ...[e.g., KSPSolve somewhere here]
+     # ...[e.g., KSPSolve somewhere here]
      
 or via the command line: ``-pc_type air``. 
 
@@ -184,7 +184,7 @@ in Fortran:
      call PCAIRSetInverseType(pc, PFLAREINV_WJACOBI, ierr)
      call PCAIRSetSmoothType(pc, "fcf", ierr)
 
-     ...[e.g., KSPSolve somewhere here]
+     ! ...[e.g., KSPSolve somewhere here]
 
 or in C:
 
@@ -195,7 +195,7 @@ or in C:
      ierr = PCAIRSetInverseType(pc, PFLAREINV_WJACOBI);
      ierr = PCAIRSetSmoothType(pc, "fcf");
 
-     ...[e.g., KSPSolve somewhere here]
+     // ...[e.g., KSPSolve somewhere here]
 
 or in Python with petsc4py:
 
@@ -207,7 +207,7 @@ or in Python with petsc4py:
      petsc_options['pc_air_inverse_type'] = 'wjacobi'
      petsc_options['pc_air_smooth_type'] = 'fcf'     
 
-     ...[e.g., KSPSolve somewhere here]
+     # ...[e.g., KSPSolve somewhere here]
      
 or via the command line: ``-pc_type air -pc_air_z_type lair -pc_air_inverse_type wjacobi -pc_air_smooth_type fcf``.
 
@@ -222,7 +222,7 @@ in Fortran:
      call PCPFLAREINVSetType(pc, PFLAREINV_NEWTON, ierr)
      call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
 
-     ...[e.g., KSPSolve somewhere here]
+     ! ...[e.g., KSPSolve somewhere here]
 
 or in C:
 
@@ -233,7 +233,7 @@ or in C:
      ierr = PCPFLAREINVSetType(pc, PFLAREINV_NEWTON);
      ierr = PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE);
 
-     ...[e.g., KSPSolve somewhere here]
+     // ...[e.g., KSPSolve somewhere here]
 
 or in Python with petsc4py:
 
@@ -245,7 +245,7 @@ or in Python with petsc4py:
      petsc_options['pc_pflareinv_order'] = '20'
      petsc_options['pc_pflareinv_matrix_free'] = ''
 
-     ...[e.g., KSPSolve somewhere here]
+     # ...[e.g., KSPSolve somewhere here]
      
 or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_order 20 -pc_pflareinv_matrix_free``.
 
@@ -273,7 +273,7 @@ in Fortran:
      ! First solve - the PCAIR will be setup
      call KSPSolve(ksp, b, x, ierr)
      
-     ...[Modify entries in A but keep the same sparsity]
+     ! ...[Modify entries in A but keep the same sparsity]
 
      ! Second solve - the PCAIR will be setup
      ! but reusing the same sparsity
@@ -291,7 +291,7 @@ or in C:
      // First solve - the PCAIR will be setup
      ierr = KSPSolve(ksp, b, x)
      
-     ...[Modify entries in A but keep the same sparsity]
+     // ...[Modify entries in A but keep the same sparsity]
 
      // Second solve - the PCAIR will be setup 
      // but reusing the same sparsity
@@ -308,7 +308,7 @@ or in Python with petsc4py:
      # First solve - the PCAIR will be setup
      ksp.solve(b,x)
      
-     ...[Modify entries in A but keep the same sparsity]
+     # ...[Modify entries in A but keep the same sparsity]
 
      # Second solve - the PCAIR will be setup 
      # but reusing the same sparsity
@@ -332,7 +332,7 @@ in Fortran:
      ! First solve - the PCAIR will be setup
      call KSPSolve(ksp, b, x, ierr)  
      
-     ...[Modify entries in A but keep the same sparsity]
+     ! ...[Modify entries in A but keep the same sparsity]
 
      ! Second solve - the PCAIR will be setup
      ! but reusing sparsity & polynomial coefficients
@@ -350,7 +350,7 @@ or in C:
      // First solve - the PCAIR will be setup
      ierr = KSPSolve(ksp, b, x)
      
-     ...[Modify entries in A but keep the same sparsity]
+     // ...[Modify entries in A but keep the same sparsity]
 
      // Second solve - the PCAIR will be setup
      // but reusing sparsity & polynomial coefficients
@@ -368,7 +368,7 @@ or in Python with petsc4py:
      # First solve - the PCAIR will be setup
      ksp.solve(b,x)
      
-     ...[Modify entries in A but keep the same sparsity]
+     # ...[Modify entries in A but keep the same sparsity]
 
      # Second solve - the PCAIR will be setup 
      # but reusing sparsity & polynomial coefficients
@@ -449,7 +449,7 @@ in Fortran:
      integer :: algorithm = CF_PMISR_DDC
      ! Is the matrix symmetric?
      logical :: symmetric = .FALSE.
-     ...
+     
      call compute_cf_splitting(A, &
            symmetric, &
            strong_threshold, max_luby_steps, &
