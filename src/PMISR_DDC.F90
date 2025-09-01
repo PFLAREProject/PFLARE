@@ -162,7 +162,7 @@ module pmisr_ddc
       integer(c_long_long) :: A_array, vec_long
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, cols_ptr, ao_ia, ao_ja
       PetscInt :: shift = 0
-      logical :: symmetric = .false., inodecompressed=.false., done    
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       logical :: zero_measure_c = .FALSE.  
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
 
