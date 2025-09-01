@@ -699,7 +699,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt, dimension(:), pointer :: colmap
       PetscInt :: shift = 0, n_ad, n_ao, local_rows, local_cols
-      logical :: symmetric = .false., inodecompressed=.false., done      
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
 
       ! ~~~~~~~~~~
 

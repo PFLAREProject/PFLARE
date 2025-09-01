@@ -886,7 +886,8 @@ end if
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
       PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
       real(c_double), pointer :: submatrices_vals(:)
-      logical :: symmetric = .false., inodecompressed=.false., done, reuse_triggered
+      logical :: reuse_triggered
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       PetscInt, parameter :: one = 1, zero = 0
       
       ! ~~~~~~~~~~  
