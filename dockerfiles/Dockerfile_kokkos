@@ -5,12 +5,15 @@ FROM ${BASE_IMAGE}
 ARG BRANCH=main
 # Use the optimised petsc build by default
 ARG ARCH=arch-linux-c-opt
+# Set the number of OpenMP threads to 1 by default
+ARG OMP_NUM_THREADS=1
 
 LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE_kokkos"
 
 ENV CHECKOUT_BRANCH=$BRANCH
 ENV PETSC_ARCH=$ARCH
+ENV OMP_NUM_THREADS=$OMP_NUM_THREADS
 # This turns on checks between kokkos and cpu versions
 ENV PFLARE_KOKKOS_DEBUG=1
 # Ensure any test failures are caught and the build fails
