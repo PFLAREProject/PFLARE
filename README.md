@@ -17,8 +17,8 @@ without requiring Gauss-Seidel methods. This includes time dependent or independ
 
 ## Methods available in PFLARE
 
-Installing and using PFLARE adds new methods to PETSc, including:
-1) Various polynomial approximate inverses, e.g., GMRES and Neumann polynomials
+PFLARE adds new methods to PETSc, including:
+1) Polynomial approximate inverses, e.g., GMRES and Neumann polynomials
 2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
 3) CF splittings, e.g., PMISR DDC
 
