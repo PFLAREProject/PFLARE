@@ -19,7 +19,7 @@ WORKDIR /build
 # Clone PFLARE and run all the tests
 RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
-    git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
+    git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
     make -j2 && \
     make -j2 tests

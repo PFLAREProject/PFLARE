@@ -21,7 +21,7 @@ WORKDIR /build
 # compiler was defaulting to 132 and we don't have a CI for that, so this will trigger it
 RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
-    git clone --branch ${CHECKOUT_BRANCH} https://github.com/stevendargaville/PFLARE.git && \
+    git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
     make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" && \
     make -j2 tests "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" && \
