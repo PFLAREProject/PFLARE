@@ -195,6 +195,12 @@ tests: build_tests
 	$(MAKE) tests_serial
 	$(MAKE) tests_parallel
 
+# Build and run the medium tests (these take longer)
+.PHONY: tests_medium
+tests_medium: build_tests
+	$(MAKE) -C tests run_tests_medium_serial
+	$(MAKE) -C tests run_tests_medium_parallel
+
 # Build the Python module with Cython
 .PHONY: python
 python: $(OUT)

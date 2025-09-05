@@ -479,3 +479,25 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power	
 
 endif
+
+run_tests_medium_serial:
+
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_2d ---"
+	@for size in $$(seq 100 100 400); do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done
+
+run_tests_medium_parallel:
+
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_2d in parallel ---"
+	@for size in $$(seq 100 100 400); do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done	
