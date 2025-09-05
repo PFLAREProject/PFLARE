@@ -244,7 +244,7 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test AIRG on steady 1D advection"
 	./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
-	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 # 
 	@echo ""
