@@ -172,28 +172,48 @@ depend:
 build_tests: $(OUT)
 	+$(MAKE) -C tests $(TEST_TARGETS)
 
-# Separate out serial and parallel tests
+# Separate out the different test cases
 # Only run the tests that load the 32 bit test matrix in /tests/data
 # if PETSC has been configured without 64 bit integers
-.PHONY: tests_serial
-tests_serial: build_tests
+.PHONY: tests_short_serial
+tests_short_serial: build_tests
 ifeq ($(PETSC_USE_64BIT_INDICES),0)
 	$(MAKE) -C tests run_tests_load_serial
 endif	
 	$(MAKE) -C tests run_tests_no_load_serial
 
-.PHONY: tests_parallel
-tests_parallel: build_tests
+.PHONY: tests_short_parallel
+tests_short_parallel: build_tests
 ifeq ($(PETSC_USE_64BIT_INDICES),0)
 	$(MAKE) -C tests run_tests_load_parallel
 endif	
 	$(MAKE) -C tests run_tests_no_load_parallel	
 
+.PHONY: tests_medium_serial
+tests_medium_serial: build_tests
+	$(MAKE) -C tests run_tests_medium_serial
+
+.PHONY: tests_medium_parallel
+tests_medium_parallel: build_tests
+	$(MAKE) -C tests run_tests_medium_parallel		
+
+# Very quick tests
+.PHONY: tests_short
+tests_short: build_tests
+	$(MAKE) tests_short_serial
+	$(MAKE) tests_short_parallel
+
+# Longer tests
+.PHONY: tests_medium
+tests_medium: build_tests
+	$(MAKE) tests_medium_serial
+	$(MAKE) tests_medium_parallel
+
 # Build and run all the tests
 .PHONY: tests
 tests: build_tests
-	$(MAKE) tests_serial
-	$(MAKE) tests_parallel
+	$(MAKE) tests_short
+	$(MAKE) tests_medium
 
 # Build the Python module with Cython
 .PHONY: python

@@ -41,6 +41,9 @@ clean::
 # ~~~~~~~~~~~
 # Run PFLARE tests
 # ~~~~~~~~~~~
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
 run_tests_load_serial:
 #
 	@echo ""
@@ -97,6 +100,8 @@ run_tests_load_serial:
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals"
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26
 
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
 run_tests_load_parallel:
 #
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in C in parallel"
@@ -127,6 +132,8 @@ run_tests_load_parallel:
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26		
 
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
 run_tests_no_load_serial:
 #
 	@echo ""
@@ -244,7 +251,7 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test AIRG on steady 1D advection"
 	./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
-	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 # 
 	@echo ""
@@ -326,6 +333,8 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 
 endif
 
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
 run_tests_no_load_parallel:
 #
 	@echo ""
@@ -479,3 +488,41 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power	
 
 endif
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_tests_medium_serial:
+
+#
+	@for size in $$(seq 100 20 200); do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_2d ---"
+	@for size in 100 200 400 800; do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_tests_medium_parallel:
+
+#
+	@for size in $$(seq 100 20 200); do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_2d in parallel ---"
+	@for size in 100 200 400 800; do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done	
