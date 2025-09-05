@@ -425,7 +425,7 @@ we find that the 10th order polynomials are good enough coarse solvers to enable
 
 ## OpenMP support
 
-If PETSc has been configured with OpenMP support then PCPFLAREINV and PCAIR support OpenMP through Kokkos. To enable OpenMP throughout the setup/solve the matrix/vector types must be specified as Kokkos and the ``OMP_NUM_THREADS`` environmental variable must be set. Good performance is dependent on appropriate pinning of MPI ranks and OpenMP threads to CPU cores/NUMA regions.
+If PETSc has been configured with Kokkos using OpenMP as the backend then PCPFLAREINV and PCAIR support OpenMP. To enable OpenMP throughout the setup/solve the matrix/vector types must be specified as Kokkos (see above) and the ``OMP_NUM_THREADS`` environmental variable must be set. Good performance is dependent on appropriate pinning of MPI ranks and OpenMP threads to CPU cores/NUMA regions.
 
 ## CF splittings
 
