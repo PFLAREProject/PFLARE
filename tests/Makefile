@@ -536,15 +536,15 @@ run_check:
 #
 	@echo ""
 	@echo "Serial check"
-	@./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 > /dev/null 2>&1 && echo "OK"
+	@./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
 	@echo "Parallel check"
-	@$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 > /dev/null 2>&1 && echo "OK"
+	@$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 # 
 	@echo "Serial KOKKOS check"
-	@./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aijkokkos > /dev/null 2>&1 && echo "OK"
+	@./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aijkokkos > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
 	@echo "Parallel KOKKOS check"
-	@$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aijkokkos > /dev/null 2>&1 && echo "OK"
+	@$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aijkokkos > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
 else	
 	@echo "KOKKOS check skipped (PETSc has not been configured with KOKKOS)"	
 
