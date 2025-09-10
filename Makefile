@@ -117,6 +117,8 @@ export TEST_TARGETS = ex12f ex6f ex6f_getcoeffs ex6 adv_1d adv_diff_2d ex6_cf_sp
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
+# Define a variable containing all the tests that the make check runs
+export CHECK_TARGETS = adv_diff_2d
 
 # Include any additional flags we input
 CFLAGS += $(CFLAGS_INPUT)
@@ -172,6 +174,11 @@ depend:
 build_tests: $(OUT)
 	+$(MAKE) -C tests $(TEST_TARGETS)
 
+# Build the tests used in the check
+.PHONY: build_tests_check
+build_tests_check: $(OUT)
+	+$(MAKE) -C tests $(CHECK_TARGETS)	
+
 # Separate out the different test cases
 # Only run the tests that load the 32 bit test matrix in /tests/data
 # if PETSC has been configured without 64 bit integers
@@ -214,6 +221,11 @@ tests_medium: build_tests
 tests: build_tests
 	$(MAKE) tests_short
 	$(MAKE) tests_medium
+
+# A quick sanity check with simple tests
+.PHONY: check
+check: build_tests_check
+	$(MAKE) -C tests run_check
 
 # Build the Python module with Cython
 .PHONY: python

@@ -94,7 +94,7 @@ To build the PFLARE library:
 
 Then if desired:
 
-3) Call ``make tests`` in the top level directory to check the build worked with some simple tests.
+3) Call ``make check`` in the top level directory to check the build worked with some simple tests.
 
 Then if desired, build and test the Python interface:
 
