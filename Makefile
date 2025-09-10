@@ -225,7 +225,8 @@ tests: build_tests
 # A quick sanity check with simple tests
 .PHONY: check
 check: build_tests_check
-	$(MAKE) -C tests run_check
+	@$(MAKE) --no-print-directory -C tests run_check
+	@$(MAKE) --no-print-directory -C python run_check
 
 # Build the Python module with Cython
 .PHONY: python

@@ -53,6 +53,19 @@ run_tests:
 	@echo "Test PMISR DDC CF splitting with Python in parallel"
 	$(MPIEXEC) -n 2 python3 ex2_cf_splitting.py	
 
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_check:
+# Only run if the python module has been built (i.e. a .so file exists)
+ifneq ($(wildcard *.so),)
+	@echo "Python check"
+	@python3 ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK"
+	@echo "Parallel Python check"
+	@$(MPIEXEC) -n 2 python3 ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK"	
+else
+	@echo "Python check skipped (PFLARE python module has not been built)"
+endif	
+
 # Cleanup
 clean::
 	$(RM) *.so; $(RM) pflare.c; $(RM) pflare_defs.c; $(RM) -r build/; $(RM) -r __pycache__/
