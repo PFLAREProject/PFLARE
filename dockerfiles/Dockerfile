@@ -23,8 +23,9 @@ RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
-    make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" && \
+    make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" && make python && \
+    make -j2 check "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" && \
     make -j2 tests "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" && \
-    make python && make tests_python
+    make tests_python
 
 WORKDIR /build/PFLARE
