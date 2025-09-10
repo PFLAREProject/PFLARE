@@ -217,10 +217,13 @@ tests_medium: build_tests
 	$(MAKE) tests_medium_parallel
 
 # Build and run all the tests
+# The python tests only run if the python module has been built
 .PHONY: tests
 tests: build_tests
-	$(MAKE) tests_short
-	$(MAKE) tests_medium
+	$(MAKE) tests_short && \
+	$(MAKE) tests_medium && \
+	$(MAKE) tests_python && \
+	echo "All tests passed: OK"
 
 # A quick sanity check with simple tests
 .PHONY: check
