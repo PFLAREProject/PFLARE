@@ -88,7 +88,7 @@ To build the PFLARE library:
 1) Set `PETSC_DIR` and `PETSC_ARCH` environmental variables.
 2) Call ``make`` in the top level directory.
 
-Then if desired, build the Python interface:
+If PETSc was configured with petsc4py, the PFLARE Python interfaces can be built:
 
 3) Call ``make python`` in the top level directory.
 
@@ -96,14 +96,14 @@ Then if desired, check that PFLARE was built successfully by running some simple
 
 4) Call ``make check`` in the top level directory.
 
-Please use the `release` branch of PETSc and compile directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS` before calling `make` for PFLARE. If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos.
+Please use the `release` branch of PETSc and compile directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS` before calling `make` for PFLARE. 
 
-PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. 
+If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos. PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. 
 
-An up to date Docker image is also available on Dockerhub which includes a build of PFLARE along with all dependencies. To download this Docker image and run the tests use:
+An up to date Docker image is also available on Dockerhub which includes a build of PFLARE along with all dependencies. To download this Docker image and check the build use:
 
      docker run -it stevendargaville/pflare
-     make tests
+     make check
 
 ## Linking to PFLARE
 
