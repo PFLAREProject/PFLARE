@@ -220,9 +220,9 @@ tests_medium: build_tests
 # The python tests only run if the python module has been built
 .PHONY: tests
 tests: build_tests
-	$(MAKE) tests_short && \
-	$(MAKE) tests_medium && \
-	$(MAKE) tests_python && \
+	($(MAKE) tests_short || (echo "Short tests failed" && exit 1)) && \
+	($(MAKE) tests_medium || (echo "Medium tests failed" && exit 1)) && \
+	($(MAKE) tests_python || (echo "Python tests failed" && exit 1)) && \
 	echo "All tests passed: OK"
 
 # A quick sanity check with simple tests
