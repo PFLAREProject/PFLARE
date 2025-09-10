@@ -28,6 +28,8 @@ python:
 	python3 setup.py build_ext --inplace
 
 run_tests:
+# Only run if the python module has been built (i.e. a .so file exists)
+ifneq ($(wildcard *.so),)
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python"
@@ -52,6 +54,22 @@ run_tests:
 	python3 ex2_cf_splitting.py
 	@echo "Test PMISR DDC CF splitting with Python in parallel"
 	$(MPIEXEC) -n 2 python3 ex2_cf_splitting.py	
+else
+	@echo "Python tests skipped (PFLARE Python module has not been built)"
+endif		
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_check:
+# Only run if the python module has been built (i.e. a .so file exists)
+ifneq ($(wildcard *.so),)
+	@echo "Python check"
+	@python3 ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
+	@echo "Parallel Python check"
+	@$(MPIEXEC) -n 2 python3 ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)	
+else
+	@echo "Python check skipped (PFLARE Python module has not been built)"
+endif	
 
 # Cleanup
 clean::

@@ -81,30 +81,33 @@ The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarch
 
 ## Building PFLARE
 
-This library depends on MPI, BLAS, LAPACK and PETSc (>=3.23.1) configured with a graph partitioner (e.g., ParMETIS).
-
-Please use the `release` branch of PETSc and compile directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS` before calling `make` for PFLARE. If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos.
-
-PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. PFLARE uses the same compilers and flags defined in the PETSc configure.
+This library depends on MPI, BLAS, LAPACK and PETSc (>=3.23.1) configured with a graph partitioner (e.g., ParMETIS). PFLARE uses the same compilers and flags defined in the PETSc configure.
 
 To build the PFLARE library:
 
 1) Set `PETSC_DIR` and `PETSC_ARCH` environmental variables.
-2) Call ``make`` in the top level directory to build the PFLARE library.
+2) Call ``make`` in the top level directory.
 
-Then if desired:
+If PETSc was configured with petsc4py, the PFLARE Python interfaces can be built:
 
-3) Call ``make tests`` in the top level directory to check the build worked with some simple tests.
+3) Call ``make python`` in the top level directory.
 
-Then if desired, build and test the Python interface:
+Then if desired, check that PFLARE was built successfully by running some simple tests:
 
-4) Call ``make python`` in the top level directory to build the Python module.
-5) Call ``make tests_python`` in the top level directory to check the Python build worked with some simple Python tests.  
+4) Call ``make check`` in the top level directory.
 
-An up to date Docker image is also available on Dockerhub which includes a build of PFLARE along with all dependencies. To download this Docker image and run the tests use:
+The full set of tests can be run with:
+
+5) Call ``make tests`` in the top level directory.
+
+Please use the `release` branch of PETSc and compile directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS` before calling `make` for PFLARE. 
+
+If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos. PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. 
+
+An up to date Docker image is also available on Dockerhub which includes a build of PFLARE along with all dependencies. To download this Docker image and check the build:
 
      docker run -it stevendargaville/pflare
-     make tests
+     make check
 
 ## Linking to PFLARE
 
