@@ -181,7 +181,7 @@ jobs:
 #             BRANCH=${{ env.BRANCH }}
 #             ARCH=arch-linux-nvidia
             
-  intel_opt_serial_test:
+  intel_opt:
     runs-on: ubuntu-22.04
     needs: [setup]
     env:
