@@ -5,7 +5,8 @@
 # This uses the compilers and flags defined in the PETSc configuration
 # ~~~~~~~~~~~~~~~~~
 
-# Can be overriden from the command line if needed
+# Can be overridden from the command line if needed
+PYTHON ?= python3
 CFLAGS   =
 FFLAGS   =
 CPPFLAGS =
