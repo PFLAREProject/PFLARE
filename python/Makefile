@@ -5,7 +5,8 @@
 # This uses the compilers and flags defined in the PETSc configuration
 # ~~~~~~~~~~~~~~~~~
 
-# Can be overriden from the command line if needed
+# Can be overridden from the command line if needed
+PYTHON ?= python3
 CFLAGS   =
 FFLAGS   =
 CPPFLAGS =
@@ -15,17 +16,22 @@ FPPFLAGS =
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
 
+# Make sure the setup.py can see the petsc compilers
+export CC
+export CXX
+export FC
+export LDSHARED := $(CC) -shared
+
 # Required during compilation to tell Cython where to look for libpflare
-# The CC variable has been defined to use the MPI wrapper for the C compiler in the parent Makefile
-export LIBRARY_PATH := $(LIBDIR)
+export LIBRARY_PATH := $(if $(LIBRARY_PATH),$(LIBRARY_PATH):)$(LIBDIR)
 # Required to run the python tests, telling it the location of libpetsc, blas, lapack and libpflare
-export LD_LIBRARY_PATH := $(PETSC_DIR)/$(PETSC_ARCH)/lib:$(LIBDIR)
+export LD_LIBRARY_PATH := $(if $(LD_LIBRARY_PATH),$(LD_LIBRARY_PATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(LIBDIR)
 # Required to locate petsc4py and our pflare python module
-export PYTHONPATH=$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(CURDIR)/python
+export PYTHONPATH := $(if $(PYTHONPATH),$(PYTHONPATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(CURDIR)
 
 # Build the Cython interface
 python:
-	python3 setup.py build_ext --inplace
+	$(PYTHON) setup.py build_ext --inplace
 
 run_tests:
 # Only run if the python module has been built (i.e. a .so file exists)
@@ -33,27 +39,27 @@ ifneq ($(wildcard *.so),)
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python"
-	python3 ex2.py
+	$(PYTHON) ex2.py
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python in parallel"
-	$(MPIEXEC) -n 2 python3 ex2.py
+	$(MPIEXEC) -n 2 $(PYTHON) ex2.py
 #
 	@echo ""
 	@echo "Test lAIR with GMRES polynomials for 2D finite difference stencil with Python"
-	python3 ex2.py -pc_air_z_type lair
+	$(PYTHON) ex2.py -pc_air_z_type lair
 	@echo "Test lAIR with GMRES polynomials for 2D finite difference stencil with Python in parallel"
-	$(MPIEXEC) -n 2 python3 ex2.py -pc_air_z_type lair
+	$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_air_z_type lair
 #
 	@echo ""
 	@echo "Test single level GMRES polynomial preconditioning with Python"
-	python3 ex2.py -pc_type pflareinv -pc_pflareinv_type power
+	$(PYTHON) ex2.py -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test single level GMRES polynomial preconditioning with Python in parallel"
-	$(MPIEXEC) -n 2 python3 ex2.py -pc_type pflareinv -pc_pflareinv_type power
+	$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_type pflareinv -pc_pflareinv_type power
 #
 	@echo ""
 	@echo "Test PMISR DDC CF splitting with Python"
-	python3 ex2_cf_splitting.py
+	$(PYTHON) ex2_cf_splitting.py
 	@echo "Test PMISR DDC CF splitting with Python in parallel"
-	$(MPIEXEC) -n 2 python3 ex2_cf_splitting.py	
+	$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py	
 else
 	@echo "Python tests skipped (PFLARE Python module has not been built)"
 endif		
@@ -64,9 +70,9 @@ run_check:
 # Only run if the python module has been built (i.e. a .so file exists)
 ifneq ($(wildcard *.so),)
 	@echo "Python check"
-	@python3 ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
+	@$(PYTHON) ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
 	@echo "Parallel Python check"
-	@$(MPIEXEC) -n 2 python3 ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)	
+	@$(MPIEXEC) -n 2 $(PYTHON) ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)	
 else
 	@echo "Python check skipped (PFLARE Python module has not been built)"
 endif	

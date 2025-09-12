@@ -100,7 +100,7 @@ The full set of tests can be run with:
 
 5) Call ``make tests`` in the top level directory.
 
-Please use the `release` branch of PETSc and compile directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS` before calling `make` for PFLARE. 
+Please use the `release` branch of PETSc and compile directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS, CXXFLAGS, CPPFLAGS` before calling `make` for PFLARE. 
 
 If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos. PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. 
 
