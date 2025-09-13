@@ -268,3 +268,16 @@ jobs:
          export PFLARE_KOKKOS_DEBUG=1 &&
          export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
          make -j2 && make -j2 tests
+
+  # Builds PFLARE with spack when the main branch is updated
+  # Does this by sending a dispatch event to the PFLARE_spack repository
+  notify_spack:
+    runs-on: ubuntu-22.04
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Trigger PFLARE_spack repository_dispatch
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PFLARE_SPACK_TOKEN }}
+          repository: PFLAREProject/PFLARE_spack
+          event-type: pflare-main-updated
