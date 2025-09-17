@@ -584,3 +584,66 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
   PetscFunctionReturn(0);
 }
+
+// Annoying as the fortran pointer returned by MatSeqAIJGetArray seems to be 
+// the wrong size and that can break things sometimes
+PETSC_INTERN void MatSetAllValues_cpu(Mat *A, double val)
+{
+
+  MPI_Comm        acomm;
+  PetscMPIInt     size;
+  PetscInt local_rows, local_cols;
+
+  PetscObjectGetComm((PetscObject)(*A), &acomm);
+  MPI_Comm_size(acomm, &size);
+
+  Mat_MPIAIJ *mat_mpi = NULL;
+  Mat mat_local = NULL, mat_nonlocal = NULL; 
+
+  // Get the existing output mats
+  if (size != 1)
+  {
+     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
+     mat_local = mat_mpi->A;
+     mat_nonlocal = mat_mpi->B;
+  }
+  else
+  {
+     mat_local = *A;
+  } 
+
+  MatGetLocalSize(*A, &local_rows, &local_cols);
+
+  PetscInt shift = 0, n;
+  PetscBool symmetric=PETSC_FALSE, inodecompressed=PETSC_FALSE, done;
+  const PetscInt *ad_ia, *ad_ja, *ao_ia, *ao_ja;
+  MatGetRowIJ(mat_local, shift, symmetric, inodecompressed, &n, &ad_ia, &ad_ja, &done);
+
+  PetscScalar *xx_v;
+  MatSeqAIJGetArrayWrite(mat_local, &xx_v);
+
+  // Set all the values in the local part
+  for (PetscInt i = 0; i < ad_ia[local_rows]; i++)
+  {
+      xx_v[i] = val;
+  }
+  MatSeqAIJRestoreArrayWrite(mat_local, &xx_v);
+  MatRestoreRowIJ(mat_local, shift, symmetric, inodecompressed, &n, &ad_ia, &ad_ja, &done);
+
+  // Now the non-local part
+  if (size != 1)
+  {
+      MatGetRowIJ(mat_nonlocal, shift, symmetric, inodecompressed, &n, &ao_ia, &ao_ja, &done);
+      MatSeqAIJGetArrayWrite(mat_nonlocal, &xx_v);
+
+      // Set all the values in the local part
+      for (PetscInt i = 0; i < ao_ia[local_rows]; i++)
+      {
+         xx_v[i] = val;
+      }
+      MatSeqAIJRestoreArrayWrite(mat_nonlocal, &xx_v);
+      MatRestoreRowIJ(mat_nonlocal, shift, symmetric, inodecompressed, &n, &ao_ia, &ao_ja, &done);
+  }  
+  return;
+
+}

@@ -648,18 +648,22 @@ logical, protected :: kokkos_debug_global = .FALSE.
    subroutine MatSetAllValues(input_mat, val)
 
       ! Sets all the values in the matrix to be val
+      ! The fortran interface to MatSeqAIJGetArray is buggy
+      ! so we do this in C and call it from here
    
       ! ~~~~~~~~~~
       ! Input 
       type(tMat), intent(in)  :: input_mat
       PetscScalar, intent(in) :: val
 
-#if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array
+#if defined(PETSC_HAVE_KOKKOS)                     
       PetscErrorCode :: ierr
       MatType :: mat_type
 #endif        
       ! ~~~~~~~~~~
+
+      A_array = input_mat%v             
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
@@ -667,86 +671,17 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then  
 
-         A_array = input_mat%v             
          call MatSetAllValues_kokkos(A_array, val) 
 
       else
-         call MatSetAllValues_cpu(input_mat, val)          
+         call MatSetAllValues_cpu(A_array, val)          
       end if
 #else
-      call MatSetAllValues_cpu(input_mat, val)    
+      call MatSetAllValues_cpu(A_array, val)    
 #endif        
 
 
    end subroutine MatSetAllValues
-
-   !------------------------------------------------------------------------------------------------------------------------
-   
-   subroutine MatSetAllValues_cpu(input_mat, val)
-
-      ! Sets all the values in the matrix to be val
-   
-      ! ~~~~~~~~~~
-      ! Input 
-      type(tMat), intent(in)  :: input_mat
-      PetscScalar, intent(in) :: val
-
-      MPI_Comm :: MPI_COMM_MATRIX
-      integer :: errorcode, comm_size
-      PetscErrorCode :: ierr
-      type(tMat) :: Ad, Ao     
-      PetscScalar, pointer :: xx_v(:)
-      PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
-      PetscInt, dimension(:), pointer :: colmap
-      PetscInt :: shift = 0, n_ad, n_ao, local_rows, local_cols
-      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
-
-      ! ~~~~~~~~~~
-
-      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
-      ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
-      call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
-
-      if (comm_size /= 1) then
-         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr) 
-      else
-         Ad = input_mat    
-      end if      
-
-      ! Need to know how many nnzs in xx_v, as its size isn't set
-      call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
-      if (.NOT. done) then
-         print *, "Pointers not set in call to MatGetRowIJ"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-      if (comm_size /= 1) then
-         call MatGetRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
-         if (.NOT. done) then
-            print *, "Pointers not set in call to MatGetRowIJ"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if
-      end if       
-
-      ! Sequential part
-      call MatSeqAIJGetArray(Ad,xx_v,ierr)
-      xx_v(1:ad_ia(local_rows+1)) = val
-      call MatSeqAIJRestoreArray(Ad,xx_v,ierr)
-     
-      ! MPI part
-      if (comm_size /= 1) then
-         call MatSeqAIJGetArray(Ao,xx_v,ierr)
-         xx_v(1:ao_ia(local_rows+1)) = val
-         call MatSeqAIJRestoreArray(Ao,xx_v,ierr)         
-      end if   
-      
-      ! Restore the sequantial pointers once we're done
-      call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
-      if (comm_size /= 1) then
-         call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
-      end if        
-
-   end subroutine MatSetAllValues_cpu   
 
   !------------------------------------------------------------------------------------------------------------------------
    

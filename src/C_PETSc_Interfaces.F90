@@ -264,7 +264,18 @@ module c_petsc_interfaces
          PetscReal, value :: val
       end subroutine MatSetAllValues_kokkos         
  
-   end interface   
+   end interface
+   
+   interface   
+      
+      subroutine MatSetAllValues_cpu(A_array, val) &
+         bind(c, name="MatSetAllValues_cpu")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscReal, value :: val
+      end subroutine MatSetAllValues_cpu
+ 
+   end interface     
    
    interface   
       
