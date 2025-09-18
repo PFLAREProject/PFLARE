@@ -171,7 +171,7 @@ ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 	$(AR) $(AR_FLAGS) $(OUT) $(OBJS)
 	$(RANLIB) $(OUT)
 else
-ifeq ($(findstring darwin,$(PETSC_ARCH)),darwin)
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
    # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
 	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -install_name @rpath/$(notdir $(OUT))
 else	
