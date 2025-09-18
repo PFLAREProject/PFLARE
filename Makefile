@@ -59,15 +59,16 @@ ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
 export PETSC_HAVE_KOKKOS := 1
 endif
 
-# Add PETSc libdir to LDFLAGS if not already present
-LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
-# These are the libraries we depend on explicitly 
-# Add LAPACK/BLAS/PETSc/Kokkos to the link line
-# Everything else should be picked up by us linking to petsc
-# Ordering matters
-LDFLAGS += -lpetsc ${BLASLAPACK_LIB}
+# To prevent overlinking with conda builds, only explicitly link 
+# to the libraries we use in pflare
+ifeq ($(CONDA_BUILD),1)
+    PETSC_LINK_LIBS = -L${PETSC_DIR}/${PETSC_ARCH}/lib -lpetsc ${BLASLAPACK_LIB}
 ifeq ($(PETSC_HAVE_KOKKOS),1)
-LDFLAGS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
+    PETSC_LINK_LIBS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
+endif	 
+# Otherwise just use everything petsc uses to be safe
+else
+    PETSC_LINK_LIBS = $(LDLIBS)
 endif
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -169,14 +170,13 @@ $(OUT): $(OBJS)
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)	
 	$(AR) $(AR_FLAGS) $(OUT) $(OBJS)
 	$(RANLIB) $(OUT)
-# Link ONLY against -lpetsc to prevent overlinking in conda-forge.	
 else
 ifeq ($(findstring darwin,$(PETSC_ARCH)),darwin)
    # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
-	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(LDFLAGS) -install_name @rpath/$(notdir $(OUT))
+	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -install_name @rpath/$(notdir $(OUT))
 else	
    # Linux: Use -shared and set the soname.
-	$(LINK.F) -shared -o $(OUT) $(OBJS) $(LDFLAGS) -Wl,-soname,$(notdir $(OUT))
+	$(LINK.F) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
 endif
 endif
 

@@ -69,9 +69,9 @@ run_check:
 # Only run if the python module has been built (i.e. a .so file exists)
 ifneq ($(wildcard *.so),)
 	@echo "Python check"
-	@$(PYTHON) ex2.py -ksp_max_it 5&& echo "OK" || (echo "FAIL" && exit 1)
+	@$(PYTHON) ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
 	@echo "Parallel Python check"
-	@$(MPIEXEC) -n 2 $(PYTHON) ex2.py -ksp_max_it 5 && echo "OK" || (echo "FAIL" && exit 1)	
+	@$(MPIEXEC) -n 2 $(PYTHON) ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)	
 else
 	@echo "Python check skipped (PFLARE Python module has not been built)"
 endif	
