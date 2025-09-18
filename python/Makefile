@@ -20,7 +20,6 @@ include ${PETSC_DIR}/lib/petsc/conf/rules
 export CC
 export CXX
 export FC
-export LDSHARED := $(CC) -shared
 
 # Required during compilation to tell Cython where to look for libpflare
 export LIBRARY_PATH := $(if $(LIBRARY_PATH),$(LIBRARY_PATH):)$(LIBDIR)
