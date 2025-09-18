@@ -33,7 +33,16 @@ CPPFLAGS += $(CPPFLAGS_INPUT)
 FPPFLAGS += $(FPPFLAGS_INPUT)
 
 # Link to pflare - order is important
-LDLIBS := -L$(LIBDIR) -lpflare -Wl,-rpath,$(LIBDIR):$(LDLIBS)
+LDFLAGS += -Wl,-rpath,$(LIBDIR)
+LDLIBS  += -L$(LIBDIR) -lpflare
+
+# Export platform runtime search path for test runs
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+  # macos
+  export DYLD_FALLBACK_LIBRARY_PATH=$(LIBDIR)
+else
+  export LD_LIBRARY_PATH=$(LIBDIR)
+endif
 
 clean::
 	$(RM) -f $(TEST_TARGETS)
