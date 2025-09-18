@@ -158,8 +158,15 @@ $(OUT): $(OBJS)
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)	
 	$(AR) $(AR_FLAGS) $(OUT) $(OBJS)
 	$(RANLIB) $(OUT)
+# Link ONLY against -lpetsc to prevent overlinking in conda-forge.	
+else
+ifeq ($(findstring darwin,$(PETSC_ARCH)),darwin)
+   # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
+	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) -lpetsc $(LDFLAGS) -install_name @rpath/$(notdir $(OUT))
 else	
-	$(LINK.F) -shared -o $(OUT) $(OBJS) $(LDLIBS)
+   # Linux: Use -shared and set the soname.
+	$(LINK.F) -shared -o $(OUT) $(OBJS) -lpetsc $(LDFLAGS) -Wl,-soname,$(notdir $(OUT))
+endif
 endif
 
 # Generate dependencies for parallel build with makedepf90
