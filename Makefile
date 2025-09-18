@@ -41,11 +41,6 @@ CXXPPFLAGS = $(INCLUDE)
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
 
-# Add PETSc libdir to LDFLAGS if not already present
-LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
-# Add LAPACK/BLAS to the link line
-LDFLAGS += ${LAPACK_LIB} ${BLAS_LIB}
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,6 +57,15 @@ endif
 export PETSC_HAVE_KOKKOS := 0
 ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
 export PETSC_HAVE_KOKKOS := 1
+endif
+
+# Add PETSc libdir to LDFLAGS if not already present
+LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
+# Add LAPACK/BLAS to the link line
+# Followed by petsc, ordering matters
+LDFLAGS += ${LAPACK_LIB} ${BLAS_LIB} -lpetsc
+ifeq ($(PETSC_HAVE_KOKKOS),1)
+LDFLAGS += ${KOKKOS_LIB}
 endif
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,10 +171,10 @@ ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 else
 ifeq ($(findstring darwin,$(PETSC_ARCH)),darwin)
    # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
-	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) -lpetsc $(LDFLAGS) -install_name @rpath/$(notdir $(OUT))
+	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(LDFLAGS) -install_name @rpath/$(notdir $(OUT))
 else	
    # Linux: Use -shared and set the soname.
-	$(LINK.F) -shared -o $(OUT) $(OBJS) -lpetsc $(LDFLAGS) -Wl,-soname,$(notdir $(OUT))
+	$(LINK.F) -shared -o $(OUT) $(OBJS) $(LDFLAGS) -Wl,-soname,$(notdir $(OUT))
 endif
 endif
 
