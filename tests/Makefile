@@ -33,7 +33,17 @@ CPPFLAGS += $(CPPFLAGS_INPUT)
 FPPFLAGS += $(FPPFLAGS_INPUT)
 
 # Link to pflare - order is important
-LDLIBS := -L$(LIBDIR) -lpflare -Wl,-rpath,$(LIBDIR):$(LDLIBS)
+LDFLAGS += -Wl,-rpath,$(LIBDIR)
+LDLIBS  += -L$(LIBDIR) -lpflare
+
+EXISTING_LD := $(LD_LIBRARY_PATH)
+EXISTING_DYLD := $(DYLD_FALLBACK_LIBRARY_PATH)
+
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+  export DYLD_FALLBACK_LIBRARY_PATH=$(LIBDIR)$(if $(EXISTING_DYLD),:$(EXISTING_DYLD))
+else
+  export LD_LIBRARY_PATH=$(LIBDIR)$(if $(EXISTING_LD),:$(EXISTING_LD))
+endif
 
 clean::
 	$(RM) -f $(TEST_TARGETS)
