@@ -61,9 +61,11 @@ endif
 
 # Add PETSc libdir to LDFLAGS if not already present
 LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
-# Add LAPACK/BLAS to the link line
-# Followed by petsc, ordering matters
-LDFLAGS += ${LAPACK_LIB} ${BLAS_LIB} -lpetsc
+# These are the libraries we depend on explicitly 
+# Add LAPACK/BLAS/PETSc/Kokkos to the link line
+# Everything else should be picked up by us linking to petsc
+# Ordering matters
+LDFLAGS += -lpetsc ${BLASLAPACK_LIB}
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 LDFLAGS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
 endif
