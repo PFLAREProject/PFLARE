@@ -896,10 +896,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in)    :: x_mat
       PetscScalar, intent(in)   :: alpha
       
-      MPI_Comm :: MPI_COMM_MATRIX
-      integer :: comm_size, errorcode
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
+      MPI_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array
       MatType :: mat_type
       Mat :: temp_mat
@@ -974,10 +974,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       MatReuse, intent(in)          :: reuse
       type(tMat), intent(inout)     :: output_mat
 
-      MPI_Comm :: MPI_COMM_MATRIX
-      integer :: comm_size, errorcode
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
+      MPI_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
       integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
       logical :: reuse_logical
