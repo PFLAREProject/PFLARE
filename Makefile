@@ -41,6 +41,9 @@ CXXPPFLAGS = $(INCLUDE)
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
 
+# Add PETSc libdir to LDFLAGS if not already present
+LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
 # ~~~~~~~~~~~~~~~~~~~~~~~~
