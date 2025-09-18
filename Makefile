@@ -59,6 +59,18 @@ ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
 export PETSC_HAVE_KOKKOS := 1
 endif
 
+# To prevent overlinking with conda builds, only explicitly link 
+# to the libraries we use in pflare
+ifeq ($(CONDA_BUILD),1)
+    PETSC_LINK_LIBS = -L${PETSC_DIR}/${PETSC_ARCH}/lib -lpetsc ${BLASLAPACK_LIB}
+ifeq ($(PETSC_HAVE_KOKKOS),1)
+    PETSC_LINK_LIBS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
+endif	 
+# Otherwise just use everything petsc uses to be safe
+else
+    PETSC_LINK_LIBS = $(LDLIBS)
+endif
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -158,8 +170,14 @@ $(OUT): $(OBJS)
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)	
 	$(AR) $(AR_FLAGS) $(OUT) $(OBJS)
 	$(RANLIB) $(OUT)
+else
+ifeq ($(findstring darwin,$(PETSC_ARCH)),darwin)
+   # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
+	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -install_name @rpath/$(notdir $(OUT))
 else	
-	$(LINK.F) -shared -o $(OUT) $(OBJS) $(LDLIBS)
+   # Linux: Use -shared and set the soname.
+	$(LINK.F) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
+endif
 endif
 
 # Generate dependencies for parallel build with makedepf90
