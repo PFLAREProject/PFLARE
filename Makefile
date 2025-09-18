@@ -65,7 +65,7 @@ LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
 # Followed by petsc, ordering matters
 LDFLAGS += ${LAPACK_LIB} ${BLAS_LIB} -lpetsc
 ifeq ($(PETSC_HAVE_KOKKOS),1)
-LDFLAGS += ${KOKKOS_LIB}
+LDFLAGS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
 endif
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
