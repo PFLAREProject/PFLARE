@@ -23,8 +23,13 @@ export FC
 
 # Required during compilation to tell Cython where to look for libpflare
 export LIBRARY_PATH := $(if $(LIBRARY_PATH),$(LIBRARY_PATH):)$(LIBDIR)
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+# macOS
+export DYLD_FALLBACK_LIBRARY_PATH := $(if $(DYLD_FALLBACK_LIBRARY_PATH),$(DYLD_FALLBACK_LIBRARY_PATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(LIBDIR)
+else
 # Required to run the python tests, telling it the location of libpetsc, blas, lapack and libpflare
 export LD_LIBRARY_PATH := $(if $(LD_LIBRARY_PATH),$(LD_LIBRARY_PATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(LIBDIR)
+endif
 # Required to locate petsc4py and our pflare python module
 export PYTHONPATH := $(if $(PYTHONPATH),$(PYTHONPATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(CURDIR)
 
