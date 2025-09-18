@@ -43,6 +43,8 @@ include ${PETSC_DIR}/lib/petsc/conf/rules
 
 # Add PETSc libdir to LDFLAGS if not already present
 LDFLAGS += -L${PETSC_DIR}/${PETSC_ARCH}/lib
+# Add LAPACK/BLAS to the link line
+LDFLAGS += ${LAPACK_LIB} ${BLAS_LIB}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
