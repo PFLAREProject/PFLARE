@@ -147,7 +147,12 @@ SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT)
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 OUT = $(LIBDIR)/libpflare.a
 else
+# mac osx name is different
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+OUT = $(LIBDIR)/libpflare.dylib
+else
 OUT = $(LIBDIR)/libpflare.so
+endif
 endif
 
 # Dependency generation with makedepf90

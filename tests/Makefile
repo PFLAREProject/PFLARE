@@ -36,12 +36,13 @@ FPPFLAGS += $(FPPFLAGS_INPUT)
 LDFLAGS += -Wl,-rpath,$(LIBDIR)
 LDLIBS  += -L$(LIBDIR) -lpflare
 
-# Export platform runtime search path for test runs
+EXISTING_LD := $(LD_LIBRARY_PATH)
+EXISTING_DYLD := $(DYLD_FALLBACK_LIBRARY_PATH)
+
 ifeq ($(shell uname -s 2>/dev/null),Darwin)
-  # macos
-  export DYLD_FALLBACK_LIBRARY_PATH=$(LIBDIR)
+  export DYLD_FALLBACK_LIBRARY_PATH=$(LIBDIR)$(if $(EXISTING_DYLD),:$(EXISTING_DYLD))
 else
-  export LD_LIBRARY_PATH=$(LIBDIR)
+  export LD_LIBRARY_PATH=$(LIBDIR)$(if $(EXISTING_LD),:$(EXISTING_LD))
 endif
 
 clean::
