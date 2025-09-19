@@ -124,8 +124,8 @@ An up to date Docker image is available on Dockerhub. To download the image and 
 For Fortran/C:
 
 1) Link the library `libpflare` to your application; it is output to `lib/`
-2) For Fortran: add `include/finclude/` to your include path
-3) For C: add `include/` to your include path
+2) Add `include/` to your include path
+3) For Fortran also add the location of the .mod files to your include path (compiler dependent, often `lib/`, `include/` or the top level directory)
 
 For Python:
 
