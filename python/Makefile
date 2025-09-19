@@ -37,9 +37,10 @@ export PYTHONPATH := $(if $(PYTHONPATH),$(PYTHONPATH):)$(PETSC_DIR)/$(PETSC_ARCH
 python:
 	$(PYTHON) setup.py build_ext --inplace
 
+.ONESHELL:
 run_tests:
-# Only run if the python module has been built (i.e. a .so file exists)
-ifneq ($(wildcard *.so),)
+   # Only run the rest of the recipe if the python module has been built and is importable
+	@$(PYTHON) -c "import pflare" 2>/dev/null || { echo 'Python check skipped (PFLARE Python module not built or not found)'; exit 0; }
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python"
@@ -63,23 +64,20 @@ ifneq ($(wildcard *.so),)
 	@echo "Test PMISR DDC CF splitting with Python"
 	$(PYTHON) ex2_cf_splitting.py
 	@echo "Test PMISR DDC CF splitting with Python in parallel"
-	$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py	
-else
-	@echo "Python tests skipped (PFLARE Python module has not been built)"
-endif		
+	$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py		
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
+.ONESHELL:
 run_check:
-# Only run if the python module has been built (i.e. a .so file exists)
-ifneq ($(wildcard *.so),)
+
+   # Only run the rest of the recipe if the python module has been built and is importable
+	@$(PYTHON) -c "import pflare" 2>/dev/null || { echo 'Python check skipped (PFLARE Python module not built or not found)'; exit 0; }
+
 	@echo "Python check"
-	@$(PYTHON) ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)
+	@$(PYTHON) ex2.py -ksp_max_it 5 && echo "OK" || (echo "FAIL" && exit 1)
 	@echo "Parallel Python check"
-	@$(MPIEXEC) -n 2 $(PYTHON) ex2.py -ksp_max_it 5 > /dev/null 2>&1 && echo "OK" || (echo "FAIL" && exit 1)	
-else
-	@echo "Python check skipped (PFLARE Python module has not been built)"
-endif	
+	@$(MPIEXEC) -n 2 $(PYTHON) ex2.py -ksp_max_it 5 && echo "OK" || (echo "FAIL" && exit 1)	
 
 # Cleanup
 clean::
