@@ -32,9 +32,10 @@ FFLAGS += $(FFLAGS_INPUT)
 CPPFLAGS += $(CPPFLAGS_INPUT)
 FPPFLAGS += $(FPPFLAGS_INPUT)
 
-# Link to pflare - order is important
+# Link to pflare - order is important 
+# pflare must be first for static linking
 LDFLAGS += -Wl,-rpath,$(LIBDIR)
-LDLIBS  += -L$(LIBDIR) -lpflare
+LDLIBS  := -L$(LIBDIR) -lpflare $(LDLIBS)
 
 EXISTING_LD := $(LD_LIBRARY_PATH)
 EXISTING_DYLD := $(DYLD_FALLBACK_LIBRARY_PATH)
