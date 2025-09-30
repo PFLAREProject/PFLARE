@@ -54,7 +54,7 @@ contains
       PetscMPIInt      rank
       PetscBool        pflag
       PetscReal norm_first_solve, norm_third_solve
-      common /my_data/ pflag,rank,norm_first_solve
+      common /my_data/ norm_first_solve,rank, pflag
 
       one = 1
       call KSPSetInitialGuessNonzero(ksp,PETSC_FALSE,ierr)
