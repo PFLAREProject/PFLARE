@@ -820,6 +820,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
    MPI_Comm MPI_COMM_MATRIX;
    PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
 
+   bool trigger_dd_ratio_compute = *max_dd_ratio > 0;
+
    // Do a fixed alpha_diag
    PetscInt search_size;
    if (fraction_swap < 0) {
@@ -830,10 +832,22 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
    else {
       // Only need to go through the biggest % of indices
       PetscInt one = 1;
-      search_size = std::max(one, static_cast<PetscInt>(double(local_rows_aff) * fraction_swap));
+      
+      // If we are trying to hit a given max_dd_ratio, then we need to continue coarsening, even
+      // if we only change one dof at a time
+      if (trigger_dd_ratio_compute)
+      {
+         search_size = std::max(one, static_cast<PetscInt>(double(local_rows_aff) * fraction_swap));
+      }
+      // If we're not trying to hit a given max_dd_ratio, then if fraction_swap is small
+      // we allow it to just not swap anything if the number of local rows is small
+      // This stops many lower levels in parallel where we are only changing one dof at a time
+      else
+      {
+         search_size = static_cast<PetscInt>(double(local_rows_aff) * fraction_swap);
+      }
    }
    
-   bool trigger_dd_ratio_compute = *max_dd_ratio > 0;
    PetscReal max_dd_ratio_achieved = 0.0;
    // Compute the maximum diagonal dominance ratio
    if (trigger_dd_ratio_compute) 

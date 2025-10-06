@@ -780,6 +780,8 @@ module pmisr_ddc
       ! The indices are the numbering in Aff matrix
       call ISGetIndices(is_fine, is_pointer, ierr)  
       call ISGetLocalSize(is_fine, fine_size, ierr) 
+
+      trigger_dd_ratio_compute = max_dd_ratio > 0
       
       ! Do a fixed alpha_diag
       if (fraction_swap < 0) then
@@ -790,13 +792,22 @@ module pmisr_ddc
       else
          ! Only need to go through the biggest % of indices
          frac_size = int(dble(fine_size) * fraction_swap)
-         search_size = max(one, frac_size)
+
+         ! If we are trying to hit a given max_dd_ratio, then we need to continue coarsening, even
+         ! if we only change one dof at a time, otherwise we could get stuck         
+         if (trigger_dd_ratio_compute) then
+            search_size = max(one, frac_size)
+         ! If we're not trying to hit a given max_dd_ratio, then if fraction_swap is small
+         ! we allow it to just not swap anything if the number of local rows is small
+         ! This stops many lower levels in parallel where we are only changing one dof at a time            
+         else
+            search_size = frac_size
+         end if
       end if
       
       ! ~~~~~~~~~~~~~
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)      
-      trigger_dd_ratio_compute = max_dd_ratio > 0
  
       ! Pull out Aff for ease of use
       call MatCreateSubMatrix(input_mat, &
