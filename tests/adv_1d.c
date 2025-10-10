@@ -18,7 +18,7 @@ int main(int argc, char **args)
   Mat         A;              /* linear system matrix */
   KSP         ksp;            /* linear solver context */
   PC          pc;             /* preconditioner context */
-  PetscInt    i, n = 100, its, global_row_start, global_row_end_plus_one, local_size;
+  PetscInt    i, n = 100, global_row_start, global_row_end_plus_one, local_size;
   PetscInt    start_assign;
   PetscCount  counter;
   KSPConvergedReason reason;
@@ -174,10 +174,7 @@ int main(int argc, char **args)
    KSPSolve(ksp, b, x);
   }
 
-  KSPGetIterationNumber(ksp,&its);
   KSPGetConvergedReason(ksp,&reason);
-
-  PetscPrintf(PETSC_COMM_WORLD, "iterations %3" PetscInt_FMT "\n", its);
 
   /*
      Free work space.  All PETSc objects should be destroyed when they

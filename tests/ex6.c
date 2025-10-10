@@ -9,11 +9,9 @@ Input arguments are:\n\
 int main(int argc,char **args)
 {
   PetscErrorCode ierr;
-  PetscInt       its;
 #if defined(PETSC_USE_LOG)
   PetscLogStage  stage1,stage2, gpu_copy;
 #endif
-  PetscReal      norm;
   Vec            x,b,u, diag_vec, b_diff_type;
   Mat            A, A_diff_type;
   char           file[PETSC_MAX_PATH_LEN];
@@ -202,15 +200,7 @@ int main(int argc,char **args)
    ierr = PetscLogStagePop();CHKERRQ(ierr);  
   }
 
-  /* Show result */
-  ierr = MatMult(A,x,u);CHKERRQ(ierr);
-  ierr = VecAXPY(u,-1.0,b);CHKERRQ(ierr);
-  ierr = VecNorm(u,NORM_2,&norm);CHKERRQ(ierr);
-  ierr = KSPGetIterationNumber(ksp,&its);CHKERRQ(ierr);
   ierr = KSPGetConvergedReason(ksp,&reason);CHKERRQ(ierr);
- 
-  ierr = PetscPrintf(PETSC_COMM_WORLD, "Number of iterations = %3" PetscInt_FMT "\n", its);
-  ierr = PetscPrintf(PETSC_COMM_WORLD, "Residual norm = %g\n", (double)norm);
 
   /* Cleanup */
   ierr = KSPDestroy(&ksp);CHKERRQ(ierr);

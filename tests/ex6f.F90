@@ -165,7 +165,7 @@
       PetscInt II,Istart,Iend
       PetscInt count,nsteps,one
       PetscErrorCode ierr
-      PetscInt its, start, start_plus_one
+      PetscInt start, start_plus_one
       PetscBool regen
       Mat     A
       KSP     ksp
@@ -240,9 +240,6 @@
 ! Solve linear system
       call KSPSolve(ksp,b,x,ierr)
       call KSPGetConvergedReason(ksp, reason, ierr)
-      call KSPGetIterationNumber(ksp,its,ierr)  
-      if (rank .eq. 0) write(6,101) count,its      
- 101  format('Solve number ',i5,' iterations ',i5)
       if (reason%v < 0) then
          error stop 1
       end if    

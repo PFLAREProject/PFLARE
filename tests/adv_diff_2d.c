@@ -39,7 +39,7 @@ int main(int argc,char **argv)
   PC             pc;
   DM             da;
   PetscErrorCode ierr;
-  PetscInt its, M, N;
+  PetscInt M, N;
   PetscScalar theta, alpha, u, v, u_test, v_test, L_x, L_y, L_x_test, L_y_test;
   PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale;
   Vec x, b, diag_vec;
@@ -210,11 +210,8 @@ int main(int argc,char **argv)
   }
 
   // Write out the iteration count
-  KSPGetIterationNumber(ksp,&its);
   KSPGetConvergedReason(ksp,&reason);
    
-  ierr = PetscPrintf(PETSC_COMM_WORLD, "Number of iterations = %3" PetscInt_FMT "\n", its);
-
   // ~~~~~~~~~~~~~~
   // ~~~~~~~~~~~~~~  
 

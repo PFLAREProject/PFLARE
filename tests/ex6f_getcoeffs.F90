@@ -42,7 +42,7 @@ contains
       PetscInt II,Istart,Iend
       PetscInt count,nsteps,one,start, start_plus_one
       PetscErrorCode ierr
-      PetscInt its, num_levels, petsc_level
+      PetscInt num_levels, petsc_level
       Mat     A
       KSP     ksp
       PC pc
@@ -216,14 +216,10 @@ contains
       ! ~~~~~~~~~~~~~~~~~~
 
       call KSPGetConvergedReason(ksp, reason, ierr)
-      call KSPGetIterationNumber(ksp,its,ierr)
       if (reason%v > 0) then
-         if (rank .eq. 0) write(6,101) count,its
       else
-         if (rank .eq. 0) print *, "Solve FAILED"
          error stop 1
       end if
-   101  format('Solve number ',i5,' iterations ',i5)
 
       ! On the third solve, check the residuals of the first and third solve
       ! are the same
