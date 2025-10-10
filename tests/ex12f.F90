@@ -13,10 +13,9 @@
 !
 
       PetscErrorCode  ierr
-      PetscInt its,m,n,mlocal,nlocal
+      PetscInt m,n,mlocal,nlocal
       PetscBool  flg, second_solve
       PetscScalar      none
-      PetscReal        norm
       Vec              x,b,u, b_diff_type
       Mat              A, A_diff_type
       character*(128)  f
@@ -117,13 +116,7 @@
       end if
 
 ! Show result
-      call MatMult(A,x,u,ierr)
-      call VecAXPY(u,none,b,ierr)
-      call VecNorm(u,NORM_2,norm,ierr)
-      call KSPGetIterationNumber(ksp,its,ierr)
       call KSPGetConvergedReason(ksp,reason,ierr)
-      write(6,101) norm,its
- 101  format('Residual norm ',1pe9.2,' iterations ',i5)
 
       call KSPDestroy(ksp,ierr)
       call VecDestroy(b,ierr)
