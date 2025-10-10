@@ -1851,3 +1851,14 @@ PETSC_EXTERN void PCRegister_AIR()
 {
    PCRegister("air", PCCreate_AIR);
 }
+
+// This is called automatically when libpflare is loaded by 
+// petsc as a shared library - this enables --download-pflare in the petsc
+// configure to just work
+// Is unused if static linking
+PETSC_EXTERN PetscErrorCode PetscDLLibraryRegister_petscpflare(void)
+{
+  PetscFunctionBegin;
+  PCRegister_AIR();
+  PetscFunctionReturn(0);
+}
