@@ -274,4 +274,48 @@ clean::
 	$(RM) $(SRCDIR)/*.o
 	$(RM) $(CURDIR)/*.mod
 	$(MAKE) -C tests clean
-	$(MAKE) -C python clean
+	$(MAKE) -C python clean	
+
+# Make install
+# Default install location which can be overridden by user
+PREFIX        ?= /usr/local
+INCLUDEDIR_INSTALL := $(DESTDIR)$(PREFIX)/include
+LIBDIR_INSTALL     := $(DESTDIR)$(PREFIX)/lib
+# Writes out a pkg-config file
+PKGCONFIGDIR_INSTALL := $(LIBDIR_INSTALL)/pkgconfig
+INSTALL ?= install
+INSTALL_DATA = $(INSTALL) -m 644
+INSTALL_PROG = $(INSTALL) -m 755
+
+.PHONY: install install_python
+install: all
+	@echo "==> Installing PFLARE into $(DESTDIR)$(PREFIX)"
+	@$(INSTALL) -d $(INCLUDEDIR_INSTALL) $(LIBDIR_INSTALL) $(PKGCONFIGDIR_INSTALL)
+	@if [ -f $(OUT) ]; then \
+		$(INSTALL_PROG) $(OUT) $(LIBDIR_INSTALL)/; \
+	else \
+		echo "ERROR: Library $(OUT) not found"; exit 1; \
+	fi
+	@if [ -d include ]; then \
+		cd include && \
+		find . -type d ! -name '.' -exec $(INSTALL) -d "$(INCLUDEDIR_INSTALL)/{}" \; && \
+		find . -type f -name "*.h" -exec $(INSTALL_DATA) "{}" "$(INCLUDEDIR_INSTALL)/{}" \; ; \
+	fi
+	@for m in *.mod lib/*.mod; do \
+		if [ -f "$$m" ]; then $(INSTALL_DATA) "$$m" $(INCLUDEDIR_INSTALL)/; fi; \
+	done
+	@$(MAKE) --no-print-directory install_python PREFIX="$(PREFIX)" DESTDIR="$(DESTDIR)"
+	@printf 'prefix=%s\nexec_prefix=$${prefix}\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: pflare\nDescription: Library with parallel iterative methods for asymmetric linear systems built on PETSc.\nVersion: 1.24.9\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lpflare\nRequires: petsc\n' "$(PREFIX)" > $(PKGCONFIGDIR_INSTALL)/pflare.pc
+	@echo '==> Install complete'
+
+install_python:
+	@if ls python/pflare_defs.cpython-*.so >/dev/null 2>&1; then \
+		PYVER=$${PYVER:-$$(python -c "import sys;print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>/dev/null || echo "3.11")}; \
+		SITELIB_INSTALL="$(DESTDIR)$(PREFIX)/lib/python$${PYVER}/site-packages"; \
+		$(INSTALL) -d "$$SITELIB_INSTALL"; \
+		$(INSTALL_PROG) python/pflare_defs.cpython-*.so "$$SITELIB_INSTALL/"; \
+		if [ -f python/pflare.py ]; then $(INSTALL_DATA) python/pflare.py "$$SITELIB_INSTALL/"; fi; \
+		echo "==> Installed Python bindings to $$SITELIB_INSTALL"; \
+	else \
+		echo "==> Python extension not built, skipping Python install"; \
+	fi
