@@ -148,6 +148,9 @@ run_tests_load_parallel:
 run_tests_no_load_serial:
 #
 	@echo ""
+	@echo "Test AIRG with random diagonally dominant matrix"
+	./matrandom -ksp_max_it 5
+	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
 	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
@@ -546,6 +549,8 @@ run_check:
 
 #
 	@echo ""
+	@echo "Serial Fortran check"
+	@./matrandom -ksp_max_it 5  && echo "OK" || (echo "FAIL" && exit 1)	
 	@echo "Serial check"
 	@./adv_diff_2d -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5  && echo "OK" || (echo "FAIL" && exit 1)
 	@echo "Parallel check"

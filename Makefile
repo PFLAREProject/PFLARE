@@ -131,7 +131,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
 # Define a variable containing all the tests that the make check runs
-export CHECK_TARGETS = adv_diff_2d
+export CHECK_TARGETS = adv_diff_2d matrandom
 
 # Include any additional flags we input
 CFLAGS += $(CFLAGS_INPUT)
