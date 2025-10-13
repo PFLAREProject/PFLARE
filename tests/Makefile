@@ -24,15 +24,10 @@ INCLUDE := -I$(CURDIR)/../ -I../include
 
 # These flags need to be before the petsc variable definition so they 
 # get added to the rules (particularly for kokkos)
-override CFLAGS += $(CFLAGS_INPUT) $(INCLUDE)
-override FFLAGS += $(FFLAGS_INPUT) $(INCLUDE)
-override FPPFLAGS += $(FPPFLAGS_INPUT) $(INCLUDE)
-override CPPFLAGS += $(CPPFLAGS_INPUT) $(INCLUDE)
-override CXXPPFLAGS += $(CXXPPFLAGS_INPUT) $(INCLUDE)
-override CXXFLAGS += $(CXXFLAGS_INPUT) $(INCLUDE)
-override CUDAC_FLAGS += $(CUDAC_FLAGS_INPUT) $(INCLUDE)
-override HIPC_FLAGS += $(HIPC_FLAGS_INPUT) $(INCLUDE)
-override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
+CPPFLAGS = $(INCLUDE)
+FPPFLAGS = $(INCLUDE)
+CPPFLAGS = $(INCLUDE)
+CXXPPFLAGS = $(INCLUDE)
 
 # Read in the petsc compile/linking variables and makefile rules
 include ${PETSC_DIR}/lib/petsc/conf/variables
