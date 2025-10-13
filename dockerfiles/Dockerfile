@@ -25,12 +25,12 @@ RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
-    make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132 -Werror" \
-             "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" && \
+    make -j2 FFLAGS="-ffree-line-length-132 -ffixed-line-length-132 -Werror" \
+             CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \
     make python && \
-    make -j2 check "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132 -Werror" \
-                   "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" && \
-    make -j2 tests "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132 -Werror" \
-                   "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror"
+    make -j2 check FFLAGS="-ffree-line-length-132 -ffixed-line-length-132 -Werror" \
+                   CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \
+    make -j2 tests FFLAGS="-ffree-line-length-132 -ffixed-line-length-132 -Werror" \
+                   CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror"
 
 WORKDIR /build/PFLARE
