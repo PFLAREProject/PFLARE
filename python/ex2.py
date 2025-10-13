@@ -211,8 +211,6 @@ ksp.solve(b,x)
 x = x - u # x.axpy(-1.0,u)
 norm = x.norm(PETSc.NormType.NORM_2)
 its = ksp.getIterationNumber()
-if rank == 0: 
-   print("its", its)
 reason = ksp.getConvergedReason()
 if (reason < 0):
     sys.exit(1)
