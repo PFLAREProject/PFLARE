@@ -40,10 +40,10 @@ RUN set -euo pipefail; \
         sed -i 's/-on_error_abort//g' python/Makefile; \
     fi && \
     if [ "${MALLOC_DUMP}" = "true" ]; then LOG=/tmp/test.log; : > "$LOG"; else LOG=/dev/null; fi; \
-    make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" 2>&1 | tee -a "$LOG"; \
+    make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" 2>&1 | tee -a "$LOG"; \
     make python 2>&1 | tee -a "$LOG"; \
-    make -j2 check "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" 2>&1 | tee -a "$LOG"; \
-    make -j2 tests "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" 2>&1 | tee -a "$LOG"; \
+    make -j2 check "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" 2>&1 | tee -a "$LOG"; \
+    make -j2 tests "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" 2>&1 | tee -a "$LOG"; \
     if [ "${MALLOC_DUMP}" = "true" ]; then \
       if grep -q "PetscTrMalloc" "$LOG"; then \
         echo "Error: found PetscTrMalloc in test output" >&2; exit 1; \
