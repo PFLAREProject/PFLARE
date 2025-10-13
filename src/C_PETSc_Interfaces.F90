@@ -4,6 +4,7 @@ module c_petsc_interfaces
    use petscsys
 
 #include "petsc/finclude/petscsys.h"
+#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 
@@ -114,8 +115,8 @@ module c_petsc_interfaces
             bind(c, name="allreducesum_petscint_mine")
             use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscInt, value :: first_int
-         PetscInt :: return_int
+         integer(PFLARE_PETSCINT_C_KIND), value :: first_int
+         integer(PFLARE_PETSCINT_C_KIND) :: return_int
 
       end subroutine allreducesum_petscint_mine         
  
@@ -126,9 +127,9 @@ module c_petsc_interfaces
       subroutine GenerateIS_ProcAgglomeration_c(proc_stride, global_size, local_size_reduced, start) &
          bind(c, name="GenerateIS_ProcAgglomeration_c")
          use iso_c_binding
-         PetscInt, value :: proc_stride
-         PetscInt, value :: global_size
-         PetscInt :: local_size_reduced, start
+         integer(PFLARE_PETSCINT_C_KIND), value :: proc_stride
+         integer(PFLARE_PETSCINT_C_KIND), value :: global_size
+         integer(PFLARE_PETSCINT_C_KIND) :: local_size_reduced, start
 
       end subroutine GenerateIS_ProcAgglomeration_c         
  
@@ -140,8 +141,8 @@ module c_petsc_interfaces
          bind(c, name="MatPartitioning_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscInt, value :: n_parts
-         PetscInt :: proc_stride
+         integer(PFLARE_PETSCINT_C_KIND), value :: n_parts
+         integer(PFLARE_PETSCINT_C_KIND) :: proc_stride
          integer(c_long_long) :: index
       end subroutine MatPartitioning_c         
  
@@ -165,7 +166,7 @@ module c_petsc_interfaces
          bind(c, name="MatGetNNZs_local_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscInt :: nnzs
+         integer(PFLARE_PETSCINT_C_KIND) :: nnzs
       end subroutine MatGetNNZs_local_c
  
    end interface
@@ -176,7 +177,7 @@ module c_petsc_interfaces
          bind(c, name="MatGetNNZs_both_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscInt :: nnzs_local, nnzs_nonlocal
+         integer(PFLARE_PETSCINT_C_KIND) :: nnzs_local, nnzs_nonlocal
       end subroutine MatGetNNZs_both_c
  
    end interface      
@@ -198,7 +199,7 @@ module c_petsc_interfaces
          bind(c, name="PCGetSetupCalled_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscInt :: setupcalled
+         integer(PFLARE_PETSCINT_C_KIND) :: setupcalled
       end subroutine PCGetSetupCalled_c         
  
    end interface
@@ -233,7 +234,7 @@ module c_petsc_interfaces
          bind(c, name="remove_small_from_sparse_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: tol
+         real(PFLARE_PETSCREAL_C_KIND), value :: tol
          integer(c_long_long) :: B_array
          integer(c_int), value :: relative_max_row_tolerance_int
          integer(c_int), value :: lump_int
@@ -250,7 +251,7 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_int), value :: lump_int, alpha_int
-         PetscReal, value :: alpha
+         real(PFLARE_PETSCREAL_C_KIND), value :: alpha
       end subroutine remove_from_sparse_match_kokkos         
  
    end interface   
@@ -261,7 +262,7 @@ module c_petsc_interfaces
          bind(c, name="MatSetAllValues_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: val
+         real(PFLARE_PETSCREAL_C_KIND), value :: val
       end subroutine MatSetAllValues_kokkos         
  
    end interface
@@ -272,7 +273,7 @@ module c_petsc_interfaces
          bind(c, name="MatSetAllValues_cpu")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: val
+         real(PFLARE_PETSCREAL_C_KIND), value :: val
       end subroutine MatSetAllValues_cpu
  
    end interface     
@@ -302,7 +303,7 @@ module c_petsc_interfaces
          bind(c, name="set_VecISCopyLocal_kokkos_our_level")
          use iso_c_binding
          integer(c_int), value :: our_level
-         PetscInt, value :: global_row_start
+         integer(PFLARE_PETSCINT_C_KIND), value :: global_row_start
          integer(c_long_long) :: index_fine
          integer(c_long_long) :: index_coarse
       end subroutine set_VecISCopyLocal_kokkos_our_level         
@@ -351,8 +352,8 @@ module c_petsc_interfaces
          bind(c, name="ddc_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: fraction_swap
-         PetscReal :: max_dd_ratio
+         real(PFLARE_PETSCREAL_C_KIND), value :: fraction_swap
+         real(PFLARE_PETSCREAL_C_KIND) :: max_dd_ratio
       end subroutine ddc_kokkos         
  
    end interface 
@@ -384,7 +385,7 @@ module c_petsc_interfaces
          use iso_c_binding
          integer(c_long_long) :: A_array, indices_fine, indices_coarse
          integer(c_long_long) :: B_array
-         PetscInt, value :: global_row_start
+         integer(PFLARE_PETSCINT_C_KIND), value :: global_row_start
          integer(c_int), value :: identity_int, reuse_int
       end subroutine compute_P_from_W_kokkos         
  
@@ -408,7 +409,7 @@ module c_petsc_interfaces
          use iso_c_binding
          integer(c_long_long) :: A_array, indices_fine, indices_coarse, indices_orig
          integer(c_long_long) :: B_array
-         PetscInt, value :: global_row_start
+         integer(PFLARE_PETSCINT_C_KIND), value :: global_row_start
          integer(c_int), value :: identity_int, reuse_int, reuse_indices_int
       end subroutine compute_R_from_Z_kokkos         
  
@@ -478,7 +479,7 @@ module c_petsc_interfaces
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
-         PetscScalar, value :: alpha
+         PFLARE_PETSCSCALAR_C_TYPE, value :: alpha
       end subroutine MatAXPY_kokkos         
  
    end interface

@@ -5,6 +5,7 @@ module pcpflareinv_interfaces
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
+#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 
@@ -25,9 +26,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVGetOrder")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         PetscInt                      :: b
-         PetscErrorCode                :: PCPFLAREINVGetOrder_mine
+         integer(c_long_long), value            :: A_array
+         integer(PFLARE_PETSCINT_C_KIND)        :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetOrder_mine
       end function PCPFLAREINVGetOrder_mine 
    end interface
    
@@ -36,9 +37,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVGetSparsityOrder")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         PetscInt                      :: b
-         PetscErrorCode                :: PCPFLAREINVGetSparsityOrder_mine
+         integer(c_long_long), value            :: A_array
+         integer(PFLARE_PETSCINT_C_KIND)        :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetSparsityOrder_mine
       end function PCPFLAREINVGetSparsityOrder_mine 
    end interface    
 
@@ -47,9 +48,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVGetType")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         PCPFLAREINVType               :: b
-         PetscErrorCode                :: PCPFLAREINVGetType_mine
+         integer(c_long_long), value            :: A_array
+         integer(c_int)                         :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetType_mine
       end function PCPFLAREINVGetType_mine 
    end interface
 
@@ -58,9 +59,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVGetMatrixFree")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         integer                       :: b
-         PetscErrorCode                :: PCPFLAREINVGetMatrixFree_mine
+         integer(c_long_long), value            :: A_array
+         integer(c_int)                         :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetMatrixFree_mine
       end function PCPFLAREINVGetMatrixFree_mine 
    end interface    
    
@@ -73,9 +74,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVSetOrder")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         PetscInt, value               :: b
-         PetscErrorCode                :: PCPFLAREINVSetOrder_mine
+         integer(c_long_long), value            :: A_array
+         integer(PFLARE_PETSCINT_C_KIND), value :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetOrder_mine
       end function PCPFLAREINVSetOrder_mine 
    end interface
    
@@ -84,9 +85,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVSetSparsityOrder")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         PetscInt, value               :: b
-         PetscErrorCode                :: PCPFLAREINVSetSparsityOrder_mine
+         integer(c_long_long), value            :: A_array
+         integer(PFLARE_PETSCINT_C_KIND), value :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetSparsityOrder_mine
       end function PCPFLAREINVSetSparsityOrder_mine 
    end interface    
 
@@ -95,9 +96,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVSetType")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         PCPFLAREINVType, value        :: b
-         PetscErrorCode                :: PCPFLAREINVSetType_mine
+         integer(c_long_long), value            :: A_array
+         integer(c_int), value                  :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetType_mine
       end function PCPFLAREINVSetType_mine 
    end interface
 
@@ -106,9 +107,9 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVSetMatrixFree")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-         integer(c_long_long), value   :: A_array
-         integer, value                :: b
-         PetscErrorCode                :: PCPFLAREINVSetMatrixFree_mine
+         integer(c_long_long), value            :: A_array
+         integer(c_int), value                  :: b
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetMatrixFree_mine
       end function PCPFLAREINVSetMatrixFree_mine 
    end interface  
 

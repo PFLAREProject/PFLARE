@@ -6,7 +6,6 @@ module constrain_z_or_w
    use petsc_helper
 
 #include "petsc/finclude/petscksp.h"
-#include "petscversion.h"
 
    implicit none
    public     
@@ -107,10 +106,7 @@ module constrain_z_or_w
       end if   
       
       if (called_get_vecs) then
-#if PETSC_VERSION_GE(3,24,0)
-         ! Restore the nullspace vectors if >= petsc 3.24
          call MatNullSpaceRestoreVecs(nullspace, has_constant, no_nullspace, null_vecs, ierr)
-#endif         
       end if
       
    end subroutine get_near_nullspace
