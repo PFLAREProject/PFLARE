@@ -8,8 +8,13 @@
 # Get the flags we have on input
 CFLAGS_INPUT := $(CFLAGS)
 FFLAGS_INPUT := $(FFLAGS)
-CPPFLAGS_INPUT := $(CPPFLAGS)
 FPPFLAGS_INPUT := $(FPPFLAGS)
+CPPFLAGS_INPUT := $(CPPFLAGS)
+CXXPPFLAGS_INPUT := $(CXXPPFLAGS)
+CXXFLAGS_INPUT := $(CXXFLAGS)
+CUDAC_FLAGS_INPUT := $(CUDAC_FLAGS)
+HIPC_FLAGS_INPUT := $(HIPC_FLAGS)
+SYCLC_FLAGS_INPUT := $(SYCLC_FLAGS)
 
 # ~~~~~~~~~~~
 # PFLARE specific changes
@@ -17,6 +22,8 @@ FPPFLAGS_INPUT := $(FPPFLAGS)
 # Include directories - include top level directory in case compilers output modules there
 INCLUDE := -I$(CURDIR)/../ -I../include
 
+# These flags need to be before the petsc variable definition so they 
+# get added to the rules (particularly for kokkos)
 CPPFLAGS = $(INCLUDE)
 FPPFLAGS = $(INCLUDE)
 CPPFLAGS = $(INCLUDE)
@@ -26,11 +33,17 @@ CXXPPFLAGS = $(INCLUDE)
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
 
-# Include any additional flags we input
-CFLAGS += $(CFLAGS_INPUT)
-FFLAGS += $(FFLAGS_INPUT)
-CPPFLAGS += $(CPPFLAGS_INPUT)
-FPPFLAGS += $(FPPFLAGS_INPUT)
+# We then have to add the flags back in after the petsc rules/variables
+# have overwritten
+override CFLAGS += $(CFLAGS_INPUT) $(INCLUDE)
+override FFLAGS += $(FFLAGS_INPUT) $(INCLUDE)
+override FPPFLAGS += $(FPPFLAGS_INPUT) $(INCLUDE)
+override CPPFLAGS += $(CPPFLAGS_INPUT) $(INCLUDE)
+override CXXPPFLAGS += $(CXXPPFLAGS_INPUT) $(INCLUDE)
+override CXXFLAGS += $(CXXFLAGS_INPUT) $(INCLUDE)
+override CUDAC_FLAGS += $(CUDAC_FLAGS_INPUT) $(INCLUDE)
+override HIPC_FLAGS += $(HIPC_FLAGS_INPUT) $(INCLUDE)
+override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
 
 # Link to pflare - order is important 
 # pflare must be first for static linking
