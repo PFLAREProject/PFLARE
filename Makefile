@@ -32,11 +32,6 @@ export LIBDIR := $(CURDIR)/lib
 # Include directories - include top level directory in case compilers output modules there
 INCLUDE := -I$(CURDIR) -I$(INCLUDEDIR)
 
-CPPFLAGS = $(INCLUDE)
-FPPFLAGS = $(INCLUDE)
-CPPFLAGS = $(INCLUDE)
-CXXPPFLAGS = $(INCLUDE)
-
 # Read in the petsc compile/linking variables and makefile rules
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
@@ -134,14 +129,19 @@ endif
 export CHECK_TARGETS = adv_diff_2d matrandom
 
 # Include any additional flags we input
-CFLAGS += $(CFLAGS_INPUT)
-FFLAGS += $(FFLAGS_INPUT)
-CPPFLAGS += $(CPPFLAGS_INPUT)
-CXXFLAGS += $(CXXFLAGS_INPUT)
-FPPFLAGS += $(FPPFLAGS_INPUT)
-CUDAC_FLAGS += $(CUDAC_FLAGS_INPUT)
-HIPC_FLAGS += $(HIPC_FLAGS_INPUT)
-SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT)
+override CFLAGS += $(CFLAGS_INPUT)
+override FFLAGS += $(FFLAGS_INPUT)
+override CPPFLAGS += $(CPPFLAGS_INPUT)
+override CXXFLAGS += $(CXXFLAGS_INPUT)
+override FPPFLAGS += $(FPPFLAGS_INPUT)
+override CUDAC_FLAGS += $(CUDAC_FLAGS_INPUT)
+override HIPC_FLAGS += $(HIPC_FLAGS_INPUT)
+override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT)
+
+override CFLAGS += $(INCLUDE)
+override FPPFLAGS += $(INCLUDE)
+override CPPFLAGS += $(INCLUDE)
+override CXXPPFLAGS += $(INCLUDE)
 
 # Output the library - either static or dynamic
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
