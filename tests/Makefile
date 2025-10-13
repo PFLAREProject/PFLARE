@@ -39,6 +39,7 @@ override CFLAGS += $(INCLUDE)
 override FPPFLAGS += $(INCLUDE)
 override CPPFLAGS += $(INCLUDE)
 override CXXPPFLAGS += $(INCLUDE)
+override CXXFLAGS += $(INCLUDE)
 
 # Link to pflare - order is important 
 # pflare must be first for static linking
