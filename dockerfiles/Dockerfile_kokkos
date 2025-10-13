@@ -28,8 +28,8 @@ RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
-    make -j2 "FFLAGS=-Werror" "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" && \ 
-    make -j2 check "FFLAGS=-Werror" "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror" && \
-    make -j2 tests "FFLAGS=-Werror" "CFLAGS=-Werror" "CXXFLAGS=-Werror" "CPPFLAGS=-Werror"
+    make -j2 FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \ 
+    make -j2 check FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \
+    make -j2 tests FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror"
 
 WORKDIR /build/PFLARE
