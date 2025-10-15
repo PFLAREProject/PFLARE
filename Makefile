@@ -38,7 +38,6 @@ INCLUDE := -I$(CURDIR) -I$(INCLUDEDIR)
 # get added to the rules (particularly for kokkos)
 CPPFLAGS = $(INCLUDE)
 FPPFLAGS = $(INCLUDE)
-CPPFLAGS = $(INCLUDE)
 CXXPPFLAGS = $(INCLUDE)
 MPICXX_INCLUDES = $(INCLUDE)
 
