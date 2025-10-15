@@ -34,8 +34,11 @@ export LIBDIR := $(CURDIR)/lib
 # Include directories - include top level directory in case compilers output modules there
 INCLUDE := -I$(CURDIR) -I$(INCLUDEDIR)
 
-# These flags need to be before the petsc variable definition so they 
-# get added to the rules (particularly for kokkos)
+# These flags need to be before the petsc variable definitions/rules are included
+# This is because the petsc/conf/rules defines LINK.kokkos.cxx :=
+# so any flags we add after the variable and rules include are ignored
+# and our kokkos tests would fail to link
+CFLAGS = $(INCLUDE)
 CPPFLAGS = $(INCLUDE)
 FPPFLAGS = $(INCLUDE)
 CXXPPFLAGS = $(INCLUDE)
