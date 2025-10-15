@@ -6,6 +6,9 @@
 # ~~~~~~~~~~~~~~~~~
 
 # Get the flags we have on input
+# These are appended to the flags set by PETSc
+# so that users can add their own flags
+# but not override the PETSc ones which we use for our builds
 CFLAGS_INPUT := $(CFLAGS)
 FFLAGS_INPUT := $(FFLAGS)
 FPPFLAGS_INPUT := $(FPPFLAGS)
@@ -27,11 +30,13 @@ INCLUDE := -I$(CURDIR)/../ -I../include
 # This is because the petsc/conf/rules defines LINK.kokkos.cxx :=
 # so any flags we add after the variable and rules include are ignored
 # and our kokkos tests would fail to link
-CFLAGS = $(INCLUDE)
-CPPFLAGS = $(INCLUDE)
-FPPFLAGS = $(INCLUDE)
-CXXPPFLAGS = $(INCLUDE)
-MPICXX_INCLUDES = $(INCLUDE)
+# These need to be overridden or the user passing in these flags on the command line
+# would override these values and our includes would be lost 
+override CFLAGS += $(INCLUDE)
+override CPPFLAGS += $(INCLUDE)
+override FPPFLAGS += $(INCLUDE)
+override CXXPPFLAGS += $(INCLUDE)
+override MPICXX_INCLUDES += $(INCLUDE)
 
 # Read in the petsc compile/linking variables and makefile rules
 include ${PETSC_DIR}/lib/petsc/conf/variables
