@@ -13,6 +13,7 @@ CPPFLAGS_INPUT := $(CPPFLAGS)
 CXXPPFLAGS_INPUT := $(CXXPPFLAGS)
 CXXFLAGS_INPUT := $(CXXFLAGS)
 CUDAC_FLAGS_INPUT := $(CUDAC_FLAGS)
+MPICXX_INCLUDES_INPUT := $(MPICXX_INCLUDES)
 HIPC_FLAGS_INPUT := $(HIPC_FLAGS)
 SYCLC_FLAGS_INPUT := $(SYCLC_FLAGS)
 
@@ -22,12 +23,15 @@ SYCLC_FLAGS_INPUT := $(SYCLC_FLAGS)
 # Include directories - include top level directory in case compilers output modules there
 INCLUDE := -I$(CURDIR)/../ -I../include
 
-# These flags need to be before the petsc variable definition so they 
-# get added to the rules (particularly for kokkos)
+# These flags need to be before the petsc variable definitions/rules are included
+# This is because the petsc/conf/rules defines LINK.kokkos.cxx :=
+# so any flags we add after the variable and rules include are ignored
+# and our kokkos tests would fail to link
+CFLAGS = $(INCLUDE)
 CPPFLAGS = $(INCLUDE)
 FPPFLAGS = $(INCLUDE)
-CPPFLAGS = $(INCLUDE)
 CXXPPFLAGS = $(INCLUDE)
+MPICXX_INCLUDES = $(INCLUDE)
 
 # Read in the petsc compile/linking variables and makefile rules
 include ${PETSC_DIR}/lib/petsc/conf/variables
@@ -42,6 +46,7 @@ override CPPFLAGS += $(CPPFLAGS_INPUT) $(INCLUDE)
 override CXXPPFLAGS += $(CXXPPFLAGS_INPUT) $(INCLUDE)
 override CXXFLAGS += $(CXXFLAGS_INPUT) $(INCLUDE)
 override CUDAC_FLAGS += $(CUDAC_FLAGS_INPUT) $(INCLUDE)
+override MPICXX_INCLUDES += $(MPICXX_INCLUDES_INPUT) $(INCLUDE)
 override HIPC_FLAGS += $(HIPC_FLAGS_INPUT) $(INCLUDE)
 override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
 
