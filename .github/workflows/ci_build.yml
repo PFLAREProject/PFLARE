@@ -346,6 +346,85 @@ jobs:
           make python
           make -j3 tests
 
+  # No docker on macos with github actions so have to just build petsc first
+  macos_kokkos_64_bit:
+    runs-on: macos-15
+    needs: [setup]
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Show toolchain
+        run: |
+          sw_vers
+          clang --version
+
+      - name: Install deps
+        run: |
+          brew update
+          brew install gcc open-mpi
+
+      - name: Set up Python venv
+        id: venv
+        run: |
+          set -e
+          python3 -m venv "$RUNNER_TEMP/venv"
+          echo "pybin=$RUNNER_TEMP/venv/bin/python" >> "$GITHUB_OUTPUT"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -U pip setuptools wheel numpy Cython
+
+      - name: Locate Homebrew gfortran and create shim
+        id: gf
+        shell: bash
+        run: |
+          set -e
+          GF=$(ls "$(brew --prefix)"/bin/gfortran-* | head -n1)
+          echo "gf=$GF" >> "$GITHUB_OUTPUT"
+          SHIM_DIR="$RUNNER_TEMP/gfortran-shim"
+          mkdir -p "$SHIM_DIR"
+          ln -sf "$GF" "$SHIM_DIR/gfortran"
+          # Make shim available to future steps
+          echo "$SHIM_DIR" >> "$GITHUB_PATH"
+          # Also use it in THIS step (GITHUB_PATH only affects subsequent steps)
+          export PATH="$SHIM_DIR:$PATH"
+          gfortran --version
+          # Sanity: ensure mpifort exists and can find gfortran now
+          "$(brew --prefix open-mpi)"/bin/mpifort -showme
+
+      - name: Build PETSc (debug, CPU, Open MPI + Fortran + petsc4py)
+        shell: bash
+        env:
+          # Tell Open MPI wrappers exactly which gfortran to invoke
+          OMPI_FC: ${{ steps.gf.outputs.gf }}
+        run: |
+          set -e
+          export PETSC_DIR="$(pwd)/petsc"
+          export PETSC_ARCH="arch-darwin-c-debug"
+          git clone --depth=1 --branch=release https://gitlab.com/petsc/petsc.git
+          cd petsc
+          MPI_BIN="$(brew --prefix open-mpi)/bin"
+          "${{ steps.venv.outputs.pybin }}" configure CC="${MPI_BIN}/mpicc" CXX="${MPI_BIN}/mpicxx" FC="${MPI_BIN}/mpifort" \
+            --with-debugging=1 \
+            --download-metis \
+            --download-parmetis \
+            --download-fblaslapack \
+            --download-kokkos \
+            --download-kokkos-kernels \
+            --with-64-bit-indices \
+            --with-make-np=3 \
+            --with-petsc4py=1 \
+            --with-python-exec="${{ steps.venv.outputs.pybin }}"
+          make -j3
+      - name: Build PFLARE (debug, CPU)
+        shell: bash
+        run: |
+          set -e
+          export PETSC_DIR="$(pwd)/petsc"
+          export PETSC_ARCH="arch-darwin-c-debug"
+          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git
+          cd PFLARE
+          make -j3
+          make python
+          make -j3 tests          
+
   # Builds PFLARE with spack when the main branch is updated
   # Does this by sending a dispatch event to the PFLARE_spack repository
   notify_spack:
