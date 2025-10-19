@@ -69,20 +69,14 @@ override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
 # ~~~~~~~~~~~~~~~~~~~~~~~~
-# Read in the petscconf.h
-CONTENTS := $(file < $(PETSCCONF_H))
-export PETSC_USE_64BIT_INDICES := 0
-ifneq (,$(findstring PETSC_USE_64BIT_INDICES 1,$(CONTENTS)))
-PETSC_USE_64BIT_INDICES := 1
-endif  		  
-PETSC_USE_SHARED_LIBRARIES := 0
-ifneq (,$(findstring PETSC_USE_SHARED_LIBRARIES 1,$(CONTENTS)))
-PETSC_USE_SHARED_LIBRARIES := 1
-endif
-export PETSC_HAVE_KOKKOS := 0
-ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
-export PETSC_HAVE_KOKKOS := 1
-endif
+# Read petscconf.h via awk (portable on macOS)
+define _have_conf
+$(shell awk '/^[[:space:]]*#define[[:space:]]+$(1)[[:space:]]+1/{print 1; exit}' $(PETSCCONF_H))
+endef
+
+export PETSC_USE_64BIT_INDICES := $(if $(call _have_conf,PETSC_USE_64BIT_INDICES),1,0)
+export PETSC_USE_SHARED_LIBRARIES := $(if $(call _have_conf,PETSC_USE_SHARED_LIBRARIES),1,0)
+export PETSC_HAVE_KOKKOS := $(if $(call _have_conf,PETSC_HAVE_KOKKOS),1,0)
 
 # To prevent overlinking with conda builds, only explicitly link 
 # to the libraries we use in pflare
