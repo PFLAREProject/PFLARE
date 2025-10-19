@@ -90,7 +90,7 @@ jobs:
           set -e
           export PETSC_DIR="$(pwd)/petsc"
           export PETSC_ARCH="arch-darwin-c-debug"
-          git clone --depth=1 --branch=main https://gitlab.com/petsc/petsc.git
+          git clone --depth=1 --branch=stevendargaville/mac_pflare_fix https://gitlab.com/stevendargaville/petsc.git
           cd petsc
           MPI_BIN="$(brew --prefix open-mpi)/bin"
           "${{ steps.venv.outputs.pybin }}" configure CC="${MPI_BIN}/mpicc" CXX="${MPI_BIN}/mpicxx" FC="${MPI_BIN}/mpifort" \
