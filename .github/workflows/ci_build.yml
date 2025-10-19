@@ -81,6 +81,11 @@ jobs:
           # Sanity: ensure mpifort exists and can find gfortran now
           "$(brew --prefix open-mpi)"/bin/mpifort -showme
 
+      - name: Start tmate session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true  # optional: restrict access to you          
+
       - name: Build PETSc (debug, CPU, Open MPI + Fortran + petsc4py)
         shell: bash
         env:
