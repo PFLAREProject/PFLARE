@@ -69,31 +69,32 @@ override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
 # ~~~~~~~~~~~~~~~~~~~~~~~~
-# Read in the petscconf.h
-CONTENTS := $(file < $(PETSCCONF_H))
-export PETSC_USE_64BIT_INDICES := 0
-ifneq (,$(findstring PETSC_USE_64BIT_INDICES 1,$(CONTENTS)))
-PETSC_USE_64BIT_INDICES := 1
-endif  		  
-PETSC_USE_SHARED_LIBRARIES := 0
-ifneq (,$(findstring PETSC_USE_SHARED_LIBRARIES 1,$(CONTENTS)))
-PETSC_USE_SHARED_LIBRARIES := 1
-endif
-export PETSC_HAVE_KOKKOS := 0
-ifneq (,$(findstring PETSC_HAVE_KOKKOS 1,$(CONTENTS)))
-export PETSC_HAVE_KOKKOS := 1
-endif
+# Read petscconf.h via awk (portable on macOS)
+define _have_conf
+$(shell awk '/^[[:space:]]*#define[[:space:]]+$(1)[[:space:]]+1/{print 1; exit}' $(PETSCCONF_H))
+endef
+
+export PETSC_USE_64BIT_INDICES := $(if $(call _have_conf,PETSC_USE_64BIT_INDICES),1,0)
+export PETSC_USE_SHARED_LIBRARIES := $(if $(call _have_conf,PETSC_USE_SHARED_LIBRARIES),1,0)
+export PETSC_HAVE_KOKKOS := $(if $(call _have_conf,PETSC_HAVE_KOKKOS),1,0)
 
 # To prevent overlinking with conda builds, only explicitly link 
 # to the libraries we use in pflare
 ifeq ($(CONDA_BUILD),1)
-    PETSC_LINK_LIBS = -L${PETSC_DIR}/${PETSC_ARCH}/lib -lpetsc ${BLASLAPACK_LIB}
+	PETSC_LINK_LIBS = -L${PETSC_DIR}/${PETSC_ARCH}/lib -lpetsc ${BLASLAPACK_LIB}
 ifeq ($(PETSC_HAVE_KOKKOS),1)
-    PETSC_LINK_LIBS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
+	PETSC_LINK_LIBS += ${KOKKOS_LIB} ${KOKKOS_KERNELS_LIB}
 endif	 
 # Otherwise just use everything petsc uses to be safe
 else
-    PETSC_LINK_LIBS = $(LDLIBS)
+	PETSC_LINK_LIBS = $(LDLIBS)
+endif
+
+# On macOS, strip any -Wl,-rpath,* when linking the shared library to avoid duplicate LC_RPATH
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+PETSC_LINK_LIBS_NORPATH := $(strip $(foreach w,$(PETSC_LINK_LIBS),$(if $(findstring -Wl,-rpath,$(w)),,$(w))))
+else
+PETSC_LINK_LIBS_NORPATH := $(PETSC_LINK_LIBS)
 endif
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -115,7 +116,7 @@ OBJS := $(SRCDIR)/Binary_Tree.o \
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
 							  $(SRCDIR)/Grid_Transferk.o \
-                       $(SRCDIR)/VecISCopyLocalk.o \
+							  $(SRCDIR)/VecISCopyLocalk.o \
 							  $(SRCDIR)/PMISR_DDCk.o \
 							  $(SRCDIR)/Gmres_Polyk.o
 endif	
@@ -192,10 +193,10 @@ ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 	$(RANLIB) $(OUT)
 else
 ifeq ($(shell uname -s 2>/dev/null),Darwin)
-   # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
-	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -install_name @rpath/$(notdir $(OUT))
+# macOS: Use -dynamiclib and set a relocatable @rpath install_name. Do not embed rpaths.
+	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS_NORPATH) -install_name @rpath/$(notdir $(OUT))
 else	
-   # Linux: Use -shared and set the soname.
+# Linux: Use -shared and set the soname.
 	$(LINK.F) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
 endif
 endif
