@@ -90,6 +90,13 @@ else
     PETSC_LINK_LIBS = $(LDLIBS)
 endif
 
+# On macOS, strip any -Wl,-rpath,* when linking the shared library to avoid duplicate LC_RPATH
+ifeq ($(shell uname -s 2>/dev/null),Darwin)
+PETSC_LINK_LIBS_NORPATH := $(strip $(foreach w,$(PETSC_LINK_LIBS),$(if $(findstring -Wl,-rpath,$(w)),,$(w))))
+else
+PETSC_LINK_LIBS_NORPATH := $(PETSC_LINK_LIBS)
+endif
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -186,8 +193,8 @@ ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 	$(RANLIB) $(OUT)
 else
 ifeq ($(shell uname -s 2>/dev/null),Darwin)
-   # macOS: Use -dynamiclib and set a relocatable @rpath install_name.
-	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -install_name @rpath/$(notdir $(OUT))
+   # macOS: Use -dynamiclib and set a relocatable @rpath install_name. Do not embed rpaths.
+    $(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS_NORPATH) -install_name @rpath/$(notdir $(OUT))
 else	
    # Linux: Use -shared and set the soname.
 	$(LINK.F) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
