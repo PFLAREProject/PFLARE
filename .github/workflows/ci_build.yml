@@ -103,17 +103,7 @@ jobs:
             --with-petsc4py=1 \
             --with-python-exec="${{ steps.venv.outputs.pybin }}"
           make -j3
-      - name: Build PFLARE (debug, CPU)
-        shell: bash
-        run: |
-          set -e
-          export PETSC_DIR="$(pwd)/petsc"
-          export PETSC_ARCH="arch-darwin-c-debug"
-          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git
-          cd PFLARE
-          make -j3
-          make python
-          make -j3 tests
+          make PETSC_DIR=/Users/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-darwin-c-debug check
 
   # Builds PFLARE with spack when the main branch is updated
   # Does this by sending a dispatch event to the PFLARE_spack repository
