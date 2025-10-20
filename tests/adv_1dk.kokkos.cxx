@@ -30,17 +30,17 @@ int main(int argc, char **args)
   PetscLogStage setup, gpu_copy;
 
   PetscFunctionBeginUser;
-  PetscInitialize(&argc, &args, (char*)0, help);
+  PetscCall(PetscInitialize(&argc, &args, (char*)0, help));
 
-  PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL);
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
   PetscBool second_solve= PETSC_FALSE;
-  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);  
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
   // Register the pflare types
   PCRegister_PFLARE();
 
-  PetscLogStageRegister("Setup", &setup);
-  PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy);
+  PetscCall(PetscLogStageRegister("Setup", &setup));
+  PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
@@ -51,13 +51,13 @@ int main(int argc, char **args)
      Create vectors.  Note that we form 1 vector from scratch and
      then duplicate as needed.
   */
-  VecCreate(PETSC_COMM_WORLD, &x);
-  PetscObjectSetName((PetscObject)x, "Solution");
-  VecSetSizes(x, PETSC_DECIDE, n);
-  VecSetFromOptions(x);
-  VecDuplicate(x, &b);
-  VecGetLocalSize(x, &local_size);
-  VecGetOwnershipRange(x, &global_row_start, &global_row_end_plus_one);
+  PetscCall(VecCreate(PETSC_COMM_WORLD, &x));
+  PetscCall(PetscObjectSetName((PetscObject)x, "Solution"));
+  PetscCall(VecSetSizes(x, PETSC_DECIDE, n));
+  PetscCall(VecSetFromOptions(x));
+  PetscCall(VecDuplicate(x, &b));
+  PetscCall(VecGetLocalSize(x, &local_size));
+  PetscCall(VecGetOwnershipRange(x, &global_row_start, &global_row_end_plus_one));
 
   // Row and column indices for COO assembly
   PetscInt *oor, *ooc;
@@ -70,13 +70,13 @@ int main(int argc, char **args)
      preallocation of matrix memory is crucial for attaining good
      performance. See the matrix chapter of the users manual for details.
   */
-  MatCreate(PETSC_COMM_WORLD, &A);
-  MatSetSizes(A, local_size, local_size, n, n);
-  MatSetFromOptions(A);
+  PetscCall(MatCreate(PETSC_COMM_WORLD, &A));
+  PetscCall(MatSetSizes(A, local_size, local_size, n, n));
+  PetscCall(MatSetFromOptions(A));
 
   // Going to do assembly in the COO interface so assembly happens on the gpu when needed
   // Allocate memory for the coordinates
-  PetscMalloc2(2 * local_size, &oor, 2 * local_size, &ooc);
+  PetscCall(PetscMalloc2(2 * local_size, &oor, 2 * local_size, &ooc));
 
   // ~~~~~~~~~~
   // MatSetPreallocationCOO - happens on the host
@@ -117,9 +117,9 @@ int main(int argc, char **args)
 
   // Set the indices
   counter = 2 * local_size;
-  MatSetPreallocationCOO(A, counter, oor, ooc);
+  PetscCall(MatSetPreallocationCOO(A, counter, oor, ooc));
   // Can delete oor and ooc now
-  PetscFree2(oor, ooc);
+  PetscCall(PetscFree2(oor, ooc));
 
   // ~~~~~~~~~~
   // MatSetValuesCOO - happens on the device
@@ -139,25 +139,25 @@ int main(int argc, char **args)
       });
 
    // This should all happen on the gpu
-   MatSetValuesCOO(A, coo_v.data(), INSERT_VALUES);      
+   PetscCall(MatSetValuesCOO(A, coo_v.data(), INSERT_VALUES));
   }
 
   /*
      Create x, b - random initial guess and zero rhs
   */
-  VecSet(b, 0.0);
+  PetscCall(VecSet(b, 0.0));
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                 Create the linear solver and set various options
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-  KSPCreate(PETSC_COMM_WORLD, &ksp);
-  KSPSetInitialGuessNonzero(ksp, PETSC_TRUE);
+  PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp));
+  PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
 
   /*
      Set operators. Here the matrix that defines the linear system
      also serves as the matrix that defines the preconditioner.
   */
-  KSPSetOperators(ksp, A, A);
+  PetscCall(KSPSetOperators(ksp, A, A));
 
   /*
      Set linear solver defaults for this problem (optional).
@@ -168,8 +168,8 @@ int main(int argc, char **args)
        parameters could alternatively be specified at runtime via
        KSPSetFromOptions();
   */
-  KSPGetPC(ksp, &pc);
-  PCSetType(pc, PCAIR);
+  PetscCall(KSPGetPC(ksp, &pc));
+  PetscCall(PCSetType(pc, PCAIR));
 
   /*
     Set runtime options, e.g.,
@@ -178,20 +178,20 @@ int main(int argc, char **args)
     KSPSetFromOptions() is called _after_ any other customization
     routines.
   */
-  KSPSetFromOptions(ksp);
+  PetscCall(KSPSetFromOptions(ksp));
 
   // Setup the ksp
-  PetscLogStagePush(setup);
-  KSPSetUp(ksp);
-  PetscLogStagePop();
+  PetscCall(PetscLogStagePush(setup));
+  PetscCall(KSPSetUp(ksp));
+  PetscCall(PetscLogStagePop());
 
   // Do a preliminary KSPSolve so all the copies to the gpu happen
-  KSPGetPC(ksp, &pc);
-  VecSet(x, 1.0);
+  PetscCall(KSPGetPC(ksp, &pc));
+  PetscCall(VecSet(x, 1.0));
 
-  PetscLogStagePush(gpu_copy);
-  KSPSolve(ksp, b, x);
-  PetscLogStagePop();
+  PetscCall(PetscLogStagePush(gpu_copy));
+  PetscCall(KSPSolve(ksp, b, x));
+  PetscCall(PetscLogStagePop());
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Solve the linear system
@@ -199,21 +199,21 @@ int main(int argc, char **args)
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
   // gpu implementation and we don't want a copy occuring back to the cpu     
   if (second_solve)
-  { 
-   VecSet(x, 1.0); 
-   KSPSolve(ksp, b, x);
+  {
+   PetscCall(VecSet(x, 1.0));
+   PetscCall(KSPSolve(ksp, b, x));
   }
 
-  KSPGetConvergedReason(ksp,&reason);
+  PetscCall(KSPGetConvergedReason(ksp,&reason));
 
   /*
      Free work space.  All PETSc objects should be destroyed when they
      are no longer needed.
   */
-  VecDestroy(&x);
-  VecDestroy(&b);
-  MatDestroy(&A);
-  KSPDestroy(&ksp);
+  PetscCall(VecDestroy(&x));
+  PetscCall(VecDestroy(&b));
+  PetscCall(MatDestroy(&A));
+  PetscCall(KSPDestroy(&ksp));
 
   /*
      Always call PetscFinalize() before exiting a program.  This routine
@@ -221,7 +221,7 @@ int main(int argc, char **args)
        - provides summary and diagnostic information if certain runtime
          options are chosen (e.g., -log_view).
   */
-  PetscFinalize();
+  PetscCall(PetscFinalize());
   if (reason < 0)
   {
    return 1;

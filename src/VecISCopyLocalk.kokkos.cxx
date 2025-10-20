@@ -67,12 +67,12 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 {
    // Get the sizes of the local component of the input IS's
    PetscInt fine_local_size, coarse_local_size;
-   ISGetLocalSize(*index_fine, &fine_local_size);
-   ISGetLocalSize(*index_coarse, &coarse_local_size);
+   PetscCallVoid(ISGetLocalSize(*index_fine, &fine_local_size));
+   PetscCallVoid(ISGetLocalSize(*index_coarse, &coarse_local_size));
 
    // Get pointers to the indices on the host
    const PetscInt *fine_indices_ptr, *coarse_indices_ptr;
-   ISGetIndices(*index_fine, &fine_indices_ptr);
+   PetscCallVoid(ISGetIndices(*index_fine, &fine_indices_ptr));
 
    // Create a host view of the existing indices
    auto fine_view_h = PetscIntConstKokkosViewHost(fine_indices_ptr, fine_local_size);
@@ -82,8 +82,8 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    Kokkos::deep_copy(*IS_fine_views_local[our_level], fine_view_h);
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);
-   ISRestoreIndices(*index_fine, &fine_indices_ptr);
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
+   PetscCallVoid(ISRestoreIndices(*index_fine, &fine_indices_ptr));
 
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
    PetscIntKokkosView is_d;
@@ -93,7 +93,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
          is_d[i] -= global_row_start;
    });   
 
-   ISGetIndices(*index_coarse, &coarse_indices_ptr);
+   PetscCallVoid(ISGetIndices(*index_coarse, &coarse_indices_ptr));
    auto coarse_view_h = PetscIntConstKokkosViewHost(coarse_indices_ptr, coarse_local_size);
    // Create a device view
    IS_coarse_views_local[our_level] = std::make_shared<PetscIntKokkosView>("IS_coarse_view_" + std::to_string(our_level), coarse_local_size);
@@ -101,8 +101,8 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    Kokkos::deep_copy(*IS_coarse_views_local[our_level], coarse_view_h);  
    // Log copy with petsc
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);   
-   ISRestoreIndices(*index_coarse, &coarse_indices_ptr);
+   PetscCallVoid(PetscLogCpuToGpu(bytes));   
+   PetscCallVoid(ISRestoreIndices(*index_coarse, &coarse_indices_ptr));
    
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
    is_d = *IS_coarse_views_local[our_level];
@@ -136,17 +136,17 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
    if (mode_int == 1)
    {
       PetscScalarKokkosView vreduced_d;
-      VecGetKokkosViewWrite(*vreduced, &vreduced_d);
+      PetscCallVoid(VecGetKokkosViewWrite(*vreduced, &vreduced_d));
       ConstPetscScalarKokkosView vfull_d;
-      VecGetKokkosView(*vfull, &vfull_d);      
+      PetscCallVoid(VecGetKokkosView(*vfull, &vfull_d));
 
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {           
             vreduced_d[i] = vfull_d[is_d(i)];
       });
 
-      VecRestoreKokkosViewWrite(*vreduced, &vreduced_d);
-      VecRestoreKokkosView(*vfull, &vfull_d);      
+      PetscCallVoid(VecRestoreKokkosViewWrite(*vreduced, &vreduced_d));
+      PetscCallVoid(VecRestoreKokkosView(*vfull, &vfull_d)); 
 
    }        
    // SCATTER_FORWARD=0
@@ -154,17 +154,17 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
    else if (mode_int == 0)
    {
       ConstPetscScalarKokkosView vreduced_d;
-      VecGetKokkosView(*vreduced, &vreduced_d);
+      PetscCallVoid(VecGetKokkosView(*vreduced, &vreduced_d));
       PetscScalarKokkosView vfull_d;
-      VecGetKokkosViewWrite(*vfull, &vfull_d);
+      PetscCallVoid(VecGetKokkosViewWrite(*vfull, &vfull_d));
 
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {           
             vfull_d[is_d(i)] = vreduced_d[i];
       });     
 
-      VecRestoreKokkosView(*vreduced, &vreduced_d);
-      VecRestoreKokkosViewWrite(*vfull, &vfull_d);           
+      PetscCallVoid(VecRestoreKokkosView(*vreduced, &vreduced_d));
+      PetscCallVoid(VecRestoreKokkosViewWrite(*vfull, &vfull_d));  
    }
 
    return;

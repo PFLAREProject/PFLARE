@@ -19,7 +19,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
 
-   MatGetType(*input_mat, &mat_type);
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
@@ -33,7 +33,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
       mat_local = mat_mpi->A;
       mat_nonlocal = mat_mpi->B;
-      MatGetSize(mat_nonlocal, &rows_ao, &cols_ao); 
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao);); 
 
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
@@ -41,7 +41,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       Kokkos::deep_copy(colmap_input_d, colmap_input_h);
       // Log copy with petsc
       size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
-      PetscLogCpuToGpu(bytes);              
+      PetscCallVoid(PetscLogCpuToGpu(bytes));              
    }
    else
    {
@@ -49,12 +49,12 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    }
 
    // Get the comm
-   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
-   MatGetLocalSize(*input_mat, &local_rows, &local_cols);
-   MatGetSize(*input_mat, &global_rows, &global_cols);
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
    // This returns the global index of the local portion of the matrix
-   MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one);   
+   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));
+   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one));
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -62,8 +62,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
 
    // ~~~~~~~~~~~~
    // Get the number of nnzs
@@ -275,7 +275,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    exec.fence();
    
    // We can create our local diagonal block matrix directly on the device
-   MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);     
+   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
    if (mpi) 
@@ -288,10 +288,10 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
       
       // We can create our nonlocal diagonal block matrix directly on the device
-      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);      
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal)); 
 
       // We can now create our MPI matrix
-      MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);      
+      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
    }     
    // If in serial 
    else
@@ -318,7 +318,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
 
-   MatGetType(*input_mat, &mat_type);
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
@@ -332,7 +332,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
       mat_local = mat_mpi->A;
       mat_nonlocal = mat_mpi->B;
-      MatGetSize(mat_nonlocal, &rows_ao, &cols_ao); 
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao);); 
 
       // We also copy the input mat colmap over to the device as we need it
       // Don't actually need on the device for this routine
@@ -345,18 +345,18 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       mat_local = *input_mat;
    }
 
-   MatGetOwnershipRange(*input_mat, &global_row_start_W, &global_row_end_plus_one_W);  
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_W, &global_col_end_plus_one_W);                  
+   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_W, &global_row_end_plus_one_W));
+   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_W, &global_col_end_plus_one_W));
 
-   MatGetSize(*input_mat, &cols_z, &rows_z);
+   PetscCallVoid(MatGetSize(*input_mat, &cols_z, &rows_z));
 
    // Get pointers to the indices on the host
    const PetscInt *fine_indices_ptr, *coarse_indices_ptr;
-   ISGetIndices(*is_fine, &fine_indices_ptr);   
-   ISGetIndices(*is_coarse, &coarse_indices_ptr); 
+   PetscCallVoid(ISGetIndices(*is_fine, &fine_indices_ptr));   
+   PetscCallVoid(ISGetIndices(*is_coarse, &coarse_indices_ptr)); 
 
-   ISGetLocalSize(*is_coarse, &local_rows_coarse);
-   ISGetLocalSize(*is_fine, &local_rows_fine);   
+   PetscCallVoid(ISGetLocalSize(*is_coarse, &local_rows_coarse));
+   PetscCallVoid(ISGetLocalSize(*is_fine, &local_rows_fine));
 
    // Create a host view of the existing indices
    auto fine_view_h = PetscIntConstKokkosViewHost(fine_indices_ptr, local_rows_fine);    
@@ -368,9 +368,9 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::deep_copy(coarse_view_d, coarse_view_h);
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);        
+   PetscCallVoid(PetscLogCpuToGpu(bytes));        
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);      
+   PetscCallVoid(PetscLogCpuToGpu(bytes));      
 
    local_cols_coarse = local_rows_coarse;
    local_cols = local_rows_coarse + local_rows_fine;
@@ -382,7 +382,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    global_cols_coarse = rows_z;    
 
    // Get the comm
-   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -390,8 +390,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
 
    PetscIntKokkosView nnz_match_local_row_d;
    PetscIntKokkosView nnz_match_nonlocal_row_d;
@@ -612,8 +612,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // Annoyingly there isn't currently the ability to get views for i (or j)
       const PetscInt *device_local_i_output = nullptr, *device_nonlocal_i_ouput = nullptr;
       PetscMemType mtype;
-      MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, NULL, NULL, &mtype);  
-      if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype);  
+      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, NULL, NULL, &mtype));  
+      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype));  
 
       // Have these point at the existing i pointers - we don't need j if we're reusing
       ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows+1);
@@ -680,7 +680,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
          a->ibdiagvalid = PETSC_FALSE;   
          a->inode.ibdiagvalid = PETSC_FALSE; 
       }      
-      PetscObjectStateIncrease((PetscObject)(*output_mat));    
+      PetscCallVoid(PetscObjectStateIncrease((PetscObject)(*output_mat)));
 
    }
 
@@ -710,25 +710,25 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       exec.fence();      
 
       // We can create our local diagonal block matrix directly on the device
-      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols_coarse, i_local_d, j_local_d, a_local_d, &output_mat_local);  
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols_coarse, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
       if (mpi) 
       {
          // We can create our nonlocal diagonal block matrix directly on the device
          // Same number of col_ao as W         
-         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);               
+         PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
 
          // We just take a copy of the original garray
          PetscInt *garray_host = NULL; 
-         PetscMalloc1(cols_ao, &garray_host);
+         PetscCallVoid(PetscMalloc1(cols_ao, &garray_host));
          for (PetscInt i = 0; i < cols_ao; i++)
          {
             garray_host[i] = mat_mpi->garray[i];
          }
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols_coarse, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
+         PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols_coarse, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
       }     
       // If in serial 
       else
@@ -737,8 +737,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       }
    }
 
-   ISRestoreIndices(*is_fine, &fine_indices_ptr);
-   ISRestoreIndices(*is_coarse, &coarse_indices_ptr); 
+   PetscCallVoid(ISRestoreIndices(*is_fine, &fine_indices_ptr));
+   PetscCallVoid(ISRestoreIndices(*is_coarse, &coarse_indices_ptr));
 
    return;
 }
@@ -762,7 +762,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
 
-   MatGetType(*input_mat, &mat_type);
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
@@ -776,7 +776,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
       mat_local = mat_mpi->A;
       mat_nonlocal = mat_mpi->B;
-      MatGetSize(mat_nonlocal, &rows_ao, &cols_ao); 
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao);); 
 
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntKokkosViewHost(mat_mpi->garray, cols_ao);
@@ -784,7 +784,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       Kokkos::deep_copy(colmap_input_d, colmap_input_h);
       // Log copy with petsc
       size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
-      PetscLogCpuToGpu(bytes);              
+      PetscCallVoid(PetscLogCpuToGpu(bytes));              
    }
    else
    {
@@ -792,23 +792,23 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    }
 
    // Get the comm
-   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
-   ISGetLocalSize(*is_coarse, &local_coarse_size);
-   ISGetLocalSize(*is_fine, &local_fine_size);
-   ISGetSize(*is_coarse, &global_coarse_size);
-   ISGetSize(*is_fine, &global_fine_size);      
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(ISGetLocalSize(*is_coarse, &local_coarse_size));
+   PetscCallVoid(ISGetLocalSize(*is_fine, &local_fine_size));
+   PetscCallVoid(ISGetSize(*is_coarse, &global_coarse_size));
+   PetscCallVoid(ISGetSize(*is_fine, &global_fine_size));
 
    local_full_cols = local_coarse_size + local_fine_size;
    global_full_cols = global_coarse_size + global_fine_size;
 
-   MatGetLocalSize(*input_mat, &local_rows_z, &local_cols_z); 
-   MatGetSize(*input_mat, &global_rows_z, &global_cols_z);
-   
-   MatGetOwnershipRange(*input_mat, &global_row_start_Z, &global_row_end_plus_one_Z);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_Z, &global_col_end_plus_one_Z);
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows_z, &local_cols_z));
+   PetscCallVoid(MatGetSize(*input_mat, &global_rows_z, &global_cols_z));
 
-   MatGetType(*input_mat, &mat_type);
-   MatGetSize(mat_local, &rows_ad, &cols_ad);
+   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_Z, &global_row_end_plus_one_Z));
+   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_Z, &global_col_end_plus_one_Z));
+
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   PetscCallVoid(MatGetSize(mat_local, &rows_ad, &cols_ad));
 
    // We can reuse the orig_fine_col_indices as they can be expensive to generate in parallel
    if (!reuse_indices_int)
@@ -820,7 +820,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // on them anyway, we can transfer the result to the device
       if (mpi)
       {
-         PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array);
+         PetscCallVoid(PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array));
          size_cols = cols_ad + cols_ao;
          for (PetscInt i = 0; i < cols_ad; i++)
          {
@@ -833,7 +833,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       }
       else
       {
-         PetscMalloc1(cols_ad, &col_indices_off_proc_array);
+         PetscCallVoid(PetscMalloc1(cols_ad, &col_indices_off_proc_array));
          size_cols = cols_ad;
          for (PetscInt i = 0; i < cols_ad; i++)
          {
@@ -842,27 +842,27 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       }
 
       // Create the IS we want with the cols we want (written as global indices)
-      ISCreateGeneral(MPI_COMM_MATRIX, size_cols, col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices);
+      PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, size_cols, col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices));
 
       // Now let's do the comms to get what the original column indices in the full matrix are, given these indices for all 
       // the columns of Z - ie we need to check in the original fine indices at the positions given by col_indices_off_proc_array
       // This could be expensive as the number of off-processor columns in Z grows!
-      ISCreateSubIS(*is_fine, col_indices, orig_fine_col_indices);
+      PetscCallVoid(ISCreateSubIS(*is_fine, col_indices, orig_fine_col_indices));
 
       // We've now built the original fine indices
-      ISDestroy(&col_indices);
+      PetscCallVoid(ISDestroy(&col_indices));
       (void)PetscFree(col_indices_off_proc_array);
    }
    else
    {
-      ISGetLocalSize(*orig_fine_col_indices, &size_cols);
+      PetscCallVoid(ISGetLocalSize(*orig_fine_col_indices, &size_cols));
    }
 
    // Get pointers to the indices on the host
    const PetscInt *fine_indices_ptr, *coarse_indices_ptr, *is_pointer_orig_fine_col;
-   ISGetIndices(*is_fine, &fine_indices_ptr);   
-   ISGetIndices(*is_coarse, &coarse_indices_ptr); 
-   ISGetIndices(*orig_fine_col_indices, &is_pointer_orig_fine_col);     
+   PetscCallVoid(ISGetIndices(*is_fine, &fine_indices_ptr));   
+   PetscCallVoid(ISGetIndices(*is_coarse, &coarse_indices_ptr)); 
+   PetscCallVoid(ISGetIndices(*orig_fine_col_indices, &is_pointer_orig_fine_col));     
 
    // Create a host view of the existing indices
    auto fine_view_h = PetscIntConstKokkosViewHost(fine_indices_ptr, local_fine_size);    
@@ -875,13 +875,13 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::deep_copy(fine_view_d, fine_view_h);     
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);   
+   PetscCallVoid(PetscLogCpuToGpu(bytes));   
    Kokkos::deep_copy(coarse_view_d, coarse_view_h);
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);        
+   PetscCallVoid(PetscLogCpuToGpu(bytes));        
    Kokkos::deep_copy(orig_view_d, orig_view_h); 
    bytes = orig_view_h.extent(0) * sizeof(PetscInt);
-   PetscLogCpuToGpu(bytes);       
+   PetscCallVoid(PetscLogCpuToGpu(bytes));       
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -889,8 +889,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype);  
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype);          
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
 
    PetscIntKokkosView nnz_match_local_row_d;
    PetscIntKokkosView nnz_match_nonlocal_row_d;
@@ -1097,8 +1097,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // Annoyingly there isn't currently the ability to get views for i (or j)
       const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_ouput = nullptr;
       PetscMemType mtype;
-      MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype);  
-      if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype);  
+      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));  
+      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype));  
 
       // Have these point at the existing i pointers - we only need the local j
       ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows_z+1);
@@ -1172,7 +1172,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          a->ibdiagvalid = PETSC_FALSE;   
          a->inode.ibdiagvalid = PETSC_FALSE;       
       }        
-      PetscObjectStateIncrease((PetscObject)(*output_mat));    
+      PetscCallVoid(PetscObjectStateIncrease((PetscObject)(*output_mat)));
 
     }
 
@@ -1195,7 +1195,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       exec.fence();       
       
       // Create the matrix given the sorted csr
-      MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local);         
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
       // we also have to go and build our off block matrix and then the output
       if (mpi) 
@@ -1203,17 +1203,17 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
          // We know the garray is just the original but rewritten to be 
          // the full indices, which we have in in is_pointer_orig_fine_col(cols_ad:end)
          PetscInt *garray_host = NULL; 
-         PetscMalloc1(cols_ao, &garray_host);
+         PetscCallVoid(PetscMalloc1(cols_ao, &garray_host));
          for (PetscInt i = 0; i < cols_ao; i++)
          {
             garray_host[i] = is_pointer_orig_fine_col[i + cols_ad];
          }    
          
          // We can create our nonlocal diagonal block matrix directly on the device
-         MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal);         
+         PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
 
          // We can now create our MPI matrix
-         MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_z, global_full_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat);         
+         PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_z, global_full_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
       }    
       // If in serial 
       else
@@ -1222,9 +1222,9 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       }
    }
 
-   ISRestoreIndices(*is_fine, &fine_indices_ptr);
-   ISRestoreIndices(*is_coarse, &coarse_indices_ptr); 
-   ISRestoreIndices(*orig_fine_col_indices, &is_pointer_orig_fine_col);    
+   PetscCallVoid(ISRestoreIndices(*is_fine, &fine_indices_ptr));
+   PetscCallVoid(ISRestoreIndices(*is_coarse, &coarse_indices_ptr));
+   PetscCallVoid(ISRestoreIndices(*orig_fine_col_indices, &is_pointer_orig_fine_col));
 
    return;
 }

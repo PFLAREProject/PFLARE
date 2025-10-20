@@ -24,10 +24,15 @@ ENV PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_
 WORKDIR /build
 
 # Clone PFLARE and run all the tests
+# Add flags "-Wall -Werror -Wunused-result" as the petsc CI enforces capturing
+# all return types, so this in combination with --with-strict-petscerrorcode in the petsc
+# build will error out
 RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
-    make -j2 && make -j2 check && make -j2 tests
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" && \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" check && \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" tests
 
 WORKDIR /build/PFLARE
