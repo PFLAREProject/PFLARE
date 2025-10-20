@@ -20,7 +20,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscInt one = 1;
    bool deallocate_submatrices = false;
 
-   MatGetType(*input_mat, &mat_type);
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
@@ -30,11 +30,11 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Mat mat_local_input = NULL, mat_nonlocal_input = NULL;   
 
    // Get the comm
-   PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX);
-   MatGetLocalSize(*input_mat, &local_rows, &local_cols);
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    // This returns the global index of the local portion of the matrix
-   MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp);
-   MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp);
+   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp));
+   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp));
    const PetscInt global_row_start = global_row_start_temp;
    //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
    const PetscInt global_col_start = global_col_start_temp;
@@ -47,7 +47,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Kokkos::deep_copy(coefficients_d, coefficients_h);       
    // Log copy with petsc
    size_t bytes = coefficients_h.extent(0) * sizeof(PetscReal);
-   PetscLogCpuToGpu(bytes);     
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
    
    // Let's build up our matrix powers
    matrix_powers = new Mat[coeff_size - 1];
@@ -55,8 +55,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Compute the matrix powers
    for (int i = 1; i < poly_sparsity_order; i++)
    {
-      MatMatMult(*input_mat, matrix_powers[i-1], \
-            MAT_INITIAL_MATRIX, 1.5, &(matrix_powers[i]));
+      PetscCallVoid(MatMatMult(*input_mat, matrix_powers[i-1], \
+            MAT_INITIAL_MATRIX, 1.5, &(matrix_powers[i])));
    }
    // This is the matrix whose sparsity we want to match
    mat_sparsity_match = &(matrix_powers[poly_sparsity_order - 1]);
@@ -79,13 +79,13 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       mat_mpi = (Mat_MPIAIJ *)(*mat_sparsity_match)->data;
       mat_local_sparsity = mat_mpi->A;
       mat_nonlocal_sparsity = mat_mpi->B;
-      MatGetSize(mat_nonlocal_sparsity, &rows_ao, &cols_ao); 
-      MatGetSize(mat_local_sparsity, &rows_ad, &cols_ad);
+      PetscCallVoid(MatGetSize(mat_nonlocal_sparsity, &rows_ao, &cols_ao));
+      PetscCallVoid(MatGetSize(mat_local_sparsity, &rows_ad, &cols_ad));
 
       // We need to pull out all the columns in the sparsity mat
       // and the nonlocal rows that correspond to the nonlocal columns
       // from the input mat      
-      PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array);
+      PetscCallVoid(PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array));
       size_cols = cols_ad + cols_ao;
       for (PetscInt i = 0; i < cols_ad; i++)
       {
@@ -97,16 +97,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       }           
       
       // Create the sequential IS we want with the cols we want (written as global indices)
-      ISCreateGeneral(PETSC_COMM_SELF, size_cols, \
-                  col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices);
-      ISCreateGeneral(PETSC_COMM_SELF, cols_ao, \
-                  mat_mpi->garray, PETSC_USE_POINTER, &row_indices);
+      PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, size_cols, \
+                  col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices));
+      PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, cols_ao, \
+                  mat_mpi->garray, PETSC_USE_POINTER, &row_indices));
 
-      MatSetOption(*input_mat, MAT_SUBMAT_SINGLEIS, PETSC_TRUE); 
+      PetscCallVoid(MatSetOption(*input_mat, MAT_SUBMAT_SINGLEIS, PETSC_TRUE)); 
       // Now this will be doing comms to get the non-local rows we want and returns in a sequential matrix
       if (!reuse_int_reuse_mat)
       {
-         MatCreateSubMatrices(*input_mat, one, &row_indices, &col_indices, MAT_INITIAL_MATRIX, &submatrices);
+         PetscCallVoid(MatCreateSubMatrices(*input_mat, one, &row_indices, &col_indices, MAT_INITIAL_MATRIX, &submatrices));
          *reuse_mat = submatrices[0];
       }
       else
@@ -114,10 +114,10 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
          submatrices = new Mat[1];
          deallocate_submatrices = true;
          submatrices[0] = *reuse_mat;
-         MatCreateSubMatrices(*input_mat, one, &row_indices, &col_indices, MAT_REUSE_MATRIX, &submatrices);         
+         PetscCallVoid(MatCreateSubMatrices(*input_mat, one, &row_indices, &col_indices, MAT_REUSE_MATRIX, &submatrices));
       }
-      ISDestroy(&col_indices);
-      ISDestroy(&row_indices);
+      PetscCallVoid(ISDestroy(&col_indices));
+      PetscCallVoid(ISDestroy(&row_indices));
    }
    // In serial
    else
@@ -128,7 +128,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       mat_local_input = *input_mat;
       mat_local_sparsity = *mat_sparsity_match;
       cols_ad = local_cols;
-      PetscMalloc1(local_rows, &col_indices_off_proc_array);
+      PetscCallVoid(PetscMalloc1(local_rows, &col_indices_off_proc_array));
       for (PetscInt i = 0; i < local_rows; i++)
       {
          col_indices_off_proc_array[i] = i;
@@ -154,34 +154,34 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_submat_vals = nullptr;  
-   MatSeqAIJGetCSRAndMemType(submatrices[0], &device_submat_i, &device_submat_j, &device_submat_vals, &mtype);  
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(submatrices[0], &device_submat_i, &device_submat_j, &device_submat_vals, &mtype));  
 
    const PetscInt *device_local_i_input = nullptr, *device_local_j_input = nullptr, *device_nonlocal_i_input = nullptr, *device_nonlocal_j_input = nullptr;
    PetscScalar *device_local_vals_input = nullptr, *device_nonlocal_vals_input = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local_input, &device_local_i_input, &device_local_j_input, &device_local_vals_input, &mtype);
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_input, &device_nonlocal_i_input, &device_nonlocal_j_input, &device_nonlocal_vals_input, &mtype);
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_input, &device_local_i_input, &device_local_j_input, &device_local_vals_input, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_input, &device_nonlocal_i_input, &device_nonlocal_j_input, &device_nonlocal_vals_input, &mtype));
 
    const PetscInt *device_local_i_sparsity = nullptr, *device_local_j_sparsity = nullptr, *device_nonlocal_i_sparsity = nullptr, *device_nonlocal_j_sparsity = nullptr;
    PetscScalar *device_local_vals_sparsity = nullptr, *device_nonlocal_vals_sparsity = nullptr;  
-   MatSeqAIJGetCSRAndMemType(mat_local_sparsity, &device_local_i_sparsity, &device_local_j_sparsity, &device_local_vals_sparsity, &mtype);
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_sparsity, &device_nonlocal_i_sparsity, &device_nonlocal_j_sparsity, &device_nonlocal_vals_sparsity, &mtype);
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_sparsity, &device_local_i_sparsity, &device_local_j_sparsity, &device_local_vals_sparsity, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_sparsity, &device_nonlocal_i_sparsity, &device_nonlocal_j_sparsity, &device_nonlocal_vals_sparsity, &mtype));
 
    const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_output = nullptr, *device_nonlocal_j_output = nullptr;
    PetscScalar *device_local_vals_output = nullptr, *device_nonlocal_vals_output = nullptr;
-   MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_vals_output, &mtype);     
-   if (mpi) MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype);
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_vals_output, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype));
 
    // Scale the highest constrained power
-   MatScale(*output_mat, coefficients[poly_sparsity_order]);
+   PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
 
    // Then go backwards and add in each of the coefficients * A^order from the second highest order down
    for (int i = poly_sparsity_order-1; i > 0; i--)
    {
-      MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN);
+      PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
    }
 
    // Add in the 0th order term
-   MatShift(*output_mat, coefficients[0]);
+   PetscCallVoid(MatShift(*output_mat, coefficients[0]));
 
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
@@ -503,11 +503,11 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       a->ibdiagvalid = PETSC_FALSE;   
       a->inode.ibdiagvalid = PETSC_FALSE; 
    }      
-   PetscObjectStateIncrease((PetscObject)(*output_mat));   
+   PetscCallVoid(PetscObjectStateIncrease((PetscObject)(*output_mat)));   
 
    for (int i = 1; i < poly_sparsity_order; i++)
    {
-      MatDestroy(&(matrix_powers[i]));
+      PetscCallVoid(MatDestroy(&(matrix_powers[i])));
    }   
    delete[] matrix_powers;
    if (deallocate_submatrices) delete[] submatrices;
