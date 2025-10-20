@@ -13,6 +13,7 @@
       KSP :: ksp
       PC :: pc
       PetscBool :: flg
+      KSPConvergedReason reason
 
       call PetscInitialize(PETSC_NULL_CHARACTER,ierr)    
       ! Register the pflare types
@@ -52,6 +53,10 @@
 
       ! Do the solve
       call KSPSolve(ksp,b,x,ierr)
+      call KSPGetConvergedReason(ksp, reason, ierr)
+      if (reason%v < 0) then
+         error stop 1
+      end if      
 
       call MatDestroy(A, ierr)
       call VecDestroy(b, ierr)
