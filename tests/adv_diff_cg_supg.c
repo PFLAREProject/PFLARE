@@ -164,7 +164,7 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   // Diffusion coefficient
   // Default alpha is 0 - pure advection
   options->alpha = 0.0;
-  PetscOptionsGetReal(NULL, NULL, "-alpha", &options->alpha, NULL);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha", &options->alpha, NULL));
 
   // Initialize advection to zero
   options->advection_velocity[0] = 0.0; // u
@@ -175,7 +175,7 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   // Default theta is pi/4
   PetscReal pi = 4*atan(1.0);
   PetscReal theta = pi/4.0;
-  PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL));
   PetscCheck(theta <= pi/2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
 
   // Coefficients for 2d advection
@@ -186,9 +186,9 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   // This will override theta
   PetscReal u_test = 0.0, v_test = 0.0, w_test = 0.0;
   PetscBool option_found_u, option_found_v, option_found_w;
-  PetscOptionsGetReal(NULL, NULL, "-u", &u_test, &option_found_u);
-  PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v);
-  PetscOptionsGetReal(NULL, NULL, "-w", &w_test, &option_found_w);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-u", &u_test, &option_found_u));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-w", &w_test, &option_found_w));
 
   if (option_found_u) PetscCheck(u_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
   if (option_found_v) PetscCheck(v_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
@@ -391,12 +391,12 @@ int main(int argc, char **argv)
   // Register the pflare types
   PCRegister_PFLARE();
 
-  PetscLogStageRegister("Setup", &setup);
-  PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy);  
+  PetscCall(PetscLogStageRegister("Setup", &setup));
+  PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
   PetscCall(ProcessOptions(PETSC_COMM_WORLD, &options));
 
   PetscBool second_solve= PETSC_FALSE;
-  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);    
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));

@@ -8,7 +8,6 @@ Input arguments are:\n\
 
 int main(int argc,char **args)
 {
-  PetscErrorCode ierr;
 #if defined(PETSC_USE_LOG)
   PetscLogStage  stage1;
 #endif
@@ -20,23 +19,23 @@ int main(int argc,char **args)
   IS is_fine, is_coarse;
   VecType vtype;
 
-  ierr = PetscInitialize(&argc,&args,(char*)0,help);if (ierr) return ierr;
-  ierr = PetscOptionsGetBool(NULL,NULL,"-b_in_f",&b_in_f,NULL);CHKERRQ(ierr);
+  PetscCall(PetscInitialize(&argc,&args,(char*)0,help));
+  PetscCall(PetscOptionsGetBool(NULL,NULL,"-b_in_f",&b_in_f,NULL));
 
   /* Read matrix and RHS */
-  ierr = PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg);CHKERRQ(ierr);
+  PetscCall(PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg));
   if (!flg) SETERRQ(PETSC_COMM_WORLD,PETSC_ERR_USER_INPUT,"Must indicate binary file with the -f option");
-  ierr = PetscViewerBinaryOpen(PETSC_COMM_WORLD,file,FILE_MODE_READ,&fd);CHKERRQ(ierr);
-  ierr = MatCreate(PETSC_COMM_WORLD,&A);CHKERRQ(ierr);
-  ierr = MatLoad(A,fd);CHKERRQ(ierr);
+  PetscCall(PetscViewerBinaryOpen(PETSC_COMM_WORLD,file,FILE_MODE_READ,&fd));
+  PetscCall(MatCreate(PETSC_COMM_WORLD,&A));
+  PetscCall(MatLoad(A,fd));
   if (b_in_f) {
-    ierr = VecCreate(PETSC_COMM_WORLD,&b);CHKERRQ(ierr);
-    ierr = VecLoad(b,fd);CHKERRQ(ierr);
+    PetscCall(VecCreate(PETSC_COMM_WORLD,&b));
+    PetscCall(VecLoad(b,fd));
   } else {
-    ierr = MatCreateVecs(A,NULL,&b);CHKERRQ(ierr);
-    ierr = VecSetRandom(b,NULL);CHKERRQ(ierr);
+    PetscCall(MatCreateVecs(A,NULL,&b));
+    PetscCall(VecSetRandom(b,NULL));
   }
-  ierr = PetscViewerDestroy(&fd);CHKERRQ(ierr);
+  PetscCall(PetscViewerDestroy(&fd));
 
   /*
    If the load matrix is larger then the vector, due to being padded
@@ -47,32 +46,32 @@ int main(int argc,char **args)
     Vec         tmp;
     PetscScalar *bold;
 
-    ierr = MatGetLocalSize(A,&m,&n);CHKERRQ(ierr);
-    ierr = VecCreate(PETSC_COMM_WORLD,&tmp);CHKERRQ(ierr);
-    ierr = VecSetSizes(tmp,m,PETSC_DECIDE);CHKERRQ(ierr);
-    ierr = VecGetType(b, &vtype);CHKERRQ(ierr);
-    ierr = VecSetType(tmp, vtype);CHKERRQ(ierr);
-    ierr = VecGetOwnershipRange(b,&start,&end);CHKERRQ(ierr);
-    ierr = VecGetLocalSize(b,&mvec);CHKERRQ(ierr);
-    ierr = VecGetArray(b,&bold);CHKERRQ(ierr);
+    PetscCall(MatGetLocalSize(A,&m,&n));
+    PetscCall(VecCreate(PETSC_COMM_WORLD,&tmp));
+    PetscCall(VecSetSizes(tmp,m,PETSC_DECIDE));
+    PetscCall(VecGetType(b, &vtype));
+    PetscCall(VecSetType(tmp, vtype));
+    PetscCall(VecGetOwnershipRange(b,&start,&end));
+    PetscCall(VecGetLocalSize(b,&mvec));
+    PetscCall(VecGetArray(b,&bold));
     for (j=0; j<mvec; j++) {
       indx = start+j;
-      ierr = VecSetValues(tmp,1,&indx,bold+j,INSERT_VALUES);CHKERRQ(ierr);
+      PetscCall(VecSetValues(tmp,1,&indx,bold+j,INSERT_VALUES));
     }
-    ierr = VecRestoreArray(b,&bold);CHKERRQ(ierr);
-    ierr = VecDestroy(&b);CHKERRQ(ierr);
-    ierr = VecAssemblyBegin(tmp);CHKERRQ(ierr);
-    ierr = VecAssemblyEnd(tmp);CHKERRQ(ierr);
+    PetscCall(VecRestoreArray(b,&bold));
+    PetscCall(VecDestroy(&b));
+    PetscCall(VecAssemblyBegin(tmp));
+    PetscCall(VecAssemblyEnd(tmp));
     b    = tmp;
   }
-  ierr = VecDuplicate(b,&x);CHKERRQ(ierr);
-  ierr = VecDuplicate(b,&u);CHKERRQ(ierr);
+  PetscCall(VecDuplicate(b,&x));
+  PetscCall(VecDuplicate(b,&u));
 
-  ierr = VecSet(x,0.0);CHKERRQ(ierr);
-  ierr = PetscBarrier((PetscObject)A);CHKERRQ(ierr);
+  PetscCall(VecSet(x,0.0));
+  PetscCall(PetscBarrier((PetscObject)A));
 
-  ierr = PetscLogStageRegister("mystage 1",&stage1);CHKERRQ(ierr);
-  ierr = PetscLogStagePush(stage1);CHKERRQ(ierr);
+  PetscCall(PetscLogStageRegister("mystage 1",&stage1));
+  PetscCall(PetscLogStagePush(stage1));
 
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   //       Compute a cf splitting
@@ -105,28 +104,28 @@ int main(int argc,char **args)
 
   PetscInt n_fine, n_coarse;
   PetscInt local_rows, local_cols;
-  ierr = MatGetLocalSize(A, &local_rows, &local_cols);
-  ierr = ISGetLocalSize(is_fine, &n_fine);
-  ierr = ISGetLocalSize(is_coarse, &n_coarse);
+  PetscCall(MatGetLocalSize(A, &local_rows, &local_cols));
+  PetscCall(ISGetLocalSize(is_fine, &n_fine));
+  PetscCall(ISGetLocalSize(is_coarse, &n_coarse));
 
   if (n_fine + n_coarse == local_rows)
   {
-   ierr = PetscPrintf(PETSC_COMM_WORLD, "OK \n");
+   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "OK \n"));
   }
   else{
-   ierr = PetscPrintf(PETSC_COMM_WORLD, "NOT OK \n");
+   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "NOT OK \n"));
    return 1;
   }
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /* Cleanup */
-  ierr = VecDestroy(&x);CHKERRQ(ierr);
-  ierr = VecDestroy(&b);CHKERRQ(ierr);
-  ierr = VecDestroy(&u);CHKERRQ(ierr);
-  ierr = MatDestroy(&A);CHKERRQ(ierr);
-  ierr = ISDestroy(&is_fine); CHKERRQ(ierr);
-  ierr = ISDestroy(&is_coarse); CHKERRQ(ierr);
-  ierr = PetscFinalize();
+  PetscCall(VecDestroy(&x));
+  PetscCall(VecDestroy(&b));
+  PetscCall(VecDestroy(&u));
+  PetscCall(MatDestroy(&A));
+  PetscCall(ISDestroy(&is_fine));
+  PetscCall(ISDestroy(&is_coarse));
+  PetscCall(PetscFinalize());
   return 0;
 }
