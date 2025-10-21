@@ -8,7 +8,6 @@ Input arguments are:\n\
 
 int main(int argc,char **args)
 {
-  PetscErrorCode ierr;
 #if defined(PETSC_USE_LOG)
   PetscLogStage  stage1,stage2, gpu_copy;
 #endif
@@ -24,27 +23,27 @@ int main(int argc,char **args)
   PetscInt one=1, m, n, M, N;
   MatType mtype, mtype_input;
 
-  ierr = PetscInitialize(&argc,&args,(char*)0,help);if (ierr) return ierr;
-  ierr = PetscOptionsGetBool(NULL,NULL,"-b_in_f",&b_in_f,NULL);CHKERRQ(ierr);
+  PetscCall(PetscInitialize(&argc,&args,(char*)0,help));
+  PetscCall(PetscOptionsGetBool(NULL,NULL,"-b_in_f",&b_in_f,NULL));
 
   PetscBool second_solve= PETSC_FALSE;
-  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);   
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
   /* Read matrix and RHS */
-  ierr = PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg);CHKERRQ(ierr);
+  PetscCall(PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg));
   if (!flg) SETERRQ(PETSC_COMM_WORLD,PETSC_ERR_USER_INPUT,"Must indicate binary file with the -f option");
-  ierr = PetscViewerBinaryOpen(PETSC_COMM_WORLD,file,FILE_MODE_READ,&fd);CHKERRQ(ierr);
-  ierr = MatCreate(PETSC_COMM_WORLD,&A);CHKERRQ(ierr);
-  ierr = MatLoad(A,fd);CHKERRQ(ierr);
+  PetscCall(PetscViewerBinaryOpen(PETSC_COMM_WORLD,file,FILE_MODE_READ,&fd));
+  PetscCall(MatCreate(PETSC_COMM_WORLD,&A));
+  PetscCall(MatLoad(A,fd));
   if (b_in_f) {
-    ierr = VecCreate(PETSC_COMM_WORLD,&b);CHKERRQ(ierr);
-    ierr = VecLoad(b,fd);CHKERRQ(ierr);
+    PetscCall(VecCreate(PETSC_COMM_WORLD,&b));
+    PetscCall(VecLoad(b,fd));
   } else {
-    ierr = MatCreateVecs(A,NULL,&b);CHKERRQ(ierr);
-    ierr = VecSetRandom(b,NULL);CHKERRQ(ierr);
+    PetscCall(MatCreateVecs(A,NULL,&b));
+    PetscCall(VecSetRandom(b,NULL));
   }
-  ierr = PetscViewerDestroy(&fd);CHKERRQ(ierr);
-  PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL);
+  PetscCall(PetscViewerDestroy(&fd));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL));
 
   // ~~~~~~~~~~~~~~~~~~
   // If we're in parallel do a partitioning so our loaded matrix is sensibly distributed
@@ -54,66 +53,66 @@ int main(int argc,char **args)
   Vec b_partitioned;
   VecScatter vec_scatter;
   int npe;
-  MPI_Comm_size(PETSC_COMM_WORLD, &npe);CHKERRQ(ierr);
+  PetscCallMPI(MPI_Comm_size(PETSC_COMM_WORLD, &npe));
   PetscInt num_proc = npe;
   if (num_proc != 1)
   {
       // Partition the matrix
-      MatPartitioningCreate(PETSC_COMM_WORLD, &part);
-      MatPartitioningSetAdjacency(part, A);
-      MatPartitioningSetNParts(part, num_proc);
-      MatPartitioningSetFromOptions(part);
-      MatPartitioningApply(part, &is);   
-      ISBuildTwoSided(is, NULL, &isrows);
-      MatCreateSubMatrix(A, isrows, isrows, MAT_INITIAL_MATRIX, &A_partitioned);
-      MatCreateVecs(A_partitioned,NULL,&b_partitioned);CHKERRQ(ierr);
+      PetscCall(MatPartitioningCreate(PETSC_COMM_WORLD, &part));
+      PetscCall(MatPartitioningSetAdjacency(part, A));
+      PetscCall(MatPartitioningSetNParts(part, num_proc));
+      PetscCall(MatPartitioningSetFromOptions(part));
+      PetscCall(MatPartitioningApply(part, &is));
+      PetscCall(ISBuildTwoSided(is, NULL, &isrows));
+      PetscCall(MatCreateSubMatrix(A, isrows, isrows, MAT_INITIAL_MATRIX, &A_partitioned));
+      PetscCall(MatCreateVecs(A_partitioned,NULL,&b_partitioned));
 
       // Scatter the b to match the partitioning
-      VecScatterCreate(b, isrows, b_partitioned, NULL, &vec_scatter); 
-      VecScatterBegin(vec_scatter, b, b_partitioned, INSERT_VALUES, SCATTER_FORWARD);
-      VecScatterEnd(vec_scatter, b, b_partitioned, INSERT_VALUES, SCATTER_FORWARD);
+      PetscCall(VecScatterCreate(b, isrows, b_partitioned, NULL, &vec_scatter));
+      PetscCall(VecScatterBegin(vec_scatter, b, b_partitioned, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCall(VecScatterEnd(vec_scatter, b, b_partitioned, INSERT_VALUES, SCATTER_FORWARD));
 
-      MatDestroy(&A);
-      VecDestroy(&b);
+      PetscCall(MatDestroy(&A));
+      PetscCall(VecDestroy(&b));
       A = A_partitioned;
       b = b_partitioned;
   }
 
   // ~~~~~~~~~~~~~~~~~~
 
-  ierr = MatGetLocalSize(A,&m,&n);CHKERRQ(ierr);
-  ierr = MatGetSize(A,&M,&N);CHKERRQ(ierr);  
+  PetscCall(MatGetLocalSize(A,&m,&n));
+  PetscCall(MatGetSize(A,&M,&N));
 
   // Test and see if the user wants us to use a different matrix type
   // with -mat_type on the command line
   // This lets us easily test our cpu and kokkos versions through our CI
-  ierr = MatCreateFromOptions(PETSC_COMM_WORLD,NULL,\
-               one,m,n,M,N,&A_diff_type);
-  ierr = MatAssemblyBegin(A_diff_type, MAT_FINAL_ASSEMBLY);
-  ierr = MatAssemblyEnd(A_diff_type, MAT_FINAL_ASSEMBLY);
-      
-  ierr = MatGetType(A, &mtype);
-  ierr = MatGetType(A_diff_type, &mtype_input); 
+  PetscCall(MatCreateFromOptions(PETSC_COMM_WORLD,NULL,\
+               one,m,n,M,N,&A_diff_type));
+  PetscCall(MatAssemblyBegin(A_diff_type, MAT_FINAL_ASSEMBLY));
+  PetscCall(MatAssemblyEnd(A_diff_type, MAT_FINAL_ASSEMBLY));
+
+  PetscCall(MatGetType(A, &mtype));
+  PetscCall(MatGetType(A_diff_type, &mtype_input));
 
   if (mtype != mtype_input) 
   {
       // Doesn't seem like there is a converter to kokkos
       // So instead we just copy into the empty A_diff_type
       // This will be slow as its not preallocated, but this is just for testing
-      ierr = MatCopy(A, A_diff_type, DIFFERENT_NONZERO_PATTERN);
-      ierr = MatDestroy(&A);
+      PetscCall(MatCopy(A, A_diff_type, DIFFERENT_NONZERO_PATTERN));
+      PetscCall(MatDestroy(&A));
       A = A_diff_type;
 
       // Mat and vec types have to match
-      ierr = VecCreateFromOptions(PETSC_COMM_WORLD,NULL, \
-               one,n,N,&b_diff_type);
-      ierr = VecCopy(b,b_diff_type);
-      ierr = VecDestroy(&b);
+      PetscCall(VecCreateFromOptions(PETSC_COMM_WORLD,NULL, \
+               one,n,N,&b_diff_type));
+      PetscCall(VecCopy(b,b_diff_type));
+      PetscCall(VecDestroy(&b));
       b = b_diff_type;
   }
   else
   {
-      MatDestroy(&A_diff_type);
+      PetscCall(MatDestroy(&A_diff_type));
   }   
 
   /*
@@ -125,90 +124,90 @@ int main(int argc,char **args)
     Vec         tmp;
     PetscScalar *bold;
 
-    ierr = VecCreate(PETSC_COMM_WORLD,&tmp);CHKERRQ(ierr);
-    ierr = VecSetSizes(tmp,m,PETSC_DECIDE);CHKERRQ(ierr);
-    ierr = VecGetType(b, &vtype);CHKERRQ(ierr);
-    ierr = VecSetType(tmp, vtype);CHKERRQ(ierr);
-    ierr = VecGetOwnershipRange(b,&start,&end);CHKERRQ(ierr);
-    ierr = VecGetLocalSize(b,&mvec);CHKERRQ(ierr);
-    ierr = VecGetArray(b,&bold);CHKERRQ(ierr);
+    PetscCall(VecCreate(PETSC_COMM_WORLD,&tmp));
+    PetscCall(VecSetSizes(tmp,m,PETSC_DECIDE));
+    PetscCall(VecGetType(b, &vtype));
+    PetscCall(VecSetType(tmp, vtype));
+    PetscCall(VecGetOwnershipRange(b,&start,&end));
+    PetscCall(VecGetLocalSize(b,&mvec));
+    PetscCall(VecGetArray(b,&bold));
     for (j=0; j<mvec; j++) {
       indx = start+j;
-      ierr = VecSetValues(tmp,1,&indx,bold+j,INSERT_VALUES);CHKERRQ(ierr);
+      PetscCall(VecSetValues(tmp,1,&indx,bold+j,INSERT_VALUES));
     }
-    ierr = VecRestoreArray(b,&bold);CHKERRQ(ierr);
-    ierr = VecDestroy(&b);CHKERRQ(ierr);
-    ierr = VecAssemblyBegin(tmp);CHKERRQ(ierr);
-    ierr = VecAssemblyEnd(tmp);CHKERRQ(ierr);
+    PetscCall(VecRestoreArray(b,&bold));
+    PetscCall(VecDestroy(&b));
+    PetscCall(VecAssemblyBegin(tmp));
+    PetscCall(VecAssemblyEnd(tmp));
     b    = tmp;
   }
-  ierr = VecDuplicate(b,&x);CHKERRQ(ierr);
-  ierr = VecDuplicate(b,&u);CHKERRQ(ierr);
+  PetscCall(VecDuplicate(b,&x));
+  PetscCall(VecDuplicate(b,&u));
 
   // If we don't load b, just set x to random and the rhs to zero
   if (!b_in_f) {
-    ierr = VecSetRandom(x,NULL);CHKERRQ(ierr);
-    ierr = VecSet(b,0.0);CHKERRQ(ierr);
+    PetscCall(VecSetRandom(x,NULL));
+    PetscCall(VecSet(b,0.0));
   }
-  ierr = PetscBarrier((PetscObject)A);CHKERRQ(ierr);
+  PetscCall(PetscBarrier((PetscObject)A));
 
   // Diagonally scale our matrix 
   if (diag_scale) {
-   ierr = VecDuplicate(x, &diag_vec);
-   ierr = MatGetDiagonal(A, diag_vec);
-   ierr = VecReciprocal(diag_vec);
-   ierr = MatDiagonalScale(A, diag_vec, PETSC_NULLPTR);    
-   ierr = VecPointwiseMult(b, diag_vec, b); CHKERRQ(ierr);
-   ierr = VecDestroy(&diag_vec); CHKERRQ(ierr);
-  }  
+   PetscCall(VecDuplicate(x, &diag_vec));
+   PetscCall(MatGetDiagonal(A, diag_vec));
+   PetscCall(VecReciprocal(diag_vec));
+   PetscCall(MatDiagonalScale(A, diag_vec, PETSC_NULLPTR));
+   PetscCall(VecPointwiseMult(b, diag_vec, b));
+   PetscCall(VecDestroy(&diag_vec));
+  }
 
-  ierr = PetscLogStageRegister("mystage 1",&stage1);CHKERRQ(ierr);
-  ierr = PetscLogStagePush(stage1);CHKERRQ(ierr);
-  ierr = KSPCreate(PETSC_COMM_WORLD,&ksp);CHKERRQ(ierr);
-  ierr = KSPSetOperators(ksp,A,A);CHKERRQ(ierr);
-  ierr = KSPSetInitialGuessNonzero(ksp, PETSC_TRUE);
+  PetscCall(PetscLogStageRegister("mystage 1",&stage1));
+  PetscCall(PetscLogStagePush(stage1));
+  PetscCall(KSPCreate(PETSC_COMM_WORLD,&ksp));
+  PetscCall(KSPSetOperators(ksp,A,A));
+  PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
 
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   //       Let's use AIRG as our PC
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
 
-  ierr = KSPGetPC(ksp, &pc);CHKERRQ(ierr);
+  PetscCall(KSPGetPC(ksp, &pc));
   // Register the pflare types
   PCRegister_PFLARE();
-  ierr = PCSetType(pc, PCAIR);CHKERRQ(ierr);
-  ierr = KSPSetPC(ksp, pc);CHKERRQ(ierr);
+  PetscCall(PCSetType(pc, PCAIR));
+  PetscCall(KSPSetPC(ksp, pc));
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  ierr = KSPSetFromOptions(ksp);CHKERRQ(ierr);
-  ierr = KSPSetUp(ksp);CHKERRQ(ierr);
-  ierr = KSPSetUpOnBlocks(ksp);CHKERRQ(ierr);
-  ierr = PetscLogStagePop();CHKERRQ(ierr);
-  ierr = PetscBarrier((PetscObject)A);CHKERRQ(ierr);
+  PetscCall(KSPSetFromOptions(ksp));
+  PetscCall(KSPSetUp(ksp));
+  PetscCall(KSPSetUpOnBlocks(ksp));
+  PetscCall(PetscLogStagePop());
+  PetscCall(PetscBarrier((PetscObject)A));
 
-  ierr = PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",&gpu_copy);CHKERRQ(ierr);
-  ierr = PetscLogStagePush(gpu_copy);CHKERRQ(ierr);
-  ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
-  ierr = PetscLogStagePop();CHKERRQ(ierr);  
+  PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",&gpu_copy));
+  PetscCall(PetscLogStagePush(gpu_copy));
+  PetscCall(KSPSolve(ksp,b,x));
+  PetscCall(PetscLogStagePop());
 
   if (second_solve)
   {
-   ierr = VecSet(x, 1.0);CHKERRQ(ierr);
-   ierr = PetscLogStageRegister("mystage 2",&stage2);CHKERRQ(ierr);
-   ierr = PetscLogStagePush(stage2);CHKERRQ(ierr);
-   ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
-   ierr = PetscLogStagePop();CHKERRQ(ierr);  
+   PetscCall(VecSet(x, 1.0));
+   PetscCall(PetscLogStageRegister("mystage 2",&stage2));
+   PetscCall(PetscLogStagePush(stage2));
+   PetscCall(KSPSolve(ksp,b,x));
+   PetscCall(PetscLogStagePop());
   }
 
-  ierr = KSPGetConvergedReason(ksp,&reason);CHKERRQ(ierr);
+  PetscCall(KSPGetConvergedReason(ksp,&reason));
 
   /* Cleanup */
-  ierr = KSPDestroy(&ksp);CHKERRQ(ierr);
-  ierr = VecDestroy(&x);CHKERRQ(ierr);
-  ierr = VecDestroy(&b);CHKERRQ(ierr);
-  ierr = VecDestroy(&u);CHKERRQ(ierr);
-  ierr = MatDestroy(&A);CHKERRQ(ierr);
-  ierr = PetscFinalize();
+  PetscCall(KSPDestroy(&ksp));
+  PetscCall(VecDestroy(&x));
+  PetscCall(VecDestroy(&b));
+  PetscCall(VecDestroy(&u));
+  PetscCall(MatDestroy(&A));
+  PetscCall(PetscFinalize());
   if (reason < 0)
   {
    return 1;

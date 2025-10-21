@@ -38,7 +38,6 @@ int main(int argc,char **argv)
   KSP            ksp;
   PC             pc;
   DM             da;
-  PetscErrorCode ierr;
   PetscInt M, N;
   PetscScalar theta, alpha, u, v, u_test, v_test, L_x, L_y, L_x_test, L_y_test;
   PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale;
@@ -47,7 +46,7 @@ int main(int argc,char **argv)
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
 
-  ierr = PetscInitialize(&argc,&argv,(char*)0,help);if (ierr) return ierr;
+  PetscCall(PetscInitialize(&argc,&argv,(char*)0,help));
 
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   //       Let's use PFLARE
@@ -56,14 +55,14 @@ int main(int argc,char **argv)
   // Register the pflare types
   PCRegister_PFLARE();
 
-  PetscLogStageRegister("Setup", &setup);
-  PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy);
+  PetscCall(PetscLogStageRegister("Setup", &setup));
+  PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
 
   // Dimensions of box, L_y x L_x - default to [0, 1]^2
   L_x = 1.0;
   L_y = 1.0;
-  PetscOptionsGetReal(NULL, NULL, "-L_x", &L_x_test, &option_found_u);
-  PetscOptionsGetReal(NULL, NULL, "-L_y", &L_y_test, &option_found_v);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-L_x", &L_x_test, &option_found_u));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-L_y", &L_y_test, &option_found_v));
 
   if (option_found_u) PetscCheck(L_x_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_x must be positive");
   if (option_found_v) PetscCheck(L_y_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "L_y must be positive");
@@ -75,40 +74,40 @@ int main(int argc,char **argv)
    L_y = L_y_test;
   }    
 
-  ierr = KSPCreate(PETSC_COMM_WORLD,&ksp);CHKERRQ(ierr);
-  ierr = DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE,DMDA_STENCIL_STAR,11,11,PETSC_DECIDE,PETSC_DECIDE,1,1,NULL,NULL,&da);CHKERRQ(ierr);
-  ierr = DMSetFromOptions(da);CHKERRQ(ierr);
+  PetscCall(KSPCreate(PETSC_COMM_WORLD,&ksp));
+  PetscCall(DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE,DMDA_STENCIL_STAR,11,11,PETSC_DECIDE,PETSC_DECIDE,1,1,NULL,NULL,&da));
+  PetscCall(DMSetFromOptions(da));
   // This stops the zero entries in the stencil from being added to the matrix
   // It still allocates the memory for a 5 point stencil but the sparsity doesn't include the zero entries
   // We do this instead of calling MatFilter as there is no Kokkos implementation so its very slow
-  ierr = DMSetMatrixPreallocateOnly(da,PETSC_TRUE);CHKERRQ(ierr);
-  ierr = DMSetUp(da);CHKERRQ(ierr);
-  ierr = DMDASetUniformCoordinates(da, 0.0, L_x, 0.0, L_y, 0.0, 0.0);CHKERRQ(ierr);
-  ierr = KSPSetDM(ksp,(DM)da);CHKERRQ(ierr);
+  PetscCall(DMSetMatrixPreallocateOnly(da,PETSC_TRUE));
+  PetscCall(DMSetUp(da));
+  PetscCall(DMDASetUniformCoordinates(da, 0.0, L_x, 0.0, L_y, 0.0, 0.0));
+  PetscCall(KSPSetDM(ksp,(DM)da));
   // We generate the matrix ourselves
-  ierr = KSPSetDMActive(ksp, PETSC_FALSE);CHKERRQ(ierr);
+  PetscCall(KSPSetDMActive(ksp, PETSC_FALSE));
 
   // Create empty matrix and vectors
-  ierr = DMCreateMatrix(da, &A);
-  ierr = MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES ,PETSC_TRUE);CHKERRQ(ierr);
-  ierr = DMCreateGlobalVector(da, &x);
-  ierr = DMCreateGlobalVector(da, &b);
+  PetscCall(DMCreateMatrix(da, &A));
+  PetscCall(MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES ,PETSC_TRUE));
+  PetscCall(DMCreateGlobalVector(da, &x));
+  PetscCall(DMCreateGlobalVector(da, &b));
 
   // Zero rhs
-  VecSet(b, 0.0);
+  PetscCall(VecSet(b, 0.0));
 
   // ~~~~~~~~~~~~~~
   // Get command line options
   // ~~~~~~~~~~~~~~
 
   PetscBool second_solve= PETSC_FALSE;
-  PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL);  
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
   // Advection velocities - direction is [cos(theta), sin(theta)]
   // Default theta is pi/4
   PetscReal pi = 4*atan(1.0);
   theta = pi/4.0;
-  PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL));
   PetscCheck(theta <= pi/2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
 
   // Coefficients for 2d advection
@@ -117,8 +116,8 @@ int main(int argc,char **argv)
 
   // Or the user can pass in the individual advection velocities
   // This will override theta
-  PetscOptionsGetReal(NULL, NULL, "-u", &u_test, &option_found_u);
-  PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-u", &u_test, &option_found_u));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-v", &v_test, &option_found_v));
 
   if (option_found_u) PetscCheck(u_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "u must be positive");
   if (option_found_v) PetscCheck(v_test >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "v must be positive");
@@ -131,7 +130,7 @@ int main(int argc,char **argv)
   // Diffusion coefficient
   // Default alpha is 0 - pure advection
   alpha = 0.0;
-  PetscOptionsGetReal(NULL, NULL, "-alpha", &alpha, NULL);
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha", &alpha, NULL));
 
   // If we just have advection, rather than scaling by Hx * Hy, we can just have 
   // a dimensionless advection problem - this is enabled by default
@@ -141,7 +140,7 @@ int main(int argc,char **argv)
   {
    adv_nondim = PETSC_FALSE;
   }  
-  PetscOptionsGetBool(NULL, NULL, "-adv_nondim", &adv_nondim, NULL);
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-adv_nondim", &adv_nondim, NULL));
   // We can only nondimensionalise the advection if we don't have any diffusion
   check_nondim = PETSC_TRUE;
   if (alpha != 0.0)
@@ -157,71 +156,71 @@ int main(int argc,char **argv)
   // Do we diagonally scale our matrix before solving
   // Defaults to false
   diag_scale = PETSC_FALSE;
-  PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL);
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL));
 
   // ~~~~~~~~~~~~~~
   // ~~~~~~~~~~~~~~
 
   // Compute our matrix
-  ComputeMat(da, A, u, v, L_x, L_y, alpha, adv_nondim);
+  PetscCall(ComputeMat(da, A, u, v, L_x, L_y, alpha, adv_nondim));
   // This will compress out the extra memory
-  MatDuplicate(A, MAT_COPY_VALUES, &A_temp);
-  MatDestroy(&A);
+  PetscCall(MatDuplicate(A, MAT_COPY_VALUES, &A_temp));
+  PetscCall(MatDestroy(&A));
   A = A_temp;
 
   // Set the operator and options
-  ierr = KSPSetOperators(ksp,A,A);CHKERRQ(ierr);
-  ierr = KSPSetFromOptions(ksp);CHKERRQ(ierr);
-  ierr = KSPSetInitialGuessNonzero(ksp, PETSC_TRUE);
+  PetscCall(KSPSetOperators(ksp,A,A));
+  PetscCall(KSPSetFromOptions(ksp));
+  PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
 
-  ierr  = DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0);CHKERRQ(ierr); 
+  PetscCall(DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0));
 
   // Diagonally scale our matrix 
   if (diag_scale) {
-   ierr = VecDuplicate(x, &diag_vec);CHKERRQ(ierr);
-   ierr = MatGetDiagonal(A, diag_vec);CHKERRQ(ierr);
-   ierr = VecReciprocal(diag_vec);CHKERRQ(ierr);
-   ierr = MatDiagonalScale(A, diag_vec, PETSC_NULLPTR);CHKERRQ(ierr);    
-   ierr = VecPointwiseMult(b, diag_vec, b); CHKERRQ(ierr);
-   ierr = VecDestroy(&diag_vec); CHKERRQ(ierr);
+   PetscCall(VecDuplicate(x, &diag_vec));
+   PetscCall(MatGetDiagonal(A, diag_vec));
+   PetscCall(VecReciprocal(diag_vec));
+   PetscCall(MatDiagonalScale(A, diag_vec, PETSC_NULLPTR));
+   PetscCall(VecPointwiseMult(b, diag_vec, b));
+   PetscCall(VecDestroy(&diag_vec));
   }
 
   // Setup the ksp
-  ierr = PetscLogStagePush(setup);
-  ierr = KSPSetUp(ksp);CHKERRQ(ierr);
-  ierr = PetscLogStagePop();CHKERRQ(ierr);
+  PetscCall(PetscLogStagePush(setup));
+  PetscCall(KSPSetUp(ksp));
+  PetscCall(PetscLogStagePop());
 
-  ierr = KSPGetPC(ksp, &pc);CHKERRQ(ierr);
-  ierr = VecSet(x, 1.0);CHKERRQ(ierr);
+  PetscCall(KSPGetPC(ksp, &pc));
+  PetscCall(VecSet(x, 1.0));
 
   // Do a preliminary KSPSolve so all the vecs and mats get copied to the gpu
   // before the solve we're trying to time
-  ierr = PetscLogStagePush(gpu_copy);CHKERRQ(ierr);
-  ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
-  ierr = PetscLogStagePop();CHKERRQ(ierr);
+  PetscCall(PetscLogStagePush(gpu_copy));
+  PetscCall(KSPSolve(ksp,b,x));
+  PetscCall(PetscLogStagePop());
 
   // Solve
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
   // gpu implementation and we don't want a copy occuring back to the cpu
   if (second_solve)
   {
-   ierr = VecSet(x, 1.0);CHKERRQ(ierr);
-   ierr = KSPSolve(ksp,b,x);CHKERRQ(ierr);
+   PetscCall(VecSet(x, 1.0));
+   PetscCall(KSPSolve(ksp,b,x));
   }
 
   // Write out the iteration count
-  KSPGetConvergedReason(ksp,&reason);
+  PetscCall(KSPGetConvergedReason(ksp,&reason));
    
   // ~~~~~~~~~~~~~~
   // ~~~~~~~~~~~~~~  
 
   // Cleanup
-  ierr = DMDestroy(&da);CHKERRQ(ierr);
-  ierr = KSPDestroy(&ksp);CHKERRQ(ierr);
-  ierr = VecDestroy(&x);CHKERRQ(ierr);
-  ierr = VecDestroy(&b);CHKERRQ(ierr);
-  ierr = MatDestroy(&A);CHKERRQ(ierr);
-  ierr = PetscFinalize();
+  PetscCall(DMDestroy(&da));
+  PetscCall(KSPDestroy(&ksp));
+  PetscCall(VecDestroy(&x));
+  PetscCall(VecDestroy(&b));
+  PetscCall(MatDestroy(&A));
+  PetscCall(PetscFinalize());
   if (reason < 0)
   {
    return 1;
@@ -231,12 +230,11 @@ int main(int argc,char **argv)
 
 PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar L_x, PetscScalar L_y, PetscScalar alpha, PetscBool adv_nondim)
 {
-  PetscErrorCode ierr;
   PetscInt       i, j, M, N, xm, ym, xs, ys;
   PetscScalar    val[5], Hx, Hy, HydHx, HxdHy, adv_x_scale, adv_y_scale;
   MatStencil     row, col[5];
 
-  ierr  = DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0);CHKERRQ(ierr);
+  PetscCall(DMDAGetInfo(da,0,&M,&N,0,0,0,0,0,0,0,0,0,0));
   Hx    = L_x / (PetscReal)(M);
   Hy    = L_y / (PetscReal)(N);
   HxdHy = Hx/Hy;
@@ -249,7 +247,7 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
    adv_y_scale = HydHx;   
   }
 
-  ierr  = DMDAGetCorners(da,&xs,&ys,0,&xm,&ym,0);CHKERRQ(ierr);
+  PetscCall(DMDAGetCorners(da,&xs,&ys,0,&xm,&ym,0));
 
   // Loop over the nodes
   for (j=ys; j<ys+ym; j++) {
@@ -263,7 +261,7 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
          if (i==0 || j==0) {
 
             val[0] = 1.0; col[0].i = i;   col[0].j = j;        
-            ierr = MatSetValuesStencil(A,1,&row,1,col,val,ADD_VALUES);CHKERRQ(ierr);      
+            PetscCall(MatSetValuesStencil(A,1,&row,1,col,val,ADD_VALUES));
 
          // Top or right - depends on if we have any diffusion
          } else {
@@ -277,14 +275,14 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
                // bottom
                val[1] = -v * adv_x_scale;                 col[1].i = i-1; col[1].j = j;
                // centre
-               val[2] = u*adv_y_scale + v*adv_x_scale;    col[2].i = i;   col[2].j = j;   
-               ierr = MatSetValuesStencil(A,1,&row,3,col,val,ADD_VALUES);CHKERRQ(ierr);                
+               val[2] = u*adv_y_scale + v*adv_x_scale;    col[2].i = i;   col[2].j = j;
+               PetscCall(MatSetValuesStencil(A,1,&row,3,col,val,ADD_VALUES));
 
             // If we have diffusion we have dirichlet bcs on the top and right
             } else{
 
-               val[0] = 1.0; col[0].i = i;   col[0].j = j;        
-               ierr = MatSetValuesStencil(A,1,&row,1,col,val,ADD_VALUES);CHKERRQ(ierr);                   
+               val[0] = 1.0; col[0].i = i;   col[0].j = j;
+               PetscCall(MatSetValuesStencil(A,1,&row,1,col,val,ADD_VALUES));
             }
          }
 
@@ -304,7 +302,7 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
             val[3] = -alpha * HydHx;              col[3].i = i+1; col[3].j = j;
             // top
             val[4] = -alpha * HxdHy;              col[4].i = i;   col[4].j = j+1;
-            ierr = MatSetValuesStencil(A,1,&row,5,col,val,ADD_VALUES);CHKERRQ(ierr);            
+            PetscCall(MatSetValuesStencil(A,1,&row,5,col,val,ADD_VALUES));
          }
 
         // Upwind advection with theta between 0 and pi/2
@@ -314,14 +312,14 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
             // bottom
             val[1] = -v * adv_x_scale;                 col[1].i = i-1; col[1].j = j;
             // centre
-            val[2] = u*adv_y_scale + v*adv_x_scale;    col[2].i = i;   col[2].j = j;   
-            ierr = MatSetValuesStencil(A,1,&row,3,col,val,ADD_VALUES);CHKERRQ(ierr);
+            val[2] = u*adv_y_scale + v*adv_x_scale;    col[2].i = i;   col[2].j = j;
+            PetscCall(MatSetValuesStencil(A,1,&row,3,col,val,ADD_VALUES));
         }
       }
     }
   }
-  ierr = MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
-  ierr = MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
+  PetscCall(MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY));
+  PetscCall(MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY));
 
-  return 0;
+  return PETSC_SUCCESS;
 }

@@ -45,10 +45,12 @@ PETSC_EXTERN void compute_cf_splitting_c(Mat *, int, double, int, int, int, doub
 
 /* Define PCPFLAREINV get routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetOrder(PC, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVGetSparsityOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetType(PC, PCPFLAREINVType *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetMatrixFree(PC, PetscBool *);
 /* Define PCPFLAREINV set routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetOrder(PC, PetscInt);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVSetSparsityOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetType(PC, PCPFLAREINVType);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetMatrixFree(PC, PetscBool);
 
