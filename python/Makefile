@@ -34,7 +34,16 @@ endif
 export PYTHONPATH := $(if $(PYTHONPATH),$(PYTHONPATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(CURDIR)
 
 # Build the Cython interface
+# 1. Check if a compatible Cython is available - we need this for the petsc ci, as the default installed is 0.29
+#    and yet petsc when installing petsc4py installs it's own cython >=3 which we don't have access to, but we have to match the version
+# 2. If not, install it to the user's local site-packages (no sudo needed).
+# 3. Call setup.py directly, which will now find the correct Cython and petsc4py.
 python:
+	@# This shell block ensures that if the Cython check fails, the Cython install runs, and then the build runs.
+	@if ! $(PYTHON) -c "import sys; import Cython; v=tuple(map(int, Cython.__version__.split('.'))); sys.exit(0 if v >= (3,0) else 1)" 2>/dev/null; then \
+		echo "Compatible Cython not found. Installing Cython>=3.0 to user directory..."; \
+		$(PYTHON) -m pip install --user "cython>=3.0"; \
+	fi
 	$(PYTHON) setup.py build_ext --inplace
 
 run_tests:
