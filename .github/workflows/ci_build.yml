@@ -261,7 +261,6 @@ jobs:
             --download-kokkos-kernels \
             --with-cuda-arch=89 \
             --download-mpich \
-            --with-make-np=2 \
             && \
          make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-debug check &&
          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git &&
