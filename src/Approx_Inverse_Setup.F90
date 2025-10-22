@@ -56,6 +56,7 @@ module approx_inverse_setup
       type(mat_ctxtype), pointer :: mat_ctx => null()
       PetscErrorCode :: ierr
       type(tMat) :: reuse_mat, inv_matrix_temp
+      type(tMat), dimension(:), pointer :: reuse_submatrices => null()
 
       ! ~~~~~~  
       
@@ -106,6 +107,7 @@ module approx_inverse_setup
                   buffers, coefficients, &
                   matrix_free, &
                   reuse_mat, &
+                  reuse_submatrices, &
                   inv_matrix_temp)
             
       ! Have to tell the matshell to own the coefficient pointers
@@ -114,7 +116,7 @@ module approx_inverse_setup
          mat_ctx%own_coefficients = .TRUE.               
       end if
       if (.NOT. PetscObjectIsNull(reuse_mat)) then
-         call MatDestroy(reuse_mat, ierr)
+         call destroy_matrix_reuse(reuse_mat, reuse_submatrices)
       end if
 
       ! Copy the pointer - see comment above about petsc 3.22
@@ -246,7 +248,7 @@ module approx_inverse_setup
    subroutine finish_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   buffers, coefficients, &
-                  matrix_free, reuse_mat, inv_matrix)
+                  matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
 
       ! Finish the assembly of an approximate inverse
 
@@ -258,6 +260,7 @@ module approx_inverse_setup
       PetscReal, dimension(:, :), pointer, contiguous, intent(inout) :: coefficients
       logical, intent(in)                               :: matrix_free
       type(tMat), intent(inout)                         :: reuse_mat, inv_matrix
+      type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
       logical :: incomplete
       PetscErrorCode :: ierr
@@ -290,7 +293,7 @@ module approx_inverse_setup
 
          call build_gmres_polynomial_inverse(matrix, poly_order, &
                   buffers, coefficients(:, 1), &
-                  inverse_sparsity_order, matrix_free, reuse_mat, inv_matrix)  
+                  inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)  
 
       ! Gmres polynomial with newton basis
       else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
@@ -309,7 +312,7 @@ module approx_inverse_setup
 
          coefficients = 1d0
          call calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                     buffers, inverse_sparsity_order, matrix_free, reuse_mat, inv_matrix)        
+                     buffers, inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)        
                  
       ! Sparse approximate inverse
       else if (inverse_type == PFLAREINV_SAI .OR. inverse_type == PFLAREINV_ISAI) then
@@ -328,7 +331,8 @@ module approx_inverse_setup
             incomplete = .TRUE.
          end if
 
-         call calculate_and_build_sai(matrix, inverse_sparsity_order, incomplete, reuse_mat, inv_matrix)
+         call calculate_and_build_sai(matrix, inverse_sparsity_order, incomplete, &
+                  reuse_mat, reuse_submatrices, inv_matrix)
          
       ! Weighted jacobi
       else if (inverse_type == PFLAREINV_WJACOBI) then

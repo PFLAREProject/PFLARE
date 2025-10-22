@@ -22,7 +22,7 @@ module sai_z
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_sai_z(A_ff_input, A_cf, sparsity_mat_cf, incomplete, reuse_mat, z)
+   subroutine calculate_and_build_sai_z(A_ff_input, A_cf, sparsity_mat_cf, incomplete, reuse_mat, reuse_submatrices, z)
 
       ! Computes an approximation to z using sai/isai
       ! If incomplete is true then this is lAIR
@@ -33,6 +33,7 @@ module sai_z
       type(tMat), intent(in)                            :: A_ff_input, A_cf, sparsity_mat_cf
       logical, intent(in)                               :: incomplete
       type(tMat), intent(inout)                         :: reuse_mat, z
+      type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
       ! Local variables 
       PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one
@@ -62,7 +63,7 @@ module sai_z
       type(tKSP) :: ksp
       type(tPC) :: pc
       PetscInt, dimension(:), pointer :: colmap
-      type(tMat), dimension(:), pointer :: submatrices, submatrices_full
+      type(tMat), dimension(:), pointer :: submatrices
       logical :: deallocate_submatrices = .FALSE.
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       integer(c_long_long) :: A_array
@@ -186,14 +187,12 @@ module sai_z
          ! This returns a sequential matrix
          if (incomplete) then
             
-            if (.NOT. PetscObjectIsNull(reuse_mat)) then
-               allocate(submatrices(1))
-               deallocate_submatrices = .TRUE.      
-               submatrices_full(1) = reuse_mat
-               call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
+            if (.NOT. PetscObjectIsNull(reuse_mat)) then    
+               reuse_submatrices(1) = reuse_mat
+               call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
             else
-               call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_INITIAL_MATRIX, submatrices_full, ierr)
-               reuse_mat = submatrices_full(1)
+               call MatCreateSubMatrices(A_ff, one, col_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
+               reuse_mat = reuse_submatrices(1)
             end if
 
          else
@@ -212,14 +211,12 @@ module sai_z
             ! This means we will have to map any column indices we use 
             ! This is very slow in parallel and doesn't scale well! 
             ! There is no easy way in petsc to return only the non-zero columns for a given set of rows
-            if (.NOT. PetscObjectIsNull(reuse_mat)) then
-               allocate(submatrices(1))
-               deallocate_submatrices = .TRUE.               
-               submatrices_full(1) = reuse_mat        
-               call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_REUSE_MATRIX, submatrices_full, ierr)
+            if (.NOT. PetscObjectIsNull(reuse_mat)) then             
+               reuse_submatrices(1) = reuse_mat        
+               call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
             else
-               call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_INITIAL_MATRIX, submatrices_full, ierr)
-               reuse_mat = submatrices_full(1)
+               call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
+               reuse_mat = reuse_submatrices(1)
             end if
             call ISDestroy(all_cols_indices(1), ierr)
 
@@ -231,9 +228,9 @@ module sai_z
       ! Easy in serial as we have everything we neeed
       else
          
-         allocate(submatrices_full(1))
+         allocate(reuse_submatrices(1))
          deallocate_submatrices = .TRUE.               
-         submatrices_full(1) = A_ff
+         reuse_submatrices(1) = A_ff
          ! local rows is the size of c, local cols is the size of f
          row_size = local_cols
          allocate(col_indices_off_proc_array(local_cols))
@@ -352,13 +349,13 @@ module sai_z
             do j_loc = 1, size(j_rows)
 
                ! We just want the indices
-               call MatGetRow(submatrices_full(1), j_rows(j_loc), ncols, &
+               call MatGetRow(reuse_submatrices(1), j_rows(j_loc), ncols, &
                         cols, PETSC_NULL_SCALAR_POINTER, ierr) 
    
                call create_knuth_shuffle_tree_array(cols(1:ncols), &
                         i_rows_tree)                       
    
-               call MatRestoreRow(submatrices_full(1), j_rows(j_loc), ncols, &
+               call MatRestoreRow(reuse_submatrices(1), j_rows(j_loc), ncols, &
                         cols, PETSC_NULL_SCALAR_POINTER, ierr)             
    
             end do
@@ -395,11 +392,11 @@ module sai_z
 
          ! Setting this is necessary to avoid an allreduce when calling createsubmatrices
          ! This will be reset to false after the call to createsubmatrices
-         ! Shouldn't be needed given submatrices_full(1) is sequential, but whats the harm
-         call MatSetOption(submatrices_full(1), MAT_SUBMAT_SINGLEIS, PETSC_TRUE, ierr)                             
+         ! Shouldn't be needed given reuse_submatrices(1) is sequential, but whats the harm
+         call MatSetOption(reuse_submatrices(1), MAT_SUBMAT_SINGLEIS, PETSC_TRUE, ierr)                             
 
          ! This should just be an entirely local operation
-         call MatCreateSubMatrices(submatrices_full(1), one, j_col_is, i_row_is, MAT_INITIAL_MATRIX, submatrices, ierr)        
+         call MatCreateSubMatrices(reuse_submatrices(1), one, j_col_is, i_row_is, MAT_INITIAL_MATRIX, submatrices, ierr)        
          
          ! Pull out the entries of the submatrix into a dense mat
          if (.NOT. approx_solve) then
@@ -547,7 +544,10 @@ module sai_z
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
       end if     
-      if (deallocate_submatrices) deallocate(submatrices_full)   
+      if (deallocate_submatrices) then
+         deallocate(reuse_submatrices)   
+         reuse_submatrices => null()
+      end if
       if (mat_type == MATDIAGONAL) then
          call MatDestroy(A_ff, ierr)
       end if      
@@ -560,7 +560,7 @@ module sai_z
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_sai(matrix, sparsity_order, incomplete, reuse_mat, inv_matrix)
+   subroutine calculate_and_build_sai(matrix, sparsity_order, incomplete, reuse_mat, reuse_submatrices, inv_matrix)
 
       ! Computes an approximate inverse with an SAI (or an ISAI)
       ! This just builds an identity and then calls the calculate_and_build_sai_z code
@@ -570,7 +570,8 @@ module sai_z
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: sparsity_order
       logical, intent(in)                               :: incomplete
-      type(tMat), intent(inout)                         :: reuse_mat, inv_matrix    
+      type(tMat), intent(inout)                         :: reuse_mat, inv_matrix   
+      type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
       type(tMat) :: minus_I, sparsity_mat_cf, A_power
       integer :: order
@@ -638,7 +639,8 @@ module sai_z
       end if
 
       ! Now compute our sparse approximate inverse
-      call calculate_and_build_sai_z(matrix, minus_I, sparsity_mat_cf, incomplete, reuse_mat, inv_matrix)     
+      call calculate_and_build_sai_z(matrix, minus_I, sparsity_mat_cf, incomplete, &
+               reuse_mat, reuse_submatrices, inv_matrix)     
       call MatDestroy(minus_I, ierr)
       if (sparsity_order .ge. 2) call MatDestroy(sparsity_mat_cf, ierr)      
 

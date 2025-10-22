@@ -178,6 +178,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+                  air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(our_level))             
 
             ! sol_vec = A^-1 * rand_vec
@@ -196,7 +197,8 @@ module air_mg_setup
 
                ! Delete temporary if not reusing
                if (.NOT. air_data%options%reuse_sparsity) then
-                  call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), ierr)        
+                  call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+                           air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)                                    
                end if                  
 
             ! If this isn't good enough, destroy everything we used - no chance for reuse
@@ -1042,11 +1044,13 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
                   air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
+                  air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(air_data%no_levels))           
 
             ! Delete temporary if not reusing
             if (.NOT. air_data%options%reuse_sparsity) then
-               call MatDestroy(air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), ierr)          
+               call destroy_matrix_reuse(air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
+                        air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array)               
             end if                      
 
             ! Now we've finished the coarse grid solver, output the time

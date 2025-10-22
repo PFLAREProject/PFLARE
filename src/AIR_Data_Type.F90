@@ -16,6 +16,9 @@ module air_data_type
 
    public
 
+   type petsc_mat_pointer_array
+      type(tMat), dimension(:), pointer :: array => null()
+   end type petsc_mat_pointer_array
    type petsc_vec_array
       type(tVec), allocatable, dimension(:) :: array
    end type petsc_vec_array
@@ -281,6 +284,7 @@ module air_data_type
    type air_reuse_data
 
       type(tMat), dimension(22) :: reuse_mat
+      type(petsc_mat_pointer_array), dimension(22) :: reuse_submatrices
       type(tIS), dimension(2) :: reuse_is
 
    end type air_reuse_data

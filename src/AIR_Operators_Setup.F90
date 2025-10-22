@@ -353,11 +353,15 @@ module air_operators_setup
             air_data%inv_A_ff_poly_data(our_level)%buffers, &
             air_data%inv_A_ff_poly_data(our_level)%coefficients, &
             air_data%options%matrix_free_polys, air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+            air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
             air_data%inv_A_ff(our_level)) 
             
       ! Delete temporary if not reusing
       if (.NOT. air_data%options%reuse_sparsity) then
-         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), ierr)
+         ! Because inv_A_ff might have come from a gmres polynomial that had to use matcreatesubmatrices
+         ! have to be careful about how we destroy it
+         call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+                  air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)
       end if              
       
       destroy_mat = .FALSE.
@@ -379,12 +383,14 @@ module air_operators_setup
                      air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, &
                      .FALSE., air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                     air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
                      inv_dropped_Aff)
             destroy_mat = .TRUE.
 
             ! Delete temporary if not reusing
             if (.NOT. air_data%options%reuse_sparsity) then
-               call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), ierr)            
+               call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array)                         
             end if             
 
          ! If we have a strong R tolerance of 0, we can re-use the 
@@ -404,12 +410,14 @@ module air_operators_setup
                         air_data%inv_A_ff_poly_data(our_level)%buffers, &
                         air_data%inv_A_ff_poly_data(our_level)%coefficients, &
                         .FALSE., air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
                         inv_dropped_Aff)
                destroy_mat = .TRUE.
 
                ! Delete temporary if not reusing
                if (.NOT. air_data%options%reuse_sparsity) then
-                  call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), ierr)               
+                  call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                           air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array) 
                end if               
 
             ! Just re-use the already assembled one            
@@ -722,17 +730,20 @@ module air_operators_setup
             call calculate_and_build_sai_z(air_data%A_ff(our_level), air_data%A_cf(our_level), &
                         sparsity_mat_cf, .TRUE., &
                         air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_SAI_SUB)%array, &
                         air_data%reuse(our_level)%reuse_mat(MAT_Z))
          ! SAI Z
          else
             call calculate_and_build_sai_z(air_data%A_ff(our_level), air_data%A_cf(our_level), &
                         sparsity_mat_cf, .FALSE., &
                         air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_SAI_SUB)%array, &                        
                         air_data%reuse(our_level)%reuse_mat(MAT_Z))
          end if        
          ! Delete temporary if not reusing
          if (.NOT. air_data%options%reuse_sparsity) then
-            call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), ierr)         
+            call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), &
+                     air_data%reuse(our_level)%reuse_submatrices(MAT_SAI_SUB)%array)             
          end if 
          if (air_data%options%lair_distance .ge. 2) then
             call MatDestroy(sparsity_mat_cf, ierr)        
@@ -899,13 +910,15 @@ module air_operators_setup
                   air_data%inv_A_cc_poly_data(our_level)%coefficients, &
                   air_data%options%matrix_free_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_ACC), &
+                  air_data%reuse(our_level)%reuse_submatrices(MAT_INV_ACC)%array, &
                   air_data%inv_A_cc(our_level))
                   
          call timer_finish(TIMER_ID_AIR_INVERSE) 
          
          ! Delete temporary if not reusing
          if (.NOT. air_data%options%reuse_sparsity) then
-            call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_ACC), ierr)         
+            call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_ACC), &
+                     air_data%reuse(our_level)%reuse_submatrices(MAT_INV_ACC)%array)             
          end if         
 
       end if
