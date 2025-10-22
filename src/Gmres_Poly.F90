@@ -710,17 +710,19 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
    
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, reuse_mat, cmat)
+   subroutine mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, &
+                  reuse_mat, reuse_submatrices, cmat)
 
       ! Wrapper around mat_mult_powers_share_sparsity_cpu and mat_mult_powers_share_sparsity_kokkos     
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), target, intent(in)                  :: matrix
-      integer, intent(in)                             :: poly_order, poly_sparsity_order
-      type(tsqr_buffers), intent(inout)               :: buffers
-      PetscReal, dimension(:), target, intent(inout)  :: coefficients
-      type(tMat), intent(inout)                       :: reuse_mat, cmat
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: poly_order, poly_sparsity_order
+      type(tsqr_buffers), intent(inout)                  :: buffers
+      PetscReal, dimension(:), target, intent(inout)     :: coefficients
+      type(tMat), intent(inout)                          :: reuse_mat, cmat
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
 
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array, reuse_array
@@ -732,6 +734,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
       type(c_ptr)  :: coefficients_ptr
       type(tMat) :: reuse_mat_cpu
+      type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
 #endif      
       ! ~~~~~~~~~~
 
@@ -798,9 +801,10 @@ end if
             ! We send in an empty reuse_mat_cpu here always, as we can't pass through
             ! the same one Kokkos uses as it now only gets out the non-local rows we need
             ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
+            reuse_submatrices_cpu => null()
             call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
-                     buffers, coefficients, reuse_mat_cpu, temp_mat)
-            call MatDestroy(reuse_mat_cpu, ierr)
+                     buffers, coefficients, reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+            call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)         
                      
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
@@ -828,12 +832,12 @@ end if
       else
 
          call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
-                  buffers, coefficients, reuse_mat, cmat)       
+                  buffers, coefficients, reuse_mat, reuse_submatrices, cmat)       
 
       end if
 #else
       call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
-                  buffers, coefficients, reuse_mat, cmat)
+                  buffers, coefficients, reuse_mat, reuse_submatrices, cmat)
 #endif         
 
       ! ~~~~~~~~~~
@@ -842,7 +846,8 @@ end if
 
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, buffers, coefficients, reuse_mat, cmat)
+   subroutine mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, buffers, coefficients, &
+                  reuse_mat, reuse_submatrices, cmat)
 
       ! Compute matrix powers c = coeff(1) * I + coeff(2) * A + coeff(3) * A^2 + coeff(4) * A^3 + ... 
       ! where a c and the powers all share the same sparsity as the power input in poly_sparsity_order
@@ -851,11 +856,12 @@ end if
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), target, intent(in)                  :: matrix
-      integer, intent(in)                             :: poly_order, poly_sparsity_order
-      type(tsqr_buffers), intent(inout)               :: buffers
-      PetscReal, dimension(:), intent(inout)          :: coefficients
-      type(tMat), intent(inout)                       :: reuse_mat, cmat
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: poly_order, poly_sparsity_order
+      type(tsqr_buffers), intent(inout)                  :: buffers
+      PetscReal, dimension(:), intent(inout)             :: coefficients
+      type(tMat), intent(inout)                          :: reuse_mat, cmat
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
       
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
@@ -873,7 +879,6 @@ end if
       type(tIS), dimension(1) :: col_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
-      type(tMat), dimension(:), pointer :: submatrices
       logical :: deallocate_submatrices = .FALSE.
       type(c_ptr) :: vals_c_ptr
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
@@ -998,13 +1003,11 @@ end if
          ! as then the row indices match colmap
          ! This returns a sequential matrix
          if (.NOT. PetscObjectIsNull(reuse_mat)) then
-            allocate(submatrices(1))
-            deallocate_submatrices = .TRUE.
-            submatrices(1) = reuse_mat
-            call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_REUSE_MATRIX, submatrices, ierr)
+            reuse_submatrices(1) = reuse_mat
+            call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
          else
-            call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_INITIAL_MATRIX, submatrices, ierr)
-            reuse_mat = submatrices(1)
+            call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
+            reuse_mat = reuse_submatrices(1)
          end if
          row_size = size(col_indices_off_proc_array)
          call ISDestroy(col_indices(1), ierr)
@@ -1014,9 +1017,9 @@ end if
 
          Ad = mat_sparsity_match
          cols_ad = local_cols
-         allocate(submatrices(1))
+         allocate(reuse_submatrices(1))
          deallocate_submatrices = .TRUE.
-         submatrices(1) = matrix
+         reuse_submatrices(1) = matrix
          row_size = local_rows
          allocate(col_indices_off_proc_array(local_rows))
          do ifree = 1, local_rows
@@ -1025,7 +1028,7 @@ end if
       end if   
       
       ! ~~~~~~~~~
-      ! Now that we are here, submatrices(1) contains A^poly_sparsity_order with all of the rows
+      ! Now that we are here, reuse_submatrices(1) contains A^poly_sparsity_order with all of the rows
       ! that correspond to the non-zero columns of matrix
       ! ~~~~~~~~~      
 
@@ -1033,9 +1036,9 @@ end if
       max_nnzs = 0
       ! Check the nnzs of the serial copy of matrix
       do ifree = 1, row_size            
-         call MatGetRow(submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         call MatGetRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         call MatRestoreRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
       ! and also the sparsity power
       do ifree = global_row_start, global_row_end_plus_one-1     
@@ -1048,14 +1051,14 @@ end if
       ! Get pointers to the sequential aij structure so we don't have to put critical regions
       ! around the matgetrow
       ! ~~~~~~~~
-      call MatGetRowIJ(submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
+      call MatGetRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
       if (.NOT. done) then
          print *, "Pointers not set in call to MatGetRowIJF"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
       ! Returns the wrong size pointer and can break if that size goes negative??
-      !call MatSeqAIJGetArrayF90(submatrices(1),submatrices_vals,ierr);
-      A_array = submatrices(1)%v
+      !call MatSeqAIJGetArrayF90(reuse_submatrices(1),submatrices_vals,ierr);
+      A_array = reuse_submatrices(1)%v
       ! Now we must never overwrite the values in this pointer, and we must 
       ! never call restore on it, see comment on top of the commented out
       ! MatSeqAIJRestoreArray below
@@ -1107,7 +1110,7 @@ end if
       do i_loc = 1, local_rows 
                           
          ! Get the row of mat_sparsity_match
-         ! We need both the local indices into submatrices(1) and the global indices
+         ! We need both the local indices into reuse_submatrices(1) and the global indices
          if (poly_sparsity_order == 1) then
 
             ! This is the number of columns
@@ -1269,7 +1272,7 @@ end if
          deallocate(symbolic_vals, symbolic_ones, cols_local)  
       end do
 
-      call MatRestoreRowIJ(submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
+      call MatRestoreRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
       ! We very deliberately don't call restorearray here!
       ! There is no matseqaijgetarrayread or matseqaijrestorearrayread in Fortran
       ! Those routines don't increment the PetscObjectStateGet which tells petsc
@@ -1279,7 +1282,7 @@ end if
       ! even though we only read from the array
       ! That would mean if we pass in a pc->pmat for example, just setting up a pc
       ! would trigger petsc setting up the pc on every iteration of the pc
-      ! call MatSeqAIJRestoreArray(submatrices(1),submatrices_vals,ierr);
+      ! call MatSeqAIJRestoreArray(reuse_submatrices(1),submatrices_vals,ierr);
 
       ! ~~~~~~~~~~~
 
@@ -1291,7 +1294,10 @@ end if
       do order = 2, poly_sparsity_order
          call MatDestroy(matrix_powers(order), ierr)
       end do
-      if (deallocate_submatrices) deallocate(submatrices)
+      if (deallocate_submatrices) then
+         deallocate(reuse_submatrices)
+         reuse_submatrices => null()
+      end if
 
       deallocate(col_indices_off_proc_array)
       deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)
@@ -1409,7 +1415,7 @@ end if
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine build_gmres_polynomial_inverse(matrix, poly_order, buffers, coefficients, &
-                  poly_sparsity_order, matrix_free, reuse_mat, inv_matrix)
+                  poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
 
       ! Assembles a matrix which is an approximation to the inverse of a matrix using the 
       ! gmres polynomial coefficients 
@@ -1425,6 +1431,7 @@ end if
       integer, intent(in)                               :: poly_sparsity_order
       logical, intent(in)                               :: matrix_free
       type(tMat), intent(inout)                         :: reuse_mat, inv_matrix
+      type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
       ! Local variables
       PetscInt :: global_row_start, global_row_end_plus_one
@@ -1537,7 +1544,7 @@ end if
          ! so that it doen't have to do much comms
          ! This also finishes off the asyn comms and computes the coefficients
          call mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, &
-                  reuse_mat, inv_matrix)     
+                  reuse_mat, reuse_submatrices, inv_matrix)
 
          ! Then just return
          return

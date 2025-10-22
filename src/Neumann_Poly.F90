@@ -101,7 +101,7 @@ module neumann_poly
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                  buffers, poly_sparsity_order, matrix_free, reuse_mat, inv_matrix)
+                  buffers, poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
 
 
       ! Builds an assembled neumann polynomial approximate inverse
@@ -116,6 +116,7 @@ module neumann_poly
       integer, intent(in)                 :: poly_sparsity_order
       logical, intent(in)                 :: matrix_free
       type(tMat), intent(inout)           :: reuse_mat, inv_matrix
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
 
       ! Local variables
       PetscReal, dimension(:), pointer :: coefficients
@@ -232,7 +233,7 @@ module neumann_poly
          ! If we feed in coefficients=1 and leave buffers%R_buffer_receive unallocated as it will just skip 
          ! the "gmres" coefficient calculation and just calculate the sum of (potentailly fixed sparsity) matrix powers
          call build_gmres_polynomial_inverse(temp_mat, poly_order, buffers, coefficients, &
-               poly_sparsity_order, .FALSE., reuse_mat, inv_matrix)
+               poly_sparsity_order, .FALSE., reuse_mat, reuse_submatrices, inv_matrix)
                
          ! Now this computes (I - D^-1 A)^-1 D^-1
          ! For the F-point smoothing and grid-transfer operators in our air multigrid, 

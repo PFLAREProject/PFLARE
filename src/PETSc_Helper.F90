@@ -63,6 +63,37 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif
       
     end function kokkos_debug   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine destroy_matrix_reuse(mat, submatrices)
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(inout)                          :: mat
+      type(tMat), dimension(:), pointer, intent(inout)   :: submatrices
+
+      ! Local
+      PetscInt, parameter :: one = 1
+      PetscErrorCode :: ierr      
+      type(tMat) :: temp_mat
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+      
+      if (associated(submatrices)) then
+         submatrices(1) = mat
+         ! We only ever do one matrix at a time in matcreatesubmatrices
+         call MatDestroySubMatrices(one, submatrices, ierr)
+         submatrices => null()
+         ! MatDestroySubMatrices doesn't leave the mat in the same null state
+         ! as calling matdestroy
+         mat = temp_mat
+      else
+         call MatDestroy(mat, ierr)
+      end if
+      
+   end subroutine     
  
    !------------------------------------------------------------------------------------------------------------------------
    
