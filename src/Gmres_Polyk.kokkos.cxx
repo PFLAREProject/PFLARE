@@ -511,6 +511,10 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    }   
    delete[] matrix_powers;
    if (deallocate_submatrices) delete[] submatrices;
+   // We don't explicitly call matdestroysubmatrices because lord knows how we pass out submatrices back
+   // to fortran - to prevent leaking memory we destroy the submatrices pointer ourself, and if we come back
+   // into this routine with reuse we just create a new submatrices array    
+   if (mpi && !reuse_int_reuse_mat) PetscCallVoid(PetscFree(submatrices));
    (void)PetscFree(col_indices_off_proc_array);
 
    return;
