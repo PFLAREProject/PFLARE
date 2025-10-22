@@ -331,7 +331,8 @@ module approx_inverse_setup
             incomplete = .TRUE.
          end if
 
-         call calculate_and_build_sai(matrix, inverse_sparsity_order, incomplete, reuse_mat, inv_matrix)
+         call calculate_and_build_sai(matrix, inverse_sparsity_order, incomplete, &
+                  reuse_mat, reuse_submatrices, inv_matrix)
          
       ! Weighted jacobi
       else if (inverse_type == PFLAREINV_WJACOBI) then

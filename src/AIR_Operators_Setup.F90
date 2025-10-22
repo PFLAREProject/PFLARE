@@ -730,17 +730,20 @@ module air_operators_setup
             call calculate_and_build_sai_z(air_data%A_ff(our_level), air_data%A_cf(our_level), &
                         sparsity_mat_cf, .TRUE., &
                         air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_SAI_SUB)%array, &
                         air_data%reuse(our_level)%reuse_mat(MAT_Z))
          ! SAI Z
          else
             call calculate_and_build_sai_z(air_data%A_ff(our_level), air_data%A_cf(our_level), &
                         sparsity_mat_cf, .FALSE., &
                         air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_SAI_SUB)%array, &                        
                         air_data%reuse(our_level)%reuse_mat(MAT_Z))
          end if        
          ! Delete temporary if not reusing
          if (.NOT. air_data%options%reuse_sparsity) then
-            call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), ierr)         
+            call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_SAI_SUB), &
+                     air_data%reuse(our_level)%reuse_submatrices(MAT_SAI_SUB)%array)             
          end if 
          if (air_data%options%lair_distance .ge. 2) then
             call MatDestroy(sparsity_mat_cf, ierr)        
