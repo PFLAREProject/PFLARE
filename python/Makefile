@@ -31,7 +31,7 @@ else
 export LD_LIBRARY_PATH := $(if $(LD_LIBRARY_PATH),$(LD_LIBRARY_PATH):)$(PETSC_DIR)/$(PETSC_ARCH)/lib:$(LIBDIR)
 endif
 # Required to locate petsc4py and our pflare python module
-export PYTHONPATH := $(PETSC_DIR)/$(PETSC_ARCH)/lib:$(CURDIR):$(if $(PYTHONPATH),$(PYTHONPATH):)
+export PYTHONPATH := $(PETSCPYTHONPATH):$(CURDIR):$(if $(PYTHONPATH),$(PYTHONPATH):)
 
 # Build the Cython interface
 python:
