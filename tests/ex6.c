@@ -74,6 +74,10 @@ int main(int argc,char **args)
 
       PetscCall(MatDestroy(&A));
       PetscCall(VecDestroy(&b));
+      PetscCall(MatPartitioningDestroy(&part));
+      PetscCall(VecScatterDestroy(&vec_scatter));
+      PetscCall(ISDestroy(&is));
+      PetscCall(ISDestroy(&isrows));
       A = A_partitioned;
       b = b_partitioned;
   }

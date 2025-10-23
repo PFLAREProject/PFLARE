@@ -871,6 +871,8 @@ module pmisr_ddc
          ! If we have hit the required diagonal dominance ratio, then return without swapping any F points
          if (max_dd_ratio_achieved < max_dd_ratio) then
             max_dd_ratio = max_dd_ratio_achieved
+            call ISRestoreIndices(is_fine, is_pointer, ierr)
+            call MatDestroy(Aff, ierr)     
             return
          end if
       end if  
