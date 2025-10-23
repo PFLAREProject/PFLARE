@@ -31,8 +31,8 @@ RUN set -e; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" && \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" check && \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" tests
+    make -j2 FFLAGS="-Werror" CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" CPPFLAGS="-Wall -Werror -Wunused-result" && \ 
+    make -j2 check FFLAGS="-Werror" CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" CPPFLAGS="-Wall -Werror -Wunused-result" && \
+    make -j2 tests FFLAGS="-Werror" CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" CPPFLAGS="-Wall -Werror -Wunused-result"
 
 WORKDIR /build/PFLARE

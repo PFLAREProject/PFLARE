@@ -267,7 +267,8 @@ jobs:
          cd PFLARE &&
          export PFLARE_KOKKOS_DEBUG=1 &&
          export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
-         make -j2 && make -j2 tests
+         make -j2 FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \
+         make -j2 tests FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror"
 
   # No docker on macos with github actions so have to just build petsc first
   macos_debug:
