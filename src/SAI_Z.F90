@@ -67,7 +67,7 @@ module sai_z
       logical :: deallocate_submatrices = .FALSE.
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       integer(c_long_long) :: A_array
-      MatType:: mat_type
+      MatType:: mat_type, mat_type_input
       PetscScalar, dimension(:), pointer :: vec_vals
 
       ! ~~~~~~
@@ -80,8 +80,8 @@ module sai_z
       call MatGetLocalSize(A_cf, local_rows, local_cols, ierr)
       call MatGetSize(A_cf, global_rows, global_cols, ierr)   
       
-      call MatGetType(A_ff_input, mat_type, ierr)
-      if (mat_type == MATDIAGONAL) then
+      call MatGetType(A_ff_input, mat_type_input, ierr)
+      if (mat_type_input == MATDIAGONAL) then
          ! Convert it to aij just for this routine 
          ! doesn't work in parallel for some reason
          !call MatConvert(A_ff_input, MATAIJ, MAT_INITIAL_MATRIX, A_ff, ierr)
@@ -548,7 +548,7 @@ module sai_z
          deallocate(reuse_submatrices)   
          reuse_submatrices => null()
       end if
-      if (mat_type == MATDIAGONAL) then
+      if (mat_type_input == MATDIAGONAL) then
          call MatDestroy(A_ff, ierr)
       end if      
 
