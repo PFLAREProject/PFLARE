@@ -54,6 +54,23 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-debug
 
+  gnu_debug_malloc_dump:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with debug PETSc and malloc dump flag
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-debug            
+            MALLOC_DUMP=true
+
   gnu_opt:
     runs-on: ubuntu-22.04
     needs: [setup]
@@ -128,7 +145,24 @@ jobs:
           file: ./dockerfiles/Dockerfile_kokkos
           build-args: |
             BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-c-opt      
+            ARCH=arch-linux-c-opt
+            
+  gnu_opt_kokkos_malloc_dump:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with KOKKOS and PETSc and malloc dump flag
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_kokkos
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt
+            MALLOC_DUMP=true          
             
   gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
@@ -346,7 +380,7 @@ jobs:
           make -j3 tests
 
   # No docker on macos with github actions so have to just build petsc first
-  macos_kokkos_64_bit:
+  macos_64_bit_kokkos:
     runs-on: macos-15
     needs: [setup]
     env:

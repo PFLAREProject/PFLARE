@@ -7,6 +7,8 @@ ARG BRANCH=main
 ARG ARCH=arch-linux-c-opt
 # Set the number of OpenMP threads to 1 by default
 ARG OMP_NUM_THREADS=1
+# Don't use malloc dump by default
+ARG MALLOC_DUMP=false
 
 LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE_kokkos"
@@ -16,23 +18,45 @@ ENV PETSC_ARCH=$ARCH
 ENV OMP_NUM_THREADS=$OMP_NUM_THREADS
 # This turns on checks between kokkos and cpu versions
 ENV PFLARE_KOKKOS_DEBUG=1
-# Ensure any test failures are caught and the build fails
+# -on_error_abort ensures any test failures are caught and the build fails
+# This will be appended to PETSC_OPTIONS if MALLOC_DUMP is false
+ENV PETSC_OPTIONS_ERROR_FLAG_PFLARE="-on_error_abort"
 # Also force any test that can to use the kokkos types
 # Many tests will output a warning that some of these options are unused but that can be ignored
-ENV PETSC_OPTIONS="-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos"
+ENV PETSC_OPTIONS="-mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos"
 
 WORKDIR /build
+
+# Ensure pipelines fail if any stage fails
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Clone PFLARE and run all the tests
 # Add flags "-Wall -Werror -Wunused-result" as the petsc CI enforces capturing
 # all return types, so this in combination with --with-strict-petscerrorcode in the petsc
 # build will error out
-RUN set -e; \
+# If MALLOC_DUMP is true:
+# 1) Remove -on_error_abort and strip it from test Makefiles as it interferes with the output
+# 2) Output the terminal to a log file
+# 3) Check the log for any PetscTrMalloc lines which indicate memory leaks
+RUN set -euo pipefail; \
+    if [ "${MALLOC_DUMP}" = "true" ]; then export PETSC_OPTIONS="${PETSC_OPTIONS} -malloc_dump"; else export PETSC_OPTIONS="${PETSC_OPTIONS} ${PETSC_OPTIONS_ERROR_FLAG_PFLARE}"; fi; \
+    echo "Using PETSC_OPTIONS=${PETSC_OPTIONS}"; \
     echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" && \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" check && \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" tests
+    if [ "${MALLOC_DUMP}" = "true" ]; then \
+        echo "Stripping -on_error_abort from test Makefiles for malloc dump run"; \
+        sed -i 's/-on_error_abort//g' tests/Makefile; \
+        sed -i 's/-on_error_abort//g' python/Makefile; \
+    fi && \
+    if [ "${MALLOC_DUMP}" = "true" ]; then LOG=/tmp/test.log; : > "$LOG"; else LOG=/dev/null; fi; \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" 2>&1 | tee -a "$LOG"; \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" check 2>&1 | tee -a "$LOG"; \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" tests 2>&1 | tee -a "$LOG"; \
+    if [ "${MALLOC_DUMP}" = "true" ]; then \
+      if grep -q "PetscTrMalloc" "$LOG"; then \
+        echo "Error: found PetscTrMalloc in test output" >&2; exit 1; \
+      fi; \
+    fi
 
 WORKDIR /build/PFLARE
