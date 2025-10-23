@@ -200,9 +200,9 @@ module air_data_type_routines
                do i_loc = 1, size(air_data%reuse(our_level)%reuse_mat)
                   temp_mat = air_data%reuse(our_level)%reuse_mat(i_loc)
                   if (.NOT. PetscObjectIsNull(temp_mat)) then
-                     call MatDestroy(air_data%reuse(our_level)%reuse_mat(i_loc), ierr)                  
+                     call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(i_loc), &
+                        air_data%reuse(our_level)%reuse_submatrices(i_loc)%array)                     
                   end if
-                  air_data%reuse(our_level)%reuse_submatrices(i_loc)%array => null()
                end do
 
                do i_loc = 1, size(air_data%reuse(our_level)%reuse_is)
