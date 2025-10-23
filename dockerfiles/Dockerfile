@@ -25,8 +25,8 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Set the line length to 132 to check for truncation problems - the cray fortran
 # compiler was defaulting to 132 and we don't have a CI for that, so this will trigger it
 # If MALLOC_DUMP is true:
-# 1) Remove -on_error_abort and strip it from tests/Makefile as it interferes with the output
-# 2) Output the terminal output to a log file
+# 1) Remove -on_error_abort and strip it from the test Makefiles as it interferes with the output
+# 2) Output the terminal to a log file
 # 3) Check the log for any PetscTrMalloc lines which indicate memory leaks
 RUN set -euo pipefail; \
     if [ "${MALLOC_DUMP}" = "true" ]; then export PETSC_OPTIONS="-malloc_dump"; fi; \
@@ -35,8 +35,9 @@ RUN set -euo pipefail; \
     git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
     if [ "${MALLOC_DUMP}" = "true" ]; then \
-        echo "Stripping -on_error_abort from tests/Makefile for malloc dump run"; \
+        echo "Stripping -on_error_abort from test Makefiles for malloc dump run"; \
         sed -i 's/-on_error_abort//g' tests/Makefile; \
+        sed -i 's/-on_error_abort//g' python/Makefile; \
     fi && \
     if [ "${MALLOC_DUMP}" = "true" ]; then LOG=/tmp/test.log; : > "$LOG"; else LOG=/dev/null; fi; \
     make -j2 "FFLAGS=-ffree-line-length-132 -ffixed-line-length-132" 2>&1 | tee -a "$LOG"; \
