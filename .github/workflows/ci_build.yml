@@ -54,6 +54,23 @@ jobs:
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-debug
 
+  gnu_debug_malloc_debug:
+    runs-on: ubuntu-22.04
+    needs: setup
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+    steps:
+      - name: Build Docker image with debug PETSc
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-debug            
+            MALLOC_DUMP=true
+
   gnu_opt:
     runs-on: ubuntu-22.04
     needs: [setup]
