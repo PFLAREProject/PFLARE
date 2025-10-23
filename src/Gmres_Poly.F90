@@ -1606,8 +1606,9 @@ end if
             ! Have to use the DIFFERENT_NONZERO_PATTERN here
             call MatAXPYWrapper(inv_matrix, coefficients(order+1), mat_power)
          end if
-         
       end do
+      ! Don't forget to destroy the last power
+      call MatDestroy(mat_power, ierr)
 
       ! The alpha_0 just gets added to the diagonal
       ! There is an assemble in the shift so don't need a separate one       
