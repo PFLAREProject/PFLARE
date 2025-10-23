@@ -203,9 +203,10 @@ module air_mg_setup
 
             ! If this isn't good enough, destroy everything we used - no chance for reuse
             else
-               call MatDestroy(air_data%inv_A_ff(our_level), ierr)               
-               call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), ierr)             
-            end if      
+               call reset_inverse_mat(air_data%inv_A_ff(our_level))
+               call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)             
+            end if
 
             call VecDestroy(rand_vec, ierr)
             call VecDestroy(sol_vec, ierr)
