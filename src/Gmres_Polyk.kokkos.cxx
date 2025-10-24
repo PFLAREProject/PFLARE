@@ -482,20 +482,12 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    aijkok_local_output->transpose_updated = PETSC_FALSE;
    aijkok_local_output->hermitian_updated = PETSC_FALSE;
    // Invalidate diagonals
-   Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local_output->data;
-   a->idiagvalid  = PETSC_FALSE;
-   a->ibdiagvalid = PETSC_FALSE;      
-   a->inode.ibdiagvalid = PETSC_FALSE;        
    if (mpi)
    {
       aijkok_nonlocal_output->a_dual.clear_sync_state();
       aijkok_nonlocal_output->a_dual.modify_device();
       aijkok_nonlocal_output->transpose_updated = PETSC_FALSE;
       aijkok_nonlocal_output->hermitian_updated = PETSC_FALSE;
-      a = (Mat_SeqAIJ *)mat_nonlocal_output->data;
-      a->idiagvalid  = PETSC_FALSE;
-      a->ibdiagvalid = PETSC_FALSE;   
-      a->inode.ibdiagvalid = PETSC_FALSE; 
    }      
    PetscCallVoid(PetscObjectStateIncrease((PetscObject)(*output_mat)));   
 
