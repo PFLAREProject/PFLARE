@@ -69,6 +69,7 @@ module air_mg_setup
       logical :: file_exists
       PetscBool :: same
       PetscInt, dimension(:), pointer :: fine_pointer, coarse_pointer
+      PetscInt :: local_fine_size, local_coarse_size
 
       ! ~~~~~~     
 
@@ -252,8 +253,11 @@ module air_mg_setup
             call ISGetIndices(air_data%IS_fine_index(our_level), fine_pointer, ierr)
             call ISGetIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
 
-            call ISCreateGeneral(PETSC_COMM_SELF, size(fine_pointer), fine_pointer, PETSC_COPY_VALUES, local_fine, ierr)
-            call ISCreateGeneral(PETSC_COMM_SELF, size(coarse_pointer), coarse_pointer, PETSC_COPY_VALUES, local_coarse, ierr)
+            local_fine_size = size(fine_pointer)
+            local_coarse_size = size(coarse_pointer)
+
+            call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, fine_pointer, PETSC_COPY_VALUES, local_fine, ierr)
+            call ISCreateGeneral(PETSC_COMM_SELF, local_coarse_size, coarse_pointer, PETSC_COPY_VALUES, local_coarse, ierr)
 
             call ISRestoreIndices(air_data%IS_fine_index(our_level), fine_pointer, ierr)
             call ISRestoreIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
