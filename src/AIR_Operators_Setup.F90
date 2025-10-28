@@ -283,6 +283,7 @@ module air_operators_setup
       logical :: destroy_mat, reuse_grid_transfer
       MatType:: mat_type, mat_type_inv_aff
       PetscBool :: same
+      PetscReal :: diff_mat
 
       ! ~~~~~~~~~~
 
@@ -444,6 +445,9 @@ module air_operators_setup
 
                   if (.NOT. same) then
                      print *, "Error: inv aff mat does not match computed Mat."
+                     call MatAXPY(inv_dropped_Aff_temp, -1d0, inv_dropped_Aff, DIFFERENT_NONZERO_PATTERN, ierr)
+                     call MatNorm(inv_dropped_Aff_temp, NORM_FROBENIUS, diff_mat, ierr)
+                     print *, "Difference norm: ", diff_mat
                      call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
                   end if            
                   call MatDestroy(inv_dropped_Aff_temp, ierr)   
