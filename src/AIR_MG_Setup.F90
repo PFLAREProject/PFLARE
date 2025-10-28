@@ -70,6 +70,7 @@ module air_mg_setup
       PetscBool :: same
       PetscInt, dimension(:), pointer :: fine_pointer, coarse_pointer
       PetscInt :: local_fine_size, local_coarse_size
+      PetscReal :: diff_mat
 
       ! ~~~~~~     
 
@@ -593,6 +594,23 @@ module air_mg_setup
 
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))  
+
+         if (our_level.ge. 6) then
+            print *, "testing twice coarse", our_level      
+            call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
+                  temp_coarse_mat)     
+                     
+            call MatEqual(temp_coarse_mat, air_data%coarse_matrix(our_level_coarse), same, ierr)
+
+            if (.NOT. same) then
+               print *, "Error: coarse mat does not match computed Mat."
+               call MatAXPY(temp_coarse_mat, -1d0, air_data%coarse_matrix(our_level_coarse), DIFFERENT_NONZERO_PATTERN, ierr)
+               call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+               print *, "Difference norm coarse: ", diff_mat
+               !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+            end if            
+            call MatDestroy(temp_coarse_mat, ierr)                  
+         end if
 
          ! if (our_level_coarse.ge. 6) then
          !    fmt = '(I2.2)'
