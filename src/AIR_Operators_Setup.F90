@@ -271,7 +271,7 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp, restr_temp
-      type(tMat) :: temp_mat, drop_z_temp
+      type(tMat) :: temp_mat, drop_z_temp, prolong_temp, onp_temp
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
@@ -322,6 +322,23 @@ module air_operators_setup
          else
             call generate_one_point_with_one_entry_from_sparse(air_data%A_fc(our_level), &
                      air_data%reuse(our_level)%reuse_mat(MAT_W_DROP)) 
+
+            if (our_level.ge. 6) then
+               print *, "testing twice onep", our_level                      
+               call generate_one_point_with_one_entry_from_sparse(air_data%A_fc(our_level), &
+                        onp_temp)     
+                        
+               call MatEqual(onp_temp, air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), same, ierr)
+
+               if (.NOT. same) then
+                  print *, "Error: onp mat does not match computed Mat."
+                  call MatAXPY(onp_temp, -1d0, air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), DIFFERENT_NONZERO_PATTERN, ierr)
+                  call MatNorm(onp_temp, NORM_FROBENIUS, diff_mat, ierr)
+                  print *, "Difference norm onp: ", diff_mat
+                  !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if            
+               call MatDestroy(onp_temp, ierr)      
+            end if                  
          end if         
          
          call timer_finish(TIMER_ID_AIR_PROLONG)                
@@ -674,7 +691,36 @@ module air_operators_setup
                      .TRUE., &
                      reuse_grid_transfer, &
                      air_data%prolongators(our_level))
+
+         if (our_level.ge. 6) then
+            print *, "testing twice prolong", our_level  
+
+            call compute_P_from_W(air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), &
+                     global_row_start, &
+                     air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                     .TRUE., &
+                     reuse_grid_transfer, &
+                     prolong_temp)      
+                     
+            call MatEqual(prolong_temp, air_data%prolongators(our_level), same, ierr)
+
+            if (.NOT. same) then
+               print *, "Error: prolong mat does not match computed Mat."
+               call MatAXPY(prolong_temp, -1d0, air_data%prolongators(our_level), DIFFERENT_NONZERO_PATTERN, ierr)
+               call MatNorm(prolong_temp, NORM_FROBENIUS, diff_mat, ierr)
+               print *, "Difference norm prolong: ", diff_mat
+               !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+            end if            
+            call MatDestroy(prolong_temp, ierr)                      
+
          end if
+
+         end if
+
+
+
+
+
 
          ! Delete temporary if not reusing
          if (.NOT. air_data%options%reuse_sparsity) then
