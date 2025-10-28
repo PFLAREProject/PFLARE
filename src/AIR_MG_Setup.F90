@@ -47,11 +47,11 @@ module air_mg_setup
       MPI_Comm            :: MPI_COMM_MATRIX
       PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b
       logical             :: continue_coarsening, trigger_proc_agglom
-      type(tMat)          :: temp_mat
+      type(tMat)          :: temp_mat, temp_coarse_mat
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
       type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
-      type(tIS)           :: is_unchanged, is_full, temp_is
+      type(tIS)           :: is_unchanged, is_full, temp_is, temp_fine, temp_coarse
       type(mat_ctxtype), pointer :: mat_ctx
       PetscInt, parameter :: one=1, zero=0
       type(tVec), dimension(:), allocatable :: left_null_vecs, right_null_vecs
@@ -62,6 +62,12 @@ module air_mg_setup
       PetscRandom :: rctx
       MatType:: mat_type, mat_type_aff
       integer(c_int) :: diag_only
+      character*(PETSC_MAX_PATH_LEN) name
+      PetscViewer viewer
+      character*(8) fmt
+      character(2) csize
+      logical :: file_exists
+      PetscBool :: same
 
       ! ~~~~~~     
 
@@ -234,6 +240,42 @@ module air_mg_setup
                   air_data%options%max_dd_ratio, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level))      
             air_data%allocated_is(our_level) = .TRUE.
+         end if
+
+         if (our_level.ge. 6) then
+            fmt = '(I2.2)'
+            write (csize, fmt) our_level
+            write (name, '(a)') 'is_data_'//csize//'.dat'
+
+            ! Check if the file already exists to avoid overwriting
+            inquire(file=name, exist=file_exists)
+            if (.not. file_exists) then
+               call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
+               call ISView(air_data%IS_fine_index(our_level), viewer, ierr)
+               call ISView(air_data%IS_coarse_index(our_level), viewer, ierr)
+               call PetscViewerDestroy(viewer, ierr)
+            else
+               ! Optional: notify if file exists (only on rank 0 to avoid spam)
+               if (comm_rank == 0) print *, "File ", trim(name), " already exists."
+               call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_READ, viewer, ierr)
+               call ISCreate(MPI_COMM_MATRIX, temp_fine, ierr)
+               call ISCreate(MPI_COMM_MATRIX, temp_coarse, ierr)
+               call ISLoad(temp_fine, viewer, ierr)
+               call ISLoad(temp_coarse, viewer, ierr)
+               call ISEqual(air_data%IS_fine_index(our_level), temp_fine, same, ierr)
+               if (.NOT. same) then
+                  print *, "Error: Fine IS from file ", trim(name), " does not match computed IS."
+                  call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if
+               call ISEqual(air_data%IS_coarse_index(our_level), temp_coarse, same, ierr)
+               if (.NOT. same) then
+                  print *, "Error: Coarse IS from file ", trim(name), " does not match computed IS."
+                  call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if
+               call ISDestroy(temp_fine, ierr)
+               call ISDestroy(temp_coarse, ierr)
+               call PetscViewerDestroy(viewer, ierr)            
+            end if
          end if
          
          call timer_finish(TIMER_ID_AIR_COARSEN)   
@@ -528,6 +570,33 @@ module air_mg_setup
 
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))  
+
+         if (our_level_coarse.ge. 6) then
+            fmt = '(I2.2)'
+            write (csize, fmt) our_level_coarse
+            write (name, '(a)') 'mat_coarse_data_'//csize//'.dat'
+
+            ! Check if the file already exists to avoid overwriting
+            inquire(file=name, exist=file_exists)
+            if (.not. file_exists) then
+               call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
+               call MatView(air_data%coarse_matrix(our_level_coarse), viewer, ierr)
+               call PetscViewerDestroy(viewer, ierr)
+            else
+               ! Optional: notify if file exists (only on rank 0 to avoid spam)
+               if (comm_rank == 0) print *, "File ", trim(name), " already exists."
+               call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_READ, viewer, ierr)
+               call MatCreate(MPI_COMM_MATRIX, temp_coarse_mat, ierr)
+               call MatLoad(temp_coarse_mat, viewer, ierr)
+               call MatEqual(air_data%coarse_matrix(our_level_coarse), temp_coarse_mat, same, ierr)
+               if (.NOT. same) then
+                  print *, "Error: Fine mat from file ", trim(name), " does not match computed Mat."
+                  call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if
+               call MatDestroy(temp_coarse_mat, ierr)
+               call PetscViewerDestroy(viewer, ierr)            
+            end if
+         end if                  
 
          air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
 
