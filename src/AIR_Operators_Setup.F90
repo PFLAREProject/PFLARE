@@ -271,7 +271,7 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp, restr_temp
-      type(tMat) :: temp_mat
+      type(tMat) :: temp_mat, drop_z_temp
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
@@ -874,6 +874,26 @@ module air_operators_setup
          call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                      air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
                      relative_max_row_tol_int= 1)  
+
+         if (our_level.ge. 6) then
+            print *, "testing twice drop z", our_level
+
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                        air_data%options%r_drop, drop_z_temp, &
+                        relative_max_row_tol_int= 1)          
+                        
+            call MatEqual(drop_z_temp, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), same, ierr)
+
+            if (.NOT. same) then
+               print *, "Error: drop z mat does not match computed Mat."
+               call MatAXPY(drop_z_temp, -1d0, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), DIFFERENT_NONZERO_PATTERN, ierr)
+               call MatNorm(drop_z_temp, NORM_FROBENIUS, diff_mat, ierr)
+               print *, "Difference norm drop z: ", diff_mat
+               !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+            end if            
+            call MatDestroy(drop_z_temp, ierr)
+            
+         end if
       end if
 
       call timer_finish(TIMER_ID_AIR_DROP)   
