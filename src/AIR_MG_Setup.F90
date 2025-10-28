@@ -243,63 +243,6 @@ module air_mg_setup
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level))      
             air_data%allocated_is(our_level) = .TRUE.
          end if
-
-         if (our_level.ge. 6) then
-            fmt = '(I2.2)'
-            write (csize, fmt) our_level
-            write (ranky, fmt) comm_rank
-            write (name, '(a)') 'is_data_'//csize//'_rank_'//ranky//'.dat'
-
-            call ISGetIndices(air_data%IS_fine_index(our_level), fine_pointer, ierr)
-            call ISGetIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
-
-            local_fine_size = size(fine_pointer)
-            local_coarse_size = size(coarse_pointer)
-
-            call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, fine_pointer, PETSC_COPY_VALUES, local_fine, ierr)
-            call ISCreateGeneral(PETSC_COMM_SELF, local_coarse_size, coarse_pointer, PETSC_COPY_VALUES, local_coarse, ierr)
-
-            call ISRestoreIndices(air_data%IS_fine_index(our_level), fine_pointer, ierr)
-            call ISRestoreIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
-
-            ! Check if the file already exists to avoid overwriting
-            inquire(file=name, exist=file_exists)
-
-            if (.not. file_exists) then
-               call PetscViewerBinaryOpen(PETSC_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
-               call ISView(local_fine, viewer, ierr)
-               call ISView(local_coarse, viewer, ierr)
-               call PetscViewerDestroy(viewer, ierr)
-            else
-               ! Optional: notify if file exists (only on rank 0 to avoid spam)
-               print *, "File ", trim(name), " already exists."
-               call PetscViewerBinaryOpen(PETSC_COMM_SELF, name, FILE_MODE_READ, viewer, ierr)
-               call ISCreate(PETSC_COMM_SELF, temp_fine, ierr)
-               call ISCreate(PETSC_COMM_SELF, temp_coarse, ierr)
-               call ISLoad(temp_fine, viewer, ierr)
-               call ISLoad(temp_coarse, viewer, ierr)
-
-               ! call ISView(air_data%IS_fine_index(our_level), PETSC_VIEWER_STDOUT_WORLD, ierr)
-               ! call ISView(temp_fine, PETSC_VIEWER_STDOUT_WORLD, ierr)
-
-               call ISEqual(local_fine, temp_fine, same, ierr)
-               if (.NOT. same) then
-                  print *, "Error: Fine IS from file ", trim(name), " does not match computed IS."
-                  call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
-               end if
-               call ISEqual(local_coarse, temp_coarse, same, ierr)
-               if (.NOT. same) then
-                  print *, "Error: Coarse IS from file ", trim(name), " does not match computed IS."
-                  call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
-               end if
-               call ISDestroy(temp_fine, ierr)
-               call ISDestroy(temp_coarse, ierr)
-               call PetscViewerDestroy(viewer, ierr)            
-            end if
-
-            call ISDestroy(local_fine, ierr)
-            call ISDestroy(local_coarse, ierr)
-         end if
          
          call timer_finish(TIMER_ID_AIR_COARSEN)   
 
@@ -307,6 +250,63 @@ module air_mg_setup
          ! Get the sizes of C and F points
          ! ~~~~~~~~~~~~~~
          if (.NOT. auto_truncated) then
+
+            if (our_level.ge. 6) then
+               fmt = '(I2.2)'
+               write (csize, fmt) our_level
+               write (ranky, fmt) comm_rank
+               write (name, '(a)') 'is_data_'//csize//'_rank_'//ranky//'.dat'
+
+               call ISGetIndices(air_data%IS_fine_index(our_level), fine_pointer, ierr)
+               call ISGetIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
+
+               local_fine_size = size(fine_pointer)
+               local_coarse_size = size(coarse_pointer)
+
+               call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, fine_pointer, PETSC_COPY_VALUES, local_fine, ierr)
+               call ISCreateGeneral(PETSC_COMM_SELF, local_coarse_size, coarse_pointer, PETSC_COPY_VALUES, local_coarse, ierr)
+
+               call ISRestoreIndices(air_data%IS_fine_index(our_level), fine_pointer, ierr)
+               call ISRestoreIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
+
+               ! Check if the file already exists to avoid overwriting
+               inquire(file=name, exist=file_exists)
+
+               if (.not. file_exists) then
+                  call PetscViewerBinaryOpen(PETSC_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
+                  call ISView(local_fine, viewer, ierr)
+                  call ISView(local_coarse, viewer, ierr)
+                  call PetscViewerDestroy(viewer, ierr)
+               else
+                  ! Optional: notify if file exists (only on rank 0 to avoid spam)
+                  print *, "File ", trim(name), " already exists."
+                  call PetscViewerBinaryOpen(PETSC_COMM_SELF, name, FILE_MODE_READ, viewer, ierr)
+                  call ISCreate(PETSC_COMM_SELF, temp_fine, ierr)
+                  call ISCreate(PETSC_COMM_SELF, temp_coarse, ierr)
+                  call ISLoad(temp_fine, viewer, ierr)
+                  call ISLoad(temp_coarse, viewer, ierr)
+
+                  ! call ISView(air_data%IS_fine_index(our_level), PETSC_VIEWER_STDOUT_WORLD, ierr)
+                  ! call ISView(temp_fine, PETSC_VIEWER_STDOUT_WORLD, ierr)
+
+                  call ISEqual(local_fine, temp_fine, same, ierr)
+                  if (.NOT. same) then
+                     print *, "Error: Fine IS from file ", trim(name), " does not match computed IS."
+                     call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+                  end if
+                  call ISEqual(local_coarse, temp_coarse, same, ierr)
+                  if (.NOT. same) then
+                     print *, "Error: Coarse IS from file ", trim(name), " does not match computed IS."
+                     call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+                  end if
+                  call ISDestroy(temp_fine, ierr)
+                  call ISDestroy(temp_coarse, ierr)
+                  call PetscViewerDestroy(viewer, ierr)            
+               end if
+
+               call ISDestroy(local_fine, ierr)
+               call ISDestroy(local_coarse, ierr)
+            end if            
 
             call ISGetSize(air_data%IS_fine_index(our_level), global_fine_is_size, ierr)
             call ISGetLocalSize(air_data%IS_fine_index(our_level), local_fine_is_size, ierr)
