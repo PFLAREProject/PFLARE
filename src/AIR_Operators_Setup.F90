@@ -270,7 +270,7 @@ module air_operators_setup
       type(tVec), dimension(:), intent(inout)               :: left_null_vecs_c, right_null_vecs_c
 
       PetscErrorCode :: ierr
-      type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat
+      type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp
       type(tMat) :: temp_mat
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
@@ -282,6 +282,7 @@ module air_operators_setup
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer
       MatType:: mat_type, mat_type_inv_aff
+      PetscBool :: same
 
       ! ~~~~~~~~~~
 
@@ -418,7 +419,35 @@ module air_operators_setup
                if (.NOT. air_data%options%reuse_sparsity) then
                   call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
                            air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array) 
-               end if               
+               end if    
+               
+               if (our_level.ge. 6) then
+                  print *, "testing twice", our_level
+                  ! Making sure to give it the non dropped A_ff here
+                  call finish_approximate_inverse(air_data%A_ff(our_level), &
+                           air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+                           air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+                           air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+                           air_data%inv_A_ff_poly_data(our_level)%buffers, &
+                           air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                           .FALSE., air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                           air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
+                           inv_dropped_Aff_temp)
+
+                  ! Delete temporary if not reusing
+                  if (.NOT. air_data%options%reuse_sparsity) then
+                     call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                              air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array) 
+                  end if                
+
+                  call MatEqual(inv_dropped_Aff_temp, inv_dropped_Aff, same, ierr)
+
+                  if (.NOT. same) then
+                     print *, "Error: inv aff mat does not match computed Mat."
+                     call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+                  end if            
+                  call MatDestroy(inv_dropped_Aff_temp, ierr)   
+               end if
 
             ! Just re-use the already assembled one            
             else
