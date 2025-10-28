@@ -270,7 +270,7 @@ module air_operators_setup
       type(tVec), dimension(:), intent(inout)               :: left_null_vecs_c, right_null_vecs_c
 
       PetscErrorCode :: ierr
-      type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp
+      type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp, restr_temp
       type(tMat) :: temp_mat
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
@@ -917,9 +917,45 @@ module air_operators_setup
       
       ! Delete temporary if not reusing
       if (.NOT. air_data%options%reuse_sparsity) then
+         call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
+      end if        
+      
+      if (our_level.ge. 6) then
+         print *, "testing twice restrict", our_level      
+      
+         call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  .TRUE., &
+                  reuse_grid_transfer, &
+                  restr_temp)
+         
+         ! Delete temporary if not reusing
+         if (.NOT. air_data%options%reuse_sparsity) then
+            call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
+         end if 
+
+         call MatEqual(restr_temp, air_data%restrictors(our_level), same, ierr)
+
+         if (.NOT. same) then
+            print *, "Error: restrict mat does not match computed Mat."
+            call MatAXPY(restr_temp, -1d0, air_data%restrictors(our_level), DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(restr_temp, NORM_FROBENIUS, diff_mat, ierr)
+            print *, "Difference norm restrict: ", diff_mat
+            !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+         end if            
+         call MatDestroy(restr_temp, ierr)  
+      
+
+      end if
+
+      ! Delete temporary if not reusing
+      if (.NOT. air_data%options%reuse_sparsity) then
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), ierr)      
          call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
       end if        
+
+
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
