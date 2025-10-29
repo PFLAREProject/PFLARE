@@ -275,7 +275,7 @@ module air_operators_setup
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
-      integer :: comm_size, errorcode, order, i_loc
+      integer :: comm_size, errorcode, order, i_loc, comm_rank
       MPI_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array, B_array, C_array
       PetscInt :: global_row_start, global_row_end_plus_one, lr, lc, gr, gc
@@ -289,12 +289,13 @@ module air_operators_setup
       logical :: file_exists      
       character*(PETSC_MAX_PATH_LEN) name
       PetscViewer viewer
-      
+
       ! ~~~~~~~~~~
 
       call PetscObjectGetComm(air_data%A_ff(our_level), MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
 
       ! ~~~~~~~~~~~
       ! Get some sizes
@@ -450,7 +451,9 @@ module air_operators_setup
                   write (name, '(a)') 'inv_dropped_Aff_data_'//csize//'.dat'
 
                   ! Check if the file already exists to avoid overwriting
-                  inquire(file=name, exist=file_exists)
+                  if (comm_rank == 0) inquire(file=name, exist=file_exists)
+                  call MPI_Bcast(file_exists, 1, MPI_LOGICAL, 0, MPI_COMM_MATRIX, errorcode)
+
                   if (.not. file_exists) then
                      call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
                      call MatView(inv_dropped_Aff, viewer, ierr)

@@ -271,7 +271,8 @@ module air_mg_setup
                call ISRestoreIndices(air_data%IS_coarse_index(our_level), coarse_pointer, ierr)
 
                ! Check if the file already exists to avoid overwriting
-               inquire(file=name, exist=file_exists)
+               if (comm_rank == 0) inquire(file=name, exist=file_exists)
+               call MPI_Bcast(file_exists, 1, MPI_LOGICAL, 0, MPI_COMM_MATRIX, errorcode)
 
                if (.not. file_exists) then
                   call PetscViewerBinaryOpen(PETSC_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
@@ -618,7 +619,9 @@ module air_mg_setup
             write (name, '(a)') 'mat_coarse_data_'//csize//'.dat'
 
             ! Check if the file already exists to avoid overwriting
-            inquire(file=name, exist=file_exists)
+            if (comm_rank == 0) inquire(file=name, exist=file_exists)
+            call MPI_Bcast(file_exists, 1, MPI_LOGICAL, 0, MPI_COMM_MATRIX, errorcode)
+
             if (.not. file_exists) then
                call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
                call MatView(air_data%coarse_matrix(our_level_coarse), viewer, ierr)
