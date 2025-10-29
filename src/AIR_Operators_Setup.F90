@@ -460,11 +460,11 @@ module air_operators_setup
                      call PetscViewerDestroy(viewer, ierr)
                   else
                      ! Optional: notify if file exists (only on rank 0 to avoid spam)
-                     print *, "File ", trim(name), " already exists."
+                     call MatGetSize(inv_dropped_Aff, gr, gc, ierr)
+                     call MatGetLocalSize(inv_dropped_Aff, lr, lc, ierr)                     
+                     print *, "File ", trim(name), " already exists,", lr, lc, gr, gc
                      call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_READ, viewer, ierr)
                      call MatCreate(MPI_COMM_MATRIX, temp_coarse_mat, ierr)
-                     call MatGetSize(inv_dropped_Aff, gr, gc, ierr)
-                     call MatGetLocalSize(inv_dropped_Aff, lr, lc, ierr)
                      call MatSetSizes(temp_coarse_mat, lr, lc, &
                                     gr, gc, ierr)
                      call MatLoad(temp_coarse_mat, viewer, ierr)
