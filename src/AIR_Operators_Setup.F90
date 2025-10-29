@@ -272,13 +272,13 @@ module air_operators_setup
       PetscErrorCode :: ierr
       type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp, restr_temp
       type(tMat) :: temp_mat, drop_z_temp, prolong_temp, onp_temp, temp_coarse_mat
-      type(tIS)  :: temp_is
+      type(tIS)  :: temp_is, temp_fine, local_fine
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
       integer :: comm_size, errorcode, order, i_loc, comm_rank
       MPI_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array, B_array, C_array
-      PetscInt :: global_row_start, global_row_end_plus_one, lr, lc, gr, gc
+      PetscInt :: global_row_start, global_row_end_plus_one, lr, lc, gr, gc, local_fine_size
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer
       MatType:: mat_type, mat_type_inv_aff
@@ -289,6 +289,8 @@ module air_operators_setup
       logical :: file_exists      
       character*(PETSC_MAX_PATH_LEN) name
       PetscViewer viewer
+      type(tMat) :: Ad, Ao
+      PetscInt, dimension(:), pointer :: colmap   
 
       ! ~~~~~~~~~~
 
@@ -445,40 +447,66 @@ module air_operators_setup
                            air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array) 
                end if    
 
+
                if (our_level .ge. 6) then
                   fmt = '(I2.2)'
                   write (csize, fmt) our_level
-                  write (name, '(a)') 'inv_dropped_Aff_data_'//csize//'.dat'
+                  write (ranky, fmt) comm_rank
+                  write (name, '(a)') 'inv_Aff_data_'//csize//'_rank_'//ranky//'.dat'
+
+                  call MatMPIAIJGetSeqAIJ(inv_dropped_Aff, Ad, Ao, colmap, ierr) 
+                  print *, "comm_rank", comm_rank, "size", size(colmap)
+                  call MatGetSize(inv_dropped_Aff, gr, gc, ierr)
+                  call MatGetLocalSize(inv_dropped_Aff, lr, lc, ierr)        
+                  local_fine_size = size(colmap)
+                  call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, colmap, PETSC_COPY_VALUES, local_fine, ierr)
 
                   ! Check if the file already exists to avoid overwriting
-                  if (comm_rank == 0) inquire(file=name, exist=file_exists)
-                  call MPI_Bcast(file_exists, 1, MPI_LOGICAL, 0, MPI_COMM_MATRIX, errorcode)
+                  inquire(file=name, exist=file_exists)
 
                   if (.not. file_exists) then
-                     call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
-                     call MatView(inv_dropped_Aff, viewer, ierr)
+                     call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
+                     call MatView(Ad, viewer, ierr)
+                     call MatView(Ao, viewer, ierr)
+                     call ISView(local_fine, viewer, ierr)
                      call PetscViewerDestroy(viewer, ierr)
                   else
                      ! Optional: notify if file exists (only on rank 0 to avoid spam)
-                     call MatGetSize(inv_dropped_Aff, gr, gc, ierr)
-                     call MatGetLocalSize(inv_dropped_Aff, lr, lc, ierr)                     
-                     print *, "File ", trim(name), " already exists,", lr, lc, gr, gc
-                     call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_READ, viewer, ierr)
-                     call MatCreate(MPI_COMM_MATRIX, temp_coarse_mat, ierr)
-                     call MatSetSizes(temp_coarse_mat, lr, lc, &
-                                    gr, gc, ierr)
+                     print *, "File ", trim(name), " already exists,"
+                     call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_READ, viewer, ierr)
+                     call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
                      call MatLoad(temp_coarse_mat, viewer, ierr)
-                     call MatEqual(inv_dropped_Aff, temp_coarse_mat, same, ierr)
+                     call MatEqual(Ad, temp_coarse_mat, same, ierr)
                      if (.NOT. same) then
-                        print *, "Error: inv_dropped_Aff from file ", trim(name), " does not match computed Mat."
-                        call MatAXPY(temp_coarse_mat, -1d0, inv_dropped_Aff, DIFFERENT_NONZERO_PATTERN, ierr)
+                        print *, "Error: inv Aff Ad from file ", trim(name), " does not match computed Mat."
+                        call MatAXPY(temp_coarse_mat, -1d0, Ad, DIFFERENT_NONZERO_PATTERN, ierr)
                         call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
-                        print *, "Difference norm inv_dropped_Aff SAVED: ", diff_mat                  
+                        print *, "Difference norm inv Aff Ad SAVED: ", diff_mat                  
                         !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
                      end if
                      call MatDestroy(temp_coarse_mat, ierr)
+                     call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
+                     call MatLoad(temp_coarse_mat, viewer, ierr)
+                     call MatEqual(Ao, temp_coarse_mat, same, ierr)
+                     if (.NOT. same) then
+                        print *, "Error: inv Aff Ao from file ", trim(name), " does not match computed Mat."
+                        call MatAXPY(temp_coarse_mat, -1d0, Ao, DIFFERENT_NONZERO_PATTERN, ierr)
+                        call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+                        print *, "Difference norm inv Aff Ao SAVED: ", diff_mat                  
+                        !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+                     end if
+                     call MatDestroy(temp_coarse_mat, ierr)            
+                     call ISCreate(PETSC_COMM_SELF, temp_fine, ierr)
+                     call ISLoad(temp_fine, viewer, ierr)
+                     call ISEqual(local_fine, temp_fine, same, ierr)
+                     if (.NOT. same) then
+                        print *, "Error: inv Aff colmap from file ", trim(name), " does not match computed IS."
+                        !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+                     end if
+                     call ISDestroy(temp_fine, ierr)
                      call PetscViewerDestroy(viewer, ierr)            
                   end if
+                  call ISDestroy(local_fine, ierr)
                end if                
                
                if (our_level.ge. 6) then

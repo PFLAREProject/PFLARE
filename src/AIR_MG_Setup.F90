@@ -71,6 +71,8 @@ module air_mg_setup
       PetscInt, dimension(:), pointer :: fine_pointer, coarse_pointer
       PetscInt :: local_fine_size, local_coarse_size, lr, lc, gr, gc
       PetscReal :: diff_mat
+      type(tMat) :: Ad, Ao
+      PetscInt, dimension(:), pointer :: colmap      
 
       ! ~~~~~~     
 
@@ -449,6 +451,71 @@ module air_mg_setup
          end if
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
+
+         if (our_level .ge. 6) then
+            fmt = '(I2.2)'
+            write (csize, fmt) our_level
+            write (ranky, fmt) comm_rank
+            write (name, '(a)') 'Aff_data_'//csize//'_rank_'//ranky//'.dat'
+
+            call MatMPIAIJGetSeqAIJ(air_data%A_ff(our_level), Ad, Ao, colmap, ierr) 
+            print *, "comm_rank", comm_rank, "size", size(colmap)
+            call MatGetSize(air_data%A_ff(our_level), gr, gc, ierr)
+            call MatGetLocalSize(air_data%A_ff(our_level), lr, lc, ierr)        
+            local_fine_size = size(colmap)
+            call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, colmap, PETSC_COPY_VALUES, local_fine, ierr)
+
+            ! Check if the file already exists to avoid overwriting
+            inquire(file=name, exist=file_exists)
+
+            if (.not. file_exists) then
+               call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
+               call MatView(Ad, viewer, ierr)
+               call MatView(Ao, viewer, ierr)
+               call ISView(local_fine, viewer, ierr)
+               call PetscViewerDestroy(viewer, ierr)
+            else
+               ! Optional: notify if file exists (only on rank 0 to avoid spam)
+               print *, "File ", trim(name), " already exists,"
+               call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_READ, viewer, ierr)
+               call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
+               call MatLoad(temp_coarse_mat, viewer, ierr)
+               call MatEqual(Ad, temp_coarse_mat, same, ierr)
+               if (.NOT. same) then
+                  print *, "Error: Aff Ad from file ", trim(name), " does not match computed Mat."
+                  call MatAXPY(temp_coarse_mat, -1d0, Ad, DIFFERENT_NONZERO_PATTERN, ierr)
+                  call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+                  print *, "Difference norm Aff Ad SAVED: ", diff_mat                  
+                  !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if
+               call MatDestroy(temp_coarse_mat, ierr)
+               call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
+               call MatLoad(temp_coarse_mat, viewer, ierr)
+               call MatEqual(Ao, temp_coarse_mat, same, ierr)
+               if (.NOT. same) then
+                  print *, "Error: Aff Ao from file ", trim(name), " does not match computed Mat."
+                  call MatAXPY(temp_coarse_mat, -1d0, Ao, DIFFERENT_NONZERO_PATTERN, ierr)
+                  call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+                  print *, "Difference norm Aff Ao SAVED: ", diff_mat                  
+                  !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if
+               call MatDestroy(temp_coarse_mat, ierr)            
+               call ISCreate(PETSC_COMM_SELF, temp_fine, ierr)
+               call ISLoad(temp_fine, viewer, ierr)
+               call ISEqual(local_fine, temp_fine, same, ierr)
+               if (.NOT. same) then
+                  print *, "Error: Aff colmap from file ", trim(name), " does not match computed IS."
+                  !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+               end if
+               call ISDestroy(temp_fine, ierr)
+               call PetscViewerDestroy(viewer, ierr)            
+            end if
+            call ISDestroy(local_fine, ierr)
+         end if  
+
+
+
+
          
          ! ~~~~~~~~~
          ! Check if Aff is purely diagonal
