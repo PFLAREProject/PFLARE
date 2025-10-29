@@ -271,20 +271,25 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: sparsity_mat_cf, A_ff_power, inv_dropped_Aff, smoothing_mat, inv_dropped_Aff_temp, restr_temp
-      type(tMat) :: temp_mat, drop_z_temp, prolong_temp, onp_temp
+      type(tMat) :: temp_mat, drop_z_temp, prolong_temp, onp_temp, temp_coarse_mat
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
       integer :: comm_size, errorcode, order, i_loc
       MPI_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array, B_array, C_array
-      PetscInt :: global_row_start, global_row_end_plus_one
+      PetscInt :: global_row_start, global_row_end_plus_one, lr, lc, gr, gc
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer
       MatType:: mat_type, mat_type_inv_aff
       PetscBool :: same
       PetscReal :: diff_mat
-
+      character*(8) fmt
+      character(2) csize, ranky
+      logical :: file_exists      
+      character*(PETSC_MAX_PATH_LEN) name
+      PetscViewer viewer
+      
       ! ~~~~~~~~~~
 
       call PetscObjectGetComm(air_data%A_ff(our_level), MPI_COMM_MATRIX, ierr)    
@@ -438,6 +443,40 @@ module air_operators_setup
                   call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
                            air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array) 
                end if    
+
+               if (our_level .ge. 6) then
+                  fmt = '(I2.2)'
+                  write (csize, fmt) our_level
+                  write (name, '(a)') 'inv_dropped_Aff_data_'//csize//'.dat'
+
+                  ! Check if the file already exists to avoid overwriting
+                  inquire(file=name, exist=file_exists)
+                  if (.not. file_exists) then
+                     call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
+                     call MatView(inv_dropped_Aff, viewer, ierr)
+                     call PetscViewerDestroy(viewer, ierr)
+                  else
+                     ! Optional: notify if file exists (only on rank 0 to avoid spam)
+                     print *, "File ", trim(name), " already exists."
+                     call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_READ, viewer, ierr)
+                     call MatCreate(MPI_COMM_MATRIX, temp_coarse_mat, ierr)
+                     call MatGetSize(inv_dropped_Aff, gr, gc, ierr)
+                     call MatGetLocalSize(inv_dropped_Aff, lr, lc, ierr)
+                     call MatSetSizes(temp_coarse_mat, lr, lc, &
+                                    gr, gc, ierr)
+                     call MatLoad(temp_coarse_mat, viewer, ierr)
+                     call MatEqual(inv_dropped_Aff, temp_coarse_mat, same, ierr)
+                     if (.NOT. same) then
+                        print *, "Error: inv_dropped_Aff from file ", trim(name), " does not match computed Mat."
+                        call MatAXPY(temp_coarse_mat, -1d0, inv_dropped_Aff, DIFFERENT_NONZERO_PATTERN, ierr)
+                        call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+                        print *, "Difference norm inv_dropped_Aff SAVED: ", diff_mat                  
+                        !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+                     end if
+                     call MatDestroy(temp_coarse_mat, ierr)
+                     call PetscViewerDestroy(viewer, ierr)            
+                  end if
+               end if                
                
                if (our_level.ge. 6) then
                   print *, "testing twice", our_level
