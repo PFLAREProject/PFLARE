@@ -612,7 +612,7 @@ module air_mg_setup
             call MatDestroy(temp_coarse_mat, ierr)                  
          end if
 
-         if (our_level_coarse.ge. 9) then
+         if (our_level_coarse.ge. 6) then
             fmt = '(I2.2)'
             write (csize, fmt) our_level_coarse
             write (name, '(a)') 'mat_coarse_data_'//csize//'.dat'
