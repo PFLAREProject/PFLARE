@@ -148,8 +148,21 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       mat_local_output = *output_mat;
    }    
 
+   // Scale the highest constrained power
+   PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
+
+   // Then go backwards and add in each of the coefficients * A^order from the second highest order down
+   for (int i = poly_sparsity_order-1; i > 0; i--)
+   {
+      PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
+   }
+
+   // Add in the 0th order term
+   PetscCallVoid(MatShift(*output_mat, coefficients[0]));
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
+   // This should happen after all the (potentially) host matscale, mataxpy and matshift above
    // ~~~~~~~~~~~~
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
@@ -170,18 +183,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscScalar *device_local_vals_output = nullptr, *device_nonlocal_vals_output = nullptr;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_vals_output, &mtype));
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype));
-
-   // Scale the highest constrained power
-   PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
-
-   // Then go backwards and add in each of the coefficients * A^order from the second highest order down
-   for (int i = poly_sparsity_order-1; i > 0; i--)
-   {
-      PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
-   }
-
-   // Add in the 0th order term
-   PetscCallVoid(MatShift(*output_mat, coefficients[0]));
 
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
