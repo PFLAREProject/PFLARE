@@ -449,6 +449,9 @@ module air_operators_setup
 
 
                if (our_level .ge. 6) then
+
+                  if (comm_rank == 0) print *, "coefficients", air_data%inv_A_ff_poly_data(our_level)%coefficients
+
                   fmt = '(I2.2)'
                   write (csize, fmt) our_level
                   write (ranky, fmt) comm_rank
