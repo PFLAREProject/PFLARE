@@ -148,8 +148,21 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       mat_local_output = *output_mat;
    }    
 
+   // Scale the highest constrained power
+   PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
+
+   // Then go backwards and add in each of the coefficients * A^order from the second highest order down
+   for (int i = poly_sparsity_order-1; i > 0; i--)
+   {
+      PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
+   }
+
+   // Add in the 0th order term
+   PetscCallVoid(MatShift(*output_mat, coefficients[0]));
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
+   // This should happen after all the (potentially) host matscale, mataxpy and matshift above
    // ~~~~~~~~~~~~
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
@@ -170,18 +183,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscScalar *device_local_vals_output = nullptr, *device_nonlocal_vals_output = nullptr;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_vals_output, &mtype));
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype));
-
-   // Scale the highest constrained power
-   PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
-
-   // Then go backwards and add in each of the coefficients * A^order from the second highest order down
-   for (int i = poly_sparsity_order-1; i > 0; i--)
-   {
-      PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
-   }
-
-   // Add in the 0th order term
-   PetscCallVoid(MatShift(*output_mat, coefficients[0]));
 
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
@@ -311,144 +312,147 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       // the term loop
       for (int term = poly_sparsity_order + 1; term <= poly_order; term++)
       {
-         // Skip any zero coefficients
-         if (coefficients_d(term) != 0.0)
-         {
-            // Set vals_temp to zero
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {
-               vals_temp[j] = 0;
-            });      
+         const PetscReal coeff_term = coefficients_d(term);
+
+         // Set vals_temp to zero
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {
+            vals_temp[j] = 0;
+         });      
+         
+         // Team barrier to ensure initialization is complete before use
+         t.team_barrier();                   
             
-            // Team barrier to ensure initialization is complete before use
-            t.team_barrier();                   
+         // Now compute the sums in vals_temp
+         // This goes over all the local and non-local columns in row i
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {
+
+            // ~~~~~~~~~
+            // Do a search through the sorted arrays to find matching indices
+            // ~~~~~~~~~
+
+            // Get the row index for this column in sparsity mat
+            PetscInt row_of_col_j;
+            // Do we have this row locally or have we retrieved it from other ranks?
+            const bool row_of_col_j_local = j < local_cols_row_i;
+            // This is only accesssed below if row_of_col_j_local is true
+            PetscInt local_cols_row_of_col_j = 0;
+            if (row_of_col_j_local)
+            {
+               row_of_col_j = device_local_j_sparsity[device_local_i_sparsity[i] + j];
+               local_cols_row_of_col_j = device_local_i_input[row_of_col_j + 1] - device_local_i_input[row_of_col_j];    
+            }
+            else
+            {
+               row_of_col_j = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + (j - local_cols_row_i)];
+            }
+
+            // Get how many local and non-local columns there are in the row of column j     
+            PetscInt ncols_row_of_col_j = 0;
+            if (row_of_col_j_local)
+            {
+               ncols_row_of_col_j = local_cols_row_of_col_j;
+               if (mpi) ncols_row_of_col_j += device_nonlocal_i_input[row_of_col_j + 1] - device_nonlocal_i_input[row_of_col_j];
+            }
+            else
+            {
+               ncols_row_of_col_j = device_submat_i[row_of_col_j + 1] - device_submat_i[row_of_col_j];
+            }               
+
+            // We'll perform a search to find matching indices
+            // We're matching indices in sparsity mat to those in submat
+            // This is just an intersection between row i in the sparsity mat
+            // and the row of column j in the input mat
+            // This assumes column indices are already sorted 
+            PetscInt idx_col_of_row_i = 0;  // Index into original row i columns
+            PetscInt idx_col_of_row_j = 0;  // Index into target row of column j             
+
+            while (idx_col_of_row_i < ncols_row_i && idx_col_of_row_j < ncols_row_of_col_j) {
+
+               // The col_target is the column we are trying to match in the row of column j
+               // We always convert it to the "local" indexing as if it were in the columns of the submat, ie 
+               // the column indexing of [local cols; local cols + 0:cols_ao-1]
+               PetscInt col_target;
+               if (row_of_col_j_local)
+               {
+                  if (idx_col_of_row_j < local_cols_row_of_col_j)
+                  {
+                     col_target = device_local_j_input[device_local_i_input[row_of_col_j] + idx_col_of_row_j];
+                  }
+                  else
+                  {
+                     // Convert to "local" column index of submat by adding cols_ad
+                     col_target = device_nonlocal_j_input[device_nonlocal_i_input[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j] + cols_ad;
+                  }
+               }
+               else
+               {
+                  col_target = device_submat_j[device_submat_i[row_of_col_j] + idx_col_of_row_j];
+               }
+
+               PetscInt col_orig;
+               // If we're in the local part of the matrix
+               if (idx_col_of_row_i < local_cols_row_i)
+               {
+                  col_orig = device_local_j_sparsity[device_local_i_sparsity[i] + idx_col_of_row_i];
+               }
+               // Nonlocal part
+               else
+               {
+                  // Convert to "local" column index of submat by adding cols_ad
+                  col_orig = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + (idx_col_of_row_i - local_cols_row_i)] + cols_ad;
+               }
                
-            // Now compute the sums in vals_temp
-            // This goes over all the local and non-local columns in row i
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {
+               if (col_orig < col_target) {
+                  // Original column is smaller, move to next original column
+                  idx_col_of_row_i++;
+               } else if (col_orig > col_target) {
+                  // Target column is smaller, move to next target column
+                  idx_col_of_row_j++;
+               // We've found a matching index and hence we can do our compute
+               } else {
 
-               // ~~~~~~~~~
-               // Do a search through the sorted arrays to find matching indices
-               // ~~~~~~~~~
-
-               // Get the row index for this column in sparsity mat
-               PetscInt row_of_col_j;
-               // Do we have this row locally or have we retrieved it from other ranks?
-               const bool row_of_col_j_local = j < local_cols_row_i;
-               // This is only accesssed below if row_of_col_j_local is true
-               PetscInt local_cols_row_of_col_j = 0;
-               if (row_of_col_j_local)
-               {
-                  row_of_col_j = device_local_j_sparsity[device_local_i_sparsity[i] + j];
-                  local_cols_row_of_col_j = device_local_i_input[row_of_col_j + 1] - device_local_i_input[row_of_col_j];    
-               }
-               else
-               {
-                  row_of_col_j = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + (j - local_cols_row_i)];
-               }
-
-               // Get how many local and non-local columns there are in the row of column j     
-               PetscInt ncols_row_of_col_j = 0;
-               if (row_of_col_j_local)
-               {
-                  ncols_row_of_col_j = local_cols_row_of_col_j;
-                  if (mpi) ncols_row_of_col_j += device_nonlocal_i_input[row_of_col_j + 1] - device_nonlocal_i_input[row_of_col_j];
-               }
-               else
-               {
-                  ncols_row_of_col_j = device_submat_i[row_of_col_j + 1] - device_submat_i[row_of_col_j];
-               }               
-
-               // We'll perform a search to find matching indices
-               // We're matching indices in sparsity mat to those in submat
-               // This is just an intersection between row i in the sparsity mat
-               // and the row of column j in the input mat
-               // This assumes column indices are already sorted 
-               PetscInt idx_col_of_row_i = 0;  // Index into original row i columns
-               PetscInt idx_col_of_row_j = 0;  // Index into target row of column j             
-
-               while (idx_col_of_row_i < ncols_row_i && idx_col_of_row_j < ncols_row_of_col_j) {
-
-                  // The col_target is the column we are trying to match in the row of column j
-                  // We always convert it to the "local" indexing as if it were in the columns of the submat, ie 
-                  // the column indexing of [local cols; local cols + 0:cols_ao-1]
-                  PetscInt col_target;
+                  PetscReal val_target;
                   if (row_of_col_j_local)
                   {
                      if (idx_col_of_row_j < local_cols_row_of_col_j)
                      {
-                        col_target = device_local_j_input[device_local_i_input[row_of_col_j] + idx_col_of_row_j];
+                        val_target = device_local_vals_input[device_local_i_input[row_of_col_j] + idx_col_of_row_j];
                      }
                      else
                      {
-                        // Convert to "local" column index of submat by adding cols_ad
-                        col_target = device_nonlocal_j_input[device_nonlocal_i_input[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j] + cols_ad;
+                        val_target = device_nonlocal_vals_input[device_nonlocal_i_input[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j];
                      }
                   }
                   else
                   {
-                     col_target = device_submat_j[device_submat_i[row_of_col_j] + idx_col_of_row_j];
-                  }
+                     val_target = device_submat_vals[device_submat_i[row_of_col_j] + idx_col_of_row_j];
+                  }                     
 
-                  PetscInt col_orig;
-                  // If we're in the local part of the matrix
-                  if (idx_col_of_row_i < local_cols_row_i)
-                  {
-                     col_orig = device_local_j_sparsity[device_local_i_sparsity[i] + idx_col_of_row_i];
-                  }
-                  // Nonlocal part
-                  else
-                  {
-                     // Convert to "local" column index of submat by adding cols_ad
-                     col_orig = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + (idx_col_of_row_i - local_cols_row_i)] + cols_ad;
-                  }
-                  
-                  if (col_orig < col_target) {
-                     // Original column is smaller, move to next original column
-                     idx_col_of_row_i++;
-                  } else if (col_orig > col_target) {
-                     // Target column is smaller, move to next target column
-                     idx_col_of_row_j++;
-                  // We've found a matching index and hence we can do our compute
-                  } else {
+                  // Has to be atomic! Potentially lots of contention so maybe not 
+                  // the most performant way to do this
+                  Kokkos::atomic_add(&vals_temp[idx_col_of_row_i], vals_prev[j] * val_target);
 
-                     PetscReal val_target;
-                     if (row_of_col_j_local)
-                     {
-                        if (idx_col_of_row_j < local_cols_row_of_col_j)
-                        {
-                           val_target = device_local_vals_input[device_local_i_input[row_of_col_j] + idx_col_of_row_j];
-                        }
-                        else
-                        {
-                           val_target = device_nonlocal_vals_input[device_nonlocal_i_input[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j];
-                        }
-                     }
-                     else
-                     {
-                        val_target = device_submat_vals[device_submat_i[row_of_col_j] + idx_col_of_row_j];
-                     }                     
-
-                     // Has to be atomic! Potentially lots of contention so maybe not 
-                     // the most performant way to do this
-                     Kokkos::atomic_add(&vals_temp[idx_col_of_row_i], vals_prev[j] * val_target);
-
-                     // Move forward in both arrays
-                     idx_col_of_row_i++;
-                     idx_col_of_row_j++;
-                  }
+                  // Move forward in both arrays
+                  idx_col_of_row_i++;
+                  idx_col_of_row_j++;
                }
-            });      
-            
-            // Team barrier to ensure initialization is complete before use
-            t.team_barrier();     
+            }
+         });      
+         
+         // Team barrier to ensure initialization is complete before use
+         t.team_barrier();     
 
-            // ~~~~~~~~~~~
-            // Now can add the value of coeff * A^(term-1) to our matrix
-            // ~~~~~~~~~~~               
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {
+         // ~~~~~~~~~~~
+         // Now can add the value of coeff * A^(term-1) to our matrix
+         // ~~~~~~~~~~~               
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {
 
-               PetscInt diag_increm = 0;
+            PetscInt diag_increm = 0;
 
+            // Skip any zero coefficients
+            // Still have to compute the A^(term-1) above though for the next time through
+            if (coeff_term != 0.0)
+            {
                // Do the mult with coeff
                // If we're in the local part of the matrix
                if (j < local_cols_row_i)
@@ -460,20 +464,21 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
                   {
                      diag_increm = 1;
                   }
-                  device_local_vals_output[device_local_i_output[i] + j + diag_increm] += coefficients_d(term) * vals_temp[j];
+                  device_local_vals_output[device_local_i_output[i] + j + diag_increm] += coeff_term * vals_temp[j];
                }
                // Nonlocal part
                else
                {
-                  device_nonlocal_vals_output[device_nonlocal_i_output[i] + (j - local_cols_row_i)] += coefficients_d(term) * vals_temp[j];                  
+                  device_nonlocal_vals_output[device_nonlocal_i_output[i] + (j - local_cols_row_i)] += coeff_term * vals_temp[j];
                }
-               // This should now have the value of A^(term-1) in it
-               vals_prev[j] = vals_temp[j];
-            });
+            }
 
-            // Team barrier to ensure initialization is complete before use
-            t.team_barrier();                
-         }
+            // This should now have the value of A^(term-1) in it
+            vals_prev[j] = vals_temp[j];
+         });
+
+         // Team barrier to ensure initialization is complete before use
+         t.team_barrier();                
       }
    });
     

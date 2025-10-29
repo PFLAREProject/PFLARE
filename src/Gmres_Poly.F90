@@ -1230,9 +1230,6 @@ end if
          ! the term loop
          do term = poly_sparsity_order+2, size(coefficients)
 
-            ! Skip this term if the coefficient is zero
-            if (coefficients(term) == 0d0) cycle
-
             ! We need to sum up the product of vals_previous_power_temp(j_loc) * matching columns
             vals_temp = 0
 
@@ -1250,8 +1247,10 @@ end if
                
             ! ~~~~~~~~~~~
             ! Now can add the value of coeff * A^(term-1) to our matrix
+            ! Can skip this if coeff is zero, but still need to compute A^(term-1)
+            ! for the next time through
             ! ~~~~~~~~~~~
-            if (ncols /= 0) then
+            if (ncols /= 0 .AND. coefficients(term) /= 0d0) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols(1:ncols), &
                      coefficients(term) * vals_temp, ADD_VALUES, ierr)   
             end if
