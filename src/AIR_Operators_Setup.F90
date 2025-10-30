@@ -457,59 +457,8 @@ module air_operators_setup
                   write (ranky, fmt) comm_rank
                   write (name, '(a)') 'inv_Aff_data_'//csize//'_rank_'//ranky//'.dat'
 
-                  call MatMPIAIJGetSeqAIJ(inv_dropped_Aff, Ad, Ao, colmap, ierr) 
-                  print *, "comm_rank", comm_rank, "size", size(colmap)
-                  call MatGetSize(inv_dropped_Aff, gr, gc, ierr)
-                  call MatGetLocalSize(inv_dropped_Aff, lr, lc, ierr)        
-                  local_fine_size = size(colmap)
-                  call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, colmap, PETSC_COPY_VALUES, local_fine, ierr)
+                  call matrix_check(inv_dropped_Aff, name)
 
-                  ! Check if the file already exists to avoid overwriting
-                  inquire(file=name, exist=file_exists)
-
-                  if (.not. file_exists) then
-                     call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
-                     call MatView(Ad, viewer, ierr)
-                     call MatView(Ao, viewer, ierr)
-                     call ISView(local_fine, viewer, ierr)
-                     call PetscViewerDestroy(viewer, ierr)
-                  else
-                     ! Optional: notify if file exists (only on rank 0 to avoid spam)
-                     print *, "File ", trim(name), " already exists,"
-                     call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_READ, viewer, ierr)
-                     call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
-                     call MatLoad(temp_coarse_mat, viewer, ierr)
-                     call MatEqual(Ad, temp_coarse_mat, same, ierr)
-                     if (.NOT. same) then
-                        print *, "Error: inv Aff Ad from file ", trim(name), " does not match computed Mat."
-                        call MatAXPY(temp_coarse_mat, -1d0, Ad, DIFFERENT_NONZERO_PATTERN, ierr)
-                        call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
-                        print *, "Difference norm inv Aff Ad SAVED: ", diff_mat                  
-                        !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
-                     end if
-                     call MatDestroy(temp_coarse_mat, ierr)
-                     call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
-                     call MatLoad(temp_coarse_mat, viewer, ierr)
-                     call MatEqual(Ao, temp_coarse_mat, same, ierr)
-                     if (.NOT. same) then
-                        print *, "Error: inv Aff Ao from file ", trim(name), " does not match computed Mat."
-                        call MatAXPY(temp_coarse_mat, -1d0, Ao, DIFFERENT_NONZERO_PATTERN, ierr)
-                        call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
-                        print *, "Difference norm inv Aff Ao SAVED: ", diff_mat                  
-                        !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
-                     end if
-                     call MatDestroy(temp_coarse_mat, ierr)            
-                     call ISCreate(PETSC_COMM_SELF, temp_fine, ierr)
-                     call ISLoad(temp_fine, viewer, ierr)
-                     call ISEqual(local_fine, temp_fine, same, ierr)
-                     if (.NOT. same) then
-                        print *, "Error: inv Aff colmap from file ", trim(name), " does not match computed IS."
-                        !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
-                     end if
-                     call ISDestroy(temp_fine, ierr)
-                     call PetscViewerDestroy(viewer, ierr)            
-                  end if
-                  call ISDestroy(local_fine, ierr)
                end if                
                
                if (our_level.ge. 6) then

@@ -66,6 +66,109 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine matrix_check(mat, name)
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(inout)                          :: mat
+      character*(PETSC_MAX_PATH_LEN) name
+
+      ! Local
+      PetscErrorCode :: ierr      
+      PetscViewer viewer
+      logical :: file_exists
+      PetscBool :: same
+      PetscInt :: local_fine_size, lr, lc, gr, gc, shift=0, n_ad, n_ao, n_two
+      PetscReal :: diff_mat
+      type(tMat) :: Ad, Ao, temp_coarse_mat
+      PetscInt, dimension(:), pointer :: colmap     
+      PetscInt, dimension(:), pointer :: ia_ad, ja_ad, ia_two, ja_two, ia_ao, ja_ao
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done      
+      type(tIS) :: local_fine, temp_fine
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+      
+
+      call MatMPIAIJGetSeqAIJ(mat, Ad, Ao, colmap, ierr) 
+      call MatGetSize(mat, gr, gc, ierr)
+      call MatGetLocalSize(mat, lr, lc, ierr)        
+      local_fine_size = size(colmap)
+      call ISCreateGeneral(PETSC_COMM_SELF, local_fine_size, colmap, PETSC_COPY_VALUES, local_fine, ierr)
+
+      call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ia_ad,ja_ad,done,ierr) 
+      call MatGetRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ia_ao,ja_ao,done,ierr)
+
+      ! Check if the file already exists to avoid overwriting
+      inquire(file=name, exist=file_exists)
+
+      if (.not. file_exists) then
+         call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_WRITE, viewer, ierr)
+         call MatView(Ad, viewer, ierr)
+         call MatView(Ao, viewer, ierr)
+         call ISView(local_fine, viewer, ierr)
+         call PetscViewerDestroy(viewer, ierr)
+      else
+         ! Optional: notify if file exists (only on rank 0 to avoid spam)
+         print *, "File ", trim(name), " already exists,"
+         call PetscViewerBinaryOpen(MPI_COMM_SELF, name, FILE_MODE_READ, viewer, ierr)
+         call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
+         call MatLoad(temp_coarse_mat, viewer, ierr)
+         call MatEqual(Ad, temp_coarse_mat, same, ierr)
+         if (.NOT. same) then     
+            call MatGetRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
+            if (.NOT. all(ia_ad == ia_two)) then
+               print *, "Error: Aff Ad ia from file ", trim(name), " does not match computed Mat."
+            end if
+            if (.NOT. all(ja_ad == ja_two)) then
+               print *, "Error: Aff Ad ja from file ", trim(name), " does not match computed Mat."
+            end if
+            call MatRestoreRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
+            print *, "Error: Aff Ad from file ", trim(name), " does not match computed Mat."
+            call MatAXPY(temp_coarse_mat, -1d0, Ad, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+            print *, "Difference norm Aff Ad SAVED: ", diff_mat                    
+
+            !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_coarse_mat, ierr)
+         call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
+         call MatLoad(temp_coarse_mat, viewer, ierr)
+         call MatEqual(Ao, temp_coarse_mat, same, ierr)
+         if (.NOT. same) then      
+            call MatGetRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
+            if (.NOT. all(ia_ao == ia_two)) then
+               print *, "Error: Aff Ao ia from file ", trim(name), " does not match computed Mat."
+            end if
+            if (.NOT. all(ja_ao == ja_two)) then
+               print *, "Error: Aff Ao ja from file ", trim(name), " does not match computed Mat."
+            end if
+            call MatRestoreRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)                              
+            print *, "Error: Aff Ao from file ", trim(name), " does not match computed Mat."
+            call MatAXPY(temp_coarse_mat, -1d0, Ao, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+            print *, "Difference norm Aff Ao SAVED: ", diff_mat                   
+            !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_coarse_mat, ierr)            
+         call ISCreate(PETSC_COMM_SELF, temp_fine, ierr)
+         call ISLoad(temp_fine, viewer, ierr)
+         call ISEqual(local_fine, temp_fine, same, ierr)
+         if (.NOT. same) then
+            print *, "Error: Aff colmap from file ", trim(name), " does not match computed IS."
+            !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
+         end if
+         call ISDestroy(temp_fine, ierr)
+         call PetscViewerDestroy(viewer, ierr)            
+      end if
+      call ISDestroy(local_fine, ierr)
+      call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ia_ad,ja_ad,done,ierr) 
+      call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ia_ao,ja_ao,done,ierr)
+      
+   end subroutine     
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine destroy_matrix_reuse(mat, submatrices)
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
