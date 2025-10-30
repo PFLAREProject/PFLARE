@@ -459,14 +459,13 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
    // We will ncols+1 of integers which tell us what the matching indices we have
-   // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = 1 * (max_nnz_local+1) * sizeof(PetscInt) + \
-               1 * (max_nnz_nonlocal+1) * sizeof(PetscInt) +
-               8 * 2 * sizeof(PetscScalar);
+   // for both local and nonlocal indices
+   const size_t per_view_local = ScratchIntView::shmem_size(max_nnz_local+1);
+   const size_t per_view_nonlocal = ScratchIntView::shmem_size(max_nnz_nonlocal+1);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
-   policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
+   policy.set_scratch_size(1, Kokkos::PerTeam(per_view_local + per_view_nonlocal));
 
    // Execute with scratch memory
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
@@ -868,14 +867,13 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
    // We will have ncols of integers which tell us what the matching indices we have
-   // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = max_nnz_local * sizeof(PetscInt) + \
-               max_nnz_nonlocal * sizeof(PetscInt) +
-               8 * 2 * sizeof(PetscScalar);
+   // for both local and nonlocal indices
+   const size_t per_view_local = ScratchIntView::shmem_size(max_nnz_local);
+   const size_t per_view_nonlocal = ScratchIntView::shmem_size(max_nnz_nonlocal);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
-   policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
+   policy.set_scratch_size(1, Kokkos::PerTeam(per_view_local + per_view_nonlocal));
 
    // Execute with scratch memory
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
@@ -1942,13 +1940,11 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
    // We will ncols+1 of integers which tell us what the matching indices we have
-   // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = (max_nnz_local+1) * sizeof(PetscInt) + \
-               8 * 2 * sizeof(PetscScalar);
+   const size_t per_view_local = ScratchIntView::shmem_size(max_nnz_local+1);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows_row, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
-   policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));    
+   policy.set_scratch_size(1, Kokkos::PerTeam(per_view_local));    
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -1994,7 +1990,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          // number of columns
          PetscInt ncols_local;
          ncols_local = device_local_i[i + 1] - device_local_i[i];
-         ScratchIntView scratch_indices, scratch_indices_nonlocal;
+         ScratchIntView scratch_indices;
 
          // Allocate views directly on scratch memory
          // Have to use views here given alignment issues
@@ -2074,7 +2070,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          // number of columns
          PetscInt ncols_local;
          ncols_local = device_local_i[i + 1] - device_local_i[i];
-         ScratchIntView scratch_indices, scratch_indices_nonlocal;
+         ScratchIntView scratch_indices;
 
          // Allocate views directly on scratch memory
          // Have to use views here given alignment issues

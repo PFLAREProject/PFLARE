@@ -23,7 +23,8 @@ using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
 using ConstMatRowMapKokkosView = KokkosCsrGraph::row_map_type::const_type;
 
 // Create views using scratch memory space
-using ScratchSpace = typename KokkosTeamMemberType::scratch_memory_space;
+typedef Kokkos::DefaultExecutionSpace::scratch_memory_space
+  ScratchSpace;
 using ScratchIntView = Kokkos::View<PetscInt*, ScratchSpace, Kokkos::MemoryUnmanaged>;
 using ScratchScalarView = Kokkos::View<PetscScalar*, ScratchSpace, Kokkos::MemoryUnmanaged>;
 using Scratch2DIntView = Kokkos::View<PetscInt**, ScratchSpace, Kokkos::MemoryUnmanaged>;
