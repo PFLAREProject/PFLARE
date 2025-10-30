@@ -404,10 +404,11 @@ module fc_smooth
       PetscErrorCode :: ierr
 
       type(tMat) :: mat, pmat
-      integer :: our_level, errorcode, i, smooth_its
+      integer :: our_level, errorcode, i, smooth_its, comm_rank
       type(mat_ctxtype), pointer :: mat_ctx  
       type(air_multigrid_data), pointer :: air_data
       PetscBool :: first_smooth
+      PetscReal :: norm_x, norm_b
 
       ! ~~~~~~
 
@@ -428,6 +429,16 @@ module fc_smooth
       call MatShellGetContext(mat, mat_ctx, ierr)
       our_level = mat_ctx%our_level
       air_data => mat_ctx%air_data  
+
+      call MPI_Comm_rank(MPI_COMM_WORLD, comm_rank, errorcode)      
+
+      call VecNorm(b, NORM_2, norm_b, ierr)
+      call VecNorm(x, NORM_2, norm_x, ierr)
+      if (comm_rank == 0) then
+         print *, "  Level ", our_level, " FC point richardson with norm(b) = ", norm_b, &
+                  " norm(x) = ", norm_x
+      end if
+
 
       ! The first time we go through any smooth, we need to pull out x_f and/or x_c
       first_smooth = PETSC_TRUE
@@ -454,6 +465,12 @@ module fc_smooth
          first_smooth = PETSC_FALSE
 
       end do
+
+      call VecNorm(x, NORM_2, norm_x, ierr)
+      if (comm_rank == 0) then
+         print *, "  Level ", our_level, " FC point richardson after ", &
+                  " norm(x) = ", norm_x
+      end if      
       
       ! Now technically there should be a new residual that we put into r after this is done
       ! but I don't think it matters, as it is the solution that is interpolated up 
