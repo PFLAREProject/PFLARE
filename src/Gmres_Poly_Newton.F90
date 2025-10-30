@@ -467,9 +467,10 @@ module gmres_poly_newton
       type(tVec) :: y
 
       ! Local
-      integer :: order, errorcode
+      integer :: order, errorcode, comm_rank
       PetscErrorCode :: ierr      
       type(mat_ctxtype), pointer :: mat_ctx => null()
+      PetscReal :: norm_x, norm_y
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -478,6 +479,14 @@ module gmres_poly_newton
          print *, "Roots in context aren't found"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
+
+      call MPI_Comm_rank(MPI_COMM_WORLD, comm_rank, errorcode)      
+
+      call VecNorm(x, NORM_2, norm_x, ierr)
+      if (comm_rank == 0) then
+         print *, "   coarse solve with ", &
+                  " norm(x) = ", norm_x
+      end if      
 
       ! MF_VEC_TEMP = x
       call VecCopy(x, mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
@@ -557,6 +566,11 @@ module gmres_poly_newton
             order = order + 2
 
          end if
+         call VecNorm(mat_ctx%mf_temp_vec(MF_VEC_TEMP), NORM_2, norm_x, ierr)
+         if (comm_rank == 0) then
+            print *, "   coarse solve with ", &
+                     " MF_VEC_TEMP= ", norm_x
+         end if          
       end do
 
       ! Final step if last root is real
@@ -572,6 +586,12 @@ module gmres_poly_newton
                      mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr) 
          end if
       end if
+
+      call VecNorm(y, NORM_2, norm_x, ierr)
+      if (comm_rank == 0) then
+         print *, "   coarse solve with ", &
+                  " norm(y) = ", norm_x
+      end if        
 
    end subroutine petsc_matvec_gmres_newton_mf      
 
