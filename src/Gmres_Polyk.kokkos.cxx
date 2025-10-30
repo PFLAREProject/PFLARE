@@ -160,6 +160,9 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Add in the 0th order term
    PetscCallVoid(MatShift(*output_mat, coefficients[0]));
 
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // This should happen after all the (potentially) host matscale, mataxpy and matshift above
@@ -210,8 +213,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       sparsity_max_nnz = sparsity_max_nnz_local + sparsity_max_nnz_nonlocal; 
    }
 
-   auto exec = PetscGetKokkosExecutionSpace();
-
    // ~~~~~~~~~~~~~
    // Now we have to be careful 
    // mat_sparsity_match may not have diagonal entries in some rows
@@ -249,6 +250,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
       });
    });
+
+   exec.fence();
    
    // ~~~~~~~~~~~~~
    // ~~~~~~~~~~~~~
