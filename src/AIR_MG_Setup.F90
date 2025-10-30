@@ -627,41 +627,13 @@ module air_mg_setup
             call MatDestroy(temp_coarse_mat, ierr)                  
          end if
 
-         if (our_level_coarse.ge. 6) then
+         if (our_level_coarse .ge. 6) then
             fmt = '(I2.2)'
             write (csize, fmt) our_level_coarse
-            write (name, '(a)') 'mat_coarse_data_'//csize//'.dat'
-
-            ! Check if the file already exists to avoid overwriting
-            if (comm_rank == 0) inquire(file=name, exist=file_exists)
-            call MPI_Bcast(file_exists, 1, MPI_LOGICAL, 0, MPI_COMM_MATRIX, errorcode)
-
-            if (.not. file_exists) then
-               call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_WRITE, viewer, ierr)
-               call MatView(air_data%coarse_matrix(our_level_coarse), viewer, ierr)
-               call PetscViewerDestroy(viewer, ierr)
-            else
-               ! Optional: notify if file exists (only on rank 0 to avoid spam)
-               if (comm_rank == 0) print *, "File ", trim(name), " already exists."
-               call PetscViewerBinaryOpen(MPI_COMM_MATRIX, name, FILE_MODE_READ, viewer, ierr)
-               call MatCreate(MPI_COMM_MATRIX, temp_coarse_mat, ierr)
-               call MatGetSize(air_data%coarse_matrix(our_level_coarse), gr, gc, ierr)
-               call MatGetLocalSize(air_data%coarse_matrix(our_level_coarse), lr, lc, ierr)
-               call MatSetSizes(temp_coarse_mat, lr, lc, &
-                              gr, gc, ierr)
-               call MatLoad(temp_coarse_mat, viewer, ierr)
-               call MatEqual(air_data%coarse_matrix(our_level_coarse), temp_coarse_mat, same, ierr)
-               if (.NOT. same) then
-                  print *, "Error: coarse mat from file ", trim(name), " does not match computed Mat."
-                  call MatAXPY(temp_coarse_mat, -1d0, air_data%coarse_matrix(our_level_coarse), DIFFERENT_NONZERO_PATTERN, ierr)
-                  call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
-                  print *, "Difference norm coarse SAVED: ", diff_mat                  
-                  !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
-               end if
-               call MatDestroy(temp_coarse_mat, ierr)
-               call PetscViewerDestroy(viewer, ierr)            
-            end if
-         end if                  
+            write (ranky, fmt) comm_rank
+            write (name, '(a)') 'coarse_data_'//csize//'_rank_'//ranky//'.dat'
+            call matrix_check(air_data%coarse_matrix(our_level_coarse), name)
+         end if
 
          air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
 

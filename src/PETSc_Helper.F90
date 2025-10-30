@@ -116,18 +116,18 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatLoad(temp_coarse_mat, viewer, ierr)
          call MatEqual(Ad, temp_coarse_mat, same, ierr)
          if (.NOT. same) then     
+            print *, "Error: Ad from file ", trim(name), " does not match computed Mat."
             call MatGetRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
             if (.NOT. all(ia_ad == ia_two)) then
-               print *, "Error: Aff Ad ia from file ", trim(name), " does not match computed Mat."
+               print *, "Error: Ad ia from file ", trim(name), " does not match computed Mat."
             end if
             if (.NOT. all(ja_ad == ja_two)) then
-               print *, "Error: Aff Ad ja from file ", trim(name), " does not match computed Mat."
+               print *, "Error: Ad ja from file ", trim(name), " does not match computed Mat."
             end if
             call MatRestoreRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
-            print *, "Error: Aff Ad from file ", trim(name), " does not match computed Mat."
             call MatAXPY(temp_coarse_mat, -1d0, Ad, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
-            print *, "Difference norm Aff Ad SAVED: ", diff_mat                    
+            print *, "Difference norm Ad SAVED: ", diff_mat                    
 
             !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
          end if
@@ -135,19 +135,19 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatCreate(MPI_COMM_SELF, temp_coarse_mat, ierr)
          call MatLoad(temp_coarse_mat, viewer, ierr)
          call MatEqual(Ao, temp_coarse_mat, same, ierr)
-         if (.NOT. same) then      
+         if (.NOT. same) then  
+            print *, "Error: Ao from file ", trim(name), " does not match computed Mat."
             call MatGetRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
             if (.NOT. all(ia_ao == ia_two)) then
-               print *, "Error: Aff Ao ia from file ", trim(name), " does not match computed Mat."
+               print *, "Error: Ao ia from file ", trim(name), " does not match computed Mat."
             end if
             if (.NOT. all(ja_ao == ja_two)) then
-               print *, "Error: Aff Ao ja from file ", trim(name), " does not match computed Mat."
+               print *, "Error: Ao ja from file ", trim(name), " does not match computed Mat."
             end if
             call MatRestoreRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)                              
-            print *, "Error: Aff Ao from file ", trim(name), " does not match computed Mat."
             call MatAXPY(temp_coarse_mat, -1d0, Ao, DIFFERENT_NONZERO_PATTERN, ierr)
             call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
-            print *, "Difference norm Aff Ao SAVED: ", diff_mat                   
+            print *, "Difference norm Ao SAVED: ", diff_mat                   
             !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
          end if
          call MatDestroy(temp_coarse_mat, ierr)            
@@ -155,7 +155,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call ISLoad(temp_fine, viewer, ierr)
          call ISEqual(local_fine, temp_fine, same, ierr)
          if (.NOT. same) then
-            print *, "Error: Aff colmap from file ", trim(name), " does not match computed IS."
+            print *, "Error: colmap from file ", trim(name), " does not match computed IS."
             !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
          end if
          call ISDestroy(temp_fine, ierr)

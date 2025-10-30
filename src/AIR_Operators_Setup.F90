@@ -449,16 +449,12 @@ module air_operators_setup
 
 
                if (our_level .ge. 6) then
-
                   if (comm_rank == 0) print *, "coefficients", air_data%inv_A_ff_poly_data(our_level)%coefficients
-
                   fmt = '(I2.2)'
                   write (csize, fmt) our_level
                   write (ranky, fmt) comm_rank
                   write (name, '(a)') 'inv_Aff_data_'//csize//'_rank_'//ranky//'.dat'
-
                   call matrix_check(inv_dropped_Aff, name)
-
                end if                
                
                if (our_level.ge. 6) then
@@ -712,7 +708,7 @@ module air_operators_setup
                      air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
                      .TRUE., &
                      reuse_grid_transfer, &
-                     air_data%prolongators(our_level))
+                     air_data%prolongators(our_level))                    
 
          if (our_level.ge. 6) then
             print *, "testing twice prolong", our_level  
@@ -736,6 +732,14 @@ module air_operators_setup
             call MatDestroy(prolong_temp, ierr)                      
 
          end if
+
+         if (our_level .ge. 6) then
+            fmt = '(I2.2)'
+            write (csize, fmt) our_level
+            write (ranky, fmt) comm_rank
+            write (name, '(a)') 'prolong_data_'//csize//'_rank_'//ranky//'.dat'
+            call matrix_check(air_data%prolongators(our_level), name)
+         end if           
 
          end if
 
@@ -961,7 +965,8 @@ module air_operators_setup
             end if            
             call MatDestroy(drop_z_temp, ierr)
             
-         end if
+         end if         
+
       end if
 
       call timer_finish(TIMER_ID_AIR_DROP)   
@@ -1033,7 +1038,14 @@ module air_operators_setup
             !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
          end if            
          call MatDestroy(restr_temp, ierr)  
-      
+
+         if (our_level .ge. 6) then
+            fmt = '(I2.2)'
+            write (csize, fmt) our_level
+            write (ranky, fmt) comm_rank
+            write (name, '(a)') 'restrict_data_'//csize//'_rank_'//ranky//'.dat'
+            call matrix_check(air_data%restrictors(our_level), name)
+         end if
 
       end if
 
