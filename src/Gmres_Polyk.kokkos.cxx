@@ -254,15 +254,13 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // ~~~~~~~~~~~~~
 
    // Create a team policy with scratch memory allocation
-   // We want scratch space for each row
-   // We then want a vals_temp and vals_prev to store the accumulated matrix powers
-   // the last bit of memory is to account for 8-byte alignment for each view
-   size_t scratch_size_per_team = sparsity_max_nnz * 2 * sizeof(PetscScalar) + \
-               8 * 2 * sizeof(PetscScalar);
+   // We want scratch space for each row of max size sparsity_max_nnz per view
+   const size_t per_view = ScratchScalarView::shmem_size(sparsity_max_nnz);
 
    Kokkos::TeamPolicy<> policy(exec, local_rows, Kokkos::AUTO());
    // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
-   policy.set_scratch_size(1, Kokkos::PerTeam(scratch_size_per_team));
+   // We want two views in our scratch space, vals_temp and vals_prev
+   policy.set_scratch_size(1, Kokkos::PerTeam(2 * per_view));
 
    // Execute with scratch memory
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
