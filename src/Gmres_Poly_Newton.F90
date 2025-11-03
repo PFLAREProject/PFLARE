@@ -485,7 +485,7 @@ module gmres_poly_newton
       call VecNorm(x, NORM_2, norm_x, ierr)
       if (comm_rank == 0) then
          print *, "   coarse solve with ", &
-                  " norm(x) = ", norm_x
+                  " norm(x) = ", norm_x, "real roots", mat_ctx%real_roots, "imag roots", mat_ctx%imag_roots
       end if      
 
       ! MF_VEC_TEMP = x
@@ -568,7 +568,7 @@ module gmres_poly_newton
          end if
          call VecNorm(mat_ctx%mf_temp_vec(MF_VEC_TEMP), NORM_2, norm_x, ierr)
          if (comm_rank == 0) then
-            print *, "   coarse solve with ", &
+            print *, order, "   coarse solve with ", &
                      " MF_VEC_TEMP= ", norm_x
          end if          
       end do
