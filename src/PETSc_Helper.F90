@@ -126,7 +126,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             end if
             call MatRestoreRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)            
             call MatAXPY(temp_coarse_mat, -1d0, Ad, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+            call MatNorm(temp_coarse_mat, NORM_INFINITY, diff_mat, ierr)
             print *, "Difference norm Ad SAVED: ", diff_mat                    
 
             !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
@@ -146,7 +146,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             end if
             call MatRestoreRowIJ(temp_coarse_mat,shift,symmetric,inodecompressed,n_two,ia_two,ja_two,done,ierr)                              
             call MatAXPY(temp_coarse_mat, -1d0, Ao, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_coarse_mat, NORM_FROBENIUS, diff_mat, ierr)
+            call MatNorm(temp_coarse_mat, NORM_INFINITY, diff_mat, ierr)
             print *, "Difference norm Ao SAVED: ", diff_mat                   
             !call MPI_Abort(MPI_COMM_MATRIX, MPI_ERR_OTHER, errorcode)
          end if
