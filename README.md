@@ -92,7 +92,7 @@ Please choose one of the build methods below. If you wish to contribute to PFLAR
 
 ### PETSc configure build
 
-PFLARE has now been added to the PETSc configure as an external package (currently on the `main` branch, which will be included in the PETSc 3.25 release). PFLARE can be built by adding ``--download-pflare`` to the PETSc configure. 
+PFLARE has now been added to the PETSc configure as an external package (currently on the PETSc `main` branch, which will be included in the PETSc 3.25 release). PFLARE can be built by adding ``--download-pflare`` to the PETSc configure. 
 
 The PC types added by PFLARE can then be used as native PETSc PC types through command line arguments without any changes to existing code. The [Linking to PFLARE](#linking-to-pflare) and [Modifying existing code](#modifying-existing-code) sections below can therefore be skipped. 
 
@@ -107,20 +107,21 @@ https://github.com/PFLAREProject/PFLARE_spack
 
 ### Source build
 
-1) Set `PETSC_DIR` and `PETSC_ARCH` environmental variables.
-2) ``make`` in the top level directory.
+1) Clone this repository
+2) Set `PETSC_DIR` and `PETSC_ARCH` environmental variables.
+3) ``make`` in the top level directory.
 
 If PETSc was configured with petsc4py, the PFLARE Python interfaces can be built with:
 
-3) ``make python`` in the top level directory.
+4) ``make python`` in the top level directory.
 
 Then if desired, check that PFLARE was built successfully by running some simple tests with:
 
-4) ``make check`` in the top level directory.
+5) ``make check`` in the top level directory.
 
 The full set of tests can be run with:
 
-5) ``make tests`` in the top level directory.
+6) ``make tests`` in the top level directory.
 
 Please use the `release` branch of PETSc and compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS, CXXFLAGS, CPPFLAGS` before calling `make` for PFLARE. 
 
@@ -595,7 +596,7 @@ A brief description of the available options in PFLARE are given below and their
    | ``-pc_air_poly_order``  |  PCAIRGetPolyOrder  PCAIRSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_air_inverse_sparsity_order``  |  PCAIRGetInverseSparsityOrder  PCAIRSetInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |        
    | ``-pc_air_matrix_free_polys``  |  PCAIRGetMatrixFreePolys  PCAIRSetMatrixFreePolys  | Do smoothing matrix-free if possible | false |   
-   | ``-pc_air_smooth_type``  |  PCAIRGetSmoothType  PCAIRSetSmoothType  | Type and number of smooths | "ff" |
+   | ``-pc_air_smooth_type``  |  PCAIRGetSmoothType  PCAIRSetSmoothType  | Type and number of smooths | ff |
    | ``-pc_air_full_smoothing_up_and_down``  |  PCAIRGetFullSmoothingUpAndDown  PCAIRSetFullSmoothingUpAndDown  | Up and down smoothing on all points at once, rather than only down F and C smoothing which is the default  | false |     
    | ``-pc_air_c_inverse_type``  |  PCAIRGetCInverseType  PCAIRSetCInverseType  | The inverse type for the C smooth, given above. If unset this defaults to the same as the F point smoother | -pc_air_inverse_type |
    | ``-pc_air_c_poly_order``  |  PCAIRGetCPolyOrder  PCAIRSetCPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial for the C smooth. If unset this defaults to the same as the F point smoother | -pc_air_poly_order |
@@ -641,12 +642,11 @@ For more ways to use the library please see the Fortran/C examples and the Makef
 
 Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3].
 
-1. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, Journal of Computational Physics 518 (2024) 113342  
-2. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, The International Journal of High Performance Computing Applications 39(3) (2025) 364-384  
+1. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, _Journal of Computational Physics_ 518 (2024) 113342  
+2. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, _The International Journal of High Performance Computing Applications_ 39(3) (2025) 364-384  
 3. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Solving advection equations with reduction multigrids on GPUs (2025) http://arxiv.org/abs/2508.17517  
-4. T. A. Manteuffel, S. Münzenmaier, J. Ruge, B. Southworth, Nonsymmetric Reduction-Based Algebraic Multigrid, SIAM Journal on Scientific Computing 41 (2019) S242–S268  
-5. T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), SIAM Journal on Scientific Computing 40 (2018) A4105–A4130   
-6. A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, SIAM Journal on Scientific Computing (2024) S96–S122  
-7. T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, Numerical Linear
-Algebra with Applications 31(3) (2024) e2543   
-8. Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. Numerical Linear Algebra with Applications 29 (2022) e2427 
+4. T. A. Manteuffel, S. Münzenmaier, J. Ruge, B. Southworth, Nonsymmetric Reduction-Based Algebraic Multigrid, _SIAM Journal on Scientific Computing_ 41 (2019) S242–S268  
+5. T. A. Manteuffel, J. Ruge, B. S. Southworth, Nonsymmetric algebraic multigrid based on local approximate ideal restriction (lAIR), _SIAM Journal on Scientific Computing_ 40 (2018) A4105–A4130   
+6. A. Ali, J. J. Brannick, K. Kahl, O. A. Krzysik, J. B. Schroder, B. S. Southworth, Constrained local approximate ideal restriction for advection-diffusion problems, _SIAM Journal on Scientific Computing_ (2024) S96–S122  
+7. T. Zaman, N. Nytko, A. Taghibakhshi, S. MacLachlan, L. Olson, M. West, Generalizing reduction-based algebraic multigrid, _Numerical Linear Algebra with Applications_ 31(3) (2024) e2543   
+8. Loe, J.A., Morgan, R.B, Toward efficient polynomial preconditioning for GMRES. _Numerical Linear Algebra with Applications_ 29 (2022) e2427 
