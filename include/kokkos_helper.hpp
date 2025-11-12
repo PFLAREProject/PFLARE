@@ -65,8 +65,8 @@ struct ReduceData {
    // Required for Kokkos reduction
    KOKKOS_INLINE_FUNCTION
    static void join(volatile ReduceData& dest, const volatile ReduceData& src) {
-      dest.count += src.count;
-      dest.found_diagonal |= src.found_diagonal;
+      dest.count = dest.count + src.count;
+      dest.found_diagonal = dest.found_diagonal || src.found_diagonal;
    }   
 };
 

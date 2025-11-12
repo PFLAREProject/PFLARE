@@ -34,6 +34,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Add flags "-Wall -Werror -Wunused-result" as the petsc CI enforces capturing
 # all return types, so this in combination with --with-strict-petscerrorcode in the petsc
 # build will error out
+# We also enforce C++20 to ensure Kokkos 5.0 compatibility
 # If MALLOC_DUMP is true:
 # 1) Remove -on_error_abort and strip it from test Makefiles as it interferes with the output
 # 2) Output the terminal to a log file
@@ -50,9 +51,9 @@ RUN set -euo pipefail; \
         sed -i 's/-on_error_abort//g' python/Makefile; \
     fi && \
     if [ "${MALLOC_DUMP}" = "true" ]; then LOG=/tmp/test.log; : > "$LOG"; else LOG=/dev/null; fi; \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" CPPFLAGS="-Wall -Werror -Wunused-result" 2>&1 | tee -a "$LOG"; \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" CPPFLAGS="-Wall -Werror -Wunused-result" check 2>&1 | tee -a "$LOG"; \
-    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result" CPPFLAGS="-Wall -Werror -Wunused-result" tests 2>&1 | tee -a "$LOG"; \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror -Wunused-result" 2>&1 | tee -a "$LOG"; \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror -Wunused-result" check 2>&1 | tee -a "$LOG"; \
+    make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror -Wunused-result" tests 2>&1 | tee -a "$LOG"; \
     if [ "${MALLOC_DUMP}" = "true" ]; then \
       if grep -q "PetscTrMalloc" "$LOG"; then \
         echo "Error: found PetscTrMalloc in test output" >&2; exit 1; \
