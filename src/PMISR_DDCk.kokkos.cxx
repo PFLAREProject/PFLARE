@@ -61,8 +61,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    if (mpi)
    {
       mat_mpi = (Mat_MPIAIJ *)(*strength_mat)->data;
-      mat_local = mat_mpi->A;
-      mat_nonlocal = mat_mpi->B;
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, NULL));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao)); 
    }
    else
@@ -609,8 +608,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    if (mpi)
    {
       mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
-      mat_local = mat_mpi->A;
-      mat_nonlocal = mat_mpi->B;
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));      
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
    }
    else
