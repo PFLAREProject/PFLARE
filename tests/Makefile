@@ -155,9 +155,12 @@ run_tests_load_parallel:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1
 #
 	@echo ""
-	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem with coefficients calculated on subcomms"
+	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem with coefficients calculated on subcomms serial"
 	$(MPIEXEC) -n 2 ./ex12f -f data/mat_stream_2364 -pc_air_subcomm -pc_air_inverse_type arnoldi -pc_air_coarsest_subcomm \
 	 -pc_air_coarsest_inverse_type arnoldi -ksp_max_it 5 -pc_air_a_drop 1e-3
+	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem with coefficients calculated on subcomms parallel"
+	$(MPIEXEC) -n 4 ./ex12f -f data/mat_stream_2364 -pc_air_subcomm -pc_air_inverse_type arnoldi -pc_air_coarsest_subcomm \
+	 -pc_air_coarsest_inverse_type arnoldi -ksp_max_it 5 -pc_air_a_drop 1e-3	 
 # 
 	@echo "Test PMISR DDC CF splitting in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364

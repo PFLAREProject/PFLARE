@@ -351,14 +351,16 @@ PETSC_INTERN void mat_mat_symbolic_c(Mat *A, Mat *B, Mat *result)
 // Basically taken from MatMPIAdjCreateNonemptySubcommMat_MPIAdj
 PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcomm, Mat *B)
 {
-  Mat_MPIAIJ     *a = (Mat_MPIAIJ *)(*A)->data;
   const PetscInt *ranges;
   MPI_Comm        acomm, bcomm;
   MPI_Group       agroup, bgroup;
   PetscMPIInt     i, size, nranks, *ranks;
+  Mat mat_local, mat_nonlocal;
+  const PetscInt *colmap_input;
 
   PetscFunctionBegin;
 
+  PetscCall(MatMPIAIJGetSeqAIJ(*A, &mat_local, &mat_nonlocal, &colmap_input));
   *on_subcomm = 1;
 
   // Ensure we return petsc_null so we can test if we are on this subcomm
@@ -398,20 +400,28 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
     if (nranks == 1) 
     {
       // Just send out a copy of the local part of the input matrix
-      PetscCall(MatDuplicate(a->A, MAT_COPY_VALUES, B));
+      PetscCall(MatDuplicate(mat_local, MAT_COPY_VALUES, B));
+      (void)MPI_Comm_free(&bcomm);
     }
     else{
       // Copy the local and off-diagonal sequential matrices
-      PetscCall(MatDuplicate(a->A, MAT_COPY_VALUES, &Ad_copy));
-      PetscCall(MatDuplicate(a->B, MAT_COPY_VALUES, &Ao_copy));
+      PetscCall(MatDuplicate(mat_local, MAT_COPY_VALUES, &Ad_copy));
+      PetscCall(MatDuplicate(mat_nonlocal, MAT_COPY_VALUES, &Ao_copy));
+
+      PetscInt *garray_host = NULL; 
+      PetscInt rows_ao, cols_ao;
+      PetscCall(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+      PetscCall(PetscMalloc1(cols_ao, &garray_host));
+      for (PetscInt i = 0; i < cols_ao; i++)
+      {
+         garray_host[i] = colmap_input[i];
+      }      
 
       // MAT_NO_OFF_PROC_ENTRIES is set to true in this routine so 
       // don't need to set it externally
       // Have to be careful here as need to feed in copies of A and B
-      PetscCall(MatCreateMPIAIJWithSeqAIJ(bcomm, M, N, Ad_copy, Ao_copy, a->garray, B));
+      PetscCall(MatCreateMPIAIJWithSeqAIJ(bcomm, M, N, Ad_copy, Ao_copy, garray_host, B));
     }
-
-    (void)MPI_Comm_free(&bcomm);
   }
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -449,24 +459,27 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_local_c(Mat *A, PetscInt *nnzs)
       PetscFunctionReturn(PETSC_SUCCESS);
   }
 
-  Mat_MPIAIJ *mat_mpi = NULL;
   Mat mat_local; 
 
   // Get the existing output mats
   if (size != 1)
   {
-     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
-     mat_local = mat_mpi->A;
+     PetscCall(MatMPIAIJGetSeqAIJ(*A, &mat_local, NULL, NULL));
   }
   else
   {
      mat_local = *A;
   } 
 
-  Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local->data;
+  PetscInt shift = 0, n;
+  PetscBool symmetric=PETSC_FALSE, inodecompressed=PETSC_FALSE, done;
+  const PetscInt *ad_ia;
+  PetscCall(MatGetRowIJ(mat_local, shift, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));  
 
   // Set the number of non-zeros
-  *nnzs = a->nz;
+  *nnzs = ad_ia[n];
+
+  PetscCall(MatRestoreRowIJ(mat_local, shift, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));  
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -492,30 +505,39 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
       PetscFunctionReturn(PETSC_SUCCESS);
   }  
 
-  Mat_MPIAIJ *mat_mpi = NULL;
   Mat mat_local = NULL, mat_nonlocal = NULL; 
 
   // Get the existing output mats
   if (size != 1)
   {
-     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
-     mat_local = mat_mpi->A;
-     mat_nonlocal = mat_mpi->B;
+     PetscCall(MatMPIAIJGetSeqAIJ(*A, &mat_local, &mat_nonlocal, NULL));
   }
   else
   {
      mat_local = *A;
   } 
 
-  Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local->data;
+  PetscInt shift = 0, n;
+  PetscBool symmetric=PETSC_FALSE, inodecompressed=PETSC_FALSE, done;
+  const PetscInt *ad_ia;
+  PetscCall(MatGetRowIJ(mat_local, shift, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));  
 
   // Set the number of non-zeros
-  *nnzs_local = a->nz;
+  *nnzs_local = ad_ia[n];
+
+  PetscCall(MatRestoreRowIJ(mat_local, shift, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));  
 
   if (size != 1)
   {
-     Mat_SeqAIJ *b = (Mat_SeqAIJ *)mat_nonlocal->data;
-     *nnzs_nonlocal = b->nz;
+     shift = 0;
+     symmetric=PETSC_FALSE;
+     inodecompressed=PETSC_FALSE;
+     PetscCall(MatGetRowIJ(mat_nonlocal, shift, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));  
+
+     // Set the number of non-zeros
+     *nnzs_nonlocal = ad_ia[n];
+
+     PetscCall(MatRestoreRowIJ(mat_nonlocal, shift, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));
   }
 
   PetscFunctionReturn(PETSC_SUCCESS);
@@ -534,15 +556,12 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
   PetscCall(PetscObjectGetComm((PetscObject)(*A), &acomm));
   PetscCallMPI(MPI_Comm_size(acomm, &size));
 
-  Mat_MPIAIJ *mat_mpi = NULL;
   Mat mat_local = NULL, mat_nonlocal = NULL; 
 
   // Get the existing output mats
   if (size != 1)
   {
-     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
-     mat_local = mat_mpi->A;
-     mat_nonlocal = mat_mpi->B;
+     PetscCall(MatMPIAIJGetSeqAIJ(*A, &mat_local, &mat_nonlocal, NULL));
   }
   else
   {
@@ -596,15 +615,12 @@ PETSC_INTERN void MatSetAllValues_cpu(Mat *A, double val)
   PetscCallVoid(PetscObjectGetComm((PetscObject)(*A), &acomm));
   PetscCallMPIAbort(acomm, MPI_Comm_size(acomm, &size));
 
-  Mat_MPIAIJ *mat_mpi = NULL;
   Mat mat_local = NULL, mat_nonlocal = NULL; 
 
   // Get the existing output mats
   if (size != 1)
   {
-     mat_mpi = (Mat_MPIAIJ *)(*A)->data;
-     mat_local = mat_mpi->A;
-     mat_nonlocal = mat_mpi->B;
+     PetscCallVoid(MatMPIAIJGetSeqAIJ(*A, &mat_local, &mat_nonlocal, NULL));
   }
   else
   {

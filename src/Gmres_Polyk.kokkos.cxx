@@ -1,8 +1,6 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
 #include <iostream>
-#include <../src/mat/impls/aij/seq/aij.h>
-#include <../src/mat/impls/aij/mpi/mpiaij.h>
 
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -24,9 +22,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
 
-   Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local_sparsity = NULL, mat_nonlocal_sparsity = NULL;
-   Mat_MPIAIJ *mat_mpi_input = nullptr;
    Mat mat_local_input = NULL, mat_nonlocal_input = NULL;   
 
    // Get the comm
@@ -66,19 +62,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    mat_duplicate_copy_plus_diag_kokkos(mat_sparsity_match, reuse_int_cmat, output_mat);
 
    PetscInt *col_indices_off_proc_array;
+   const PetscInt *colmap_mat_sparsity_match;
    IS col_indices, row_indices;
    Mat *submatrices;
 
    // Pull out the nonlocal parts of the input mat we need
    if (mpi)
    {
-      mat_mpi_input = (Mat_MPIAIJ *)(*input_mat)->data;
-      mat_local_input = mat_mpi_input->A;
-      mat_nonlocal_input = mat_mpi_input->B;
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local_input, &mat_nonlocal_input, NULL));
 
-      mat_mpi = (Mat_MPIAIJ *)(*mat_sparsity_match)->data;
-      mat_local_sparsity = mat_mpi->A;
-      mat_nonlocal_sparsity = mat_mpi->B;
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*mat_sparsity_match, &mat_local_sparsity, &mat_nonlocal_sparsity, &colmap_mat_sparsity_match));
       PetscCallVoid(MatGetSize(mat_nonlocal_sparsity, &rows_ao, &cols_ao));
       PetscCallVoid(MatGetSize(mat_local_sparsity, &rows_ad, &cols_ad));
 
@@ -93,14 +86,14 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       }
       for (PetscInt i = 0; i < cols_ao; i++)
       {
-         col_indices_off_proc_array[cols_ad + i] = mat_mpi->garray[i];
+         col_indices_off_proc_array[cols_ad + i] = colmap_mat_sparsity_match[i];
       }           
       
       // Create the sequential IS we want with the cols we want (written as global indices)
       PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, size_cols, \
                   col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices));
       PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, cols_ao, \
-                  mat_mpi->garray, PETSC_USE_POINTER, &row_indices));
+                  colmap_mat_sparsity_match, PETSC_USE_POINTER, &row_indices));
 
       PetscCallVoid(MatSetOption(*input_mat, MAT_SUBMAT_SINGLEIS, PETSC_TRUE)); 
       // Now this will be doing comms to get the non-local rows we want and returns in a sequential matrix
@@ -139,9 +132,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
    if (mpi)
    {
-      Mat_MPIAIJ *mat_mpi_output = (Mat_MPIAIJ *)(*output_mat)->data;
-      mat_local_output = mat_mpi_output->A;
-      mat_nonlocal_output = mat_mpi_output->B;     
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*output_mat, &mat_local_output, &mat_nonlocal_output, NULL));  
    }
    else
    {
