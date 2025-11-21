@@ -4,7 +4,7 @@
 <img align="right" img src="PFLARE_logo.png" width="300" height="300" />
 
 # PFLARE library
-### Author: Steven Dargaville
+#### Created by: Steven Dargaville
 
 This library contains methods which can be used to solve linear systems in parallel with PETSc, with interfaces in C/Fortran/Python. 
 
@@ -84,7 +84,7 @@ The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarch
 
 ## Building PFLARE
 
-PFLARE depends on MPI, BLAS, LAPACK and PETSc (>=3.24.0) configured with a graph partitioner (e.g., ParMETIS). PFLARE uses the same compilers and flags defined in the PETSc configure.
+PFLARE depends on MPI, BLAS, LAPACK and PETSc configured with a graph partitioner (e.g., ParMETIS). PFLARE uses the same compilers and flags defined in the PETSc configure.
 
 If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos and the relevant GPU backend. PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. 
 
@@ -123,7 +123,9 @@ The full set of tests can be run with:
 
 6) ``make tests`` in the top level directory.
 
-Please use the `release` branch of PETSc and compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS, CXXFLAGS, CPPFLAGS` before calling `make` for PFLARE. 
+Please use the `main` branch of PETSc and compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS, CXXFLAGS, CPPFLAGS` before calling `make` for PFLARE. 
+
+If you wish to use an older version of PETSc, please see the [PFLARE Spack](https://github.com/PFLAREProject/PFLARE_spack) `package.py` where a list of compatible PFLARE release versions is maintained.
 
 ### Docker
 
