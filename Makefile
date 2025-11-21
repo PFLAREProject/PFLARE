@@ -7,10 +7,10 @@
 # This uses the compilers and flags defined in the PETSc configuration
 # ~~~~~~~~~~~~~~~~~
 
-# Check PETSc version is at least 3.24.0
-PETSC_VERSION_MIN := $(shell ${PETSC_DIR}/lib/petsc/bin/petscversion ge 3.24.0)
+# Check PETSc version is at least 3.24.1
+PETSC_VERSION_MIN := $(shell ${PETSC_DIR}/lib/petsc/bin/petscversion ge 3.24.1)
 ifeq ($(PETSC_VERSION_MIN),0)
-$(error PETSc version is too old. PFLARE requires at least version 3.24.0)
+$(error PETSc version is too old. PFLARE requires at least version 3.24.1)
 endif
 
 # Get the flags we have on input
@@ -36,18 +36,6 @@ export LIBDIR := $(CURDIR)/lib
 
 # Include directories - include top level directory in case compilers output modules there
 INCLUDE := -I$(CURDIR) -I$(INCLUDEDIR)
-
-# These flags need to be before the petsc variable definitions/rules are included
-# This is because the petsc/conf/rules defines LINK.kokkos.cxx :=
-# so any flags we add after the variable and rules include are ignored
-# and our kokkos tests would fail to link
-# These need to be overridden or the user passing in these flags on the command line
-# would override these values and our includes would be lost 
-override CFLAGS += $(INCLUDE)
-override CPPFLAGS += $(INCLUDE)
-override FPPFLAGS += $(INCLUDE)
-override CXXPPFLAGS += $(INCLUDE)
-override MPICXX_INCLUDES += $(INCLUDE)
 
 # Read in the petsc compile/linking variables and makefile rules
 include ${PETSC_DIR}/lib/petsc/conf/variables
