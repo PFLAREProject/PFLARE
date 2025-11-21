@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       branch: ${{ steps.determine_branch.outputs.branch }}
+      commit: ${{ github.sha }}      
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -180,24 +181,7 @@ jobs:
           build-args: |
             BRANCH=${{ env.BRANCH }}
             OMP_NUM_THREADS=2
-            ARCH=arch-linux-c-opt-omp           
-
-# Currently nvidia fortran compiler breaks on petsc 3.23            
-#   nvidia_opt:
-#     runs-on: ubuntu-22.04
-#     needs: [setup]
-#     env:
-#       BRANCH: ${{ needs.setup.outputs.branch }}
-#     steps:
-#       - name: Build Docker image with PETSc and NVIDIA compilers
-#         uses: docker/build-push-action@v2
-#         with:
-#           platforms: linux/amd64
-#           push: false
-#           file: ./dockerfiles/Dockerfile_nvidia
-#           build-args: |
-#             BRANCH=${{ env.BRANCH }}
-#             ARCH=arch-linux-nvidia
+            ARCH=arch-linux-c-opt-omp
             
   intel_opt:
     runs-on: ubuntu-22.04
@@ -213,8 +197,72 @@ jobs:
           file: ./dockerfiles/Dockerfile_intel
           build-args: |
             BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-intel 
+            ARCH=arch-linux-intel
+            
+  # Now pflare tracks petsc main, we check to see if this commit can still be built
+  # through the petsc configure
+  # We do this by checking out petsc main and just replacing the hash it pulls down
+  # for PFLARE to the hash from the merge commit for this branch
+  gnu_petsc_config:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    env:
+      BRANCH: ${{ needs.setup.outputs.branch }}
+      COMMIT: ${{ needs.setup.outputs.commit }}
+    steps:
+      - name: Test build through PETSc configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          export BRANCH="${{ env.BRANCH }}"
+          export COMMIT="${{ env.COMMIT }}"
+          echo "Using branch: ${BRANCH}"
+          echo "Using commit: ${COMMIT}"
 
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake bash-completion ca-certificates chrpath cmake curl \
+            g++ gcc gfortran git less libblis-serial-dev liblapack-dev libtool \
+            locales m4 make openssl pkg-config ripgrep zlib1g-dev python3-virtualenv \
+            python3-venv python3-dev wget valgrind vim
+
+          export PETSC_DIR="$(pwd)/petsc"
+          export PETSC_ARCH="arch-linux-c-debug"
+
+          git clone --depth=1 --branch=main https://gitlab.com/petsc/petsc.git
+          cd petsc
+
+          python3 - "$COMMIT" <<'PY'
+          import pathlib, sys
+          commit = sys.argv[1]
+          path = pathlib.Path("config/BuildSystem/config/packages/PFLARE.py")
+          lines = path.read_text().splitlines()
+          found = False
+          for i, line in enumerate(lines):
+              if line.strip().startswith("self.gitcommit"):
+                  # Preserve indentation
+                  indent = line[:line.find("self.gitcommit")]
+                  lines[i] = f"{indent}self.gitcommit              = '{commit}'"
+                  found = True
+                  break
+          if not found:
+              sys.exit("gitcommit line not found in PFLARE.py")
+          path.write_text("\n".join(lines) + "\n")
+          PY
+
+          python3 configure \
+            --with-debugging=1 \
+            --download-metis \
+            --download-parmetis \
+            --download-fblaslapack \
+            --download-kokkos \
+            --download-kokkos-kernels \
+            --download-mpich \
+            --download-pflare
+
+          make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}"
+          make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}" check
+          
   # GPU testing
   # Have to build the entirity of the stack given the petsc configure
   # needs to detect the gpu
