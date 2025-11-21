@@ -35,10 +35,10 @@ PCPFLAREINV contains methods for computing approximate inverses, most of which c
 
    | Command line type  | Flag | Description | GPU setup |
    | ------------- | -- | ------------- | -- |
-   | power  |  PFLAREINV_POWER  | GMRES polynomial with the power basis  | Yes |
-   | arnoldi  |  PFLAREINV_ARNOLDI  | GMRES polynomial with the Arnoldi basis  | Yes |
-   | newton  |  PFLAREINV_NEWTON  | GMRES polynomial with the Newton basis with extra roots for stability  | Yes |
-   | newton_no_extra  |  PFLAREINV_NEWTON_NO_EXTRA  | GMRES polynomial with the Newton basis with no extra roots   | Yes |
+   | power  |  PFLAREINV_POWER  | GMRES polynomial, applied as a mononomial, with coefficients computed with a power basis  | Yes |
+   | arnoldi  |  PFLAREINV_ARNOLDI  | GMRES polynomial, applied as a mononomial, with coefficients computed with an Arnoldi method  | Yes |
+   | newton  |  PFLAREINV_NEWTON  | GMRES polynomial, applied as a Newton polynomial, with roots computed with an Arnoldi method and with extra roots added for stability  | Yes |
+   | newton_no_extra  |  PFLAREINV_NEWTON_NO_EXTRA  | GMRES polynomial, applied as a Newton polynomial, with roots computed with an Arnoldi method and with no extra roots added   | Yes |
    | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  | Yes |
    | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  | No |
    | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | No |
@@ -239,7 +239,7 @@ or in Python with petsc4py:
      
 or via the command line: ``-pc_type air -pc_air_z_type lair -pc_air_inverse_type wjacobi -pc_air_smooth_type fcf``.
 
-#### 3) Using PCPFLAREINV to apply a 20th order GMRES polynomial in the Newton basis matrix free:
+#### 3) Using PCPFLAREINV to apply a 20th order GMRES polynomial as a Newton polynomial matrix free:
 
 in Fortran:
 
@@ -308,7 +308,7 @@ Development of the setup on GPUs is ongoing, please get in touch if you would li
 
 This is based around using the high-order polynomials applied matrix free as a coarse solver. For many problems GMRES polynomials in the Newton basis are stable at high order and can therefore be combined with heavy truncation of the multigrid hierarchy. We also have an automated way to determine at what level of the multigrid hierarchy to truncate. 
 
-For example, on a single GPU with a 2D structured grid advection problem we apply a high order (10th order) Newton polynomial matrix-free as a coarse grid solver:
+For example, on a single GPU with a 2D structured grid advection problem we apply a high order (10th order) GMRES polynomial as a Newton polynomial matrix-free as a coarse grid solver:
 
 ``./adv_diff_2d -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos``
 
