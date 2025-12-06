@@ -1,11 +1,6 @@
 module tsqr
 
-   ! Need the mpi types 
-   ! and it is difficult to pick either the old school 
-   ! include mpif.h or the newer use mpi_f08
-   ! If you want to change this to use mpi_f08 everywhere 
-   ! some definitions need to change from integers
-   ! like the tsqr_buffers%request, communicators and status
+   ! Get MPI types from PETSc as it can control whether using mpi or mpif08
    use petscmat
 
 #include "petsc/finclude/petscmat.h"
@@ -270,7 +265,7 @@ module tsqr
       use, intrinsic :: iso_c_binding, only : c_ptr, c_f_pointer 
       type(c_ptr), value :: invec, inoutvec 
       integer            :: len 
-      integer            :: type 
+      MPIU_Datatype      :: type 
 
       PetscReal, pointer :: invec_r(:), inoutvec_r(:) 
       integer :: number_chunks, i_loc, lwork, chunk_size

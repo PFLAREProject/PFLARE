@@ -140,7 +140,8 @@ module approx_inverse_setup
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
 
       PetscErrorCode :: ierr
-      integer :: MPI_COMM_MATRIX, errorcode
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: errorcode
       ! ~~~~~~    
 
       if (buffers%subcomm .AND. inverse_type == PFLAREINV_POWER) then
@@ -265,7 +266,11 @@ module approx_inverse_setup
       logical :: incomplete
       PetscErrorCode :: ierr
       integer :: errorcode
-      integer, dimension(MPI_STATUS_SIZE) :: status
+#if defined(PETSC_USE_MPI_F08)
+      MPIU_Status :: status
+#else
+      MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
+#endif
 
       ! ~~~~~~    
 
