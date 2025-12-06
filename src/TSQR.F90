@@ -17,13 +17,13 @@ module tsqr
    ! in case its expensive to create it
    ! ~~~~~~~~~
    logical, protected :: built_custom_op_tsqr = .false.
-   integer, protected :: reduction_op_tsqr
+   MPIU_Op, protected :: reduction_op_tsqr
 
    ! ~~~~~~~~
    ! Stores data for the asynchronous comms
    ! ~~~~~~~~
    type tsqr_buffers
-      integer                          :: request = MPI_REQUEST_NULL
+      MPIU_Request                          :: request = MPI_REQUEST_NULL
       PetscReal, dimension(:), allocatable  :: R_buffer_send, R_buffer_receive
       ! In case this comms request is done on a matrix on a subcomm, we 
       ! need to keep a pointer to it
@@ -72,7 +72,7 @@ module tsqr
       ! After finish_tsqr_parallel has been called, buffers%R_buffer_receive holds R
 
       ! ~~~~~~
-      MPI_Comm, intent(in)                                     :: MPI_COMM_MATRIX
+      MPIU_Comm, intent(in)                                     :: MPI_COMM_MATRIX
       PetscReal, dimension(:, :), intent(inout)                     :: A
       type(tsqr_buffers), target, intent(inout)                :: buffers
       
@@ -391,8 +391,12 @@ module tsqr
       type(tsqr_buffers), intent(inout)   :: buffers
 
       integer :: errorcode
-      integer, dimension(MPI_STATUS_SIZE) :: status
-
+#if defined(PETSC_USE_MPI_F08)
+      MPIU_Status :: status
+#else
+      MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
+#endif
+      
       ! ~~~~~
 
       ! We might want to call this on a sub communicator

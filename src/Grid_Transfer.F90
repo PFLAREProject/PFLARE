@@ -106,7 +106,7 @@ module grid_transfer
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       integer :: max_loc(1)
       integer :: comm_size, errorcode
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: colmap
       type(tMat) :: Ad, Ao
@@ -325,7 +325,7 @@ module grid_transfer
       PetscCount :: counter
       integer :: errorcode, comm_size, comm_size_world
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt, dimension(:), pointer :: cols => null()
       PetscReal, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
@@ -581,7 +581,7 @@ module grid_transfer
       PetscCount :: counter
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), pointer :: cols => null()
       PetscReal, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices_coo, col_indices_coo

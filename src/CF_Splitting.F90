@@ -35,7 +35,7 @@ module cf_splitting
       PetscInt :: fine_counter, coarse_counter, i_loc
       PetscInt :: n, n_fine, n_coarse
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       
       ! ~~~~~~~~~~
 
@@ -97,7 +97,7 @@ module cf_splitting
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       type(tMat) :: transpose_mat
       type(tIS) :: zero_diags
       PetscInt, dimension(:), pointer :: zero_diags_pointer

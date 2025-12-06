@@ -32,7 +32,7 @@ module repartition
       PetscInt :: local_nnzs, off_proc_nnzs
       integer :: errorcode
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       PetscReal :: ratio_parallel
 
       ! ~~~~~~  
@@ -81,7 +81,7 @@ module repartition
       PetscInt :: global_rows, global_cols
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: adj, input_transpose
       PetscInt :: local_size_is, start_is
       integer(c_long_long) :: A_array, index_array

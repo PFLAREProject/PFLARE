@@ -209,7 +209,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       logical :: lump_entries
       integer :: drop_diag_int, errorcode, rel_max_row_tol_int
       PetscReal :: rel_row_tol
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       PetscScalar :: abs_biggest_entry
       
@@ -533,7 +533,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries, alpha_present
       PetscReal :: lump_sum
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       
       ! ~~~~~~~~~~
       ! If the tolerance is 0 we still want to go through this routine and drop the zeros
@@ -827,7 +827,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       PetscReal, allocatable, dimension(:) :: v         
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       
       ! ~~~~~~~~~~
@@ -929,7 +929,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array
       MatType :: mat_type
@@ -1007,7 +1007,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
       integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
@@ -1107,7 +1107,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       
       ! ~~~~~~~~~~
@@ -1170,7 +1170,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, allocatable, dimension(:) :: v      
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: is_pointer
       
@@ -1250,7 +1250,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, allocatable, dimension(:) :: v      
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: is_pointer
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
@@ -1312,7 +1312,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_nnzs_petsc, offdiag_nnzs_petsc
       integer(kind=8) :: local_nnzs
       

@@ -44,7 +44,7 @@ module sai_z
       integer :: lwork, intersect_count, location
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: transpose_mat, A_ff
       type(tIS), dimension(1) :: i_row_is, j_col_is, all_cols_indices
       type(tIS), dimension(1) :: col_indices

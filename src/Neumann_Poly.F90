@@ -123,7 +123,7 @@ module neumann_poly
       PetscReal, dimension(poly_order + 1), target :: coefficients_stack
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr      
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       type(tMat) :: temp_mat
       type(tVec) :: rhs_copy, diag_vec

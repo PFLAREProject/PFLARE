@@ -141,7 +141,7 @@ module gmres_poly
       type(tVec), dimension(:)                                    :: V_n
 
       ! Local variables
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one, row_i
       PetscCount :: vec_size
@@ -525,7 +525,7 @@ module gmres_poly
       integer :: comm_size, subspace_size, comm_rank, i_loc
       integer :: errorcode
       PetscErrorCode :: ierr      
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:, :), allocatable, target :: K_m_plus_1_data
       type(tVec), dimension(poly_order+2) :: V_n
       ! ~~~~~~    
@@ -886,7 +886,7 @@ end if
       type(int_vec), dimension(:), allocatable :: symbolic_ones
       type(real_vec), dimension(:), allocatable :: symbolic_vals
       integer(c_long_long) A_array
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:), allocatable :: vals_temp, vals_prev_temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
       PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
@@ -1437,7 +1437,7 @@ end if
       PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: comm_size, errorcode, order
       PetscErrorCode :: ierr      
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       type(tMat) :: mat_power, temp_mat
       type(mat_ctxtype), pointer :: mat_ctx
       logical :: reuse_triggered      

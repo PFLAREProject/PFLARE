@@ -162,7 +162,7 @@ module gmres_poly_newton
       integer :: lwork, subspace_size, rank, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
       integer :: total_extra, counter, k_loc, m
       PetscErrorCode :: ierr      
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
       PetscReal, dimension(poly_order+1) :: e_d, solution, s, pof
@@ -595,7 +595,7 @@ module gmres_poly_newton
       PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr      
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       type(mat_ctxtype), pointer :: mat_ctx
 
       ! ~~~~~~       

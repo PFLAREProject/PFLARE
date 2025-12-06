@@ -392,7 +392,7 @@ module air_mg_stats
       PetscReal :: grid_complx, op_complx, cycle_complx, storage_complx, reuse_storage_complx
       integer :: comm_rank, errorcode
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
 
       ! ~~~~~~   
       
