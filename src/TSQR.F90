@@ -1,11 +1,6 @@
 module tsqr
 
-   ! Need the mpi types 
-   ! and it is difficult to pick either the old school 
-   ! include mpif.h or the newer use mpi_f08
-   ! If you want to change this to use mpi_f08 everywhere 
-   ! some definitions need to change from integers
-   ! like the tsqr_buffers%request, communicators and status
+   ! Get MPI types from PETSc as it can control whether using mpi or mpif08
    use petscmat
 
 #include "petsc/finclude/petscmat.h"
@@ -17,13 +12,13 @@ module tsqr
    ! in case its expensive to create it
    ! ~~~~~~~~~
    logical, protected :: built_custom_op_tsqr = .false.
-   integer, protected :: reduction_op_tsqr
+   MPIU_Op, protected :: reduction_op_tsqr
 
    ! ~~~~~~~~
    ! Stores data for the asynchronous comms
    ! ~~~~~~~~
    type tsqr_buffers
-      integer                          :: request = MPI_REQUEST_NULL
+      MPIU_Request                          :: request = MPI_REQUEST_NULL
       PetscReal, dimension(:), allocatable  :: R_buffer_send, R_buffer_receive
       ! In case this comms request is done on a matrix on a subcomm, we 
       ! need to keep a pointer to it
@@ -72,7 +67,7 @@ module tsqr
       ! After finish_tsqr_parallel has been called, buffers%R_buffer_receive holds R
 
       ! ~~~~~~
-      MPI_Comm, intent(in)                                     :: MPI_COMM_MATRIX
+      MPIU_Comm, intent(in)                                     :: MPI_COMM_MATRIX
       PetscReal, dimension(:, :), intent(inout)                     :: A
       type(tsqr_buffers), target, intent(inout)                :: buffers
       
@@ -270,7 +265,7 @@ module tsqr
       use, intrinsic :: iso_c_binding, only : c_ptr, c_f_pointer 
       type(c_ptr), value :: invec, inoutvec 
       integer            :: len 
-      integer            :: type 
+      MPIU_Datatype      :: type 
 
       PetscReal, pointer :: invec_r(:), inoutvec_r(:) 
       integer :: number_chunks, i_loc, lwork, chunk_size
@@ -391,8 +386,12 @@ module tsqr
       type(tsqr_buffers), intent(inout)   :: buffers
 
       integer :: errorcode
-      integer, dimension(MPI_STATUS_SIZE) :: status
-
+#if defined(PETSC_USE_MPI_F08)
+      MPIU_Status :: status
+#else
+      MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
+#endif
+      
       ! ~~~~~
 
       ! We might want to call this on a sub communicator

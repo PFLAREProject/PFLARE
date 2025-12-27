@@ -27,7 +27,7 @@ module constrain_z_or_w
       integer :: comm_size, errorcode
       MatNullSpace :: nullspace
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       PetscBool :: has_constant
       PetscInt :: no_nullspace, no_nullspace_vecs, i_loc
       type(tVec), dimension(:), pointer :: null_vecs      
@@ -125,7 +125,7 @@ module constrain_z_or_w
       integer :: comm_size, errorcode, i_loc
       PetscInt :: local_rows, global_rows, local_cols, global_cols
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       type(tVec) :: vec_rhs
       type(tKSP) :: ksp
       type(tPC) :: pc
@@ -231,7 +231,7 @@ module constrain_z_or_w
       PetscInt :: cols_ad, rows_ad, ncols_ad, ncols_ao, ncols_temp
       integer :: errorcode, comm_size, null_vec
       PetscErrorCode :: ierr      
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       type(tMat) :: row_mat, temp_mat_aij
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       PetscInt, dimension(:), pointer :: cols => null()

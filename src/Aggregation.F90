@@ -28,7 +28,7 @@ module aggregation
       PetscInt :: aggregate, max_neighbour_index, max_neighbour_value, jfree
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), allocatable :: indices
       PetscInt, dimension(:), pointer :: cols => null()
       logical :: mark_neigh

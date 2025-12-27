@@ -44,7 +44,7 @@ module air_mg_setup
       integer             :: i_loc, inverse_type_aff, inverse_sparsity_aff
       integer             :: no_levels, our_level, our_level_coarse, errorcode, comm_rank, comm_size
       PetscErrorCode      :: ierr
-      MPI_Comm            :: MPI_COMM_MATRIX
+      MPIU_Comm            :: MPI_COMM_MATRIX
       PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b
       logical             :: continue_coarsening, trigger_proc_agglom
       type(tMat)          :: temp_mat

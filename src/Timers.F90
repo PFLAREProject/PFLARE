@@ -1,8 +1,6 @@
 module timers
 
-   ! Just need the mpi types 
-   ! and it is difficult to pick either the old school 
-   ! include mpif.h or the newer use mpi_f08   
+   ! Get MPI types from PETSc as it can control whether using mpi or mpif08 
    use petscsys
    use iso_c_binding, only: c_double
 

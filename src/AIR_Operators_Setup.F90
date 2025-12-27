@@ -276,7 +276,7 @@ module air_operators_setup
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
       integer :: comm_size, errorcode, order, i_loc
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array, B_array, C_array
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1

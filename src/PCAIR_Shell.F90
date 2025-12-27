@@ -48,7 +48,7 @@ module pcair_shell
       type(tPC), intent(inout)                     :: pc
 
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX
 
       ! ~~~~~~  
 

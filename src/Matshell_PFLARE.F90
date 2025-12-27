@@ -24,7 +24,7 @@ module matshell_pflare
       subroutine MatCreateShell(comm,mloc,nloc,m,n,ctx,mat,ierr)
          use petsc
          use matshell_data_type
-         MPI_Comm :: comm
+         MPIU_Comm :: comm
          PetscInt :: mloc,nloc,m,n
          type(mat_ctxtype) :: ctx
          type(tMat) :: mat

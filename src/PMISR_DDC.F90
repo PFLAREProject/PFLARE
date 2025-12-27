@@ -41,7 +41,7 @@ module pmisr_ddc
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable, target :: measure_local
       PetscInt :: local_rows, local_cols
-      MPI_Comm :: MPI_COMM_MATRIX    
+      MPIU_Comm :: MPI_COMM_MATRIX    
       type(c_ptr)  :: measure_local_ptr, cf_markers_local_ptr
       integer, dimension(:), allocatable :: cf_markers_local_two
 #endif        
@@ -149,7 +149,7 @@ module pmisr_ddc
       integer :: comm_rank, errorcode       
       integer :: kfree
       PetscErrorCode :: ierr
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable :: measure_local, measure_nonlocal
       PetscReal, dimension(:), allocatable :: cf_markers_local_real
@@ -772,7 +772,7 @@ module pmisr_ddc
       PetscReal :: diag_val, max_dd_ratio_local, max_dd_ratio_achieved
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
-      MPI_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX      
       logical :: trigger_dd_ratio_compute
 
       ! ~~~~~~  
