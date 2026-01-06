@@ -294,7 +294,7 @@ module air_data_type_routines
 
       air_data%options%strong_r_threshold = 0d0
 
-      air_data%options%inverse_type = PFLAREINV_POWER
+      air_data%options%inverse_type = PFLAREINV_ARNOLDI
 
       air_data%options%z_type = AIR_Z_PRODUCT
 
@@ -303,18 +303,18 @@ module air_data_type_routines
       air_data%options%poly_order = 6
       air_data%options%inverse_sparsity_order = 1
 
-      air_data%options%c_inverse_type = PFLAREINV_POWER
+      air_data%options%c_inverse_type = PFLAREINV_ARNOLDI
       air_data%options%c_poly_order = 6
       air_data%options%c_inverse_sparsity_order = 1
       
-      air_data%options%coarsest_inverse_type = PFLAREINV_POWER
+      air_data%options%coarsest_inverse_type = PFLAREINV_ARNOLDI
       air_data%options%coarsest_poly_order = 6
       air_data%options%coarsest_inverse_sparsity_order = 1
       air_data%options%coarsest_matrix_free_polys = .FALSE.
       air_data%options%coarsest_subcomm = .FALSE.
 
       air_data%options%r_drop = 0.01
-      air_data%options%a_drop = 0.001
+      air_data%options%a_drop = 1e-4
       air_data%options%a_lump = .FALSE.    
 
       air_data%options%reuse_sparsity = .FALSE.     

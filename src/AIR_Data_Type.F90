@@ -195,7 +195,7 @@ module air_data_type
       ! Inverse type for c smoothing
       ! This defaults to whatever the F point smoother is atm
       ! -pc_air_c_inverse_type
-      integer :: c_inverse_type = 0      
+      integer :: c_inverse_type = 1      
       ! Poly order for c smoothing
       ! This defaults to whatever the F point smoother is atm
       ! -pc_air_c_poly_order
