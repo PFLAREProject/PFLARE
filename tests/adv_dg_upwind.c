@@ -79,6 +79,7 @@ static char help[] = "Solves steady advection with upwinded DG FEM.\n\n";
 #include <math.h>
 
 #include "pflare.h"
+#include "box_2D_gen_unstruc_mesh.h"
 
 /* -----------------------------------------------------------------------
    Application context
@@ -187,11 +188,13 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
 /* -----------------------------------------------------------------------
    Mesh creation — identical to the SUPG code
    ----------------------------------------------------------------------- */
-static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *opt, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,
+                                 int final_smooths, AppCtx *opt, DM *dm)
 {
   PetscFunctionBeginUser;
-  PetscCall(DMCreate(comm, dm));
-  PetscCall(DMSetType(*dm, DMPLEX));
+  // Generate the mesh stored in a parallel DM 
+  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE, PETSC_TRUE);
+
   /* DG requires a 1-cell overlap so that each rank sees the neighbour cells
      across partition boundaries.  Set this as a default; the user can still
      override with -dm_distribute_overlap <n> on the command line.         */
@@ -204,7 +207,7 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *opt, DM *dm)
   PetscCall(DMSetFromOptions(*dm));
   PetscCall(DMGetCoordinatesLocalSetUp(*dm));
   PetscCall(DMSetApplicationContext(*dm, opt));
-  PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
+  PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view")); 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1467,8 +1470,14 @@ int main(int argc, char **argv)
   PetscCall(ProcessOptions(PETSC_COMM_WORLD, &ctx));
 
   /* ---- Mesh ---- */
+  double target_len = 0.0025;
+  PetscBool set;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-target_edge_length", &target_len, &set));
+  PetscInt final_smooth_its = 4;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-final_smooth_its", &final_smooth_its, &set));  
+
   PetscCall(PetscLogStagePush(setup_stage));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, &ctx, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, final_smooth_its, &ctx, &dm));
 
   PetscCall(DMGetDimension(dm, &dim));
   PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
