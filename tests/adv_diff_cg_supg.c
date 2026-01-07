@@ -36,6 +36,7 @@ static char help[] = "Solves steady advection-diffusion FEM problem with SUPG st
 #include <math.h>
 
 #include "pflare.h"
+#include "box_2D_gen_unstruc_mesh.h"
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
@@ -114,6 +115,13 @@ static inline PetscErrorCode ComputeSUPGStabilization(PetscInt dim, PetscReal h,
 static PetscErrorCode dirichlet_bc(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
 {
   u[0] = 0.0;
+  return PETSC_SUCCESS;
+}
+
+// Dirichlet BC: u = 0.0 (for inflow boundaries)
+static PetscErrorCode dirichlet_bc_one(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
+{
+  u[0] = 1.0;
   return PETSC_SUCCESS;
 }
 
@@ -257,11 +265,13 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *options, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,int final_smooths, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
-  PetscCall(DMCreate(comm, dm));
-  PetscCall(DMSetType(*dm, DMPLEX));
+  //PetscCall(DMCreate(comm, dm));
+  //PetscCall(DMSetType(*dm, DMPLEX));
+  //PetscCall(DMSetFromOptions(*dm));
+  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE);
   PetscCall(DMSetFromOptions(*dm));
   PetscCall(DMSetApplicationContext(*dm, options));
   PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
@@ -276,7 +286,7 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   PetscCall(DMGetDimension(dm, &dim));
 
   PetscInt numInflow = 0, numOutflow = 0;
-  PetscInt *inflow = NULL, *outflow = NULL;
+  PetscInt *inflow = NULL, *inflow_one = NULL, *outflow = NULL;
 
   // ~~~~~~~~~~~~~~~~~
   // For advection we just apply dirichlet inflow conditions on incoming faces
@@ -285,15 +295,17 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   // ~~~~~~~~~~~~~~~~~
 
   // In 2D its bottom and left
-  PetscInt inflowids_2d[] = {1,4};
+  PetscInt inflowids_2d[] = {4};
+  PetscInt inflowids_2d_one[] = {1};
   PetscInt outflowids_2d[] =  {2,3};
   // In 3D its bottom, left and back face
   PetscInt inflowids_3d[] = {1,3,6};
   PetscInt outflowids_3d[] =  {2,4,5};
   if (dim == 2)
   {
-    numInflow = 2;
+    numInflow = 1;
     inflow = &inflowids_2d[0];
+    inflow_one = &inflowids_2d_one[0];
     numOutflow = 2;
     outflow = &outflowids_2d[0];
   }
@@ -318,6 +330,7 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   
   // Dirichlet condition on bottom surface as inflow
   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
+  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow_one", label, numInflow, inflow_one, 0, 0, NULL, (void (*)(void))dirichlet_bc_one, NULL, options, NULL));
   // If no diffusion, Neumann condition (outflow - zero flux) on other surfaces
   if (options->alpha == 0.0)
   {
@@ -457,9 +470,17 @@ int main(int argc, char **argv)
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
+    double target_len = 0.0025;
+    PetscBool set;
+    PetscCall(PetscOptionsGetReal(NULL, NULL, "-target_edge_length", &target_len, &set));
+
+    PetscInt final_smooth_its = 4;
+    PetscCall(PetscOptionsGetInt(NULL, NULL, "-final_smooth_its", &final_smooth_its, &set));  
+    int final_smooths = final_smooth_its;
+
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, &options, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, final_smooths, &options, &dm));
   PetscCall(SNESSetDM(snes, dm));
   PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &options));
   // *** Set up the auxiliary vector for SUPG stabilization ***
