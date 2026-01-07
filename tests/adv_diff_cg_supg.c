@@ -38,6 +38,7 @@ static char help[] = "Solves steady advection-diffusion FEM problem with SUPG st
 #include <math.h>
 
 #include "pflare.h"
+#include "box_2D_gen_unstruc_mesh.h"
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
@@ -272,14 +273,16 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *options, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,int final_smooths, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
-  PetscCall(DMCreate(comm, dm));
-  PetscCall(DMSetType(*dm, DMPLEX));
+
+  // Generate the mesh stored in a parallel DM 
+  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE, PETSC_TRUE);
+
   PetscCall(DMSetFromOptions(*dm));
+  // Give the DM access to the application context (which includes diffusion coefficient and advection velocity)
   PetscCall(DMSetApplicationContext(*dm, options));
-  PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -505,9 +508,17 @@ int main(int argc, char **argv)
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
+    double target_len = 0.0025;
+    PetscBool set;
+    PetscCall(PetscOptionsGetReal(NULL, NULL, "-target_edge_length", &target_len, &set));
+
+    PetscInt final_smooth_its = 4;
+    PetscCall(PetscOptionsGetInt(NULL, NULL, "-final_smooth_its", &final_smooth_its, &set));  
+    int final_smooths = final_smooth_its;
+
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, &options, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, final_smooths, &options, &dm));
   PetscCall(SNESSetDM(snes, dm));
   PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &options));
   // *** Set up the auxiliary vector for SUPG stabilization ***
