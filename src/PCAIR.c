@@ -1389,12 +1389,12 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetAutoTruncateTol(pc, &input_real));
       if (input_int != -1)
       {
-         PetscCall(PetscViewerASCIIPrintf(viewer, "  Auto truncate start level=%" PetscInt_FMT ", with tolerance %.2e \n", input_int, input_real));
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  Auto truncate start level=%" PetscInt_FMT ", with tolerance=%.2e \n", input_int, input_real));
       }
 
       PetscCall(PCAIRGetRDrop(pc, &input_real));
       PetscCall(PCAIRGetADrop(pc, &input_real_two));
-      PetscCall(PetscViewerASCIIPrintf(viewer, "  A drop tolerance=%f, R drop tolerance %f \n", input_real_two, input_real));
+      PetscCall(PetscViewerASCIIPrintf(viewer, "  A drop tolerance=%.2e, R drop tolerance=%.2e \n", input_real_two, input_real));
       PetscCall(PCAIRGetALump(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Lumping \n"));
       PetscCall(PCAIRGetReuseSparsity(pc, &flg));
@@ -1406,7 +1406,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetProcessorAgglomRatio(pc, &input_real));
       PetscCall(PCAIRGetProcessorAgglomFactor(pc, &input_int));
       PetscCall(PCAIRGetProcessEqLimit(pc, &input_int_two));
-      if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Processor agglomeration with factor=%" PetscInt_FMT ", ratio %f and eq limit=%" PetscInt_FMT " \n", input_int, input_real, input_int_two));
+      if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Processor agglomeration with factor=%" PetscInt_FMT ", ratio=%f and eq limit=%" PetscInt_FMT " \n", input_int, input_real, input_int_two));
       PetscCall(PCAIRGetSubcomm(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Polynomial coefficients calculated on subcomm \n"));
       
@@ -1680,7 +1680,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          PetscCall(PetscViewerASCIIPrintf(viewer, "    lAIR SAI Z, distance %" PetscInt_FMT " \n", input_int_two));
       }
       PetscCall(PCAIRGetStrongRThreshold(pc, &input_real));
-      PetscCall(PetscViewerASCIIPrintf(viewer, "    Strong R threshold=%f \n", input_real));
+      PetscCall(PetscViewerASCIIPrintf(viewer, "    Strong R threshold=%.2e \n", input_real));
       if (input_int_three > 0)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    Improve W %" PetscInt_FMT " iterations \n", input_int_three));
