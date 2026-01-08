@@ -7,6 +7,7 @@ module pmisr_ddc
    use c_petsc_interfaces
 
 #include "petsc/finclude/petscmat.h"
+#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 
@@ -151,16 +152,16 @@ module pmisr_ddc
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       integer, dimension(:), allocatable :: seed
-      PetscReal, dimension(:), allocatable :: measure_local, measure_nonlocal
-      PetscReal, dimension(:), allocatable :: cf_markers_local_real
-      logical, dimension(:), allocatable :: mark
-      type(c_ptr) :: cf_markers_nonlocal_ptr
-      real(c_double), pointer :: cf_markers_nonlocal(:) => null()
+      PetscReal, dimension(:), allocatable :: measure_local
+      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable :: in_set_this_loop
+      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
+      type(c_ptr) :: measure_nonlocal_ptr, assigned_local_ptr, assigned_nonlocal_ptr
+      real(c_double), pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
-      type(tVec) :: cf_markers_vec
+      type(tVec) :: measure_vec
       PetscInt, dimension(:), pointer :: colmap
       integer(c_long_long) :: A_array, vec_long
-      PetscInt, dimension(:), pointer :: ad_ia, ad_ja, cols_ptr, ao_ia, ao_ja
+      PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       logical :: zero_measure_c = .FALSE.  
@@ -192,7 +193,6 @@ module pmisr_ddc
 
       ! ~~~~~~~~
       ! Get pointers to the sequential diagonal and off diagonal aij structures 
-      ! so we don't have to put critical regions around the matgetrow
       ! ~~~~~~~~
       call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
       if (.NOT. done) then
@@ -211,13 +211,9 @@ module pmisr_ddc
       ! Get the number of connections in S
       allocate(measure_local(local_rows))
       allocate(cf_markers_local(local_rows))  
-      allocate(cf_markers_local_real(local_rows))
-      allocate(mark(local_rows))
-
-      ! ~~~~~~~~~
-      ! We're using reals here to represent the cf marker just because I want to use the existing petsc
-      ! scatter for strength_mat - shouldn't be a big difference in comms 
-      ! ~~~~~~~~~
+      cf_markers_local = C_POINT
+      allocate(in_set_this_loop(local_rows))
+      allocate(assigned_local(local_rows))
 
       ! ~~~~~~~~~~~~
       ! Seed the measure_local between 0 and 1
@@ -234,8 +230,7 @@ module pmisr_ddc
       ! This is tricky to do, given the numbering of rows is different in parallel 
       ! I did code up a version that used the unique spatial node positions to seed the random 
       ! number generator and test that and it works the same regardless of num of procs
-      ! so I'm fairly confident things are correct - we don't care if the CF splitting
-      ! is identical for different numbers of procs so we haven't kept that (as its expensive)
+      ! so I'm fairly confident things are correct
 
       ! Fill the measure with random numbers
       call random_number(measure_local)
@@ -268,37 +263,35 @@ module pmisr_ddc
       if (pmis) measure_local = measure_local * (-1)
       
       ! ~~~~~~~~~~~~
-      ! Create parallel cf_marker vec and scatter the measure
+      ! Create parallel vec and scatter the measure
       ! ~~~~~~~~~~~~
-      ! If in parallel we're going to have to do scatters
       if (comm_size/=1) then
 
          ! This is fine being mpi type specifically as strength_mat is always a mataij
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, &
-            local_rows, global_rows, cf_markers_local_real, cf_markers_vec, ierr)            
-
-         ! Let's scatter the measure now
-         cf_markers_local_real = measure_local
+            local_rows, global_rows, measure_local, measure_vec, ierr)
 
          A_array = strength_mat%v
-         vec_long = cf_markers_vec%v
-         ! Have to call restore after we're done with lvec (ie cf_markers_nonlocal_ptr)
-         call vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal_ptr)
-         call vecscatter_mat_end_c(A_array, vec_long, cf_markers_nonlocal_ptr)
-         ! Nonlocal vals only pointer
-         call c_f_pointer(cf_markers_nonlocal_ptr, cf_markers_nonlocal, shape=[cols_ao])
+         vec_long = measure_vec%v
+         ! We're just going to use the existing lvec to scatter the measure
+         ! Have to call restore after we're done with lvec (ie measure_nonlocal_ptr)
+         call vecscatter_mat_begin_c(A_array, vec_long, measure_nonlocal_ptr)
+         call vecscatter_mat_end_c(A_array, vec_long, measure_nonlocal_ptr)
+         ! This is the lvec so we have to make sure we don't do a matvec anywhere 
+         ! before calling restore
+         call c_f_pointer(measure_nonlocal_ptr, measure_nonlocal, shape=[cols_ao])
 
-         allocate(measure_nonlocal(cols_ao))
-         measure_nonlocal = cf_markers_nonlocal
-         ! Don't forget to restore
-         call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)
-
+         allocate(assigned_nonlocal(cols_ao))
+         assigned_local_ptr = c_loc(assigned_local)
+         assigned_nonlocal_ptr = c_loc(assigned_nonlocal)
       end if
 
       ! ~~~~~~~~~~~~
       ! Initialise the set
       ! ~~~~~~~~~~~~
       counter_in_set_start = 0
+      assigned_local = .FALSE.
+      if (comm_size/=1) assigned_nonlocal = .FALSE.
 
       do ifree = 1, local_rows
 
@@ -307,30 +300,31 @@ module pmisr_ddc
          ! Absolute value here given measure_local could be negative (pmis) or positive (pmisr)
          if (abs(measure_local(ifree)) < 1) then
 
+            ! Assign this node
+            assigned_local(ifree) = .TRUE.
+
             ! This is typically enabled in a second pass of PMIS just on C points 
             ! (ie aggressive coarsening based on MIS(MIS(1))), we want to keep  
             ! C-points with no other strong C connections as C points
             if (zero_measure_c) then
                if (pmis) then
                   ! Set as F here but reversed below to become C
-                  cf_markers_local_real(ifree) = F_POINT
+                  cf_markers_local(ifree) = F_POINT
                else
                   ! Becomes C
-                  cf_markers_local_real(ifree) = C_POINT
+                  cf_markers_local(ifree) = C_POINT
                end if  
             else
                if (pmis) then
                   ! Set as C here but reversed below to become F
                   ! Otherwise dirichlet conditions persist down onto the coarsest grid
-                  cf_markers_local_real(ifree) = C_POINT
+                  cf_markers_local(ifree) = C_POINT
                else
                   ! Becomes F
-                  cf_markers_local_real(ifree) = F_POINT
+                  cf_markers_local(ifree) = F_POINT
                end if
             end if
             counter_in_set_start = counter_in_set_start + 1
-         else
-            cf_markers_local_real(ifree) = 0
          end if
       end do       
 
@@ -371,33 +365,23 @@ module pmisr_ddc
          ! We can do this as we know we won't ruin Aff by doing so, unlike in a normal multigrid
          if (max_luby_steps > 0 .AND. max_luby_steps+1 == -loops_through) exit
 
-         !if (getprocno() == 1) print *, "TOP LOOP", local_rows, counter_undecided
-
          ! ~~~~~~~~~
-         ! Start the async scatter of the nonlocal cf_markers
+         ! Start the async broadcast of assigned_local to assigned_nonlocal
          ! ~~~~~~~~~
          if (comm_size /= 1) then
-            ! Have to call restore after we're done with lvec (ie cf_markers_nonlocal_ptr)
-            call vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal_ptr)
+            call boolscatter_mat_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
          end if
 
-         ! ~~~~~~~~
-         ! This keeps track of which of the candidate nodes can become in the set
-         ! Only need this because we want to do async comms so we need a way to trigger
-         ! a node not being in the set due to either strong local neighbours *or* strong offproc neighbours
-         mark = .TRUE.
-
-         ! Any that aren't zero cf marker are already assigned so set to to false
+         ! Reset in_set_this_loop, which keeps track of which nodes are added to the set this loop
          do ifree = 1, local_rows
-            if (cf_markers_local_real(ifree) /= 0) mark(ifree) = .FALSE.
-         end do  
-
-         ! ~~~~~~~~~~~~
-         ! Loop over all the undecided rows
-         ! Now this occurs based on the strong neighbours in the active set
-         ! ie cf_markers == 0 is A
-         ! cf_markers == loops_through is M' 
-         ! ~~~~~~~~~~~~
+            ! If they're already assigned they can't be added
+            if (assigned_local(ifree)) then
+               in_set_this_loop(ifree) = .FALSE.
+            ! We assume any unassigned are added to the set this loop and then rule them out below
+            else
+               in_set_this_loop(ifree) = .TRUE.
+            end if
+         end do
 
          ! ~~~~~~~~
          ! The Luby algorithm has measure_local(v) > measure_local(u) for all u in active neighbours
@@ -413,41 +397,30 @@ module pmisr_ddc
          ! ~~~~~~~~
          ! Go and do the local component
          ! ~~~~~~~~
-
          node_loop_local: do ifree = 1, local_rows   
 
-            ! Check if this node is in A
-            ! This can't be mark as we don't want it to be updated during the loop
-            if (cf_markers_local_real(ifree) /= 0) cycle node_loop_local        
-
-            ! Get S_i
-            ! This is the number of columns
-            ncols = ad_ia(ifree+1) - ad_ia(ifree)      
-            ! This is the column indices
-            cols_ptr => ad_ja(ad_ia(ifree)+1:ad_ia(ifree+1))
+            ! Check if this node is already in A
+            if (assigned_local(ifree)) cycle node_loop_local
 
             ! Loop over all the active strong neighbours on the local processors
-            do jfree = 1, ncols
+            do jfree = ad_ia(ifree)+1, ad_ia(ifree+1)
                
-               ! Have to only check active strong neighbours
-               ! This can't be mark as we don't want it to be updated during the loop
-               if (cf_markers_local_real(cols_ptr(jfree) + 1) /= 0) cycle
+               ! Have to only check unassigned strong neighbours
+               if (assigned_local(ad_ja(jfree) + 1)) cycle
 
                ! Check the measure_local
-               if (measure_local(ifree) .ge. measure_local(cols_ptr(jfree) + 1)) then
-                  mark(ifree) = .FALSE.
+               if (measure_local(ifree) .ge. measure_local(ad_ja(jfree) + 1)) then
+                  in_set_this_loop(ifree) = .FALSE.
                   cycle node_loop_local
                end if
             end do
          end do node_loop_local
 
          ! ~~~~~~~~
-         ! Finish the async scatter
+         ! Finish the async broadcast, assigned_nonlocal is now correct
          ! ~~~~~~~~
          if (comm_size /= 1) then
-            call vecscatter_mat_end_c(A_array, vec_long, cf_markers_nonlocal_ptr)
-            ! Nonlocal vals only pointer
-            call c_f_pointer(cf_markers_nonlocal_ptr, cf_markers_nonlocal, shape=[cols_ao])
+            call boolscatter_mat_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
          end if     
                  
          ! ~~~~~~~~
@@ -457,26 +430,18 @@ module pmisr_ddc
 
             node_loop: do ifree = 1, local_rows   
 
-               ! Check if this node is in A
-               ! This can't be mark as we don't want it to be updated during the loop
-               if (cf_markers_local_real(ifree) /= 0) cycle node_loop        
+               ! Check if already ruled out by local loop or already assigned
+               if (assigned_local(ifree) .OR. .NOT. in_set_this_loop(ifree)) cycle node_loop       
 
-               ! Get S_i
-               ! This is the number of columns
-               ncols = ao_ia(ifree+1) - ao_ia(ifree)      
-               ! This is the column indices
-               cols_ptr => ao_ja(ao_ia(ifree)+1:ao_ia(ifree+1))
-
-               ! Loop over all the active strong neighbours on the local processors
-               do jfree = 1, ncols
+               ! Loop over all the active strong neighbours on the non-local processors
+               do jfree = ao_ia(ifree)+1, ao_ia(ifree+1)
                   
-                  ! Have to only check active strong neighbours
-                  ! This can't be mark as we don't want it to be updated during the loop
-                  if (cf_markers_nonlocal(cols_ptr(jfree) + 1) /= 0) cycle
+                  ! Have to only check unassigned strong neighbours
+                  if (assigned_nonlocal(ao_ja(jfree) + 1)) cycle
    
                   ! Check the measure_local
-                  if (measure_local(ifree) .ge. measure_nonlocal(cols_ptr(jfree) + 1)) then
-                     mark(ifree) = .FALSE.
+                  if (measure_local(ifree) .ge. measure_nonlocal(ao_ja(jfree) + 1)) then
+                     in_set_this_loop(ifree) = .FALSE.
                      cycle node_loop
                   end if
                end do
@@ -484,67 +449,41 @@ module pmisr_ddc
             end do node_loop
          end if
 
-         ! The nodes that have mark equal to true have no strong active neighbours in the IS
-         ! hence they can be in the IS
+         ! We now know all nodes which were added to the set this loop, so let's record them
          do ifree = 1, local_rows
-            if (mark(ifree)) then
-               cf_markers_local_real(ifree) = dble(loops_through)
+            if (in_set_this_loop(ifree)) then
+               assigned_local(ifree) = .TRUE.
+               cf_markers_local(ifree) = F_POINT
             end if
          end do
 
-         ! ~~~~~~~~~~~~
-         ! Once we're here
-         ! cf_markers_local <0 is M
-         ! And now we have to go and update cf_markers to exclude any neighbours from A
-         ! ready for cf_markers == 0 to be A in the next loop
-         ! ~~~~~~~~~~~~       
-
          ! ~~~~~~~~~~~~~~
-         ! Update the nonlocal values first then start the async scatter
-         ! The only change to nonlocal nodes is that they could have been assigned to 
-         ! not be in the IS - we only assign local nodes to be in the IS
-         ! The other processor is guaranteed to not have picked that node in the IS
-         ! We know the other processor will eventually set that node to be not in the IS
-         ! but it might be doing that sometime much later. It has to be deleted in this step
-         ! otherwise it could be considered an active vertex on the other processor
+         ! All the work below here is now to ensure assigned_local is correct for the next iteration
+         ! Update the nonlocal values first then comm them
          ! ~~~~~~~~~~~~~~
          if (comm_size /= 1) then
 
-            ! We're going to do an add reverse scatter, so set them to zero
-            cf_markers_nonlocal = 0
+            ! We're going to do an LOR reduce so start all as false
+            assigned_nonlocal = .FALSE.
       
             do ifree = 1, local_rows   
 
-               ! Check if this node has been assigned during this top loop
-               if (cf_markers_local_real(ifree) /= loops_through) cycle        
+               ! Only need to update neighbours of nodes assigned this top loop
+               if (.NOT. in_set_this_loop(ifree)) cycle        
 
-               ! Get S_i
-               ! This is the number of columns
-               ncols = ao_ia(ifree+1) - ao_ia(ifree)      
-               ! This is the column indices
-               cols_ptr => ao_ja(ao_ia(ifree)+1:ao_ia(ifree+1))
-
-               do jfree = 1, ncols
-                  cf_markers_nonlocal(cols_ptr(jfree) + 1) = C_POINT
+               ! We know all neighbours of points assigned this loop are C points
+               ! We don't actually need to record that they're C points, just that they're assigned
+               do jfree = ao_ia(ifree)+1, ao_ia(ifree+1)
+                  assigned_nonlocal(ao_ja(jfree) + 1) = .TRUE.
                end do            
             end do 
 
             ! ~~~~~~~~~~~
-            ! Now we have to reverse add scatter cf_markers_nonlocal back into cf_markers
-            ! If a node on the other processor assigned any of our halo nodes to not in the IS and we didn't
-            ! the add reverse will make it 1, and vice versa. If both (or more) of them set it to not in the IS
-            ! then the add reverse will make it >1, which is fine because the only checks we do are nonzero checks            
-            ! ~~~~~~~~~~~
-            
-            ! We've updated the values in cf_markers_nonlocal, which is a pointer to lvec
-            ! We must first call restore on it (as if we're on the gpus this is a pointer to the 
-            ! host data and we must tell the vec we need to sync to the device if we're using 
-            ! gpu aware mpi)
-            ! Calling a reverse scatter add will then update the values of vec_long (ie cf_markers_vec)
-            ! Begin the scatter asynchronously
-
-            call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)            
-            call vecscatter_mat_reverse_begin_c(A_array, vec_long)            
+            ! We need to start the async reduce LOR of the assigned_nonlocal into assigned_local     
+            ! After this comms finishes any local node in another processors halo 
+            ! that has been assigned on another process will be correctly marked in assigned_local
+            ! ~~~~~~~~~~~    
+            call boolscatter_mat_reverse_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)       
 
          end if
 
@@ -554,30 +493,22 @@ module pmisr_ddc
         
          do ifree = 1, local_rows   
 
-            ! Check if this node has been assigned during this top loop
-            if (cf_markers_local_real(ifree) /= loops_through) cycle
+            ! Only need to update neighbours of nodes assigned this top loop
+            if (.NOT. in_set_this_loop(ifree)) cycle
 
-            ! Get S_i
-            ! This is the number of columns
-            ncols = ad_ia(ifree+1) - ad_ia(ifree)      
-            ! This is the column indices
-            cols_ptr => ad_ja(ad_ia(ifree)+1:ad_ia(ifree+1))
-
-            ! Set unassigned strong dependencies as not in the IS
             ! Don't need a guard here to check if they're already assigned, as we 
             ! can guarantee they won't be 
-            do jfree = 1, ncols
-               cf_markers_local_real(cols_ptr(jfree) + 1) = C_POINT
+            do jfree = ad_ia(ifree)+1, ad_ia(ifree+1)
+               assigned_local(ad_ja(jfree) + 1) = .TRUE.
             end do            
          end do
       
          ! ~~~~~~~~~
-         ! In parallel we have to finish our asyn scatter
+         ! In parallel we have to finish our asyn comms
          ! ~~~~~~~~~
          if (comm_size /= 1) then
-
-            ! Don't forget to finish the scatter
-            call vecscatter_mat_reverse_end_c(A_array, vec_long)
+            ! Finishes the reduce LOR, assigned_local will now be correct
+            call boolscatter_mat_reverse_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)       
          end if
 
          ! ~~~~~~~~~~~~
@@ -590,7 +521,7 @@ module pmisr_ddc
          ! ~~~~~~~~~~~~
          if (max_luby_steps < 0) then
             ! Count how many are undecided
-            counter_undecided = count(cf_markers_local_real == 0)
+            counter_undecided =  local_rows - count(assigned_local)
             ! Parallel reduction!
             A_array = strength_mat%v
             call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
@@ -607,34 +538,7 @@ module pmisr_ddc
       if (comm_size /= 1) then
          call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
       end if    
-      
-      ! ~~~~~~~~~
-      ! Now assign our final cf markers
-      ! ~~~~~~~~~
-
-      ! We set cf_markers_local to be -1, -2, -3... if its in the set, based on which 
-      ! outer iteration it was set in, just reset them all to -1
-      ! And for not in the set, they are 1 or will have a value greater than one 
-      ! if an add reverse scatter from other processors touched them (ie told them they were 
-      ! not in the set from another processor)
-      ! If we're 0, then we broke out of our CF loop early as we had only a small fraction of 
-      ! undecided left and we can easily just call them as not in the set 
-      
-      do ifree = 1, local_rows
-         ! Because we have reals here, make sure to stick the zero comparison first
-         ! as not sure which sign the fp zero matches
-         ! If unassigned its C
-         if (cf_markers_local_real(ifree) == 0) then
-            cf_markers_local(ifree) = C_POINT
-         ! Less than zero its F
-         else if (cf_markers_local_real(ifree) < 0) then
-            cf_markers_local(ifree) = F_POINT
-         ! Greater than zero its C
-         else 
-            cf_markers_local(ifree) = C_POINT
-         end if
-      end do
-      
+            
       ! If PMIS then we swap the CF markers from PMISR
       if (pmis) then
          cf_markers_local = cf_markers_local * (-1)
@@ -643,10 +547,12 @@ module pmisr_ddc
       ! ~~~~~~~~~
       ! Cleanup
       ! ~~~~~~~~~      
-      deallocate(measure_local, cf_markers_local_real, mark)
+      deallocate(measure_local, in_set_this_loop, assigned_local)
       if (comm_size/=1) then
-         call VecDestroy(cf_markers_vec, ierr)    
-         deallocate(measure_nonlocal)        
+         call VecDestroy(measure_vec, ierr)    
+         deallocate(assigned_nonlocal)    
+         ! Don't forget to restore on lvec from our matrix
+         call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)             
       end if
 
    end subroutine pmisr_cpu  

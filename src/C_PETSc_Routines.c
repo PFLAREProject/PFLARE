@@ -23,8 +23,6 @@ PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, double **no
 {
 
    Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   // Could call this but can just access them directly
-   //MatGetCommunicationStructs(*matrix, &lvec, PetscInt *colmap[], &multScatter)
 
    // Do the scatter
    PetscCallVoid(VecScatterBegin(a->Mvctx, *vec_long, a->lvec, INSERT_VALUES, SCATTER_FORWARD));
@@ -44,6 +42,24 @@ PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, double **nonl
    // in colmap
    PetscCallVoid(VecGetArray(a->lvec, nonlocal_vals));
    // Have to call a restore once you're done
+}
+
+// Does a vecscatter according to the pattern in the given Mat
+// Have to do this in C as there is no fortran interface to MatGetCommunicationStructs
+PETSC_INTERN void boolscatter_mat_begin_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
+{
+
+   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
+
+   // Do the scatter
+   PetscCallVoid(PetscSFBcastBegin(a->Mvctx, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
+}
+
+// End the scatter started in boolscatter_mat_begin_c and return a pointer
+PETSC_INTERN void boolscatter_mat_end_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
+{
+   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
+   PetscCallVoid(PetscSFBcastEnd(a->Mvctx, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
 }
 
 PETSC_INTERN void vecscatter_mat_restore_c(Mat *matrix, double **nonlocal_vals)
@@ -71,6 +87,21 @@ PETSC_INTERN void vecscatter_mat_reverse_end_c(Mat *matrix, Vec *vec_long)
 
    Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
    PetscCallVoid(VecScatterEnd(a->Mvctx, a->lvec, *vec_long, ADD_VALUES, SCATTER_REVERSE));
+}
+
+PETSC_INTERN void boolscatter_mat_reverse_begin_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
+{
+
+   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
+
+   // Do the scatter
+   PetscCallVoid(PetscSFReduceBegin(a->Mvctx, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
+}
+
+PETSC_INTERN void boolscatter_mat_reverse_end_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
+{
+   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
+   PetscCallVoid(PetscSFReduceEnd(a->Mvctx, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
 }
 
 // Annoying as the fortran pointer returned by MatSeqAIJGetArrayF90 seems to be 
