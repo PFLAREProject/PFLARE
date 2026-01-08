@@ -295,7 +295,7 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   // ~~~~~~~~~~~~~~~~~
 
   // In 2D its bottom and left
-  PetscInt inflowids_2d[] = {4};
+  PetscInt inflowids_2d[] = {1, 4};
   PetscInt inflowids_2d_one[] = {1};
   PetscInt outflowids_2d[] =  {2,3};
   // In 3D its bottom, left and back face
@@ -303,7 +303,7 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   PetscInt outflowids_3d[] =  {2,4,5};
   if (dim == 2)
   {
-    numInflow = 1;
+    numInflow = 2;
     inflow = &inflowids_2d[0];
     inflow_one = &inflowids_2d_one[0];
     numOutflow = 2;
@@ -330,7 +330,7 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   
   // Dirichlet condition on bottom surface as inflow
   PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
-  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow_one", label, numInflow, inflow_one, 0, 0, NULL, (void (*)(void))dirichlet_bc_one, NULL, options, NULL));
+  //PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow_one", label, numInflow, inflow_one, 0, 0, NULL, (void (*)(void))dirichlet_bc_one, NULL, options, NULL));
   // If no diffusion, Neumann condition (outflow - zero flux) on other surfaces
   if (options->alpha == 0.0)
   {
