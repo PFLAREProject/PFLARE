@@ -871,7 +871,7 @@ end if
       integer :: comm_size
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
-      PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, local_gindices, cols
+      PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
       PetscReal, dimension(:), allocatable :: vals
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
@@ -970,15 +970,15 @@ end if
 
          ! These are the global indices of the columns we want
          allocate(col_indices_off_proc_array(cols_ad + cols_ao))
-         allocate(local_gindices(cols_ad))
+         allocate(ad_indices(cols_ad))
          ! Local rows (as global indices)
          do ifree = 1, cols_ad
-            local_gindices(ifree) = global_row_start + ifree - 1
+            ad_indices(ifree) = global_row_start + ifree - 1
          end do
 
          ! col_indices_off_proc_array is now sorted, which are the global indices of the columns we want
-         call merge_pre_sorted(local_gindices, colmap, col_indices_off_proc_array)
-         deallocate(local_gindices)
+         call merge_pre_sorted(ad_indices, colmap, col_indices_off_proc_array)
+         deallocate(ad_indices)
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
          call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, &
@@ -1141,7 +1141,7 @@ end if
                call MatGetRow(matrix, cols(j_loc), ncols_two, &
                         cols_two_ptr, vals_two_ptr, ierr)
 
-            ! If we're trying to acceess a non-local row in matrix
+            ! If we're trying to access a non-local row in matrix
             else
 
                ! this is local row index we want into reuse_submatrices(1) (as row_indices used to extract are just colmap)  
@@ -1167,7 +1167,7 @@ end if
             end if
             
             ! Search for the matching column
-            ! We're intersecting the global column indices of match_sparsity_match (cols) and matrix (cols_two_ptr)
+            ! We're intersecting the global column indices of mat_sparsity_match (cols) and matrix (cols_two_ptr)
             call intersect_pre_sorted_indices_only(cols(1:ncols), cols_two_ptr, cols_index_one, cols_index_two, match_counter)      
             
             ! Don't need to do anything if we have no matches
