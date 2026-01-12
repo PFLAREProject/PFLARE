@@ -1162,7 +1162,8 @@ end if
                cols_two_ptr = col_indices_off_proc_array(cols_two_ptr+1)
 
                ! This is the values
-               vals_two_ptr => submatrices_vals(submatrices_ia(row_index_into_submatrix)+1:submatrices_ia(row_index_into_submatrix+1))
+               vals_two_ptr => &
+                submatrices_vals(submatrices_ia(row_index_into_submatrix)+1:submatrices_ia(row_index_into_submatrix+1))
             end if
             
             ! Search for the matching column
