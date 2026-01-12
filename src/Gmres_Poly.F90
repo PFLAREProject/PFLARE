@@ -1168,7 +1168,7 @@ end if
             
             ! Search for the matching column
             ! We're intersecting the global column indices of match_sparsity_match (cols) and matrix (cols_two_ptr)
-            call intersect_pre_sorted_indices_only(cols, cols_two_ptr, cols_index_one, cols_index_two, match_counter)      
+            call intersect_pre_sorted_indices_only(cols(1:ncols), cols_two_ptr, cols_index_one, cols_index_two, match_counter)      
             
             ! Don't need to do anything if we have no matches
             if (match_counter == 0) then 
