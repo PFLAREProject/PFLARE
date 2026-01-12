@@ -864,19 +864,16 @@ end if
       type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
       
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one
+      PetscInt :: global_row_start, global_row_end_plus_one, row_index_into_submatrix
       PetscInt :: global_col_start, global_col_end_plus_one, n, ncols, ncols_two, ifree, max_nnzs
       PetscInt :: i_loc, j_loc, row_size, rows_ao, cols_ao, rows_ad, cols_ad, shift = 0
-      PetscInt :: ncols_local, ncols_nonlocal     
       integer :: errorcode, match_counter, term, order
       integer :: comm_size
       PetscErrorCode :: ierr      
-      PetscReal, dimension(:), pointer :: vals_two, vals_power_temp, vals_previous_power_temp
-      PetscReal, dimension(:), pointer :: vals => null()
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
-      PetscInt, dimension(:), pointer :: cols => null(), cols_two, cols_local
-      PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
-      type(tIS), dimension(1) :: col_indices
+      PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, local_gindices, cols
+      PetscReal, dimension(:), allocatable :: vals
+      type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
       logical :: deallocate_submatrices = .FALSE.
@@ -887,7 +884,7 @@ end if
       type(real_vec), dimension(:), allocatable :: symbolic_vals
       integer(c_long_long) A_array
       MPIU_Comm :: MPI_COMM_MATRIX
-      PetscReal, dimension(:), allocatable :: vals_temp, vals_prev_temp
+      PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
       PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
       real(c_double), pointer :: submatrices_vals(:)
@@ -973,18 +970,21 @@ end if
 
          ! These are the global indices of the columns we want
          allocate(col_indices_off_proc_array(cols_ad + cols_ao))
+         allocate(local_gindices(cols_ad))
          ! Local rows (as global indices)
          do ifree = 1, cols_ad
-            col_indices_off_proc_array(ifree) = global_row_start + ifree - 1
+            local_gindices(ifree) = global_row_start + ifree - 1
          end do
-         ! Off diagonal rows we want (as global indices)
-         do ifree = 1, cols_ao
-            col_indices_off_proc_array(cols_ad + ifree) = colmap(ifree)
-         end do
+
+         ! col_indices_off_proc_array is now sorted, which are the global indices of the columns we want
+         call merge_pre_sorted(local_gindices, colmap, col_indices_off_proc_array)
+         deallocate(local_gindices)
 
          ! Create the sequential IS we want with the cols we want (written as global indices)
          call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, &
                      col_indices_off_proc_array, PETSC_USE_POINTER, col_indices(1), ierr) 
+         call ISCreateGeneral(PETSC_COMM_SELF, cols_ao, &
+                     colmap, PETSC_USE_POINTER, row_indices(1), ierr)                      
 
          ! ~~~~~~~
          ! Now we can pull out the chunk of matrix that we need
@@ -997,20 +997,18 @@ end if
          
          ! Now this will be doing comms to get the non-local rows we want
          ! But only including the columns of the local fixed sparsity, as we don't need all the 
-         ! columns of the non-local entries unless we are doing a full matmatmult         
-         ! This matrix has the local rows and the non-local rows in it
-         ! We could just request the non-local rows, but it's easier to just get the whole slab
-         ! as then the row indices match colmap
+         ! columns of the non-local entries unless we are doing a full matmatmult
          ! This returns a sequential matrix
          if (.NOT. PetscObjectIsNull(reuse_mat)) then
             reuse_submatrices(1) = reuse_mat
-            call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
+            call MatCreateSubMatrices(matrix, one, row_indices, col_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
          else
-            call MatCreateSubMatrices(matrix, one, col_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
+            call MatCreateSubMatrices(matrix, one, row_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
             reuse_mat = reuse_submatrices(1)
          end if
          row_size = size(col_indices_off_proc_array)
          call ISDestroy(col_indices(1), ierr)
+         call ISDestroy(row_indices(1), ierr)
 
       ! Easy in serial as we have everything we neeed
       else
@@ -1034,12 +1032,18 @@ end if
 
       ! Have to get the max nnzs of the local and off-local rows we've just retrieved
       max_nnzs = 0
-      ! Check the nnzs of the serial copy of matrix
-      do ifree = 1, row_size            
-         call MatGetRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      do ifree = global_row_start, global_row_end_plus_one-1     
+         call MatGetRow(matrix, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do
+         call MatRestoreRow(matrix, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      end do      
+      if (comm_size /= 1) then
+         do ifree = 1, cols_ao            
+            call MatGetRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+            if (ncols > max_nnzs) max_nnzs = ncols
+            call MatRestoreRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         end do
+      end if
       ! and also the sparsity power
       do ifree = global_row_start, global_row_end_plus_one-1     
          call MatGetRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
@@ -1068,7 +1072,7 @@ end if
       ! ~~~~~~~~~~
       
       allocate(cols(max_nnzs))
-      allocate(vals(max_nnzs)) 
+      allocate(vals(max_nnzs))
       allocate(vals_power_temp(max_nnzs))
       allocate(vals_previous_power_temp(max_nnzs))
       allocate(cols_index_one(max_nnzs))
@@ -1110,97 +1114,60 @@ end if
       do i_loc = 1, local_rows 
                           
          ! Get the row of mat_sparsity_match
-         ! We need both the local indices into reuse_submatrices(1) and the global indices
-         if (poly_sparsity_order == 1) then
+         call MatGetRow(mat_sparsity_match, i_loc - 1 + global_row_start, ncols_two, &
+                  cols_ptr, vals_ptr, ierr)
+         ! Copying here because mat_sparsity_match and matrix are often the same matrix
+         ! and hence we can only have one active matgetrow
+         ncols = ncols_two
+         cols(1:ncols) = cols_ptr(1:ncols)
+         vals(1:ncols) = vals_ptr(1:ncols)
+         call MatRestoreRow(mat_sparsity_match, i_loc - 1 + global_row_start, ncols_two, &
+                  cols_ptr, vals_ptr, ierr)         
 
-            ! This is the number of columns
-            ncols = submatrices_ia(i_loc+1) - submatrices_ia(i_loc)      
-            ! This is the column indices
-            cols_ptr => submatrices_ja(submatrices_ia(i_loc)+1:submatrices_ia(i_loc+1))
-            ! This is the values
-            vals_ptr => submatrices_vals(submatrices_ia(i_loc)+1:submatrices_ia(i_loc+1))                  
-
-            ! Need to modify the column positions to be global indices
-            allocate(cols_local(ncols))
-            ! Already has the local indices
-            cols_local = cols_ptr
-            if (comm_size /= 1) then
-               ! Gives us the global indices
-               cols(1:ncols) = col_indices_off_proc_array(cols_local+1)
-            else
-               cols(1:ncols) = cols_ptr               
-            end if  
-
-         ! Higher order sparsity
-         else
-          
-            call MatGetRow(Ad, i_loc-1, ncols_local, &
-                     PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-            ncols = ncols_local
-            call MatRestoreRow(Ad, i_loc-1, ncols_local, &
-                     PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)                     
-                  
-            if (comm_size /= 1) then
-               call MatGetRow(Ao, i_loc-1, ncols_nonlocal, &
-                        PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-               ncols = ncols + ncols_nonlocal                        
-               call MatRestoreRow(Ao, i_loc-1, ncols_nonlocal, &
-                        PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr) 
-            end if
-
-            allocate(cols_local(ncols))
-            call MatGetRow(Ad, i_loc-1, ncols_local, &
-                     cols_two, vals_two, ierr)
-            cols_local(1:ncols_local) = cols_two(1:ncols_local)
-            vals(1:ncols_local) = vals_two(1:ncols_local)                      
-            call MatRestoreRow(Ad, i_loc-1, ncols_local, &
-                     cols_two, vals_two, ierr)   
-                     
-            if (comm_size /= 1) then  
-               call MatGetRow(Ao, i_loc-1, ncols_nonlocal, &
-                  cols_two, vals_two, ierr)
-               cols_local(ncols_local+1:ncols) = cols_two(1:ncols_nonlocal) + cols_ad
-               vals(ncols_local+1:ncols) = vals_two(1:ncols_nonlocal)                      
-               call MatRestoreRow(Ao, i_loc-1, ncols_nonlocal, &
-                        cols_two, vals_two, ierr)  
-            end if               
-
-            if (comm_size /= 1) then
-               ! Gives us the global indices
-               cols(1:ncols) = col_indices_off_proc_array(cols_local(1:ncols)+1)
-            else
-               cols(1:ncols) = cols_local(1:ncols)               
-            end if              
-            vals_ptr => vals(1:ncols)
-  
-         end if
-         
-         if (any(cols_local > row_size)) then
-            print *, "Local size bigger than it should be"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if
-
-         ! If we have to do matrix powers, then let's just do all the column matching
-         ! and extraction of the values once
-         ! This is just basically a symbolic for the set of rows given in cols
+         ! This is just a symbolic for the set of rows given in cols
+         ! Let's just do all the column matching and extraction of the values once
             
          ! Allocate some space to store the matching indices
          allocate(symbolic_ones(ncols))
          allocate(symbolic_vals(ncols))
+         row_index_into_submatrix = 1
 
          ! This is a row-wise product
          do j_loc = 1, ncols
 
-            ! This is the number of columns
-            ncols_two = submatrices_ia(cols_local(j_loc)+2) - submatrices_ia(cols_local(j_loc)+1)
-            ! This is the column indices
-            cols_two_ptr => submatrices_ja(submatrices_ia(cols_local(j_loc)+1)+1:submatrices_ia(cols_local(j_loc)+2))
-            ! This is the values
-            vals_two_ptr => submatrices_vals(submatrices_ia(cols_local(j_loc)+1)+1:submatrices_ia(cols_local(j_loc)+2))
+            ! If we're trying to access a local row in matrix
+            if (cols(j_loc) .ge. global_row_start .AND. cols(j_loc) < global_row_end_plus_one) then
+
+               call MatGetRow(matrix, cols(j_loc), ncols_two, &
+                        cols_two_ptr, vals_two_ptr, ierr)
+
+            ! If we're trying to acceess a non-local row in matrix
+            else
+
+               ! this is local row index we want into reuse_submatrices(1) (as row_indices used to extract are just colmap)  
+               ! We know cols is sorted, so every non-local index will be greater than the last one
+               ! (it's just that cols could have some local ones between different non-local)
+               ! colmap is also sorted and we know every single non-local entry in cols(j_loc) is in colmap
+               do while (row_index_into_submatrix .le. cols_ao .AND. colmap(row_index_into_submatrix) .lt. cols(j_loc))
+                  row_index_into_submatrix = row_index_into_submatrix + 1
+               end do
+
+               ! This is the number of columns
+               ncols_two = submatrices_ia(row_index_into_submatrix+1) - submatrices_ia(row_index_into_submatrix)
+               allocate(cols_two_ptr(ncols_two))
+               ! This is the local column indices in reuse_submatrices(1)
+               cols_two_ptr = submatrices_ja(submatrices_ia(row_index_into_submatrix)+1:submatrices_ia(row_index_into_submatrix+1))
+               ! Because col_indices_off_proc_array (and hence the column indices in reuse_submatrices(1) is sorted, 
+               ! then cols_two_ptr contains the sorted global column indices
+               cols_two_ptr = col_indices_off_proc_array(cols_two_ptr+1)
+
+               ! This is the values
+               vals_two_ptr => submatrices_vals(submatrices_ia(row_index_into_submatrix)+1:submatrices_ia(row_index_into_submatrix+1))
+            end if
             
-            ! Search for the matching column - assuming sorted
-            ! Need to make sure we're matching the local indices
-            call intersect_pre_sorted_indices_only(cols_local(1:ncols), cols_two_ptr, cols_index_one, cols_index_two, match_counter)                 
+            ! Search for the matching column
+            ! We're intersecting the global column indices of match_sparsity_match (cols) and matrix (cols_two_ptr)
+            call intersect_pre_sorted_indices_only(cols, cols_two_ptr, cols_index_one, cols_index_two, match_counter)      
             
             ! Don't need to do anything if we have no matches
             if (match_counter == 0) then 
@@ -1216,14 +1183,19 @@ end if
                ! These are the matching values of matrix
                allocate(symbolic_vals(j_loc)%ptr(match_counter))
                symbolic_vals(j_loc)%ptr = vals_two_ptr(cols_index_two(1:match_counter)) 
-            end if          
-         end do    
-
-         allocate(vals_temp(ncols))
-         allocate(vals_prev_temp(ncols))
+            end if   
+            
+            ! Restore local row of matrix
+            if (cols(j_loc) .ge. global_row_start .AND. cols(j_loc) < global_row_end_plus_one) then
+               call MatRestoreRow(matrix, cols(j_loc), ncols_two, &
+                        cols_two_ptr, vals_two_ptr, ierr)
+            else
+               deallocate(cols_two_ptr)
+            end if            
+         end do
          
          ! Start with the values of mat_sparsity_match in it
-         vals_prev_temp = vals_ptr
+         vals_previous_power_temp(1:ncols) = vals(1:ncols)
                      
          ! Loop over any matrix powers
          ! vals_power_temp stores the value of A^(term-1) for this row, and we update this as we go through 
@@ -1231,7 +1203,7 @@ end if
          do term = poly_sparsity_order+2, size(coefficients)
 
             ! We need to sum up the product of vals_previous_power_temp(j_loc) * matching columns
-            vals_temp = 0
+            vals_power_temp(1:ncols) = 0
 
             ! Have to finish all the columns before we move onto the next coefficient
             do j_loc = 1, ncols
@@ -1240,8 +1212,8 @@ end if
                if (.NOT. associated(symbolic_ones(j_loc)%ptr)) cycle
 
                ! symbolic_vals(j_loc)%ptr has the matching values of A in it
-               vals_temp(symbolic_ones(j_loc)%ptr) = vals_temp(symbolic_ones(j_loc)%ptr) + &
-                        vals_prev_temp(j_loc) * symbolic_vals(j_loc)%ptr
+               vals_power_temp(symbolic_ones(j_loc)%ptr) = vals_power_temp(symbolic_ones(j_loc)%ptr) + &
+                        vals_previous_power_temp(j_loc) * symbolic_vals(j_loc)%ptr
 
             end do
                
@@ -1251,15 +1223,13 @@ end if
             ! for the next time through
             ! ~~~~~~~~~~~
             if (ncols /= 0 .AND. coefficients(term) /= 0d0) then
-               call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols(1:ncols), &
-                     coefficients(term) * vals_temp, ADD_VALUES, ierr)   
+               call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
+                     coefficients(term) * vals_power_temp, ADD_VALUES, ierr)   
             end if
 
             ! This should now have the value of A^(term-1) in it
-            vals_prev_temp = vals_temp
-         end do   
-
-         deallocate(vals_temp, vals_prev_temp)
+            vals_previous_power_temp(1:ncols) = vals_power_temp(1:ncols)
+         end do      
 
          ! Delete our symbolic
          do j_loc = 1, ncols
@@ -1268,7 +1238,7 @@ end if
                deallocate(symbolic_vals(j_loc)%ptr)
             end if      
          end do  
-         deallocate(symbolic_vals, symbolic_ones, cols_local)  
+         deallocate(symbolic_vals, symbolic_ones)  
       end do
 
       call MatRestoreRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
