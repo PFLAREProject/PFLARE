@@ -224,9 +224,9 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   PetscInt *inflow = NULL, *outflow = NULL;
 
   // ~~~~~~~~~~~~~~~~~
-  // For advection we just apply dirichlet inflow conditions of 1 on incoming faces
+  // For advection we just apply dirichlet inflow conditions on incoming faces
   // and Neumann outflow conditions (zero flux) on the other faces.
-  // Solution should just be 1 across the domain
+  // Solution should just be equal to the inflow condition across the domain
   // ~~~~~~~~~~~~~~~~~
 
   // In 2D its bottom and left
