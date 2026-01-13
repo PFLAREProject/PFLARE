@@ -268,10 +268,11 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
 static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,int final_smooths, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
-  //PetscCall(DMCreate(comm, dm));
-  //PetscCall(DMSetType(*dm, DMPLEX));
-  //PetscCall(DMSetFromOptions(*dm));
+  PetscCall(DMCreate(comm, dm));
+  PetscCall(DMSetType(*dm, DMPLEX));
+
   *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE);
+
   PetscCall(DMSetFromOptions(*dm));
   PetscCall(DMSetApplicationContext(*dm, options));
   PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
