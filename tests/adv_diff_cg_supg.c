@@ -270,7 +270,7 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,int fi
   PetscFunctionBeginUser;
 
   // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE);
+  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE, PETSC_TRUE);
 
   PetscCall(DMSetFromOptions(*dm));
   // Give the DM access to the application context (which includes diffusion coefficient and advection velocity)
