@@ -764,10 +764,6 @@ module gmres_poly_newton
       ! If we're here then we want an assembled approximate inverse
       ! ~~~~~~~~~~~~         
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)   
-      
-      ! For the 0th and 1st order assembled polynomial we just combine the coefficients
-      ! to get the mononomial form and assemble it, which should be stable for such low order
-      ! For higher order we use the actual Newton form 
 
       ! If we're zeroth order poly this is trivial as it's just 1/theta_1 I
       if (poly_order == 0) then
@@ -795,7 +791,7 @@ module gmres_poly_newton
 
             ! Have to be careful here, as we may be first order, but the second eigenvaule
             ! might have been set to zero thanks to the rank reducing solve 
-            ! So we just check if the second imaginary part is zero and if it is
+            ! So we just check if the second real part is zero and if it is
             ! we just compute a 0th order inverse - annoyingly we can't call 
             ! build_gmres_polynomial_newton_inverse_0th_order as that builds a MATDIAGONAL
             ! and in the tests there is a problem where we reuse the sparsity, in the first
@@ -813,12 +809,20 @@ module gmres_poly_newton
                return  
             end if
 
-            ! result = -A_ff/(theta_1 * theta_2)
-            call MatScale(inv_matrix, -1d0/(coefficients(1, 1) * coefficients(2, 1)), ierr)
+            ! Could just compute the equivalent mononomial here to save some flops
+            ! but the whole point to doing the Newton form is to avoid the 
+            ! theta_1 * theta_2 that would result
 
-            ! result = I * (1/theta_1 + 1/theta_2) - A_ff/(theta_1 * theta_2)
+            ! result = -A_ff/theta_1
+            call MatScale(inv_matrix, -1d0/(coefficients(1, 1)), ierr)
+            ! result = I -A_ff/theta_1
+            call MatShift(inv_matrix, 1d0, ierr) 
+            ! result = 1/theta_2 * (I -A_ff/theta_1)
+            call MatScale(inv_matrix, 1d0/(coefficients(2, 1)), ierr)      
+
+            ! result = 1/theta_1 + 1/theta_2 * (I -A_ff/theta_1)
             ! Don't need an assemble as there is one called in this
-            call MatShift(inv_matrix, 1d0/(coefficients(1, 1)) + 1d0/(coefficients(2, 1)), ierr)       
+            call MatShift(inv_matrix, 1d0/(coefficients(1, 1)), ierr)       
 
          ! Complex conjugate roots, a +- ib
          else
