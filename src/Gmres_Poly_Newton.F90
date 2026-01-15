@@ -692,12 +692,13 @@ module gmres_poly_newton
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
-      integer :: comm_size, errorcode
+      integer :: comm_size, errorcode, order
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       type(mat_ctxtype), pointer :: mat_ctx=>null()
       logical :: reuse_triggered      
       PetscReal :: square_sum
+      type(tMat) :: mat_product, temp_mat_A, temp_mat_two, temp_mat_three, mat_product_k_plus_1
 
       ! ~~~~~~       
 
@@ -837,6 +838,165 @@ module gmres_poly_newton
 
       end if
 
+      ! If we're constraining sparsity we've built a custom matrix-powers that assumes fixed sparsity
+      if (poly_sparsity_order < poly_order) then    
+
+         ! ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
+         ! ! so that it doen't have to do much comms
+         ! ! This also finishes off the asyn comms and computes the coefficients
+         ! call mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, &
+         !          reuse_mat, reuse_submatrices, inv_matrix)
+
+         ! ! Then just return
+         return         
+         
+      end if
+
+      ! ~~~~~~~~~~
+      ! We are only here if we don't constrain_sparsity
+      ! ~~~~~~~~~~
+
+      ! If not re-using
+      ! Copy in the initial matrix
+      if (.NOT. reuse_triggered) then
+         ! Duplicate & copy the matrix, but ensure there is a diagonal present
+         call mat_duplicate_copy_plus_diag(matrix, .FALSE., inv_matrix)
+      else
+         ! For the powers > 1 the pattern of the original matrix will be different
+         ! to the resulting inverse
+         call MatCopy(matrix, inv_matrix, DIFFERENT_NONZERO_PATTERN, ierr)
+      end if
+
+      ! Set to zero as we add in each product of terms
+      call MatScale(inv_matrix, 0d0, ierr)
+
+      ! Don't set any off processor entries so no need for a reduction when assembling
+      call MatSetOption(inv_matrix, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)  
+
+      ! We start with an identity in mat_product
+      call generate_identity(matrix, mat_product)
+
+      ! ~~~~~~~~~~~~
+      ! Iterate over the order
+      ! This is basically the same as the MF application but we have to build the powers
+      ! ~~~~~~~~~~~~      
+      order = 1
+      do while (order .le. poly_order - 1)
+
+         ! Duplicate & copy the matrix, but ensure there is a diagonal present
+         ! temp_mat_A is going to store things with the sparsity of A
+         if (PetscObjectIsNull(temp_mat_A)) then
+            call mat_duplicate_copy_plus_diag(matrix, .FALSE., temp_mat_A)     
+         else
+            ! Can reuse the sparsity 
+            call mat_duplicate_copy_plus_diag(matrix, .TRUE., temp_mat_A)     
+         end if         
+
+         ! If real this is easy
+         if (coefficients(order,2) == 0d0) then
+
+            ! Skips eigenvalues that are numerically zero - see 
+            ! the comment in calculate_gmres_polynomial_roots_newton 
+            if (abs(coefficients(order,1)) < 1e-12) then
+               order = order + 1
+               cycle
+            end if        
+
+            ! Then add the scaled version of each product
+            if (reuse_triggered) then
+               ! If doing reuse we know our nonzeros are a subset
+               call MatAXPY(inv_matrix, 1d0/coefficients(order,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
+            else
+               ! Have to use the DIFFERENT_NONZERO_PATTERN here
+               call MatAXPYWrapper(inv_matrix, 1d0/coefficients(order,1), mat_product)
+            end if
+
+            ! temp_mat_A = A_ff/theta_k       
+            call MatScale(temp_mat_A, -1d0/coefficients(order,1), ierr)
+            ! temp_mat_A = I - A_ff/theta_k
+            call MatShift(temp_mat_A, 1d0, ierr)    
+            
+            ! mat_product_k_plus_1 = mat_product * temp_mat_A
+            call MatMatMult(temp_mat_A, mat_product, &
+                  MAT_INITIAL_MATRIX, 1.5d0, mat_product_k_plus_1, ierr)      
+            call MatDestroy(mat_product, ierr)  
+            mat_product = mat_product_k_plus_1     
+            
+            order = order + 1
+
+         ! Complex 
+         else
+
+            ! Skips eigenvalues that are numerically zero
+            if (coefficients(order,1)**2 + coefficients(order,2)**2 < 1e-12) then
+               order = order + 2
+               cycle
+            end if
+
+            ! Compute 2a I - A
+            ! Have to use the DIFFERENT_NONZERO_PATTERN here
+            ! temp_mat_A = -A    
+            call MatScale(temp_mat_A, -1d0, ierr)
+            ! temp_mat_A = 2a I - A_ff
+            call MatShift(temp_mat_A, 2d0 * coefficients(order,1), ierr)   
+            ! temp_mat_A = (2a I - A_ff)/(a^2 + b^2)
+            call MatScale(temp_mat_A, 1d0/(coefficients(order,1)**2 + coefficients(order,2)**2), ierr) 
+
+            call MatMatMult(temp_mat_A, mat_product, &
+                  MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)      
+
+            ! Then add the scaled version of each product
+            if (reuse_triggered) then
+               ! If doing reuse we know our nonzeros are a subset
+               call MatAXPY(inv_matrix, 1d0, temp_mat_two, SUBSET_NONZERO_PATTERN, ierr)
+            else
+               ! Have to use the DIFFERENT_NONZERO_PATTERN here
+               call MatAXPYWrapper(inv_matrix, 1d0, temp_mat_two)
+            end if            
+
+            if (order .le. size(coefficients, 1) - 2) then
+               ! temp_mat_three = matrix * temp_mat_two
+               call MatMatMult(matrix, temp_mat_two, &
+                     MAT_INITIAL_MATRIX, 1.5d0, temp_mat_three, ierr)     
+               call MatDestroy(temp_mat_two, ierr)  
+
+               ! Then add the scaled version of each product
+               if (reuse_triggered) then
+                  ! If doing reuse we know our nonzeros are a subset
+                  call MatAXPY(mat_product, -1d0, temp_mat_three, SUBSET_NONZERO_PATTERN, ierr)
+               else
+                  ! Have to use the DIFFERENT_NONZERO_PATTERN here
+                  call MatAXPYWrapper(mat_product, -1d0, temp_mat_three)
+               end if               
+               call MatDestroy(temp_mat_three, ierr) 
+            else
+               call MatDestroy(temp_mat_two, ierr)  
+            end if
+
+            ! Skip two evals
+            order = order + 2
+
+         end if       
+      end do
+
+      ! Final step if last root is real
+      if (coefficients(order,2) == 0d0) then
+         ! Add in the final term multiplied by 1/theta_poly_order
+
+         ! Skips eigenvalues that are numerically zero
+         if (abs(coefficients(order,1)) > 1e-12) then            
+            if (reuse_triggered) then
+               ! If doing reuse we know our nonzeros are a subset
+               call MatAXPY(inv_matrix, 1d0/coefficients(order,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
+            else
+               ! Have to use the DIFFERENT_NONZERO_PATTERN here
+               call MatAXPYWrapper(inv_matrix, 1d0/coefficients(order,1), mat_product)
+            end if     
+         end if       
+      end if        
+
+      call MatDestroy(temp_mat_A, ierr)
+      call MatDestroy(mat_product, ierr)
 
    end subroutine build_gmres_polynomial_newton_inverse     
    
