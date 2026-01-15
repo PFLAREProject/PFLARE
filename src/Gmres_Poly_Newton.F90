@@ -674,6 +674,7 @@ module gmres_poly_newton
 
    subroutine build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                   coefficients, &
+                  poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, &
                   inv_matrix)
 
       ! Builds a matrix which is an approximation to the inverse of a matrix using the 
@@ -684,7 +685,10 @@ module gmres_poly_newton
       type(tMat), intent(in)                                      :: matrix
       integer, intent(in)                                         :: poly_order
       PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
-      type(tMat), intent(inout)                                   :: inv_matrix
+      integer, intent(in)                                         :: poly_sparsity_order
+      logical, intent(in)                                         :: matrix_free      
+      type(tMat), intent(inout)                                   :: reuse_mat, inv_matrix
+      type(tMat), dimension(:), pointer, intent(inout)            :: reuse_submatrices
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
@@ -692,6 +696,7 @@ module gmres_poly_newton
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       type(mat_ctxtype), pointer :: mat_ctx=>null()
+      logical :: reuse_triggered      
 
       ! ~~~~~~       
 
@@ -708,47 +713,144 @@ module gmres_poly_newton
       ! ~~~~~~~
       ! Just build a matshell that applies our polynomial matrix-free
       ! ~~~~~~~
+      if (matrix_free) then      
 
-      ! If not re-using
-      if (PetscObjectIsNull(inv_matrix)) then
+         ! If not re-using
+         if (PetscObjectIsNull(inv_matrix)) then
 
-         ! Have to dynamically allocate this
-         allocate(mat_ctx)      
+            ! Have to dynamically allocate this
+            allocate(mat_ctx)      
 
-         ! We pass in the polynomial coefficients as the context
-         call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
-                     mat_ctx, inv_matrix, ierr)
-         ! The subroutine petsc_matvec_gmres_newton_mf applies the polynomial inverse
-         call MatShellSetOperation(inv_matrix, &
-                     MATOP_MULT, petsc_matvec_gmres_newton_mf, ierr)
+            ! We pass in the polynomial coefficients as the context
+            call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
+                        mat_ctx, inv_matrix, ierr)
+            ! The subroutine petsc_matvec_gmres_newton_mf applies the polynomial inverse
+            call MatShellSetOperation(inv_matrix, &
+                        MATOP_MULT, petsc_matvec_gmres_newton_mf, ierr)
 
-         call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
-         call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
-         ! Have to make sure to set the type of vectors the shell creates
-         call ShellSetVecType(matrix, inv_matrix)          
+            call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
+            call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
+            ! Have to make sure to set the type of vectors the shell creates
+            call ShellSetVecType(matrix, inv_matrix)          
+            
+            ! Create temporary vectors we use during application
+            ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)
+            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)          
+            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                
+
+         ! Reusing 
+         else
+            call MatShellGetContext(inv_matrix, mat_ctx, ierr)
+
+         end if
+
+         mat_ctx%real_roots => coefficients(:, 1)
+         mat_ctx%imag_roots => coefficients(:, 2)
+         ! Now because the context reset deallocates the coefficient pointer 
+         ! we want to make sure we don't leak memory, so we use pointer remapping here 
+         ! to turn the 2D coefficient pointer into a 1D that we can store in mat_ctx%coefficients
+         ! and then the deallocate on mat_ctx%coefficients should still delete all the memory
+         mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+         ! This is the matrix whose inverse we are applying (just copying the pointer here)
+         mat_ctx%mat = matrix     
          
-         ! Create temporary vectors we use during application
-         ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)
-         call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)          
-         call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                
+         ! We're done
+         return
+      endif
 
-      ! Reusing 
-      else
-         call MatShellGetContext(inv_matrix, mat_ctx, ierr)
+      ! ~~~~~~~~~~~~
+      ! If we're here then we want an assembled approximate inverse
+      ! ~~~~~~~~~~~~         
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)     
+
+      ! If we're zeroth order poly this is trivial as it's just 1/theta_1 I
+      if (poly_order == 0) then
+
+         call build_gmres_polynomial_newton_inverse_0th_order(matrix, poly_order, coefficients, &
+               inv_matrix) 
+
+         ! Then just return
+         return      
+
+      ! For poly_order 1 and poly_sparsity_order 1 this is easy
+      else if (poly_order == 1 .AND. poly_sparsity_order == 1) then
+         
+         ! Duplicate & copy the matrix, but ensure there is a diagonal present
+         call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, inv_matrix)
+
+         ! Flags to prevent reductions when assembling (there are assembles in the shift)
+         call MatSetOption(inv_matrix, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr) 
+         call MatSetOption(inv_matrix, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
+         call MatSetOption(inv_matrix, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
+
+         ! ! We want 1/theta_1 (I - A/theta_1)
+         ! ! result = -A_ff/theta_1^2
+         ! ! We know if we have only a first order polynomial the first root
+         ! ! is purely real (as complex roots come in conjugate pairs)
+         ! call MatScale(inv_matrix, -1d0/(coefficients(1, 1))**2, ierr)
+
+         ! ! result = -A_ff/theta_1^2 + 1/theta_1 I
+         ! ! Don't need an assemble as there is one called in this
+         ! call MatShift(inv_matrix, 1d0/coefficients(1, 1), ierr)       
+
+         ! Then just return
+         return
 
       end if
+      
+      
 
-      mat_ctx%real_roots => coefficients(:, 1)
-      mat_ctx%imag_roots => coefficients(:, 2)
-      ! Now because the context reset deallocates the coefficient pointer 
-      ! we want to make sure we don't leak memory, so we use pointer remapping here 
-      ! to turn the 2D coefficient pointer into a 1D that we can store in mat_ctx%coefficients
-      ! and then the deallocate on mat_ctx%coefficients should still delete all the memory
-      mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
-      ! This is the matrix whose inverse we are applying (just copying the pointer here)
-      mat_ctx%mat = matrix       
 
-   end subroutine build_gmres_polynomial_newton_inverse       
+   end subroutine build_gmres_polynomial_newton_inverse     
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine build_gmres_polynomial_newton_inverse_0th_order(matrix, poly_order, coefficients, &
+                  inv_matrix)
+
+      ! Specific 0th order inverse
+
+      ! ~~~~~~
+      type(tMat), intent(in)                            :: matrix
+      integer, intent(in)                               :: poly_order
+      PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
+      type(tMat), intent(inout)                         :: inv_matrix
+
+      ! Local variables
+      integer :: errorcode
+      PetscErrorCode :: ierr      
+      logical :: reuse_triggered
+      type(tVec) :: diag_vec   
+
+      ! ~~~~~~      
+      
+      if (poly_order /= 0) then
+         print *, "This is a 0th order inverse, but poly_order is not 0"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Let's create a matrix to represent the inverse diagonal
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
+
+      if (.NOT. reuse_triggered) then
+         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+      else
+         call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
+      end if
+
+      ! Must be real as we only have one coefficient
+      call VecSet(diag_vec, 1d0/coefficients(1, 1), ierr)
+
+      ! We may be reusing with the same sparsity
+      if (.NOT. reuse_triggered) then
+         ! The matrix takes ownership of diag_vec and increases ref counter
+         call MatCreateDiagonal(diag_vec, inv_matrix, ierr)
+         call VecDestroy(diag_vec, ierr)
+      else
+         call MatDiagonalRestoreDiagonal(inv_matrix, diag_vec, ierr)
+      end if             
+
+   end subroutine build_gmres_polynomial_newton_inverse_0th_order   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
