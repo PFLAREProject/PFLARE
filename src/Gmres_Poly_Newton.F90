@@ -885,7 +885,7 @@ module gmres_poly_newton
       ! This is basically the same as the MF application but we have to build the powers
       ! ~~~~~~~~~~~~      
       order = 1
-      do while (order .le. poly_order - 1)
+      do while (order .le. size(coefficients, 1) - 1)
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
          ! temp_mat_A is going to store things with the sparsity of A
@@ -984,7 +984,7 @@ module gmres_poly_newton
       end do
 
       ! Final step if last root is real
-      if (coefficients(order,2) == 0d0) then
+      if (coefficients(size(coefficients,1),2) == 0d0) then
          ! Add in the final term multiplied by 1/theta_poly_order
 
          ! Skips eigenvalues that are numerically zero
