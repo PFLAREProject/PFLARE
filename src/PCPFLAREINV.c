@@ -18,8 +18,8 @@ PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, Pets
 //
 // PFLAREINV_POWER      - GMRES polynomial with the power basis 
 // PFLAREINV_ARNOLDI    - GMRES polynomial with the arnoldi basis 
-// PFLAREINV_NEWTON     - GMRES polynomial with the newton basis with extra roots for stability - can only be used matrix-free atm      
-// PFLAREINV_NEWTON_NO_EXTRA     - GMRES polynomial with the newton basis without extra roots - can only be used matrix-free atm      
+// PFLAREINV_NEWTON     - GMRES polynomial with the newton basis with extra roots for stability 
+// PFLAREINV_NEWTON_NO_EXTRA     - GMRES polynomial with the newton basis without extra roots    
 // PFLAREINV_NEUMANN    - Neumann polynomial
 // PFLAREINV_SAI        - SAI - cannot be used matrix-free atm
 // PFLAREINV_ISAI       - Incomplete SAI - cannot be used matrix-free atm
@@ -335,11 +335,6 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
    // ~~~~~~~
    PetscCall(PCPFLAREINVGetType(pc, &type));
 
-   // Newton has to be matrix free
-   if (type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA)
-   {
-      PetscCheck(inv_data->matrix_free, comm, PETSC_ERR_ARG_WRONGSTATE, "GMRES polynomial with Newton basis must be applied matrix-free");
-   }
    // SAI/ISAI can't be matrix free
    if (type == PFLAREINV_SAI || type == PFLAREINV_ISAI)
    {

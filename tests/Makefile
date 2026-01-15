@@ -268,6 +268,12 @@ run_tests_no_load_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 0	
 # 
 	@echo ""
+	@echo "Test AIRG Newton with 1st order GMRES polynomials with PC reused with no sparsity change"
+	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -ksp_max_it 10 -pc_air_poly_order 1
+	@echo "Test AIRG Newton with 1st order GMRES polynomials with PC regenerated with no sparsity change"
+	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 1		
+# 
+	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and polynomial coeffs stored"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and polynomial coeffs stored and lumping"
@@ -497,7 +503,15 @@ run_tests_no_load_parallel:
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton
 	@echo "Test AIRG Newton with 0th order GMRES polynomials with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 0 \
-	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton	 
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton
+# 
+	@echo ""
+	@echo "Test AIRG Newton with 1st order GMRES polynomials with PC reused with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -ksp_max_it 10 -pc_air_poly_order 1 \
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton
+	@echo "Test AIRG Newton with 1st order GMRES polynomials with PC regenerated with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 1 \
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton	 	 
 # 
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"

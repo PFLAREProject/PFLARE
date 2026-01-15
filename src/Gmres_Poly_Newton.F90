@@ -697,6 +697,7 @@ module gmres_poly_newton
       MPIU_Comm :: MPI_COMM_MATRIX
       type(mat_ctxtype), pointer :: mat_ctx=>null()
       logical :: reuse_triggered      
+      PetscReal :: square_sum
 
       ! ~~~~~~       
 
@@ -761,7 +762,11 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~
       ! If we're here then we want an assembled approximate inverse
       ! ~~~~~~~~~~~~         
-      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)     
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)   
+      
+      ! For the 0th and 1st order assembled polynomial we just combine the coefficients
+      ! to get the mononomial form and assemble it, which should be stable for such low order
+      ! For higher order we use the actual Newton form 
 
       ! If we're zeroth order poly this is trivial as it's just 1/theta_1 I
       if (poly_order == 0) then
@@ -783,22 +788,54 @@ module gmres_poly_newton
          call MatSetOption(inv_matrix, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
          call MatSetOption(inv_matrix, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
 
-         ! ! We want 1/theta_1 (I - A/theta_1)
-         ! ! result = -A_ff/theta_1^2
-         ! ! We know if we have only a first order polynomial the first root
-         ! ! is purely real (as complex roots come in conjugate pairs)
-         ! call MatScale(inv_matrix, -1d0/(coefficients(1, 1))**2, ierr)
+         ! We only have two coefficients, so they are either both real or complex conjugates
+         ! If real
+         if (coefficients(1,2) == 0d0) then
 
-         ! ! result = -A_ff/theta_1^2 + 1/theta_1 I
-         ! ! Don't need an assemble as there is one called in this
-         ! call MatShift(inv_matrix, 1d0/coefficients(1, 1), ierr)       
+            ! Have to be careful here, as we may be first order, but the second eigenvaule
+            ! might have been set to zero thanks to the rank reducing solve 
+            ! So we just check if the second imaginary part is zero and if it is
+            ! we just compute a 0th order inverse - annoyingly we can't call 
+            ! build_gmres_polynomial_newton_inverse_0th_order as that builds a MATDIAGONAL
+            ! and in the tests there is a problem where we reuse the sparsity, in the first
+            ! solve we don't have a zero coefficient but in the second solve we do
+            ! So the mat type needs to remain consistent
+            ! This can't happen in the complex case
+            if (coefficients(2,1) == 0d0) then
+
+               ! Set to zero
+               call MatScale(inv_matrix, 0d0, ierr)
+               ! Then add in the 0th order inverse
+               call MatShift(inv_matrix, 1d0/coefficients(1,1), ierr)
+               
+               ! Then just return
+               return  
+            end if
+
+            ! result = -A_ff/(theta_1 * theta_2)
+            call MatScale(inv_matrix, -1d0/(coefficients(1, 1) * coefficients(2, 1)), ierr)
+
+            ! result = I * (1/theta_1 + 1/theta_2) - A_ff/(theta_1 * theta_2)
+            ! Don't need an assemble as there is one called in this
+            call MatShift(inv_matrix, 1d0/(coefficients(1, 1)) + 1d0/(coefficients(2, 1)), ierr)       
+
+         ! Complex conjugate roots, a +- ib
+         else
+            ! a^2 + b^2
+            square_sum = coefficients(1,1)**2 + coefficients(1,2)**2
+
+            ! Complex conjugate roots
+            ! result = -A_ff / (a^2 + b^2)
+            call MatScale(inv_matrix, -1d0/square_sum, ierr)
+            ! result = 2a/(a^2 + b^2) I - A_ff / (a^2 + b^2)
+            ! Don't need an assemble as there is one called in this
+            call MatShift(inv_matrix, 2d0 * coefficients(1,1)/square_sum, ierr)       
+         end if    
 
          ! Then just return
          return
 
       end if
-      
-      
 
 
    end subroutine build_gmres_polynomial_newton_inverse     
