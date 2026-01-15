@@ -303,13 +303,9 @@ module approx_inverse_setup
       ! Gmres polynomial with newton basis
       else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
-         if (.NOT. matrix_free) then
-            print *, "GMRES polynomial with Newton basis must be applied matrix-free"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if
-
          call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                            coefficients, &
+                           inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, &
                            inv_matrix)         
 
       ! Neumann polynomial
