@@ -851,7 +851,6 @@ end if
 
       ! Compute matrix powers c = coeff(1) * I + coeff(2) * A + coeff(3) * A^2 + coeff(4) * A^3 + ... 
       ! where a c and the powers all share the same sparsity as the power input in poly_sparsity_order
-      ! Assuming cmat has not been built/allocated
       ! This also finishes the async comms required to compute the gmres poly coefficients if buffers%request is allocated
    
       ! ~~~~~~~~~~
@@ -1655,7 +1654,7 @@ end if
       integer :: order
       PetscErrorCode :: ierr      
       logical :: reuse_triggered
-      type(tVec) :: rhs_copy, diag_vec, power_vec
+      type(tVec) :: inv_vec, diag_vec, power_vec
       ! ~~~~~~
 
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
@@ -1666,9 +1665,9 @@ end if
 
       ! This stores D^order
       if (.NOT. reuse_triggered) then
-         call VecDuplicate(diag_vec, rhs_copy, ierr)
+         call VecDuplicate(diag_vec, inv_vec, ierr)
       else
-         call MatDiagonalGetDiagonal(inv_matrix, rhs_copy, ierr)
+         call MatDiagonalGetDiagonal(inv_matrix, inv_vec, ierr)
       end if
       call VecCopy(diag_vec, power_vec, ierr)
 
@@ -1678,22 +1677,22 @@ end if
       call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)         
 
       ! Set: alpha_0 * I
-      call VecSet(rhs_copy, coefficients(1), ierr)
+      call VecSet(inv_vec, coefficients(1), ierr)
 
       ! Calculate: alpha_0 * I + alpha_1 * D + alpha_2 * D^2
       do order = 1, poly_order
-         call VecAXPY(rhs_copy, coefficients(order+1), power_vec, ierr)
+         call VecAXPY(inv_vec, coefficients(order+1), power_vec, ierr)
          ! Compute power_vec = power_vec * D
          if (order /= poly_order) call VecPointwiseMult(power_vec, power_vec, diag_vec, ierr)
       end do
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
-         ! The matrix takes ownership of rhs_copy and increases ref counter
-         call MatCreateDiagonal(rhs_copy, inv_matrix, ierr)
-         call VecDestroy(rhs_copy, ierr)
+         ! The matrix takes ownership of inv_vec and increases ref counter
+         call MatCreateDiagonal(inv_vec, inv_matrix, ierr)
+         call VecDestroy(inv_vec, ierr)
       else
-         call MatDiagonalRestoreDiagonal(inv_matrix, rhs_copy, ierr)
+         call MatDiagonalRestoreDiagonal(inv_matrix, inv_vec, ierr)
       end if  
 
       call VecDestroy(diag_vec, ierr)
