@@ -669,6 +669,560 @@ module gmres_poly_newton
       end do
 
    end subroutine petsc_matvec_gmres_newton_mf_residual
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine mat_mult_powers_share_sparsity_newton(matrix, poly_order, poly_sparsity_order, coefficients, &
+                  reuse_mat, reuse_submatrices, cmat)
+
+      ! Wrapper around mat_mult_powers_share_sparsity_cpu and mat_mult_powers_share_sparsity_kokkos     
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: poly_order, poly_sparsity_order
+      PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
+      type(tMat), intent(inout)                          :: reuse_mat, cmat
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
+
+#if defined(PETSC_HAVE_KOKKOS)                     
+      integer(c_long_long) :: A_array, B_array, reuse_array
+      integer :: errorcode, reuse_int_cmat, reuse_int_reuse_mat
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
+      PetscScalar normy;
+      logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
+      type(c_ptr)  :: coefficients_ptr
+      type(tMat) :: reuse_mat_cpu
+      type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
+#endif      
+      ! ~~~~~~~~~~
+
+      ! ~~~~~~~~~~
+      ! Special case if we just want to return a gmres polynomial with the sparsity of the diagonal
+      ! This is like a damped Jacobi
+      ! ~~~~~~~~~~
+if (poly_sparsity_order == 0) then
+
+      call build_gmres_polynomial_inverse_0th_order_sparsity_newton(matrix, poly_order, &
+               coefficients, cmat)     
+
+      return
+end if
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatGetType(matrix, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then                  
+
+         A_array = matrix%v             
+         reuse_triggered_cmat = .NOT. PetscObjectIsNull(cmat) 
+         reuse_triggered_reuse_mat = .NOT. PetscObjectIsNull(reuse_mat) 
+         reuse_int_cmat = 0
+         if (reuse_triggered_cmat) then
+            reuse_int_cmat = 1
+            B_array = cmat%v
+         end if
+         reuse_int_reuse_mat = 0
+         if (reuse_triggered_reuse_mat) then
+            reuse_int_reuse_mat = 1
+         end if         
+         reuse_array = reuse_mat%v
+         coefficients_ptr = c_loc(coefficients)
+
+         ! call mat_mult_powers_share_sparsity_newton_kokkos(A_array, poly_order, poly_sparsity_order, &
+         !         coefficients_ptr, reuse_int_reuse_mat, reuse_array, reuse_int_cmat, B_array)
+                         
+         reuse_mat%v = reuse_array
+         cmat%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! If we're doing reuse and debug, then we have to always output the result 
+            ! from the cpu version, as it will have coo preallocation structures set
+            ! They aren't copied over if you do a matcopy (or matconvert)
+            ! If we didn't do that the next time we come through this routine 
+            ! and try to call the cpu version with reuse, it will segfault
+            if (reuse_triggered_cmat) then
+               temp_mat = cmat
+               call MatConvert(cmat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+            else
+               temp_mat_compare = cmat                         
+            end if            
+
+            ! Debug check if the CPU and Kokkos versions are the same
+            ! We send in an empty reuse_mat_cpu here always, as we can't pass through
+            ! the same one Kokkos uses as it now only gets out the non-local rows we need
+            ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
+            reuse_submatrices_cpu => null()
+            call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
+                     coefficients, reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+            call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)         
+                     
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)                        
+
+            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            ! There is floating point compute in these inverses, so we have to be a 
+            ! bit more tolerant to rounding differences
+            if (normy .gt. 1d-11 .OR. normy/=normy) then
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Kokkos and CPU versions of mat_mult_powers_share_sparsity do not match"
+
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse_triggered_cmat) then
+               call MatDestroy(cmat, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            cmat = temp_mat
+         end if
+
+      else
+
+         call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
+                  coefficients, reuse_mat, reuse_submatrices, cmat)       
+
+      end if
+#else
+      call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
+                  coefficients, reuse_mat, reuse_submatrices, cmat)
+#endif         
+
+      ! ~~~~~~~~~~
+      
+   end subroutine mat_mult_powers_share_sparsity_newton
+
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, coefficients, &
+                  reuse_mat, reuse_submatrices, cmat)
+
+      ! Compute newton powers with the same sparsity
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: poly_order, poly_sparsity_order
+      PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
+      type(tMat), intent(inout)                          :: reuse_mat, cmat
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
+      
+      PetscInt :: local_rows, local_cols, global_rows, global_cols
+      PetscInt :: global_row_start, global_row_end_plus_one, row_index_into_submatrix
+      PetscInt :: global_col_start, global_col_end_plus_one, n, ncols, ncols_two, ifree, max_nnzs
+      PetscInt :: i_loc, j_loc, row_size, rows_ao, cols_ao, rows_ad, cols_ad, shift = 0
+      integer :: errorcode, match_counter, term, order
+      integer :: comm_size
+      PetscErrorCode :: ierr      
+      integer, dimension(:), allocatable :: cols_index_one, cols_index_two
+      PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
+      PetscReal, dimension(:), allocatable :: vals
+      type(tIS), dimension(1) :: col_indices, row_indices
+      type(tMat) :: Ad, Ao
+      PetscInt, dimension(:), pointer :: colmap
+      logical :: deallocate_submatrices = .FALSE.
+      type(c_ptr) :: vals_c_ptr
+      type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
+      type(tMat), pointer :: mat_sparsity_match
+      type(int_vec), dimension(:), allocatable :: symbolic_ones
+      type(real_vec), dimension(:), allocatable :: symbolic_vals
+      integer(c_long_long) A_array
+      MPIU_Comm :: MPI_COMM_MATRIX
+      PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp
+      PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
+      PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
+      real(c_double), pointer :: submatrices_vals(:)
+      logical :: reuse_triggered
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
+      PetscInt, parameter :: one = 1, zero = 0
+      
+      ! ~~~~~~~~~~  
+
+      if (poly_sparsity_order .ge. size(coefficients)-1) then      
+         print *, "Requested sparsity is greater than or equal to the order"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if      
+
+      call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)    
+      ! Get the comm size 
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+
+      ! Get the local sizes
+      call MatGetLocalSize(matrix, local_rows, local_cols, ierr)
+      call MatGetSize(matrix, global_rows, global_cols, ierr)
+      ! This returns the global index of the local portion of the matrix
+      call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)  
+      call MatGetOwnershipRangeColumn(matrix, global_col_start, global_col_end_plus_one, ierr)  
+
+      reuse_triggered = .NOT. PetscObjectIsNull(cmat) 
+
+      ! ! ~~~~~~~~~~
+      ! ! Compute any matrix powers we might need to constrain sparsity and start assembling the 
+      ! ! components of the output matrix up to the order of poly_sparsity_order
+      ! ! The powers higher than poly_sparsity_order can be done with only
+      ! ! a single bit of comms and is done below this
+      ! ! ~~~~~~~~~~
+
+      ! ! matrix_powers stores all the powers of the input matrix
+      ! matrix_powers(1) = matrix
+
+      ! ! What power of A do we want to match the sparsity of
+      ! ! Compute the power we need if we're two or above
+      ! do order = 2, poly_sparsity_order
+
+      !    ! Let's just store each power, that way we can set the sparsity 
+      !    ! as the highest (unconstrained) power and do the mataxpy with a subset of entries
+      !    ! Takes more memory to do this but is faster
+      !    call MatMatMult(matrix, matrix_powers(order-1), &
+      !          MAT_INITIAL_MATRIX, 1.5d0, matrix_powers(order), ierr)        
+      ! end do  
+      
+      ! ! mat_sparsity_match now contains the sparsity of the power of A we want to match
+      ! mat_sparsity_match => matrix_powers(poly_sparsity_order)
+
+      ! ! Copy in the highest unconstrained power
+      ! ! Duplicate & copy the matrix, but ensure there is a diagonal present
+      ! call mat_duplicate_copy_plus_diag(matrix_powers(poly_sparsity_order), reuse_triggered, cmat)
+
+      ! ! We know we will never have non-zero locations outside of the highest constrained sparsity power 
+      ! call MatSetOption(cmat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
+      ! call MatSetOption(cmat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr) 
+      ! ! We know we are only going to insert local vals
+      ! ! These options should turn off any reductions in the assembly
+      ! call MatSetOption(cmat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)     
+      
+      ! ! ~~~~~~~~~~~~
+      ! ! If we're in parallel we need to get the off-process rows of matrix that correspond
+      ! ! to the columns of mat_sparsity_match
+      ! ! We can therefore do the matmult for every constrained power locally with just that data
+      ! ! ~~~~~~~~~~~~
+      ! ! Have to double check comm_size /= 1 as we might be on a subcommunicator and we can't call
+      ! ! MatMPIAIJGetSeqAIJ specifically if that's the case
+      ! if (comm_size /= 1) then
+
+      !    ! ~~~~
+      !    ! Get the cols
+      !    ! ~~~~
+      !    call MatMPIAIJGetSeqAIJ(mat_sparsity_match, Ad, Ao, colmap, ierr)
+
+      !    call MatGetSize(Ad, rows_ad, cols_ad, ierr)             
+      !    ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
+      !    call MatGetSize(Ao, rows_ao, cols_ao, ierr)         
+
+      !    ! For the column indices we need to take all the columns of mat_sparsity_match
+      !    A_array = mat_sparsity_match%v
+
+      !    ! These are the global indices of the columns we want
+      !    allocate(col_indices_off_proc_array(cols_ad + cols_ao))
+      !    allocate(ad_indices(cols_ad))
+      !    ! Local rows (as global indices)
+      !    do ifree = 1, cols_ad
+      !       ad_indices(ifree) = global_row_start + ifree - 1
+      !    end do
+
+      !    ! col_indices_off_proc_array is now sorted, which are the global indices of the columns we want
+      !    call merge_pre_sorted(ad_indices, colmap, col_indices_off_proc_array)
+      !    deallocate(ad_indices)
+
+      !    ! Create the sequential IS we want with the cols we want (written as global indices)
+      !    call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, &
+      !                col_indices_off_proc_array, PETSC_USE_POINTER, col_indices(1), ierr) 
+      !    call ISCreateGeneral(PETSC_COMM_SELF, cols_ao, &
+      !                colmap, PETSC_USE_POINTER, row_indices(1), ierr)                      
+
+      !    ! ~~~~~~~
+      !    ! Now we can pull out the chunk of matrix that we need
+      !    ! ~~~~~~~
+
+      !    ! We need off-processor rows to compute matrix powers   
+      !    ! Setting this is necessary to avoid an allreduce when calling createsubmatrices
+      !    ! This will be reset to false after the call to createsubmatrices
+      !    call MatSetOption(matrix, MAT_SUBMAT_SINGLEIS, PETSC_TRUE, ierr)       
+         
+      !    ! Now this will be doing comms to get the non-local rows we want
+      !    ! But only including the columns of the local fixed sparsity, as we don't need all the 
+      !    ! columns of the non-local entries unless we are doing a full matmatmult
+      !    ! This returns a sequential matrix
+      !    if (.NOT. PetscObjectIsNull(reuse_mat)) then
+      !       reuse_submatrices(1) = reuse_mat
+      !       call MatCreateSubMatrices(matrix, one, row_indices, col_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
+      !    else
+      !       call MatCreateSubMatrices(matrix, one, row_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
+      !       reuse_mat = reuse_submatrices(1)
+      !    end if
+      !    row_size = size(col_indices_off_proc_array)
+      !    call ISDestroy(col_indices(1), ierr)
+      !    call ISDestroy(row_indices(1), ierr)
+
+      ! ! Easy in serial as we have everything we neeed
+      ! else
+
+      !    Ad = mat_sparsity_match
+      !    cols_ad = local_cols
+      !    allocate(reuse_submatrices(1))
+      !    deallocate_submatrices = .TRUE.
+      !    reuse_submatrices(1) = matrix
+      !    row_size = local_rows
+      !    allocate(col_indices_off_proc_array(local_rows))
+      !    do ifree = 1, local_rows
+      !       col_indices_off_proc_array(ifree) = ifree-1
+      !    end do
+      ! end if   
+      
+      ! ! ~~~~~~~~~
+      ! ! Now that we are here, reuse_submatrices(1) contains A^poly_sparsity_order with all of the rows
+      ! ! that correspond to the non-zero columns of matrix
+      ! ! ~~~~~~~~~      
+
+      ! ! Have to get the max nnzs of the local and off-local rows we've just retrieved
+      ! max_nnzs = 0
+      ! do ifree = global_row_start, global_row_end_plus_one-1     
+      !    call MatGetRow(matrix, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      !    if (ncols > max_nnzs) max_nnzs = ncols
+      !    call MatRestoreRow(matrix, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      ! end do      
+      ! if (comm_size /= 1) then
+      !    do ifree = 1, cols_ao            
+      !       call MatGetRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      !       if (ncols > max_nnzs) max_nnzs = ncols
+      !       call MatRestoreRow(reuse_submatrices(1), ifree-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      !    end do
+      ! end if
+      ! ! and also the sparsity power
+      ! do ifree = global_row_start, global_row_end_plus_one-1     
+      !    call MatGetRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      !    if (ncols > max_nnzs) max_nnzs = ncols
+      !    call MatRestoreRow(mat_sparsity_match, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      ! end do 
+      
+      ! ! ~~~~~~~~
+      ! ! Get pointers to the sequential aij structure so we don't have to put critical regions
+      ! ! around the matgetrow
+      ! ! ~~~~~~~~
+      ! call MatGetRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
+      ! if (.NOT. done) then
+      !    print *, "Pointers not set in call to MatGetRowIJF"
+      !    call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      ! end if
+      ! ! Returns the wrong size pointer and can break if that size goes negative??
+      ! !call MatSeqAIJGetArrayF90(reuse_submatrices(1),submatrices_vals,ierr);
+      ! A_array = reuse_submatrices(1)%v
+      ! ! Now we must never overwrite the values in this pointer, and we must 
+      ! ! never call restore on it, see comment on top of the commented out
+      ! ! MatSeqAIJRestoreArray below
+      ! call MatSeqAIJGetArrayF90_mine(A_array, vals_c_ptr)
+      ! call c_f_pointer(vals_c_ptr, submatrices_vals, shape=[size(submatrices_ja)])
+      
+      ! ! ~~~~~~~~~~
+      
+      ! allocate(cols(max_nnzs))
+      ! allocate(vals(max_nnzs))
+      ! allocate(vals_power_temp(max_nnzs))
+      ! allocate(vals_previous_power_temp(max_nnzs))
+      ! allocate(cols_index_one(max_nnzs))
+      ! allocate(cols_index_two(max_nnzs))      
+
+      ! ! Scale the highest constrained power
+      ! call MatScale(cmat, coefficients(poly_sparsity_order+1), ierr)
+
+      ! ! Then go backwards and add in each of the coefficients * A^order from the second highest order down
+      ! do order = poly_sparsity_order - 1, 1, -1
+
+      !    ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
+      !    ! Can use SUBSET_NONZERO_PATTERN as we have put the highest order power in first
+      !    call MatAXPY(cmat, coefficients(order+1), matrix_powers(order), SUBSET_NONZERO_PATTERN , ierr) 
+      ! end do 
+
+      ! ! Add in the 0th order term
+      ! do i_loc = 1, local_rows   
+         
+      !    ! Add in the I term - 0th order term
+      !    call MatSetValue(cmat, global_row_start + i_loc-1, global_row_start + i_loc-1, &
+      !                coefficients(1), ADD_VALUES, ierr)           
+      ! end do
+
+      ! ! ~~~~~~~~~~~~
+      ! ! From here we now have cmat with the correct values up to the power poly_sparsity_order
+      ! ! and hence we want to add in the sparsity constrained powers
+      ! ! ~~~~~~~~~~~~
+      
+      ! ! Now go through and compute the sum of the matrix powers
+      ! ! We're doing row-wise matmatmults here assuming the fixed sparsity
+      ! ! We exploit the fact that the subsequent matrix powers can be done
+      ! ! one row at a time, so we only have to retrieve the needed vals from mat_sparsity_match once
+      ! do i_loc = 1, local_rows 
+                          
+      !    ! Get the row of mat_sparsity_match
+      !    call MatGetRow(mat_sparsity_match, i_loc - 1 + global_row_start, ncols_two, &
+      !             cols_ptr, vals_ptr, ierr)
+      !    ! Copying here because mat_sparsity_match and matrix are often the same matrix
+      !    ! and hence we can only have one active matgetrow
+      !    ncols = ncols_two
+      !    cols(1:ncols) = cols_ptr(1:ncols)
+      !    vals(1:ncols) = vals_ptr(1:ncols)
+      !    call MatRestoreRow(mat_sparsity_match, i_loc - 1 + global_row_start, ncols_two, &
+      !             cols_ptr, vals_ptr, ierr)         
+
+      !    ! This is just a symbolic for the set of rows given in cols
+      !    ! Let's just do all the column matching and extraction of the values once
+            
+      !    ! Allocate some space to store the matching indices
+      !    allocate(symbolic_ones(ncols))
+      !    allocate(symbolic_vals(ncols))
+      !    row_index_into_submatrix = 1
+
+      !    ! This is a row-wise product
+      !    do j_loc = 1, ncols
+
+      !       ! If we're trying to access a local row in matrix
+      !       if (cols(j_loc) .ge. global_row_start .AND. cols(j_loc) < global_row_end_plus_one) then
+
+      !          call MatGetRow(matrix, cols(j_loc), ncols_two, &
+      !                   cols_two_ptr, vals_two_ptr, ierr)
+
+      !       ! If we're trying to access a non-local row in matrix
+      !       else
+
+      !          ! this is local row index we want into reuse_submatrices(1) (as row_indices used to extract are just colmap)  
+      !          ! We know cols is sorted, so every non-local index will be greater than the last one
+      !          ! (it's just that cols could have some local ones between different non-local)
+      !          ! colmap is also sorted and we know every single non-local entry in cols(j_loc) is in colmap
+      !          do while (row_index_into_submatrix .le. cols_ao .AND. colmap(row_index_into_submatrix) .lt. cols(j_loc))
+      !             row_index_into_submatrix = row_index_into_submatrix + 1
+      !          end do
+
+      !          ! This is the number of columns
+      !          ncols_two = submatrices_ia(row_index_into_submatrix+1) - submatrices_ia(row_index_into_submatrix)
+      !          allocate(cols_two_ptr(ncols_two))
+      !          ! This is the local column indices in reuse_submatrices(1)
+      !          cols_two_ptr = submatrices_ja(submatrices_ia(row_index_into_submatrix)+1:submatrices_ia(row_index_into_submatrix+1))
+      !          ! Because col_indices_off_proc_array (and hence the column indices in reuse_submatrices(1) is sorted, 
+      !          ! then cols_two_ptr contains the sorted global column indices
+      !          cols_two_ptr = col_indices_off_proc_array(cols_two_ptr+1)
+
+      !          ! This is the values
+      !          vals_two_ptr => &
+      !           submatrices_vals(submatrices_ia(row_index_into_submatrix)+1:submatrices_ia(row_index_into_submatrix+1))
+      !       end if
+            
+      !       ! Search for the matching column
+      !       ! We're intersecting the global column indices of mat_sparsity_match (cols) and matrix (cols_two_ptr)
+      !       call intersect_pre_sorted_indices_only(cols(1:ncols), cols_two_ptr, cols_index_one, cols_index_two, match_counter)      
+            
+      !       ! Don't need to do anything if we have no matches
+      !       if (match_counter == 0) then 
+      !          ! Store that we can skip this entry
+      !          symbolic_ones(j_loc)%ptr => null()
+      !          symbolic_vals(j_loc)%ptr => null()                        
+      !       else
+
+      !          ! These are the matching local column indices for this row of mat_sparsity_match
+      !          allocate(symbolic_ones(j_loc)%ptr(match_counter))
+      !          symbolic_ones(j_loc)%ptr = cols_index_one(1:match_counter)
+
+      !          ! These are the matching values of matrix
+      !          allocate(symbolic_vals(j_loc)%ptr(match_counter))
+      !          symbolic_vals(j_loc)%ptr = vals_two_ptr(cols_index_two(1:match_counter)) 
+      !       end if   
+            
+      !       ! Restore local row of matrix
+      !       if (cols(j_loc) .ge. global_row_start .AND. cols(j_loc) < global_row_end_plus_one) then
+      !          call MatRestoreRow(matrix, cols(j_loc), ncols_two, &
+      !                   cols_two_ptr, vals_two_ptr, ierr)
+      !       else
+      !          deallocate(cols_two_ptr)
+      !       end if            
+      !    end do
+         
+      !    ! Start with the values of mat_sparsity_match in it
+      !    vals_previous_power_temp(1:ncols) = vals(1:ncols)
+                     
+      !    ! Loop over any matrix powers
+      !    ! vals_power_temp stores the value of A^(term-1) for this row, and we update this as we go through 
+      !    ! the term loop
+      !    do term = poly_sparsity_order+2, size(coefficients)
+
+      !       ! We need to sum up the product of vals_previous_power_temp(j_loc) * matching columns
+      !       vals_power_temp(1:ncols) = 0
+
+      !       ! Have to finish all the columns before we move onto the next coefficient
+      !       do j_loc = 1, ncols
+
+      !          ! If we have no matching columns cycle this row
+      !          if (.NOT. associated(symbolic_ones(j_loc)%ptr)) cycle
+
+      !          ! symbolic_vals(j_loc)%ptr has the matching values of A in it
+      !          vals_power_temp(symbolic_ones(j_loc)%ptr) = vals_power_temp(symbolic_ones(j_loc)%ptr) + &
+      !                   vals_previous_power_temp(j_loc) * symbolic_vals(j_loc)%ptr
+
+      !       end do
+               
+      !       ! ~~~~~~~~~~~
+      !       ! Now can add the value of coeff * A^(term-1) to our matrix
+      !       ! Can skip this if coeff is zero, but still need to compute A^(term-1)
+      !       ! for the next time through
+      !       ! ~~~~~~~~~~~
+      !       if (ncols /= 0 .AND. coefficients(term) /= 0d0) then
+      !          call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
+      !                coefficients(term) * vals_power_temp, ADD_VALUES, ierr)   
+      !       end if
+
+      !       ! This should now have the value of A^(term-1) in it
+      !       vals_previous_power_temp(1:ncols) = vals_power_temp(1:ncols)
+      !    end do      
+
+      !    ! Delete our symbolic
+      !    do j_loc = 1, ncols
+      !       if (associated(symbolic_ones(j_loc)%ptr)) then
+      !          deallocate(symbolic_ones(j_loc)%ptr)
+      !          deallocate(symbolic_vals(j_loc)%ptr)
+      !       end if      
+      !    end do  
+      !    deallocate(symbolic_vals, symbolic_ones)  
+      ! end do
+
+      ! call MatRestoreRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
+      ! ! We very deliberately don't call restorearray here!
+      ! ! There is no matseqaijgetarrayread or matseqaijrestorearrayread in Fortran
+      ! ! Those routines don't increment the PetscObjectStateGet which tells petsc
+      ! ! the mat has changed. Hence above we directly access the data pointer with 
+      ! ! a call to MatSeqAIJGetArrayF90_mine and then never write into it
+      ! ! If we call the restorearrayf90, that does increment the object state
+      ! ! even though we only read from the array
+      ! ! That would mean if we pass in a pc->pmat for example, just setting up a pc
+      ! ! would trigger petsc setting up the pc on every iteration of the pc
+      ! ! call MatSeqAIJRestoreArray(reuse_submatrices(1),submatrices_vals,ierr);
+
+      ! ! ~~~~~~~~~~~
+
+      ! ! Do the assembly, should need zero reductions in this given we've set the 
+      ! ! flags above
+      ! call MatAssemblyBegin(cmat, MAT_FINAL_ASSEMBLY, ierr)
+
+      ! ! Delete temporaries
+      ! do order = 2, poly_sparsity_order
+      !    call MatDestroy(matrix_powers(order), ierr)
+      ! end do
+      ! if (deallocate_submatrices) then
+      !    deallocate(reuse_submatrices)
+      !    reuse_submatrices => null()
+      ! end if
+
+      ! deallocate(col_indices_off_proc_array)
+      ! deallocate(cols, vals, vals_power_temp, vals_previous_power_temp, cols_index_one, cols_index_two)
+
+      ! ! Finish assembly
+      ! call MatAssemblyEnd(cmat, MAT_FINAL_ASSEMBLY, ierr) 
+
+         
+   end subroutine mat_mult_powers_share_sparsity_newton_cpu   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -845,11 +1399,10 @@ module gmres_poly_newton
       ! If we're constraining sparsity we've built a custom matrix-powers that assumes fixed sparsity
       if (poly_sparsity_order < poly_order) then    
 
-         ! ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
-         ! ! so that it doen't have to do much comms
-         ! ! This also finishes off the asyn comms and computes the coefficients
-         ! call mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, &
-         !          reuse_mat, reuse_submatrices, inv_matrix)
+         ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
+         ! so that it doen't have to do much comms
+         call mat_mult_powers_share_sparsity_newton(matrix, poly_order, poly_sparsity_order, coefficients, &
+                  reuse_mat, reuse_submatrices, inv_matrix)
 
          ! ! Then just return
          return         
@@ -1052,6 +1605,137 @@ module gmres_poly_newton
       end if             
 
    end subroutine build_gmres_polynomial_newton_inverse_0th_order   
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine build_gmres_polynomial_inverse_0th_order_sparsity_newton(matrix, poly_order, coefficients, &
+                  inv_matrix)
+
+      ! Specific inverse with 0th order sparsity
+
+      ! ~~~~~~
+      type(tMat), intent(in)                            :: matrix
+      integer, intent(in)                               :: poly_order
+      PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
+      type(tMat), intent(inout)                         :: inv_matrix
+
+      ! Local variables
+      integer :: order
+      PetscErrorCode :: ierr      
+      logical :: reuse_triggered
+      type(tVec) :: inv_vec, diag_vec, product_vec, temp_vec_A, one_vec, temp_vec_two
+      ! ~~~~~~
+
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
+
+       ! Our matrix has to be square
+      call MatCreateVecs(matrix, product_vec, diag_vec, ierr)
+      call MatGetDiagonal(matrix, diag_vec, ierr)
+
+      ! This stores D^order
+      if (.NOT. reuse_triggered) then
+         call VecDuplicate(diag_vec, inv_vec, ierr)
+      else
+         call MatDiagonalGetDiagonal(inv_matrix, inv_vec, ierr)
+      end if
+      call VecDuplicate(diag_vec, temp_vec_A, ierr)
+      call VecDuplicate(diag_vec, one_vec, ierr)
+      call VecDuplicate(diag_vec, temp_vec_two, ierr)
+      
+      ! Set to zero as we add to it
+      call VecSet(inv_vec, 0d0, ierr) 
+      ! We start with an identity in product_vec    
+      call VecSet(product_vec, 1d0, ierr)
+      call VecSet(one_vec, 1d0, ierr)
+
+      order = 1
+      do while (order .le. size(coefficients, 1) - 1)
+
+         ! temp_vec_A is going to store things with the sparsity of A
+         call VecCopy(diag_vec, temp_vec_A, ierr)     
+
+         ! If real this is easy
+         if (coefficients(order,2) == 0d0) then
+
+            ! Skips eigenvalues that are numerically zero - see 
+            ! the comment in calculate_gmres_polynomial_roots_newton 
+            if (abs(coefficients(order,1)) < 1e-12) then
+               order = order + 1
+               cycle
+            end if        
+
+            call VecAXPY(inv_vec, 1d0/coefficients(order,1), product_vec, ierr)
+
+            ! temp_vec_A = A_ff/theta_k       
+            call VecScale(temp_vec_A, -1d0/coefficients(order,1), ierr)
+            ! temp_vec_A = I - A_ff/theta_k
+            call VecAXPY(temp_vec_A, 1d0, one_vec, ierr)
+            
+            ! product_vec = product_vec * temp_vec_A
+            call VecPointwiseMult(product_vec, product_vec, temp_vec_A, ierr)   
+            
+            order = order + 1
+
+         ! Complex 
+         else
+
+            ! Skips eigenvalues that are numerically zero
+            if (coefficients(order,1)**2 + coefficients(order,2)**2 < 1e-12) then
+               order = order + 2
+               cycle
+            end if
+
+            ! Compute 2a I - A
+            ! temp_vec_A = -A    
+            call VecScale(temp_vec_A, -1d0, ierr)
+            ! temp_vec_A = 2a I - A_ff
+            call VecAXPY(temp_vec_A, 2d0 * coefficients(order,1), one_vec, ierr) 
+            ! temp_vec_A = (2a I - A_ff)/(a^2 + b^2)
+            call VecScale(temp_vec_A, 1d0/(coefficients(order,1)**2 + coefficients(order,2)**2), ierr) 
+
+            ! temp_vec_two = temp_vec_A * product_vec
+            call VecPointwiseMult(temp_vec_two, temp_vec_A, product_vec, ierr)   
+            call VecAXPY(inv_vec, 1d0, temp_vec_two, ierr)         
+
+            if (order .le. size(coefficients, 1) - 2) then
+               ! temp_vec_two = A * temp_vec_two
+               call VecPointwiseMult(temp_vec_two, diag_vec, temp_vec_two, ierr) 
+               call VecAXPY(product_vec, -1d0, temp_vec_two, ierr)
+            end if
+
+            ! Skip two evals
+            order = order + 2
+
+         end if       
+      end do
+
+      ! Final step if last root is real
+      if (coefficients(size(coefficients,1),2) == 0d0) then
+         ! Add in the final term multiplied by 1/theta_poly_order
+
+         ! Skips eigenvalues that are numerically zero
+         if (abs(coefficients(order,1)) > 1e-12) then      
+            call VecAXPY(inv_vec, 1d0/coefficients(order,1), product_vec, ierr)  
+         end if       
+      end if
+
+      ! We may be reusing with the same sparsity
+      if (.NOT. reuse_triggered) then
+         ! The matrix takes ownership of inv_vec and increases ref counter
+         call MatCreateDiagonal(inv_vec, inv_matrix, ierr)
+         call VecDestroy(inv_vec, ierr)
+      else
+         call MatDiagonalRestoreDiagonal(inv_matrix, inv_vec, ierr)
+      end if  
+
+      call VecDestroy(diag_vec, ierr)
+      call VecDestroy(product_vec, ierr)     
+      call VecDestroy(temp_vec_A, ierr)   
+      call VecDestroy(one_vec, ierr)                      
+      call VecDestroy(temp_vec_two, ierr)
+
+   end subroutine build_gmres_polynomial_inverse_0th_order_sparsity_newton     
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
