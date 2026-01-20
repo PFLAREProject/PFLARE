@@ -11,28 +11,10 @@ module pcair_shell
    implicit none
 
    public
-   
-   ! You have to provide this to get the context type correct for PETSc
-   interface PCShellGetContext
-      subroutine PCShellGetContext(pc,pc_air_data,ierr)
-         use petsc
-         use pcair_data_type
-         type(tPC) :: pc
-         type(pc_air_multigrid_data), pointer :: pc_air_data
-         PetscErrorCode :: ierr
-      end subroutine PCShellGetContext  
-   end interface PCShellGetContext
 
-   interface PCShellSetContext
-      subroutine PCShellSetContext(pc,pc_air_data,ierr)
-         use petsc
-         use pcair_data_type
-         type(tPC) :: pc
-         type(pc_air_multigrid_data) :: pc_air_data
-         PetscErrorCode :: ierr
-      end subroutine PCShellSetContext  
-   end interface PCShellSetContext      
-   
+   ! You have to provide this to get the context type correct for PETSc
+   Interface_PCShellGetContext(pc_air_multigrid_data)
+
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
