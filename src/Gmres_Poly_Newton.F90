@@ -503,18 +503,16 @@ module gmres_poly_newton
             end if
 
             ! y = y + theta_i * MF_VEC_TEMP
-            call VecAXPBY(y, &
+            call VecAXPY(y, &
                      1d0/mat_ctx%real_roots(order), &
-                     1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)   
                                           
             ! MF_VEC_DIAG = A * MF_VEC_TEMP
             ! MF_VEC_DIAG isn't actually a diagonal here, we're just using this vec as temporary storage
             call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_TEMP), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
             ! MF_VEC_TEMP = MF_VEC_TEMP - theta_i * MF_VEC_DIAG
-            call VecAXPBY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+            call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
                      -1d0/mat_ctx%real_roots(order), &
-                     1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr) 
 
             order = order + 1
@@ -539,9 +537,8 @@ module gmres_poly_newton
                   mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
 
             ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_DIAG
-            call VecAXPBY(y, &
+            call VecAXPY(y, &
                      1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
-                     1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)  
                      
             if (order .le. size(mat_ctx%real_roots) - 2) then
@@ -549,9 +546,8 @@ module gmres_poly_newton
                call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)    
 
                ! MF_VEC_TEMP = MF_VEC_TEMP - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_RHS
-               call VecAXPBY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
                         -1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
-                        1d0, &
                         mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)               
             end if
 
