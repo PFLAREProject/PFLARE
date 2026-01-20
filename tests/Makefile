@@ -425,6 +425,13 @@ run_tests_no_load_parallel:
 	 -pc_air_inverse_type power		 
 # 
 	@echo ""
+	@echo "Test auto truncation with matrix-free Newton polynomials as coarse grid solver in parallel" 
+	$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 10 -da_grid_y 10 -ksp_type richardson -pc_type air \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys \
+	 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-2 -ksp_max_it 3 \
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power	 
+# 
+	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power

@@ -165,6 +165,7 @@ module air_mg_setup
 
             call VecSetRandom(rand_vec, rctx, ierr)
             call PetscRandomDestroy(rctx, ierr)
+            call VecNorm(rand_vec, NORM_2, norm_b, ierr)
 
             call VecDuplicate(rand_vec, sol_vec, ierr)
             call VecDuplicate(rand_vec, temp_vec, ierr)
@@ -179,17 +180,30 @@ module air_mg_setup
                   air_data%options%coarsest_matrix_free_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
-                  air_data%inv_A_ff(our_level))             
+                  air_data%inv_A_ff(our_level))          
+                  
+            ! We have a custom MF routine for computing just the residual 
+            ! when applying the Newton form of the gmres polynomial that saves some flops
+            ! We don't actually need the solution here as it's useless
+            if ((air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
+                  air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+                  air_data%options%coarsest_matrix_free_polys) then
 
-            ! sol_vec = A^-1 * rand_vec
-            call MatMult(air_data%inv_A_ff(our_level), rand_vec, sol_vec, ierr)
-            ! Now calculate a residual
-            ! A * sol_vec
-            call MatMult(air_data%coarse_matrix(our_level), sol_vec, temp_vec, ierr)
-            ! Now A * sol_vec - rand_vec
-            call VecAXPY(temp_vec, -1d0, rand_vec, ierr)
+               call petsc_matvec_gmres_newton_mf_residual(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
+
+            else
+
+               ! sol_vec = A^-1 * rand_vec
+               call MatMult(air_data%inv_A_ff(our_level), rand_vec, sol_vec, ierr)
+               ! Now calculate a residual
+               ! A * sol_vec
+               call MatMult(air_data%coarse_matrix(our_level), sol_vec, temp_vec, ierr)
+               ! Now A * sol_vec - rand_vec
+               call VecAXPY(temp_vec, -1d0, rand_vec, ierr)  
+            end if 
+
+            ! Get the achieved norm
             call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
-            call VecNorm(rand_vec, NORM_2, norm_b, ierr)    
 
             ! If it's good enough we can truncate on this level and our coarse solver has been computed
             if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol) then
