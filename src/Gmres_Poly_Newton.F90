@@ -237,7 +237,8 @@ module gmres_poly_newton
          ! as we might expect up to the rank
          ! but then we have some eigenvalues that are numerically zero
          ! We keep those and our application of the newton polynomial in 
-         ! petsc_matvec_gmres_newton_mf just skips them and hence we don't do any 
+         ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
+         ! just skips them and hence we don't do any 
          ! extra work in the application phase than we would have done with lower order     
          
          ! ~~~~~~~~~~~
@@ -457,6 +458,7 @@ module gmres_poly_newton
       ! Applies a gmres polynomial in the newton basis matrix-free as an inverse
       ! The roots are stored in mat_ctx%real_roots, mat_ctx%imag_roots in the input matshell
       ! Based on Loe 2021 Toward efficient polynomial preconditioning for GMRES
+      ! This is Algorithm 3 in Loe
       ! y = A x
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -501,18 +503,16 @@ module gmres_poly_newton
             end if
 
             ! y = y + theta_i * MF_VEC_TEMP
-            call VecAXPBY(y, &
+            call VecAXPY(y, &
                      1d0/mat_ctx%real_roots(order), &
-                     1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)   
                                           
             ! MF_VEC_DIAG = A * MF_VEC_TEMP
             ! MF_VEC_DIAG isn't actually a diagonal here, we're just using this vec as temporary storage
             call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_TEMP), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
             ! MF_VEC_TEMP = MF_VEC_TEMP - theta_i * MF_VEC_DIAG
-            call VecAXPBY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+            call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
                      -1d0/mat_ctx%real_roots(order), &
-                     1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr) 
 
             order = order + 1
@@ -537,9 +537,8 @@ module gmres_poly_newton
                   mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
 
             ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_DIAG
-            call VecAXPBY(y, &
+            call VecAXPY(y, &
                      1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
-                     1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)  
                      
             if (order .le. size(mat_ctx%real_roots) - 2) then
@@ -547,9 +546,8 @@ module gmres_poly_newton
                call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)    
 
                ! MF_VEC_TEMP = MF_VEC_TEMP - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_RHS
-               call VecAXPBY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
                         -1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
-                        1d0, &
                         mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)               
             end if
 
@@ -574,6 +572,103 @@ module gmres_poly_newton
       end if
 
    end subroutine petsc_matvec_gmres_newton_mf      
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_gmres_newton_mf_residual(mat, x, y)
+
+      ! Applies a gmres residual polynomial in the newton basis matrix-free as an inverse
+      ! This is different than petsc_matvec_gmres_newton_mf which applies p(A)v, 
+      ! whereas this routine applies pi(A)v
+      ! This is (a slightly modified) Algorithm 1 in Loe and saves some flops when we don't need the solution
+      ! just the residual
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      integer :: order, errorcode
+      PetscErrorCode :: ierr      
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%real_roots)) then
+         print *, "Roots in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! y = x
+      call VecCopy(x, y, ierr)
+
+      ! ~~~~~~~~~~~~
+      ! Iterate over the order
+      ! ~~~~~~~~~~~~
+      order = 1
+      ! Does every e'val in this loop unlike when we apply p(A)v
+      do while (order .le. size(mat_ctx%real_roots))
+
+         ! If real this is easy
+         if (mat_ctx%imag_roots(order) == 0d0) then
+
+            ! Skips eigenvalues that are numerically zero - see 
+            ! the comment in calculate_gmres_polynomial_roots_newton 
+            if (abs(mat_ctx%real_roots(order)) < 1e-12) then
+               order = order + 1
+               cycle
+            end if
+
+            ! MF_VEC_DIAG = A * y
+            call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+
+            ! y = y - theta_i * MF_VEC_DIAG
+            call VecAXPY(y, &
+                     -1d0/mat_ctx%real_roots(order), &
+                     mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+
+            order = order + 1
+
+         ! If imaginary, then have to combine the e'val and its
+         ! complex conjugate to keep the arithmetic real
+         ! Relies on the complex conjugate being next to each other
+         else
+
+            ! Skips eigenvalues that are numerically zero
+            if (mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2 < 1e-12) then
+               order = order + 2
+               cycle
+            end if           
+            
+            ! MF_VEC_DIAG = A * y
+            call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)   
+
+            ! MF_VEC_TEMP = A * MF_VEC_DIAG
+            call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)              
+
+            ! MF_VEC_TEMP = MF_VEC_TEMP - 2 * Re(theta_i) * MF_VEC_DIAG
+            call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+                  -2 * mat_ctx%real_roots(order), &
+                  mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+
+            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_TEMP
+            call VecAXPY(y, &
+                     1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
+                     mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+
+            ! Skip two evals
+            order = order + 2
+
+         end if
+      end do
+
+   end subroutine petsc_matvec_gmres_newton_mf_residual
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

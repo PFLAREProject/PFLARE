@@ -103,7 +103,7 @@ module gmres_poly
             zero_root = .FALSE.
             if (coefficients(i_loc,2) == 0d0) then
                ! The size of the zero check here has to match that in 
-               ! petsc_matvec_gmres_newton_mf 
+               ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
                if (abs(coefficients(i_loc,1)) < 1e-12) zero_root = .TRUE.
             else
                if (coefficients(i_loc,1)**2 + &
