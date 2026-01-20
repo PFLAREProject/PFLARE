@@ -263,78 +263,78 @@ jobs:
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}"
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}" check
           
-  # GPU testing
-  # Have to build the entirity of the stack given the petsc configure
-  # needs to detect the gpu
-  gnu_debug_gpu:
-    runs-on: ubicloud-gpu
-    needs:  [setup]
-    # This conditional ensures the job only runs when manually triggered
-    if: github.event_name == 'workflow_dispatch'    
-    # Specify the protected environment to ensure gpu builds are only triggered 
-    # by the correct people
-    environment: protected-manual-builds    
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
-    steps:       
-      # Run our tests on GPU
-      - name: Test GPU
-        run: |
-         export BRANCH="${{ env.BRANCH }}" &&
-         echo "Using branch: $BRANCH" &&
-         set -e &&
-         echo '=== GPU Information ===' &&
-         nvidia-smi &&
-         sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            autoconf \
-            automake \
-            bash-completion \
-            ca-certificates \
-            chrpath \
-            cmake \
-            curl \
-            g++ \
-            gcc \
-            gfortran \
-            git \
-            less \
-            libblis-serial-dev \
-            liblapack-dev \
-            libtool \
-            locales \
-            m4 \
-            make \
-            openssl \
-            pkg-config \
-            ripgrep \
-            zlib1g-dev \
-            python3-virtualenv \
-            python3-venv \
-            python3-dev \
-            wget \
-            valgrind \
-            vim &&
-         export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-debug &&
-         git clone --depth=1 --branch=main https://gitlab.com/petsc/petsc.git && \
-         cd petsc && \
-         python3 configure \
-            --with-debugging=1 \
-            --download-metis \
-            --download-parmetis \
-            --download-fblaslapack \
-            --with-cuda \
-            --download-kokkos \
-            --download-kokkos-kernels \
-            --with-cuda-arch=89 \
-            --download-mpich \
-            && \
-         make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-debug check &&
-         git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git &&
-         cd PFLARE &&
-         export PFLARE_KOKKOS_DEBUG=1 &&
-         export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
-         make -j2 FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \
-         make -j2 tests FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror"
+#   # GPU testing - ubicloud have deprecated their gpu runners
+#   # Have to build the entirity of the stack given the petsc configure
+#   # needs to detect the gpu
+#   gnu_debug_gpu:
+#     runs-on: ubicloud-gpu
+#     needs:  [setup]
+#     # This conditional ensures the job only runs when manually triggered
+#     if: github.event_name == 'workflow_dispatch'    
+#     # Specify the protected environment to ensure gpu builds are only triggered 
+#     # by the correct people
+#     environment: protected-manual-builds    
+#     env:
+#       BRANCH: ${{ needs.setup.outputs.branch }}
+#     steps:       
+#       # Run our tests on GPU
+#       - name: Test GPU
+#         run: |
+#          export BRANCH="${{ env.BRANCH }}" &&
+#          echo "Using branch: $BRANCH" &&
+#          set -e &&
+#          echo '=== GPU Information ===' &&
+#          nvidia-smi &&
+#          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+#             autoconf \
+#             automake \
+#             bash-completion \
+#             ca-certificates \
+#             chrpath \
+#             cmake \
+#             curl \
+#             g++ \
+#             gcc \
+#             gfortran \
+#             git \
+#             less \
+#             libblis-serial-dev \
+#             liblapack-dev \
+#             libtool \
+#             locales \
+#             m4 \
+#             make \
+#             openssl \
+#             pkg-config \
+#             ripgrep \
+#             zlib1g-dev \
+#             python3-virtualenv \
+#             python3-venv \
+#             python3-dev \
+#             wget \
+#             valgrind \
+#             vim &&
+#          export PETSC_DIR=`pwd`/petsc && export PETSC_ARCH=arch-linux-c-debug &&
+#          git clone --depth=1 --branch=main https://gitlab.com/petsc/petsc.git && \
+#          cd petsc && \
+#          python3 configure \
+#             --with-debugging=1 \
+#             --download-metis \
+#             --download-parmetis \
+#             --download-fblaslapack \
+#             --with-cuda \
+#             --download-kokkos \
+#             --download-kokkos-kernels \
+#             --with-cuda-arch=89 \
+#             --download-mpich \
+#             && \
+#          make && make PETSC_DIR=/home/runner/work/PFLARE/PFLARE/petsc PETSC_ARCH=arch-linux-c-debug check &&
+#          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git &&
+#          cd PFLARE &&
+#          export PFLARE_KOKKOS_DEBUG=1 &&
+#          export PETSC_OPTIONS='-on_error_abort -mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos' &&
+#          make -j2 FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror" && \
+#          make -j2 tests FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror"
 
   # No docker on macos with github actions so have to just build petsc first
   macos_debug:
