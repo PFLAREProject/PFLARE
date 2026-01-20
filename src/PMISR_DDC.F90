@@ -155,7 +155,7 @@ module pmisr_ddc
       PetscReal, dimension(:), allocatable :: measure_local
       PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable :: in_set_this_loop
       PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
-      type(c_ptr) :: measure_nonlocal_ptr, assigned_local_ptr, assigned_nonlocal_ptr
+      type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
       real(c_double), pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
       type(tVec) :: measure_vec
@@ -284,6 +284,9 @@ module pmisr_ddc
          allocate(assigned_nonlocal(cols_ao))
          assigned_local_ptr = c_loc(assigned_local)
          assigned_nonlocal_ptr = c_loc(assigned_nonlocal)
+      else
+         ! Need to avoid uninitialised warning
+         allocate(assigned_nonlocal(0))
       end if
 
       ! ~~~~~~~~~~~~
@@ -291,7 +294,7 @@ module pmisr_ddc
       ! ~~~~~~~~~~~~
       counter_in_set_start = 0
       assigned_local = .FALSE.
-      if (comm_size/=1) assigned_nonlocal = .FALSE.
+      assigned_nonlocal = .FALSE.
 
       do ifree = 1, local_rows
 
@@ -550,10 +553,10 @@ module pmisr_ddc
       deallocate(measure_local, in_set_this_loop, assigned_local)
       if (comm_size/=1) then
          call VecDestroy(measure_vec, ierr)    
-         deallocate(assigned_nonlocal)    
          ! Don't forget to restore on lvec from our matrix
          call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)             
       end if
+      deallocate(assigned_nonlocal)    
 
    end subroutine pmisr_cpu  
 
