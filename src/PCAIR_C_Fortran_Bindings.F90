@@ -831,7 +831,7 @@ module pcair_c_fortran_bindings
       integer                                :: our_level, errorcode
       integer(PFLARE_PETSCINT_C_KIND)                               :: num_levels
       type(tPC)                              :: pc_shell
-      type(pc_air_multigrid_data), pointer   :: pc_air_data      
+      type(pc_air_multigrid_data), pointer   :: pc_air_data=>null()      
 
       ! ~~~~~~~~
 
@@ -1751,7 +1751,7 @@ module pcair_c_fortran_bindings
       integer                                :: our_level, errorcode
       integer(PFLARE_PETSCINT_C_KIND)                               :: num_levels, i_loc, j_loc
       type(tPC)                              :: pc_shell
-      type(pc_air_multigrid_data), pointer   :: pc_air_data   
+      type(pc_air_multigrid_data), pointer   :: pc_air_data=>null()   
       real(PFLARE_PETSCREAL_C_KIND), pointer :: coeffs_c(:,:)   
 
       ! ~~~~~~~~
