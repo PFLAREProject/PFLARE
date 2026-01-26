@@ -2,7 +2,6 @@ module neumann_poly
 
    use petscmat
    use gmres_poly
-   use matshell_pflare
    use c_petsc_interfaces
 
 #include "petsc/finclude/petscmat.h"
@@ -127,7 +126,7 @@ module neumann_poly
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       type(tMat) :: temp_mat
       type(tVec) :: rhs_copy, diag_vec
-      type(mat_ctxtype), pointer :: mat_ctx, mat_ctx_ida
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_ida=>null()
 
       ! ~~~~~~    
 

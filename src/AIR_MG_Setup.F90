@@ -52,7 +52,7 @@ module air_mg_setup
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
       type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
       type(tIS)           :: is_unchanged, is_full, temp_is
-      type(mat_ctxtype), pointer :: mat_ctx
+      type(mat_ctxtype), pointer :: mat_ctx => null()
       PetscInt, parameter :: one=1, zero=0
       type(tVec), dimension(:), allocatable :: left_null_vecs, right_null_vecs
       type(tVec), dimension(:), allocatable :: left_null_vecs_c, right_null_vecs_c

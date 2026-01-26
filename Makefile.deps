@@ -4,21 +4,20 @@ src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.F90 src/FC_Smooth.o sr
 src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/AIR_Operators_Setup.o src/Grid_Transfer.o src/C_PETSc_Interfaces.o src/FC_Smooth.o src/AIR_MG_Stats.o src/Timers.o src/Approx_Inverse_Setup.o src/Matshell_Data_Type.o src/CF_Splitting.o src/Constrain_Z_or_W.o 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.F90 src/Gmres_Poly.o src/AIR_Data_Type.o src/PETSc_Helper.o 
 src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/Grid_Transfer_Improve.o src/Grid_Transfer.o src/C_PETSc_Interfaces.o src/FC_Smooth.o src/Timers.o src/Approx_Inverse_Setup.o src/Constrain_Z_or_W.o 
-src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/Matshell_PFLARE.o src/Repartition.o src/SAI_Z.o src/Weighted_Jacobi.o src/Neumann_Poly.o src/Gmres_Poly_Newton.o src/Gmres_Poly.o 
+src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/Matshell_Data_Type.o src/Repartition.o src/SAI_Z.o src/Weighted_Jacobi.o src/Neumann_Poly.o src/Gmres_Poly_Newton.o src/Gmres_Poly.o 
 src/Binary_Tree.o : src/Binary_Tree.F90 
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/AIR_Data_Type_Routines.o src/PFLARE.o src/PCAIR_Shell.o src/AIR_MG_Setup.o 
 src/CF_Splitting.o : src/CF_Splitting.F90 src/PETSc_Helper.o src/Aggregation.o src/PMISR_DDC.o 
 src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
-src/FC_Smooth.o : src/FC_Smooth.F90 src/Matshell_PFLARE.o src/PETSc_Helper.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
+src/FC_Smooth.o : src/FC_Smooth.F90 src/Matshell_Data_Type.o src/PETSc_Helper.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/Gmres_Poly_Data_Type.o : src/Gmres_Poly_Data_Type.F90 src/TSQR.o 
-src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Matshell_PFLARE.o src/C_PETSc_Interfaces.o src/Sorting.o 
+src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Matshell_Data_Type.o src/C_PETSc_Interfaces.o src/Sorting.o 
 src/Gmres_Poly_Newton.o : src/Gmres_Poly_Newton.F90 src/C_PETSc_Interfaces.o src/Gmres_Poly.o 
 src/Grid_Transfer.o : src/Grid_Transfer.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/Grid_Transfer_Improve.o : src/Grid_Transfer_Improve.F90 src/PETSc_Helper.o src/Timers.o 
 src/Matshell_Data_Type.o : src/Matshell_Data_Type.F90 src/AIR_Data_Type.o 
-src/Matshell_PFLARE.o : src/Matshell_PFLARE.F90 src/Matshell_Data_Type.o 
-src/Neumann_Poly.o : src/Neumann_Poly.F90 src/C_PETSc_Interfaces.o src/Matshell_PFLARE.o src/Gmres_Poly.o 
+src/Neumann_Poly.o : src/Neumann_Poly.F90 src/C_PETSc_Interfaces.o src/Gmres_Poly.o 
 src/PCAIR_C_Fortran_Bindings.o : src/PCAIR_C_Fortran_Bindings.F90 src/PCAIR_Interfaces.o 
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.F90 src/AIR_Data_Type.o 
 src/PCAIR_Interfaces.o : src/PCAIR_Interfaces.F90 src/PCAIR_Shell.o 

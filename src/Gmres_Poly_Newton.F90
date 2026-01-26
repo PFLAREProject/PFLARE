@@ -691,7 +691,7 @@ module gmres_poly_newton
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
-      type(mat_ctxtype), pointer :: mat_ctx
+      type(mat_ctxtype), pointer :: mat_ctx=>null()
 
       ! ~~~~~~       
 

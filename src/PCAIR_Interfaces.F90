@@ -80,7 +80,7 @@ module pcair_interfaces
       type(air_options), pointer, intent(inout) :: options
 
       type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
       PetscErrorCode :: ierr
       ! ~~~~~~~~
 
@@ -201,7 +201,7 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
       ! ~~~~~~~~
 
       ! Get the underlying PCShell
@@ -231,7 +231,7 @@ module pcair_interfaces
       PetscErrorCode, intent(out)                        :: ierr
 
       type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
       PetscInt                              :: num_levels
       integer                               :: our_level, errorcode
       ! ~~~~~~~~
@@ -349,7 +349,7 @@ module pcair_interfaces
       PetscErrorCode, intent(out)                        :: ierr
 
       type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
       PetscInt                              :: num_levels
       integer                               :: our_level, errorcode
       ! ~~~~~~~~

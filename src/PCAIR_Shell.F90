@@ -11,28 +11,6 @@ module pcair_shell
    implicit none
 
    public
-   
-   ! You have to provide this to get the context type correct for PETSc
-   interface PCShellGetContext
-      subroutine PCShellGetContext(pc,pc_air_data,ierr)
-         use petsc
-         use pcair_data_type
-         type(tPC) :: pc
-         type(pc_air_multigrid_data), pointer :: pc_air_data
-         PetscErrorCode :: ierr
-      end subroutine PCShellGetContext  
-   end interface PCShellGetContext
-
-   interface PCShellSetContext
-      subroutine PCShellSetContext(pc,pc_air_data,ierr)
-         use petsc
-         use pcair_data_type
-         type(tPC) :: pc
-         type(pc_air_multigrid_data) :: pc_air_data
-         PetscErrorCode :: ierr
-      end subroutine PCShellSetContext  
-   end interface PCShellSetContext      
-   
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
@@ -135,7 +113,7 @@ module pcair_shell
       PetscErrorCode, intent(inout)   :: ierr
 
       type(tMat)                 :: amat, pmat
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
       integer                    :: structure_flag
       PetscInt                   :: setupcalled
 
@@ -198,7 +176,7 @@ module pcair_shell
       type(tVec), intent(in)   :: x, y
       PetscErrorCode, intent(inout)   :: ierr
 
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
 
       ! ~~~~~~  
 
@@ -219,7 +197,7 @@ module pcair_shell
       type(tPC), intent(in)    :: pc
       PetscErrorCode, intent(inout)   :: ierr
 
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
 
       ! ~~~~~~  
 
@@ -242,7 +220,7 @@ module pcair_shell
       type(tPC), intent(in)    :: pc
       PetscErrorCode, intent(inout)   :: ierr
 
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
 
       ! ~~~~~~  
 
@@ -264,7 +242,7 @@ module pcair_shell
       type(tPetscViewer), intent(in)   :: viewer
       PetscErrorCode, intent(inout)           :: ierr
 
-      type(pc_air_multigrid_data), pointer  :: pc_air_data
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
 
       ! ~~~~~~  
 

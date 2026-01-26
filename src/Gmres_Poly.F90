@@ -3,7 +3,7 @@ module gmres_poly
    use petscmat
    use sorting
    use c_petsc_interfaces
-   use matshell_pflare
+   use matshell_data_type
    use tsqr
    use gmres_poly_data_type
    use petsc_helper
@@ -1410,7 +1410,7 @@ end if
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       type(tMat) :: mat_power, temp_mat
-      type(mat_ctxtype), pointer :: mat_ctx
+      type(mat_ctxtype), pointer :: mat_ctx=>null()
       logical :: reuse_triggered      
 
       ! ~~~~~~       
