@@ -14,7 +14,8 @@ LABEL description="PFLARE"
 ENV CHECKOUT_BRANCH=$BRANCH
 ENV PETSC_ARCH=$ARCH
 # -on_error_abort ensures any test failures are caught and the build fails
-ENV PETSC_OPTIONS="-on_error_abort"
+# fp trap turns on floating point exception trapping in petsc
+ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"
 
 WORKDIR /build
 
