@@ -1225,7 +1225,7 @@ end if
             ! ~~~~~~~~~~~
             if (ncols /= 0 .AND. coefficients(term) /= 0d0) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                     coefficients(term) * vals_power_temp, ADD_VALUES, ierr)   
+                     coefficients(term) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
             end if
 
             ! This should now have the value of A^(term-1) in it
