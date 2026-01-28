@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+
+# Fortran / C build artifacts
+*.o
+*.mod
+
+# PETSc / PFLARE generated files
+src/*.o
+src/*.mod
+
+# Images (optional – keep only if you want them versioned)
+# *.png
