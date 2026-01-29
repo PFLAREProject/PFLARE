@@ -1275,8 +1275,13 @@ end if
                   ! 2aprod/a^2+b^2 
                   ! for (c, c, r) mat product is output without the 1/a^2+b^2 but that is fine as we 
                   ! compensate for that in the product
+                  if (term < poly_sparsity_order + 2) then
+                     if (output_first_complex) then
+                        temp(1:ncols) = temp(1:ncols) + 2d0 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
+                        print *, "ADDING 2*a*prod back into temp"
+                     end if                     
+                  end if                  
 
-               
                ! First time through complex pair
                else
                   
@@ -1968,6 +1973,9 @@ end if
          ! Complex 
          else
 
+
+            print *, "INTO FULL", "first_complex", first_complex
+
             ! Skips eigenvalues that are numerically zero
             if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
                i = i + 2
@@ -1976,6 +1984,8 @@ end if
 
             ! If doing the normal iteration
             if (.NOT. first_complex) then
+
+               print *, "adding in 2a prod - A prod"
 
                ! temp_mat_A = -A    
                call MatScale(temp_mat_A, -1d0, ierr)
@@ -1989,6 +1999,11 @@ end if
                   ! temp_mat_two = temp_mat_A * mat_product
                   call MatMatMult(temp_mat_A, mat_product, &
                         MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)     
+               end if    
+               
+               ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
+               if (output_product .AND. i > i_sparse - 2) then
+                  call MatConvert(temp_mat_two, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)            
                end if               
 
             ! If instead we only have the first of a complex conjugate pair
@@ -1998,14 +2013,19 @@ end if
             ! as this is the part that would increase the sparsity beyond poly_sparsity_order
             else
 
+               print *, "only first complex - passing out product"
+
                ! Copy mat_product into temp_mat_two
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, temp_mat_two, ierr)
 
-            end if
+               ! temp_mat_two = 2a * mat_product
+               call MatScale(temp_mat_two, 2d0 * coefficients(i,1), ierr)   
 
-            ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
-            if (output_product .AND. i > i_sparse - 2) then
-               call MatConvert(temp_mat_two, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)            
+               ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
+               if (output_product .AND. i > i_sparse - 2) then
+                  call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)            
+               end if                
+
             end if
 
             ! Then add the scaled version of each product
@@ -2019,6 +2039,9 @@ end if
             end if            
 
             if (i .le. i_sparse - 2) then
+
+               print *, "COMPUTING PRODUCT IN FULL"
+
                ! temp_mat_three = matrix * temp_mat_two
                call MatMatMult(matrix, temp_mat_two, &
                      MAT_INITIAL_MATRIX, 1.5d0, temp_mat_three, ierr)     
