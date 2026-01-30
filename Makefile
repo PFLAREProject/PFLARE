@@ -138,7 +138,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/PCPFLAREINV.o	
 
 # Define a variable containing all the tests
-export TEST_TARGETS = ex12f ex6f ex6f_getcoeffs ex6 adv_1d adv_diff_2d ex6_cf_splitting adv_diff_cg_supg matrandom matrandom_check_reset
+export TEST_TARGETS = ex12f ex6f ex6f_getcoeffs ex6 adv_1d adv_diff_2d ex6_cf_splitting adv_diff_cg_supg matrandom matrandom_check_reset ex12f_gmres_poly
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk

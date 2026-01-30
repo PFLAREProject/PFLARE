@@ -863,8 +863,6 @@ end if
 
       reuse_triggered = .NOT. PetscObjectIsNull(cmat) 
 
-      print *, "coefficients", coefficients
-
       ! ~~~~~~~~~~
       ! Compute cmat for all powers up to poly_sparsity_order
       ! We have to be more careful here than in the monomial case
@@ -894,8 +892,6 @@ end if
          ! we can't call build_gmres_polynomial_newton_inverse_1st_1st as it is only correct
          ! for valid coefficients up to 1st order (ie both real or both complex)
          if (coefficients(1,2) == 0d0 .AND. coefficients(2,2) /= 0d0) then
-
-            print *, "DOING FULL FIRST ORDER BUILD"
 
             call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
                   cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex)            
@@ -1179,22 +1175,16 @@ end if
          if (coefficients(term,2) /= 0d0 .AND. .NOT. output_first_complex) then
             term = term - 1
             skip_add = .TRUE.
-            print *, "minus one starting term for complex root"
          end if
 
-         print *, "starting with term", term
          ! This loop skips the last coefficient
          do while (term .le. size(coefficients, 1) - 1)
 
             ! We need to sum up the product of vals_previous_power_temp(j_loc) * matching columns
             vals_power_temp(1:ncols) = 0
 
-            print *, "coeff in term", term, coefficients(term, 1), coefficients(term, 2)
-
             ! If real
             if (coefficients(term,2) == 0d0) then
-
-               print *, "inside real term", term
 
                ! ~~~~~~~~~~~
                ! Now can add the value to our matrix
@@ -1205,7 +1195,6 @@ end if
                ! to that order)
                ! ~~~~~~~~~~~
                if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12 .AND. term > poly_sparsity_order + 1) then
-                  print *, "adding to matrix real term", term
                   call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                         1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
                end if          
@@ -1218,8 +1207,6 @@ end if
 
                   ! If we have no matching columns cycle this row
                   if (.NOT. associated(symbolic_ones(j_loc)%ptr)) cycle
-
-                  print *, "processing column ", j_loc, " for real term ", term, "with coeff", coefficients(term, 1)
 
                   ! symbolic_vals(j_loc)%ptr has the matching values of A in it
                   ! This is the (I - A_ff/theta_k) * prod
@@ -1236,21 +1223,16 @@ end if
                square_sum = 1d0/(coefficients(term,1)**2 + coefficients(term,2)**2)
                if (.NOT. skip_add) then
 
-                  print *, "NOT SKIP ADD", term, "with output_first_complex", output_first_complex
-
                   ! We skip the 2 * a * prod from the first root of a complex pair if that has already
                   ! been included in the inv_matrix from build_gmres_polynomial_newton_inverse_full
                   if (term < poly_sparsity_order + 2) then
                      if (.NOT. output_first_complex) then
                         temp(1:ncols) = 2 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
-                        print *, "not skipping first complex part of product"
                      else
                         temp(1:ncols) = 0d0
-                        print *, "skipping first complex part of product"
                      end if                     
                   else
                      temp(1:ncols) = 2 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
-                     print *, "adding 2a term as normal"
                   end if
 
                   ! This is the -A * prod
@@ -1278,7 +1260,6 @@ end if
                   if (term < poly_sparsity_order + 2) then
                      if (output_first_complex) then
                         temp(1:ncols) = temp(1:ncols) + 2d0 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
-                        print *, "ADDING 2*a*prod back into temp"
                      end if                     
                   end if                  
 
@@ -1289,7 +1270,6 @@ end if
                   ! values in it for temp
                   ! All we have to do is compute prod for the next time through
                   skip_add = .FALSE.
-                  print *, "SKIP ADD"
                   temp(1:ncols) = vals_previous_power_temp(1:ncols)
                   ! @@@ have to be careful here!
                   ! If we've gone back a term, we don't have anything in prod
@@ -1303,8 +1283,6 @@ end if
                end if
 
                if (term .le. size(coefficients, 1)- 2) then
-
-                  print *, "COMPUTING PRODUCT COMPLEX"
 
                   vals_power_temp(1:ncols) = vals_previous_power_temp(1:ncols)
 
@@ -1332,7 +1310,6 @@ end if
          ! Final step if last root is real
          if (coefficients(term,2) == 0d0) then
             if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12) then
-               print *, "adding to matrix FINAL real term", term, coefficients(term, 1) 
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                      1d0/coefficients(term, 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
             end if             
@@ -1408,9 +1385,6 @@ end if
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       type(mat_ctxtype), pointer :: mat_ctx=>null()
-      logical :: reuse_triggered      
-      PetscReal :: square_sum
-      type(tMat) :: mat_product, temp_mat_A, temp_mat_two, temp_mat_three, mat_product_k_plus_1
       logical :: reuse_triggered
 
       ! ~~~~~~       
@@ -1732,8 +1706,6 @@ end if
       call MatSetOption(inv_matrix, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
       call MatSetOption(inv_matrix, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
 
-      print *, "inside 1st 1st", coefficients
-
       ! We only have two coefficients, so they are either both real or complex conjugates
       ! If real
       if (coefficients(1,2) == 0d0) then
@@ -1973,9 +1945,6 @@ end if
          ! Complex 
          else
 
-
-            print *, "INTO FULL", "first_complex", first_complex
-
             ! Skips eigenvalues that are numerically zero
             if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
                i = i + 2
@@ -1984,8 +1953,6 @@ end if
 
             ! If doing the normal iteration
             if (.NOT. first_complex) then
-
-               print *, "adding in 2a prod - A prod"
 
                ! temp_mat_A = -A    
                call MatScale(temp_mat_A, -1d0, ierr)
@@ -2013,8 +1980,6 @@ end if
             ! as this is the part that would increase the sparsity beyond poly_sparsity_order
             else
 
-               print *, "only first complex - passing out product"
-
                ! Copy mat_product into temp_mat_two
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, temp_mat_two, ierr)
 
@@ -2039,8 +2004,6 @@ end if
             end if            
 
             if (i .le. i_sparse - 2) then
-
-               print *, "COMPUTING PRODUCT IN FULL"
 
                ! temp_mat_three = matrix * temp_mat_two
                call MatMatMult(matrix, temp_mat_two, &

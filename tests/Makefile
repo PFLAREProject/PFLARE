@@ -127,6 +127,19 @@ run_tests_load_serial:
 	./ex12f -f data/mat_stream_2364 -ksp_max_it 5 -pc_air_inverse_type newton -pc_air_poly_order 2
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 3rd order"
 	./ex12f -f data/mat_stream_2364 -ksp_max_it 5 -pc_air_inverse_type newton -pc_air_poly_order 3	
+#
+	@echo ""
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders"
+	@for order in 0 1 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
+	done
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders first order fixed sparsity"
+	@for order in 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order; \
+	done
+
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_load_parallel:
@@ -167,6 +180,18 @@ run_tests_load_parallel:
 	$(MPIEXEC) -n 2 ./ex12f -f data/mat_stream_2364 -ksp_max_it 5 -pc_air_inverse_type newton -pc_air_poly_order 2
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 3rd order in parallel"
 	$(MPIEXEC) -n 2 ./ex12f -f data/mat_stream_2364 -ksp_max_it 5 -pc_air_inverse_type newton -pc_air_poly_order 3		
+#
+	@echo ""
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders in parallel"
+	@for order in 0 1 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
+	done	
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders first order fixed sparsity in parallel"
+	@for order in 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order; \
+	done	
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
