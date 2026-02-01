@@ -7,7 +7,7 @@ module approx_inverse_setup
    use weighted_jacobi
    use sai_z
    use repartition
-   use matshell_pflare
+   use matshell_data_type
 
 #include "petsc/finclude/petscmat.h"
       
@@ -368,7 +368,7 @@ module approx_inverse_setup
 
       PetscErrorCode :: ierr
       MatType:: mat_type
-      type(mat_ctxtype), pointer :: mat_ctx, mat_ctx_ida
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_ida=>null()
       ! ~~~~~~
 
       if (.NOT. PetscObjectIsNull(matrix)) then

@@ -4,7 +4,7 @@ module fc_smooth
    use c_petsc_interfaces
    use air_data_type
    use petsc_helper
-   use matshell_pflare
+   use matshell_data_type
 
 #include "petsc/finclude/petscksp.h"
 #include "petscconf.h"
@@ -405,7 +405,7 @@ module fc_smooth
 
       type(tMat) :: mat, pmat
       integer :: our_level, errorcode, i, smooth_its
-      type(mat_ctxtype), pointer :: mat_ctx  
+      type(mat_ctxtype), pointer :: mat_ctx=>null()
       type(air_multigrid_data), pointer :: air_data
       PetscBool :: first_smooth
 
