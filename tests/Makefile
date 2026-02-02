@@ -165,6 +165,9 @@ run_tests_no_load_serial:
 	@echo "Test AIRG with random diagonally dominant matrix"
 	./matrandom -ksp_max_it 5
 	@echo ""
+	@echo "Test AIRG with parameter resets on random diagonally dominant matrix"
+	./matrandom_check_reset -ksp_max_it 7
+	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
 	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4

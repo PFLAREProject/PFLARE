@@ -252,6 +252,16 @@ module c_petsc_interfaces
 
    interface   
       
+      subroutine PCMarkNotSetUp_c(A_array) &
+         bind(c, name="PCMarkNotSetUp_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+      end subroutine PCMarkNotSetUp_c         
+ 
+   end interface   
+
+   interface   
+      
       subroutine MatGetDiagonalOnly_c(A_array, diag_only) &
          bind(c, name="MatGetDiagonalOnly_c")
          use iso_c_binding

@@ -1244,10 +1244,12 @@ module pcair_interfaces
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       ! Call the underlying reset - this won't touch the context 
       ! in our pcshell though as pcshell doesn't offer a way to 
-      ! give a custom reset function      
+      ! give a custom reset function     
       call PCReset(pc_shell, ierr)
       ! Call the destroy routine
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      ! Have to mark that the outer setup must be called again
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%max_levels = int(max_levels)
       ierr = 0
@@ -1277,7 +1279,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)    
+      call PCMarkNotSetUp_c(pc%v)        
 
       options%coarse_eq_limit = coarse_eq_limit
       ierr = 0
@@ -1307,7 +1310,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%auto_truncate_start_level = int(start_level)
       ierr = 0
@@ -1337,7 +1341,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%auto_truncate_tol = tol
       ierr = 0
@@ -1367,7 +1372,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%processor_agglom = processor_agglom
       ierr = 0
@@ -1397,7 +1403,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%processor_agglom_ratio = ratio
       ierr = 0
@@ -1427,7 +1434,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)
 
       options%processor_agglom_factor = int(factor)
       ierr = 0
@@ -1457,7 +1465,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%process_eq_limit = limit
       ierr = 0
@@ -1506,7 +1515,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%strong_threshold = thresh
       ierr = 0
@@ -1536,7 +1546,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%ddc_its = int(its)
       ierr = 0
@@ -1566,7 +1577,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%max_dd_ratio = ratio
       ierr = 0
@@ -1596,7 +1608,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%ddc_fraction = frac
       ierr = 0
@@ -1626,7 +1639,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%cf_splitting_type = int(algo)
       ierr = 0
@@ -1656,7 +1670,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%max_luby_steps = int(steps)
       ierr = 0
@@ -1689,7 +1704,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       n = len_trim(input_string)
       if (n == 0) then
@@ -1805,7 +1821,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%matrix_free_polys = mf
       ierr = 0
@@ -1835,7 +1852,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%one_point_classical_prolong = onep
       ierr = 0
@@ -1865,7 +1883,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%full_smoothing_up_and_down = full
       ierr = 0
@@ -1895,7 +1914,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%symmetric = sym
       ierr = 0
@@ -1925,7 +1945,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%constrain_w = constrain
       ierr = 0
@@ -1955,7 +1976,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%constrain_z = constrain
       ierr = 0
@@ -1985,7 +2007,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%improve_w_its = int(its)
       ierr = 0
@@ -2015,7 +2038,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%improve_z_its = int(its)
       ierr = 0
@@ -2045,7 +2069,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%strong_r_threshold = thresh
       ierr = 0
@@ -2075,7 +2100,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%inverse_type = inv_type
       ierr = 0
@@ -2105,7 +2131,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%c_inverse_type = inv_type
       ierr = 0
@@ -2135,7 +2162,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%z_type = z_type
       ierr = 0
@@ -2165,7 +2193,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%lair_distance = int(distance)
       ierr = 0
@@ -2195,7 +2224,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%poly_order = int(order)
       ierr = 0
@@ -2225,7 +2255,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%inverse_sparsity_order = int(order)
       ierr = 0
@@ -2255,7 +2286,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%c_poly_order = int(order)
       ierr = 0
@@ -2285,7 +2317,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%c_inverse_sparsity_order = int(order)
       ierr = 0
@@ -2315,7 +2348,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%coarsest_inverse_type = inv_type
       ierr = 0
@@ -2345,7 +2379,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%coarsest_poly_order = int(order)
       ierr = 0
@@ -2375,7 +2410,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%coarsest_inverse_sparsity_order = int(order)
       ierr = 0
@@ -2405,7 +2441,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%coarsest_matrix_free_polys = mf
       ierr = 0
@@ -2454,7 +2491,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%r_drop = rdrop
       ierr = 0
@@ -2484,7 +2522,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%a_drop = adrop
       ierr = 0
@@ -2514,7 +2553,8 @@ module pcair_interfaces
       ! Set the options
       call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
       call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)      
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
 
       options%a_lump = lump
       ierr = 0
