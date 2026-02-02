@@ -3,7 +3,7 @@
       use petscksp
       implicit none
 
-!   Test fortran interface of pflare with small solve of random matrix
+!   Test changing parameters after a solve triggers a reset
 
       PetscErrorCode :: ierr
       Mat :: A
@@ -12,7 +12,7 @@
       Vec :: x,b
       KSP :: ksp
       PC :: pc
-      PetscBool :: flg
+      PetscBool :: flg, check_airg, check
       KSPConvergedReason reason
 
       call PetscInitialize(PETSC_NULL_CHARACTER,ierr)    
@@ -23,6 +23,10 @@
       n      = 5
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER,'-m',m,flg,ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER,'-n',n,flg,ierr)
+      check_airg = PETSC_TRUE
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER, &
+               '-check_airg', check,flg,ierr)
+      if (flg) check_airg = check                       
 
       ! Create matrix
       call MatCreate(PETSC_COMM_WORLD,A,ierr)
@@ -46,9 +50,15 @@
       call KSPSetOperators(ksp,A,A,ierr)
       call KSPGetPC(ksp,pc,ierr)
       ! Set AIRG as pc
-      call PCSetType(pc, PCAIR, ierr)
-      ! Set an initial option to test it persists after reset
-      call PCAIRSetCoarseEqLimit(pc, 9, ierr)
+      if (check_airg) then
+         call PCSetType(pc, PCAIR, ierr)
+         ! Set an initial option to test it persists after reset
+         call PCAIRSetCoarseEqLimit(pc, 9, ierr)
+      else
+         call PCSetType(pc, PCPFLAREINV, ierr)
+         call PCPFLAREINVSetOrder(pc, 2, ierr)
+      end if
+
       call KSPSetPC(ksp, pc, ierr)       
       call KSPSetFromOptions(ksp,ierr)   
       call KSPSetUp(ksp,ierr)
@@ -61,8 +71,12 @@
       end if      
 
       ! Do a second solve with some changed parameters to test reset
-      call PCAIRSetMaxLevels(pc, 2, ierr)
-      call PCAIRSetStrongThreshold(pc, 0.4d0, ierr)      
+      if (check_airg) then
+         call PCAIRSetMaxLevels(pc, 2, ierr)
+         call PCAIRSetStrongThreshold(pc, 0.4d0, ierr)      
+      else
+         call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
+      end if
       call VecSet(x, 0d0, ierr)
       call KSPSolve(ksp,b,x,ierr)
       call KSPGetConvergedReason(ksp, reason, ierr)

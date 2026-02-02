@@ -473,7 +473,7 @@ PETSC_INTERN void PCGetSetupCalled_c(PC *pc, PetscInt *setupcalled)
 // Mark that we need to do setup again (e.g. after a reset)
 PETSC_INTERN void PCMarkNotSetUp_c(PC *pc)
 {
-   (*pc)->setupcalled = 0;
+   (*pc)->setupcalled = PETSC_FALSE;
 }
 
 // Gets the number of nonzeros in the local 
