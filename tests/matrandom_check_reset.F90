@@ -8,7 +8,7 @@
       PetscErrorCode :: ierr
       Mat :: A
       PetscInt :: m, n, nnzs
-      PetscInt, parameter :: one = 1, two = 2, three = 3
+      PetscInt, parameter :: one = 1, two = 2, three = 3, nine = 9
       Vec :: x,b
       KSP :: ksp
       PC :: pc
@@ -53,10 +53,10 @@
       if (check_airg) then
          call PCSetType(pc, PCAIR, ierr)
          ! Set an initial option to test it persists after reset
-         call PCAIRSetCoarseEqLimit(pc, 9, ierr)
+         call PCAIRSetCoarseEqLimit(pc, nine, ierr)
       else
          call PCSetType(pc, PCPFLAREINV, ierr)
-         call PCPFLAREINVSetOrder(pc, 2, ierr)
+         call PCPFLAREINVSetOrder(pc, two, ierr)
       end if
 
       call KSPSetPC(ksp, pc, ierr)       
@@ -72,7 +72,7 @@
 
       ! Do a second solve with some changed parameters to test reset
       if (check_airg) then
-         call PCAIRSetMaxLevels(pc, 2, ierr)
+         call PCAIRSetMaxLevels(pc, two, ierr)
          call PCAIRSetStrongThreshold(pc, 0.4d0, ierr)      
       else
          call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
