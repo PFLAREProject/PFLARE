@@ -155,7 +155,7 @@ int main(int argc,char **argv)
   }
   PetscCall(KSPSetDM(ksp,(DM)da));
   // We generate the matrix ourselves
-  PetscCall(KSPSetDMActive(ksp, PETSC_FALSE));
+  PetscCall(KSPSetDMActive(ksp, KSP_DMACTIVE_ALL, PETSC_FALSE));
 
   // Create empty matrix and vectors
   PetscCall(DMCreateMatrix(da, &A));
