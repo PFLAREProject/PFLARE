@@ -164,7 +164,8 @@ PetscErrorCode PCPFLAREINVSetOrder(PC pc, PetscInt poly_order)
    PetscCall(PCPFLAREINVGetOrder(pc, &old_order));
    if (old_order == poly_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
-   inv_data->poly_order = (int)poly_order;  
+   inv_data->poly_order = (int)poly_order;
+   pc->setupcalled = PETSC_FALSE;  
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -190,7 +191,8 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
    PetscCall(PCPFLAREINVGetSparsityOrder(pc, &old_order));
    if (old_order == inverse_sparsity_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
-   inv_data->inverse_sparsity_order = (int)inverse_sparsity_order;  
+   inv_data->inverse_sparsity_order = (int)inverse_sparsity_order;
+   pc->setupcalled = PETSC_FALSE;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -217,6 +219,7 @@ PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType type)
    if (old_type == type) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
    inv_data->inverse_type = type;  
+   pc->setupcalled = PETSC_FALSE;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -244,6 +247,7 @@ static PetscErrorCode PCPFLAREINVSetMatrixFree_PFLAREINV(PC pc, PetscBool flg)
    if (old_flag == flg) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));   
    inv_data->matrix_free = flg;
+   pc->setupcalled = PETSC_FALSE;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
