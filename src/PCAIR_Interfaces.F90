@@ -93,7 +93,33 @@ module pcair_interfaces
       ! Return the options
       options => pc_air_data%air_data%options
 
-   end subroutine PCAIRGetOptions 
+   end subroutine PCAIRGetOptions
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOptionsAndShell(pc, options, pc_shell) 
+
+      ! Gets the air options and PCSHELL that lives in our PCAIR
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                  :: pc
+      type(air_options), pointer, intent(inout) :: options
+      type(tPC), intent(inout)                    :: pc_shell
+
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+      
+      ! Return the options
+      options => pc_air_data%air_data%options
+
+   end subroutine PCAIRGetOptionsAndShell    
 
 
 ! -------------------------------------------------------------------------------------------------------------------------------
@@ -1204,10 +1230,25 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetMaxLevels(pc, old_int, ierr)
+      if (old_int == max_levels) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      ! Call the underlying reset - this won't touch the context 
+      ! in our pcshell though as pcshell doesn't offer a way to 
+      ! give a custom reset function      
+      call PCReset(pc_shell, ierr)
+      ! Call the destroy routine
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%max_levels = int(max_levels)
       ierr = 0
 
@@ -1223,10 +1264,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetCoarseEqLimit(pc, old_int, ierr)
+      if (old_int == coarse_eq_limit) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%coarse_eq_limit = coarse_eq_limit
       ierr = 0
 
@@ -1242,10 +1294,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetAutoTruncateStartLevel(pc, old_int, ierr)
+      if (old_int == start_level) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%auto_truncate_start_level = int(start_level)
       ierr = 0
 
@@ -1261,10 +1324,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetAutoTruncateTol(pc, old_real, ierr)
+      if (old_real == tol) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%auto_truncate_tol = tol
       ierr = 0
 
@@ -1280,10 +1354,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetProcessorAgglom(pc, old_bool, ierr)
+      if (old_bool .eqv. processor_agglom) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%processor_agglom = processor_agglom
       ierr = 0
 
@@ -1299,10 +1384,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetProcessorAgglomRatio(pc, old_real, ierr)
+      if (old_real == ratio) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%processor_agglom_ratio = ratio
       ierr = 0
 
@@ -1318,10 +1414,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetProcessorAgglomFactor(pc, old_int, ierr)
+      if (old_int == factor) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%processor_agglom_factor = int(factor)
       ierr = 0
 
@@ -1337,10 +1444,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetProcessEqLimit(pc, old_int, ierr)
+      if (old_int == limit) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%process_eq_limit = limit
       ierr = 0
 
@@ -1375,10 +1493,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetStrongThreshold(pc, old_real, ierr)
+      if (old_real == thresh) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%strong_threshold = thresh
       ierr = 0
 
@@ -1394,10 +1523,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetDDCIts(pc, old_int, ierr)
+      if (old_int == its) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%ddc_its = int(its)
       ierr = 0
 
@@ -1413,10 +1553,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetMaxDDRatio(pc, old_real, ierr)
+      if (old_real == ratio) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%max_dd_ratio = ratio
       ierr = 0
 
@@ -1432,10 +1583,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetDDCFraction(pc, old_real, ierr)
+      if (old_real == frac) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%ddc_fraction = frac
       ierr = 0
 
@@ -1451,10 +1613,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      CFSplittingType            :: old_type
       ! ~~~~~~~~
 
+      call PCAIRGetCFSplittingType(pc, old_type, ierr)
+      if (old_type == algo) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%cf_splitting_type = int(algo)
       ierr = 0
 
@@ -1470,10 +1643,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetMaxLubySteps(pc, old_int, ierr)
+      if (old_int == steps) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%max_luby_steps = int(steps)
       ierr = 0
 
@@ -1489,13 +1673,23 @@ module pcair_interfaces
       PetscErrorCode, intent(out)    :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
       character(len = 1) :: current_char, old_char
+      character(len = PETSC_MAX_PATH_LEN) :: old_string
       integer :: smooth_order_index
       integer :: errorcode, n, i
       ! ~~~~~~~~
 
+      call PCAIRGetSmoothType(pc, old_string, ierr)
+      if (trim(old_string) == trim(input_string)) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
 
       n = len_trim(input_string)
       if (n == 0) then
@@ -1598,10 +1792,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetMatrixFreePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. mf) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%matrix_free_polys = mf
       ierr = 0
 
@@ -1617,10 +1822,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetOnePointClassicalProlong(pc, old_bool, ierr)
+      if (old_bool .eqv. onep) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%one_point_classical_prolong = onep
       ierr = 0
 
@@ -1636,10 +1852,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetFullSmoothingUpAndDown(pc, old_bool, ierr)
+      if (old_bool .eqv. full) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%full_smoothing_up_and_down = full
       ierr = 0
 
@@ -1655,10 +1882,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetSymmetric(pc, old_bool, ierr)
+      if (old_bool .eqv. sym) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%symmetric = sym
       ierr = 0
 
@@ -1674,10 +1912,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetConstrainW(pc, old_bool, ierr)
+      if (old_bool .eqv. constrain) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%constrain_w = constrain
       ierr = 0
 
@@ -1693,10 +1942,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetConstrainZ(pc, old_bool, ierr)
+      if (old_bool .eqv. constrain) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%constrain_z = constrain
       ierr = 0
 
@@ -1712,10 +1972,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetImproveWIts(pc, old_int, ierr)
+      if (old_int == its) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%improve_w_its = int(its)
       ierr = 0
 
@@ -1731,10 +2002,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetImproveZIts(pc, old_int, ierr)
+      if (old_int == its) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%improve_z_its = int(its)
       ierr = 0
 
@@ -1750,10 +2032,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetStrongRThreshold(pc, old_real, ierr)
+      if (old_real == thresh) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%strong_r_threshold = thresh
       ierr = 0
 
@@ -1769,10 +2062,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCPFLAREINVType            :: old_type
       ! ~~~~~~~~
 
+      call PCAIRGetInverseType(pc, old_type, ierr)
+      if (old_type == inv_type) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%inverse_type = inv_type
       ierr = 0
 
@@ -1788,10 +2092,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCPFLAREINVType            :: old_type
       ! ~~~~~~~~
 
+      call PCAIRGetCInverseType(pc, old_type, ierr)
+      if (old_type == inv_type) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%c_inverse_type = inv_type
       ierr = 0
 
@@ -1807,10 +2122,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCAIRZType                 :: old_type
       ! ~~~~~~~~
 
+      call PCAIRGetZType(pc, old_type, ierr)
+      if (old_type == z_type) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%z_type = z_type
       ierr = 0
 
@@ -1826,10 +2152,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetLairDistance(pc, old_int, ierr)
+      if (old_int == distance) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%lair_distance = int(distance)
       ierr = 0
 
@@ -1845,10 +2182,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetPolyOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%poly_order = int(order)
       ierr = 0
 
@@ -1864,10 +2212,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetInverseSparsityOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%inverse_sparsity_order = int(order)
       ierr = 0
 
@@ -1883,10 +2242,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetCPolyOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%c_poly_order = int(order)
       ierr = 0
 
@@ -1902,10 +2272,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetCInverseSparsityOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%c_inverse_sparsity_order = int(order)
       ierr = 0
 
@@ -1921,10 +2302,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCPFLAREINVType            :: old_type
       ! ~~~~~~~~
 
+      call PCAIRGetCoarsestInverseType(pc, old_type, ierr)
+      if (old_type == inv_type) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%coarsest_inverse_type = inv_type
       ierr = 0
 
@@ -1940,10 +2332,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetCoarsestPolyOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%coarsest_poly_order = int(order)
       ierr = 0
 
@@ -1959,10 +2362,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      call PCAIRGetCoarsestInverseSparsityOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%coarsest_inverse_sparsity_order = int(order)
       ierr = 0
 
@@ -1978,10 +2392,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetCoarsestMatrixFreePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. mf) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%coarsest_matrix_free_polys = mf
       ierr = 0
 
@@ -2016,10 +2441,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetRDrop(pc, old_real, ierr)
+      if (old_real == rdrop) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%r_drop = rdrop
       ierr = 0
 
@@ -2035,10 +2471,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      call PCAIRGetADrop(pc, old_real, ierr)
+      if (old_real == adrop) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%a_drop = adrop
       ierr = 0
 
@@ -2054,10 +2501,21 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
+      call PCAIRGetALump(pc, old_bool, ierr)
+      if (old_bool .eqv. lump) then
+         ierr = 0
+         return
+      end if
+
       ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)      
+
       options%a_lump = lump
       ierr = 0
 
