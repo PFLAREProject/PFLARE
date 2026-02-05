@@ -309,6 +309,15 @@ module gmres_poly_newton
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if  
 
+      ! In some cases with rank deficiency, we can still end up with non-zero (or negative) eigenvalues that
+      ! are trivially small - we set them explicitly to zero
+      do i_loc = 1, poly_order + 1
+         if (abs(coefficients(i_loc, 1)**2 + coefficients(i_loc, 2)**2) < 1e-12) then
+            coefficients(i_loc, 1) = 0d0
+            coefficients(i_loc, 2) = 0d0
+         end if
+      end do      
+
       ! ~~~~~~~~~~~~~~
       ! Add roots for stability
       ! ~~~~~~~~~~~~~~         
@@ -1180,12 +1189,18 @@ end if
             term = term - 1
             skip_add = .TRUE.
          end if
+         ! ! If the fixed sparsity root is real and the previous root was real,
+         ! ! we just need to compute the correct part of the product, we just make sure not to add
+         ! if (coefficients(term,2) == 0d0 .AND. coefficients(term-1,2) == 0d0) then
+         !    skip_add = .TRUE.
+         ! end if         
+
+         print *, "starting loop at term ", term, "skip_add ", skip_add
 
          ! This loop skips the last coefficient
          do while (term .le. size(coefficients, 1) - 1)
 
-            ! We need to sum up the product of vals_previous_power_temp(j_loc) * matching columns
-            vals_power_temp(1:ncols) = 0
+            print *, "term ", term, "coeff ", coefficients(term,1), coefficients(term,2), skip_add
 
             ! If real
             if (coefficients(term,2) == 0d0) then
@@ -1198,9 +1213,16 @@ end if
                ! matrix by the build_gmres_polynomial_newton_inverse_full (as we had to build the product up
                ! to that order)
                ! ~~~~~~~~~~~
-               if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12 .AND. term > poly_sparsity_order + 1) then
-                  call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                        1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
+               if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12 .AND. &
+                  term > poly_sparsity_order + 1) then
+
+                  !if (.NOT. skip_add) then
+                     print *, "CALLING SET VALUES ", term, " to row "
+                     call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
+                           1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
+                  ! else
+                  !    skip_add = .FALSE.
+                  ! end if
                end if          
                
                ! Initialize with previous product before the A*prod subtraction
@@ -1314,6 +1336,7 @@ end if
          ! Final step if last root is real
          if (coefficients(term,2) == 0d0) then
             if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12) then
+               print *, "adding REAL final term ", term, " coeff ", coefficients(term,1)
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                      1d0/coefficients(term, 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
             end if             
@@ -1723,7 +1746,7 @@ end if
          ! solve we don't have a zero coefficient but in the second solve we do
          ! So the mat type needs to remain consistent
          ! This can't happen in the complex case
-         if (coefficients(2,1) == 0d0) then
+         if (abs(coefficients(2,1)) < 1e-12) then
 
             ! Set to zero
             call MatScale(inv_matrix, 0d0, ierr)
@@ -1802,6 +1825,7 @@ end if
       logical :: reuse_triggered, output_product, first_complex
       integer :: i, i_sparse
       type(tMat) :: mat_product, temp_mat_A, temp_mat_two, temp_mat_three, mat_product_k_plus_1
+      PetscReal :: square_sum, a_coeff
 
       ! ~~~~~~      
 
@@ -1855,7 +1879,7 @@ end if
       i_sparse = size(coefficients, 1)
       first_complex = .FALSE.
 
-      print *, "size coeffs", size(coefficients, 1)
+      print *, "size coeffs", size(coefficients, 1), "coeffs", coefficients(:, 1), coefficients(:, 2)
 
       if (output_product) then
 
@@ -1915,11 +1939,13 @@ end if
 
             print *, "real", "i_sparse", i_sparse
 
-            ! Skips eigenvalues that are numerically zero - see 
-            ! the comment in calculate_gmres_polynomial_roots_newton 
+            ! Skips eigenvalues that are numerically zero
+            ! We still compute the entries as as zero because we need the sparsity
+            ! to be correct for the next iteration
             if (abs(coefficients(i,1)) < 1e-12) then
-               i = i + 1
-               cycle
+               square_sum = 0
+            else
+               square_sum = 1d0/coefficients(i,1)
             end if        
 
             ! Then add the scaled version of each product
@@ -1929,15 +1955,15 @@ end if
             else
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
-                  call MatAXPY(inv_matrix, 1d0/coefficients(i,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
+                  call MatAXPY(inv_matrix, square_sum, mat_product, SUBSET_NONZERO_PATTERN, ierr)
                else
                   ! Have to use the DIFFERENT_NONZERO_PATTERN here
-                  call MatAXPYWrapper(inv_matrix, 1d0/coefficients(i,1), mat_product)
+                  call MatAXPYWrapper(inv_matrix, square_sum, mat_product)
                end if
             end if
 
             ! temp_mat_A = A_ff/theta_k       
-            call MatScale(temp_mat_A, -1d0/coefficients(i,1), ierr)
+            call MatScale(temp_mat_A, -square_sum, ierr)
             ! temp_mat_A = I - A_ff/theta_k
             call MatShift(temp_mat_A, 1d0, ierr)    
             
@@ -1954,6 +1980,7 @@ end if
             
             ! We copy out the last product if we're doing this as part of a fixed sparsity multiply
             if (output_product .AND. i == i_sparse - 1) then
+               print *, "outputting product in real case", "i_sparse", i_sparse, "i", i
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
             end if
             
@@ -1966,8 +1993,11 @@ end if
 
             ! Skips eigenvalues that are numerically zero
             if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
-               i = i + 2
-               cycle
+               square_sum = 0
+               a_coeff = 0
+             else  
+               square_sum = 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2)
+               a_coeff = 2d0 * coefficients(i,1)
             end if
 
             ! If doing the normal iteration
@@ -1976,7 +2006,7 @@ end if
                ! temp_mat_A = -A    
                call MatScale(temp_mat_A, -1d0, ierr)
                ! temp_mat_A = 2a I - A_ff
-               call MatShift(temp_mat_A, 2d0 * coefficients(i,1), ierr)   
+               call MatShift(temp_mat_A, a_coeff, ierr)   
 
                if (i == 1) then
                   ! If i == 1 then we know mat_product is identity so we can do it directly
@@ -2004,7 +2034,7 @@ end if
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, temp_mat_two, ierr)
 
                ! temp_mat_two = 2a * mat_product
-               call MatScale(temp_mat_two, 2d0 * coefficients(i,1), ierr)   
+               call MatScale(temp_mat_two, a_coeff, ierr)   
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
@@ -2016,11 +2046,11 @@ end if
             ! Then add the scaled version of each product
             if (reuse_triggered) then
                ! If doing reuse we know our nonzeros are a subset
-               call MatAXPY(inv_matrix, 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2), &
+               call MatAXPY(inv_matrix, square_sum, &
                         temp_mat_two, SUBSET_NONZERO_PATTERN, ierr)
             else
                ! Have to use the DIFFERENT_NONZERO_PATTERN here
-               call MatAXPYWrapper(inv_matrix, 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2), temp_mat_two)
+               call MatAXPYWrapper(inv_matrix, square_sum, temp_mat_two)
             end if            
 
             if (i .le. i_sparse - 2) then
@@ -2035,11 +2065,11 @@ end if
                ! Then add the scaled version of each product
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
-                  call MatAXPY(mat_product, -1d0/(coefficients(i,1)**2 + coefficients(i,2)**2), &
+                  call MatAXPY(mat_product, -square_sum, &
                            temp_mat_three, SUBSET_NONZERO_PATTERN, ierr)
                else
                   ! Have to use the DIFFERENT_NONZERO_PATTERN here
-                  call MatAXPYWrapper(mat_product, -1d0/(coefficients(i,1)**2 + coefficients(i,2)**2), temp_mat_three)
+                  call MatAXPYWrapper(mat_product, -square_sum, temp_mat_three)
                end if               
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
@@ -2067,7 +2097,7 @@ end if
             ! Skips eigenvalues that are numerically zero
             if (abs(coefficients(i,1)) > 1e-12) then     
                
-               print *, "doing last real step"
+               print *, "doing last real step, adding in term", i, "coeff", coefficients(i,1)
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
                   call MatAXPY(inv_matrix, 1d0/coefficients(i,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
