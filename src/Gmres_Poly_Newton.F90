@@ -1615,7 +1615,7 @@ end if
 
       ! Delete temporaries
       call MatDestroy(mat_sparsity_match, ierr)
-      !call MatDestroy(mat_product_save, ierr)
+      call MatDestroy(mat_product_save, ierr)
       if (deallocate_submatrices) then
          deallocate(reuse_submatrices)
          reuse_submatrices => null()
@@ -2236,6 +2236,7 @@ end if
             ! mat_product_k_plus_1 = mat_product * temp_mat_A
             if (i == 1) then
                ! If i == 1 then we know mat_product is identity so we can just copy
+               call MatDestroy(mat_product, ierr)
                call MatConvert(temp_mat_A, MATSAME, MAT_INITIAL_MATRIX, mat_product, ierr)  
             else
                call MatMatMult(temp_mat_A, mat_product, &
