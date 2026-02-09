@@ -123,6 +123,8 @@ run_tests_load_serial:
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals"
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26
+	@echo "Test AIRG with Newton GMRES polynomials in indefinite problem with zero diagonals"
+	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -ksp_max_it 26			
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order"
