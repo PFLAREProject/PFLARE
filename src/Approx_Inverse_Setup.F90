@@ -70,7 +70,12 @@ module approx_inverse_setup
             allocate(coefficients(poly_order + 1, 1))
          end if
       else
-         coefficients => coefficients_stack
+         if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+            ! Newton basis needs storage for real and imaginary roots
+            allocate(coefficients(poly_order + 1, 2))
+         else         
+            coefficients => coefficients_stack
+         end if
       end if
 
       ! This is diabolical - In petsc 3.22, they changed the way to test for 

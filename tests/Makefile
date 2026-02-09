@@ -93,6 +93,8 @@ run_tests_load_serial:
 	./ex6 -f data/mat_stream_2364 -pc_type pflareinv -ksp_max_it 21		
 	@echo "Test single level GMRES polynomial preconditioning for hyperbolic streaming problem in C"
 	./ex6 -f data/mat_stream_2364 -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 21	
+	@echo "Test single level Newton GMRES polynomial preconditioning for hyperbolic streaming problem in C"
+	./ex6 -f data/mat_stream_2364 -pc_type pflareinv -pc_pflareinv_type newton -ksp_max_it 21		
 # 
 	@echo ""
 	@echo "Test single level GMRES polynomial preconditioning with the Newton basis matrix-free for hyperbolic streaming problem in C"
@@ -320,8 +322,8 @@ run_tests_no_load_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -ksp_max_it 10 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
 	@echo "Test AIRG Newton with 2nd order GMRES polynomials with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
-#	@echo "Test AIRG Newton with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change"
-#		./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2		
+	@echo "Test AIRG Newton with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change"
+	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2		
 # 
 	@echo ""
 	@echo "Test AIRG Newton with GMRES polynomials with PC reused with no sparsity change with 0th order fixed sparsity"
@@ -593,9 +595,9 @@ run_tests_no_load_parallel:
 	@echo "Test AIRG Newton with 2nd order GMRES polynomials with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton
-#	@echo "Test AIRG Newton with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change in parallel"
-#	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2 \
-#	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton	
+	@echo "Test AIRG Newton with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2 \
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton	
 # 
 	@echo ""
 	@echo "Test AIRG Newton with GMRES polynomials with PC reused with no sparsity change in parallel with 0th order fixed sparsity"
