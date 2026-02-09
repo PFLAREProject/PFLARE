@@ -134,7 +134,7 @@ run_tests_load_serial:
 		echo "--- Testing order = $$order ---"; \
 		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
 	done
-	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity in parallel"
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity"
 	@for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		for sparsity in $$(seq 1 $$(($$order - 1))); do \
@@ -189,12 +189,15 @@ run_tests_load_parallel:
 	@for order in 0 1 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
-	done	
-	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders first order fixed sparsity in parallel"
+	done
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity in parallel"
 	@for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
-		$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order; \
-	done	
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$sparsity; \
+		done; \
+	done
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
@@ -416,7 +419,24 @@ run_tests_no_load_serial:
 	 -pc_air_improve_w_its 3 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with PC regenerated with no sparsity change with 1 iteration"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
-	 -pc_air_improve_w_its 1 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power	 	
+	 -pc_air_improve_w_its 1 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test Newton AIRG on advection for for different orders"
+	@for order in 0 1 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+	done
+	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity"
+	@for order in 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+		done; \
+	done	 	 	
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
 # Include kokkos examples	 
@@ -614,6 +634,23 @@ run_tests_no_load_parallel:
 	@echo "Test improving W with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
 	 -pc_air_improve_w_its 3 -ksp_max_it 3	-pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test Newton AIRG on advection for for different orders in parallel"
+	@for order in 0 1 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+	done
+	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity in parallel"
+	@for order in 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+		done; \
+	done
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

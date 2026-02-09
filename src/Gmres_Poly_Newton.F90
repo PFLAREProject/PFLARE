@@ -135,6 +135,240 @@ module gmres_poly_newton
 
    end subroutine modified_leja   
 
+   ! -------------------------------------------------------------------------------------------------
+
+   subroutine cluster_eigenvalues_stable(real_roots, imag_roots, rel_tol, abs_tol)
+
+      ! Robust clustering of (possibly complex) harmonic Ritz values.
+      ! Numerically distinct clusters are moved to the front.
+      ! Remaining entries are set to zero.
+      ! Skips eigenvalues that are exactly zero (both real and imag parts).
+      !
+      ! Inputs:
+      !   real_roots, imag_roots : eigenvalues (length k)
+      !   rel_tol               : relative tolerance (suggest sqrt(eps) ~ 1e-8)
+      !   abs_tol               : absolute tolerance (suggest eps * ||H|| ~ 1e-15)
+      !
+      ! Outputs:
+      !   real_roots, imag_roots : clustered eigenvalues at front, zeros after
+
+      PetscReal, dimension(:), intent(inout) :: real_roots, imag_roots
+      PetscReal, intent(in)                  :: rel_tol, abs_tol
+      integer                                :: i, j, n, n_unique, cluster_size
+      logical, allocatable                   :: used(:)
+      PetscReal                              :: dist, mag_i, mag_j, scale
+      PetscReal                              :: sum_real, sum_imag
+      PetscReal, allocatable                 :: rtmp(:), itmp(:)
+
+      n = size(real_roots)
+
+      allocate(used(n))
+      allocate(rtmp(n), itmp(n))
+
+      used = .false.
+      n_unique = 0
+
+      ! ---------------------------------------------------------
+      ! All-pairs clustering (no sorting to preserve proximity)
+      ! ---------------------------------------------------------
+      do i = 1, n
+
+         if (used(i)) cycle
+
+         ! Skip eigenvalues that are exactly zero
+         if (real_roots(i) == 0.0d0 .AND. imag_roots(i) == 0.0d0) then
+            used(i) = .true.
+            cycle
+         end if
+
+         ! Start new cluster with eigenvalue i
+         sum_real = real_roots(i)
+         sum_imag = imag_roots(i)
+         cluster_size = 1
+         used(i) = .true.
+         
+         mag_i = sqrt(real_roots(i)**2 + imag_roots(i)**2)
+
+         ! Look for all other eigenvalues close to this one
+         do j = i + 1, n
+
+            if (used(j)) cycle
+
+            ! Skip exactly zero eigenvalues
+            if (real_roots(j) == 0.0d0 .AND. imag_roots(j) == 0.0d0) then
+               used(j) = .true.
+               cycle
+            end if
+
+            mag_j = sqrt(real_roots(j)**2 + imag_roots(j)**2)
+            
+            ! Distance between eigenvalues
+            dist = sqrt((real_roots(j) - real_roots(i))**2 + &
+                        (imag_roots(j) - imag_roots(i))**2)
+
+            ! Use the larger magnitude for relative scaling
+            scale = max(mag_i, mag_j, 1.0d0)
+
+            ! Check if within tolerance
+            if (dist <= abs_tol + rel_tol * scale) then
+               sum_real = sum_real + real_roots(j)
+               sum_imag = sum_imag + imag_roots(j)
+               cluster_size = cluster_size + 1
+               used(j) = .true.
+            end if
+
+         end do
+
+         ! Compute cluster centroid (mean)
+         n_unique = n_unique + 1
+         rtmp(n_unique) = sum_real / dble(cluster_size)
+         itmp(n_unique) = sum_imag / dble(cluster_size)
+
+      end do
+
+      ! ---------------------------------------------------------
+      ! Output compact form
+      ! ---------------------------------------------------------
+      real_roots = 0.0d0
+      imag_roots = 0.0d0
+
+      real_roots(1:n_unique) = rtmp(1:n_unique)
+      imag_roots(1:n_unique) = itmp(1:n_unique)
+
+      deallocate(used, rtmp, itmp)
+
+   end subroutine cluster_eigenvalues_stable
+
+
+   ! -------------------------------------------------------------------------------------------------
+
+   subroutine compute_extra_roots(real_roots, imag_roots, real_roots_output, imag_roots_output)
+
+      ! Add extra roots for stability
+      ! Computes the product of factors for each eigenvalue and adds extra copies
+      ! of roots that have large products (to improve polynomial stability)
+      ! Only non-zero eigenvalues should be passed in
+      ! real_roots_output, imag_roots_output are allocated and filled with the original
+      ! roots plus any extra copies, with perturbed values for the leja sort
+
+      ! ~~~~~~
+      PetscReal, dimension(:), intent(inout)              :: real_roots, imag_roots
+      PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_output, imag_roots_output
+
+      ! Local variables
+      integer :: i_loc, j_loc, k_loc, n_roots, total_extra, counter
+      PetscReal :: a, b, c, d, div_real, div_imag, div_mag
+      PetscReal, dimension(size(real_roots)) :: pof
+      integer, dimension(size(real_roots)) :: extra_pair_roots, overflow
+
+      ! ~~~~~~
+
+      n_roots = size(real_roots)
+
+      ! Compute the product of factors
+      pof = 1   
+      extra_pair_roots = 0
+      overflow = 0
+      total_extra = 0
+      do k_loc = 1, n_roots
+
+         a = real_roots(k_loc)
+         b = imag_roots(k_loc)      
+         
+         ! We have already computed pof for the positive imaginary complex conjugate
+         if (b < 0) cycle
+
+         ! Skips eigenvalues that are numerically zero
+         if (abs(a) < 1e-12) cycle
+         if (a**2 + b**2 < 1e-12) cycle
+
+         ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
+         do i_loc = 1, n_roots
+
+            ! Skip
+            if (k_loc == i_loc) cycle
+
+            c = real_roots(i_loc)
+            d = imag_roots(i_loc)
+
+            ! Skips eigenvalues that are numerically zero
+            if (abs(c) < 1e-12) cycle
+            if (c**2 + d**2 < 1e-12) cycle
+
+            ! theta_k/theta_i
+            div_real = (a * c + b * d)/(c**2 + d**2)
+            div_imag = (b * c - a * d)/(c**2 + d**2)
+
+            ! |1 - theta_k/theta_i|
+            div_mag = sqrt((1 - div_real)**2 + div_imag**2)
+
+            ! Pof is about to overflow, store the exponent and 
+            ! reset pof back to one
+            ! We can hit this for very high order polynomials, where we have to 
+            ! add more roots than 22 (ie pof > 1e308)
+            if (log10(pof(k_loc)) + log10(div_mag) > 307) then
+               overflow(k_loc) = overflow(k_loc) + int(log10(pof(k_loc)))
+               pof(k_loc) = 1
+            end if            
+
+            ! Product
+            pof(k_loc) = pof(k_loc) * div_mag
+
+         end do
+
+         ! If pof > 1e4, we add an extra root, plus one extra for every 1e14
+         if (log10(pof(k_loc)) > 4 .OR. overflow(k_loc) /= 0) then
+
+            ! if real extra_pair_roots counts each distinct real root we're adding
+            ! if imaginary it only counts a pair as one
+            extra_pair_roots(k_loc) = ceiling((log10(pof(k_loc)) + overflow(k_loc) - 4.0)/14.0)
+            total_extra = total_extra + extra_pair_roots(k_loc)
+
+            ! If imaginary, the pof is the same for the conjugate, let's just set it to -1
+            if (b > 0) then
+               ! We know the positive imaginary value is first, so the conjugate follows it
+               pof(k_loc+1) = -1
+               ! We need the conjugates as well
+               total_extra = total_extra + extra_pair_roots(k_loc)
+
+            end if            
+         end if
+      end do
+
+      ! Allocate output arrays (original roots + extra roots)
+      allocate(real_roots_output(n_roots + total_extra))
+      allocate(imag_roots_output(n_roots + total_extra))
+      real_roots_output = 0d0
+      imag_roots_output = 0d0
+
+      ! Copy in original roots
+      real_roots_output(1:n_roots) = real_roots(1:n_roots)
+      imag_roots_output(1:n_roots) = imag_roots(1:n_roots)
+
+      ! Add the extra copies of roots, ensuring conjugate pairs we add 
+      ! are next to each other
+      counter = n_roots + 1
+      do i_loc = 1, n_roots
+
+         ! For each extra root pair to add
+         do j_loc = 1, extra_pair_roots(i_loc)
+
+            real_roots_output(counter) = real_roots(i_loc)
+            imag_roots_output(counter) = imag_roots(i_loc)
+            ! Add in the conjugate
+            if (imag_roots(i_loc) > 0) then
+               real_roots_output(counter+1) = real_roots(i_loc)
+               imag_roots_output(counter+1) = -imag_roots(i_loc)
+            end if
+
+            counter = counter + 1
+            if (imag_roots(i_loc) > 0) counter = counter + 1
+         end do
+      end do
+
+   end subroutine compute_extra_roots   
+
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, add_roots, coefficients)
@@ -160,22 +394,22 @@ module gmres_poly_newton
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: lwork, subspace_size, rank, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
-      integer :: total_extra, counter, k_loc, m
+      integer :: total_extra, counter, k_loc, m, numerical_order
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
-      PetscReal, dimension(poly_order+1) :: e_d, solution, s, pof
-      integer, dimension(poly_order+1) :: extra_pair_roots, overflow
+      PetscReal, dimension(poly_order+1) :: e_d, solution, s
       integer, dimension(:), allocatable :: iwork_allocated, indices
-      PetscReal, dimension(:), allocatable :: work
+      PetscReal, dimension(:), allocatable :: work, real_roots_added, imag_roots_added
+      PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
       PetscReal, dimension(:,:), allocatable :: VL, VR
-      PetscReal :: beta, div_real, div_imag, a, b, c, d, div_mag
+      PetscReal :: beta
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
       type(tVec), dimension(poly_order+2) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = 1e-12
+      PetscReal :: rcond = 1e-12, rel_tol, abs_tol, H_norm
 
       ! ~~~~~~    
 
@@ -264,8 +498,8 @@ module gmres_poly_newton
          call dgelsd(poly_order + 1, poly_order + 1, 1, H_n_T, size(H_n_T, 1), &
                         e_d, size(e_d), s, rcond, rank, &
                         work, lwork, iwork_allocated, errorcode)
-         deallocate(work, iwork_allocated)         
-
+         deallocate(work, iwork_allocated)        
+         
          ! Copy in the solution
          solution = e_d
 
@@ -309,154 +543,150 @@ module gmres_poly_newton
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if  
 
-      ! In some cases with rank deficiency, we can still end up with non-zero (or negative) eigenvalues that
+      ! print *, "coefficients r", coefficients(:, 1)   
+      ! print *, "coefficients c", coefficients(:, 2)
+
+      ! These are the tolerances that control the clustering
+      H_norm = norm2(H_n(1:m,1:m))
+      rel_tol = 1.0d0 * sqrt(epsilon(1.0d0))
+      abs_tol = epsilon(1.0d0) * max(H_norm, beta)
+
+      !print *, "H_norm", H_norm, "rel_tol", rel_tol, "abs_tol", abs_tol
+
+      ! In some cases with numerical rank deficiency, we can still
+      ! end up with non-zero (or negative) eigenvalues that
       ! are trivially small - we set them explicitly to zero
       do i_loc = 1, poly_order + 1
-         if (abs(coefficients(i_loc, 1)**2 + coefficients(i_loc, 2)**2) < 1e-12) then
+         if (coefficients(i_loc,1)**2 + coefficients(i_loc,2)**2 < &
+            (abs_tol + rel_tol*H_norm)**2) then
             coefficients(i_loc, 1) = 0d0
             coefficients(i_loc, 2) = 0d0
          end if
       end do      
 
+      ! print *, "after zero coefficients r", coefficients(:, 1)   
+      ! print *, "after zero coefficients c", coefficients(:, 2)       
+     
+      ! Cluster close eigenvalues together to improve stability of the polynomial evaluation
+      call cluster_eigenvalues_stable(coefficients(:, 1), coefficients(:, 2), rel_tol, abs_tol)      
+      
+      ! print *, "after cluster coefficients r", coefficients(:, 1)   
+      ! print *, "after cluster coefficients c", coefficients(:, 2)      
+
       ! ~~~~~~~~~~~~~~
-      ! Add roots for stability
+      ! Extract the non-zero eigenvalues for root adding and leja ordering
+      ! Zero eigenvalues will be appended at the end
+      ! ~~~~~~~~~~~~~~
+      ! Count the number of non-zero eigenvalues after clustering
+      numerical_order = 0
+      do i_loc = 1, poly_order + 1
+         if (coefficients(i_loc, 1) /= 0d0 .OR. coefficients(i_loc, 2) /= 0d0) then
+            numerical_order = numerical_order + 1
+         end if
+      end do
+
+      ! ~~~~~~~~~~~~~~
+      ! Add roots for stability (only on non-zero eigenvalues)
       ! ~~~~~~~~~~~~~~         
-      if (add_roots) then 
+      if (add_roots .AND. numerical_order > 0) then 
 
-         ! Compute the product of factors
-         pof = 1   
-         extra_pair_roots = 0
-         overflow = 0
-         total_extra = 0
-         do k_loc = 1, poly_order + 1
-
-            a = coefficients(k_loc, 1)
-            b = coefficients(k_loc, 2)      
-            
-            ! We have already computed pof for the positive imaginary complex conjugate
-            if (b < 0) cycle
-
-            ! Skips eigenvalues that are numerically zero
-            if (abs(a) < 1e-12) cycle
-            if (a**2 + b**2 < 1e-12) cycle
-
-            ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
-            do i_loc = 1, poly_order + 1
-
-               ! Skip
-               if (k_loc == i_loc) cycle
-
-               c = coefficients(i_loc, 1)
-               d = coefficients(i_loc, 2)
-
-               ! Skips eigenvalues that are numerically zero
-               if (abs(c) < 1e-12) cycle
-               if (c**2 + d**2 < 1e-12) cycle
-
-               ! theta_k/theta_i
-               div_real = (a * c + b * d)/(c**2 + d**2)
-               div_imag = (b * c - a * d)/(c**2 + d**2)
-
-               ! |1 - theta_k/theta_i|
-               div_mag = sqrt((1 - div_real)**2 + div_imag**2)
-
-               ! Pof is about to overflow, store the exponent and 
-               ! reset pof back to one
-               ! We can hit this for very high order polynomials, where we have to 
-               ! add more roots than 22 (ie pof > 1e308)
-               if (log10(pof(k_loc)) + log10(div_mag) > 307) then
-                  overflow(k_loc) = overflow(k_loc) + int(log10(pof(k_loc)))
-                  pof(k_loc) = 1
-               end if            
-
-               ! Product
-               pof(k_loc) = pof(k_loc) * div_mag
-
-            end do
-
-            ! If pof > 1e4, we add an extra root, plus one extra for every 1e14
-            if (log10(pof(k_loc)) > 4 .OR. overflow(k_loc) /= 0) then
-
-               ! if real extra_pair_roots counts each distinct real root we're adding
-               ! if imaginary it only counts a pair as one
-               extra_pair_roots(k_loc) = ceiling((log10(pof(k_loc)) + overflow(k_loc) - 4.0)/14.0)
-               total_extra = total_extra + extra_pair_roots(k_loc)
-
-               ! If imaginary, the pof is the same for the conjugate, let's just set it to -1
-               if (b > 0) then
-                  ! We know the positive imaginary value is first, so the conjugate follows it
-                  pof(k_loc+1) = -1
-                  ! We need the conjugates as well
-                  total_extra = total_extra + extra_pair_roots(k_loc)
-
-               end if            
+         ! Extract non-zero eigenvalues into a temporary array
+         allocate(coefficients_temp(numerical_order, 2))
+         counter = 0
+         do i_loc = 1, poly_order + 1
+            if (coefficients(i_loc, 1) /= 0d0 .OR. coefficients(i_loc, 2) /= 0d0) then
+               counter = counter + 1
+               coefficients_temp(counter, 1) = coefficients(i_loc, 1)
+               coefficients_temp(counter, 2) = coefficients(i_loc, 2)
             end if
          end do
 
-         ! If we have extra roots we need to resize the coefficients storage
-         if (total_extra > 0) then
-            allocate(coefficients_temp(size(coefficients, 1), size(coefficients, 2)))
-            coefficients_temp(1:size(coefficients, 1), 1:size(coefficients, 2)) = coefficients
-            deallocate(coefficients)
-            allocate(coefficients(size(coefficients_temp, 1) + total_extra, 2))
-            coefficients = 0
-            coefficients(1:size(coefficients_temp, 1), :) = coefficients_temp
-            deallocate(coefficients_temp)
-         end if
-      end if
+         ! Call compute_extra_roots only on the non-zero eigenvalues
+         ! This allocates real_roots_added/imag_roots_added with the original + extra roots
+         call compute_extra_roots(coefficients_temp(:, 1), coefficients_temp(:, 2), &
+                  real_roots_added, imag_roots_added)
 
-      ! Take a copy of the existing roots
-      coefficients_temp = coefficients
+         ! total number of non-zero roots after adding extras
+         total_extra = size(real_roots_added) - numerical_order
 
-      if (add_roots) then
-         
-         ! Add the extra copies of roots, ensuring conjugate pairs we add 
-         ! are next to each other
-         counter = size(extra_pair_roots)+1
-         do i_loc = 1, size(extra_pair_roots)
+         ! Resize coefficients to hold non-zero roots (with extras) + zero roots at end
+         deallocate(coefficients)
+         allocate(coefficients(size(real_roots_added) + (poly_order + 1 - numerical_order), 2))
+         coefficients = 0d0
 
-            ! For each extra root pair to add
-            do j_loc = 1, extra_pair_roots(i_loc)
+         ! Create perturbed copy for leja ordering
+         allocate(perturbed_real(size(real_roots_added)))
+         allocate(perturbed_imag(size(real_roots_added)))
+         perturbed_real = real_roots_added
+         perturbed_imag = imag_roots_added
 
-               coefficients(counter, :) = coefficients(i_loc, :)
-               ! Add in the conjugate
-               if (coefficients(i_loc, 2) > 0) then
-                  coefficients(counter+1, 1) = coefficients(i_loc, 1)
-                  coefficients(counter+1, 2) = -coefficients(i_loc, 2)
+         ! Perturb the extra roots so they have unique values for the leja sort
+         counter = numerical_order + 1
+         do i_loc = 1, numerical_order
+            k_loc = 0
+            do j_loc = counter, size(real_roots_added)
+               ! Check if this extra root matches the original
+               if (real_roots_added(j_loc) == coefficients_temp(i_loc, 1) .AND. &
+                   abs(imag_roots_added(j_loc)) == abs(coefficients_temp(i_loc, 2))) then
+                  k_loc = k_loc + 1
+                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * 5e-8
                end if
-
-               ! Store a perturbed root so we have unique values for the leja sort below
-               ! Just peturbing the real value
-               coefficients_temp(counter, 1) = coefficients(i_loc, 1) + j_loc * 5e-8
-               coefficients_temp(counter, 2) = coefficients(i_loc, 2)
-               ! Add in the conjugate
-               if (coefficients(i_loc, 2) > 0) then
-                  coefficients_temp(counter+1, 1) = coefficients(i_loc, 1) + j_loc * 5e-8
-                  coefficients_temp(counter+1, 2) = -coefficients(i_loc, 2)
-               end if            
-
-               counter = counter + 1
-               if (coefficients(i_loc, 2) > 0) counter = counter + 1
             end do
          end do
+
+         ! Leja order only the non-zero eigenvalues (with extras)
+         call modified_leja(perturbed_real, perturbed_imag, indices)
+
+         ! Reorder the (non-perturbed) roots using the leja ordering
+         coefficients(1:size(real_roots_added), 1) = real_roots_added(indices)
+         coefficients(1:size(real_roots_added), 2) = imag_roots_added(indices)
+
+         ! Zero eigenvalues are already zero at the end from the coefficients = 0d0 above
+
+         ! Cleanup
+         deallocate(coefficients_temp, real_roots_added, imag_roots_added)
+         deallocate(perturbed_real, perturbed_imag, indices)
+
+      else
+
+         ! No root adding - just leja order the non-zero eigenvalues
+         ! and put zeros at the end
+         if (numerical_order > 0) then
+
+            ! Extract non-zero eigenvalues
+            allocate(coefficients_temp(numerical_order, 2))
+            counter = 0
+            do i_loc = 1, poly_order + 1
+               if (coefficients(i_loc, 1) /= 0d0 .OR. coefficients(i_loc, 2) /= 0d0) then
+                  counter = counter + 1
+                  coefficients_temp(counter, 1) = coefficients(i_loc, 1)
+                  coefficients_temp(counter, 2) = coefficients(i_loc, 2)
+               end if
+            end do
+
+            ! Leja order the non-zero eigenvalues
+            call modified_leja(coefficients_temp(:, 1), coefficients_temp(:, 2), indices)
+
+            ! Reorder and put zeros at the end
+            coefficients = 0d0
+            coefficients(1:numerical_order, 1) = coefficients_temp(indices, 1)
+            coefficients(1:numerical_order, 2) = coefficients_temp(indices, 2)
+
+            deallocate(coefficients_temp, indices)
+
+         end if
+
       end if
 
-      ! ~~~~~~~~~~~~~~
-      ! Now compute a modified leja ordering for stability
-      ! ~~~~~~~~~~~~~~      
-      ! Called with the peturbed extra roots
-      call modified_leja(coefficients_temp(:,1), coefficients_temp(:,2), indices)   
-
-      ! Reorder the (non-peturbed) roots 
-      coefficients(:,1) = coefficients(indices,1)
-      coefficients(:,2) = coefficients(indices,2)
+      ! print *, "after root adding and leja coefficients r", coefficients(:, 1)   
+      ! print *, "after root adding and leja coefficients c", coefficients(:, 2)       
 
       ! Cleanup
-      deallocate(coefficients_temp)
       do i_loc = 1, subspace_size+1
          call VecDestroy(V_n(i_loc), ierr)
       end do
       call VecDestroy(w_j, ierr)
+       
 
    end subroutine calculate_gmres_polynomial_roots_newton   
 
@@ -1209,6 +1439,11 @@ end if
             ! If real
             if (coefficients(term,2) == 0d0) then
 
+               if (abs(coefficients(term,1)) < 1e-12) then
+                  term = term + 1
+                  cycle
+               end if
+
                !print *, "REAL CASE assembly", term
 
                ! ~~~~~~~~~~~
@@ -1218,9 +1453,8 @@ end if
                ! Also we skip the first one if we're real as that value has already been added to the 
                ! matrix by the build_gmres_polynomial_newton_inverse_full (as we had to build the product up
                ! to that order)
-               ! ~~~~~~~~~~~
-               if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12 .AND. &
-                  status_output(term, 1) /= 1) then
+               ! ~~~~~~~~~~~               
+               if (ncols /= 0 .AND. status_output(term, 1) /= 1) then
 
                   !print *, "ADDING IN REAL TERM ", term
                   call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
@@ -1250,6 +1484,11 @@ end if
             ! If complex
             else
 
+               if (coefficients(term,1)**2 + coefficients(term,2)**2 < 1e-12) then
+                  term = term + 2
+                  cycle
+               end if
+
                !print *, "COMPLEX CASE assembly", term
 
                square_sum = 1d0/(coefficients(term,1)**2 + coefficients(term,2)**2)
@@ -1277,7 +1516,7 @@ end if
                   end do           
 
                   ! This is the p = p + 1/(a^2 + b^2) * temp
-                  if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12) then
+                  if (ncols /= 0) then
                      call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                            square_sum * temp(1:ncols), ADD_VALUES, ierr)   
                   end if       
@@ -1378,8 +1617,6 @@ end if
                      1d0/coefficients(term, 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
             end if             
          end if
-
-         ! Delete our symbolic
          do j_loc = 1, ncols
             if (associated(symbolic_ones(j_loc)%ptr)) then
                deallocate(symbolic_ones(j_loc)%ptr)
