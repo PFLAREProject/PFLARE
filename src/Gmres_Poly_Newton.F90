@@ -919,8 +919,8 @@ end if
          end if     
       else
 
-         print *,"reals", coefficients(:,1)
-         print *,"imags", coefficients(:,2)
+         ! print *,"reals", coefficients(:,1)
+         ! print *,"imags", coefficients(:,2)
 
          ! If we're any higher, then we build cmat up to that order
          ! But we have to be careful because the last root we want to explicitly
@@ -939,13 +939,13 @@ end if
                   status_output, status_product, mat_product_save)
       end if
 
-      print *, "status output real", status_output(:, 1)
-      print *, "status output complex", status_output(:, 2)
+      ! print *, "status output real", status_output(:, 1)
+      ! print *, "status output complex", status_output(:, 2)
 
-      print *, "sum", sum(status_output, 2)
+      ! print *, "sum", sum(status_output, 2)
 
-      print *, "status product real", status_product(:, 1)
-      print *, "status product complex", status_product(:, 2)     
+      ! print *, "status product real", status_product(:, 1)
+      ! print *, "status product complex", status_product(:, 2)     
       
       ! We know we will never have non-zero locations outside of the highest constrained sparsity power 
       call MatSetOption(cmat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
@@ -1202,17 +1202,17 @@ end if
             skip_add = .TRUE.
          end if        
 
-         print *, "starting loop at term ", term, "skip_add ", skip_add
+         !print *, "starting loop at term ", term, "skip_add ", skip_add
 
          ! This loop skips the last coefficient
          do while (term .le. size(coefficients, 1) - 1)
 
-            print *, "term ", term, "coeff ", coefficients(term,1), coefficients(term,2), skip_add
+            !print *, "term ", term, "coeff ", coefficients(term,1), coefficients(term,2), skip_add
 
             ! If real
             if (coefficients(term,2) == 0d0) then
 
-               print *, "REAL CASE assembly", term
+               !print *, "REAL CASE assembly", term
 
                ! ~~~~~~~~~~~
                ! Now can add the value to our matrix
@@ -1225,7 +1225,7 @@ end if
                if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12 .AND. &
                   status_output(term, 1) /= 1) then
 
-                  print *, "ADDING IN REAL TERM ", term
+                  !print *, "ADDING IN REAL TERM ", term
                   call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                         1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
                end if          
@@ -1233,7 +1233,7 @@ end if
                ! Initialize with previous product before the A*prod subtraction
                vals_power_temp(1:ncols) = vals_previous_power_temp(1:ncols)        
                
-               print *, "DOING REAL PRODCUT for term ", term
+               !print *, "DOING REAL PRODCUT for term ", term
 
                ! Have to finish all the columns before we move onto the next coefficient
                do j_loc = 1, ncols
@@ -1253,7 +1253,7 @@ end if
             ! If complex
             else
 
-               print *, "COMPLEX CASE assembly", term
+               !print *, "COMPLEX CASE assembly", term
 
                square_sum = 1d0/(coefficients(term,1)**2 + coefficients(term,2)**2)
                if (.NOT. skip_add) then
@@ -1261,10 +1261,10 @@ end if
                   ! We skip the 2 * a * prod from the first root of a complex pair if that has already
                   ! been included in the inv_matrix from build_gmres_polynomial_newton_inverse_full
                   if (status_output(term, 2) /= 1) then
-                     print *, term, "adding in 2a prod"
+                     !print *, term, "adding in 2a prod"
                      temp(1:ncols) = 2 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
                   else
-                     print *, term, "skipping adding in 2a prod"
+                     !print *, term, "skipping adding in 2a prod"
                      temp(1:ncols) = 0d0
                   end if
 
@@ -1292,7 +1292,7 @@ end if
                   ! compensate for that in the product
                   if (status_output(term, 2) == 1) then
                      if (output_first_complex) then
-                        print *, "ADDING IN 2a prod second time for term ", term
+                        !print *, "ADDING IN 2a prod second time for term ", term
                         temp(1:ncols) = temp(1:ncols) + 2d0 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
                      end if                     
                   end if                  
@@ -1300,7 +1300,7 @@ end if
                ! First time through complex pair
                else
 
-                  print *, "SKIP ADDING IN COMPLEX TERM ", term
+                  !print *, "SKIP ADDING IN COMPLEX TERM ", term
                   !@@@ for the case where we have (r, c, c, ....) and second order sparsity
                   ! i think the problem is that we have to skip adding anything to p as inverse_matrix
                   ! already has the correct values in it, as we computed tmp which will have 2nd order terms
@@ -1376,7 +1376,7 @@ end if
          ! Final step if last root is real
          if (coefficients(term,2) == 0d0) then
             if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12) then
-               print *, "adding REAL final term ", term, " coeff ", coefficients(term,1)
+               !print *, "adding REAL final term ", term, " coeff ", coefficients(term,1)
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                      1d0/coefficients(term, 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
             end if             
@@ -1774,8 +1774,10 @@ end if
       call MatSetOption(inv_matrix, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
       call MatSetOption(inv_matrix, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
 
-      status_output = 0
-      status_product = 0      
+      if (output_product) then
+         status_output = 0
+         status_product = 0      
+      end if
 
       ! We only have two coefficients, so they are either both real or complex conjugates
       ! If real
@@ -1826,8 +1828,10 @@ end if
          ! Don't need an assemble as there is one called in this
          call MatShift(inv_matrix, 1d0/(coefficients(1, 1)), ierr)     
          
-         status_output(1:2, 1) = 1
-         status_product(1,1) = 1         
+         if (output_product) then
+            status_output(1:2, 1) = 1
+            status_product(1,1) = 1         
+         end if
 
       ! Complex conjugate roots, a +- ib
       else
@@ -1848,8 +1852,10 @@ end if
          ! result = 2a I - A_ff/(a^2 + b^2)
          call MatScale(inv_matrix, 1d0/square_sum, ierr)
 
-         status_output(1:2, 2) = 1
-         status_product(1,2) = 1 
+         if (output_product) then
+            status_output(1:2, 2) = 1
+            status_product(1,2) = 1 
+         end if
       end if               
 
    end subroutine build_gmres_polynomial_newton_inverse_1st_1st     
@@ -1879,7 +1885,7 @@ end if
       ! Local variables
       PetscErrorCode :: ierr      
       logical :: reuse_triggered, output_product, first_complex
-      integer :: i, i_sparse
+      integer :: i, i_sparse, sparsity_order
       type(tMat) :: mat_product, temp_mat_A, temp_mat_two, temp_mat_three, mat_product_k_plus_1
       PetscReal :: square_sum, a_coeff
 
@@ -1901,8 +1907,14 @@ end if
 
       ! We start with an identity in mat_product
       call generate_identity(matrix, mat_product)
-      status_output = 0
-      status_product = 0
+      if (output_product) then
+         status_output = 0
+         status_product = 0
+      end if
+      sparsity_order = poly_order
+      if (present(poly_sparsity_order)) then
+         sparsity_order = poly_sparsity_order
+      end if
 
       ! If we're going to output the product as part of a fixed sparsity multiply,
       ! we may be asking to constrain the sparsity to a power in between order and order + 2
@@ -1937,13 +1949,13 @@ end if
       i_sparse = size(coefficients, 1)
       first_complex = .FALSE.
 
-      print *, "size coeffs", size(coefficients, 1), "coeffs", coefficients(:, 1), coefficients(:, 2)
+      !print *, "size coeffs", size(coefficients, 1), "coeffs", coefficients(:, 1), coefficients(:, 2)
 
       if (output_product) then
 
          output_first_complex = .FALSE.
          if (output_product) then
-            i_sparse = poly_sparsity_order + 1
+            i_sparse = sparsity_order + 1
 
             ! If the last root is real we don't have to do anything
             if (coefficients(i_sparse,2) /= 0d0) then
@@ -1970,7 +1982,7 @@ end if
          first_complex = output_first_complex
       end if
 
-      print *, "i_sparse", i_sparse, "output_first_complex", output_first_complex
+      !print *, "i_sparse", i_sparse, "output_first_complex", output_first_complex
 
       ! ~~~~~~~~~~~~
       ! Iterate over the i
@@ -1981,7 +1993,7 @@ end if
       ! We're always building up the next product
       do while (i .le. i_sparse - 1)
 
-         print *, "i = ", i
+         !print *, "i = ", i
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
          ! temp_mat_A is going to store things with the sparsity of A
@@ -1995,7 +2007,7 @@ end if
          ! If real this is easy
          if (coefficients(i,2) == 0d0) then
 
-            print *, "real", "i_sparse", i_sparse
+            !print *, "real", "i_sparse", i_sparse
 
             ! Skips eigenvalues that are numerically zero
             ! We still compute the entries as as zero because we need the sparsity
@@ -2019,7 +2031,7 @@ end if
                   call MatAXPYWrapper(inv_matrix, square_sum, mat_product)
                end if
             end if
-            status_output(i, 1) = 1
+            if (output_product) status_output(i, 1) = 1
 
             ! temp_mat_A = A_ff/theta_k       
             call MatScale(temp_mat_A, -square_sum, ierr)
@@ -2036,11 +2048,11 @@ end if
                call MatDestroy(mat_product, ierr)  
                mat_product = mat_product_k_plus_1  
             end if
-            status_product(i, 1) = maxval(status_product) + 1
+            if (output_product) status_product(i, 1) = maxval(status_product) + 1
             
             ! We copy out the last product if we're doing this as part of a fixed sparsity multiply
             if (output_product .AND. i == i_sparse - 1) then
-               print *, "outputting product in real case", "i_sparse", i_sparse, "i", i
+               !print *, "outputting product in real case", "i_sparse", i_sparse, "i", i
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
             end if
             
@@ -2049,7 +2061,7 @@ end if
          ! Complex 
          else
 
-            print *, "complex", first_complex
+            !print *, "complex", first_complex
 
             ! Skips eigenvalues that are numerically zero
             if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
@@ -2065,14 +2077,14 @@ end if
             ! This is equivalent to only part of tmp on Line 9 of Loe
             ! The fixed sparsity loop will then finish the tmp with the term -A * prod/(a^2+b^2)
             ! as this is the part that would increase the sparsity beyond poly_sparsity_order            
-            if (i == poly_sparsity_order + 1 .AND. first_complex) then
+            if (i == sparsity_order + 1 .AND. first_complex) then
 
                ! Copy mat_product into temp_mat_two
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, temp_mat_two, ierr)
 
                ! temp_mat_two = 2a * mat_product
                call MatScale(temp_mat_two, a_coeff, ierr)   
-               status_output(i, 2) = 1
+               if (output_product) status_output(i, 2) = 1
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
@@ -2086,8 +2098,10 @@ end if
                call MatScale(temp_mat_A, -1d0, ierr)
                ! temp_mat_A = 2a I - A_ff
                call MatShift(temp_mat_A, a_coeff, ierr)   
-               status_output(i, 2) = 1
-               status_output(i+1, 2) = 1
+               if (output_product) then
+                  status_output(i, 2) = 1
+                  status_output(i+1, 2) = 1
+               end if
 
                if (i == 1) then
                   ! If i == 1 then we know mat_product is identity so we can do it directly
@@ -2097,11 +2111,11 @@ end if
                   call MatMatMult(temp_mat_A, mat_product, &
                         MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)     
                end if    
-               status_product(i, 2) = maxval(status_product) + 1
+               if (output_product) status_product(i, 2) = maxval(status_product) + 1
                
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
-                  print *, "outputting TEMP in complex case", "i_sparse", i_sparse, "i", i
+                  !print *, "outputting TEMP in complex case", "i_sparse", i_sparse, "i", i
                   call MatConvert(temp_mat_two, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr) 
                   ! If i == 1 then we know mat_product is the identity and we don't bother 
                   ! to write it out, we just have some custom code in the product given its trivial
@@ -2127,14 +2141,16 @@ end if
 
             if (i .le. i_sparse - 2) then
 
-               print *, "doing complex matmult step"
+               !print *, "doing complex matmult step"
 
                ! temp_mat_three = matrix * temp_mat_two
                call MatMatMult(matrix, temp_mat_two, &
                      MAT_INITIAL_MATRIX, 1.5d0, temp_mat_three, ierr)     
                call MatDestroy(temp_mat_two, ierr)   
-               status_output(i, 2) = 1
-               status_product(i+1, 2) = maxval(status_product) + 1
+               if (output_product) then               
+                  status_output(i, 2) = 1
+                  status_product(i+1, 2) = maxval(status_product) + 1
+               end if
 
                ! Then add the scaled version of each product
                if (reuse_triggered) then
@@ -2148,7 +2164,7 @@ end if
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. .NOT. first_complex) then
-                  print *, "outputting product in complex case", "i_sparse", i_sparse, "i", i
+                  !print *, "outputting product in complex case", "i_sparse", i_sparse, "i", i
                   call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)      
                end if                 
 
@@ -2171,7 +2187,7 @@ end if
             ! Skips eigenvalues that are numerically zero
             if (abs(coefficients(i,1)) > 1e-12) then     
                
-               print *, "doing last real step, adding in term", i, "coeff", coefficients(i,1)
+               !print *, "doing last real step, adding in term", i, "coeff", coefficients(i,1)
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
                   call MatAXPY(inv_matrix, 1d0/coefficients(i,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
@@ -2179,7 +2195,7 @@ end if
                   ! Have to use the DIFFERENT_NONZERO_PATTERN here
                   call MatAXPYWrapper(inv_matrix, 1d0/coefficients(i,1), mat_product)
                end if     
-               status_output(i, 1) = 1
+               if (output_product) status_output(i, 1) = 1
             end if       
          end if   
       end if     

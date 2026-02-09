@@ -134,10 +134,13 @@ run_tests_load_serial:
 		echo "--- Testing order = $$order ---"; \
 		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
 	done
-	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders first order fixed sparsity"
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity in parallel"
 	@for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
-		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order; \
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$sparsity; \
+		done; \
 	done
 
 # ~~~~~~~~~~~
