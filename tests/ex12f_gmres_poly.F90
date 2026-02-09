@@ -148,18 +148,18 @@
       ! A_ff on each level they should be basically identical and hence
       ! we should have almost no difference in the resulting residual
       ! ~~~~~~~~~~~~~
-      norm_diff_one = abs(norm_power - norm_newton)/norm_newton
+      norm_diff_one = abs(norm_arnoldi - norm_newton)/norm_arnoldi
       if (norm_diff_one > 1e-9) then
          print *, "Residuals differ between polynomial bases!", norm_diff_one
-         print *, "Power basis residual:   ", norm_power
          print *, "Newton basis residual:  ", norm_newton
+         print *, "Arnoldi basis residual:   ", norm_arnoldi
          error stop 1
       end if
-      norm_diff_two = abs(norm_arnoldi - norm_power)/norm_power
+      norm_diff_two = abs(norm_arnoldi - norm_power)/norm_arnoldi
       if (norm_diff_two > 1e-9) then
          print *, "Residuals differ between polynomial bases!", norm_diff_two
+         print *, "Power basis residual:  ", norm_power
          print *, "Arnoldi basis residual: ", norm_arnoldi
-         print *, "Newton basis residual:  ", norm_newton
          error stop 1
       end if      
 
