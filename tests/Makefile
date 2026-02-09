@@ -146,6 +146,12 @@ run_tests_load_serial:
 				./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$sparsity; \
 		done; \
 	done
+#
+	@echo ""
+	@echo "Test Newton GMRES polynomials matrix-free with added roots in market matrix problem 1138"
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 6
+	@echo "Test Newton GMRES polynomials with fixed sparsity with added roots in market matrix problem 1138"
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_order 60 -ksp_norm_type unpreconditioned -ksp_max_it 6	
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
