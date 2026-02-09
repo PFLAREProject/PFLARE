@@ -1757,7 +1757,7 @@ end if
       PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
       type(tMat), intent(inout)                         :: inv_matrix
       type(tMat), intent(inout), optional               :: mat_prod_or_temp
-      integer, dimension(poly_order + 1, 2), intent(inout), optional :: status_output, status_product
+      integer, dimension(:, :), intent(inout), optional :: status_output, status_product
 
       ! Local variables
       PetscErrorCode :: ierr      
@@ -1880,7 +1880,7 @@ end if
       type(tMat), intent(inout), optional               :: mat_prod_or_temp, mat_product_save
       integer, intent(in), optional                     :: poly_sparsity_order
       logical, intent(inout), optional                  :: output_first_complex
-      integer, dimension(poly_order + 1, 2), intent(inout), optional :: status_output, status_product
+      integer, dimension(:, :), intent(inout), optional :: status_output, status_product
 
       ! Local variables
       PetscErrorCode :: ierr      
