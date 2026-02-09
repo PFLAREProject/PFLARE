@@ -139,7 +139,7 @@ module gmres_poly_newton
 
    subroutine cluster_eigenvalues_stable(real_roots, imag_roots, rel_tol, abs_tol)
 
-      ! Robust clustering of (possibly complex) harmonic Ritz values.
+      ! Clustering of (possibly complex) harmonic Ritz values.
       ! Numerically distinct clusters are moved to the front.
       ! Remaining entries are set to zero.
       ! Skips eigenvalues that are exactly zero (both real and imag parts).
@@ -169,7 +169,7 @@ module gmres_poly_newton
       n_unique = 0
 
       ! ---------------------------------------------------------
-      ! All-pairs clustering (no sorting to preserve proximity)
+      ! All-pairs clustering
       ! ---------------------------------------------------------
       do i = 1, n
 
@@ -249,7 +249,7 @@ module gmres_poly_newton
       ! of roots that have large products (to improve polynomial stability)
       ! Only non-zero eigenvalues should be passed in
       ! real_roots_output, imag_roots_output are allocated and filled with the original
-      ! roots plus any extra copies, with perturbed values for the leja sort
+      ! roots plus any extra
 
       ! ~~~~~~
       PetscReal, dimension(:), intent(inout)              :: real_roots, imag_roots
@@ -470,8 +470,9 @@ module gmres_poly_newton
          ! What we find is that when use this to compute eigenvalues we find e-vals 
          ! as we might expect up to the rank
          ! but then we have some eigenvalues that are numerically zero
-         ! We keep those and our application of the newton polynomial in 
-         ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
+         ! Given the way the outside code is structured, we can't lower the poly_order
+         ! in this routine and return
+         ! Instead we keep the "zero" eigenvalues our application of the newton polynomial
          ! just skips them and hence we don't do any 
          ! extra work in the application phase than we would have done with lower order     
          
@@ -543,15 +544,14 @@ module gmres_poly_newton
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if  
 
-      ! print *, "coefficients r", coefficients(:, 1)   
-      ! print *, "coefficients c", coefficients(:, 2)
+      ! ~~~~~~~~~~~~~~
+      ! Now we have to check the output eigenvalues
+      ! ~~~~~~~~~~~~~~
 
       ! These are the tolerances that control the clustering
       H_norm = norm2(H_n(1:m,1:m))
       rel_tol = 1.0d0 * sqrt(epsilon(1.0d0))
       abs_tol = epsilon(1.0d0) * max(H_norm, beta)
-
-      !print *, "H_norm", H_norm, "rel_tol", rel_tol, "abs_tol", abs_tol
 
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
@@ -562,16 +562,18 @@ module gmres_poly_newton
             coefficients(i_loc, 1) = 0d0
             coefficients(i_loc, 2) = 0d0
          end if
-      end do      
-
-      ! print *, "after zero coefficients r", coefficients(:, 1)   
-      ! print *, "after zero coefficients c", coefficients(:, 2)       
+      end do         
      
+      ! ~~~~~~~~~~~~~~
       ! Cluster close eigenvalues together to improve stability of the polynomial evaluation
+      ! For example when computing the e'vals of a constant diagonal matrix
+      ! the rank revealing factorisation above doesn't always report a rank of 1 given roundoff
+      ! Instead it returns multiple eigenvalues that are very close to each other, 
+      ! and we want to cluster those together and treat them as one root
+      ! ~~~~~~~~~~~~~~      
+
+      ! This places all exactly zero eigenvalues at the end of coefficients
       call cluster_eigenvalues_stable(coefficients(:, 1), coefficients(:, 2), rel_tol, abs_tol)      
-      
-      ! print *, "after cluster coefficients r", coefficients(:, 1)   
-      ! print *, "after cluster coefficients c", coefficients(:, 2)      
 
       ! ~~~~~~~~~~~~~~
       ! Extract the non-zero eigenvalues for root adding and leja ordering
@@ -676,10 +678,7 @@ module gmres_poly_newton
 
          end if
 
-      end if
-
-      ! print *, "after root adding and leja coefficients r", coefficients(:, 1)   
-      ! print *, "after root adding and leja coefficients c", coefficients(:, 2)       
+      end if     
 
       ! Cleanup
       do i_loc = 1, subspace_size+1
@@ -1109,24 +1108,31 @@ end if
       ! In the mononomial case we just compute the matrix powers up to poly_sparsity_order
       ! and add them times the coefficients to cmat
       ! Here though we have to build the Newton basis polynomials
-      ! The complex conjugate roots are tricky as they build up two powers at a time
-      ! The powers higher than poly_sparsity_order can be done with only
-      ! a single bit of comms and is done below this
+      ! As a rule, the value input here into cmat is correct up to the power
+      ! of poly_sparsity_order, with all other terms being added in the fixed sparsity loops
+      ! below
+      !
+      ! For complex conjugate roots, two terms are computed at a time, but if the sparsity order
+      ! falls in between those two roots, only part of the output cmat is included
+      ! Any remaining terms are output in either mat_sparsity_match or mat_product_save depending 
+      ! on the case
+      ! mat_sparsity_match has either temp or prod in it depending on the case
+      ! mat_product_save only exists in some cases and stores prod from the previous term
+      ! mat_sparsity_match and mat_product_save are always output with the sparsity of sparsity order
+      !
+      ! status_output is an array of length the number of roots
+      ! and has a 1 in each position if that term has been added to the output
+      ! It just helps us keep track of what has gone into cmat and what hasn't
+      ! It breaks up complex conjugate pairs into the first root (i) which has the same power as prod
+      !   tmp = 2 * a * prod
+      !   p = p + 1/(a^2 + b^2) * tmp
+      ! and the second root (i+1) which has the same power as prod * A:
+      !   tmp = -A * prod
+      !   p = p + 1/(a^2 + b^2) * tmp
       ! ~~~~~~~~~~
+
       output_first_complex = .FALSE.
       if (poly_sparsity_order == 1) then
-
-         ! If we've got first order sparsity, we want to build cmat up to first order
-         ! and then we add in higher order powers later
-         ! We can just pass in the first two roots to build the first order gmres polynomial
-         ! mat_sparsity_match gets out the parts of the product up to 1st order
-         ! for the real case this will be the equivalent of prod on line 5 of Alg 3 in Loe 2021
-         ! I - 1/theta_1 A
-         ! whereas cmat will be 1/theta_1 + 1/theta_2 * (I - 1/theta_1 A)
-         ! For the complex case we instead pass out tmp from line 9 scaled by 1/(a^2 + b^2)
-         ! as this is the part of the product with sparsity up to A
-         ! This is because the prod for complex builds up the A^2 term for the next iteration
-         ! given it does two roots at a time
 
          ! If we have a real first coefficient and a second complex
          ! we can't call build_gmres_polynomial_newton_inverse_1st_1st as it is only correct
@@ -1137,6 +1143,7 @@ end if
                   cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
                   status_output, mat_product_save)    
 
+         ! Valid 1st order polynomial, so this case is easy
          else
          
             ! Duplicate & copy the matrix, but ensure there is a diagonal present
@@ -1149,30 +1156,15 @@ end if
          end if     
       else
 
-         ! print *,"reals", coefficients(:,1)
-         ! print *,"imags", coefficients(:,2)
-
          ! If we're any higher, then we build cmat up to that order
          ! But we have to be careful because the last root we want to explicitly
-         ! build up to here (ie the power of the matrix given by poly_sparsity_order)
+         ! build up to here (ie the power of the matrix given by sparsity_order)
          ! might be the first root of a complex conjugate pair
-         ! In that case cmat only contains part of the result up to poly_sparsity_order
-         ! Similarly mat_sparsity_match contains the product up to poly_sparsity_order
-         ! The rest gets added in below
-         ! output_first_complex records if poly_sparsity_order hits the first root
-         ! of a complex conjugate pair, as we need to know that below to add in the rest
-         ! of the poly_sparsity_order+1 term from that pair
-         ! before moving on to the rest of the higher order roots
          call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, &
                   coefficients(1:poly_sparsity_order + 1, 1:2), &
                   cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
                   status_output, mat_product_save)
-      end if
-
-      ! print *, "status output real", status_output(:, 1)
-      ! print *, "status output complex", status_output(:, 2)
-
-      ! print *, "sum", sum(status_output, 2)    
+      end if 
       
       ! We know we will never have non-zero locations outside of the highest constrained sparsity power 
       call MatSetOption(cmat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
@@ -1423,40 +1415,30 @@ end if
          term = poly_sparsity_order + 1
          skip_add = .FALSE.
          ! If the fixed sparsity root is the second of a complex pair, we start one term earlier
-         ! so that we can compute the correct part of the product, we just make sure not to add
+         ! so that we can compute the correct part of the fixed sparsity product, we just make sure not to add
+         ! anything to cmat as it is already correct up to the fixed sparsity order
          if (coefficients(term,2) /= 0d0 .AND. .NOT. output_first_complex) then
             term = term - 1
             skip_add = .TRUE.
          end if        
 
-         !print *, "starting loop at term ", term, "skip_add ", skip_add
-
          ! This loop skips the last coefficient
          do while (term .le. size(coefficients, 1) - 1)
-
-            !print *, "term ", term, "coeff ", coefficients(term,1), coefficients(term,2), skip_add
 
             ! If real
             if (coefficients(term,2) == 0d0) then
 
+               ! Skips eigenvalues that are numerically zero - see 
+               ! the comment in calculate_gmres_polynomial_roots_newton                
                if (abs(coefficients(term,1)) < 1e-12) then
                   term = term + 1
                   cycle
                end if
 
-               !print *, "REAL CASE assembly", term
-
                ! ~~~~~~~~~~~
                ! Now can add the value to our matrix
-               ! Can skip this if coeff is zero, but still need to compute A^(term-1)
-               ! for the next time through
-               ! Also we skip the first one if we're real as that value has already been added to the 
-               ! matrix by the build_gmres_polynomial_newton_inverse_full (as we had to build the product up
-               ! to that order)
                ! ~~~~~~~~~~~               
                if (ncols /= 0 .AND. status_output(term, 1) /= 1) then
-
-                  !print *, "ADDING IN REAL TERM ", term
                   call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                         1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
                end if          
@@ -1464,16 +1446,13 @@ end if
                ! Initialize with previous product before the A*prod subtraction
                vals_power_temp(1:ncols) = vals_previous_power_temp(1:ncols)        
                
-               !print *, "DOING REAL PRODCUT for term ", term
-
-               ! Have to finish all the columns before we move onto the next coefficient
+               ! This is the 1/theta_i * A * prod but where A * prod has fixed sparsity
                do j_loc = 1, ncols
 
                   ! If we have no matching columns cycle this row
                   if (.NOT. associated(symbolic_ones(j_loc)%ptr)) cycle
 
                   ! symbolic_vals(j_loc)%ptr has the matching values of A in it
-                  ! This is the (I - A_ff/theta_k) * prod
                   vals_power_temp(symbolic_ones(j_loc)%ptr) = vals_power_temp(symbolic_ones(j_loc)%ptr) - &
                            1d0/coefficients(term, 1) * &
                            symbolic_vals(j_loc)%ptr * vals_previous_power_temp(j_loc)
@@ -1484,23 +1463,23 @@ end if
             ! If complex
             else
 
+               ! Skips eigenvalues that are numerically zero - see 
+               ! the comment in calculate_gmres_polynomial_roots_newton                
                if (coefficients(term,1)**2 + coefficients(term,2)**2 < 1e-12) then
                   term = term + 2
                   cycle
                end if
 
-               !print *, "COMPLEX CASE assembly", term
-
                square_sum = 1d0/(coefficients(term,1)**2 + coefficients(term,2)**2)
+
+               ! If our fixed sparsity order falls on the first of a complex conjugate pair
                if (.NOT. skip_add) then
 
                   ! We skip the 2 * a * prod from the first root of a complex pair if that has already
-                  ! been included in the inv_matrix from build_gmres_polynomial_newton_inverse_full
+                  ! been included in the cmat from build_gmres_polynomial_newton_inverse_full
                   if (status_output(term, 2) /= 1) then
-                     !print *, term, "adding in 2a prod"
                      temp(1:ncols) = 2 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
                   else
-                     !print *, term, "skipping adding in 2a prod"
                      temp(1:ncols) = 0d0
                   end if
 
@@ -1521,69 +1500,57 @@ end if
                            square_sum * temp(1:ncols), ADD_VALUES, ierr)   
                   end if       
 
-                  ! for (r, c, c)
-                  ! problem here is 2 *a * prod has been added to inv_matrix but we need to have added
-                  ! 2aprod/a^2+b^2 
-                  ! for (c, c, r) mat product is output without the 1/a^2+b^2 but that is fine as we 
-                  ! compensate for that in the product
+                  ! Here we need to go back in and ensure 2 *a * prod is in temp if we skipped it 
+                  ! above. We know it is already in cmat, but it has to be in temp when we 
+                  ! do the next product 
                   if (status_output(term, 2) == 1) then
                      if (output_first_complex) then
-                        !print *, "ADDING IN 2a prod second time for term ", term
                         temp(1:ncols) = temp(1:ncols) + 2d0 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
                      end if                     
                   end if                  
 
-               ! First time through complex pair
+               ! If our fixed sparsity order falls on the second of a complex conjugate pair
                else
 
-                  !print *, "SKIP ADDING IN COMPLEX TERM ", term
-                  !@@@ for the case where we have (r, c, c, ....) and second order sparsity
-                  ! i think the problem is that we have to skip adding anything to p as inverse_matrix
-                  ! already has the correct values in it, as we computed tmp which will have 2nd order terms
-                  ! in it, but we skipped the product in the full, which is correct as that would compute 3rd order 
-                  ! terms. so the thing that gets output in mat_prod_or_tmp is tmp  
-                  ! 
+                  ! In this case we have already included both 2*a*prod - A * prod into cmat
+                  ! But we still have to compute the product for the next term
+                  ! The problem here is that mat_sparsity_match has temp in it in this case, not 
+                  ! the old prod from whatever the previous loop is
+                  ! In that case build_gmres_polynomial_newton_inverse_full also outputs
+                  ! mat_product_save which is the old value of prod but with the sparsity of 
+                  ! mat_sparsity_match (with zeros if needed)
                   
-                  ! If we're skipping the add, then vals_previous_power_temp has all the correct
-                  ! values in it for temp
-                  ! All we have to do is compute prod for the next time through
+                  ! This case only occurs once for each row, so once we've hit this 
+                  ! we will always have our correct prod 
                   skip_add = .FALSE.
-                  !@@@@ so then this line sets temp to be tmp
+                  ! temp is output into mat_sparsity_match in this case
                   temp(1:ncols) = vals_previous_power_temp(1:ncols)
 
-                  ! @@@ have to be careful here!
-                  ! If we've gone back a term, we don't have anything in prod
-                  ! prod is I when term = 1
-                  ! @@@@ if we're doing this for the first time, we know product is I
-                  ! so we just set prod to be I
-                  ! @@@@ the problem is if we're not doing this for the first time
-                  ! we need to know what prod had in it from the previous time, as our full 
-                  ! is only outputting prod or temp, not both, because at lower order when we output
-                  ! temp in this case we knew prod was I so we didn't have to store both
-                  ! in the (r, c, c) case prod will have been I - 1/theta_1 A_ff from the r
-                  ! but for it to work with the loop below vals_previous_power_temp has to contain that but
-                  ! over the sparsity of the 2nd order term.
+                  ! If sparsity order is 1, the previous product will have been the identity
+                  ! and we don't output it into mat_product_save because that is a trivial case 
+                  ! we can do ourselves
                   if (term == 1) then
                      vals_previous_power_temp(1:ncols) = 0d0
                      if (diag_index /= -1) then
                         vals_previous_power_temp(diag_index) = 1d0
                      end if
+
                   ! In the case the mat_product_save is not the identity, we need to pull it's value out
-                  ! We only do this once for the first term in this case
                   else
 
                      call MatGetRow(mat_product_save, i_loc - 1 + global_row_start, ncols_two, &
                               cols_two_ptr, vals_two_ptr, ierr)
                      
-                     ! We have guaranteed in the full version that mat_product_save has fixed sparsity
+                     ! We have guaranteed in the build_gmres_polynomial_newton_inverse_full
+                     ! version that mat_product_save has fixed sparsity
                      vals_previous_power_temp(1:ncols_two) = vals_two_ptr(1:ncols_two)
                      
                      call MatRestoreRow(mat_product_save, i_loc - 1 + global_row_start, ncols_two, &
                               cols_two_ptr, vals_two_ptr, ierr)                     
-
                   end if
                end if
 
+               ! Now we compute the next product
                if (term .le. size(coefficients, 1)- 2) then
 
                   vals_power_temp(1:ncols) = vals_previous_power_temp(1:ncols)
@@ -1605,18 +1572,20 @@ end if
 
             end if
 
-            ! This should now have the value of A^(term-1) in it
+            ! This should now have the value of prod in it
             vals_previous_power_temp(1:ncols) = vals_power_temp(1:ncols)
          end do    
          
          ! Final step if last root is real
          if (coefficients(term,2) == 0d0) then
             if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12) then
-               !print *, "adding REAL final term ", term, " coeff ", coefficients(term,1)
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                      1d0/coefficients(term, 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
             end if             
          end if
+
+         ! ~~~~~~~~~~~~~~~
+
          do j_loc = 1, ncols
             if (associated(symbolic_ones(j_loc)%ptr)) then
                deallocate(symbolic_ones(j_loc)%ptr)
@@ -1646,6 +1615,7 @@ end if
 
       ! Delete temporaries
       call MatDestroy(mat_sparsity_match, ierr)
+      !call MatDestroy(mat_product_save, ierr)
       if (deallocate_submatrices) then
          deallocate(reuse_submatrices)
          reuse_submatrices => null()
@@ -2104,9 +2074,10 @@ end if
                   status_output, mat_product_save)
 
       ! No constrained sparsity by default
-      ! If you pass in mat_prod_or_temp, poly_sparsity_order, output_first_complex
+      ! If you pass in mat_prod_or_temp, poly_sparsity_order, output_first_complex, status_output and 
+      ! mat_product_save
       ! then it will build part of the terms, up to poly_sparsity_order, and return the product
-      ! in mat_prod_or_temp that you need to compute the rest of the fixed sparsity terms
+      ! in mat_prod_or_temp and mat_product_save that you need to compute the rest of the fixed sparsity terms
 
       ! ~~~~~~
       type(tMat), intent(in)                            :: matrix
@@ -2158,9 +2129,6 @@ end if
       ! where ^r means a purely real root and ^c means a complex root 
       ! want poly_sparsity_order = 1, we can't process all the way up to theta_3^c as that would 
       ! compute up to an A^2 term which is beyond our sparsity constraint
-      ! So we just check if the last root also has it's complex conjugate present
-      ! This will never happen in any context except when we are outputting the product
-      ! as part of a fixed sparsity multiply
 
       ! i_sparse tells us how many roots we are going to process
       ! Normally this would just be size(coefficients, 1) and the loop below goes up 
@@ -2183,8 +2151,6 @@ end if
 
       i_sparse = size(coefficients, 1)
       first_complex = .FALSE.
-
-      !print *, "size coeffs", size(coefficients, 1), "coeffs", coefficients(:, 1), coefficients(:, 2)
 
       if (output_product) then
 
@@ -2217,8 +2183,6 @@ end if
          first_complex = output_first_complex
       end if
 
-      !print *, "i_sparse", i_sparse, "output_first_complex", output_first_complex
-
       ! ~~~~~~~~~~~~
       ! Iterate over the i
       ! This is basically the same as the MF application but we have to build the powers
@@ -2227,8 +2191,6 @@ end if
       ! Loop through to one fewer than the number of roots
       ! We're always building up the next product
       do while (i .le. i_sparse - 1)
-
-         !print *, "i = ", i
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
          ! temp_mat_A is going to store things with the sparsity of A
@@ -2241,8 +2203,6 @@ end if
 
          ! If real this is easy
          if (coefficients(i,2) == 0d0) then
-
-            !print *, "real", "i_sparse", i_sparse
 
             ! Skips eigenvalues that are numerically zero
             ! We still compute the entries as as zero because we need the sparsity
@@ -2286,7 +2246,6 @@ end if
             
             ! We copy out the last product if we're doing this as part of a fixed sparsity multiply
             if (output_product .AND. i == i_sparse - 1) then
-               !print *, "outputting product in real case", "i_sparse", i_sparse, "i", i
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
             end if
             
@@ -2294,8 +2253,6 @@ end if
 
          ! Complex 
          else
-
-            !print *, "complex", first_complex
 
             ! Skips eigenvalues that are numerically zero
             if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
@@ -2346,9 +2303,9 @@ end if
                         MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)     
                end if    
                
-               ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
+               ! We copy out the last part of the old product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
-                  !print *, "outputting TEMP in complex case", "i_sparse", i_sparse, "i", i
+
                   call MatConvert(temp_mat_two, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr) 
                   ! If i == 1 then we know mat_product is the identity and we don't bother 
                   ! to write it out, we just have some custom code in the product given its trivial
@@ -2374,8 +2331,6 @@ end if
 
             if (i .le. i_sparse - 2) then
 
-               !print *, "doing complex matmult step"
-
                ! temp_mat_three = matrix * temp_mat_two
                call MatMatMult(matrix, temp_mat_two, &
                      MAT_INITIAL_MATRIX, 1.5d0, temp_mat_three, ierr)     
@@ -2396,7 +2351,6 @@ end if
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. .NOT. first_complex) then
-                  !print *, "outputting product in complex case", "i_sparse", i_sparse, "i", i
                   call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)      
                end if                 
 
@@ -2419,7 +2373,6 @@ end if
             ! Skips eigenvalues that are numerically zero
             if (abs(coefficients(i,1)) > 1e-12) then     
                
-               !print *, "doing last real step, adding in term", i, "coeff", coefficients(i,1)
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
                   call MatAXPY(inv_matrix, 1d0/coefficients(i,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
