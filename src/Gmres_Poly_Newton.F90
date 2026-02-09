@@ -851,7 +851,7 @@ end if
       PetscInt, parameter :: one = 1, zero = 0
       logical :: output_first_complex, skip_add
       PetscReal :: square_sum
-      integer, dimension(poly_order + 1, 2) :: status_output, status_product
+      integer, dimension(poly_order + 1, 2) :: status_output
       
       ! ~~~~~~~~~~  
 
@@ -905,7 +905,7 @@ end if
 
             call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
                   cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
-                  status_output, status_product, mat_product_save)    
+                  status_output, mat_product_save)    
 
          else
          
@@ -915,7 +915,7 @@ end if
             call build_gmres_polynomial_newton_inverse_1st_1st(matrix, one, &
                      coefficients(1:poly_sparsity_order + 1, 1:2), &
                      cmat, mat_sparsity_match, &
-                     status_output, status_product)    
+                     status_output)    
          end if     
       else
 
@@ -936,16 +936,13 @@ end if
          call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, &
                   coefficients(1:poly_sparsity_order + 1, 1:2), &
                   cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
-                  status_output, status_product, mat_product_save)
+                  status_output, mat_product_save)
       end if
 
       ! print *, "status output real", status_output(:, 1)
       ! print *, "status output complex", status_output(:, 2)
 
-      ! print *, "sum", sum(status_output, 2)
-
-      ! print *, "status product real", status_product(:, 1)
-      ! print *, "status product complex", status_product(:, 2)     
+      ! print *, "sum", sum(status_output, 2)    
       
       ! We know we will never have non-zero locations outside of the highest constrained sparsity power 
       call MatSetOption(cmat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
@@ -1747,7 +1744,7 @@ end if
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine build_gmres_polynomial_newton_inverse_1st_1st(matrix, poly_order, coefficients, &
-                  inv_matrix, mat_prod_or_temp, status_output, status_product)
+                  inv_matrix, mat_prod_or_temp, status_output)
 
       ! Specific 1st order with 1st order sparsity
 
@@ -1757,7 +1754,7 @@ end if
       PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
       type(tMat), intent(inout)                         :: inv_matrix
       type(tMat), intent(inout), optional               :: mat_prod_or_temp
-      integer, dimension(:, :), intent(inout), optional :: status_output, status_product
+      integer, dimension(:, :), intent(inout), optional :: status_output
 
       ! Local variables
       PetscErrorCode :: ierr      
@@ -1776,7 +1773,6 @@ end if
 
       if (output_product) then
          status_output = 0
-         status_product = 0      
       end if
 
       ! We only have two coefficients, so they are either both real or complex conjugates
@@ -1796,12 +1792,17 @@ end if
 
             ! Set to zero
             call MatScale(inv_matrix, 0d0, ierr)
-            ! Then add in the 0th order inverse
-            call MatShift(inv_matrix, 1d0/coefficients(1,1), ierr)
 
-            !!@@@ need product here
-            print *, "CHECK/FIX THIS"
-            call exit(0)
+            ! Tricky case here as we want to pass out the identity with the 
+            ! sparsity of A
+            if (output_product) then
+               call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
+               call MatShift(mat_prod_or_temp, 1d0, ierr)
+               status_output(1:2, 1) = 1
+            end if                
+
+            ! Then add in the 0th order inverse
+            call MatShift(inv_matrix, 1d0/coefficients(1,1), ierr)       
             
             ! Then just return
             return  
@@ -1830,7 +1831,6 @@ end if
          
          if (output_product) then
             status_output(1:2, 1) = 1
-            status_product(1,1) = 1         
          end if
 
       ! Complex conjugate roots, a +- ib
@@ -1854,7 +1854,6 @@ end if
 
          if (output_product) then
             status_output(1:2, 2) = 1
-            status_product(1,2) = 1 
          end if
       end if               
 
@@ -1865,7 +1864,7 @@ end if
 
    subroutine build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
                   inv_matrix, mat_prod_or_temp, poly_sparsity_order, output_first_complex, &
-                  status_output, status_product, mat_product_save)
+                  status_output, mat_product_save)
 
       ! No constrained sparsity by default
       ! If you pass in mat_prod_or_temp, poly_sparsity_order, output_first_complex
@@ -1880,7 +1879,7 @@ end if
       type(tMat), intent(inout), optional               :: mat_prod_or_temp, mat_product_save
       integer, intent(in), optional                     :: poly_sparsity_order
       logical, intent(inout), optional                  :: output_first_complex
-      integer, dimension(:, :), intent(inout), optional :: status_output, status_product
+      integer, dimension(:, :), intent(inout), optional :: status_output
 
       ! Local variables
       PetscErrorCode :: ierr      
@@ -1909,7 +1908,6 @@ end if
       call generate_identity(matrix, mat_product)
       if (output_product) then
          status_output = 0
-         status_product = 0
       end if
       sparsity_order = poly_order
       if (present(poly_sparsity_order)) then
@@ -2048,7 +2046,6 @@ end if
                call MatDestroy(mat_product, ierr)  
                mat_product = mat_product_k_plus_1  
             end if
-            if (output_product) status_product(i, 1) = maxval(status_product) + 1
             
             ! We copy out the last product if we're doing this as part of a fixed sparsity multiply
             if (output_product .AND. i == i_sparse - 1) then
@@ -2111,7 +2108,6 @@ end if
                   call MatMatMult(temp_mat_A, mat_product, &
                         MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)     
                end if    
-               if (output_product) status_product(i, 2) = maxval(status_product) + 1
                
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
@@ -2149,7 +2145,6 @@ end if
                call MatDestroy(temp_mat_two, ierr)   
                if (output_product) then               
                   status_output(i, 2) = 1
-                  status_product(i+1, 2) = maxval(status_product) + 1
                end if
 
                ! Then add the scaled version of each product
