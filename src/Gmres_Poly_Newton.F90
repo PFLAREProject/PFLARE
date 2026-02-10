@@ -2249,6 +2249,7 @@ end if
             
             ! We copy out the last product if we're doing this as part of a fixed sparsity multiply
             if (output_product .AND. i == i_sparse - 1) then
+               call MatDestroy(mat_prod_or_temp, ierr)
                call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
             end if
             
@@ -2282,6 +2283,7 @@ end if
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
+                  call MatDestroy(mat_prod_or_temp, ierr)
                   call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
                end if  
                
@@ -2309,11 +2311,13 @@ end if
                ! We copy out the last part of the old product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. i > i_sparse - 2) then
 
+                  call MatDestroy(mat_prod_or_temp, ierr)
                   call MatConvert(temp_mat_two, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr) 
                   ! If i == 1 then we know mat_product is the identity and we don't bother 
                   ! to write it out, we just have some custom code in the product given its trivial
                   if (i /= 1) then 
                      ! This ensures it has the matching sparsity
+                     call MatDestroy(mat_product_save, ierr)
                      call MatConvert(mat_prod_or_temp, MATSAME, MAT_INITIAL_MATRIX, mat_product_save, ierr)  
                      ! This zeros mat_product_save and then puts mat_product into the sparsity pattern 
                      ! of mat_prod_or_temp
@@ -2354,6 +2358,7 @@ end if
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. .NOT. first_complex) then
+                  call MatDestroy(mat_prod_or_temp, ierr)
                   call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)      
                end if                 
 
