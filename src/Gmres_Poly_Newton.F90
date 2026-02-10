@@ -553,8 +553,6 @@ module gmres_poly_newton
       rel_tol = 1.0d0 * sqrt(epsilon(1.0d0))
       abs_tol = epsilon(1.0d0) * max(H_norm, beta)
 
-      print *, "coeffs", coefficients(:,1), "imag", coefficients(:,2)
-
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
       ! are trivially small - we set them explicitly to zero
@@ -565,9 +563,7 @@ module gmres_poly_newton
             coefficients(i_loc, 2) = 0d0
          end if
       end do       
-      
-      print *, "coeffs after zero", coefficients(:,1), "imag", coefficients(:,2)
-     
+           
       ! ~~~~~~~~~~~~~~
       ! Cluster close eigenvalues together to improve stability of the polynomial evaluation
       ! For example when computing the e'vals of a constant diagonal matrix
@@ -578,8 +574,6 @@ module gmres_poly_newton
 
       ! This places all exactly zero eigenvalues at the end of coefficients
       call cluster_eigenvalues_stable(coefficients(:, 1), coefficients(:, 2), rel_tol, abs_tol)      
-
-      print *, "coeffs after cluster", coefficients(:,1), "imag", coefficients(:,2)
 
       ! ~~~~~~~~~~~~~~
       ! Extract the non-zero eigenvalues for root adding and leja ordering
@@ -619,8 +613,6 @@ module gmres_poly_newton
 
          ! Resize coefficients to hold non-zero roots (with extras) + zero roots at end
          deallocate(coefficients)
-         print *, "size(real_roots_added)", size(real_roots_added), "poly_order + 1", poly_order + 1, "numerical_order", numerical_order
-         print *, "new size", size(real_roots_added) + (poly_order + 1 - numerical_order)
          allocate(coefficients(size(real_roots_added) + (poly_order + 1 - numerical_order), 2))
          coefficients = 0d0
 
@@ -692,10 +684,7 @@ module gmres_poly_newton
       do i_loc = 1, subspace_size+1
          call VecDestroy(V_n(i_loc), ierr)
       end do
-      call VecDestroy(w_j, ierr)
-
-      print *, "coeffs after leja", coefficients(:,1), "imag", coefficients(:,2)
-       
+      call VecDestroy(w_j, ierr)       
 
    end subroutine calculate_gmres_polynomial_roots_newton   
 
@@ -1091,6 +1080,7 @@ end if
       logical :: output_first_complex, skip_add
       PetscReal :: square_sum
       integer, dimension(poly_order + 1, 2) :: status_output
+      PetscReal, dimension(poly_sparsity_order+1,2) :: coeffs_contig
       
       ! ~~~~~~~~~~  
 
@@ -1158,9 +1148,10 @@ end if
          
             ! Duplicate & copy the matrix, but ensure there is a diagonal present
             call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, cmat)  
-
+            ! Have to be careful to pass in a contiguous piece of memory here
+            coeffs_contig = coefficients(1:poly_sparsity_order + 1, 1:2)
             call build_gmres_polynomial_newton_inverse_1st_1st(matrix, 1, &
-                     coefficients(1:poly_sparsity_order + 1, 1:2), &
+                     coeffs_contig, &
                      cmat, mat_sparsity_match, &
                      status_output)    
          end if     
@@ -1170,8 +1161,9 @@ end if
          ! But we have to be careful because the last root we want to explicitly
          ! build up to here (ie the power of the matrix given by sparsity_order)
          ! might be the first root of a complex conjugate pair
+         coeffs_contig = coefficients(1:poly_sparsity_order + 1, 1:2)
          call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, &
-                  coefficients(1:poly_sparsity_order + 1, 1:2), &
+                  coeffs_contig, &
                   cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
                   status_output, mat_product_save)
       end if 
