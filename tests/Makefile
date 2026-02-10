@@ -134,12 +134,12 @@ run_tests_load_serial:
 #
 	@echo ""
 	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders"
-	@for order in 0 1 2 3 4 5 6; do \
+	@set -e; for order in 0 1 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
 	done
 	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity"
-	@for order in 2 3 4 5 6; do \
+	@set -e; for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		for sparsity in $$(seq 1 $$(($$order - 1))); do \
 			echo "  --- Testing sparsity order = $$sparsity ---"; \
@@ -200,16 +200,16 @@ run_tests_load_parallel:
 #
 	@echo ""
 	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders in parallel"
-	@for order in 0 1 2 3 4 5 6; do \
+	@set -e; for order in 0 1 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
 	done
 	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity in parallel"
-	@for order in 2 3 4 5 6; do \
+	@set -e; for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		for sparsity in $$(seq 1 $$(($$order - 1))); do \
 			echo "  --- Testing sparsity order = $$sparsity ---"; \
-				$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$sparsity; \
+			$(MPIEXEC) -n 2 ./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$sparsity; \
 		done; \
 	done
 
@@ -437,13 +437,13 @@ run_tests_no_load_serial:
 #
 	@echo ""
 	@echo "Test Newton AIRG on advection for for different orders"
-	@for order in 0 1 2 3 4 5 6; do \
+	@set -e; for order in 0 1 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
 		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 	done
 	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity"
-	@for order in 2 3 4 5 6; do \
+	@set -e; for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		for sparsity in $$(seq 1 $$(($$order - 1))); do \
 			echo "  --- Testing sparsity order = $$sparsity ---"; \
@@ -659,13 +659,13 @@ run_tests_no_load_parallel:
 #
 	@echo ""
 	@echo "Test Newton AIRG on advection for for different orders in parallel"
-	@for order in 0 1 2 3 4 5 6; do \
+	@set -e; for order in 0 1 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
 		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 	done
 	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity in parallel"
-	@for order in 2 3 4 5 6; do \
+	@set -e; for order in 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		for sparsity in $$(seq 1 $$(($$order - 1))); do \
 			echo "  --- Testing sparsity order = $$sparsity ---"; \
@@ -694,7 +694,7 @@ run_tests_medium_serial:
 
 #
 	@echo ""
-	@for size in $$(seq 100 20 200); do \
+	@set -e; for size in $$(seq 100 20 200); do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
@@ -702,7 +702,7 @@ run_tests_medium_serial:
 #
 	@echo ""
 	@echo "--- Running scaling study on adv_diff_2d ---"
-	@for size in 100 200 400 800; do \
+	@set -e; for size in 100 200 400 800; do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
@@ -714,7 +714,7 @@ run_tests_medium_parallel:
 
 #
 	@echo ""
-	@for size in $$(seq 100 20 200); do \
+	@set -e; for size in $$(seq 100 20 200); do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
@@ -722,7 +722,7 @@ run_tests_medium_parallel:
 #
 	@echo ""
 	@echo "--- Running scaling study on adv_diff_2d in parallel ---"
-	@for size in 100 200 400 800; do \
+	@set -e; for size in 100 200 400 800; do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
