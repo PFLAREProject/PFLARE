@@ -450,7 +450,15 @@ run_tests_no_load_serial:
 				./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
 				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 		done; \
-	done	 	 	
+	done
+#
+	@echo ""
+	@echo "Test Newton GMRES polynomial on a diagonal matrix"
+	./mat_diag -ksp_max_it 1
+	@echo "Test Arnoldi GMRES polynomial on a diagonal matrix"
+	./mat_diag -pc_pflareinv_type arnoldi -ksp_max_it 1
+	@echo "Test Power GMRES polynomial on a diagonal matrix"
+	./mat_diag -pc_pflareinv_type power -ksp_max_it 1		
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
 # Include kokkos examples	 
