@@ -553,6 +553,8 @@ module gmres_poly_newton
       rel_tol = 1.0d0 * sqrt(epsilon(1.0d0))
       abs_tol = epsilon(1.0d0) * max(H_norm, beta)
 
+      print *, "coeffs", coefficients(:,1), "imag", coefficients(:,2)
+
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
       ! are trivially small - we set them explicitly to zero
@@ -562,7 +564,9 @@ module gmres_poly_newton
             coefficients(i_loc, 1) = 0d0
             coefficients(i_loc, 2) = 0d0
          end if
-      end do         
+      end do       
+      
+      print *, "coeffs after zero", coefficients(:,1), "imag", coefficients(:,2)
      
       ! ~~~~~~~~~~~~~~
       ! Cluster close eigenvalues together to improve stability of the polynomial evaluation
@@ -574,6 +578,8 @@ module gmres_poly_newton
 
       ! This places all exactly zero eigenvalues at the end of coefficients
       call cluster_eigenvalues_stable(coefficients(:, 1), coefficients(:, 2), rel_tol, abs_tol)      
+
+      print *, "coeffs after cluster", coefficients(:,1), "imag", coefficients(:,2)
 
       ! ~~~~~~~~~~~~~~
       ! Extract the non-zero eigenvalues for root adding and leja ordering
@@ -613,6 +619,8 @@ module gmres_poly_newton
 
          ! Resize coefficients to hold non-zero roots (with extras) + zero roots at end
          deallocate(coefficients)
+         print *, "size(real_roots_added)", size(real_roots_added), "poly_order + 1", poly_order + 1, "numerical_order", numerical_order
+         print *, "new size", size(real_roots_added) + (poly_order + 1 - numerical_order)
          allocate(coefficients(size(real_roots_added) + (poly_order + 1 - numerical_order), 2))
          coefficients = 0d0
 
@@ -685,6 +693,8 @@ module gmres_poly_newton
          call VecDestroy(V_n(i_loc), ierr)
       end do
       call VecDestroy(w_j, ierr)
+
+      print *, "coeffs after leja", coefficients(:,1), "imag", coefficients(:,2)
        
 
    end subroutine calculate_gmres_polynomial_roots_newton   
@@ -799,11 +809,11 @@ module gmres_poly_newton
       if (mat_ctx%imag_roots(size(mat_ctx%real_roots)) == 0d0) then
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(mat_ctx%real_roots(i)) > 1e-12) then
+         if (abs(mat_ctx%real_roots(size(mat_ctx%real_roots))) > 1e-12) then
 
             ! y = y + theta_i * MF_VEC_TEMP
             call VecAXPBY(y, &
-                     1d0/mat_ctx%real_roots(i), &
+                     1d0/mat_ctx%real_roots(size(mat_ctx%real_roots)), &
                      1d0, &
                      mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr) 
          end if
@@ -1575,12 +1585,12 @@ end if
             ! This should now have the value of prod in it
             vals_previous_power_temp(1:ncols) = vals_power_temp(1:ncols)
          end do    
-         
+
          ! Final step if last root is real
-         if (coefficients(term,2) == 0d0) then
-            if (ncols /= 0 .AND. abs(coefficients(term,1)) > 1e-12) then
+         if (coefficients(size(coefficients, 1),2) == 0d0) then
+            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > 1e-12) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                     1d0/coefficients(term, 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)   
+                     1d0/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
             end if             
          end if
 
@@ -1926,8 +1936,8 @@ end if
          ! Add in the final term multiplied by 1/theta_poly_order
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(coefficients(i,1)) > 1e-12) then      
-            call VecAXPY(inv_vec, 1d0/coefficients(i,1), product_vec, ierr)  
+         if (abs(coefficients(size(coefficients, 1),1)) > 1e-12) then      
+            call VecAXPY(inv_vec, 1d0/coefficients(size(coefficients, 1),1), product_vec, ierr)  
          end if       
       end if
 
@@ -2372,16 +2382,16 @@ end if
             ! Add in the final term multiplied by 1/theta_poly_order
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(coefficients(i,1)) > 1e-12) then     
+            if (abs(coefficients(i_sparse,1)) > 1e-12) then     
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
-                  call MatAXPY(inv_matrix, 1d0/coefficients(i,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
+                  call MatAXPY(inv_matrix, 1d0/coefficients(i_sparse,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
                else
                   ! Have to use the DIFFERENT_NONZERO_PATTERN here
-                  call MatAXPYWrapper(inv_matrix, 1d0/coefficients(i,1), mat_product)
+                  call MatAXPYWrapper(inv_matrix, 1d0/coefficients(i_sparse,1), mat_product)
                end if     
-               if (output_product) status_output(i, 1) = 1
+               if (output_product) status_output(i_sparse, 1) = 1
             end if       
          end if   
       end if     
