@@ -2174,7 +2174,7 @@ end if
 
                   ! Check if the distance between the fixed sparsity root and the one before
                   ! If > zero then they are not complex conjugates and hence we are on the first of the pair         
-                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > 1e-14 .AND. &
+                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > 1e-14 .OR. &
                         abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > 1e-14) then
                      output_first_complex = .TRUE.
                      i_sparse = i_sparse + 1
