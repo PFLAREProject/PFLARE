@@ -12,7 +12,7 @@
       PetscErrorCode :: ierr
       Mat :: A
       PetscInt :: m, n, nnzs
-      PetscInt, parameter :: one = 1, two = 2, three = 3
+      PetscInt, parameter :: one = 1, two = 2, three = 3, zero = 0
       Vec :: x,b
       KSP :: ksp
       PC :: pc
@@ -98,7 +98,7 @@
       ! (ie a 1st order polynomial) for an exact solve
       ! ~~~~~~~~~~~~~~
       ! Set one of the values to 2.5
-      call MatSetValue(A, 0, 0, 2.5d0, INSERT_VALUES, ierr)
+      call MatSetValue(A, zero, zero, 2.5d0, INSERT_VALUES, ierr)
       call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
       call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)      
       call VecSet(x, 0d0, ierr)    
