@@ -1055,9 +1055,9 @@ end if
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one, row_index_into_submatrix
       PetscInt :: global_col_start, global_col_end_plus_one, n, ncols, ncols_two, ifree, max_nnzs
-      PetscInt :: i_loc, j_loc, row_size, rows_ao, cols_ao, rows_ad, cols_ad, shift = 0
+      PetscInt :: i_loc, j_loc, row_size, rows_ao, cols_ao, rows_ad, cols_ad, shift = 0, diag_index
       integer :: errorcode, match_counter, term
-      integer :: comm_size, diag_index
+      integer :: comm_size
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
@@ -1149,7 +1149,7 @@ end if
             ! Duplicate & copy the matrix, but ensure there is a diagonal present
             call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, cmat)  
 
-            call build_gmres_polynomial_newton_inverse_1st_1st(matrix, one, &
+            call build_gmres_polynomial_newton_inverse_1st_1st(matrix, 1, &
                      coefficients(1:poly_sparsity_order + 1, 1:2), &
                      cmat, mat_sparsity_match, &
                      status_output)    
