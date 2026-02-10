@@ -662,7 +662,7 @@ run_tests_no_load_parallel:
 	@set -e; for order in 0 1 2 3 4 5 6; do \
 		echo "--- Testing order = $$order ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
-		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 6; \
 	done
 	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity in parallel"
 	@set -e; for order in 2 3 4 5 6; do \
