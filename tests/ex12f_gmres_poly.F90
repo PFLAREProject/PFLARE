@@ -9,7 +9,7 @@
 
       PetscErrorCode  ierr
       PetscInt m,n,mlocal,nlocal
-      PetscBool  flg
+      PetscBool  flg, check, no_power
       PetscReal      norm_power, norm_rhs, norm_arnoldi, norm_newton
       PetscReal :: norm_diff_one, norm_diff_two
       Vec              x,b,u, b_diff_type
@@ -33,6 +33,12 @@
      &        PETSC_NULL_CHARACTER,'-f',f,flg,ierr)
       call PetscViewerBinaryOpen(PETSC_COMM_WORLD,f,FILE_MODE_READ,     &
      &     fd,ierr)
+      no_power = PETSC_FALSE
+      ! Our CI has an intel pipeline and the intel MPI breaks with the power basis
+      ! so we can disable the power basis test with a command line option
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER, &
+               '-no_power', check,flg,ierr)  
+      if (flg) no_power = check     
 
       call MatCreate(PETSC_COMM_WORLD,A,ierr)
       call MatLoad(A,fd,ierr)
@@ -85,33 +91,15 @@
       call VecNorm(b,NORM_2,norm_rhs,ierr)
 
       ! ~~~~~~~~~~~~~
-      ! Do a solve with the power basis
+      ! Do a solve with the Arnoldi basis
       ! ~~~~~~~~~~~~~
       call KSPCreate(PETSC_COMM_WORLD,ksp,ierr)
       call KSPSetOperators(ksp,A,A,ierr)
       call KSPGetPC(ksp, pc, ierr)       
       call PCSetType(pc, PCAIR, ierr)      
-      call PCAIRSetInverseType(pc, PFLAREINV_POWER, ierr)
+      call PCAIRSetInverseType(pc, PFLAREINV_ARNOLDI, ierr)
       call KSPSetPC(ksp, pc, ierr)
       call KSPSetFromOptions(ksp,ierr)
-
-      call VecSet(x, 0d0, ierr)
-      call KSPSolve(ksp,b,x,ierr)
-      call KSPGetConvergedReason(ksp,reason,ierr)      
-      if (reason%v < 0) then
-         error stop 1
-      end if
-      ! Compute the residual
-      call MatMult(A,x,u,ierr)
-      call VecAXPY(u,-1d0,b,ierr)
-      call VecNorm(u,NORM_2,norm_power,ierr)
-      norm_power = norm_power/norm_rhs
-
-      ! ~~~~~~~~~~~~~
-      ! Now do a solve with the Arnoldi basis
-      ! ~~~~~~~~~~~~~      
-      call PCAIRSetInverseType(pc, PFLAREINV_ARNOLDI, ierr)
-
       call VecSet(x, 0d0, ierr)
       call KSPSolve(ksp,b,x,ierr)
       call KSPGetConvergedReason(ksp,reason,ierr)      
@@ -123,6 +111,25 @@
       call VecAXPY(u,-1d0,b,ierr)
       call VecNorm(u,NORM_2,norm_arnoldi,ierr)
       norm_arnoldi = norm_arnoldi/norm_rhs
+
+      ! ~~~~~~~~~~~~~
+      ! Now do a solve with the Power basis
+      ! ~~~~~~~~~~~~~      
+      if (.NOT. no_power) then
+         call PCAIRSetInverseType(pc, PFLAREINV_POWER, ierr)
+
+         call VecSet(x, 0d0, ierr)
+         call KSPSolve(ksp,b,x,ierr)
+         call KSPGetConvergedReason(ksp,reason,ierr)      
+         if (reason%v < 0) then
+            error stop 1
+         end if
+         ! Compute the residual
+         call MatMult(A,x,u,ierr)
+         call VecAXPY(u,-1d0,b,ierr)
+         call VecNorm(u,NORM_2,norm_power,ierr)
+         norm_power = norm_power/norm_rhs
+      end if
 
       ! ~~~~~~~~~~~~~
       ! Now do a solve with the Newton basis
@@ -155,13 +162,15 @@
          print *, "Arnoldi basis residual:   ", norm_arnoldi
          error stop 1
       end if
-      norm_diff_two = abs(norm_arnoldi - norm_power)/norm_arnoldi
-      if (norm_diff_two > 1e-9) then
-         print *, "Residuals differ between polynomial bases!", norm_diff_two
-         print *, "Power basis residual:  ", norm_power
-         print *, "Arnoldi basis residual: ", norm_arnoldi
-         error stop 1
-      end if      
+      if (.NOT. no_power) then
+         norm_diff_two = abs(norm_arnoldi - norm_power)/norm_arnoldi
+         if (norm_diff_two > 1e-9) then
+            print *, "Residuals differ between polynomial bases!", norm_diff_two
+            print *, "Power basis residual:  ", norm_power
+            print *, "Arnoldi basis residual: ", norm_arnoldi
+            error stop 1
+         end if      
+      end if
 
       call VecDestroy(b,ierr)
       call VecDestroy(x,ierr)
