@@ -28,6 +28,9 @@ RUN source /opt/intel/oneapi/setvars.sh && \
     sed -i '/^run_tests_load_parallel:/,/^run_tests_no_load_serial:/s/-pc_pflareinv_type power/-pc_pflareinv_type arnoldi/g' tests/Makefile && \
     sed -i '/^run_tests_no_load_parallel:/,/^run_tests_medium_serial:/s/-pc_air_inverse_type power/-pc_air_inverse_type arnoldi/g' tests/Makefile && \
     sed -i '/^run_tests_no_load_parallel:/,/^run_tests_medium_serial:/s/-pc_pflareinv_type power/-pc_pflareinv_type arnoldi/g' tests/Makefile && \
+    echo "Disabling power basis in parallel test ex12f_gmres_poly in tests/Makefile" && \
+    sed -i '/^run_tests_load_parallel:/,/^run_tests_no_load_serial:/s/ex12f_gmres_poly/ex12f_gmres_poly -no_power/g' tests/Makefile && \
+    sed -i '/^run_tests_no_load_parallel:/,/^run_tests_medium_serial:/s/ex12f_gmres_poly/ex12f_gmres_poly -no_power/g' tests/Makefile && \    
     make -j2 && make -j2 check && \
     make -j2 tests
 
