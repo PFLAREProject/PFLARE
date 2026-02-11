@@ -555,6 +555,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
 
+   exec.fence();   
+
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
    aijkok_local_output->a_dual.clear_sync_state();

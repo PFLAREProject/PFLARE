@@ -716,6 +716,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       }
    }
 
+   // Let's make sure everything on the device is finished
+   exec.fence();   
+
    // We can create our local diagonal block matrix directly on the device
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
@@ -728,6 +731,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       PetscInt *garray_host = NULL;
       PetscInt col_ao_output = 0;
       rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
+
+      exec.fence();
 
       // We can create our nonlocal diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
@@ -1070,6 +1075,8 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       }       
    });
 
+   exec.fence();
+
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
    aijkok_local_output->a_dual.clear_sync_state();
@@ -1141,6 +1148,8 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
 
    aijkok_local->a_dual.clear_sync_state();
    aijkok_local->a_dual.modify_device();
@@ -1240,6 +1249,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    // We may have identity
    Kokkos::deep_copy(nnz_match_local_row_d, 0);              
    if (mpi) nnz_match_nonlocal_row_d = PetscIntKokkosView("nnz_match_nonlocal_row_d", local_rows);      
+
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Calculate if each row has a diagonal, we need to know this for both 
    // reuse and not reuse
@@ -1499,6 +1510,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
             }
       });   
 
+      exec.fence();
+
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
       aijkok_local_output->a_dual.clear_sync_state();
@@ -1524,7 +1537,6 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    if (!reuse_int)
    {
       // Let's make sure everything on the device is finished
-      auto exec = PetscGetKokkosExecutionSpace();
       exec.fence();     
 
       // Now we have to sort the local column indices, as we add in the identity at the 
@@ -1533,7 +1545,6 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       KokkosSparse::sort_crs_matrix(csrmat_local);       
 
       // Let's make sure everything on the device is finished
-      exec = PetscGetKokkosExecutionSpace();
       exec.fence();       
 
       // Create the matrix given the sorted csr
@@ -1634,6 +1645,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    PetscCallVoid(MatGetLocalSize(*Y, &local_rows, &local_cols));
    PetscCallVoid(MatGetSize(*Y, &global_rows, &global_cols));
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // ~~~~~~~~~~~~~~~
    // Let's go and add the local components together
    // ~~~~~~~~~~~~~~~
@@ -1669,6 +1682,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       Kokkos::deep_copy(i_local_d_copy, i_local_d_z);
       Kokkos::deep_copy(j_local_d_copy, j_local_d_z);
    }
+
+   exec.fence();
 
    // We can create our local diagonal block matrix directly on the device
    Mat Z_local;
@@ -1707,8 +1722,10 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
          device_nonlocal_x_j[i] = colmap_input_d_x(device_nonlocal_x_j[i]);
    });    
 
+   // Let's make sure everything on the device is finished
+   exec.fence();   
+
    // ~~~~~~~~~
-   auto exec = PetscGetKokkosExecutionSpace();
 
    Kokkos::View<PetscScalar *> a_nonlocal_d_copy;
    Kokkos::View<PetscInt *> i_nonlocal_d_copy, j_nonlocal_d_copy;
@@ -1757,6 +1774,9 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       Kokkos::deep_copy(i_nonlocal_d_copy, i_nonlocal_d_z);
       Kokkos::deep_copy(j_nonlocal_d_copy, j_nonlocal_d_z);   
    }
+
+   // Let's make sure everything on the device is finished
+   exec.fence();   
 
    // We can create our nonlocal diagonal block matrix directly on the device
    Mat Z_nonlocal;
@@ -2064,7 +2084,10 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
                a_local_d(i_local_const_d(i_idx_is_row) + scratch_indices(j)) = device_local_vals[device_local_i[i] + j];            
             }
          });
-      });        
+      });    
+      
+      // Let's make sure everything on the device is finished
+      exec.fence();      
 
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN

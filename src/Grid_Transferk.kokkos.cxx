@@ -282,6 +282,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       PetscInt col_ao_output = 0;
       rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
       
+      exec.fence();
       // We can create our nonlocal diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal)); 
 
@@ -390,6 +391,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::View<PetscInt *> i_nonlocal_d;          
    Kokkos::View<PetscInt *> j_nonlocal_d;  
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
+
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -638,6 +641,9 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
             }
       });   
 
+      // Let's make sure everything on the device is finished
+      exec.fence();      
+
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
       aijkok_local_output->a_dual.clear_sync_state();
@@ -678,7 +684,6 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       }   
         
       // Let's make sure everything on the device is finished
-      auto exec = PetscGetKokkosExecutionSpace();
       exec.fence();      
 
       // We can create our local diagonal block matrix directly on the device
@@ -873,7 +878,9 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::View<PetscScalar *> a_nonlocal_d;
    Kokkos::View<PetscInt *> i_nonlocal_d;          
    Kokkos::View<PetscInt *> j_nonlocal_d;  
-   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;  
+   
+   auto exec = PetscGetKokkosExecutionSpace();   
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -1115,6 +1122,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
             }
       });   
 
+      exec.fence();
+
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
       aijkok_local_output->a_dual.clear_sync_state();
@@ -1139,7 +1148,6 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    if (!reuse_int)
    {
       // Let's make sure everything on the device is finished
-      auto exec = PetscGetKokkosExecutionSpace();
       exec.fence();   
 
       // Now we have to sort the local column indices, as we add in the identity at the 
@@ -1148,7 +1156,6 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       KokkosSparse::sort_crs_matrix(csrmat_local);
       
       // Let's make sure everything on the device is finished
-      exec = PetscGetKokkosExecutionSpace();
       exec.fence();       
       
       // Create the matrix given the sorted csr
