@@ -110,6 +110,8 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
       Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
          is_d[i] -= global_row_start;
    });    
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
 
    return;
 }
