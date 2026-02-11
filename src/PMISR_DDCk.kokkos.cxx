@@ -120,6 +120,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // Compute the measure
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
@@ -146,6 +148,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
    if (mpi)
    {
+      exec.fence();
       // Have to make sure we don't modify measure_local_d while the comms is in progress
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
@@ -236,6 +239,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Start the async scatter of the nonlocal cf_markers
       // ~~~~~~~~~
       if (mpi) {
+
+         exec.fence();
          // We can't overwrite any of the values in cf_markers_d while the forward scatter is still going
          // Be careful these aren't petscints
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
@@ -389,6 +394,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Calling a reverse scatter add will then update the values of cf_markers_local
          // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
          // Be careful these aren't petscints
+         exec.fence();
          PetscCallVoid(PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
             mem_type, cf_markers_nonlocal_d_ptr,
             mem_type, cf_markers_d_ptr,
@@ -469,6 +475,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       }
       if (pmis_int) cf_markers_d(i) *= -1;
    });
+   exec.fence();
 
    return;
 }
@@ -483,7 +490,8 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 
    // Can't use the global directly within the parallel 
    // regions on the device
-   intKokkosView cf_markers_d = cf_markers_local_d;   
+   intKokkosView cf_markers_d = cf_markers_local_d;  
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
@@ -526,6 +534,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
             is_local_d(point_offsets_d(i)) = i;
          }              
    });
+   exec.fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -561,6 +570,9 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    
       is_coarse_local_d(i) += global_row_start;
    });       
+
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
 
    // Create some host space for the indices
    PetscInt *is_fine_array = nullptr, *is_coarse_array = nullptr;
@@ -638,6 +650,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    int *cf_markers_nonlocal_d_ptr = NULL;
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
    PetscMemType mtype;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // The off-diagonal component requires some comms which we can start now
    if (mpi)
@@ -645,6 +658,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();   
 
+      exec.fence();
       // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
       // one of the kokkos backends like PETSC_MEMTYPE_HIP
       // Be careful these aren't petscints
