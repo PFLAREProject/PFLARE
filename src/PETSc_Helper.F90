@@ -1018,74 +1018,74 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif      
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
-      ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
+!       call MatGetType(input_mat, mat_type, ierr)
+!       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
+!       ! Get the comm size 
+!       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
 
-      ! If doing parallel Kokkos
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
+!       ! If doing parallel Kokkos
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then
 
-         ! Are we reusing
-         reuse_logical = reuse == MAT_REUSE_MATRIX
-         reuse_int = 0
-         if (reuse_logical) reuse_int = 1
+!          ! Are we reusing
+!          reuse_logical = reuse == MAT_REUSE_MATRIX
+!          reuse_int = 0
+!          if (reuse_logical) reuse_int = 1
 
-         A_array = input_mat%v   
-         B_array = output_mat%v      
-         is_row_ptr = is_row%v
-         is_col_ptr = is_col%v
+!          A_array = input_mat%v   
+!          B_array = output_mat%v      
+!          is_row_ptr = is_row%v
+!          is_col_ptr = is_col%v
 
-         our_level_int = -1
-         is_row_fine_int = 0
-         is_col_fine_int = 0
+!          our_level_int = -1
+!          is_row_fine_int = 0
+!          is_col_fine_int = 0
 
-         if (present(our_level)) then
-            our_level_int = our_level
-         end if
-         if (present(is_row_fine)) then
-            if (is_row_fine) is_row_fine_int = 1
-         end if
-         if (present(is_col_fine)) then
-            if (is_col_fine) is_col_fine_int = 1
-         end if
+!          if (present(our_level)) then
+!             our_level_int = our_level
+!          end if
+!          if (present(is_row_fine)) then
+!             if (is_row_fine) is_row_fine_int = 1
+!          end if
+!          if (present(is_col_fine)) then
+!             if (is_col_fine) is_col_fine_int = 1
+!          end if
 
-         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
-                  reuse_int, B_array, &
-                  our_level_int, is_row_fine_int, is_col_fine_int)
+!          call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
+!                   reuse_int, B_array, &
+!                   our_level_int, is_row_fine_int, is_col_fine_int)
 
-         output_mat%v = B_array
+!          output_mat%v = B_array
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            call MatCreateSubMatrix(input_mat, is_row, is_col, &
-                  MAT_INITIAL_MATRIX, temp_mat, ierr)    
+!             call MatCreateSubMatrix(input_mat, is_row, is_col, &
+!                   MAT_INITIAL_MATRIX, temp_mat, ierr)    
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of MatCreateSubMatrix do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat, ierr)
-         end if
+!             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+!             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+!             if (normy .gt. 1d-12 .OR. normy/=normy) then
+!                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+!                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+!                print *, "Kokkos and CPU versions of MatCreateSubMatrix do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+!             end if
+!             call MatDestroy(temp_mat, ierr)
+!          end if
 
-      else
+!       else
 
-         call MatCreateSubMatrix(input_mat, is_row, is_col, &
-               reuse, output_mat, ierr)        
+!          call MatCreateSubMatrix(input_mat, is_row, is_col, &
+!                reuse, output_mat, ierr)        
 
-      end if
-#else
+!       end if
+! #else
          call MatCreateSubMatrix(input_mat, is_row, is_col, &
                reuse, output_mat, ierr) 
-#endif  
+!#endif  
          
    end subroutine MatCreateSubMatrixWrapper   
 
