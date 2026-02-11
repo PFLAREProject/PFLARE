@@ -2162,6 +2162,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       if (reuse_int) output_mat_local = *output_mat;
    }
    size_t bytes = 0;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // The diagonal component
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
@@ -2209,7 +2210,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscScalar *cmap_d_ptr = NULL;
          cmap_d_ptr = cmap_d.data();
          PetscScalar *lvec_d_ptr = NULL;
-         lvec_d_ptr = lvec_d.data();       
+         lvec_d_ptr = lvec_d.data();  
+         
+         exec.fence();
 
          // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
          // one of the kokkos backends like PETSC_MEMTYPE_HIP
