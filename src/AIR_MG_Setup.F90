@@ -426,8 +426,6 @@ module air_mg_setup
          ! Convert Aff to a matdiagonal type
          ! Haven't rewritten some inverse types to take advantage of matdiagonal
          if (aff_diag .AND. &
-                  inverse_type_aff /= PFLAREINV_NEWTON .AND. &
-                  inverse_type_aff /= PFLAREINV_NEWTON_NO_EXTRA .AND. &
                   inverse_type_aff /= PFLAREINV_SAI .AND. &
                   inverse_type_aff /= PFLAREINV_ISAI) then
 
