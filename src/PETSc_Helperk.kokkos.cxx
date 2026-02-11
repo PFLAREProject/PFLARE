@@ -79,6 +79,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
             j_nonlocal_d(i) = low;
       });         
    }
+   exec.fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -730,9 +731,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
       PetscInt *garray_host = NULL;
       PetscInt col_ao_output = 0;
+      // This routine fences internally
       rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
-
-      exec.fence();
 
       // We can create our nonlocal diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
