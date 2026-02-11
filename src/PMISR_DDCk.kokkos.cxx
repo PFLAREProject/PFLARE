@@ -389,19 +389,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   });     
                }
          });
-
-         // We've updated the values in cf_markers_nonlocal
-         // Calling a reverse scatter add will then update the values of cf_markers_local
-         // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
-         // Be careful these aren't petscints
-         exec.fence();
-         PetscCallVoid(PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-            mem_type, cf_markers_nonlocal_d_ptr,
-            mem_type, cf_markers_d_ptr,
-            MPIU_SUM));
       }
 
-      // Go and do local
+      // Go and do local - must be BEFORE the SFReduce to avoid a data race
+      // on cf_markers_d between the MPI reduction and this kernel
       Kokkos::parallel_for(
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -428,6 +419,17 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
       if (mpi) 
       {
+         // Fence to ensure local kernel completes before starting the 
+         // SF reduce which also writes to cf_markers_d
+         exec.fence();
+         // We've updated the values in cf_markers_nonlocal
+         // Calling a reverse scatter add will then update the values of cf_markers_local
+         // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
+         // Be careful these aren't petscints         
+         PetscCallVoid(PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
+            mem_type, cf_markers_nonlocal_d_ptr,
+            mem_type, cf_markers_d_ptr,
+            MPIU_SUM));
          // Finish the scatter
          // Be careful these aren't petscints
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
