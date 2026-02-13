@@ -20,7 +20,10 @@
              : advection-diffusion with linear FEM with theta=pi/4
                BCs dirichlet on all sides
 
+     Can change default velocity from straight line to curved with -curved_velocity (default false)
+     Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
      Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
+     If any of u,v,w are set then they will override the theta and unit velocity will be disabled
 
 */
 
@@ -38,13 +41,15 @@ typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
   PetscReal advection_velocity[3];   // Advection velocity, in 2D or 3D (for straight line case)
   PetscBool curved_velocity;         // Use curved velocity field if true
+  PetscBool unit_velocity;           // Normalize velocity magnitude if true
 } AppCtx;
 
 // Helper function to compute velocity at a point
-// constants[0] is alpha, constants[1-3] are constant velocity, constants[4] is curved flag (-1.0 if curved)
+// constants[0] is alpha, constants[1-3] are constant velocity, constants[4] is curved flag (1.0 if curved)
+// and constant[5] is velocity normalisation flag (1.0 if normalise)
 static inline void GetVelocity(const PetscScalar constants[], const PetscReal x[], PetscReal v[])
 {
-  if (constants[4] == -1.0) {
+  if (constants[4] == 1.0) {
     // Spatially-varying velocity field: top-left quadrant of a rotating circle (center at 1,0)
     // u(x,y) = y, v(x,y) = 1-x
     v[0] = x[1];         // u(x,y)
@@ -55,6 +60,18 @@ static inline void GetVelocity(const PetscScalar constants[], const PetscReal x[
     v[0] = constants[1];
     v[1] = constants[2];
     v[2] = constants[3];
+  }
+
+  // Normalize velocity if unit_velocity flag is set
+  if (constants[5] == 1.0) {
+    PetscReal mag = 0.0;
+    for (int d = 0; d < 2; ++d) mag += v[d]*v[d];
+    mag = sqrt(mag);
+    if (mag > 1e-12) {
+      v[0] /= mag;
+      v[1] /= mag;
+      v[2] /= mag;
+    }
   }
 }
 
@@ -195,6 +212,10 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   options->curved_velocity = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-curved_velocity", &options->curved_velocity, NULL));
 
+  // Unit velocity normalization option - default to unit velocity
+  options->unit_velocity = PETSC_TRUE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-unit_velocity", &options->unit_velocity, NULL));  
+
   // Initialize advection to zero
   options->advection_velocity[0] = 0.0; // u
   options->advection_velocity[1] = 0.0; // v
@@ -212,7 +233,7 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   options->advection_velocity[1] = sin(theta);
 
   // Or the user can pass in the individual advection velocities
-  // This will override theta
+  // This will override theta and unit velocity options if they are set
   PetscReal u_test = 0.0, v_test = 0.0, w_test = 0.0;
   PetscBool option_found_u, option_found_v, option_found_w;
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-u", &u_test, &option_found_u));
@@ -226,6 +247,11 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   if (option_found_u) options->advection_velocity[0] = u_test;
   if (option_found_v) options->advection_velocity[1] = v_test;
   if (option_found_w) options->advection_velocity[2] = w_test;
+
+  // Don't normalise if user has explicitly set a velocity
+  if (option_found_u || option_found_v || option_found_w) {
+    options->unit_velocity = PETSC_FALSE;
+  }
 
   PetscOptionsEnd();
   PetscFunctionReturn(PETSC_SUCCESS);
@@ -305,14 +331,15 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
 
   /* Setup constants that get passed into the FEM functions*/
   {
-    PetscScalar constants[5];
+    PetscScalar constants[6];
 
     constants[0] = options->alpha;
     constants[1] = options->advection_velocity[0];
     constants[2] = options->advection_velocity[1];
     constants[3] = options->advection_velocity[2];
-    constants[4] = options->curved_velocity ? -1.0 : 0.0;  // -1.0 indicates curved velocity
-    PetscCall(PetscDSSetConstants(ds, 5, constants));
+    constants[4] = options->curved_velocity ? 1.0 : 0.0;  // 1.0 indicates curved velocity
+    constants[5] = options->unit_velocity ? 1.0 : 0.0;    // 1.0 indicates unit velocity normalization
+    PetscCall(PetscDSSetConstants(ds, 6, constants));
   }
 
   PetscFunctionReturn(PETSC_SUCCESS);
