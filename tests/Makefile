@@ -234,7 +234,10 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
 	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 6
+	@echo "Test AIRG with SUPG CG FEM in 2D with curved velocity"
+	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 6 -curved_velocity 
 	@echo "Test AIRG with SUPG CG FEM in 3D"
 	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
@@ -486,7 +489,10 @@ run_tests_no_load_parallel:
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 6 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	@echo "Test AIRG with SUPG CG FEM in 2D with curved velocity in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 1 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 6 -curved_velocity	 
 	@echo "Test AIRG with SUPG CG FEM in 3D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 \
 	 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power

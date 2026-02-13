@@ -36,8 +36,27 @@ static char help[] = "Solves steady advection-diffusion FEM problem with SUPG st
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
-  PetscReal advection_velocity[3];   // Advection velocity, in 2D or 3D
+  PetscReal advection_velocity[3];   // Advection velocity, in 2D or 3D (for straight line case)
+  PetscBool curved_velocity;         // Use curved velocity field if true
 } AppCtx;
+
+// Helper function to compute velocity at a point
+// constants[0] is alpha, constants[1-3] are constant velocity, constants[4] is curved flag (-1.0 if curved)
+static inline void GetVelocity(const PetscScalar constants[], const PetscReal x[], PetscReal v[])
+{
+  if (constants[4] == -1.0) {
+    // Spatially-varying velocity field: top-left quadrant of a rotating circle (center at 1,0)
+    // u(x,y) = y, v(x,y) = 1-x
+    v[0] = x[1];         // u(x,y)
+    v[1] = 1.0 - x[0];   // v(x,y)
+    v[2] = 0.0;          // w (unused in 2D)
+  } else {
+    // Constant velocity field
+    v[0] = constants[1];
+    v[1] = constants[2];
+    v[2] = constants[3];
+  }
+}
 
 // Helper function to compute the SUPG stabilization parameter tau
 static inline PetscErrorCode ComputeSUPGStabilization(PetscInt dim, PetscReal h, PetscReal alpha, const PetscReal v[], PetscReal *tau)
@@ -92,9 +111,8 @@ static PetscErrorCode neumann_bc_zero_flux(PetscInt dim, PetscReal time, const P
 // The f0 term in the weak form integral
 static void advection_diffusion_f0(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f0[])
 {
-  // constants[1] is u, constants[2] is v, constants[3] is w
-  // Pointer to the first component of the velocity in the constants array
-  const PetscReal *advection_velocity = &constants[1]; 
+  PetscReal advection_velocity[3];
+  GetVelocity(constants, x, advection_velocity);
 
   PetscReal adv_dot_grad_u = 0.0;
   PetscReal volumetric_source = 0.0; // Assuming f = 0 for now
@@ -112,8 +130,12 @@ static void advection_diffusion_f0(PetscInt dim, PetscInt Nf, PetscInt NfAux, co
 static void advection_diffusion_f1_supg(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f1[])
 {
   const PetscReal  alpha = constants[0];
-  const PetscReal *v     = &constants[1];
   const PetscReal  h     = a[0]; // Cell size from auxiliary field
+  
+  // Get velocity field
+  PetscReal v[3];
+  GetVelocity(constants, x, v);
+  
   PetscReal        tau, v_dot_grad_u = 0.0;
   PetscInt         d;
 
@@ -129,9 +151,8 @@ static void advection_diffusion_f1_supg(PetscInt dim, PetscInt Nf, PetscInt NfAu
 // The Jacobian for advection term
 static void g1_jacobian_advection_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g1[])
 {
-  // constants[1] is u, constants[2] is v, constants[3] is w
-  // Pointer to the first component of the velocity
-  const PetscReal *advection_velocity = &constants[1]; 
+  PetscReal advection_velocity[3];
+  GetVelocity(constants, x, advection_velocity);
 
   PetscInt d;
   for (d = 0; d < dim; ++d) {
@@ -143,8 +164,12 @@ static void g1_jacobian_advection_term(PetscInt dim, PetscInt Nf, PetscInt NfAux
 static void g3_jacobian_diffusion_term_supg(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g3[])
 {
   const PetscReal  alpha = constants[0];
-  const PetscReal *v     = &constants[1];
   const PetscReal  h     = a[0]; // Cell size from auxiliary field
+  
+  // Get velocity field
+  PetscReal v[3];
+  GetVelocity(constants, x, v);
+  
   PetscReal        tau;
   PetscInt         d, c;
 
@@ -165,6 +190,10 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   // Default alpha is 0 - pure advection
   options->alpha = 0.0;
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha", &options->alpha, NULL));
+
+  // Curved velocity field option
+  options->curved_velocity = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-curved_velocity", &options->curved_velocity, NULL));
 
   // Initialize advection to zero
   options->advection_velocity[0] = 0.0; // u
@@ -276,13 +305,14 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
 
   /* Setup constants that get passed into the FEM functions*/
   {
-    PetscScalar constants[4];
+    PetscScalar constants[5];
 
     constants[0] = options->alpha;
     constants[1] = options->advection_velocity[0];
     constants[2] = options->advection_velocity[1];
     constants[3] = options->advection_velocity[2];
-    PetscCall(PetscDSSetConstants(ds, 4, constants));
+    constants[4] = options->curved_velocity ? -1.0 : 0.0;  // -1.0 indicates curved velocity
+    PetscCall(PetscDSSetConstants(ds, 5, constants));
   }
 
   PetscFunctionReturn(PETSC_SUCCESS);
@@ -385,6 +415,8 @@ int main(int argc, char **argv)
   Vec    u;    /* Solutions */
   AppCtx options; /* options-defined work context */
   PetscLogStage setup, gpu_copy;
+  KSPConvergedReason reason;
+  KSP ksp;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &argv, NULL, help));
@@ -427,6 +459,14 @@ int main(int argc, char **argv)
   PetscCall(SNESSolve(snes, NULL, u));
   PetscCall(PetscLogStagePop());
 
+  // Get the iteration count
+  PetscCall(SNESGetKSP(snes, &ksp));
+  PetscCall(KSPGetConvergedReason(ksp,&reason));  
+  if (reason < 0)
+  {
+   return 1;
+  }  
+
   // Solve
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
   // gpu implementation and we don't want a copy occuring back to the cpu
@@ -434,7 +474,13 @@ int main(int argc, char **argv)
   {
    PetscCall(VecSet(u, 1.0));
    PetscCall(SNESSolve(snes, NULL, u));
-  }  
+  }
+  
+  PetscCall(KSPGetConvergedReason(ksp,&reason));  
+  if (reason < 0)
+  {
+   return 1;
+  }    
 
   PetscCall(SNESGetSolution(snes, &u));
   /* Cleanup */
