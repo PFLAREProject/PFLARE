@@ -721,6 +721,24 @@ run_tests_medium_serial:
 		./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
 	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh ---"
+	@set -e; for refine in 2 3 4; do \
+		echo "--- Testing refinement = $$refine ---"; \
+		./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
+	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh and curved velocity ---"
+	@set -e; for refine in 2 3 4; do \
+		echo "--- Testing refinement = $$refine ---"; \
+		./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		-curved_velocity -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
+	done			
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
@@ -740,6 +758,24 @@ run_tests_medium_parallel:
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_2d -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh in parallel ---"
+	@set -e; for refine in 2 3 4; do \
+		echo "--- Testing refinement = $$refine ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
+	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh and curved velocity in parallel ---"
+	@set -e; for refine in 2 3 4; do \
+		echo "--- Testing refinement = $$refine ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		-curved_velocity -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done	
 
 # ~~~~~~~~~~~
