@@ -69,6 +69,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Pull out the nonlocal parts of the input mat we need
    const PetscInt *colmap_input_mat;
    PetscInt cols_ao_input = 0;
+   cols_ao = 0;
    if (mpi)
    {
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local_input, &mat_nonlocal_input, &colmap_input_mat));
