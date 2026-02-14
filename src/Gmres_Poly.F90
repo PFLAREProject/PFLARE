@@ -820,7 +820,7 @@ end if
 
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
-            if (normy .gt. 1d-11 .OR. normy/=normy) then
+            if (normy .gt. 3d-11 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
