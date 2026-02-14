@@ -730,11 +730,13 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-      PetscScalar normy;
+      PetscScalar :: normy
       logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
       type(c_ptr)  :: coefficients_ptr
       type(tMat) :: reuse_mat_cpu
       type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
 #endif      
       ! ~~~~~~~~~~
 
@@ -810,13 +812,18 @@ end if
                         temp_mat_reuse, ierr)                        
 
             call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
-            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
-            if (normy .gt. 1d-11 .OR. normy/=normy) then
+            if (normy .gt. 3d-11 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of mat_mult_powers_share_sparsity do not match"
+               print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
 
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if

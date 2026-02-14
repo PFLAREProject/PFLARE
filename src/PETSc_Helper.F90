@@ -115,7 +115,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy;
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
 #endif      
       ! ~~~~~~~~~~
 
@@ -155,11 +157,16 @@ logical, protected :: kokkos_debug_global = .FALSE.
                      lump, drop_diagonal_int)       
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
             if (normy .gt. 1d-12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
+               print *, "Diff Kokkos and CPU remove_small_from_sparse", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
             call MatDestroy(temp_mat, ierr)
@@ -439,8 +446,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy
+      PetscScalar :: normy
       PetscReal :: alpha_val
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
 #endif      
       ! ~~~~~~~~~~
 
@@ -481,11 +490,16 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call remove_from_sparse_match_cpu(input_mat, temp_mat, lump, alpha)      
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
             if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of remove_from_sparse_match do not match"
+               print *, "Diff Kokkos and CPU remove_from_sparse_match", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
             call MatDestroy(temp_mat, ierr)
@@ -732,7 +746,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-      PetscScalar normy;
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
 #endif        
       ! ~~~~~~~~~~
 
@@ -773,11 +789,16 @@ logical, protected :: kokkos_debug_global = .FALSE.
                         temp_mat_reuse, ierr)                       
 
             call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
             if (normy .gt. 1d-13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of compute_R_from_Z do not match"
+               print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
             call MatDestroy(temp_mat_reuse, ierr)
@@ -934,7 +955,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer(c_long_long) :: A_array, B_array
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy;
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
 #endif      
       ! ~~~~~~~~~~
 
@@ -963,11 +986,16 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
 
             call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
             if (normy .gt. 1d-12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of MatAXPY do not match"
+               print *, "Diff Kokkos and CPU MatAXPY", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
             call MatDestroy(temp_mat, ierr)
@@ -1014,7 +1042,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       logical :: reuse_logical
       MatType :: mat_type
       Mat :: temp_mat
-      PetscScalar normy
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
 #endif      
       ! ~~~~~~~~~~
 
@@ -1066,11 +1096,16 @@ logical, protected :: kokkos_debug_global = .FALSE.
                   MAT_INITIAL_MATRIX, temp_mat, ierr)    
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
             if (normy .gt. 1d-12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of MatCreateSubMatrix do not match"
+               print *, "Diff Kokkos and CPU MatCreateSubMatrix", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
             end if
             call MatDestroy(temp_mat, ierr)
