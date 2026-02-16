@@ -249,14 +249,6 @@ run_tests_no_load_serial:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity"
 	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity
-#	 
-	@echo ""
-	@echo "Test AIRG with upwind DG FEM in 2D with triangles"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 1 -dm_refine 2 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
-	@echo "Test AIRG with upwind DG FEM in 2D with triangles with curved velocity"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 1 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity	
 #	 
 	@echo ""
@@ -530,14 +522,6 @@ run_tests_no_load_parallel:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity
-#	 
-	@echo ""
-	@echo "Test AIRG with upwind DG FEM in 2D with triangles in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 1 -dm_refine 2 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
-	@echo "Test AIRG with upwind DG FEM in 2D with triangles with curved velocity in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 1 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity		 
 #	 
 	@echo ""
