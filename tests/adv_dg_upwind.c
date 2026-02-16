@@ -21,8 +21,8 @@
      Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
      Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
      If any of u,v,w are set then they will override the theta and unit velocity will be disabled
-     Can enable diagonal block element inverse scaling with -diag_scale (default false) which is essential for scalable 
-       convergence with higher order basis functions
+     Can enable diagonal block element inverse scaling with -diag_scale (default true) which is essential for scalable 
+       convergence
 
      Boundary label conventions (matching the SUPG code):
        2D: inflow  = {1, 4}  (left, bottom)
@@ -141,7 +141,7 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
   opt->bottom_only_inflow_one = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-bottom_only_inflow_one", &opt->bottom_only_inflow_one, NULL));
 
-  opt->diag_scale = PETSC_FALSE;
+  opt->diag_scale = PETSC_TRUE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-diag_scale", &opt->diag_scale, NULL));
 
   opt->second_solve = PETSC_FALSE;
@@ -190,19 +190,6 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *opt, DM *dm)
       PetscCall(PetscOptionsSetValue(NULL, "-dm_distribute_overlap", "1"));
   }
   PetscCall(DMSetFromOptions(*dm));
-  /* DMSetUp and DMLocalizeCoordinates ensure the local coordinate DM is
-     fully initialised for DMPlexComputeCellGeometryFEM.  The box-mesh
-     generator does this internally, but when reading a file via
-     -dm_plex_filename DMSetFromOptions handles the read and we must call
-     these explicitly to finish coordinate setup.  They are safe to call
-     on the generated mesh too (they become no-ops if already done).      */
-  //PetscCall(DMSetUp(*dm));
-  /* GMsh (and other file formats) may use vertex orderings that give a
-     negative Jacobian determinant under PETSc's reference element convention.
-     DMPlexOrient corrects all cell orientations to be consistent with
-     PETSc's outward-normal convention before any geometry is computed.    */
-  PetscCall(DMPlexOrient(*dm));  
-  //PetscCall(DMLocalizeCoordinates(*dm));
   PetscCall(DMGetCoordinatesLocalSetUp(*dm));
   PetscCall(DMSetApplicationContext(*dm, opt));
   PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
