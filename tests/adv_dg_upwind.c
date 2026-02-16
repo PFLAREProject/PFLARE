@@ -190,19 +190,6 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *opt, DM *dm)
       PetscCall(PetscOptionsSetValue(NULL, "-dm_distribute_overlap", "1"));
   }
   PetscCall(DMSetFromOptions(*dm));
-  /* DMSetUp and DMLocalizeCoordinates ensure the local coordinate DM is
-     fully initialised for DMPlexComputeCellGeometryFEM.  The box-mesh
-     generator does this internally, but when reading a file via
-     -dm_plex_filename DMSetFromOptions handles the read and we must call
-     these explicitly to finish coordinate setup.  They are safe to call
-     on the generated mesh too (they become no-ops if already done).      */
-  //PetscCall(DMSetUp(*dm));
-  /* GMsh (and other file formats) may use vertex orderings that give a
-     negative Jacobian determinant under PETSc's reference element convention.
-     DMPlexOrient corrects all cell orientations to be consistent with
-     PETSc's outward-normal convention before any geometry is computed.    */
-  PetscCall(DMPlexOrient(*dm));  
-  //PetscCall(DMLocalizeCoordinates(*dm));
   PetscCall(DMGetCoordinatesLocalSetUp(*dm));
   PetscCall(DMSetApplicationContext(*dm, opt));
   PetscCall(DMViewFromOptions(*dm, NULL, "-dm_view"));
