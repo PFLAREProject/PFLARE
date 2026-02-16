@@ -1183,6 +1183,7 @@ int main(int argc, char **argv)
   DMPolytopeType ct;
   PetscBool   simplex;
   PetscLogStage setup_stage, gpu_copy_stage;
+  MatType mat_type;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &argv, NULL, help));
@@ -1278,14 +1279,10 @@ int main(int argc, char **argv)
   /* ---- Allocate matrix and vectors ---- */
   PetscCall(MatCreate(PETSC_COMM_WORLD, &A));
   PetscCall(MatSetSizes(A, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
-  PetscCall(MatSetType(A, MATAIJ));
   PetscCall(MatSetFromOptions(A));
   PetscCall(PreallocateMatrix(dm, Nb, A));
 
-  PetscCall(VecCreate(PETSC_COMM_WORLD, &b_rhs));
-  PetscCall(VecSetSizes(b_rhs, nrows, PETSC_DETERMINE));
-  PetscCall(VecSetType(b_rhs, VECSTANDARD));
-  PetscCall(VecSetFromOptions(b_rhs));
+  PetscCall(MatCreateVecs(A, &b_rhs, NULL));
   PetscCall(VecSet(b_rhs, 0.0));
 
   PetscCall(VecDuplicate(b_rhs, &x));
@@ -1294,6 +1291,7 @@ int main(int argc, char **argv)
 
   /* ---- Assemble ---- */
   PetscCall(AssembleSystem(dm, fe, &ctx, Nb, Nq, A, b_rhs));
+  PetscCall(MatGetType(A, &mat_type));
 
   /* ---- Block diagonal scaling: D^{-1} A x = D^{-1} b ---- */
   if (ctx.diag_scale) {
@@ -1313,7 +1311,7 @@ int main(int argc, char **argv)
     /* Build the block-diagonal inverse matrix Dinv */
     PetscCall(MatCreate(PETSC_COMM_WORLD, &Dinv));
     PetscCall(MatSetSizes(Dinv, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
-    PetscCall(MatSetType(Dinv, MATAIJ));
+    PetscCall(MatSetType(Dinv, mat_type));
     PetscCall(MatSeqAIJSetPreallocation(Dinv, Nb, NULL));
     PetscCall(MatMPIAIJSetPreallocation(Dinv, Nb, NULL, 0, NULL));
     PetscCall(MatSetUp(Dinv));
@@ -1358,7 +1356,7 @@ int main(int argc, char **argv)
 
       PetscCall(MatCreate(PETSC_COMM_WORLD, &DinvA_f));
       PetscCall(MatSetSizes(DinvA_f, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
-      PetscCall(MatSetType(DinvA_f, MATAIJ));
+      PetscCall(MatSetType(DinvA_f, mat_type));
       PetscCall(MatSetOption(DinvA_f, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE));
       PetscCall(MatSetUp(DinvA_f));
 
