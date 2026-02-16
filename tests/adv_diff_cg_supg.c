@@ -7,7 +7,7 @@
        to sensibly distribute the initial mesh before refining)
      Can refine with -dm_refine
      Can read in an unstructured gmsh file with -dm_plex_filename
-         - have to make sure boundary ids match (1 through 6)
+         - have to make sure boundary ids match (1 through 4 in 2D, 1 through 6 in 3D)
      Can view the solution with -snes_view_solution vtk:solution.vtu
 
      ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1
