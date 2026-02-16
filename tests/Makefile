@@ -777,7 +777,7 @@ run_tests_medium_serial:
 	@echo "--- Running scaling study on adv_dg_upwind with unstructured mesh ---"
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		./adv_dg_upwind -adv_dg_petscspace_degree 1 -diag_scale -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		./adv_dg_upwind -adv_dg_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 6; \
 	done
@@ -786,7 +786,7 @@ run_tests_medium_serial:
 	@echo "--- Running scaling study on adv_dg_upwind with unstructured mesh and quadratic basis functions ---"
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		./adv_dg_upwind -adv_dg_petscspace_degree 2 -diag_scale -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		./adv_dg_upwind -adv_dg_petscspace_degree 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
 	done					
@@ -833,7 +833,7 @@ run_tests_medium_parallel:
 	@echo "--- Running scaling study on adv_dg_upwind with unstructured mesh in parallel ---"
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -diag_scale -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 6; \
 	done
@@ -842,7 +842,7 @@ run_tests_medium_parallel:
 	@echo "--- Running scaling study on adv_dg_upwind with unstructured mesh and quadratic basis functions in parallel ---"
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 2 -diag_scale -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
 	done		

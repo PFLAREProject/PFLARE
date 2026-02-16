@@ -21,8 +21,8 @@
      Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
      Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
      If any of u,v,w are set then they will override the theta and unit velocity will be disabled
-     Can enable diagonal block element inverse scaling with -diag_scale (default false) which is essential for scalable 
-       convergence with higher order basis functions
+     Can enable diagonal block element inverse scaling with -diag_scale (default true) which is essential for scalable 
+       convergence
 
      Boundary label conventions (matching the SUPG code):
        2D: inflow  = {1, 4}  (left, bottom)
@@ -141,7 +141,7 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
   opt->bottom_only_inflow_one = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-bottom_only_inflow_one", &opt->bottom_only_inflow_one, NULL));
 
-  opt->diag_scale = PETSC_FALSE;
+  opt->diag_scale = PETSC_TRUE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-diag_scale", &opt->diag_scale, NULL));
 
   opt->second_solve = PETSC_FALSE;
