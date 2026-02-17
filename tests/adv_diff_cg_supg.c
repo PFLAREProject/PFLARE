@@ -1,6 +1,6 @@
 /*   DMPlex/SNES/KSP solving a system of linear equations.
      Steady advection-diffusion equation with SUPG stabilised CG FEM
-     Default is 2D triangles with default velocity is (1,1) normalised.
+     Default is 2D with default velocity (1,1) normalised.
      In 3D default velocity is (1,1,1) normalised.
      Can control dimension with -dm_plex_dim
      Can control quad/hex tri/tet with -dm_plex_simplex (if tri/tet need to configure petsc with triangle/ctetgen)
@@ -11,13 +11,13 @@
          - have to make sure boundary ids match (1 through 4 in 2D, 1 through 6 in 3D)
      Can view the solution with -snes_view_solution vtk:solution.vtu
 
-     ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1
-             : pure advection with linear FEM with u = v = 1, normalised (theta=pi/4)
-               BCs left and bottom and back dirichlet, the others outflow
-     ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -u 0 -v 0 -alpha 1.0
+     ./adv_diff_cg_supg -dm_refine 1
+             : pure advection in 2D with linear FEM with u = v = 1, normalised (theta=pi/4)
+               BCs left and bottom and back 0 inflow dirichlet, the others outflow
+     ./adv_diff_cg_supg -dm_refine 1 -u 0 -v 0 -alpha 1.0
              : pure diffusion with linear FEM
                BCs dirichlet on all sides
-     ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -alpha 1.0
+     ./adv_diff_cg_supg -dm_refine 1 -alpha 1.0
              : advection-diffusion with linear FEM with theta=pi/4
                BCs dirichlet on all sides
 
@@ -454,7 +454,21 @@ static PetscErrorCode SetupDiscretization(DM dm, const char name[], PetscErrorCo
   PetscCall(DMPlexGetCellType(dm, cStart, &ct));
   simplex = DMPolytopeTypeGetNumVertices(ct) == DMPolytopeTypeGetDim(ct) + 1 ? PETSC_TRUE : PETSC_FALSE;
 
+    /* PetscFECreateDefault reads the polynomial degree from the options
+       database under -adv_diff_petscspace_degree.  PETSc's own internal
+       default is 0 (piecewise constant), but we want 1 (linear) as the
+       code default.  Only insert the default if the user has not already
+       set it on the command line. */  
   PetscCall(PetscSNPrintf(prefix, PETSC_MAX_PATH_LEN, "%s_", name));
+  {
+    char      degree_key[PETSC_MAX_PATH_LEN];
+    PetscBool degree_set;
+    PetscCall(PetscSNPrintf(degree_key, sizeof(degree_key), "-%spetscspace_degree", prefix));
+    PetscCall(PetscOptionsHasName(NULL, NULL, degree_key, &degree_set));
+    if (!degree_set)
+      PetscCall(PetscOptionsSetValue(NULL, degree_key, "1"));
+  }
+
   PetscCall(PetscFECreateDefault(PetscObjectComm((PetscObject)dm), dim, 1, simplex, name ? prefix : NULL, -1, &fe));
   PetscCall(PetscObjectSetName((PetscObject)fe, name));
   PetscCall(DMSetField(dm, 0, NULL, (PetscObject)fe));

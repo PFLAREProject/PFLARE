@@ -1,5 +1,7 @@
 /*  DMPlex/KSP solving a scalar advection equation with upwinded DG FEM.
     Pure advection only (no diffusion) on a 2D or 3D mesh.
+    Default is 2D with default velocity (1,1) normalised.
+    In 3D default velocity is (1,1,1) normalised.    
     The function space is a broken polynomial space: each cell owns its own
     DOFs with no inter-element continuity enforced.  The upwind numerical
     flux on interior facets and inflow boundary facets couples the cells.
@@ -10,10 +12,13 @@
       Can control face count with        -dm_plex_box_faces
       Can refine with                    -dm_refine
       Can read a gmsh file with          -dm_plex_filename
+      Can specify basis function order   -adv_diff_petscspace_degree
       Specify inflow of 1 on bottom face -bottom_only_inflow_one
+      Can write out vtk solution with    -write_vtk
 
-    Example:
-      ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_refine 2
+    ./adv_dg_upwind -dm_refine 2
+            : pure advection in 2D with linear FEM with u = v = 1, normalised (theta=pi/4)
+              BCs left and bottom 0 inflow dirichlet, the others outflow
 
     Boundary label conventions (matching the SUPG code):
       2D: inflow  = {1, 4}  (left, bottom)
