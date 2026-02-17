@@ -1,36 +1,26 @@
-/*   DMPlex/KSP solving a scalar advection equation with upwinded DG FEM.
-     Pure advection only (no diffusion).
-     Default is 2D triangles
-     Can control dimension with -dm_plex_dim
-     Can control quad/hex tri/tet with -dm_plex_simplex (if tri/tet need to configure petsc with triangle/ctetgen)
-     Can control number of faces with -dm_plex_box_faces (if in parallel make sure you start with enough faces
-       to sensibly distribute the initial mesh before refining)
-     Can refine with -dm_refine
-     Can read in an unstructured gmsh file with -dm_plex_filename
-         - have to make sure boundary ids match (1 through 4 in 2D, 1 through 6 in 3D)
-     Can view the solution with -write_vtk
+/*  DMPlex/KSP solving a scalar advection equation with upwinded DG FEM.
+    Pure advection only (no diffusion) on a 2D or 3D mesh.
+    The function space is a broken polynomial space: each cell owns its own
+    DOFs with no inter-element continuity enforced.  The upwind numerical
+    flux on interior facets and inflow boundary facets couples the cells.
 
-     ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_refine 1
-             : pure advection with linear DG FEM with theta = pi/4
-               BCs left and bottom and back dirichlet (zero), the others outflow
-     ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_refine 1 -bottom_only_inflow_one
-             : pure advection with linear DG FEM with theta = pi/4
-               BCs bottom inflow set to 1, left/back set to 0, the others outflow
+    Usage mirrors the SUPG CG code:
+      Can control dimension with         -dm_plex_dim
+      Can control simplex/quad with      -dm_plex_simplex
+      Can control face count with        -dm_plex_box_faces
+      Can refine with                    -dm_refine
+      Can read a gmsh file with          -dm_plex_filename
 
-     Can change default velocity from straight line to curved with -curved_velocity (default false)
-     Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
-     Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
-     If any of u,v,w are set then they will override the theta and unit velocity will be disabled
-     Can enable diagonal block element inverse scaling with -diag_scale (default true) which is essential for scalable 
-       convergence
+    Example:
+      ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_refine 2
 
-     Boundary label conventions (matching the SUPG code):
-       2D: inflow  = {1, 4}  (left, bottom)
-           outflow = {2, 3}  (right, top)
-       3D: inflow  = {1, 3, 6}
-           outflow = {2, 4, 5}
+    Boundary label conventions (matching the SUPG code):
+      2D: inflow  = {1, 4}  (left, bottom)
+          outflow = {2, 3}  (right, top)
+      3D: inflow  = {1, 3, 6}
+          outflow = {2, 4, 5}
 
-     Design notes
+    Design notes
     ============
     We deliberately avoid the DS/SNES callback machinery.  Instead:
 
@@ -114,13 +104,12 @@ static inline void GetVelocity(const AppCtx *ctx, const PetscReal x[], PetscReal
 
 /* Inflow Dirichlet value by boundary face id.
    Default: homogeneous (0) inflow.
-   With -bottom_only_inflow_one in 2D: set g=1 on bottom (id 4),
-   while keeping g=0 on other inflow sides (e.g. left id 1). */
-static inline PetscScalar InflowValue(const AppCtx *ctx, PetscInt dim, PetscInt faceId,
+   With -bottom_only_inflow_one: set g=1 on face set 1, g=0 elsewhere. */
+static inline PetscScalar InflowValue(const AppCtx *ctx, PetscInt faceId,
                                       const PetscReal x[])
 {
   (void)x;
-  if (ctx->bottom_only_inflow_one && dim == 2) return (faceId == 1) ? 1.0 : 0.0;
+  if (ctx->bottom_only_inflow_one) return (faceId == 1) ? 1.0 : 0.0;
   return 0.0;
 }
 
@@ -230,7 +219,7 @@ static PetscErrorCode BuildBrokenSection(DM dm, PetscInt Nb, PetscSection *sec)
 
    Each cell has a diagonal block of size Nb x Nb (from volume + own-facet
    terms).  Each interior facet couples two cells, adding two off-diagonal
-   blocks of size Nb x Nb.  We walk all facets of height 1 (codimension 1)
+   blocks.  We walk all facets of height 1 (codimension 1)
    and use DMPlexGetSupport to find the owning cells.
 
    For the parallel case we must distinguish on-process (d_nnz) from
@@ -387,9 +376,18 @@ static PetscErrorCode FacetOutwardNormal(DM dm, PetscInt f, PetscInt c,
     n_out[1] = ny;
     n_out[2] = 0.0;
   } else {
-    PetscReal rawNormal[3];
-    PetscCall(DMPlexComputeCellGeometryFVM(dm, f, &area, NULL, rawNormal));
-    for (PetscInt d = 0; d < dim; d++) n_out[d] = rawNormal[d] / area;
+    /* 3D: compute face normal via FVM geometry and orient outward from cell c */
+    PetscReal rawNormal[3], fc[3], cc[3];
+    PetscCall(DMPlexComputeCellGeometryFVM(dm, f, &area, fc, rawNormal));
+    /* rawNormal from DMPlexComputeCellGeometryFVM is already a unit normal */
+    for (PetscInt d = 0; d < dim; d++) n_out[d] = rawNormal[d];
+    /* Orient so that n_out points away from cell c */
+    PetscCall(DMPlexComputeCellGeometryFVM(dm, c, NULL, cc, NULL));
+    PetscReal dot = 0.0;
+    for (PetscInt d = 0; d < dim; d++) dot += n_out[d] * (cc[d] - fc[d]);
+    if (dot > 0.0) {
+      for (PetscInt d = 0; d < dim; d++) n_out[d] = -n_out[d];
+    }
   }
 
   PetscFunctionReturn(PETSC_SUCCESS);
@@ -558,13 +556,9 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
   const PetscReal *fqpoints, *fqweights;
   const PetscReal *efqpoints;
   PetscInt         Nfq, dim;
-  PetscReal        n_out[3]; /* outward normal from cL */
 
   PetscFunctionBeginUser;
   PetscCall(DMGetDimension(dm, &dim));
-
-  /* Outward normal from cL for this facet */
-  PetscCall(FacetOutwardNormal(dm, f, cL, dim, n_out));
 
   /* Face quadrature: weights and points in the (dim-1)-dimensional reference
      space of the facet itself.                                              */
@@ -599,58 +593,161 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
   }
 
   /* Cell geometry for cL and cR: v0 (shifted to biunit-origin image) and J.
-     Used to map expanded face quadrature points to physical space.        */
-  PetscReal v0L[3], JL[9], invJL_dummy[9], detJL_dummy;
-  PetscCall(DMPlexComputeCellGeometryFEM(dm, cL, NULL, v0L, JL, invJL_dummy, &detJL_dummy));
+     Used to map expanded face quadrature points to physical space.
+     We also retrieve invJ and detJ so that the facet normal and area can be
+     derived from the SAME affine mapping as the volume integral.  This is
+     essential for consistency on non-affine cells (e.g. twisted hexes):
+     using the FVM-computed facet area/normal would break the discrete
+     divergence theorem and prevent the method from reproducing constants. */
+  PetscReal v0L[3], JL[9], invJL[9], detJL;
+  PetscCall(DMPlexComputeCellGeometryFEM(dm, cL, NULL, v0L, JL, invJL, &detJL));
   for (PetscInt d = 0; d < dim; d++)
     for (PetscInt e = 0; e < dim; e++) v0L[d] += JL[d * dim + e];
 
-  PetscReal v0R[3], JR[9], invJR_dummy[9], detJR_dummy;
+  PetscReal v0R[3], JR[9], invJR[9], detJR;
   PetscInt  *qRfromL = NULL;
   if (cR >= 0) {
-    PetscCall(DMPlexComputeCellGeometryFEM(dm, cR, NULL, v0R, JR, invJR_dummy, &detJR_dummy));
+    PetscCall(DMPlexComputeCellGeometryFEM(dm, cR, NULL, v0R, JR, invJR, &detJR));
     for (PetscInt d = 0; d < dim; d++)
       for (PetscInt e = 0; e < dim; e++) v0R[d] += JR[d * dim + e];
   /* Quadrature-point matching for interior facets.
      The expanded face quadrature gives reference-space points for each
      local face of a cell.  The q-th point on face fL of cL must
      correspond to the same physical location as some point on face fR of
-     cR.  Depending on the relative cone orientation, the ordering may be
-     identity or reversed.  We test both and pick the one that minimises
-     the summed squared physical distance.                                */
+     cR.  In 2D (edge facets) only identity or reversed orderings are
+     possible, but in 3D (face facets) there can be rotations and flips.
+     We use a general nearest-neighbour match in physical space.          */
     PetscCall(PetscMalloc1(Nfq, &qRfromL));
 
-    PetscReal idCost = 0.0, revCost = 0.0;
-    for (PetscInt q = 0; q < Nfq; q++) {
-      PetscReal xL[3] = {0.0, 0.0, 0.0}, xRid[3] = {0.0, 0.0, 0.0}, xRrev[3] = {0.0, 0.0, 0.0};
-      const PetscReal *xiLq   = &efqpoints[(fL * Nfq + q) * dim];
-      const PetscReal *xiRid  = &efqpoints[(fR * Nfq + q) * dim];
-      const PetscReal *xiRrev = &efqpoints[(fR * Nfq + (Nfq - 1 - q)) * dim];
-
+    for (PetscInt qL = 0; qL < Nfq; qL++) {
+      PetscReal xL[3] = {0.0, 0.0, 0.0};
+      const PetscReal *xiLq = &efqpoints[(fL * Nfq + qL) * dim];
       for (PetscInt d = 0; d < dim; d++) {
-        for (PetscInt e = 0; e < dim; e++) {
-          xL[d]    += JL[d * dim + e] * xiLq[e];
-          xRid[d]  += JR[d * dim + e] * xiRid[e];
-          xRrev[d] += JR[d * dim + e] * xiRrev[e];
-        }
-        xL[d]    += v0L[d];
-        xRid[d]  += v0R[d];
-        xRrev[d] += v0R[d];
-        idCost  += (xRid[d] - xL[d]) * (xRid[d] - xL[d]);
-        revCost += (xRrev[d] - xL[d]) * (xRrev[d] - xL[d]);
+        xL[d] = v0L[d];
+        for (PetscInt e = 0; e < dim; e++) xL[d] += JL[d * dim + e] * xiLq[e];
       }
-    }
-
-    if (idCost <= revCost) {
-      for (PetscInt q = 0; q < Nfq; q++) qRfromL[q] = q;
-    } else {
-      for (PetscInt q = 0; q < Nfq; q++) qRfromL[q] = Nfq - 1 - q;
+      PetscReal bestDist = PETSC_MAX_REAL;
+      PetscInt  bestQ    = 0;
+      for (PetscInt qR = 0; qR < Nfq; qR++) {
+        PetscReal xR[3] = {0.0, 0.0, 0.0};
+        const PetscReal *xiRq = &efqpoints[(fR * Nfq + qR) * dim];
+        for (PetscInt d = 0; d < dim; d++) {
+          xR[d] = v0R[d];
+          for (PetscInt e = 0; e < dim; e++) xR[d] += JR[d * dim + e] * xiRq[e];
+        }
+        PetscReal dist = 0.0;
+        for (PetscInt d = 0; d < dim; d++) dist += (xR[d] - xL[d]) * (xR[d] - xL[d]);
+        if (dist < bestDist) { bestDist = dist; bestQ = qR; }
+      }
+      qRfromL[qL] = bestQ;
     }
   }
 
-  /* Facet area for integration weight scaling */
-  PetscReal facetArea;
-  PetscCall(DMPlexComputeCellGeometryFVM(dm, f, &facetArea, NULL, NULL));
+  /* Determine the Jacobian-consistent outward normal for face fL of cL.
+
+     For tensor-product cells (hex/quad), the faces align with reference
+     coordinate planes (xi_k = ±1).  We identify the constant coordinate
+     from the expanded face quadrature points and compute:
+       n_w = |det(J)| * invJ^T * n_ref
+     so that the facet integral is consistent with the volume integral
+     (both use the same affine Jacobian).  This is essential for non-affine
+     tensor-product cells (e.g. twisted hexes) where the FVM geometry would
+     break the discrete divergence theorem.
+
+     For simplices (tri/tet), the affine Jacobian is exact, so we use the
+     FVM-computed normal and area (which are also exact).  We always use
+     the FVM path for simplices because simplex faces are not generally
+     aligned with reference coordinate planes, and with Nfq=1 the constant-
+     direction detection cannot distinguish between faces.                  */
+
+  /* Detect cell type to choose simplex vs tensor-product path */
+  DMPolytopeType ctL;
+  PetscCall(DMPlexGetCellType(dm, cL, &ctL));
+  PetscBool isTensorProduct = (ctL == DM_POLYTOPE_QUADRILATERAL ||
+                                ctL == DM_POLYTOPE_HEXAHEDRON);
+
+  PetscReal n_refL[3] = {0.0, 0.0, 0.0};
+  PetscBool isSimplexFace;
+  PetscReal area_fvm = 0.0;
+
+  if (isTensorProduct) {
+    /* Tensor-product cell: find constant reference coordinate on face fL */
+    isSimplexFace = PETSC_FALSE;
+    const PetscReal *xi0 = &efqpoints[(fL * Nfq) * dim];
+    for (PetscInt d = 0; d < dim; d++) {
+      PetscBool allSame = PETSC_TRUE;
+      for (PetscInt qq = 1; qq < Nfq; qq++) {
+        const PetscReal *xiq = &efqpoints[(fL * Nfq + qq) * dim];
+        if (PetscAbsReal(xiq[d] - xi0[d]) > 1e-12) { allSame = PETSC_FALSE; break; }
+      }
+      if (allSame && Nfq > 1) {
+        n_refL[d] = (xi0[d] > 0) ? 1.0 : -1.0;
+        break;
+      } else if (Nfq == 1) {
+        /* Single quad point: determine from the point value directly.
+           For a [-1,1]^dim hex/quad, face quad points are at ±1 in the
+           normal direction and in (-1,1) in the tangential directions. */
+        if (PetscAbsReal(PetscAbsReal(xi0[d]) - 1.0) < 1e-12) {
+          n_refL[d] = (xi0[d] > 0) ? 1.0 : -1.0;
+          break;
+        }
+      }
+    }
+  } else {
+    /* Simplex cell: use FVM geometry (exact for affine simplices) */
+    isSimplexFace = PETSC_TRUE;
+    PetscCall(FacetOutwardNormal(dm, f, cL, dim, n_refL));
+    PetscCall(DMPlexComputeCellGeometryFVM(dm, f, &area_fvm, NULL, NULL));
+  }
+
+  /* Compute n_ref for face fR of cell cR (only for interior tensor-product faces) */
+  PetscReal n_refR[3] = {0.0, 0.0, 0.0};
+  if (cR >= 0 && !isSimplexFace) {
+    const PetscReal *xi0R = &efqpoints[(fR * Nfq) * dim];
+    for (PetscInt d = 0; d < dim; d++) {
+      PetscBool allSame = PETSC_TRUE;
+      for (PetscInt qq = 1; qq < Nfq; qq++) {
+        const PetscReal *xiq = &efqpoints[(fR * Nfq + qq) * dim];
+        if (PetscAbsReal(xiq[d] - xi0R[d]) > 1e-12) { allSame = PETSC_FALSE; break; }
+      }
+      if (allSame && Nfq > 1) {
+        n_refR[d] = (xi0R[d] > 0) ? 1.0 : -1.0;
+        break;
+      } else if (Nfq == 1) {
+        if (PetscAbsReal(PetscAbsReal(xi0R[d]) - 1.0) < 1e-12) {
+          n_refR[d] = (xi0R[d] > 0) ? 1.0 : -1.0;
+          break;
+        }
+      }
+    }
+  }
+
+  /* Compute Jacobian-weighted normals n_w_L (and n_w_R for interior faces).
+     For hex/quad: n_w = det(J) * invJ^T * n_ref
+     For simplex:  n_w = n_out * facetArea / refFacetMeasure  (FVM fallback) */
+  PetscReal n_wL[3] = {0.0, 0.0, 0.0};
+  PetscReal n_wR[3] = {0.0, 0.0, 0.0};
+  if (!isSimplexFace) {
+    PetscReal absDetJL = PetscAbsReal(detJL);
+    for (PetscInt d = 0; d < dim; d++)
+      for (PetscInt e = 0; e < dim; e++)
+        n_wL[d] += absDetJL * invJL[e * dim + d] * n_refL[e];
+    if (cR >= 0) {
+      PetscReal absDetJR = PetscAbsReal(detJR);
+      for (PetscInt d = 0; d < dim; d++)
+        for (PetscInt e = 0; e < dim; e++)
+          n_wR[d] += absDetJR * invJR[e * dim + d] * n_refR[e];
+    }
+  } else {
+    PetscReal refMeas = 0.0;
+    for (PetscInt qq = 0; qq < Nfq; qq++) refMeas += fqweights[qq];
+    PetscReal sc = area_fvm / refMeas;
+    for (PetscInt d = 0; d < dim; d++) n_wL[d] = n_refL[d] * sc;
+    /* For simplex, the normal is exact and -n_L works for cR */
+    if (cR >= 0) {
+      for (PetscInt d = 0; d < dim; d++) n_wR[d] = -n_wL[d];
+    }
+  }
 
   /* Local matrices / vectors */
   PetscScalar *K_LL, *K_LR = NULL, *K_RL = NULL, *K_RR = NULL;
@@ -664,11 +761,10 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
     PetscCall(PetscCalloc1(Nb, &g_R));
   }
 
-  PetscReal refFacetMeasure = 0.0;
-  for (PetscInt qq = 0; qq < Nfq; qq++) refFacetMeasure += fqweights[qq];
-  PetscReal wScale = facetArea / refFacetMeasure;
-
-  /* Quadrature loop over face quadrature points */
+  /* Quadrature loop over face quadrature points — cL's face parameterization.
+     K_LL and K_LR are assembled here, contributing to cL's rows.
+     Using cL's canonical quad points and weights ensures cL's
+     per-cell divergence theorem is satisfied.                             */
   for (PetscInt q = 0; q < Nfq; q++) {
 
     PetscReal xq[3] = {0.0, 0.0, 0.0};
@@ -682,16 +778,16 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
     PetscReal bv[3];
     GetVelocity(ctx, xq, bv);
 
-    /* Normal flux: b . n_out (outward from cL) */
-    PetscReal bn = 0.0;
-    for (PetscInt d = 0; d < dim; d++) bn += bv[d] * n_out[d];
+    /* Normal flux from cL's perspective using cL's Jacobian-weighted normal */
+    PetscReal bnL = 0.0;
+    for (PetscInt d = 0; d < dim; d++) bnL += bv[d] * n_wL[d];
 
-    PetscReal bn_plus  = PetscMax(bn, 0.0);  /* upwind from cL */
-    PetscReal bn_minus = PetscMin(bn, 0.0);  /* upwind from cR */
+    PetscReal bnL_plus  = PetscMax(bnL, 0.0);
+    PetscReal bnL_minus = PetscMin(bnL, 0.0);
 
-    /* Facet integration weight: reference-face weight times physical
-       facet measure scaling from DMPlex geometry. */
-    PetscReal wFacet = fqweights[q] * wScale;
+    /* Facet integration weight: face quadrature weight only.
+       The surface-element scaling is already in n_w.                     */
+    PetscReal wFacet = fqweights[q];
 
     /* Basis values at this facet quadrature point for each side */
     for (PetscInt i = 0; i < Nb; i++) {
@@ -702,40 +798,93 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
         PetscReal phi_jL = Tf->T[0][(fL * Nfq + q) * Nb + j];
 
         /* K_LL: test from cL, trial from cL (upwind from cL contribution) */
-        K_LL[i * Nb + j] += bn_plus * phi_jL * psi_iL * wFacet;
+        K_LL[i * Nb + j] += bnL_plus * phi_jL * psi_iL * wFacet;
 
         if (cR >= 0) {
           PetscReal phi_jR = Tf->T[0][(fR * Nfq + qR) * Nb + j];
-          PetscReal psi_iR = Tf->T[0][(fR * Nfq + qR) * Nb + i];
 
-          /* K_LR: test from cL, trial from cR (upwind from cR contribution,
-                   b.n < 0 so information flows from cR into cL)            */
-          K_LR[i * Nb + j] += bn_minus * phi_jR * psi_iL * wFacet;
-
-          /* K_RL: test from cR, trial from cL.
-                   The outward normal from cR is -n_out, so b.n_R = -bn.
-                   The cR test function sees the flux from cL when b.n_R < 0,
-                   i.e. when bn > 0.  Contribution: -bn_plus * phi_jL * psi_iR.
-                   The minus sign comes from the sign flip of the normal.    */
-          K_RL[i * Nb + j] -= bn_plus * phi_jL * psi_iR * wFacet;
-
-          /* K_RR: test from cR, trial from cR.
-                   b.n_R = -bn, upwind from cR means b.n_R > 0, i.e. bn < 0.
-                   Contribution: -bn_minus * phi_jR * psi_iR.               */
-          K_RR[i * Nb + j] -= bn_minus * phi_jR * psi_iR * wFacet;
+          /* K_LR: test from cL, trial from cR (upwind from cR into cL) */
+          K_LR[i * Nb + j] += bnL_minus * phi_jR * psi_iL * wFacet;
         }
-        /* For outflow boundary (bn >= 0): only K_LL is nonzero via bn_plus,
-           and g_L gets no boundary contribution. */
       }
 
-      if (cR < 0 && isInflowBoundary && bn < 0.0) {
-        /* Boundary: bn < 0 (inflow), u- = g (boundary value).
-           The flux term bn_minus * g * psi_iL goes to RHS, and must be
-           added once per test function (not once per trial function). */
-        PetscReal g_val = (PetscReal)InflowValue(ctx, dim, boundaryFaceId, xq);
-        g_L[i] -= bn_minus * g_val * psi_iL * wFacet;
+      if (cR < 0 && isInflowBoundary && bnL < 0.0) {
+        PetscReal g_val = (PetscReal)InflowValue(ctx, boundaryFaceId, xq);
+        g_L[i] -= bnL_minus * g_val * psi_iL * wFacet;
       }
     }
+  }
+
+  /* Second quadrature loop — cR's face parameterization (interior faces only).
+     K_RL and K_RR are assembled here, contributing to cR's rows.
+     Using cR's canonical quad points and weights ensures cR's
+     per-cell divergence theorem is satisfied.  This is critical for
+     non-affine cells where the qRfromL matching is a non-isometric
+     permutation, causing weight mismatches if we use cL's weights.      */
+  if (cR >= 0) {
+    /* Build reverse matching: qLfromR maps cR's q-th point to cL's nearest */
+    PetscInt *qLfromR;
+    PetscCall(PetscMalloc1(Nfq, &qLfromR));
+    for (PetscInt qR = 0; qR < Nfq; qR++) {
+      PetscReal xR[3] = {0.0, 0.0, 0.0};
+      const PetscReal *xiRq = &efqpoints[(fR * Nfq + qR) * dim];
+      for (PetscInt d = 0; d < dim; d++) {
+        xR[d] = v0R[d];
+        for (PetscInt e = 0; e < dim; e++) xR[d] += JR[d * dim + e] * xiRq[e];
+      }
+      PetscReal bestDist = PETSC_MAX_REAL;
+      PetscInt  bestQ    = 0;
+      for (PetscInt qL = 0; qL < Nfq; qL++) {
+        PetscReal xL[3] = {0.0, 0.0, 0.0};
+        const PetscReal *xiLq = &efqpoints[(fL * Nfq + qL) * dim];
+        for (PetscInt d = 0; d < dim; d++) {
+          xL[d] = v0L[d];
+          for (PetscInt e = 0; e < dim; e++) xL[d] += JL[d * dim + e] * xiLq[e];
+        }
+        PetscReal dist = 0.0;
+        for (PetscInt d = 0; d < dim; d++) dist += (xR[d] - xL[d]) * (xR[d] - xL[d]);
+        if (dist < bestDist) { bestDist = dist; bestQ = qL; }
+      }
+      qLfromR[qR] = bestQ;
+    }
+
+    for (PetscInt qR = 0; qR < Nfq; qR++) {
+      PetscReal xqR[3] = {0.0, 0.0, 0.0};
+      const PetscReal *xiRq = &efqpoints[(fR * Nfq + qR) * dim];
+      for (PetscInt d = 0; d < dim; d++) {
+        xqR[d] = v0R[d];
+        for (PetscInt e = 0; e < dim; e++) xqR[d] += JR[d * dim + e] * xiRq[e];
+      }
+
+      PetscReal bv[3];
+      GetVelocity(ctx, xqR, bv);
+
+      /* Normal flux from cR's perspective using cR's Jacobian-weighted normal */
+      PetscReal bnR = 0.0;
+      for (PetscInt d = 0; d < dim; d++) bnR += bv[d] * n_wR[d];
+      PetscReal bnR_plus  = PetscMax(bnR, 0.0);
+      PetscReal bnR_minus = PetscMin(bnR, 0.0);
+
+      PetscReal wFacetR = fqweights[qR];
+      PetscInt  qL      = qLfromR[qR];
+
+      for (PetscInt i = 0; i < Nb; i++) {
+        PetscReal psi_iR = Tf->T[0][(fR * Nfq + qR) * Nb + i];
+        for (PetscInt j = 0; j < Nb; j++) {
+          PetscReal phi_jL = Tf->T[0][(fL * Nfq + qL) * Nb + j];
+          PetscReal phi_jR = Tf->T[0][(fR * Nfq + qR) * Nb + j];
+
+          /* K_RL: test from cR, trial from cL.
+                   cR sees inflow (bnR < 0) from cL. */
+          K_RL[i * Nb + j] += bnR_minus * phi_jL * psi_iR * wFacetR;
+
+          /* K_RR: test from cR, trial from cR.
+                   cR sees outflow (bnR > 0) from itself. */
+          K_RR[i * Nb + j] += bnR_plus * phi_jR * psi_iR * wFacetR;
+        }
+      }
+    }
+    PetscCall(PetscFree(qLfromR));
   }
 
   /* Scatter into global matrix and RHS — use global section offsets.
@@ -927,8 +1076,8 @@ static PetscErrorCode AssembleSystem(DM dm, PetscFE fe,
    evaluate the DG polynomial in that owning cell and write it as point
    data.  Only locally-owned cells (non-ghost) are written.
 
-   Supports triangles (3 vertices, VTK_TRIANGLE=5) and axis-aligned
-   rectangular quads (4 vertices, VTK_QUAD=9).
+   Supports triangles (3, VTK_TRIANGLE=5), quads (4, VTK_QUAD=9),
+   tetrahedra (4, VTK_TETRA=10), and hexahedra (8, VTK_HEXAHEDRON=12).
    ----------------------------------------------------------------------- */
 static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
                                       Vec x, const char basename[])
@@ -947,18 +1096,14 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
   PetscMPIInt       rank, size;
   char              piece_fname[PETSC_MAX_PATH_LEN];
   PetscInt          rstart;
-  PetscInt          vertsPerCell; /* 3 for triangles, 4 for quads */
-  unsigned char     vtkCellType;  /* 5 = VTK_TRIANGLE, 9 = VTK_QUAD */
-  PetscBool         isSimplex;
+  PetscInt          vertsPerCell; /* 3 tri, 4 quad/tet, 8 hex */
+  unsigned char     vtkCellType;  /* 5 tri, 9 quad, 10 tet, 12 hex */
 
   PetscFunctionBeginUser;
   PetscCallMPI(MPI_Comm_rank(PetscObjectComm((PetscObject)dm), &rank));
   PetscCallMPI(MPI_Comm_size(PetscObjectComm((PetscObject)dm), &size));
 
   PetscCall(DMGetDimension(dm, &dim));
-  PetscCheck(dim == 2, PetscObjectComm((PetscObject)dm), PETSC_ERR_SUP,
-             "WriteDGFieldVTU currently supports only 2D meshes");
-
   PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
   PetscCall(DMPlexGetDepthStratum(dm, 0, &vStart, &vEnd));
   PetscCall(PetscFEGetDimension(fe, &Nb));
@@ -968,15 +1113,16 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
   {
     DMPolytopeType ct;
     PetscCall(DMPlexGetCellType(dm, cStart, &ct));
-    isSimplex = (DMPolytopeTypeGetNumVertices(ct) == DMPolytopeTypeGetDim(ct) + 1)
-                ? PETSC_TRUE : PETSC_FALSE;
-  }
-  if (isSimplex) {
-    vertsPerCell = 3;
-    vtkCellType  = 5; /* VTK_TRIANGLE */
-  } else {
-    vertsPerCell = 4;
-    vtkCellType  = 9; /* VTK_QUAD */
+    switch (ct) {
+      case DM_POLYTOPE_TRIANGLE:      vertsPerCell = 3; vtkCellType =  5; break;
+      case DM_POLYTOPE_QUADRILATERAL: vertsPerCell = 4; vtkCellType =  9; break;
+      case DM_POLYTOPE_TETRAHEDRON:   vertsPerCell = 4; vtkCellType = 10; break;
+      case DM_POLYTOPE_HEXAHEDRON:    vertsPerCell = 8; vtkCellType = 12; break;
+      default:
+        SETERRQ(PetscObjectComm((PetscObject)dm), PETSC_ERR_SUP,
+                "Unsupported cell type %s for VTK output",
+                DMPolytopeTypes[ct]);
+    }
   }
 
   PetscCall(DMGetCoordinateDM(dm, &cdm));
@@ -1012,7 +1158,7 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
     if (goff < 0) continue; /* skip ghost cells */
 
     PetscInt            ncl, *closure = NULL;
-    PetscInt            verts[4], nv = 0;  /* max 4 for quads */
+    PetscInt            verts[8], nv = 0;  /* max 8 for hexes */
     PetscReal           v0[3], J[9], invJ[9], detJ;
 
     PetscCall(DMPlexComputeCellGeometryFEM(dm, c, NULL, v0, J, invJ, &detJ));
@@ -1035,6 +1181,120 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
     PetscCheck(nv == vertsPerCell, PETSC_COMM_SELF, PETSC_ERR_SUP,
                "Expected cell with %" PetscInt_FMT " vertices, got %" PetscInt_FMT,
                vertsPerCell, nv);
+
+    /* Reorder closure vertices into VTK order.  Map each vertex to
+       reference coordinates via invJ, then classify by the sign of
+       each component.  In the reference element every hex vertex sits
+       at a corner of [-1,1]^dim, so the octant is always unique —
+       even for skewed / rotated / non-axis-aligned hexes.
+
+       VTK_HEXAHEDRON (type 12) vertex ordering:
+         0:(−,−,−)  1:(+,−,−)  2:(+,+,−)  3:(−,+,−)
+         4:(−,−,+)  5:(+,−,+)  6:(+,+,+)  7:(−,+,+)
+
+       VTK_QUAD (type 9) vertex ordering:
+         0:(−,−)  1:(+,−)  2:(+,+)  3:(−,+)                    */
+    if (vtkCellType == 12 || vtkCellType == 9) {
+      /* Octant-to-VTK index mapping.  Octant bits: bit0=x+, bit1=y+, bit2=z+ */
+      static const PetscInt oct2vtk_hex[8]  = {0, 1, 3, 2, 4, 5, 7, 6};
+      static const PetscInt oct2vtk_quad[4] = {0, 1, 3, 2};
+
+      PetscInt  sorted[8];
+      PetscBool octant_ok = PETSC_TRUE;
+      PetscInt  used[8]   = {0, 0, 0, 0, 0, 0, 0, 0};
+      for (PetscInt lv = 0; lv < vertsPerCell; lv++) {
+        /* Get vertex physical coordinates */
+        PetscInt csz; PetscScalar *cv = NULL;
+        PetscReal xvert[3] = {0.0, 0.0, 0.0};
+        PetscCall(DMPlexVecGetClosure(cdm, csec, coordsLocal, verts[lv], &csz, &cv));
+        for (PetscInt d = 0; d < dim; d++) xvert[d] = PetscRealPart(cv[d]);
+        PetscCall(DMPlexVecRestoreClosure(cdm, csec, coordsLocal, verts[lv], &csz, &cv));
+
+        /* Map to reference coordinates: xi = invJ * (x - v0)
+           v0 is the shifted origin (center of biunit cell), so xi ∈ [-1,1]^dim */
+        PetscReal xi[3] = {0.0, 0.0, 0.0};
+        for (PetscInt e = 0; e < dim; e++)
+          for (PetscInt d = 0; d < dim; d++)
+            xi[e] += invJ[e * dim + d] * (xvert[d] - v0[d]);
+
+        PetscInt octant = 0;
+        for (PetscInt d = 0; d < dim; d++) {
+          if (xi[d] > 0.0) octant |= (1 << d);
+        }
+        PetscInt vtkIdx = (vtkCellType == 12) ? oct2vtk_hex[octant]
+                                               : oct2vtk_quad[octant];
+        if (used[vtkIdx]) { octant_ok = PETSC_FALSE; break; }
+        used[vtkIdx] = 1;
+        sorted[vtkIdx] = verts[lv];
+      }
+      if (octant_ok) {
+        for (PetscInt lv = 0; lv < vertsPerCell; lv++) verts[lv] = sorted[lv];
+      } else if (vtkCellType == 12) {
+        /* ---- Fallback: face-based topological reordering for hexes ----
+           Uses DMPlex cone (face) structure to determine correct VTK
+           connectivity without relying on coordinate classification.   */
+        const PetscInt *cellCone;
+        PetscInt        cellConeSize;
+        PetscCall(DMPlexGetConeSize(dm, c, &cellConeSize));
+        PetscCall(DMPlexGetCone(dm, c, &cellCone));
+
+        /* Gather vertices for each face */
+        PetscInt fv[6][4], fnv[6];
+        for (PetscInt fi = 0; fi < cellConeSize; fi++) {
+          fnv[fi] = 0;
+          PetscInt fncl; PetscInt *fcl = NULL;
+          PetscCall(DMPlexGetTransitiveClosure(dm, cellCone[fi], PETSC_TRUE, &fncl, &fcl));
+          for (PetscInt k = 0; k < fncl; k++) {
+            PetscInt p = fcl[2 * k];
+            if (p >= vStart && p < vEnd && fnv[fi] < 4) {
+              PetscBool dup = PETSC_FALSE;
+              for (PetscInt m = 0; m < fnv[fi]; m++)
+                if (fv[fi][m] == p) { dup = PETSC_TRUE; break; }
+              if (!dup) fv[fi][fnv[fi]++] = p;
+            }
+          }
+          PetscCall(DMPlexRestoreTransitiveClosure(dm, cellCone[fi], PETSC_TRUE, &fncl, &fcl));
+        }
+
+        /* Pick face 0 as bottom; find opposite face (shares no vertices) */
+        PetscInt bf = 0, tf = -1;
+        for (PetscInt fi = 1; fi < cellConeSize; fi++) {
+          PetscBool shared = PETSC_FALSE;
+          for (PetscInt a = 0; a < fnv[bf] && !shared; a++)
+            for (PetscInt b = 0; b < fnv[fi] && !shared; b++)
+              if (fv[bf][a] == fv[fi][b]) shared = PETSC_TRUE;
+          if (!shared) { tf = fi; break; }
+        }
+
+        /* Match each bottom vertex to its top counterpart.
+           The correct pair shares TWO side faces (connected by a
+           vertical edge); diagonal neighbours share only ONE.       */
+        PetscInt bot[4], top[4];
+        for (PetscInt i = 0; i < 4; i++) bot[i] = fv[bf][i];
+        for (PetscInt i = 0; i < 4; i++) {
+          top[i] = -1;
+          for (PetscInt j = 0; j < 4; j++) {
+            PetscInt cnt = 0;
+            for (PetscInt fi = 0; fi < cellConeSize; fi++) {
+              if (fi == bf || fi == tf) continue;
+              PetscBool has_b = PETSC_FALSE, has_t = PETSC_FALSE;
+              for (PetscInt k = 0; k < fnv[fi]; k++) {
+                if (fv[fi][k] == bot[i])    has_b = PETSC_TRUE;
+                if (fv[fi][k] == fv[tf][j]) has_t = PETSC_TRUE;
+              }
+              if (has_b && has_t) cnt++;
+            }
+            if (cnt == 2) { top[i] = fv[tf][j]; break; }
+          }
+        }
+
+        for (PetscInt i = 0; i < 4; i++) {
+          verts[i]     = bot[i];
+          verts[i + 4] = top[i];
+        }
+      }
+      /* else (quad fallback): keep original closure order */
+    }
 
     /* Index into the local portion of the global solution vector */
     PetscInt localDGoff = goff - rstart;
@@ -1063,7 +1323,7 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
 
       pts[3 * pCursor + 0] = xvert[0];
       pts[3 * pCursor + 1] = xvert[1];
-      pts[3 * pCursor + 2] = 0.0;
+      pts[3 * pCursor + 2] = (dim > 2) ? xvert[2] : 0.0;
       vals[pCursor] = uval;
       conn[connCursor++] = pCursor;
       pCursor++;
@@ -1228,7 +1488,7 @@ int main(int argc, char **argv)
       PetscCall(PetscFEGetBasisSpace(fe, &sp));
       PetscCall(PetscSpaceGetDegree(sp, &pmin, &pmax));
       p      = (pmax >= 0) ? pmax : pmin;
-      qorder = PetscMax(2 * p + 1, 2);
+      qorder = PetscMax(2 * p + 1, 10);
       PetscCall(PetscDTCreateDefaultQuadrature(ct, qorder, &q, &fq));
       PetscCall(PetscFESetQuadrature(fe, q));
       PetscCall(PetscFESetFaceQuadrature(fe, fq));
