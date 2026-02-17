@@ -262,7 +262,7 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs"
 	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_dim 3 -dm_plex_box_faces 8,8,8 \
-	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump -u 1 -v 1 -w 1 \
+	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #	 
 	@echo ""
@@ -547,7 +547,7 @@ run_tests_no_load_parallel:
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_dim 3 -dm_plex_box_faces 8,8,8 \
-	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump -u 1 -v 1 -w 1 \
+	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #	 
 	@echo ""
