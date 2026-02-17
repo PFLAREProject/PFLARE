@@ -241,7 +241,7 @@ run_tests_no_load_serial:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity -pc_air_a_lump
 	@echo "Test AIRG with SUPG CG FEM in 3D"
 	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads"
@@ -526,7 +526,7 @@ run_tests_no_load_parallel:
 	@echo "Test AIRG with SUPG CG FEM in 3D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 \
 	 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
-	 -pc_air_a_lump
+	 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads in parallel"

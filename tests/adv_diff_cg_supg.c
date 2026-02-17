@@ -1,6 +1,7 @@
 /*   DMPlex/SNES/KSP solving a system of linear equations.
      Steady advection-diffusion equation with SUPG stabilised CG FEM
-     Default is 2D triangles
+     Default is 2D triangles with default velocity is (1,1) normalised.
+     In 3D default velocity is (1,1,1) normalised.
      Can control dimension with -dm_plex_dim
      Can control quad/hex tri/tet with -dm_plex_simplex (if tri/tet need to configure petsc with triangle/ctetgen)
      Can control number of faces with -dm_plex_box_faces (if in parallel make sure you start with enough faces
@@ -11,7 +12,7 @@
      Can view the solution with -snes_view_solution vtk:solution.vtu
 
      ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1
-             : pure advection with linear FEM with theta = pi/4
+             : pure advection with linear FEM with u = v = 1, normalised (theta=pi/4)
                BCs left and bottom and back dirichlet, the others outflow
      ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_refine 1 -u 0 -v 0 -alpha 1.0
              : pure diffusion with linear FEM
@@ -23,7 +24,8 @@
      Can change default velocity from straight line to curved with -curved_velocity (default false)
      Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
      Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
-     If any of u,v,w are set then they will override the theta and unit velocity will be disabled
+     If any of u,v,w are set then they will override the velocity and unit velocity will be disabled
+     Can specify inflow of 1 on bottom face with -bottom_only_inflow_one (default false)
 
 */
 
@@ -42,12 +44,13 @@ typedef struct {
   PetscReal advection_velocity[3];   // Advection velocity, in 2D or 3D (for straight line case)
   PetscBool curved_velocity;         // Use curved velocity field if true
   PetscBool unit_velocity;           // Normalize velocity magnitude if true
+  PetscBool bottom_only_inflow_one;  // If true, set inflow to 1 only on bottom face, and 0 elsewhere
 } AppCtx;
 
 // Helper function to compute velocity at a point
 // constants[0] is alpha, constants[1-3] are constant velocity, constants[4] is curved flag (1.0 if curved)
 // and constant[5] is velocity normalisation flag (1.0 if normalise)
-static inline void GetVelocity(const PetscScalar constants[], const PetscReal x[], PetscReal v[])
+static inline void GetVelocity(PetscInt dim, const PetscScalar constants[], const PetscReal x[], PetscReal v[])
 {
   if (constants[4] == 1.0) {
     // Spatially-varying velocity field: top-left quadrant of a rotating circle (center at 1,0)
@@ -65,12 +68,10 @@ static inline void GetVelocity(const PetscScalar constants[], const PetscReal x[
   // Normalize velocity if unit_velocity flag is set
   if (constants[5] == 1.0) {
     PetscReal mag = 0.0;
-    for (int d = 0; d < 2; ++d) mag += v[d]*v[d];
+    for (int d = 0; d < dim; ++d) mag += v[d]*v[d];
     mag = sqrt(mag);
     if (mag > 1e-12) {
-      v[0] /= mag;
-      v[1] /= mag;
-      v[2] /= mag;
+      for (int d = 0; d < dim; ++d) v[d] /= mag;
     }
   }
 }
@@ -117,6 +118,13 @@ static PetscErrorCode dirichlet_bc(PetscInt dim, PetscReal time, const PetscReal
   return PETSC_SUCCESS;
 }
 
+// Dirichlet BC: u = 1.0 (for inflow boundaries)
+static PetscErrorCode dirichlet_bc_one(PetscInt dim, PetscReal time, const PetscReal x[], PetscInt Nc, PetscScalar *u, void *ctx)
+{
+  u[0] = 1.0;
+  return PETSC_SUCCESS;
+}
+
 // Neumann BC: du/dn = 0.0 (for outflow/zero flux boundaries)
 // This function must provide the flux value.
 static PetscErrorCode neumann_bc_zero_flux(PetscInt dim, PetscReal time, const PetscReal x[], const PetscReal n[], PetscInt Nc, PetscScalar *flux, void *ctx)
@@ -129,7 +137,7 @@ static PetscErrorCode neumann_bc_zero_flux(PetscInt dim, PetscReal time, const P
 static void advection_diffusion_f0(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar f0[])
 {
   PetscReal advection_velocity[3];
-  GetVelocity(constants, x, advection_velocity);
+  GetVelocity(dim, constants, x, advection_velocity);
 
   PetscReal adv_dot_grad_u = 0.0;
   PetscReal volumetric_source = 0.0; // Assuming f = 0 for now
@@ -151,7 +159,7 @@ static void advection_diffusion_f1_supg(PetscInt dim, PetscInt Nf, PetscInt NfAu
   
   // Get velocity field
   PetscReal v[3];
-  GetVelocity(constants, x, v);
+  GetVelocity(dim, constants, x, v);
   
   PetscReal        tau, v_dot_grad_u = 0.0;
   PetscInt         d;
@@ -169,7 +177,7 @@ static void advection_diffusion_f1_supg(PetscInt dim, PetscInt Nf, PetscInt NfAu
 static void g1_jacobian_advection_term(PetscInt dim, PetscInt Nf, PetscInt NfAux, const PetscInt uOff[], const PetscInt uOff_x[], const PetscScalar u[], const PetscScalar u_t[], const PetscScalar u_x[], const PetscInt aOff[], const PetscInt aOff_x[], const PetscScalar a[], const PetscScalar a_t[], const PetscScalar a_x[], PetscReal t, PetscReal u_tShift, const PetscReal x[], PetscInt numConstants, const PetscScalar constants[], PetscScalar g1[])
 {
   PetscReal advection_velocity[3];
-  GetVelocity(constants, x, advection_velocity);
+  GetVelocity(dim, constants, x, advection_velocity);
 
   PetscInt d;
   for (d = 0; d < dim; ++d) {
@@ -185,7 +193,7 @@ static void g3_jacobian_diffusion_term_supg(PetscInt dim, PetscInt Nf, PetscInt 
   
   // Get velocity field
   PetscReal v[3];
-  GetVelocity(constants, x, v);
+  GetVelocity(dim, constants, x, v);
   
   PetscReal        tau;
   PetscInt         d, c;
@@ -214,23 +222,30 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
 
   // Unit velocity normalization option - default to unit velocity
   options->unit_velocity = PETSC_TRUE;
-  PetscCall(PetscOptionsGetBool(NULL, NULL, "-unit_velocity", &options->unit_velocity, NULL));  
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-unit_velocity", &options->unit_velocity, NULL));
+  
+  // Option to set only the bottom face inflow to 1, and the rest to 0
+  options->bottom_only_inflow_one = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-bottom_only_inflow_one", &options->bottom_only_inflow_one, NULL));  
 
-  // Initialize advection to zero
-  options->advection_velocity[0] = 0.0; // u
-  options->advection_velocity[1] = 0.0; // v
-  options->advection_velocity[2] = 0.0; // w (for 3D)
+  // Initialize advection to the diagonal direction by default
+  options->advection_velocity[0] = 1.0; // u
+  options->advection_velocity[1] = 1.0; // v
+  options->advection_velocity[2] = 1.0; // w (for 3D)
 
-  // Advection velocities - direction is [cos(theta), sin(theta)]
-  // Default theta is pi/4
+  // User can specify direction with theta, or by giving the velocity components directly
   PetscReal pi = 4*atan(1.0);
-  PetscReal theta = pi/4.0;
-  PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL));
-  PetscCheck(theta <= pi/2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
-
-  // Coefficients for 2d advection
-  options->advection_velocity[0] = cos(theta);
-  options->advection_velocity[1] = sin(theta);
+      PetscReal theta = pi/4.0;
+  PetscBool theta_found;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, &theta_found));
+  if (theta_found)
+  {  
+      PetscCheck(theta <= pi/2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, 
+                  "Theta must be between 0 and pi/2");
+      options->advection_velocity[0] = cos(theta);
+      options->advection_velocity[1] = sin(theta);
+      options->advection_velocity[2] = 0.0; // w component is 0 with theta
+  }
 
   // Or the user can pass in the individual advection velocities
   // This will override theta and unit velocity options if they are set
@@ -273,10 +288,19 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   PetscDS        ds;
   DMLabel        label;
   PetscInt       dim;
-  PetscCall(DMGetDimension(dm, &dim));
+  PetscInt       numInflow = 0, numOutflow = 0, one = 1;
+  PetscInt      *inflow = NULL, *outflow = NULL;
+  // In 2D it's bottom and left
+  PetscInt       inflowids_2d[]  = {1, 4};
+  // The others inflow
+  PetscInt       outflowids_2d[] = {2, 3};
+  // In 3D it's bottom left and back for outflow
+  PetscInt       inflowids_3d[]  = {1, 3, 6};
+  // The others inflow
+  PetscInt       outflowids_3d[] = {2, 4, 5};
 
-  PetscInt numInflow = 0, numOutflow = 0;
-  PetscInt *inflow = NULL, *outflow = NULL;
+  PetscFunctionBeginUser;
+  PetscCall(DMGetDimension(dm, &dim));
 
   // ~~~~~~~~~~~~~~~~~
   // For advection we just apply dirichlet inflow conditions on incoming faces
@@ -284,12 +308,6 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   // Solution should just be equal to the inflow condition across the domain
   // ~~~~~~~~~~~~~~~~~
 
-  // In 2D its bottom and left
-  PetscInt inflowids_2d[] = {1,4};
-  PetscInt outflowids_2d[] =  {2,3};
-  // In 3D its bottom, left and back face
-  PetscInt inflowids_3d[] = {1,3,6};
-  PetscInt outflowids_3d[] =  {2,4,5};
   if (dim == 2)
   {
     numInflow = 2;
@@ -304,8 +322,6 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
     numOutflow = 3;
     outflow = &outflowids_3d[0];
   }
-
-  PetscFunctionBeginUser;
   PetscCall(DMGetDS(dm, &ds));
   PetscCall(DMGetLabel(dm, "Face Sets", &label));
   PetscCall(PetscDSSetResidual(ds, 0, advection_diffusion_f0, advection_diffusion_f1_supg));
@@ -316,8 +332,25 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   // g3_uu: d(f1)/d(grad u) - g3_jacobian_diffusion_term (contribution from diffusion)  
   PetscCall(PetscDSSetJacobian(ds, 0, 0, NULL, g1_jacobian_advection_term, NULL, g3_jacobian_diffusion_term_supg));
   
-  // Dirichlet condition on bottom surface as inflow
-  PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
+  // Dirichlet condition on bottom surface as inflow of 1
+  if (options->bottom_only_inflow_one) {
+    if (dim == 2) 
+    {
+      numInflow = 1;
+    }
+    else
+    {
+      numInflow = 2;
+    }
+
+    PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, &inflow[1], 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
+    PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow_one", label, one, &inflow[0], 0, 0, NULL, (void (*)(void))dirichlet_bc_one, NULL, options, NULL));
+  }
+  else
+  {
+    PetscCall(DMAddBoundary(dm, DM_BC_ESSENTIAL, "inflow", label, numInflow, inflow, 0, 0, NULL, (void (*)(void))dirichlet_bc, NULL, options, NULL));
+  }
+
   // If no diffusion, Neumann condition (outflow - zero flux) on other surfaces
   if (options->alpha == 0.0)
   {
