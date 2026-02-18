@@ -21,10 +21,17 @@
               BCs left and bottom 0 inflow dirichlet, the others outflow
 
     Boundary label conventions (matching the SUPG code):
-      2D: inflow  = {1, 4}  (left, bottom)
-          outflow = {2, 3}  (right, top)
-      3D: inflow  = {1, 3, 6}
-          outflow = {2, 4, 5}
+      2D: Dirichlet inflow faces = {1, 4}  (bottom/y=0, left/x=0)
+          Neumann outflow faces  = {2, 3}  (top/y=1, right/x=1)
+      3D: Dirichlet inflow faces = {1, 3, 6}  (bottom/z=0, front/y=0, left/x=0)
+          Neumann outflow faces  = {2, 4, 5}  (top/z=1, back/y=1, right/x=1)
+
+    Note: unlike the SUPG code, actual inflow/outflow at each quadrature point
+    is always determined physically by the sign of b.n (the dot product of
+    the advection velocity with the outward face normal).  The Face Sets IDs
+    above only control which boundary faces are candidates for applying
+    Dirichlet inflow data via InflowValue().  On faces labelled as outflow
+    no Dirichlet value is imposed even if b.n < 0 locally.
 
     Design notes
     ============
@@ -958,13 +965,20 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
 }
 
 /* -----------------------------------------------------------------------
-   Classify boundary facets into inflow / outflow using Face Sets IDs.
-
-   Matching the SUPG code conventions:
-     2D inflow  = {1,4}, outflow = {2,3}
-     3D inflow  = {1,3,6}, outflow = {2,4,5}
+   Classify boundary facets using Face Sets IDs.
 
    *isBoundary is PETSC_TRUE if f has any Face Sets label value.
+   *isInflow   is PETSC_TRUE if f belongs to one of the designated
+               Dirichlet-inflow face sets (where InflowValue() may be
+               applied).  These face sets correspond to the geometrically
+               inflow sides for the default diagonal velocity:
+                 2D: {1,4}   (bottom/y=0, left/x=0)
+                 3D: {1,3,6} (bottom/z=0, front/y=0, left/x=0)
+
+   IMPORTANT: *isInflow does NOT determine the upwind direction.  The
+   physical inflow condition (b.n < 0) is checked separately in the
+   assembly loop.  A Dirichlet value is only actually imposed when
+   *isInflow is PETSC_TRUE AND b.n < 0 at the quadrature point.
    ----------------------------------------------------------------------- */
 static PetscErrorCode ClassifyBoundaryFacet(DM dm, DMLabel label,
                                              PetscInt f, PetscInt dim,

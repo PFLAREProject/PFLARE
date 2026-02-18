@@ -294,9 +294,9 @@ static PetscErrorCode SetupPrimalProblem(DM dm, AppCtx *options)
   PetscInt       inflowids_2d[]  = {1, 4};
   // The others inflow
   PetscInt       outflowids_2d[] = {2, 3};
-  // In 3D it's bottom left and back for outflow
+  // In 3D: inflow faces are bottom (z=0, id=1), front (y=0, id=3), left (x=0, id=6)
   PetscInt       inflowids_3d[]  = {1, 3, 6};
-  // The others inflow
+  // Outflow faces are top (z=1, id=2), back (y=1, id=4), right (x=1, id=5)
   PetscInt       outflowids_3d[] = {2, 4, 5};
 
   PetscFunctionBeginUser;
