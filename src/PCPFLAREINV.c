@@ -68,14 +68,14 @@ static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
 
 // Get routines
 
-PetscErrorCode PCPFLAREINVGetOrder(PC pc, PetscInt *poly_order)
+PetscErrorCode PCPFLAREINVGetPolyOrder(PC pc, PetscInt *poly_order)
 {
    PetscFunctionBegin;
-   PetscUseMethod(pc, "PCPFLAREINVGetOrder_C", (PC, PetscInt *), (pc, poly_order));
+   PetscUseMethod(pc, "PCPFLAREINVGetPolyOrder_C", (PC, PetscInt *), (pc, poly_order));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode PCPFLAREINVGetOrder_PFLAREINV(PC pc, PetscInt *poly_order)
+static PetscErrorCode PCPFLAREINVGetPolyOrder_PFLAREINV(PC pc, PetscInt *poly_order)
 {
    PC_PFLAREINV *inv_data;
 
@@ -146,22 +146,22 @@ static PetscErrorCode PCPFLAREINVGetMatrixFree_PFLAREINV(PC pc, PetscBool *flg)
 
 // This is the order of polynomial we use
 // Default: 6
-// -pc_pflareinv_order 
-PetscErrorCode PCPFLAREINVSetOrder(PC pc, PetscInt poly_order)
+// -pc_pflareinv_poly_order 
+PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
 {
    PetscFunctionBegin;
-   PetscTryMethod(pc, "PCPFLAREINVSetOrder_C", (PC, PetscInt), (pc, poly_order));
+   PetscTryMethod(pc, "PCPFLAREINVSetPolyOrder_C", (PC, PetscInt), (pc, poly_order));
    PetscFunctionReturn(PETSC_SUCCESS);
 } 
 
- static PetscErrorCode PCPFLAREINVSetOrder_PFLAREINV(PC pc, PetscInt poly_order)
+ static PetscErrorCode PCPFLAREINVSetPolyOrder_PFLAREINV(PC pc, PetscInt poly_order)
 {
    PC_PFLAREINV *inv_data;
    PetscInt old_order;
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
-   PetscCall(PCPFLAREINVGetOrder(pc, &old_order));
+   PetscCall(PCPFLAREINVGetPolyOrder(pc, &old_order));
    if (old_order == poly_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
    inv_data->poly_order = (int)poly_order;
@@ -283,8 +283,8 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetType_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetMatrixFree_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetMatrixFree_C", NULL));
-   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetOrder_C", NULL));
-   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetOrder_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyOrder_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetSparsityOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", NULL));
    PetscFunctionReturn(PETSC_SUCCESS);
@@ -309,8 +309,8 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
    PetscCall(PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg));
    if (flg) PetscCall(PCPFLAREINVSetType(pc, type));
    PetscCall(PetscOptionsBool("-pc_pflareinv_matrix_free", "Apply matrix free", "PCPFLAREINVSetMatrixFree", inv_data->matrix_free, &inv_data->matrix_free, NULL));
-   PetscCall(PetscOptionsInt("-pc_pflareinv_order", "Order of polynomial", "PCPFLAREINVSetOrder", inv_data->poly_order, &poly_order, &flg));
-   if (flg) PetscCall(PCPFLAREINVSetOrder(pc, poly_order));
+   PetscCall(PetscOptionsInt("-pc_pflareinv_poly_order", "Order of polynomial", "PCPFLAREINVSetPolyOrder", inv_data->poly_order, &poly_order, &flg));
+   if (flg) PetscCall(PCPFLAREINVSetPolyOrder(pc, poly_order));
    PetscCall(PetscOptionsInt("-pc_pflareinv_sparsity_order", "Sparsity order of assembled inverse", "PCPFLAREINVSetSparsityOrder", inv_data->inverse_sparsity_order, &inverse_sparsity_order, &flg));
    if (flg) PetscCall(PCPFLAREINVSetSparsityOrder(pc, inverse_sparsity_order));
    PetscOptionsHeadEnd();
@@ -506,8 +506,8 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetType_C", PCPFLAREINVGetType_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetMatrixFree_C", PCPFLAREINVSetMatrixFree_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetMatrixFree_C", PCPFLAREINVGetMatrixFree_PFLAREINV));
-   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetOrder_C", PCPFLAREINVSetOrder_PFLAREINV));
-   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetOrder_C", PCPFLAREINVGetOrder_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyOrder_C", PCPFLAREINVSetPolyOrder_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyOrder_C", PCPFLAREINVGetPolyOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetSparsityOrder_C", PCPFLAREINVSetSparsityOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", PCPFLAREINVGetSparsityOrder_PFLAREINV)); 
 

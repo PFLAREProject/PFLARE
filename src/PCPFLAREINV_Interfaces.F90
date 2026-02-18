@@ -22,14 +22,14 @@ module pcpflareinv_interfaces
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
    interface 
-      function PCPFLAREINVGetOrder_mine(A_array,b) &
-         bind(c, name="PCPFLAREINVGetOrder")
+      function PCPFLAREINVGetPolyOrder_mine(A_array,b) &
+         bind(c, name="PCPFLAREINVGetPolyOrder")
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(PFLARE_PETSCINT_C_KIND)        :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetOrder_mine
-      end function PCPFLAREINVGetOrder_mine 
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetPolyOrder_mine
+      end function PCPFLAREINVGetPolyOrder_mine 
    end interface
    
    interface 
@@ -70,14 +70,14 @@ module pcpflareinv_interfaces
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
    interface 
-      function PCPFLAREINVSetOrder_mine(A_array,b) &
-         bind(c, name="PCPFLAREINVSetOrder")
+      function PCPFLAREINVSetPolyOrder_mine(A_array,b) &
+         bind(c, name="PCPFLAREINVSetPolyOrder")
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(PFLARE_PETSCINT_C_KIND), value :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetOrder_mine
-      end function PCPFLAREINVSetOrder_mine 
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetPolyOrder_mine
+      end function PCPFLAREINVSetPolyOrder_mine 
    end interface
    
    interface 
@@ -123,7 +123,7 @@ module pcpflareinv_interfaces
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCPFLAREINVGetOrder(pc, order, ierr)
+   subroutine PCPFLAREINVGetPolyOrder(pc, order, ierr)
 
       ! ~~~~~~~~~~
       type(tPC), intent(in)         :: pc
@@ -134,9 +134,9 @@ module pcpflareinv_interfaces
       ! ~~~~~~~~~~
 
       pc_ptr= pc%v
-      ierr = PCPFLAREINVGetOrder_mine(pc_ptr, order)
+      ierr = PCPFLAREINVGetPolyOrder_mine(pc_ptr, order)
 
-   end subroutine PCPFLAREINVGetOrder    
+   end subroutine PCPFLAREINVGetPolyOrder    
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -198,7 +198,7 @@ module pcpflareinv_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCPFLAREINVSetOrder(pc, order, ierr)
+   subroutine PCPFLAREINVSetPolyOrder(pc, order, ierr)
 
       ! ~~~~~~~~~~
       type(tPC), intent(in)         :: pc
@@ -209,9 +209,9 @@ module pcpflareinv_interfaces
       ! ~~~~~~~~~~
 
       pc_ptr= pc%v
-      ierr = PCPFLAREINVSetOrder_mine(pc_ptr, order)
+      ierr = PCPFLAREINVSetPolyOrder_mine(pc_ptr, order)
 
-   end subroutine PCPFLAREINVSetOrder    
+   end subroutine PCPFLAREINVSetPolyOrder    
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

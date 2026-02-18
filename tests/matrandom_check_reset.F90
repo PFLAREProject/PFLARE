@@ -56,7 +56,7 @@
          call PCAIRSetCoarseEqLimit(pc, nine, ierr)
       else
          call PCSetType(pc, PCPFLAREINV, ierr)
-         call PCPFLAREINVSetOrder(pc, two, ierr)
+         call PCPFLAREINVSetPolyOrder(pc, two, ierr)
       end if
 
       call KSPSetPC(ksp, pc, ierr)       

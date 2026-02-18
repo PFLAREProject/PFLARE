@@ -246,7 +246,7 @@ in Fortran:
      call KSPGetPC(ksp, pc, ierr)
      call PCSetType(pc, PCPFLAREINV, ierr)
 
-     call PCPFLAREINVSetOrder(pc, 20, ierr)
+     call PCPFLAREINVSetPolyOrder(pc, 20, ierr)
      call PCPFLAREINVSetType(pc, PFLAREINV_NEWTON, ierr)
      call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
 
@@ -257,7 +257,7 @@ or in C:
      ierr = KSPGetPC(ksp, &pc);
      ierr = PCSetType(pc, PCPFLAREINV);
 
-     ierr = PCPFLAREINVSetOrder(pc, 20);
+     ierr = PCPFLAREINVSetPolyOrder(pc, 20);
      ierr = PCPFLAREINVSetType(pc, PFLAREINV_NEWTON);
      ierr = PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE);
 
@@ -270,12 +270,12 @@ or in Python with petsc4py:
 
      petsc_options = PETSc.Options()
      petsc_options['pc_pflareinv_type'] = 'newton'
-     petsc_options['pc_pflareinv_order'] = '20'
+     petsc_options['pc_pflareinv_poly_order'] = '20'
      petsc_options['pc_pflareinv_matrix_free'] = ''
 
      # ...[e.g., KSPSolve somewhere here]
      
-or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_order 20 -pc_pflareinv_matrix_free``.
+or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 20 -pc_pflareinv_matrix_free``.
 
 ## GPU support           
 
@@ -283,13 +283,13 @@ If PETSc has been configured with GPU support then PCPFLAREINV and PCAIR support
 
 By default the tests run on the CPU unless the matrix/vector types are specified as those compatible with GPUs. For example, the following arguments specify that the 1D advection problem ``tests/adv_1d`` will use a 30th order GMRES polynomial applied matrix-free to solve on the CPU:
 
-``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_order 30``
+``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 30``
 
 To run on GPUs, we set the matrix/vector types as Kokkos, which can be easily done through command line arguments. Our tests use either ``-mat_type`` and ``-vec_type``, or if set by a DM directly use ``-dm_mat_type`` and ``-dm_vec_type``.
 
 For example, running the same problem on a single GPU with KOKKOS:
 
-``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_order 30 -mat_type aijkokkos -vec_type kokkos``
+``./adv_1d -n 1000 -ksp_type richardson -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 30 -mat_type aijkokkos -vec_type kokkos``
 
 Note: many of the tests allow the option ``-second_solve`` which turns on two solves, the first to trigger any copies to the GPU (e.g., the top grid matrix if created on the host) and the second to allow accurate timing. 
 
@@ -550,7 +550,7 @@ A brief description of the available options in PFLARE are given below and their
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
    | ``-pc_pflareinv_type``  |  PCPFLAREINVGetType  PCPFLAREINVSetType  | The inverse type, given above | arnoldi |   
-   | ``-pc_pflareinv_order``  |  PCPFLAREINVGetOrder  PCPFLAREINVSetOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
+   | ``-pc_pflareinv_poly_order``  |  PCPFLAREINVGetPolyOrder  PCPFLAREINVSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_pflareinv_sparsity_order``  |  PCPFLAREINVGetSparsityOrder  PCPFLAREINVSetSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |   
    | ``-pc_pflareinv_matrix_free``  |  PCPFLAREINVGetMatrixFree  PCPFLAREINVSetMatrixFree  | Is the inverse applied matrix free, or is an assembled matrix built and used | false |                                        
 
