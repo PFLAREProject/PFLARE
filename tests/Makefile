@@ -149,13 +149,13 @@ run_tests_load_serial:
 #
 	@echo ""
 	@echo "Test Newton GMRES polynomials order 60 matrix-free with added roots in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 6
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 6
 	@echo "Test Newton GMRES polynomials order 60 with fixed sparsity with added roots in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_order 60 -ksp_norm_type unpreconditioned -ksp_max_it 6
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -ksp_norm_type unpreconditioned -ksp_max_it 6
 	@echo "Test Newton GMRES polynomials order 120 matrix-free with added roots in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_order 120 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 5
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 120 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 5
 	@echo "Test Newton GMRES polynomials order 120 with fixed sparsity with added roots in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5		
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5		
 #
 	@echo "Test Newton AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing"
 	./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -pc_air_matrix_free_polys -ksp_max_it 5	
@@ -446,10 +446,10 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test high order GMRES polynomials in small linear system"
 	./adv_diff_2d -da_grid_x 5 -da_grid_y 5 -pc_type pflareinv -pc_pflareinv_type newton \
-	 -pc_pflareinv_matrix_free -pc_pflareinv_order 16 -ksp_max_it 1
+	 -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 16 -ksp_max_it 1
 	@echo "Test high order GMRES polynomials in small linear system - slightly bigger"
 	./adv_diff_2d -da_grid_x 10 -da_grid_y 10 -pc_type pflareinv -pc_pflareinv_type newton \
-	 -pc_pflareinv_matrix_free -pc_pflareinv_order 50 -ksp_max_it 1
+	 -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 50 -ksp_max_it 1
 # 
 	@echo ""
 	@echo "Test auto truncation with matrix-free Newton polynomials as coarse grid solver" 
