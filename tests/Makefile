@@ -234,42 +234,51 @@ run_tests_no_load_serial:
 #	
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
-	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
+	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
 	@echo "Test AIRG with SUPG CG FEM in 2D with curved velocity"
-	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
+	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity -pc_air_a_lump
 	@echo "Test AIRG with SUPG CG FEM in 3D"
-	./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
+	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
+	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets"
+	./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump	 
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity	
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_filename data/square_unstruc.msh -pc_type air \
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles with curved velocity"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_filename data/square_unstruc.msh -pc_type air \
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity	  
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs"
-	./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_dim 3 -dm_plex_box_faces 8,8,8 \
-	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump -u 1 -v 1 -w 1 \
+	./adv_dg_upwind -dm_plex_dim 3 -dm_plex_box_faces 8,8,8 \
+	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs and cycles"
-	./adv_dg_upwind -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+	./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
-	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1	 
+	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1
+#	 
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 3D with tets"
+	./adv_dg_upwind -dm_plex_filename data/cube_unstruc.msh \
+	 -pc_type air -pc_air_a_lump \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4		 
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil"
@@ -517,44 +526,53 @@ run_tests_no_load_parallel:
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -pc_air_a_lump
 	@echo "Test AIRG with SUPG CG FEM in 2D with curved velocity in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity -pc_air_a_lump
 	@echo "Test AIRG with SUPG CG FEM in 3D in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 \
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 \
 	 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
-	 -pc_air_a_lump
+	 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
+	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump		 
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity		 
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_filename data/square_unstruc.msh -pc_type air \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles with curved velocity"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_filename data/square_unstruc.msh -pc_type air \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity		 
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_plex_dim 3 -dm_plex_box_faces 8,8,8 \
-	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump -u 1 -v 1 -w 1 \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_dim 3 -dm_plex_box_faces 8,8,8 \
+	 -dm_plex_simplex 0 -pc_type air -pc_air_a_lump \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs and cycles in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
 	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1		 
+#	 
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 3D with tets in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/cube_unstruc.msh \
+	 -pc_type air -pc_air_a_lump \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4		
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil in parallel"
@@ -783,7 +801,7 @@ run_tests_medium_serial:
 	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh ---"
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
@@ -792,7 +810,7 @@ run_tests_medium_serial:
 	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh and curved velocity ---"
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-curved_velocity -ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
@@ -801,7 +819,7 @@ run_tests_medium_serial:
 	@echo "--- Running scaling study on adv_dg_upwind with unstructured mesh ---"
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		./adv_dg_upwind -adv_dg_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 6; \
 	done
@@ -839,7 +857,7 @@ run_tests_medium_parallel:
 	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh in parallel ---"
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
@@ -848,7 +866,7 @@ run_tests_medium_parallel:
 	@echo "--- Running scaling study on adv_diff_cg_supg with unstructured mesh and curved velocity in parallel ---"
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -adv_diff_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-curved_velocity -ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
@@ -857,7 +875,7 @@ run_tests_medium_parallel:
 	@echo "--- Running scaling study on adv_dg_upwind with unstructured mesh in parallel ---"
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
-		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 1 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
+		$(MPIEXEC) -n 2 ./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 6; \
 	done

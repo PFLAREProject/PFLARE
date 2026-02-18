@@ -1,5 +1,7 @@
 /*  DMPlex/KSP solving a scalar advection equation with upwinded DG FEM.
     Pure advection only (no diffusion) on a 2D or 3D mesh.
+    Default is 2D with default velocity (1,1) normalised.
+    In 3D default velocity is (1,1,1) normalised.    
     The function space is a broken polynomial space: each cell owns its own
     DOFs with no inter-element continuity enforced.  The upwind numerical
     flux on interior facets and inflow boundary facets couples the cells.
@@ -10,15 +12,26 @@
       Can control face count with        -dm_plex_box_faces
       Can refine with                    -dm_refine
       Can read a gmsh file with          -dm_plex_filename
+      Can specify basis function order   -adv_diff_petscspace_degree
+      Specify inflow of 1 on bottom face -bottom_only_inflow_one
+      Can write out vtk solution with    -write_vtk
 
-    Example:
-      ./adv_dg_upwind -adv_dg_petscspace_degree 1 -dm_refine 2
+    ./adv_dg_upwind -dm_refine 2
+            : pure advection in 2D with linear FEM with u = v = 1, normalised (theta=pi/4)
+              BCs left and bottom 0 inflow dirichlet, the others outflow
 
     Boundary label conventions (matching the SUPG code):
-      2D: inflow  = {1, 4}  (left, bottom)
-          outflow = {2, 3}  (right, top)
-      3D: inflow  = {1, 3, 6}
-          outflow = {2, 4, 5}
+      2D: Dirichlet inflow faces = {1, 4}  (bottom/y=0, left/x=0)
+          Neumann outflow faces  = {2, 3}  (top/y=1, right/x=1)
+      3D: Dirichlet inflow faces = {1, 3, 6}  (bottom/z=0, front/y=0, left/x=0)
+          Neumann outflow faces  = {2, 4, 5}  (top/z=1, back/y=1, right/x=1)
+
+    Note: unlike the SUPG code, actual inflow/outflow at each quadrature point
+    is always determined physically by the sign of b.n (the dot product of
+    the advection velocity with the outward face normal).  The Face Sets IDs
+    above only control which boundary faces are candidates for applying
+    Dirichlet inflow data via InflowValue().  On faces labelled as outflow
+    no Dirichlet value is imposed even if b.n < 0 locally.
 
     Design notes
     ============
@@ -83,7 +96,7 @@ typedef struct {
 /* -----------------------------------------------------------------------
    Velocity evaluation — identical logic to the SUPG code
    ----------------------------------------------------------------------- */
-static inline void GetVelocity(const AppCtx *ctx, const PetscReal x[], PetscReal v[])
+static inline void GetVelocity(PetscInt dim, const AppCtx *ctx, const PetscReal x[], PetscReal v[])
 {
   if (ctx->curved_velocity) {
     v[0] = x[1];
@@ -96,9 +109,9 @@ static inline void GetVelocity(const AppCtx *ctx, const PetscReal x[], PetscReal
   }
   if (ctx->unit_velocity) {
     PetscReal mag = 0.0;
-    for (PetscInt d = 0; d < 3; d++) mag += v[d] * v[d];
+    for (PetscInt d = 0; d < dim; d++) mag += v[d] * v[d];
     mag = PetscSqrtReal(mag);
-    if (mag > 1e-12) { v[0] /= mag; v[1] /= mag; v[2] /= mag; }
+    if (mag > 1e-12) { for (PetscInt d = 0; d < dim; d++) v[d] /= mag; }
   }
 }
 
@@ -139,15 +152,25 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
   opt->write_vtk = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-write_vtk", &opt->write_vtk, NULL));
 
-  PetscReal pi = 4.0 * atan(1.0), theta = pi / 4.0;
-  PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL));
-  PetscCheck(theta >= 0.0 && theta <= pi / 2.0, comm, PETSC_ERR_ARG_WRONGSTATE,
-             "theta must be in [0, pi/2]");
-  opt->advection_velocity[0] = PetscCosReal(theta);
-  opt->advection_velocity[1] = PetscSinReal(theta);
-  opt->advection_velocity[2] = 0.0;
+  // Initialize advection to the diagonal direction by default
+  opt->advection_velocity[0] = 1.0; // u
+  opt->advection_velocity[1] = 1.0; // v
+  opt->advection_velocity[2] = 1.0; // w (for 3D)  
 
-  PetscReal uv, vv, wv;
+  // User can specify direction with theta, or by giving the velocity components directly
+  PetscReal pi = 4.0 * atan(1.0), theta = pi / 4.0;
+  PetscBool theta_found;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, &theta_found));
+  if (theta_found)
+  {
+      PetscCheck(theta >= 0.0 && theta <= pi / 2.0, comm, PETSC_ERR_ARG_WRONGSTATE,
+                  "theta must be in [0, pi/2]");
+      opt->advection_velocity[0] = PetscCosReal(theta);
+      opt->advection_velocity[1] = PetscSinReal(theta);
+      opt->advection_velocity[2] = 0.0; // w component is 0 with theta
+  }
+
+  PetscReal uv = 0.0, vv = 0.0, wv = 0.0;
   PetscBool fu, fv, fw;
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-u", &uv, &fu));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-v", &vv, &fv));
@@ -475,7 +498,7 @@ static PetscErrorCode AssembleVolumeCell(DM dm, PetscFE fe, PetscInt c,
 
     /* Velocity at this physical point */
     PetscReal bv[3];
-    GetVelocity(ctx, xq, bv);
+    GetVelocity(dim, ctx, xq, bv);
 
     PetscReal wdetJ = qweights[q] * detJ;
 
@@ -776,7 +799,7 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
 
     /* Velocity at physical point */
     PetscReal bv[3];
-    GetVelocity(ctx, xq, bv);
+    GetVelocity(dim, ctx, xq, bv);
 
     /* Normal flux from cL's perspective using cL's Jacobian-weighted normal */
     PetscReal bnL = 0.0;
@@ -857,7 +880,7 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
       }
 
       PetscReal bv[3];
-      GetVelocity(ctx, xqR, bv);
+      GetVelocity(dim, ctx, xqR, bv);
 
       /* Normal flux from cR's perspective using cR's Jacobian-weighted normal */
       PetscReal bnR = 0.0;
@@ -942,13 +965,20 @@ static PetscErrorCode AssembleFacet(DM dm, PetscFE fe,
 }
 
 /* -----------------------------------------------------------------------
-   Classify boundary facets into inflow / outflow using Face Sets IDs.
-
-   Matching the SUPG code conventions:
-     2D inflow  = {1,4}, outflow = {2,3}
-     3D inflow  = {1,3,6}, outflow = {2,4,5}
+   Classify boundary facets using Face Sets IDs.
 
    *isBoundary is PETSC_TRUE if f has any Face Sets label value.
+   *isInflow   is PETSC_TRUE if f belongs to one of the designated
+               Dirichlet-inflow face sets (where InflowValue() may be
+               applied).  These face sets correspond to the geometrically
+               inflow sides for the default diagonal velocity:
+                 2D: {1,4}   (bottom/y=0, left/x=0)
+                 3D: {1,3,6} (bottom/z=0, front/y=0, left/x=0)
+
+   IMPORTANT: *isInflow does NOT determine the upwind direction.  The
+   physical inflow condition (b.n < 0) is checked separately in the
+   assembly loop.  A Dirichlet value is only actually imposed when
+   *isInflow is PETSC_TRUE AND b.n < 0 at the quadrature point.
    ----------------------------------------------------------------------- */
 static PetscErrorCode ClassifyBoundaryFacet(DM dm, DMLabel label,
                                              PetscInt f, PetscInt dim,
@@ -966,11 +996,6 @@ static PetscErrorCode ClassifyBoundaryFacet(DM dm, DMLabel label,
   PetscCall(DMLabelGetValue(label, f, &val));
   if (val < 0) PetscFunctionReturn(PETSC_SUCCESS);
   *isBoundary = PETSC_TRUE;
-
-  if (ctx->bottom_only_inflow_one && dim == 2) {
-    if (val == 1 || val == 4) *isInflow = PETSC_TRUE;
-    PetscFunctionReturn(PETSC_SUCCESS);
-  }
 
   if (dim == 2) {
     if (val == 1 || val == 4) *isInflow = PETSC_TRUE;
