@@ -419,7 +419,12 @@ run_tests_no_load_serial:
 	@echo ""
 	@echo "Test curved velocity 2D upwind finite-difference"
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity	 
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
+# 
+	@echo ""
+	@echo "Test 3D upwind finite-difference"
+	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
 # 
 	@echo ""
 	@echo "Test lAIR on steady 2D structured advection"
@@ -739,6 +744,11 @@ run_tests_no_load_parallel:
 	@echo "Test curved velocity 2D upwind finite-difference in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity	 
+# 
+	@echo ""
+	@echo "Test 3D upwind finite-difference in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4	 
 #
 	@echo ""
 	@echo "Test improving Z in parallel" 
