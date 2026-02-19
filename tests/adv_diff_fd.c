@@ -405,11 +405,6 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscInt dim,
     adv_xy_scale = Hy / Hx;
   }
 
-  // Node spacings for coordinate computation in GetVelocity
-  PetscReal Hx_node = Hx;
-  PetscReal Hy_node = Hy;
-  PetscReal Hz_node = (dim == 3) ? Hz : 0.0;
-
   if (dim == 2) {
 
     PetscCall(DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL));
@@ -419,7 +414,7 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscInt dim,
         row.i = i; row.j = j;
 
         // Compute velocity at this node
-        PetscReal x_node[3] = {i * Hx_node, j * Hy_node, 0.0};
+        PetscReal x_node[3] = {i * Hx, j * Hy, 0.0};
         PetscReal vel[3];
         GetVelocity(dim, (PetscReal)u, (PetscReal)v, (PetscReal)w, x_node, curved_velocity, unit_velocity, vel);
         PetscScalar u_loc = vel[0], v_loc = vel[1];
@@ -496,7 +491,7 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscInt dim,
           row.i = i; row.j = j; row.k = k;
 
           // Compute velocity at this node
-          PetscReal x_node[3] = {i * Hx_node, j * Hy_node, k * Hz_node};
+          PetscReal x_node[3] = {i * Hx, j * Hy, k * Hz};
           PetscReal vel[3];
           GetVelocity(dim, (PetscReal)u, (PetscReal)v, (PetscReal)w, x_node, curved_velocity, unit_velocity, vel);
           PetscScalar u_loc = vel[0], v_loc = vel[1], w_loc = vel[2];
