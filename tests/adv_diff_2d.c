@@ -3,20 +3,27 @@
 
      ./adv_diff_2d
              : pure advection with theta = pi/4, dimensionless
-               BCs left and bottom dirichlet, top and right outflow
+               BCs left and bottom dirichlet (u=0), top and right outflow
                Same equation as advection_2d in PyAMG, except we don't eliminate the dirichlet dofs
      ./adv_diff_2d -adv_nondim 0
              : pure advection with theta = pi/4, scaled by Hx * Hy
-               BCs left and bottom dirichlet, top and right outflow
+               BCs left and bottom dirichlet (u=0), top and right outflow
      ./adv_diff_2d -u 0 -v 0 -alpha 1.0 
              : pure diffusion scaled by Hx * Hy
                BCs dirichlet on all sides
      ./adv_diff_2d -alpha 1.0 
              : advection-diffusion scaled by Hx * Hy with theta=pi/4             
                BCs dirichlet on all sides
+     ./adv_diff_2d -bottom_only_inflow_one
+             : pure advection with theta = pi/4, dimensionless
+               BC bottom face dirichlet inflow u=1, left face dirichlet u=0, top and right outflow
 
      Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v directly
      Can optionally left scale the matrix by the inverse diagonal before solving (-diag_scale)
+     Can specify inflow of 1 on the bottom face with -bottom_only_inflow_one (default false),
+       left face and other inflow faces are set to u=0
+     Can write the solution to a VTK structured grid file with -vec_view vtk:solution.vts
+       (note: DMDA is a structured mesh so PETSc produces .vts, not .vtu)
      Modified from ex50.c by Michael Boghosian <boghmic@iit.edu>, 2008,
 
 */
@@ -40,7 +47,7 @@ int main(int argc,char **argv)
   DM             da;
   PetscInt M, N;
   PetscScalar theta, alpha, u, v, u_test, v_test, L_x, L_y, L_x_test, L_y_test;
-  PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale;
+  PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale, bottom_only_inflow_one;
   Vec x, b, diag_vec;
   Mat A, A_temp;
   KSPConvergedReason reason;
@@ -91,6 +98,7 @@ int main(int argc,char **argv)
   PetscCall(DMCreateMatrix(da, &A));
   PetscCall(MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES ,PETSC_TRUE));
   PetscCall(DMCreateGlobalVector(da, &x));
+  PetscCall(PetscObjectSetName((PetscObject)x, "adv_diff"));
   PetscCall(DMCreateGlobalVector(da, &b));
 
   // Zero rhs
@@ -158,6 +166,25 @@ int main(int argc,char **argv)
   diag_scale = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-diag_scale", &diag_scale, NULL));
 
+  // Set only the bottom face (j==0) inflow to u=1, all other inflow faces (left, i==0) to u=0
+  // Defaults to false (all inflow faces are u=0)
+  bottom_only_inflow_one = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-bottom_only_inflow_one", &bottom_only_inflow_one, NULL));
+
+  // If bottom_only_inflow_one is set, set the RHS to 1 on the bottom boundary (j==0)
+  if (bottom_only_inflow_one) {
+    PetscScalar **b_arr;
+    PetscInt     xs_b, ys_b, xm_b, ym_b, i_b;
+    PetscCall(DMDAGetCorners(da, &xs_b, &ys_b, 0, &xm_b, &ym_b, 0));
+    PetscCall(DMDAVecGetArray(da, b, &b_arr));
+    if (ys_b == 0) {
+      for (i_b = xs_b; i_b < xs_b + xm_b; i_b++) {
+        b_arr[0][i_b] = 1.0;
+      }
+    }
+    PetscCall(DMDAVecRestoreArray(da, b, &b_arr));
+  }
+
   // ~~~~~~~~~~~~~~
   // ~~~~~~~~~~~~~~
 
@@ -210,6 +237,10 @@ int main(int argc,char **argv)
 
   // Write out the iteration count
   PetscCall(KSPGetConvergedReason(ksp,&reason));
+
+  // Optionally write the solution to a VTK structured grid file.
+  // Use -vec_view vtk:solution.vts on the command line to enable.
+  PetscCall(VecViewFromOptions(x, NULL, "-vec_view"));
    
   // ~~~~~~~~~~~~~~
   // ~~~~~~~~~~~~~~  
