@@ -399,9 +399,10 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscInt dim,
   adv_xz_scale = Hx * Hz;
   adv_xy_scale = Hx * Hy;
   if (adv_nondim) {
-    adv_yz_scale = HyHz_Hx;
-    adv_xz_scale = Hz;
-    adv_xy_scale = Hy;
+    // For 3D to be dimensionless like 2D, we divide by Hx*Hx
+    adv_yz_scale = HyHz_Hx / Hx;
+    adv_xz_scale = Hz / Hx;
+    adv_xy_scale = Hy / Hx;
   }
 
   // Node spacings for coordinate computation in GetVelocity
