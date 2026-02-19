@@ -22,9 +22,12 @@
      Can optionally left scale the matrix by the inverse diagonal before solving (-diag_scale)
      Can specify inflow of 1 on the bottom face with -bottom_only_inflow_one (default false),
        left face and other inflow faces are set to u=0
+     Can change default velocity from straight line to curved with -curved_velocity (default false)
+       curved velocity field: u(x,y) = y, v(x,y) = 1-x (rotating, always >= 0 on [0,1]^2)
+     Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
+       If any of u,v are set explicitly then unit velocity will be disabled
      Can write the solution to a VTK structured grid file with -vec_view vtk:solution.vts
        (note: DMDA is a structured mesh so PETSc produces .vts, not .vtu)
-     Modified from ex50.c by Michael Boghosian <boghmic@iit.edu>, 2008,
 
 */
 
@@ -38,7 +41,34 @@ static char help[] = "Solves 2D steady advection-diffusion on a structured grid.
 
 #include "pflare.h"
 
-extern PetscErrorCode ComputeMat(DM,Mat,PetscScalar,PetscScalar,PetscScalar,PetscScalar, PetscScalar, PetscBool);
+// Helper function to compute velocity at a point.
+// u_const, v_const: constant velocity components (used when curved_velocity is false)
+// x[2]: node coordinates (x, y)
+// curved_velocity: if true, use spatially-varying field u(x,y) = y, v(x,y) = 1-x
+// unit_velocity: if true, normalise the velocity to unit magnitude
+static inline void GetVelocity(PetscReal u_const, PetscReal v_const, const PetscReal x[],
+                               PetscBool curved_velocity, PetscBool unit_velocity,
+                               PetscReal vel[])
+{
+  if (curved_velocity) {
+    // Spatially-varying velocity field: top-left quadrant of a rotating circle (center at 1,0)
+    // u(x,y) = y, v(x,y) = 1-x
+    vel[0] = x[1];        // u(x,y) = y
+    vel[1] = 1.0 - x[0]; // v(x,y) = 1-x
+  } else {
+    // Constant velocity field
+    vel[0] = u_const;
+    vel[1] = v_const;
+  }
+
+  // Normalise velocity magnitude if unit_velocity flag is set
+  if (unit_velocity) {
+    PetscReal mag = PetscSqrtReal(vel[0]*vel[0] + vel[1]*vel[1]);
+    if (mag > 1e-12) { vel[0] /= mag; vel[1] /= mag; }
+  }
+}
+
+extern PetscErrorCode ComputeMat(DM,Mat,PetscScalar,PetscScalar,PetscScalar,PetscScalar, PetscScalar, PetscBool, PetscBool, PetscBool);
 
 int main(int argc,char **argv)
 {
@@ -47,7 +77,7 @@ int main(int argc,char **argv)
   DM             da;
   PetscInt M, N;
   PetscScalar theta, alpha, u, v, u_test, v_test, L_x, L_y, L_x_test, L_y_test;
-  PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale, bottom_only_inflow_one;
+  PetscBool option_found_u, option_found_v, adv_nondim, check_nondim, diag_scale, bottom_only_inflow_one, curved_velocity, unit_velocity;
   Vec x, b, diag_vec;
   Mat A, A_temp;
   KSPConvergedReason reason;
@@ -135,6 +165,20 @@ int main(int argc,char **argv)
    v = v_test;
   }
 
+  // Curved velocity field option (u(x,y) = y, v(x,y) = 1-x)
+  // Default is straight line (false)
+  curved_velocity = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-curved_velocity", &curved_velocity, NULL));
+
+  // Unit velocity normalization option - default to unit velocity
+  unit_velocity = PETSC_TRUE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-unit_velocity", &unit_velocity, NULL));
+
+  // Don't normalise if user has explicitly set a velocity
+  if (option_found_u || option_found_v) {
+    unit_velocity = PETSC_FALSE;
+  }
+
   // Diffusion coefficient
   // Default alpha is 0 - pure advection
   alpha = 0.0;
@@ -189,7 +233,7 @@ int main(int argc,char **argv)
   // ~~~~~~~~~~~~~~
 
   // Compute our matrix
-  PetscCall(ComputeMat(da, A, u, v, L_x, L_y, alpha, adv_nondim));
+  PetscCall(ComputeMat(da, A, u, v, L_x, L_y, alpha, adv_nondim, curved_velocity, unit_velocity));
   // This will compress out the extra memory
   PetscCall(MatDuplicate(A, MAT_COPY_VALUES, &A_temp));
   PetscCall(MatDestroy(&A));
@@ -259,7 +303,7 @@ int main(int argc,char **argv)
   return 0;
 }
 
-PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar L_x, PetscScalar L_y, PetscScalar alpha, PetscBool adv_nondim)
+PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScalar L_x, PetscScalar L_y, PetscScalar alpha, PetscBool adv_nondim, PetscBool curved_velocity, PetscBool unit_velocity)
 {
   PetscInt       i, j, M, N, xm, ym, xs, ys;
   PetscScalar    val[5], Hx, Hy, HydHx, HxdHy, adv_x_scale, adv_y_scale;
@@ -278,12 +322,23 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
    adv_y_scale = HydHx;   
   }
 
+  // Node spacing for coordinate computation
+  // M nodes span [0, L_x], so node i is at x = i * L_x / (M-1)
+  PetscReal Hx_node = (M > 1) ? L_x / (PetscReal)(M - 1) : 0.0;
+  PetscReal Hy_node = (N > 1) ? L_y / (PetscReal)(N - 1) : 0.0;
+
   PetscCall(DMDAGetCorners(da,&xs,&ys,0,&xm,&ym,0));
 
   // Loop over the nodes
   for (j=ys; j<ys+ym; j++) {
     for (i=xs; i<xs+xm; i++) {
       row.i = i; row.j = j;
+
+      // Compute velocity at this node via GetVelocity
+      PetscReal x_node[2] = {i * Hx_node, j * Hy_node};
+      PetscReal vel[2];
+      GetVelocity((PetscReal)u, (PetscReal)v, x_node, curved_velocity, unit_velocity, vel);
+      PetscScalar u_loc = vel[0], v_loc = vel[1];
 
       // Boundary values
       if (i==0 || j==0 || i==M-1 || j==N-1) {
@@ -301,12 +356,12 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
             // upwinded stencil, representing an outflow bc
             if (alpha == 0.0){
                // Upwind advection with theta between 0 and pi/2
-               // left
-               val[0] = -u * adv_y_scale;                 col[0].i = i;   col[0].j = j-1;
-               // bottom
-               val[1] = -v * adv_x_scale;                 col[1].i = i-1; col[1].j = j;
+               // south (lower y)
+               val[0] = -v_loc * adv_x_scale;                     col[0].i = i;   col[0].j = j-1;
+               // west (lower x)
+               val[1] = -u_loc * adv_y_scale;                     col[1].i = i-1; col[1].j = j;
                // centre
-               val[2] = u*adv_y_scale + v*adv_x_scale;    col[2].i = i;   col[2].j = j;
+               val[2] = u_loc*adv_y_scale + v_loc*adv_x_scale;    col[2].i = i;   col[2].j = j;
                PetscCall(MatSetValuesStencil(A,1,&row,3,col,val,ADD_VALUES));
 
             // If we have diffusion we have dirichlet bcs on the top and right
@@ -337,13 +392,13 @@ PetscErrorCode ComputeMat(DM da, Mat A, PetscScalar u, PetscScalar v, PetscScala
          }
 
         // Upwind advection with theta between 0 and pi/2
-        if (u != 0.0 || v != 0.0) {
-            // left
-            val[0] = -u * adv_y_scale;                 col[0].i = i;   col[0].j = j-1;
-            // bottom
-            val[1] = -v * adv_x_scale;                 col[1].i = i-1; col[1].j = j;
+        if (u_loc != 0.0 || v_loc != 0.0) {
+            // south (lower y)
+            val[0] = -v_loc * adv_x_scale;                     col[0].i = i;   col[0].j = j-1;
+            // west (lower x)
+            val[1] = -u_loc * adv_y_scale;                     col[1].i = i-1; col[1].j = j;
             // centre
-            val[2] = u*adv_y_scale + v*adv_x_scale;    col[2].i = i;   col[2].j = j;
+            val[2] = u_loc*adv_y_scale + v_loc*adv_x_scale;    col[2].i = i;   col[2].j = j;
             PetscCall(MatSetValuesStencil(A,1,&row,3,col,val,ADD_VALUES));
         }
       }
