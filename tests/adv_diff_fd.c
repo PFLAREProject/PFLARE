@@ -2,26 +2,26 @@
      Steady advection-diffusion equation in 2D or 3D with finite difference, advection is upwinded
      Default is 2D. Use -dim 3 for 3D.
 
-     ./adv_diff_2d
+     ./adv_diff_fd
              : pure advection with theta = pi/4, dimensionless
                BCs left and bottom dirichlet (u=0), top and right outflow
                Same equation as advection_2d in PyAMG, except we don't eliminate the dirichlet dofs
-     ./adv_diff_2d -adv_nondim 0
+     ./adv_diff_fd -adv_nondim 0
              : pure advection with theta = pi/4, scaled by Hx * Hy
                BCs left and bottom dirichlet (u=0), top and right outflow
-     ./adv_diff_2d -u 0 -v 0 -alpha 1.0
+     ./adv_diff_fd -u 0 -v 0 -alpha 1.0
              : pure diffusion scaled by Hx * Hy
                BCs dirichlet on all sides
-     ./adv_diff_2d -alpha 1.0
+     ./adv_diff_fd -alpha 1.0
              : advection-diffusion scaled by Hx * Hy with theta=pi/4
                BCs dirichlet on all sides
-     ./adv_diff_2d -bottom_only_inflow_one
+     ./adv_diff_fd -bottom_only_inflow_one
              : pure advection with theta = pi/4, dimensionless
                BC bottom face dirichlet inflow u=1, left face dirichlet u=0, top and right outflow
-     ./adv_diff_2d -dim 3
+     ./adv_diff_fd -dim 3
              : pure advection in 3D with default velocity (1,1,1) normalised
                BCs west (x=0), south (y=0), bottom (z=0) dirichlet u=0; other faces outflow
-     ./adv_diff_2d -dim 3 -alpha 1.0
+     ./adv_diff_fd -dim 3 -alpha 1.0
              : advection-diffusion in 3D scaled by Hx*Hy*Hz
                BCs dirichlet on all sides
 

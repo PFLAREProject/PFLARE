@@ -143,7 +143,7 @@ export TEST_TARGETS = ex12f \
 		  ex6f_getcoeffs \
 		  ex6 \
 		  adv_1d \
-		  adv_diff_2d \
+		  adv_diff_fd \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \
 		  matrandom \
@@ -156,7 +156,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
 # Define a variable containing all the tests that the make check runs
-export CHECK_TARGETS = adv_diff_2d matrandom
+export CHECK_TARGETS = adv_diff_fd matrandom
 
 # Output the library - either static or dynamic
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
