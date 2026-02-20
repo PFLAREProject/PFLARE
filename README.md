@@ -310,11 +310,11 @@ This is based around using the high-order polynomials applied matrix free as a c
 
 For example, on a single GPU with a 2D structured grid advection problem we apply a high order (10th order) GMRES polynomial as a Newton polynomial matrix-free as a coarse grid solver:
 
-``./adv_diff_2d -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos``
+``./adv_diff_fd -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos``
 
 The hierarchy in this case has 29 levels. If we turn on the auto truncation and set a very large truncation tolerance  
 
-``./adv_diff_2d -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1``
+``./adv_diff_fd -da_grid_x 1000 -da_grid_y 1000 -ksp_type richardson -pc_type air -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_poly_order 10 -dm_mat_type aijkokkos -dm_vec_type kokkos -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1``
 
 we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve in this example. The speedup is typically greater in parallel. Please see [3] for more details.
 
