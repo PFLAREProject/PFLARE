@@ -862,7 +862,8 @@ run_tests_medium_parallel:
 	@set -e; for size in $$(seq 100 20 200); do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
-	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6 \
+		 -unit_velocity 0; \
 	done
 #
 	@echo ""
@@ -870,7 +871,8 @@ run_tests_medium_parallel:
 	@set -e; for size in 100 200 400 800; do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
-	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6 \
+		 -unit_velocity 0; \
 	done
 #
 	@echo ""
