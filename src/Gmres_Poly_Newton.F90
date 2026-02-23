@@ -720,12 +720,12 @@ module gmres_poly_newton
       ! We want to apply q(mat_ctx%mat_scaled) D^-1
       ! ~~~~~~~~~~~~
 
-      ! Doing MF_VEC_TEMP_TWO = D^-1 x 
+      ! Doing MF_VEC_RHS = D^-1 x 
       call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
                mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
 
       ! and now we apply our polynomial
-      ! q(mat_ctx%mat_scaled) to MF_VEC_TEMP_TWO (D^-1 x)
+      ! q(mat_ctx%mat_scaled) to MF_VEC_RHS (D^-1 x)
       call petsc_newton(mat_ctx%mat_scaled, &
                mat_ctx%real_roots, mat_ctx%imag_roots, &
                mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
@@ -888,9 +888,96 @@ module gmres_poly_newton
 
    end subroutine petsc_matvec_poly_newton_mf     
 
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_matvec_gmres_newton_mf_residual(mat, x, y)
+   subroutine petsc_matvec_right_scale_poly_newton_residual_mf(mat, x, y)
+
+      ! Applies a Newton polynomial matrix-free with a right diagonal scaling added
+      ! q(mat_ctx%mat_scaled) D^-1, as an inverse and computes the residual
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      integer :: errorcode
+      PetscErrorCode :: ierr      
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%real_roots)) then
+         print *, "Polynomial coefficients in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! ~~~~~~~~~~~~
+      ! We want to apply q(mat_ctx%mat_scaled) D^-1 and then compute a residual
+      ! ~~~~~~~~~~~~
+
+      ! Doing MF_VEC_RHS = D^-1 x 
+      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
+               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+
+      ! and now we apply our polynomial
+      ! q(mat_ctx%mat_scaled) to MF_VEC_RHS (D^-1 x)
+      call petsc_newton_residual(mat_ctx%mat_scaled, &
+               mat_ctx%real_roots, mat_ctx%imag_roots, &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), &
+               mat_ctx%mf_temp_vec(MF_VEC_RHS), y)   
+               
+      call VecPointwiseMult(y, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                   
+
+   end subroutine petsc_matvec_right_scale_poly_newton_residual_mf     
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_poly_newton_residual_mf(mat, x, y)
+
+      ! Applies a matrix polynomial matrix-free as an inverse and computes the residual
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%real_roots)) then
+         print *, "Polynomial coefficients in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Apply polynomial
+      call petsc_newton_residual(mat_ctx%mat, &
+               mat_ctx%real_roots, mat_ctx%imag_roots, &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), &               
+               x, y) 
+
+   end subroutine petsc_matvec_poly_newton_residual_mf   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_newton_residual(mat, real_roots, imag_roots, temp_vec, temp_vec_two, temp_vec_three, x, y)
 
       ! Applies a gmres residual polynomial in the newton basis matrix-free as an inverse
       ! This is different than petsc_newton which applies p(A)v, 
@@ -902,22 +989,17 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       ! Input
-      type(tMat), intent(in)    :: mat
-      type(tVec) :: x
-      type(tVec) :: y
+      type(tMat), intent(in)              :: mat
+      PetscReal, dimension(:), intent(in) :: real_roots, imag_roots
+      type(tVec), intent(in)              :: temp_vec, temp_vec_two, temp_vec_three
+      type(tVec)                          :: x
+      type(tVec)                          :: y
 
       ! Local
-      integer :: order, errorcode
+      integer :: order
       PetscErrorCode :: ierr      
-      type(mat_ctxtype), pointer :: mat_ctx => null()
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      call MatShellGetContext(mat, mat_ctx, ierr)
-      if (.NOT. associated(mat_ctx%real_roots)) then
-         print *, "Roots in context aren't found"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
 
       ! y = x
       call VecCopy(x, y, ierr)
@@ -927,25 +1009,25 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~
       order = 1
       ! Does every e'val in this loop unlike when we apply p(A)v
-      do while (order .le. size(mat_ctx%real_roots))
+      do while (order .le. size(real_roots))
 
          ! If real this is easy
-         if (mat_ctx%imag_roots(order) == 0d0) then
+         if (imag_roots(order) == 0d0) then
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(mat_ctx%real_roots(order)) < 1e-12) then
+            if (abs(real_roots(order)) < 1e-12) then
                order = order + 1
                cycle
             end if
 
-            ! MF_VEC_DIAG = A * y
-            call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+            ! temp_vec_two = A * y
+            call MatMult(mat, y, temp_vec_two, ierr)            
 
-            ! y = y - theta_i * MF_VEC_DIAG
+            ! y = y - theta_i * temp_vec_two
             call VecAXPY(y, &
-                     -1d0/mat_ctx%real_roots(order), &
-                     mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+                     -1d0/real_roots(order), &
+                     temp_vec_two, ierr)
 
             order = order + 1
 
@@ -955,26 +1037,26 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2 < 1e-12) then
+            if (real_roots(order)**2 + imag_roots(order)**2 < 1e-12) then
                order = order + 2
                cycle
             end if           
             
-            ! MF_VEC_DIAG = A * y
-            call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)   
+            ! temp_vec_two = A * y
+            call MatMult(mat, y, temp_vec_two, ierr)   
 
-            ! MF_VEC_TEMP = A * MF_VEC_DIAG
-            call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)              
+            ! temp_vec = A * temp_vec_two
+            call MatMult(mat, temp_vec_two, temp_vec, ierr)              
 
-            ! MF_VEC_TEMP = MF_VEC_TEMP - 2 * Re(theta_i) * MF_VEC_DIAG
-            call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
-                  -2 * mat_ctx%real_roots(order), &
-                  mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+            ! temp_vec = temp_vec - 2 * Re(theta_i) * temp_vec_two
+            call VecAXPY(temp_vec, &
+                  -2 * real_roots(order), &
+                  temp_vec_two, ierr)
 
-            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_TEMP
+            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec
             call VecAXPY(y, &
-                     1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
-                     mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+                     1d0/(real_roots(order)**2 + imag_roots(order)**2), &
+                     temp_vec, ierr)
 
             ! Skip two evals
             order = order + 2
@@ -982,7 +1064,8 @@ module gmres_poly_newton
          end if
       end do
 
-   end subroutine petsc_matvec_gmres_newton_mf_residual
+   end subroutine petsc_newton_residual
+
 !------------------------------------------------------------------------------------------------------------------------
    
    subroutine mat_mult_powers_share_sparsity_newton(matrix, poly_order, poly_sparsity_order, coefficients, &
