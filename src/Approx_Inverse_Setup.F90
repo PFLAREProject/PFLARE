@@ -376,7 +376,7 @@ module approx_inverse_setup
 
          call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                            coefficients, &
-                           inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, &
+                           inverse_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
                            inv_matrix)         
 
       ! Neumann polynomial
@@ -455,6 +455,8 @@ module approx_inverse_setup
                
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+               call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), ierr)
+               call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), ierr)
             end if
 
             ! Neumann polynomial has extra context that needs deleting
