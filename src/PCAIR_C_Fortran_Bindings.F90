@@ -317,6 +317,27 @@ module pcair_c_fortran_bindings
       call PCAIRGetMaxLubySteps(pc, steps, ierr)
 
    end subroutine PCAIRGetMaxLubySteps_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPolyDiagScale_c(pc_ptr, scale) bind(C, name='PCAIRGetPolyDiagScale_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: scale
+
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetPolyDiagScale(pc, dummy, ierr)
+      scale = .FALSE.
+      if (dummy) scale = .TRUE.
+
+   end subroutine PCAIRGetPolyDiagScale_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1241,6 +1262,26 @@ module pcair_c_fortran_bindings
       end do
    
    end subroutine PCAIRGetSmoothType_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetPolyDiagScale_c(pc_ptr, scale) bind(C, name='PCAIRSetPolyDiagScale_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      IF (scale) dummy = .TRUE.
+      call PCAIRSetPolyDiagScale(pc, dummy, ierr)
+
+   end subroutine PCAIRSetPolyDiagScale_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -283,6 +283,7 @@ module air_data_type_routines
       air_data%options%smooth_order = 0
       air_data%options%smooth_order(1) = 2
       air_data%options%any_c_smooths = .FALSE.
+      air_data%options%poly_diag_scale = .FALSE.
       air_data%options%matrix_free_polys = .FALSE.
       air_data%options%one_point_classical_prolong = .TRUE.
       air_data%options%full_smoothing_up_and_down = .FALSE.

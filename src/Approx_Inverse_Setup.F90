@@ -147,6 +147,8 @@ module approx_inverse_setup
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       integer :: errorcode
+      type(tMat) :: diag_mat
+      type(tVec) :: diag_vec
       ! ~~~~~~    
 
       if (buffers%subcomm .AND. inverse_type == PFLAREINV_POWER) then
@@ -182,6 +184,15 @@ module approx_inverse_setup
 
       ! ~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~
+
+         ! ! Need to build an assembled D^-1 A
+         ! call MatDuplicate(buffers%matrix, MAT_COPY_VALUES, diag_mat, ierr)
+         ! buffers%matrix = diag_mat
+         ! call MatCreateVecs(buffers%matrix, PETSC_NULL_VEC, diag_vec, ierr)
+         ! call MatGetDiagonal(buffers%matrix, diag_vec, ierr)
+         ! call VecReciprocal(diag_vec, ierr)
+         ! call MatDiagonalScale(buffers%matrix, diag_vec, PETSC_NULL_VEC, ierr) 
+
 
       ! If we're on the subcomm, we don't need to do anything
       if (.NOT. PetscObjectIsNull(buffers%matrix)) then
@@ -276,6 +287,7 @@ module approx_inverse_setup
 #else
       MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
 #endif
+      type(tVec) :: diag_vec, diag_inverse_vec
 
       ! ~~~~~~    
 
@@ -301,6 +313,7 @@ module approx_inverse_setup
       ! Gmres poylnomial with power or arnoldi basis
       if (inverse_type == PFLAREINV_POWER .OR. inverse_type == PFLAREINV_ARNOLDI) then
 
+         ! needs to be buffers%matrix to work with diag scaling NOW @@@@
          call build_gmres_polynomial_inverse(matrix, poly_order, &
                   buffers, coefficients(:, 1), &
                   inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)  
@@ -351,6 +364,12 @@ module approx_inverse_setup
          call calculate_and_build_weighted_jacobi_inverse(matrix, .FALSE., inv_matrix)           
 
       end if
+
+         ! call MatCreateVecs(matrix, diag_inverse_vec, diag_vec, ierr)
+         ! call MatGetDiagonal(matrix, diag_vec, ierr)
+         ! call VecCopy(diag_vec, diag_inverse_vec, ierr)
+         ! call VecReciprocal(diag_inverse_vec, ierr)
+         ! call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)       
 
       ! If we were on a subcomm we created a copy of our matrix, if not we incremented 
       ! the reference counter

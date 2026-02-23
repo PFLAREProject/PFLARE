@@ -681,6 +681,30 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetMaxLubySteps
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPolyDiagScale(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! Always true for neumann
+      if (options%inverse_type == PFLAREINV_NEUMANN) then
+         scale = .TRUE.
+      else
+         scale = options%poly_diag_scale
+      end if
+      ierr = 0
+
+   end subroutine PCAIRGetPolyDiagScale   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1797,6 +1821,37 @@ module pcair_interfaces
    
       ierr = 0
    end subroutine PCAIRGetSmoothType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetPolyDiagScale(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetPolyDiagScale(pc, old_bool, ierr)
+      if (old_bool .eqv. scale) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%poly_diag_scale = scale
+      ierr = 0
+
+   end subroutine PCAIRSetPolyDiagScale   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

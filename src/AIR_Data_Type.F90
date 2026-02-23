@@ -120,6 +120,9 @@ module air_data_type
       integer, dimension(10) :: smooth_order = (/ 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 /)
       ! Do we do any C point smooths?
       logical :: any_c_smooths = .FALSE.
+      ! If using a polynomial inverse type, do we diagonally scale before computing?
+      ! -pc_air_poly_diag_scale
+      logical :: poly_diag_scale = .FALSE.      
       ! Do we apply our polynomials matrix free when smoothing?
       ! -pc_air_matrix_free_polys
       logical :: matrix_free_polys = .FALSE.
