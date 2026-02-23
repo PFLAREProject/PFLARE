@@ -320,7 +320,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetPolyDiagScale_c(pc_ptr, scale) bind(C, name='PCAIRGetPolyDiagScale_c')
+   subroutine PCAIRGetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetDiagScalePolys_c')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -333,11 +333,11 @@ module pcair_c_fortran_bindings
       ! ~~~~~~~~
 
       pc%v = pc_ptr
-      call PCAIRGetPolyDiagScale(pc, dummy, ierr)
+      call PCAIRGetDiagScalePolys(pc, dummy, ierr)
       scale = .FALSE.
       if (dummy) scale = .TRUE.
 
-   end subroutine PCAIRGetPolyDiagScale_c   
+   end subroutine PCAIRGetDiagScalePolys_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1265,7 +1265,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetPolyDiagScale_c(pc_ptr, scale) bind(C, name='PCAIRSetPolyDiagScale_c')
+   subroutine PCAIRSetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetDiagScalePolys_c')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1279,9 +1279,9 @@ module pcair_c_fortran_bindings
       pc%v = pc_ptr
       dummy = .FALSE.
       IF (scale) dummy = .TRUE.
-      call PCAIRSetPolyDiagScale(pc, dummy, ierr)
+      call PCAIRSetDiagScalePolys(pc, dummy, ierr)
 
-   end subroutine PCAIRSetPolyDiagScale_c   
+   end subroutine PCAIRSetDiagScalePolys_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

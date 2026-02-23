@@ -35,7 +35,7 @@ PETSC_EXTERN void PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
 PETSC_EXTERN void PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetSmoothType_c(PC *pc, char* input_string);
-PETSC_EXTERN void PCAIRGetPolyDiagScale_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetDiagScalePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetOnePointClassicalProlong_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetFullSmoothingUpAndDown_c(PC *pc, PetscBool *input_bool);
@@ -83,7 +83,7 @@ PETSC_EXTERN void PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
 PETSC_EXTERN void PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetSmoothType_c(PC *pc, const char* input_string);
-PETSC_EXTERN void PCAIRSetPolyDiagScale_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetDiagScalePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetMatrixFreePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetOnePointClassicalProlong_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetFullSmoothingUpAndDown_c(PC *pc, PetscBool input_bool);
@@ -297,10 +297,10 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
    PCAIRGetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-PETSC_EXTERN PetscErrorCode PCAIRGetPolyDiagScale(PC pc, PetscBool *input_bool)
+PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
-   PCAIRGetPolyDiagScale_c(&pc, input_bool);
+   PCAIRGetDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool)
@@ -660,11 +660,11 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 }
 // If using a polynomial inverse type, diagonally scale before computing?
 // Default: false (if inverse type neumann this is always true and cannot be overridden)
-// -pc_air_poly_diag_scale
-PETSC_EXTERN PetscErrorCode PCAIRSetPolyDiagScale(PC pc, PetscBool input_bool)
+// -pc_air_diag_scale_polys
+PETSC_EXTERN PetscErrorCode PCAIRSetDiagScalePolys(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
-   PCAIRSetPolyDiagScale_c(&pc, input_bool);
+   PCAIRSetDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 // Do we apply our polynomials matrix free when smoothing?
@@ -1003,10 +1003,10 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsBool("-pc_air_processor_agglom", "Processor agglomeration", "PCAIRSetProcessorAgglom", old_flag, &flg, NULL));
    PetscCall(PCAIRSetProcessorAgglom(pc, flg));
    // ~~~~
-   PetscCall(PCAIRGetPolyDiagScale(pc, &old_flag));
+   PetscCall(PCAIRGetDiagScalePolys(pc, &old_flag));
    flg = old_flag;
-   PetscCall(PetscOptionsBool("-pc_air_poly_diag_scale", "Diagonally scale before computing polynomial inverse", "PCAIRSetPolyDiagScale", old_flag, &flg, NULL));
-   PetscCall(PCAIRSetPolyDiagScale(pc, flg));   
+   PetscCall(PetscOptionsBool("-pc_air_diag_scale_polys", "Diagonally scale before computing polynomial inverse", "PCAIRSetDiagScalePolys", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetDiagScalePolys(pc, flg));   
    // ~~~~
    PetscCall(PCAIRGetMatrixFreePolys(pc, &old_flag));
    flg = old_flag;
@@ -1322,7 +1322,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          PetscCall(PCAIRGetInverseType(pc, &input_type));
          PetscCall(PCAIRGetPolyOrder(pc, &input_int_two));
          PetscCall(PCAIRGetInverseSparsityOrder(pc, &input_int_three));
-         PetscCall(PCAIRGetPolyDiagScale(pc, &flg_diag_scale));
+         PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
          PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
 
          // What type of inverse
@@ -1420,7 +1420,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PCAIRGetInverseType(pc, &input_type));
             PetscCall(PCAIRGetPolyOrder(pc, &input_int_two));
             PetscCall(PCAIRGetInverseSparsityOrder(pc, &input_int_three));
-            PetscCall(PCAIRGetPolyDiagScale(pc, &flg_diag_scale));
+            PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
             PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
 
             // What type of inverse
@@ -1508,7 +1508,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PCAIRGetCInverseType(pc, &input_type));
             PetscCall(PCAIRGetCPolyOrder(pc, &input_int_two));
             PetscCall(PCAIRGetCInverseSparsityOrder(pc, &input_int_three));
-            PetscCall(PCAIRGetPolyDiagScale(pc, &flg_diag_scale));
+            PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
             PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
 
             // What type of inverse

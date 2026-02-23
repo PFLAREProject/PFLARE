@@ -109,6 +109,7 @@ module air_operators_setup
          call start_approximate_inverse(smoothing_mat, &
                   air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+                  air_data%options%diag_scale_polys, &
                   air_data%inv_A_ff_poly_data(our_level)%buffers, &
                   air_data%inv_A_ff_poly_data(our_level)%coefficients)        
       end if
@@ -126,6 +127,7 @@ module air_operators_setup
             call start_approximate_inverse(air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_order, &
+                  air_data%options%diag_scale_polys, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)          
          end if
@@ -159,6 +161,7 @@ module air_operators_setup
             call start_approximate_inverse(air_data%A_cc(our_level), &
                   air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
+                  air_data%options%diag_scale_polys, &
                   air_data%inv_A_cc_poly_data(our_level)%buffers, &
                   air_data%inv_A_cc_poly_data(our_level)%coefficients)  
          end if
@@ -352,7 +355,9 @@ module air_operators_setup
             air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
             air_data%inv_A_ff_poly_data(our_level)%buffers, &
             air_data%inv_A_ff_poly_data(our_level)%coefficients, &
-            air_data%options%matrix_free_polys, air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+            air_data%options%matrix_free_polys, &
+            air_data%options%diag_scale_polys, &
+            air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
             air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
             air_data%inv_A_ff(our_level)) 
             
@@ -382,7 +387,9 @@ module air_operators_setup
                      air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_sparsity_order, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, &
-                     .FALSE., air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                     .FALSE., &
+                     air_data%options%diag_scale_polys, &
+                     air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
                      air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
                      inv_dropped_Aff)
             destroy_mat = .TRUE.
@@ -409,7 +416,9 @@ module air_operators_setup
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
                         air_data%inv_A_ff_poly_data(our_level)%buffers, &
                         air_data%inv_A_ff_poly_data(our_level)%coefficients, &
-                        .FALSE., air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                        .FALSE., &
+                        air_data%options%diag_scale_polys, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
                         air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
                         inv_dropped_Aff)
                destroy_mat = .TRUE.
@@ -909,6 +918,7 @@ module air_operators_setup
                   air_data%inv_A_cc_poly_data(our_level)%buffers, &
                   air_data%inv_A_cc_poly_data(our_level)%coefficients, &
                   air_data%options%matrix_free_polys, &
+                  air_data%options%diag_scale_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_ACC), &
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_ACC)%array, &
                   air_data%inv_A_cc(our_level))

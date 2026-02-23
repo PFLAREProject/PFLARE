@@ -11,7 +11,7 @@
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
 PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, PetscInt inverse_type, PetscInt order, \
-                     PetscInt sparsity_order, PetscInt matrix_free_int, \
+                     PetscInt sparsity_order, PetscInt matrix_free_int, PetscInt diag_scale_polys_int, \
                      PetscInt subcomm_int, Mat *inv_matrix);
 
 // The types available as approximate inverses are (see include/pflare.h):
@@ -343,6 +343,13 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
 
    // We have to pass in an int
    int matrix_free_int = inv_data->matrix_free == PETSC_TRUE;   
+   // We don't allow polynomail diagonal scaling through PCPFLAREINV
+   // as the user could pass in a matshell as the matrix
+   // It is the user's responsibility to have done the scaling beforehand
+   // if they want
+   int diag_scale_polys_int = 0;
+   // Similarly for the subcomm
+   int subcomm_int = 0;
 
    // If we haven't setup yet
    if (pc->setupcalled == 0)
@@ -351,7 +358,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       calculate_and_build_approximate_inverse_c(&(pc->pmat), \
             type, \
             inv_data->poly_order, inv_data->inverse_sparsity_order, \
-            matrix_free_int, 0, \
+            matrix_free_int, diag_scale_polys_int, subcomm_int, \
             &(inv_data->mat_inverse));      
    }
    else
@@ -365,7 +372,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
                type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, 0, \
+               matrix_free_int, diag_scale_polys_int, subcomm_int, \
                &(inv_data->mat_inverse)); 
       }
       else if (pc->flag == SAME_NONZERO_PATTERN)
@@ -375,7 +382,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
                type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, 0, \
+               matrix_free_int, diag_scale_polys_int, subcomm_int, \
                &(inv_data->mat_inverse));
       }
    }

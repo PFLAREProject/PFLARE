@@ -25,7 +25,7 @@ module matshell_data_type
       logical                     :: own_coefficients = .FALSE.
       PetscReal, dimension(:), pointer :: real_roots => null()
       PetscReal, dimension(:), pointer :: imag_roots => null()
-      type(tMat) :: mat, mat_ida
+      type(tMat) :: mat, mat_scaled
       ! Temporary vectors we use
       type(tVec), dimension(3) :: mf_temp_vec
       type(air_multigrid_data), pointer :: air_data => null()

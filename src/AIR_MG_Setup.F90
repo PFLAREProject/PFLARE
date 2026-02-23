@@ -154,6 +154,7 @@ module air_mg_setup
             call start_approximate_inverse(air_data%coarse_matrix(our_level), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                  .FALSE., &
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients)                       
 
@@ -178,6 +179,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
+                  .FALSE., &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(our_level))          
@@ -894,6 +896,7 @@ module air_mg_setup
             call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                  .FALSE., &
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients)         
             call timer_finish(TIMER_ID_AIR_INVERSE)
@@ -1058,6 +1061,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
+                  .FALSE., &
                   air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
                   air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(air_data%no_levels))           

@@ -29,21 +29,21 @@ module neumann_poly
 
       ! Local
       PetscErrorCode :: ierr
-      type(mat_ctxtype), pointer :: mat_ctx_ida => null()
+      type(mat_ctxtype), pointer :: mat_ctx_scaled => null()
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-      call MatShellGetContext(mat, mat_ctx_ida, ierr)
+      call MatShellGetContext(mat, mat_ctx_scaled, ierr)
 
       ! ~~~~~~~~~~~~
       ! We want to apply (I-D^-1 A) x
       ! ~~~~~~~~~~~~
 
       ! Multiply by A
-      call MatMult(mat_ctx_ida%mat, x, y, ierr)
+      call MatMult(mat_ctx_scaled%mat, x, y, ierr)
 
       ! Doing D^-1 on the result
-      call VecPointwiseDivide(y, y, mat_ctx_ida%mf_temp_vec(MF_VEC_DIAG), ierr)
+      call VecPointwiseDivide(y, y, mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG), ierr)
 
       ! Now do x - D^-1 A x
       call VecAXPBY(y, &
@@ -51,51 +51,7 @@ module neumann_poly
                -1d0, &
                x, ierr)      
 
-   end subroutine petsc_matvec_ida_neumann_poly_mf     
-
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine petsc_matvec_neumann_poly_mf(mat, x, y)
-
-      ! Applies a Neumann polynomial matrix-free, q(I-D^-1 A) D^-1, as an inverse
-      ! y = A x
-
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      ! Input
-      type(tMat), intent(in)    :: mat
-      type(tVec) :: x
-      type(tVec) :: y
-
-      ! Local
-      integer :: errorcode
-      PetscErrorCode :: ierr      
-      type(mat_ctxtype), pointer :: mat_ctx => null()
-
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      call MatShellGetContext(mat, mat_ctx, ierr)
-      if (.NOT. associated(mat_ctx%coefficients)) then
-         print *, "Polynomial coefficients in context aren't found"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-
-      ! ~~~~~~~~~~~~
-      ! We want to apply q(I-D^-1 A) D^-1 with coefficients=1
-      ! ~~~~~~~~~~~~
-
-      ! Doing rhs_copy = D^-1 x 
-      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
-               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
-
-      ! and now we call the horner method to apply our polynomial
-      ! q(I - D^-1 A) to rhs_copy (D^-1 x)
-      call petsc_horner(mat_ctx%mat_ida, mat_ctx%coefficients, mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
-                  mat_ctx%mf_temp_vec(MF_VEC_RHS), y)      
-
-   end subroutine petsc_matvec_neumann_poly_mf      
-
+   end subroutine petsc_matvec_ida_neumann_poly_mf
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -125,8 +81,8 @@ module neumann_poly
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       type(tMat) :: temp_mat
-      type(tVec) :: rhs_copy, diag_vec
-      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_ida=>null()
+      type(tVec) :: rhs_copy, diag_inverse_vec
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
 
       ! ~~~~~~    
 
@@ -158,9 +114,10 @@ module neumann_poly
             ! Create the matshell
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
                         mat_ctx, inv_matrix, ierr)
-            ! The subroutine petsc_matvec_neumann_poly_mf applies the neumann polynomial inverse
+            ! The subroutine petsc_matvec_right_scale_poly_mf applies
+            ! q(mat) D^-1
             call MatShellSetOperation(inv_matrix, &
-                        MATOP_MULT, petsc_matvec_neumann_poly_mf, ierr)
+                        MATOP_MULT, petsc_matvec_right_scale_poly_mf, ierr)
 
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
@@ -177,20 +134,20 @@ module neumann_poly
             ! ~~~~~~~~~~~~~
 
             ! Have to dynamically allocate this
-            allocate(mat_ctx_ida)
-            mat_ctx_ida%coefficients => coefficients                     
+            allocate(mat_ctx_scaled)
+            mat_ctx_scaled%coefficients => coefficients                     
             
             ! Create the matshell
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
-                        mat_ctx_ida, mat_ctx%mat_ida, ierr)
+                        mat_ctx_scaled, mat_ctx%mat_scaled, ierr)
             ! The subroutine petsc_matvec_ida_neumann_poly_mf applies I - D^-1 A
-            call MatShellSetOperation(mat_ctx%mat_ida, &
+            call MatShellSetOperation(mat_ctx%mat_scaled, &
                         MATOP_MULT, petsc_matvec_ida_neumann_poly_mf, ierr)
 
-            call MatAssemblyBegin(mat_ctx%mat_ida, MAT_FINAL_ASSEMBLY, ierr)
-            call MatAssemblyEnd(mat_ctx%mat_ida, MAT_FINAL_ASSEMBLY, ierr)   
+            call MatAssemblyBegin(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
+            call MatAssemblyEnd(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
             ! Have to make sure to set the type of vectors the shell creates
-            call ShellSetVecType(matrix, mat_ctx%mat_ida)   
+            call ShellSetVecType(matrix, mat_ctx%mat_scaled)   
             
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
@@ -199,17 +156,17 @@ module neumann_poly
          ! Reusing 
          else
             call MatShellGetContext(inv_matrix, mat_ctx, ierr)
-            call MatShellGetContext(mat_ctx%mat_ida, mat_ctx_ida, ierr)
+            call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
 
          end if
 
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
          mat_ctx%mat = matrix 
-         mat_ctx_ida%mat = matrix 
+         mat_ctx_scaled%mat = matrix 
 
          ! Get the diagonal
          call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
-         mat_ctx_ida%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
+         mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
 
       ! If not matrix free
       else
@@ -220,10 +177,10 @@ module neumann_poly
 
          ! Need to build an assembled I - D^-1 A
          call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)
-         call MatCreateVecs(matrix, rhs_copy, diag_vec, ierr)
-         call MatGetDiagonal(matrix, diag_vec, ierr)
-         call VecReciprocal(diag_vec, ierr)
-         call MatDiagonalScale(temp_mat, diag_vec, PETSC_NULL_VEC, ierr) 
+         call MatCreateVecs(matrix, rhs_copy, diag_inverse_vec, ierr)
+         call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
+         call VecReciprocal(diag_inverse_vec, ierr)
+         call MatDiagonalScale(temp_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
    
          ! Computes: I - D^-1 A
          call MatScale(temp_mat, -1d0, ierr)
@@ -231,18 +188,20 @@ module neumann_poly
          
          ! If we feed in coefficients=1 and leave buffers%R_buffer_receive unallocated as it will just skip 
          ! the "gmres" coefficient calculation and just calculate the sum of (potentailly fixed sparsity) matrix powers
+         ! We set diag_scale_polys to false as we have already scaled the matrix by the diagonal
+         ! and we scale the columns ourself next
          call build_gmres_polynomial_inverse(temp_mat, poly_order, buffers, coefficients, &
-               poly_sparsity_order, .FALSE., reuse_mat, reuse_submatrices, inv_matrix)
+               poly_sparsity_order, .FALSE., .FALSE., reuse_mat, reuse_submatrices, inv_matrix)
                
          ! Now this computes (I - D^-1 A)^-1 D^-1
          ! For the F-point smoothing and grid-transfer operators in our air multigrid, 
          ! this is equivalent to using (I - Dff^-1 Aff)^-1 Dff^-1 everywhere we normally use 
          ! Aff^-1
-         call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_vec, ierr) 
+         call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr) 
          
          ! Cleanup
          call VecDestroy(rhs_copy, ierr)
-         call VecDestroy(diag_vec, ierr)  
+         call VecDestroy(diag_inverse_vec, ierr)  
          call MatDestroy(temp_mat, ierr)
 
       end if      

@@ -121,8 +121,8 @@ module air_data_type
       ! Do we do any C point smooths?
       logical :: any_c_smooths = .FALSE.
       ! If using a polynomial inverse type, do we diagonally scale before computing?
-      ! -pc_air_poly_diag_scale
-      logical :: poly_diag_scale = .FALSE.      
+      ! -pc_air_diag_scale_polys
+      logical :: diag_scale_polys = .FALSE.      
       ! Do we apply our polynomials matrix free when smoothing?
       ! -pc_air_matrix_free_polys
       logical :: matrix_free_polys = .FALSE.

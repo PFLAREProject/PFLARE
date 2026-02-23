@@ -94,7 +94,7 @@ module c_fortran_bindings
 
    subroutine calculate_and_build_approximate_inverse_c(input_mat_ptr, inverse_type, &
          poly_order, poly_sparsity_order, &
-         matrix_free_int, subcomm_int, inv_matrix_ptr) &
+         matrix_free_int, diag_scale_polys_int, subcomm_int, inv_matrix_ptr) &
          bind(C,name='calculate_and_build_approximate_inverse_c')
 
       ! Builds an approximate inverse
@@ -102,11 +102,11 @@ module c_fortran_bindings
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
       integer(c_int), value, intent(in)      :: inverse_type, poly_order, poly_sparsity_order
-      integer(c_int), value, intent(in)      :: matrix_free_int, subcomm_int
+      integer(c_int), value, intent(in)      :: matrix_free_int, diag_scale_polys_int, subcomm_int
       integer(c_long_long), intent(inout)    :: inv_matrix_ptr
 
       type(tMat)  :: input_mat, inv_matrix
-      logical     :: matrix_free = .FALSE., subcomm = .FALSE.
+      logical     :: matrix_free = .FALSE., subcomm = .FALSE., diag_scale_polys = .FALSE.
       ! ~~~~~~~~      
       
       ! Now the input mat long long just gets copied into input_mat%v
@@ -118,10 +118,11 @@ module c_fortran_bindings
       inv_matrix%v = inv_matrix_ptr
       
       if (matrix_free_int == 1) matrix_free = .TRUE.
+      if (diag_scale_polys_int == 1) diag_scale_polys = .TRUE.
       if (subcomm_int == 1) subcomm = .TRUE.
       call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
                poly_order, poly_sparsity_order, &
-               matrix_free, subcomm, &
+               matrix_free, diag_scale_polys, subcomm, &
                inv_matrix)
 
       ! Pass out the new inverse matrix

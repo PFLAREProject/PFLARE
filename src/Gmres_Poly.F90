@@ -1283,6 +1283,83 @@ end if
 
          
    end subroutine mat_mult_powers_share_sparsity_cpu
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_da_poly_mf(mat, x, y)
+
+      ! Applies D^-1 A as a shell
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      PetscErrorCode :: ierr
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+
+      ! ~~~~~~~~~~~~
+      ! We want to apply (D^-1 A) x
+      ! ~~~~~~~~~~~~
+
+      ! Multiply by A
+      call MatMult(mat_ctx%mat, x, y, ierr)
+
+      ! Doing D^-1 on the result
+      call VecPointwiseDivide(y, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
+
+   end subroutine petsc_matvec_da_poly_mf   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_right_scale_poly_mf(mat, x, y)
+
+      ! Applies a polynomial matrix-free with a right diagonal scaling added
+      ! q(mat_ctx%mat_scaled) D^-1, as an inverse
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      integer :: errorcode
+      PetscErrorCode :: ierr      
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%coefficients)) then
+         print *, "Polynomial coefficients in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! ~~~~~~~~~~~~
+      ! We want to apply q(mat_ctx%mat_scaled) D^-1
+      ! ~~~~~~~~~~~~
+
+      ! Doing rhs_copy = D^-1 x 
+      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
+               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+
+      ! and now we call the horner method to apply our polynomial
+      ! q(mat_ctx%mat_scaled) to rhs_copy (D^-1 x)
+      call petsc_horner(mat_ctx%mat_scaled, mat_ctx%coefficients, mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+                  mat_ctx%mf_temp_vec(MF_VEC_RHS), y)      
+
+   end subroutine petsc_matvec_right_scale_poly_mf      
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1295,7 +1372,7 @@ end if
 
       ! Input
       type(tMat), intent(in)    :: mat
-      PetscReal, dimension(:)        :: coefficients
+      PetscReal, dimension(:)   :: coefficients
       type(tVec)                :: x, temp_vec
       type(tVec)                :: y
 
@@ -1391,7 +1468,7 @@ end if
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine build_gmres_polynomial_inverse(matrix, poly_order, buffers, coefficients, &
-                  poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
+                  poly_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, inv_matrix)
 
       ! Assembles a matrix which is an approximation to the inverse of a matrix using the 
       ! gmres polynomial coefficients 
@@ -1403,9 +1480,9 @@ end if
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: poly_order
       type(tsqr_buffers), intent(inout)                 :: buffers
-      PetscReal, dimension(:), target, intent(inout)         :: coefficients
+      PetscReal, dimension(:), target, intent(inout)    :: coefficients
       integer, intent(in)                               :: poly_sparsity_order
-      logical, intent(in)                               :: matrix_free
+      logical, intent(in)                               :: matrix_free, diag_scale_polys
       type(tMat), intent(inout)                         :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
@@ -1416,7 +1493,8 @@ end if
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       type(tMat) :: mat_power, temp_mat
-      type(mat_ctxtype), pointer :: mat_ctx=>null()
+      type(tVec) :: diag_inverse_vec
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       logical :: reuse_triggered      
 
       ! ~~~~~~       
@@ -1431,7 +1509,7 @@ end if
       call MatGetLocalSize(matrix, local_rows, local_cols, ierr)
       call MatGetSize(matrix, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
-      call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)     
+      call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)
       
       ! Just build a matshell that applies our polynomial matrix-free
       if (matrix_free) then
@@ -1448,9 +1526,16 @@ end if
             ! We pass in the polynomial coefficients as the context
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
                         mat_ctx, inv_matrix, ierr)
-            ! The subroutine petsc_matvec_poly_mf applies the polynomial inverse
-            call MatShellSetOperation(inv_matrix, &
-                        MATOP_MULT, petsc_matvec_poly_mf, ierr)
+            if (diag_scale_polys) then
+               ! The subroutine petsc_matvec_right_scale_poly_mf applies
+               ! q(mat_ctx%mat_scaled) D^-1
+               call MatShellSetOperation(inv_matrix, &
+                           MATOP_MULT, petsc_matvec_right_scale_poly_mf, ierr)              
+            else
+               ! The subroutine petsc_matvec_poly_mf applies the polynomial inverse, q(mat_ctx%mat)
+               call MatShellSetOperation(inv_matrix, &
+                           MATOP_MULT, petsc_matvec_poly_mf, ierr)
+            end if
 
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr) 
@@ -1459,16 +1544,51 @@ end if
 
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)         
+            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)        
+            
+            ! Need to build mat_ctx%mat_scaled, ie D^-1 A
+            if (diag_scale_polys) then
+
+               ! Have to dynamically allocate this
+               allocate(mat_ctx_scaled)
+               mat_ctx_scaled%coefficients => coefficients                     
+               
+               ! Create the matshell
+               call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
+                           mat_ctx_scaled, mat_ctx%mat_scaled, ierr)
+               ! The subroutine petsc_matvec_da_poly_mf applies D^-1 A
+               call MatShellSetOperation(mat_ctx%mat_scaled, &
+                           MATOP_MULT, petsc_matvec_da_poly_mf, ierr)
+
+               call MatAssemblyBegin(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
+               call MatAssemblyEnd(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
+               ! Have to make sure to set the type of vectors the shell creates
+               call ShellSetVecType(matrix, mat_ctx%mat_scaled)   
+               
+               ! Create temporary vector we use during horner
+               ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
+               call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                 
+
+            end if
 
          ! Reusing 
          else
             call MatShellGetContext(inv_matrix, mat_ctx, ierr)
+            if (diag_scale_polys) then
+               call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
+            end if
          end if
          
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
          mat_ctx%mat = matrix 
          mat_ctx%coefficients => coefficients
+         if (diag_scale_polys) then
+            mat_ctx_scaled%mat = matrix 
+
+            ! Get the diagonal
+            call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
+         end if
 
          ! We're done
          return
@@ -1479,11 +1599,29 @@ end if
       ! ~~~~~~~~~~~~
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix) 
 
+      ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
+      if (diag_scale_polys) then
+         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
+         call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
+         call VecReciprocal(diag_inverse_vec, ierr)
+         call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)
+         call MatDiagonalScale(temp_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
+
+      else
+         temp_mat = matrix
+      end if      
+
       ! If we're zeroth order poly this is trivial as it's just the coefficient(1) on the diagonal
       if (poly_order == 0) then
 
-         call build_gmres_polynomial_inverse_0th_order(matrix, poly_order, buffers, coefficients, &
+         call build_gmres_polynomial_inverse_0th_order(temp_mat, poly_order, buffers, coefficients, &
                inv_matrix)         
+
+         if (diag_scale_polys) then
+            call MatDestroy(temp_mat, ierr)
+            call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+            call VecDestroy(diag_inverse_vec, ierr)      
+         end if         
 
          ! Then just return
          return
@@ -1492,7 +1630,7 @@ end if
       else if (poly_order == 1 .AND. poly_sparsity_order == 1) then
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
-         call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, inv_matrix)
+         call mat_duplicate_copy_plus_diag(temp_mat, reuse_triggered, inv_matrix)
 
          ! Flags to prevent reductions when assembling (there are assembles in the shift)
          call MatSetOption(inv_matrix, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr) 
@@ -1508,6 +1646,12 @@ end if
          ! Don't need an assemble as there is one called in this
          call MatShift(inv_matrix, coefficients(1), ierr)       
 
+         if (diag_scale_polys) then
+            call MatDestroy(temp_mat, ierr)
+            call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+            call VecDestroy(diag_inverse_vec, ierr)      
+         end if         
+
          ! Then just return
          return
 
@@ -1519,8 +1663,14 @@ end if
          ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
          ! so that it doen't have to do much comms
          ! This also finishes off the asyn comms and computes the coefficients
-         call mat_mult_powers_share_sparsity(matrix, poly_order, poly_sparsity_order, buffers, coefficients, &
+         call mat_mult_powers_share_sparsity(temp_mat, poly_order, poly_sparsity_order, buffers, coefficients, &
                   reuse_mat, reuse_submatrices, inv_matrix)
+
+         if (diag_scale_polys) then
+            call MatDestroy(temp_mat, ierr)
+            call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+            call VecDestroy(diag_inverse_vec, ierr)      
+         end if                  
 
          ! Then just return
          return
@@ -1535,11 +1685,11 @@ end if
       ! Copy in the initial matrix
       if (.NOT. reuse_triggered) then
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
-         call mat_duplicate_copy_plus_diag(matrix, .FALSE., inv_matrix)
+         call mat_duplicate_copy_plus_diag(temp_mat, .FALSE., inv_matrix)
       else
          ! For the powers > 1 the pattern of the original matrix will be different
          ! to the resulting inverse
-         call MatCopy(matrix, inv_matrix, DIFFERENT_NONZERO_PATTERN, ierr)
+         call MatCopy(temp_mat, inv_matrix, DIFFERENT_NONZERO_PATTERN, ierr)
       end if
 
       ! Don't set any off processor entries so no need for a reduction when assembling
@@ -1562,10 +1712,10 @@ end if
 
          ! TODO - these can be reused
          if (order == 2) then
-            call MatMatMult(matrix, matrix, &
+            call MatMatMult(temp_mat, temp_mat, &
                   MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)     
          else
-            call MatMatMult(matrix, mat_power, &
+            call MatMatMult(temp_mat, mat_power, &
                   MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)      
             call MatDestroy(mat_power, ierr)
          end if       
@@ -1588,7 +1738,13 @@ end if
 
       ! The alpha_0 just gets added to the diagonal
       ! There is an assemble in the shift so don't need a separate one       
-      call MatShift(inv_matrix, coefficients(1), ierr)       
+      call MatShift(inv_matrix, coefficients(1), ierr)  
+      
+      if (diag_scale_polys) then
+         call MatDestroy(temp_mat, ierr)
+         call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+         call VecDestroy(diag_inverse_vec, ierr)      
+      end if      
 
    end subroutine build_gmres_polynomial_inverse
    
