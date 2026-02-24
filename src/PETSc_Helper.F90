@@ -119,62 +119,62 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif      
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
+!       call MatGetType(input_mat, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then
 
-         ! Absolute tolerance by default   
-         rel_max_row_tol_int = 0
-         if (present(relative_max_row_tol_int)) then
-            rel_max_row_tol_int = relative_max_row_tol_int
-         end if
-         lump_int = 0
-         if (present(lump)) then
-            if (lump) then
-               lump_int = 1
-            end if
-         end if   
-         ! Never drop the diagonal by default
-         allow_drop_diagonal_int = 0
-         if (present(drop_diagonal_int)) then
-            allow_drop_diagonal_int = drop_diagonal_int
-         end if         
+!          ! Absolute tolerance by default   
+!          rel_max_row_tol_int = 0
+!          if (present(relative_max_row_tol_int)) then
+!             rel_max_row_tol_int = relative_max_row_tol_int
+!          end if
+!          lump_int = 0
+!          if (present(lump)) then
+!             if (lump) then
+!                lump_int = 1
+!             end if
+!          end if   
+!          ! Never drop the diagonal by default
+!          allow_drop_diagonal_int = 0
+!          if (present(drop_diagonal_int)) then
+!             allow_drop_diagonal_int = drop_diagonal_int
+!          end if         
 
-         A_array = input_mat%v             
-         call remove_small_from_sparse_kokkos(A_array, tol, &
-                  B_array, rel_max_row_tol_int, lump_int, allow_drop_diagonal_int) 
-         output_mat%v = B_array
+!          A_array = input_mat%v             
+!          call remove_small_from_sparse_kokkos(A_array, tol, &
+!                   B_array, rel_max_row_tol_int, lump_int, allow_drop_diagonal_int) 
+!          output_mat%v = B_array
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tol_int, &
-                     lump, drop_diagonal_int)       
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tol_int, &
+!                      lump, drop_diagonal_int)       
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat, ierr)
-         end if
+!             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+!             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+!             if (normy .gt. 1d-12 .OR. normy/=normy) then
+!                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+!                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+!                print *, "Kokkos and CPU versions of remove_small_from_sparse do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+!             end if
+!             call MatDestroy(temp_mat, ierr)
+!          end if
 
-      else
+!       else
 
-         call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
-                  lump, drop_diagonal_int)          
+!          call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
+!                   lump, drop_diagonal_int)          
 
-      end if
-#else
+!       end if
+! #else
       call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
                lump, drop_diagonal_int)  
-#endif  
+!#endif  
      
          
    end subroutine remove_small_from_sparse
@@ -444,61 +444,61 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif      
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+!       call MatGetType(input_mat, mat_type, ierr)
 
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then
 
-         lump_int = 0
-         if (present(lump)) then
-            if (lump) then
-               lump_int = 1
-            end if
-         end if        
-         alpha_int = 0
-         alpha_val = 1.0
-         if (present(alpha)) then
-            alpha_int = 1
-            alpha_val = alpha
-         end if
+!          lump_int = 0
+!          if (present(lump)) then
+!             if (lump) then
+!                lump_int = 1
+!             end if
+!          end if        
+!          alpha_int = 0
+!          alpha_val = 1.0
+!          if (present(alpha)) then
+!             alpha_int = 1
+!             alpha_val = alpha
+!          end if
 
-         if (kokkos_debug()) then
-            ! Make sure to copy the values here as we may be doing with alpha
-            call MatDuplicate(output_mat, &
-                     MAT_COPY_VALUES, temp_mat, ierr)            
-         end if
+!          if (kokkos_debug()) then
+!             ! Make sure to copy the values here as we may be doing with alpha
+!             call MatDuplicate(output_mat, &
+!                      MAT_COPY_VALUES, temp_mat, ierr)            
+!          end if
 
-         A_array = input_mat%v             
-         B_array = output_mat%v             
-         call remove_from_sparse_match_kokkos(A_array, B_array, lump_int, alpha_int, alpha_val) 
+!          A_array = input_mat%v             
+!          B_array = output_mat%v             
+!          call remove_from_sparse_match_kokkos(A_array, B_array, lump_int, alpha_int, alpha_val) 
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            call remove_from_sparse_match_cpu(input_mat, temp_mat, lump, alpha)      
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             call remove_from_sparse_match_cpu(input_mat, temp_mat, lump, alpha)      
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of remove_from_sparse_match do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat, ierr)
-         end if
+!             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+!             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+!             if (normy .gt. 1d-13 .OR. normy/=normy) then
+!                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+!                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+!                print *, "Kokkos and CPU versions of remove_from_sparse_match do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+!             end if
+!             call MatDestroy(temp_mat, ierr)
+!          end if
 
-      else
+!       else
 
-         call remove_from_sparse_match_cpu(input_mat, output_mat, lump, alpha)          
+!          call remove_from_sparse_match_cpu(input_mat, output_mat, lump, alpha)          
 
-      end if
-#else
+!       end if
+! #else
       call remove_from_sparse_match_cpu(input_mat, output_mat, lump, alpha)   
-#endif  
+!#endif  
          
    end subroutine remove_from_sparse_match   
 
@@ -696,20 +696,20 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       A_array = input_mat%v             
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then  
+!       call MatGetType(input_mat, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then  
 
-         call MatSetAllValues_kokkos(A_array, val) 
+!          call MatSetAllValues_kokkos(A_array, val) 
 
-      else
-         call MatSetAllValues_cpu(A_array, val)          
-      end if
-#else
+!       else
+!          call MatSetAllValues_cpu(A_array, val)          
+!       end if
+! #else
       call MatSetAllValues_cpu(A_array, val)    
-#endif        
+!#endif        
 
 
    end subroutine MatSetAllValues
@@ -737,67 +737,67 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! ~~~~~~~~~~
 
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
+!       call MatGetType(input_mat, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then
 
-         reuse_int = 0
-         if (reuse) reuse_int = 1
+!          reuse_int = 0
+!          if (reuse) reuse_int = 1
 
-         A_array = input_mat%v             
-         if (reuse) B_array = output_mat%v
-         call mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array)
-         output_mat%v = B_array
+!          A_array = input_mat%v             
+!          if (reuse) B_array = output_mat%v
+!          call mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array)
+!          output_mat%v = B_array
          
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
-            if (reuse) then
-               temp_mat = output_mat
-               call MatConvert(output_mat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
-            else
-               temp_mat_compare = output_mat                 
-            end if
+!             ! If we're doing reuse and debug, then we have to always output the result 
+!             ! from the cpu version, as it will have coo preallocation structures set
+!             ! They aren't copied over if you do a matcopy (or matconvert)
+!             ! If we didn't do that the next time we come through this routine 
+!             ! and try to call the cpu version with reuse, it will segfault
+!             if (reuse) then
+!                temp_mat = output_mat
+!                call MatConvert(output_mat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+!             else
+!                temp_mat_compare = output_mat                 
+!             end if
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, temp_mat)
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, temp_mat)
 
-            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
-                        temp_mat_reuse, ierr)                       
+!             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+!                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
-               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of compute_R_from_Z do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat_reuse, ierr)
-            if (.NOT. reuse) then
-               call MatDestroy(output_mat, ierr)
-            else
-               call MatDestroy(temp_mat_compare, ierr)
-            end if
-            output_mat = temp_mat
+!             call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+!             call MatNorm(temp_mat_reuse, NORM_FROBENIUS, normy, ierr)
+!             if (normy .gt. 1d-13 .OR. normy/=normy) then
+!                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+!                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+!                print *, "Kokkos and CPU versions of compute_R_from_Z do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+!             end if
+!             call MatDestroy(temp_mat_reuse, ierr)
+!             if (.NOT. reuse) then
+!                call MatDestroy(output_mat, ierr)
+!             else
+!                call MatDestroy(temp_mat_compare, ierr)
+!             end if
+!             output_mat = temp_mat
 
-         end if
+!          end if
 
-      else
+!       else
 
-         call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, output_mat)     
+!          call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, output_mat)     
 
-      end if
-#else
+!       end if
+! #else
       call mat_duplicate_copy_plus_diag_cpu(input_mat, reuse, output_mat)
-#endif       
+!#endif       
 
          
    end subroutine mat_duplicate_copy_plus_diag  
@@ -938,49 +938,49 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif      
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(y_mat, mat_type, ierr)
-      call PetscObjectGetComm(y_mat, MPI_COMM_MATRIX, ierr)  
-      ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
+!       call MatGetType(y_mat, mat_type, ierr)
+!       call PetscObjectGetComm(y_mat, MPI_COMM_MATRIX, ierr)  
+!       ! Get the comm size 
+!       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
 
-      ! If doing parallel Kokkos
-      if ((mat_type == MATMPIAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) .AND. comm_size /= 1) then
+!       ! If doing parallel Kokkos
+!       if ((mat_type == MATMPIAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) .AND. comm_size /= 1) then
 
-         if (kokkos_debug()) then    
-            call MatDuplicate(y_mat, MAT_COPY_VALUES, temp_mat, ierr)            
-         end if
+!          if (kokkos_debug()) then    
+!             call MatDuplicate(y_mat, MAT_COPY_VALUES, temp_mat, ierr)            
+!          end if
 
-         A_array = y_mat%v   
-         B_array = x_mat%v      
-         call MatAXPY_kokkos(A_array, alpha, B_array) 
+!          A_array = y_mat%v   
+!          B_array = x_mat%v      
+!          call MatAXPY_kokkos(A_array, alpha, B_array) 
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
+!             call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
 
-            call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Kokkos and CPU versions of MatAXPY do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat, ierr)
-         end if
+!             call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+!             call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+!             if (normy .gt. 1d-12 .OR. normy/=normy) then
+!                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+!                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+!                print *, "Kokkos and CPU versions of MatAXPY do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+!             end if
+!             call MatDestroy(temp_mat, ierr)
+!          end if
 
-      else
+!       else
 
-         call MatAXPY(y_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)        
+!          call MatAXPY(y_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)        
 
-      end if
-#else
+!       end if
+! #else
          call MatAXPY(y_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr) 
-#endif  
+!#endif  
      
          
    end subroutine MatAXPYWrapper   
