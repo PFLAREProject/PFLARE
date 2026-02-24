@@ -48,72 +48,72 @@ module pmisr_ddc
 #endif        
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(strength_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then  
+!       call MatGetType(strength_mat, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then  
 
-         call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
-         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)                  
+!          call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
+!          call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)                  
 
-         A_array = strength_mat%v  
-         pmis_int = 0
-         if (pmis) pmis_int = 1
-         zero_measure_c_point_int = 0
-         if (present(zero_measure_c_point)) then
-            if (zero_measure_c_point) zero_measure_c_point_int = 1
-         end if
+!          A_array = strength_mat%v  
+!          pmis_int = 0
+!          if (pmis) pmis_int = 1
+!          zero_measure_c_point_int = 0
+!          if (present(zero_measure_c_point)) then
+!             if (zero_measure_c_point) zero_measure_c_point_int = 1
+!          end if
 
-         ! Let's generate the random values on the host for now so they match
-         ! for comparisons with pmisr_cpu
-         call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
-         allocate(measure_local(local_rows))   
-         call random_seed(size=seed_size)
-         allocate(seed(seed_size))
-         do kfree = 1, seed_size
-            seed(kfree) = comm_rank + 1 + kfree
-         end do   
-         call random_seed(put=seed) 
-         ! Fill the measure with random numbers
-         call random_number(measure_local)
-         deallocate(seed)   
+!          ! Let's generate the random values on the host for now so they match
+!          ! for comparisons with pmisr_cpu
+!          call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
+!          allocate(measure_local(local_rows))   
+!          call random_seed(size=seed_size)
+!          allocate(seed(seed_size))
+!          do kfree = 1, seed_size
+!             seed(kfree) = comm_rank + 1 + kfree
+!          end do   
+!          call random_seed(put=seed) 
+!          ! Fill the measure with random numbers
+!          call random_number(measure_local)
+!          deallocate(seed)   
          
-         measure_local_ptr = c_loc(measure_local)
+!          measure_local_ptr = c_loc(measure_local)
 
-         allocate(cf_markers_local(local_rows))  
-         cf_markers_local_ptr = c_loc(cf_markers_local)
+!          allocate(cf_markers_local(local_rows))  
+!          cf_markers_local_ptr = c_loc(cf_markers_local)
 
-         ! Creates a cf_markers on the device
-         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
+!          ! Creates a cf_markers on the device
+!          call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then         
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then         
 
-            ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls 
-            ! use the device data
-            call copy_cf_markers_d2h(cf_markers_local_ptr)
-            call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local_two, zero_measure_c_point)  
+!             ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls 
+!             ! use the device data
+!             call copy_cf_markers_d2h(cf_markers_local_ptr)
+!             call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local_two, zero_measure_c_point)  
             
-            if (any(cf_markers_local /= cf_markers_local_two)) then
+!             if (any(cf_markers_local /= cf_markers_local_two)) then
 
-               ! do kfree = 1, local_rows
-               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
-               !       print *, kfree, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
-               !    end if
-               ! end do
-               print *, "Kokkos and CPU versions of pmisr do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
-            end if
-            deallocate(cf_markers_local_two)
-         end if
+!                ! do kfree = 1, local_rows
+!                !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
+!                !       print *, kfree, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
+!                !    end if
+!                ! end do
+!                print *, "Kokkos and CPU versions of pmisr do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+!             end if
+!             deallocate(cf_markers_local_two)
+!          end if
 
-      else
-         call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)       
-      end if
-#else
+!       else
+!          call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)       
+!       end if
+! #else
       call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
-#endif        
+!#endif        
 
       ! ~~~~~~ 
 
@@ -596,54 +596,54 @@ module pmisr_ddc
          return
       end if      
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then  
+!       call MatGetType(input_mat, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then  
 
-         A_array = input_mat%v  
-         cf_markers_local_ptr = c_loc(cf_markers_local)
+!          A_array = input_mat%v  
+!          cf_markers_local_ptr = c_loc(cf_markers_local)
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then         
-            allocate(cf_markers_local_two(size(cf_markers_local)))
-            cf_markers_local_two = cf_markers_local
-         end if
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then         
+!             allocate(cf_markers_local_two(size(cf_markers_local)))
+!             cf_markers_local_two = cf_markers_local
+!          end if
 
-         ! Modifies the existing device cf_markers created by the pmisr
-         max_dd_ratio_kokkos = max_dd_ratio
-         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio_kokkos)
+!          ! Modifies the existing device cf_markers created by the pmisr
+!          max_dd_ratio_kokkos = max_dd_ratio
+!          call ddc_kokkos(A_array, fraction_swap, max_dd_ratio_kokkos)
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then  
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then  
 
-            ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
-            ! use the existing device data
-            call copy_cf_markers_d2h(cf_markers_local_ptr)       
-            max_dd_ratio_cpu = max_dd_ratio     
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, cf_markers_local_two)  
+!             ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls 
+!             ! use the existing device data
+!             call copy_cf_markers_d2h(cf_markers_local_ptr)       
+!             max_dd_ratio_cpu = max_dd_ratio     
+!             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, cf_markers_local_two)  
 
-            if (any(cf_markers_local /= cf_markers_local_two)) then
+!             if (any(cf_markers_local /= cf_markers_local_two)) then
 
-               ! do kfree = 1, size(cf_markers_local)
-               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
-               !       print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
-               !    end if
-               ! end do
-               print *, "Kokkos and CPU versions of ddc do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
-            end if
-            deallocate(cf_markers_local_two)
-         end if
-         max_dd_ratio = max_dd_ratio_kokkos
+!                ! do kfree = 1, size(cf_markers_local)
+!                !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
+!                !       print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
+!                !    end if
+!                ! end do
+!                print *, "Kokkos and CPU versions of ddc do not match"
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+!             end if
+!             deallocate(cf_markers_local_two)
+!          end if
+!          max_dd_ratio = max_dd_ratio_kokkos
 
-      else
-         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)     
-      end if
-#else
+!       else
+!          call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)     
+!       end if
+! #else
       call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
-#endif        
+!#endif        
 
    end subroutine ddc
    

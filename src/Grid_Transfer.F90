@@ -43,46 +43,46 @@ module grid_transfer
 #endif      
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then      
+!       call MatGetType(input_mat, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then      
 
-         A_array = input_mat%v             
-         call generate_one_point_with_one_entry_from_sparse_kokkos(A_array, B_array) 
-         output_mat%v = B_array
+!          A_array = input_mat%v             
+!          call generate_one_point_with_one_entry_from_sparse_kokkos(A_array, B_array) 
+!          output_mat%v = B_array
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, temp_mat)      
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, temp_mat)      
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-            ! Find the biggest entry in the difference
-            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
-            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
-            call VecMax(max_vec, row_loc, normy, ierr)
-            call VecDestroy(max_vec, ierr)
+         !    call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+         !    ! Find the biggest entry in the difference
+         !    call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         !    call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         !    call VecMax(max_vec, row_loc, normy, ierr)
+         !    call VecDestroy(max_vec, ierr)
             
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
-               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Diff Kokkos and CPU generate_one_point_with_one_entry_from_sparse", normy, "row", row_loc
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat, ierr)
-         end if
+         !    if (normy .gt. 1d-13 .OR. normy/=normy) then
+         !       !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+         !       !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+         !       print *, "Diff Kokkos and CPU generate_one_point_with_one_entry_from_sparse", normy, "row", row_loc
+         !       call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+         !    end if
+         !    call MatDestroy(temp_mat, ierr)
+         ! end if
 
-      else
+!       else
 
-         call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, output_mat)         
+!          call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, output_mat)         
 
-      end if
-#else
+!       end if
+! #else
       call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, output_mat)  
-#endif 
+!#endif 
 
          
    end subroutine generate_one_point_with_one_entry_from_sparse    
@@ -238,81 +238,81 @@ module grid_transfer
       ! ~~~~~~~~~~
 
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(W, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
+!       call MatGetType(W, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then
 
-         identity_int = 0
-         if (identity) identity_int = 1
-         reuse_int = 0
-         if (reuse) reuse_int = 1
+!          identity_int = 0
+!          if (identity) identity_int = 1
+!          reuse_int = 0
+!          if (reuse) reuse_int = 1
 
-         A_array = W%v             
-         indices_fine = is_fine%v
-         indices_coarse = is_coarse%v
-         if (reuse) B_array = P%v
-         call compute_P_from_W_kokkos(A_array, global_row_start, &
-                     indices_fine, indices_coarse, &
-                     identity_int, reuse_int, B_array)
-         P%v = B_array
+!          A_array = W%v             
+!          indices_fine = is_fine%v
+!          indices_coarse = is_coarse%v
+!          if (reuse) B_array = P%v
+!          call compute_P_from_W_kokkos(A_array, global_row_start, &
+!                      indices_fine, indices_coarse, &
+!                      identity_int, reuse_int, B_array)
+!          P%v = B_array
          
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
-            if (reuse) then
-               temp_mat = P
-               call MatConvert(P, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
-            else
-               temp_mat_compare = P                         
-            end if
+!             ! If we're doing reuse and debug, then we have to always output the result 
+!             ! from the cpu version, as it will have coo preallocation structures set
+!             ! They aren't copied over if you do a matcopy (or matconvert)
+!             ! If we didn't do that the next time we come through this routine 
+!             ! and try to call the cpu version with reuse, it will segfault
+!             if (reuse) then
+!                temp_mat = P
+!                call MatConvert(P, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+!             else
+!                temp_mat_compare = P                         
+!             end if
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
-                     identity, reuse, temp_mat)   
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+!                      identity, reuse, temp_mat)   
 
-            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
-                        temp_mat_reuse, ierr)                       
+!             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+!                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
-            ! Find the biggest entry in the difference
-            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
-            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
-            call VecMax(max_vec, row_loc, normy, ierr)
-            call VecDestroy(max_vec, ierr)
+            ! call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! ! Find the biggest entry in the difference
+            ! call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            ! call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            ! call VecMax(max_vec, row_loc, normy, ierr)
+            ! call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
-               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Diff Kokkos and CPU compute_P_from_W", normy, "row", row_loc
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat_reuse, ierr)
-            if (.NOT. reuse) then
-               call MatDestroy(P, ierr)
-            else
-               call MatDestroy(temp_mat_compare, ierr)
-            end if
-            P = temp_mat
+            ! if (normy .gt. 1d-13 .OR. normy/=normy) then
+            !    !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+            !    !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+            !    print *, "Diff Kokkos and CPU compute_P_from_W", normy, "row", row_loc
+            !    call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            ! end if
+            ! call MatDestroy(temp_mat_reuse, ierr)
+            ! if (.NOT. reuse) then
+            !    call MatDestroy(P, ierr)
+            ! else
+            !    call MatDestroy(temp_mat_compare, ierr)
+            ! end if
+            ! P = temp_mat
 
-         end if
+!          end if
 
-      else
+!       else
 
-         call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
-                  identity, reuse, P)         
+!          call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+!                   identity, reuse, P)         
 
-      end if
-#else
+!       end if
+! #else
       call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
                   identity, reuse, P)
-#endif  
+!#endif  
 
          
    end subroutine compute_P_from_W         
@@ -481,94 +481,94 @@ module grid_transfer
       ! ~~~~~~~~~~
 
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(Z, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
+!       call MatGetType(Z, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then
 
-         identity_int = 0
-         if (identity) identity_int = 1
-         reuse_int = 0
-         if (reuse) reuse_int = 1
-         reuse_indices_int = 0;
-         if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) then
-            reuse_indices_int = 1
-         end if
+!          identity_int = 0
+!          if (identity) identity_int = 1
+!          reuse_int = 0
+!          if (reuse) reuse_int = 1
+!          reuse_indices_int = 0;
+!          if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) then
+!             reuse_indices_int = 1
+!          end if
 
-         A_array = Z%v             
-         indices_fine = is_fine%v
-         indices_coarse = is_coarse%v
-         orig_indices = orig_fine_col_indices%v
-         if (reuse) B_array = R%v
-         call compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, indices_coarse, &
-                        orig_indices, &
-                        identity_int, reuse_int, reuse_indices_int, &
-                        B_array)
-         R%v = B_array
-         orig_fine_col_indices%v = orig_indices
+!          A_array = Z%v             
+!          indices_fine = is_fine%v
+!          indices_coarse = is_coarse%v
+!          orig_indices = orig_fine_col_indices%v
+!          if (reuse) B_array = R%v
+!          call compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, indices_coarse, &
+!                         orig_indices, &
+!                         identity_int, reuse_int, reuse_indices_int, &
+!                         B_array)
+!          R%v = B_array
+!          orig_fine_col_indices%v = orig_indices
          
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
-            if (reuse) then
-               temp_mat = R
-               call MatConvert(R, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
-            else
-               temp_mat_compare = R                       
-            end if
+!             ! If we're doing reuse and debug, then we have to always output the result 
+!             ! from the cpu version, as it will have coo preallocation structures set
+!             ! They aren't copied over if you do a matcopy (or matconvert)
+!             ! If we didn't do that the next time we come through this routine 
+!             ! and try to call the cpu version with reuse, it will segfault
+!             if (reuse) then
+!                temp_mat = R
+!                call MatConvert(R, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+!             else
+!                temp_mat_compare = R                       
+!             end if
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
-                           orig_fine_col_indices, &
-                           identity, reuse, &
-                           temp_mat)  
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+!                            orig_fine_col_indices, &
+!                            identity, reuse, &
+!                            temp_mat)  
 
-            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
-                        temp_mat_reuse, ierr)                       
+!             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+!                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
-            ! Find the biggest entry in the difference
-            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
-            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
-            call VecMax(max_vec, row_loc, normy, ierr)
-            call VecDestroy(max_vec, ierr)
+            ! call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! ! Find the biggest entry in the difference
+            ! call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            ! call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            ! call VecMax(max_vec, row_loc, normy, ierr)
+            ! call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
-               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat_reuse, ierr)
-            if (.NOT. reuse) then
-               call MatDestroy(R, ierr)
-            else
-               call MatDestroy(temp_mat_compare, ierr)
-            end if
-            R = temp_mat
+            ! if (normy .gt. 1d-13 .OR. normy/=normy) then
+            !    !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+            !    !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+            !    print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
+            !    call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            ! end if
+            ! call MatDestroy(temp_mat_reuse, ierr)
+            ! if (.NOT. reuse) then
+            !    call MatDestroy(R, ierr)
+            ! else
+            !    call MatDestroy(temp_mat_compare, ierr)
+            ! end if
+            ! R = temp_mat
 
-         end if
+!          end if
 
-      else
+!       else
 
-         call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
-                        orig_fine_col_indices, &
-                        identity, reuse, &
-                        R)       
+!          call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+!                         orig_fine_col_indices, &
+!                         identity, reuse, &
+!                         R)       
 
-      end if
-#else
+!       end if
+! #else
       call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
                      orig_fine_col_indices, &
                      identity, reuse, &
                      R)
-#endif 
+!#endif 
          
          
    end subroutine compute_R_from_Z   
