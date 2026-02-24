@@ -961,54 +961,54 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif      
       ! ~~~~~~~~~~
 
-! #if defined(PETSC_HAVE_KOKKOS)    
+#if defined(PETSC_HAVE_KOKKOS)    
 
-!       call MatGetType(y_mat, mat_type, ierr)
-!       call PetscObjectGetComm(y_mat, MPI_COMM_MATRIX, ierr)  
-!       ! Get the comm size 
-!       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
+      call MatGetType(y_mat, mat_type, ierr)
+      call PetscObjectGetComm(y_mat, MPI_COMM_MATRIX, ierr)  
+      ! Get the comm size 
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
 
-!       ! If doing parallel Kokkos
-!       if ((mat_type == MATMPIAIJKOKKOS .OR. &
-!             mat_type == MATAIJKOKKOS) .AND. comm_size /= 1) then
+      ! If doing parallel Kokkos
+      if ((mat_type == MATMPIAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) .AND. comm_size /= 1) then
 
-!          if (kokkos_debug()) then    
-!             call MatDuplicate(y_mat, MAT_COPY_VALUES, temp_mat, ierr)            
-!          end if
+         if (kokkos_debug()) then    
+            call MatDuplicate(y_mat, MAT_COPY_VALUES, temp_mat, ierr)            
+         end if
 
-!          A_array = y_mat%v   
-!          B_array = x_mat%v      
-!          call MatAXPY_kokkos(A_array, alpha, B_array) 
+         A_array = y_mat%v   
+         B_array = x_mat%v      
+         call MatAXPY_kokkos(A_array, alpha, B_array) 
 
-!          ! If debugging do a comparison between CPU and Kokkos results
-!          if (kokkos_debug()) then
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
 
-!             call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
+            call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
 
-         !    call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
-         !    ! Find the biggest entry in the difference
-         !    call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
-         !    call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
-         !    call VecMax(max_vec, row_loc, normy, ierr)
-         !    call VecDestroy(max_vec, ierr)
+            call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
 
-         !    if (normy .gt. 1d-12 .OR. normy/=normy) then
-         !       !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-         !       !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
-         !       print *, "Diff Kokkos and CPU MatAXPY", normy, "row", row_loc
-         !       call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-         !    end if
-         !    call MatDestroy(temp_mat, ierr)
-         ! end if
+            if (normy .gt. 1d-12 .OR. normy/=normy) then
+               !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Diff Kokkos and CPU MatAXPY", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
 
-!       else
+      else
 
-!          call MatAXPY(y_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)        
+         call MatAXPY(y_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)        
 
-!       end if
-! #else
+      end if
+#else
          call MatAXPY(y_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr) 
-!#endif  
+#endif  
      
          
    end subroutine MatAXPYWrapper   
