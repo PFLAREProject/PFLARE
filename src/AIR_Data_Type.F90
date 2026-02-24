@@ -217,6 +217,8 @@ module air_data_type
       integer :: coarsest_inverse_sparsity_order = 1
       ! -pc_air_coarsest_matrix_free_polys
       logical :: coarsest_matrix_free_polys = .FALSE.
+      ! -pc_air_coarsest_diag_scale_polys
+      logical :: coarsest_diag_scale_polys = .FALSE.      
       ! -pc_air_coarsest_subcomm
       logical :: coarsest_subcomm = .FALSE.
 

@@ -557,6 +557,24 @@ run_tests_no_load_serial:
 	-ksp_max_it 8	
 #
 	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling coarsest grid Newton GMRES polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -ksp_max_it 8 \
+	-pc_air_max_levels 3 \
+	-pc_air_coarsest_matrix_free_polys 1 -pc_air_coarsest_inverse_type newton \
+	-pc_air_coarsest_poly_order 100 -pc_air_coarsest_diag_scale_polys 1
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling coarsest grid Newton GMRES polynomial auto truncate"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -ksp_max_it 8 \
+	-pc_air_auto_truncate_tol 1e-1 -pc_air_auto_truncate_start_level 1 -pc_air_coarsest_matrix_free_polys 1 \
+	-pc_air_coarsest_inverse_type newton \
+	-pc_air_coarsest_poly_order 100 -pc_air_coarsest_diag_scale_polys 1	
+#
+	@echo ""
 	@echo "Test poorly scaled matrix with Neumann polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \

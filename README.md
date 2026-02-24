@@ -627,7 +627,8 @@ A brief description of the available options in PFLARE are given below and their
    | ``-pc_air_coarsest_inverse_type``  |  PCAIRGetCoarsestInverseType  PCAIRSetCoarsestInverseType  | Coarse grid inverse type, given above | arnoldi |
    | ``-pc_air_coarsest_poly_order``  |  PCAIRGetCoarsestPolyOrder  PCAIRSetCoarsestPolyOrder  | Coarse grid polynomial order | 6 |
    | ``-pc_air_coarsest_inverse_sparsity_order``  |  PCAIRGetCoarsestInverseSparsityOrder  PCAIRSetCoarsestInverseSparsityOrder  | Coarse grid sparsity order | 1 |
-   | ``-pc_air_coarsest_matrix_free_polys``  |  PCAIRGetCoarsestMatrixFreePolys  PCAIRSetCoarsestMatrixFreePolys  | Do smoothing matrix-free if possible on the coarse grid | false |              
+   | ``-pc_air_coarsest_matrix_free_polys``  |  PCAIRGetCoarsestMatrixFreePolys  PCAIRSetCoarsestMatrixFreePolys  | Do smoothing matrix-free if possible on the coarse grid | false |
+   | ``-pc_air_coarsest_diag_scale_polys``  |  PCAIRGetCoarsestDiagScalePolys  PCAIRSetCoarsestDiagScalePolys  | If using a polynomial inverse type, diagonally scale on the coarse grid before computing | false (if coarsest inverse type neumann this is always true and cannot be overridden) |                 
    | ``-pc_air_coarsest_subcomm``  |  PCAIRGetCoarsestSubcomm  PCAIRSetCoarsestSubcomm  | Use a subcommunicator on the coarse grid | false |
 
 #### Reuse options

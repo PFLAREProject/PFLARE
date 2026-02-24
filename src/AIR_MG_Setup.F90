@@ -154,7 +154,7 @@ module air_mg_setup
             call start_approximate_inverse(air_data%coarse_matrix(our_level), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%options%diag_scale_polys, &
+                  air_data%options%coarsest_diag_scale_polys, &
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients)                       
 
@@ -179,7 +179,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
-                  air_data%options%diag_scale_polys, &
+                  air_data%options%coarsest_diag_scale_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(our_level))          
@@ -191,7 +191,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
                   air_data%options%coarsest_matrix_free_polys) then
 
-               if (air_data%options%diag_scale_polys) then
+               if (air_data%options%coarsest_diag_scale_polys) then
                   call petsc_matvec_right_scale_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
                else
                   call petsc_matvec_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
@@ -899,7 +899,7 @@ module air_mg_setup
             call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  .FALSE., &
+                  air_data%options%coarsest_diag_scale_polys, &
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients)         
             call timer_finish(TIMER_ID_AIR_INVERSE)
@@ -1064,7 +1064,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients, &
                   air_data%options%coarsest_matrix_free_polys, &
-                  .FALSE., &
+                  air_data%options%coarsest_diag_scale_polys, &
                   air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
                   air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(air_data%no_levels))           
