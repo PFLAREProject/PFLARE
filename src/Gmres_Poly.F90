@@ -752,100 +752,100 @@ if (poly_sparsity_order == 0) then
       return
 end if
 
-#if defined(PETSC_HAVE_KOKKOS)    
+! #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(matrix, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then      
+!       call MatGetType(matrix, mat_type, ierr)
+!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+!             mat_type == MATAIJKOKKOS) then      
                
-         ! Finish off the non-blocking all reduce to compute our coefficients
-         ! This is a fortran routine and we don't want to call this inside the kokkos
-         call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)                
+!          ! Finish off the non-blocking all reduce to compute our coefficients
+!          ! This is a fortran routine and we don't want to call this inside the kokkos
+!          call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients)                
 
-         A_array = matrix%v             
-         reuse_triggered_cmat = .NOT. PetscObjectIsNull(cmat) 
-         reuse_triggered_reuse_mat = .NOT. PetscObjectIsNull(reuse_mat) 
-         reuse_int_cmat = 0
-         if (reuse_triggered_cmat) then
-            reuse_int_cmat = 1
-            B_array = cmat%v
-         end if
-         reuse_int_reuse_mat = 0
-         if (reuse_triggered_reuse_mat) then
-            reuse_int_reuse_mat = 1
-         end if         
-         reuse_array = reuse_mat%v
-         coefficients_ptr = c_loc(coefficients)
-         ! The kokkos version doesn't take the buffers, we finish all the async stuff before
-         ! the kokkos routine is called
-         call mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
-                  coefficients_ptr, reuse_int_reuse_mat, reuse_array, reuse_int_cmat, B_array)
+!          A_array = matrix%v             
+!          reuse_triggered_cmat = .NOT. PetscObjectIsNull(cmat) 
+!          reuse_triggered_reuse_mat = .NOT. PetscObjectIsNull(reuse_mat) 
+!          reuse_int_cmat = 0
+!          if (reuse_triggered_cmat) then
+!             reuse_int_cmat = 1
+!             B_array = cmat%v
+!          end if
+!          reuse_int_reuse_mat = 0
+!          if (reuse_triggered_reuse_mat) then
+!             reuse_int_reuse_mat = 1
+!          end if         
+!          reuse_array = reuse_mat%v
+!          coefficients_ptr = c_loc(coefficients)
+!          ! The kokkos version doesn't take the buffers, we finish all the async stuff before
+!          ! the kokkos routine is called
+!          call mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
+!                   coefficients_ptr, reuse_int_reuse_mat, reuse_array, reuse_int_cmat, B_array)
                          
-         reuse_mat%v = reuse_array
-         cmat%v = B_array
+!          reuse_mat%v = reuse_array
+!          cmat%v = B_array
 
-         ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+!          ! If debugging do a comparison between CPU and Kokkos results
+!          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
-            if (reuse_triggered_cmat) then
-               temp_mat = cmat
-               call MatConvert(cmat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
-            else
-               temp_mat_compare = cmat                         
-            end if            
+!             ! If we're doing reuse and debug, then we have to always output the result 
+!             ! from the cpu version, as it will have coo preallocation structures set
+!             ! They aren't copied over if you do a matcopy (or matconvert)
+!             ! If we didn't do that the next time we come through this routine 
+!             ! and try to call the cpu version with reuse, it will segfault
+!             if (reuse_triggered_cmat) then
+!                temp_mat = cmat
+!                call MatConvert(cmat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
+!             else
+!                temp_mat_compare = cmat                         
+!             end if            
 
-            ! Debug check if the CPU and Kokkos versions are the same
-            ! We send in an empty reuse_mat_cpu here always, as we can't pass through
-            ! the same one Kokkos uses as it now only gets out the non-local rows we need
-            ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
-            reuse_submatrices_cpu => null()
-            call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
-                     buffers, coefficients, reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
-            call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)         
+!             ! Debug check if the CPU and Kokkos versions are the same
+!             ! We send in an empty reuse_mat_cpu here always, as we can't pass through
+!             ! the same one Kokkos uses as it now only gets out the non-local rows we need
+!             ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
+!             reuse_submatrices_cpu => null()
+!             call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+!                      buffers, coefficients, reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+!             call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)         
                      
-            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
-                        temp_mat_reuse, ierr)                        
+!             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+!                         temp_mat_reuse, ierr)                        
 
-            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
-            ! Find the biggest entry in the difference
-            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
-            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
-            call VecMax(max_vec, row_loc, normy, ierr)
-            call VecDestroy(max_vec, ierr)
+            ! call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            ! ! Find the biggest entry in the difference
+            ! call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            ! call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            ! call VecMax(max_vec, row_loc, normy, ierr)
+            ! call VecDestroy(max_vec, ierr)
 
-            ! There is floating point compute in these inverses, so we have to be a 
-            ! bit more tolerant to rounding differences
-            if (normy .gt. 4d-11 .OR. normy/=normy) then
-               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-               print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
+            ! ! There is floating point compute in these inverses, so we have to be a 
+            ! ! bit more tolerant to rounding differences
+            ! if (normy .gt. 4d-11 .OR. normy/=normy) then
+            !    !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+            !    !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+            !    print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
 
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-            end if
-            call MatDestroy(temp_mat_reuse, ierr)
-            if (.NOT. reuse_triggered_cmat) then
-               call MatDestroy(cmat, ierr)
-            else
-               call MatDestroy(temp_mat_compare, ierr)
-            end if
-            cmat = temp_mat
-         end if
+!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
+!             end if
+!             call MatDestroy(temp_mat_reuse, ierr)
+!             if (.NOT. reuse_triggered_cmat) then
+!                call MatDestroy(cmat, ierr)
+!             else
+!                call MatDestroy(temp_mat_compare, ierr)
+!             end if
+!             cmat = temp_mat
+!          end if
 
-      else
+!       else
 
-         call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
-                  buffers, coefficients, reuse_mat, reuse_submatrices, cmat)       
+!          call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+!                   buffers, coefficients, reuse_mat, reuse_submatrices, cmat)       
 
-      end if
-#else
+!       end if
+! #else
       call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
                   buffers, coefficients, reuse_mat, reuse_submatrices, cmat)
-#endif         
+!#endif         
 
       ! ~~~~~~~~~~
       
