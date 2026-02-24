@@ -283,6 +283,7 @@ module air_data_type_routines
       air_data%options%smooth_order = 0
       air_data%options%smooth_order(1) = 2
       air_data%options%any_c_smooths = .FALSE.
+      air_data%options%diag_scale_polys = .FALSE.
       air_data%options%matrix_free_polys = .FALSE.
       air_data%options%one_point_classical_prolong = .TRUE.
       air_data%options%full_smoothing_up_and_down = .FALSE.
@@ -311,6 +312,7 @@ module air_data_type_routines
       air_data%options%coarsest_poly_order = 6
       air_data%options%coarsest_inverse_sparsity_order = 1
       air_data%options%coarsest_matrix_free_polys = .FALSE.
+      air_data%options%coarsest_diag_scale_polys = .FALSE.
       air_data%options%coarsest_subcomm = .FALSE.
 
       air_data%options%r_drop = 0.01

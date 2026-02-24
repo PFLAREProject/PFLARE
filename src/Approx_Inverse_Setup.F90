@@ -20,7 +20,7 @@ module approx_inverse_setup
 
    subroutine calculate_and_build_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
-                  matrix_free, subcomm, &
+                  matrix_free, diag_scale_polys, subcomm, &
                   inv_matrix)
 
       ! Builds an approximate inverse
@@ -42,7 +42,7 @@ module approx_inverse_setup
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: inverse_type, poly_order
       integer, intent(in)                               :: inverse_sparsity_order
-      logical, intent(in)                               :: matrix_free, subcomm
+      logical, intent(in)                               :: matrix_free, diag_scale_polys, subcomm
       type(tMat), intent(inout)                         :: inv_matrix
 
       type(tsqr_buffers)                           :: buffers 
@@ -100,17 +100,17 @@ module approx_inverse_setup
       ! but some methods benefit from having their intermediate calculations 
       ! done on a subcomm
       buffers%subcomm = subcomm
-      ! Don't do any re-use, if you want reuse call the start/finish yourself   
+      ! Don't do any overlapping of comms, if you want that call the start/finish yourself   
 
       ! Start the calculation
       call start_approximate_inverse(matrix, inverse_type, &
-                  poly_order, &
+                  poly_order, diag_scale_polys, &
                   buffers, coefficients)
       ! Finish it
       call finish_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   buffers, coefficients, &
-                  matrix_free, &
+                  matrix_free, diag_scale_polys, &
                   reuse_mat, &
                   reuse_submatrices, &
                   inv_matrix_temp)
@@ -131,7 +131,7 @@ module approx_inverse_setup
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine start_approximate_inverse(matrix, inverse_type, poly_order, &
+   subroutine start_approximate_inverse(matrix, inverse_type, poly_order, diag_scale_polys, &
                   buffers, coefficients)
 
       ! Starts the assembly of an approximate inverse
@@ -139,14 +139,17 @@ module approx_inverse_setup
       ! Have to call finish_approximate_inverse before it can be used
 
       ! ~~~~~~
-      type(tMat), intent(in)                            :: matrix
-      integer, intent(in)                               :: inverse_type, poly_order
-      type(tsqr_buffers), intent(inout)                 :: buffers 
-      PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
+      type(tMat), intent(in)                             :: matrix
+      integer, intent(in)                                :: inverse_type, poly_order
+      logical, intent(in)                                :: diag_scale_polys
+      type(tsqr_buffers), intent(inout)                  :: buffers 
+      PetscReal, dimension(:, :), pointer, intent(inout) :: coefficients
 
       PetscErrorCode :: ierr
-      MPIU_Comm :: MPI_COMM_MATRIX
+      MPIU_Comm :: MPI_COMM_MATRIX, MPI_COMM_BUFFERS_MATRIX
+      PetscInt :: local_rows, local_cols, global_rows, global_cols
       integer :: errorcode
+      type(mat_ctxtype), pointer :: mat_ctx_da=>null()
       ! ~~~~~~    
 
       if (buffers%subcomm .AND. inverse_type == PFLAREINV_POWER) then
@@ -178,13 +181,63 @@ module approx_inverse_setup
          buffers%matrix = matrix
          ! Increase the reference counter
          call PetscObjectReference(matrix, ierr)          
-      end if
+      end if     
 
       ! ~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~
+
+      ! Have to dynamically allocate this
+      allocate(mat_ctx_da)
+      mat_ctx_da%mat_scaled = buffers%matrix
 
       ! If we're on the subcomm, we don't need to do anything
       if (.NOT. PetscObjectIsNull(buffers%matrix)) then
+
+         ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
+         if ((inverse_type == PFLAREINV_POWER .OR. &
+             inverse_type == PFLAREINV_ARNOLDI .OR. &
+             inverse_type == PFLAREINV_NEWTON .OR. &
+             inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+             diag_scale_polys) then
+
+            ! ~~~~~~~~~~~~~
+            ! Now we allocate a new matshell that applies a diagonally scaled version of 
+            ! the matrix to compute the coefficients
+            ! ~~~~~~~~~~~~~       
+            ! Get the comm on the buffers matrix (which may be a subcomm)
+            call PetscObjectGetComm(buffers%matrix, MPI_COMM_BUFFERS_MATRIX, ierr)                
+      
+            ! Get the sizes
+            call MatGetLocalSize(buffers%matrix, local_rows, local_cols, ierr)
+            call MatGetSize(buffers%matrix, global_rows, global_cols, ierr)                
+            
+            ! Create the matshell
+            call MatCreateShell(MPI_COMM_BUFFERS_MATRIX, local_rows, local_cols, global_rows, global_cols, &
+                        mat_ctx_da, mat_ctx_da%mat_scaled, ierr)
+            ! The subroutine petsc_matvec_da_poly_mf applies D^-1 A
+            call MatShellSetOperation(mat_ctx_da%mat_scaled, &
+                        MATOP_MULT, petsc_matvec_da_poly_mf, ierr)
+
+            call MatAssemblyBegin(mat_ctx_da%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
+            call MatAssemblyEnd(mat_ctx_da%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
+            ! Have to make sure to set the type of vectors the shell creates
+            call ShellSetVecType(buffers%matrix, mat_ctx_da%mat_scaled)   
+            
+            ! Create temporary vector we use during horner
+            ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
+            call MatCreateVecs(buffers%matrix, PETSC_NULL_VEC, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr) 
+            ! Get the diagonal
+            call MatGetDiagonal(buffers%matrix, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            ! This is the matrix whose inverse we are applying (just copying the pointer here)
+            mat_ctx_da%mat = buffers%matrix
+
+         end if
+
+         ! ~~~~~~~~~
+         ! mat_ctx_da%mat_scaled now contains a shell that just does D^-1 A
+         ! We compute the coefficients with that and then finish_approximate_inverse builds
+         ! whatever matrix it needs to compute the appropriate inverse with those coeffs
+         ! ~~~~~~~~~
 
          ! Gmres poylnomial with power basis
          if (inverse_type == PFLAREINV_POWER) then
@@ -192,26 +245,38 @@ module approx_inverse_setup
             ! Only does one reduction in parallel
             ! Want to start the coefficient calculation asap, as we have a non-blocking
             ! all reduce in it
-            call start_gmres_polynomial_coefficients_power(buffers%matrix, poly_order, &
+            call start_gmres_polynomial_coefficients_power(mat_ctx_da%mat_scaled, poly_order, &
                   buffers, coefficients(:, 1))         
 
          ! Gmres polynomial with arnoldi basis
          else if (inverse_type == PFLAREINV_ARNOLDI) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_coefficients_arnoldi(buffers%matrix, poly_order, coefficients(:, 1))
+            call calculate_gmres_polynomial_coefficients_arnoldi(mat_ctx_da%mat_scaled, poly_order, coefficients(:, 1))
 
          ! Gmres polynomial with Newton basis with extra added roots for stability - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(buffers%matrix, poly_order, .TRUE., coefficients)
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .TRUE., coefficients)
 
          ! Gmres polynomial with Newton basis without extra added roots - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(buffers%matrix, poly_order, .FALSE., coefficients)            
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .FALSE., coefficients)            
+         end if
+
+         ! Destroy the shell matrix
+         if ((inverse_type == PFLAREINV_POWER .OR. &
+             inverse_type == PFLAREINV_ARNOLDI .OR. &
+             inverse_type == PFLAREINV_NEWTON .OR. &
+             inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+             diag_scale_polys) then
+
+            call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)
+            call MatDestroy(mat_ctx_da%mat_scaled, ierr)
+            deallocate(mat_ctx_da)               
          end if
       end if
 
@@ -254,7 +319,7 @@ module approx_inverse_setup
    subroutine finish_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   buffers, coefficients, &
-                  matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
+                  matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, inv_matrix)
 
       ! Finish the assembly of an approximate inverse
 
@@ -264,7 +329,7 @@ module approx_inverse_setup
       integer, intent(in)                               :: inverse_sparsity_order
       type(tsqr_buffers), intent(inout)                 :: buffers      
       PetscReal, dimension(:, :), pointer, contiguous, intent(inout) :: coefficients
-      logical, intent(in)                               :: matrix_free
+      logical, intent(in)                               :: matrix_free, diag_scale_polys
       type(tMat), intent(inout)                         :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
@@ -303,14 +368,15 @@ module approx_inverse_setup
 
          call build_gmres_polynomial_inverse(matrix, poly_order, &
                   buffers, coefficients(:, 1), &
-                  inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)  
+                  inverse_sparsity_order, matrix_free, diag_scale_polys, &
+                  reuse_mat, reuse_submatrices, inv_matrix)  
 
       ! Gmres polynomial with newton basis
       else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
          call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                            coefficients, &
-                           inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, &
+                           inverse_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
                            inv_matrix)         
 
       ! Neumann polynomial
@@ -369,7 +435,7 @@ module approx_inverse_setup
 
       PetscErrorCode :: ierr
       MatType:: mat_type
-      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_ida=>null()
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       ! ~~~~~~
 
       if (.NOT. PetscObjectIsNull(matrix)) then
@@ -384,19 +450,20 @@ module approx_inverse_setup
             call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
 
             ! Both newton and neumann polynomials use some extra temporary vectors
-            if (.NOT. PetscObjectIsNull(mat_ctx%mat_ida) .OR. &
+            if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled) .OR. &
                      associated(mat_ctx%real_roots)) then
                
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+               call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), ierr)
+               call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), ierr)
             end if
 
             ! Neumann polynomial has extra context that needs deleting
-            if (.NOT. PetscObjectIsNull(mat_ctx%mat_ida)) then
-               call MatShellGetContext(mat_ctx%mat_ida, mat_ctx_ida, ierr)
-               deallocate(mat_ctx_ida)
-               call MatDestroy(mat_ctx%mat_ida, ierr)
-
+            if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled)) then
+               call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
+               deallocate(mat_ctx_scaled)
+               call MatDestroy(mat_ctx%mat_scaled, ierr)
             end if
             deallocate(mat_ctx)
          end if               

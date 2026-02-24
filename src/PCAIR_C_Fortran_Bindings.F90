@@ -317,6 +317,27 @@ module pcair_c_fortran_bindings
       call PCAIRGetMaxLubySteps(pc, steps, ierr)
 
    end subroutine PCAIRGetMaxLubySteps_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetDiagScalePolys_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: scale
+
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetDiagScalePolys(pc, dummy, ierr)
+      scale = .FALSE.
+      if (dummy) scale = .TRUE.
+
+   end subroutine PCAIRGetDiagScalePolys_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -695,6 +716,26 @@ module pcair_c_fortran_bindings
       if (dummy) mf = .TRUE.
 
    end subroutine PCAIRGetCoarsestMatrixFreePolys_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetCoarsestDiagScalePolys_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetCoarsestDiagScalePolys(pc, dummy, ierr)
+      scale = .FALSE.
+      if (dummy) scale = .TRUE.
+
+   end subroutine PCAIRGetCoarsestDiagScalePolys_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1241,6 +1282,26 @@ module pcair_c_fortran_bindings
       end do
    
    end subroutine PCAIRGetSmoothType_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetDiagScalePolys_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      IF (scale) dummy = .TRUE.
+      call PCAIRSetDiagScalePolys(pc, dummy, ierr)
+
+   end subroutine PCAIRSetDiagScalePolys_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1619,6 +1680,26 @@ module pcair_c_fortran_bindings
       call PCAIRSetCoarsestMatrixFreePolys(pc, dummy, ierr)
 
    end subroutine PCAIRSetCoarsestMatrixFreePolys_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetCoarsestDiagScalePolys_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      if (scale) dummy = .TRUE.
+      call PCAIRSetCoarsestDiagScalePolys(pc, dummy, ierr)
+
+   end subroutine PCAIRSetCoarsestDiagScalePolys_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

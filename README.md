@@ -597,6 +597,7 @@ A brief description of the available options in PFLARE are given below and their
    | ``-pc_air_inverse_type``  |  PCAIRGetInverseType  PCAIRSetInverseType  | The inverse type, given above | arnoldi |
    | ``-pc_air_poly_order``  |  PCAIRGetPolyOrder  PCAIRSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_air_inverse_sparsity_order``  |  PCAIRGetInverseSparsityOrder  PCAIRSetInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |        
+   | ``-pc_air_diag_scale_polys``  |  PCAIRGetDiagScalePolys  PCAIRSetDiagScalePolys  | If using a polynomial inverse type, diagonally scale before computing | false (if inverse type neumann this is always true and cannot be overridden) |    
    | ``-pc_air_matrix_free_polys``  |  PCAIRGetMatrixFreePolys  PCAIRSetMatrixFreePolys  | Do smoothing matrix-free if possible | false |   
    | ``-pc_air_smooth_type``  |  PCAIRGetSmoothType  PCAIRSetSmoothType  | Type and number of smooths | ff |
    | ``-pc_air_full_smoothing_up_and_down``  |  PCAIRGetFullSmoothingUpAndDown  PCAIRSetFullSmoothingUpAndDown  | Up and down smoothing on all points at once, rather than only down F and C smoothing which is the default  | false |     
@@ -626,7 +627,8 @@ A brief description of the available options in PFLARE are given below and their
    | ``-pc_air_coarsest_inverse_type``  |  PCAIRGetCoarsestInverseType  PCAIRSetCoarsestInverseType  | Coarse grid inverse type, given above | arnoldi |
    | ``-pc_air_coarsest_poly_order``  |  PCAIRGetCoarsestPolyOrder  PCAIRSetCoarsestPolyOrder  | Coarse grid polynomial order | 6 |
    | ``-pc_air_coarsest_inverse_sparsity_order``  |  PCAIRGetCoarsestInverseSparsityOrder  PCAIRSetCoarsestInverseSparsityOrder  | Coarse grid sparsity order | 1 |
-   | ``-pc_air_coarsest_matrix_free_polys``  |  PCAIRGetCoarsestMatrixFreePolys  PCAIRSetCoarsestMatrixFreePolys  | Do smoothing matrix-free if possible on the coarse grid | false |              
+   | ``-pc_air_coarsest_matrix_free_polys``  |  PCAIRGetCoarsestMatrixFreePolys  PCAIRSetCoarsestMatrixFreePolys  | Do smoothing matrix-free if possible on the coarse grid | false |
+   | ``-pc_air_coarsest_diag_scale_polys``  |  PCAIRGetCoarsestDiagScalePolys  PCAIRSetCoarsestDiagScalePolys  | If using a polynomial inverse type, diagonally scale on the coarse grid before computing | false (if coarsest inverse type neumann this is always true and cannot be overridden) |                 
    | ``-pc_air_coarsest_subcomm``  |  PCAIRGetCoarsestSubcomm  PCAIRSetCoarsestSubcomm  | Use a subcommunicator on the coarse grid | false |
 
 #### Reuse options

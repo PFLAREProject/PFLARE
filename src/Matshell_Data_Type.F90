@@ -15,8 +15,10 @@ module matshell_data_type
 
    ! Indices into mf_temp_vec
    integer, parameter :: MF_VEC_TEMP = 1
-   integer, parameter :: MF_VEC_DIAG = 2
-   integer, parameter :: MF_VEC_RHS = 3
+   integer, parameter :: MF_VEC_TEMP_TWO = 2
+   integer, parameter :: MF_VEC_TEMP_THREE = 3   
+   integer, parameter :: MF_VEC_DIAG = 4
+   integer, parameter :: MF_VEC_RHS = 5
    
    type :: mat_ctxtype
 
@@ -25,9 +27,9 @@ module matshell_data_type
       logical                     :: own_coefficients = .FALSE.
       PetscReal, dimension(:), pointer :: real_roots => null()
       PetscReal, dimension(:), pointer :: imag_roots => null()
-      type(tMat) :: mat, mat_ida
+      type(tMat) :: mat, mat_scaled
       ! Temporary vectors we use
-      type(tVec), dimension(3) :: mf_temp_vec
+      type(tVec), dimension(5) :: mf_temp_vec
       type(air_multigrid_data), pointer :: air_data => null()
 
    end type mat_ctxtype

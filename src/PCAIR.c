@@ -35,6 +35,7 @@ PETSC_EXTERN void PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
 PETSC_EXTERN void PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetSmoothType_c(PC *pc, char* input_string);
+PETSC_EXTERN void PCAIRGetDiagScalePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetOnePointClassicalProlong_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetFullSmoothingUpAndDown_c(PC *pc, PetscBool *input_bool);
@@ -56,6 +57,7 @@ PETSC_EXTERN void PCAIRGetCoarsestInverseType_c(PC *pc, PCPFLAREINVType *input_i
 PETSC_EXTERN void PCAIRGetCoarsestPolyOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetCoarsestDiagScalePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetCoarsestSubcomm_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetRDrop_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetADrop_c(PC *pc, PetscReal *input_real);
@@ -82,6 +84,7 @@ PETSC_EXTERN void PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
 PETSC_EXTERN void PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetSmoothType_c(PC *pc, const char* input_string);
+PETSC_EXTERN void PCAIRSetDiagScalePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetMatrixFreePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetOnePointClassicalProlong_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetFullSmoothingUpAndDown_c(PC *pc, PetscBool input_bool);
@@ -103,6 +106,7 @@ PETSC_EXTERN void PCAIRSetCoarsestInverseType_c(PC *pc, PCPFLAREINVType input_in
 PETSC_EXTERN void PCAIRSetCoarsestPolyOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestMatrixFreePolys_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetCoarsestDiagScalePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetCoarsestSubcomm_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetRDrop_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
@@ -295,6 +299,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
    PCAIRGetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
+{
+   PetscFunctionBegin;
+   PCAIRGetDiagScalePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
@@ -419,6 +429,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PC pc, PetscBool *in
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestMatrixFreePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC pc, PetscBool *input_bool)
+{
+   PetscFunctionBegin;
+   PCAIRGetCoarsestDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestSubcomm(PC pc, PetscBool *input_bool)
@@ -650,6 +666,15 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
    PCAIRSetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+// If using a polynomial inverse type, diagonally scale before computing?
+// Default: false (if inverse type neumann this is always true and cannot be overridden)
+// -pc_air_diag_scale_polys
+PETSC_EXTERN PetscErrorCode PCAIRSetDiagScalePolys(PC pc, PetscBool input_bool)
+{
+   PetscFunctionBegin;
+   PCAIRSetDiagScalePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 // Do we apply our polynomials matrix free when smoothing?
 // Default: false
 // -pc_air_matrix_free_polys
@@ -877,6 +902,15 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PC pc, PetscBool inp
    PCAIRSetCoarsestMatrixFreePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+// Coarse diagonal scaling polynomial application (see PCAIRSetDiagScalePolys)
+// Default: false
+// -pc_air_coarsest_diag_scale_polys
+PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PC pc, PetscBool input_bool)
+{
+   PetscFunctionBegin;
+   PCAIRSetCoarsestDiagScalePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 // Coarse grid subcomm (see PCAIRSetSubcomm)
 // Default: false
 // -pc_air_coarsest_subcomm
@@ -986,6 +1020,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsBool("-pc_air_processor_agglom", "Processor agglomeration", "PCAIRSetProcessorAgglom", old_flag, &flg, NULL));
    PetscCall(PCAIRSetProcessorAgglom(pc, flg));
    // ~~~~
+   PetscCall(PCAIRGetDiagScalePolys(pc, &old_flag));
+   flg = old_flag;
+   PetscCall(PetscOptionsBool("-pc_air_diag_scale_polys", "Diagonally scale before computing polynomial inverse", "PCAIRSetDiagScalePolys", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetDiagScalePolys(pc, flg));   
+   // ~~~~
    PetscCall(PCAIRGetMatrixFreePolys(pc, &old_flag));
    flg = old_flag;
    PetscCall(PetscOptionsBool("-pc_air_matrix_free_polys", "Applies polynomial smoothers matrix-free", "PCAIRSetMatrixFreePolys", old_flag, &flg, NULL));
@@ -1020,6 +1059,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    flg = old_flag;
    PetscCall(PetscOptionsBool("-pc_air_coarsest_matrix_free_polys", "Applies polynomial coarse grid solver matrix-free", "PCAIRSetCoarsestMatrixFreePolys", old_flag, &flg, NULL));
    PetscCall(PCAIRSetCoarsestMatrixFreePolys(pc, flg));
+   // ~~~~  
+   PetscCall(PCAIRGetCoarsestDiagScalePolys(pc, &old_flag));
+   flg = old_flag;
+   PetscCall(PetscOptionsBool("-pc_air_coarsest_diag_scale_polys", "Diagonally scale before computing coarse grid polynomial inverse", "PCAIRSetCoarsestDiagScalePolys", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetCoarsestDiagScalePolys(pc, flg));   
    // ~~~~  
    PetscCall(PCAIRGetCoarsestSubcomm(pc, &old_flag));
    flg = old_flag;
@@ -1211,7 +1255,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
    PC *pc_air_shell = (PC *)pc->data;
 
    PetscInt input_int, input_int_two, input_int_three, input_int_four;
-   PetscBool flg, flg_f_smooth, flg_c_smooth;
+   PetscBool flg, flg_f_smooth, flg_c_smooth, flg_diag_scale;
    PetscReal input_real, input_real_two, input_real_three;
    PCPFLAREINVType input_type;
    PCAIRZType z_type;
@@ -1300,24 +1344,41 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          PetscCall(PCAIRGetInverseType(pc, &input_type));
          PetscCall(PCAIRGetPolyOrder(pc, &input_int_two));
          PetscCall(PCAIRGetInverseSparsityOrder(pc, &input_int_three));
+         PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
          PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
 
          // What type of inverse
          if (input_type == PFLAREINV_POWER)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, power basis, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }
          }
          else if (input_type == PFLAREINV_ARNOLDI)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, arnoldi basis, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }            
          }
          else if (input_type == PFLAREINV_NEWTON)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with extra roots, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }            
          }
          else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }            
          }
          else if (input_type == PFLAREINV_SAI)
          {
@@ -1330,6 +1391,10 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          else if (input_type == PFLAREINV_NEUMANN)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }            
          }
          else if (input_type == PFLAREINV_WJACOBI)
          {
@@ -1377,24 +1442,41 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PCAIRGetInverseType(pc, &input_type));
             PetscCall(PCAIRGetPolyOrder(pc, &input_int_two));
             PetscCall(PCAIRGetInverseSparsityOrder(pc, &input_int_three));
+            PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
             PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
 
             // What type of inverse
             if (input_type == PFLAREINV_POWER)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, power basis, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_ARNOLDI)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, arnoldi basis, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_NEWTON)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis with extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_SAI)
             {
@@ -1407,6 +1489,10 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEUMANN)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_WJACOBI)
             {
@@ -1444,24 +1530,41 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PCAIRGetCInverseType(pc, &input_type));
             PetscCall(PCAIRGetCPolyOrder(pc, &input_int_two));
             PetscCall(PCAIRGetCInverseSparsityOrder(pc, &input_int_three));
+            PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
             PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
 
             // What type of inverse
             if (input_type == PFLAREINV_POWER)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, power basis, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }               
             }
             else if (input_type == PFLAREINV_ARNOLDI)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, arnoldi basis, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_NEWTON)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, newton basis with extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }
             else if (input_type == PFLAREINV_SAI)
             {
@@ -1474,6 +1577,10 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEUMANN)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
             }     
             else if (input_type == PFLAREINV_WJACOBI)
             {
@@ -1568,24 +1675,41 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetCoarsestInverseType(pc, &input_type));
       PetscCall(PCAIRGetCoarsestPolyOrder(pc, &input_int_two));
       PetscCall(PCAIRGetCoarsestInverseSparsityOrder(pc, &input_int_three));
+      PetscCall(PCAIRGetCoarsestDiagScalePolys(pc, &flg_diag_scale));
       PetscCall(PCAIRGetCoarsestMatrixFreePolys(pc, &flg));
 
       // What type of inverse
       if (input_type == PFLAREINV_POWER)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, power basis, order %" PetscInt_FMT " \n", input_int_two));
+         if (flg_diag_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+         }          
       }
       else if (input_type == PFLAREINV_ARNOLDI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, arnoldi basis, order %" PetscInt_FMT " \n", input_int_two));
+         if (flg_diag_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+         }          
       }
       else if (input_type == PFLAREINV_NEWTON)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with extra roots, order %" PetscInt_FMT " \n", input_int_two));      
+         if (flg_diag_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+         }          
       }
       else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+         if (flg_diag_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+         }          
       }
       else if (input_type == PFLAREINV_SAI)
       {

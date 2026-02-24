@@ -690,12 +690,10 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_matvec_gmres_newton_mf(mat, x, y)
+   subroutine petsc_matvec_right_scale_poly_newton_mf(mat, x, y)
 
-      ! Applies a gmres polynomial in the newton basis matrix-free as an inverse
-      ! The roots are stored in mat_ctx%real_roots, mat_ctx%imag_roots in the input matshell
-      ! Based on Loe 2021 Toward efficient polynomial preconditioning for GMRES
-      ! This is Algorithm 3 in Loe
+      ! Applies a Newton polynomial matrix-free with a right diagonal scaling added
+      ! q(mat_ctx%mat_scaled) D^-1, as an inverse
       ! y = A x
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -706,7 +704,7 @@ module gmres_poly_newton
       type(tVec) :: y
 
       ! Local
-      integer :: i, errorcode
+      integer :: errorcode
       PetscErrorCode :: ierr      
       type(mat_ctxtype), pointer :: mat_ctx => null()
 
@@ -714,12 +712,56 @@ module gmres_poly_newton
 
       call MatShellGetContext(mat, mat_ctx, ierr)
       if (.NOT. associated(mat_ctx%real_roots)) then
-         print *, "Roots in context aren't found"
+         print *, "Polynomial coefficients in context aren't found"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
-      ! MF_VEC_TEMP = x
-      call VecCopy(x, mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+      ! ~~~~~~~~~~~~
+      ! We want to apply q(mat_ctx%mat_scaled) D^-1
+      ! ~~~~~~~~~~~~
+
+      ! Doing MF_VEC_RHS = D^-1 x 
+      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
+               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+
+      ! and now we apply our polynomial
+      ! q(mat_ctx%mat_scaled) to MF_VEC_RHS (D^-1 x)
+      call petsc_newton(mat_ctx%mat_scaled, &
+               mat_ctx%real_roots, mat_ctx%imag_roots, &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), &
+               mat_ctx%mf_temp_vec(MF_VEC_RHS), y)      
+
+   end subroutine petsc_matvec_right_scale_poly_newton_mf    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_newton(mat, real_roots, imag_roots, temp_vec, temp_vec_two, temp_vec_three, x, y)
+
+      ! Applies a gmres polynomial in the newton basis matrix-free as an inverse
+      ! The roots are stored in real_roots, imag_roots in the input matshell
+      ! Based on Loe 2021 Toward efficient polynomial preconditioning for GMRES
+      ! This is Algorithm 3 in Loe
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)              :: mat
+      PetscReal, dimension(:), intent(in) :: real_roots, imag_roots
+      type(tVec), intent(in)              :: temp_vec, temp_vec_two, temp_vec_three
+      type(tVec)                          :: x
+      type(tVec)                          :: y
+
+      ! Local
+      integer :: i
+      PetscErrorCode :: ierr      
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! temp_vec = x
+      call VecCopy(x, temp_vec, ierr)
       ! y = 0
       call VecSet(y, 0d0, ierr)
 
@@ -727,30 +769,29 @@ module gmres_poly_newton
       ! Iterate over the i
       ! ~~~~~~~~~~~~
       i = 1
-      do while (i .le. size(mat_ctx%real_roots) - 1)
+      do while (i .le. size(real_roots) - 1)
 
          ! If real this is easy
-         if (mat_ctx%imag_roots(i) == 0d0) then
+         if (imag_roots(i) == 0d0) then
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(mat_ctx%real_roots(i)) < 1e-12) then
+            if (abs(real_roots(i)) < 1e-12) then
                i = i + 1
                cycle
             end if
 
-            ! y = y + theta_i * MF_VEC_TEMP
+            ! y = y + theta_i * temp_vec
             call VecAXPY(y, &
-                     1d0/mat_ctx%real_roots(i), &
-                     mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)   
+                     1d0/real_roots(i), &
+                     temp_vec, ierr)   
                                           
-            ! MF_VEC_DIAG = A * MF_VEC_TEMP
-            ! MF_VEC_DIAG isn't actually a diagonal here, we're just using this vec as temporary storage
-            call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_TEMP), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
-            ! MF_VEC_TEMP = MF_VEC_TEMP - theta_i * MF_VEC_DIAG
-            call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
-                     -1d0/mat_ctx%real_roots(i), &
-                     mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr) 
+            ! temp_vec_two = A * temp_vec
+            call MatMult(mat, temp_vec, temp_vec_two, ierr)
+            ! temp_vec = temp_vec - theta_i * temp_vec_two
+            call VecAXPY(temp_vec, &
+                     -1d0/real_roots(i), &
+                     temp_vec_two, ierr) 
 
             i = i + 1
 
@@ -760,32 +801,32 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (mat_ctx%real_roots(i)**2 + mat_ctx%imag_roots(i)**2 < 1e-12) then
+            if (real_roots(i)**2 + imag_roots(i)**2 < 1e-12) then
                i = i + 2
                cycle
             end if            
 
-            ! MF_VEC_DIAG = A * MF_VEC_TEMP
-            call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_TEMP), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
-            ! MF_VEC_DIAG = 2 * Re(theta_i) * MF_VEC_TEMP - MF_VEC_DIAG
-            call VecAXPBY(mat_ctx%mf_temp_vec(MF_VEC_DIAG), &
-                  2 * mat_ctx%real_roots(i), &
+            ! temp_vec_two = A * temp_vec
+            call MatMult(mat, temp_vec, temp_vec_two, ierr)    
+            ! temp_vec_two = 2 * Re(theta_i) * temp_vec - temp_vec_two
+            call VecAXPBY(temp_vec_two, &
+                  2 * real_roots(i), &
                   -1d0, &
-                  mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+                  temp_vec, ierr)
 
-            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_DIAG
+            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec_two
             call VecAXPY(y, &
-                     1d0/(mat_ctx%real_roots(i)**2 + mat_ctx%imag_roots(i)**2), &
-                     mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)  
+                     1d0/(real_roots(i)**2 + imag_roots(i)**2), &
+                     temp_vec_two, ierr)  
                      
-            if (i .le. size(mat_ctx%real_roots) - 2) then
-               ! MF_VEC_RHS = A * MF_VEC_DIAG
-               call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)    
+            if (i .le. size(real_roots) - 2) then
+               ! temp_vec_three = A * temp_vec_two
+               call MatMult(mat, temp_vec_two, temp_vec_three, ierr)    
 
-               ! MF_VEC_TEMP = MF_VEC_TEMP - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_RHS
-               call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
-                        -1d0/(mat_ctx%real_roots(i)**2 + mat_ctx%imag_roots(i)**2), &
-                        mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)               
+               ! temp_vec = temp_vec - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec_three
+               call VecAXPY(temp_vec, &
+                        -1d0/(real_roots(i)**2 + imag_roots(i)**2), &
+                        temp_vec_three, ierr)               
             end if
 
             ! Skip two evals
@@ -795,31 +836,26 @@ module gmres_poly_newton
       end do
 
       ! Final step if last root is real
-      if (mat_ctx%imag_roots(size(mat_ctx%real_roots)) == 0d0) then
+      if (imag_roots(size(real_roots)) == 0d0) then
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(mat_ctx%real_roots(size(mat_ctx%real_roots))) > 1e-12) then
+         if (abs(real_roots(size(real_roots))) > 1e-12) then
 
-            ! y = y + theta_i * MF_VEC_TEMP
+            ! y = y + theta_i * temp_vec
             call VecAXPBY(y, &
-                     1d0/mat_ctx%real_roots(size(mat_ctx%real_roots)), &
+                     1d0/real_roots(size(real_roots)), &
                      1d0, &
-                     mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr) 
+                     temp_vec, ierr) 
          end if
       end if
 
-   end subroutine petsc_matvec_gmres_newton_mf      
-
-
+   end subroutine petsc_newton  
+   
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_matvec_gmres_newton_mf_residual(mat, x, y)
+   subroutine petsc_matvec_poly_newton_mf(mat, x, y)
 
-      ! Applies a gmres residual polynomial in the newton basis matrix-free as an inverse
-      ! This is different than petsc_matvec_gmres_newton_mf which applies p(A)v, 
-      ! whereas this routine applies pi(A)v
-      ! This is (a slightly modified) Algorithm 1 in Loe and saves some flops when we don't need the solution
-      ! just the residual
+      ! Applies a matrix polynomial matrix-free as an inverse
       ! y = A x
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -830,7 +866,46 @@ module gmres_poly_newton
       type(tVec) :: y
 
       ! Local
-      integer :: order, errorcode
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%real_roots)) then
+         print *, "Polynomial coefficients in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Apply polynomial
+      call petsc_newton(mat_ctx%mat, &
+               mat_ctx%real_roots, mat_ctx%imag_roots, &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), &               
+               x, y) 
+
+   end subroutine petsc_matvec_poly_newton_mf     
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_right_scale_poly_newton_residual_mf(mat, x, y)
+
+      ! Applies a Newton polynomial matrix-free with a right diagonal scaling added
+      ! q(mat_ctx%mat_scaled) D^-1, as an inverse and computes the residual
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      integer :: errorcode
       PetscErrorCode :: ierr      
       type(mat_ctxtype), pointer :: mat_ctx => null()
 
@@ -838,9 +913,93 @@ module gmres_poly_newton
 
       call MatShellGetContext(mat, mat_ctx, ierr)
       if (.NOT. associated(mat_ctx%real_roots)) then
-         print *, "Roots in context aren't found"
+         print *, "Polynomial coefficients in context aren't found"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
+
+      ! ~~~~~~~~~~~~
+      ! We want to apply q(mat_ctx%mat_scaled) D^-1 and then compute a residual
+      ! ~~~~~~~~~~~~
+
+      ! Doing MF_VEC_RHS = D^-1 x 
+      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
+               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+
+      ! and now we apply our polynomial
+      ! q(mat_ctx%mat_scaled) to MF_VEC_RHS (D^-1 x)
+      call petsc_newton_residual(mat_ctx%mat_scaled, &
+               mat_ctx%real_roots, mat_ctx%imag_roots, &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), &
+               mat_ctx%mf_temp_vec(MF_VEC_RHS), y)   
+               
+      call VecPointwiseMult(y, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                   
+
+   end subroutine petsc_matvec_right_scale_poly_newton_residual_mf     
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_matvec_poly_newton_residual_mf(mat, x, y)
+
+      ! Applies a matrix polynomial matrix-free as an inverse and computes the residual
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%real_roots)) then
+         print *, "Polynomial coefficients in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Apply polynomial
+      call petsc_newton_residual(mat_ctx%mat, &
+               mat_ctx%real_roots, mat_ctx%imag_roots, &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), &
+               mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), &               
+               x, y) 
+
+   end subroutine petsc_matvec_poly_newton_residual_mf   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_newton_residual(mat, real_roots, imag_roots, temp_vec, temp_vec_two, temp_vec_three, x, y)
+
+      ! Applies a gmres residual polynomial in the newton basis matrix-free as an inverse
+      ! This is different than petsc_newton which applies p(A)v, 
+      ! whereas this routine applies pi(A)v
+      ! This is (a slightly modified) Algorithm 1 in Loe and saves some flops when we don't need the solution
+      ! just the residual
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)              :: mat
+      PetscReal, dimension(:), intent(in) :: real_roots, imag_roots
+      type(tVec), intent(in)              :: temp_vec, temp_vec_two, temp_vec_three
+      type(tVec)                          :: x
+      type(tVec)                          :: y
+
+      ! Local
+      integer :: order
+      PetscErrorCode :: ierr      
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       ! y = x
       call VecCopy(x, y, ierr)
@@ -850,25 +1009,25 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~
       order = 1
       ! Does every e'val in this loop unlike when we apply p(A)v
-      do while (order .le. size(mat_ctx%real_roots))
+      do while (order .le. size(real_roots))
 
          ! If real this is easy
-         if (mat_ctx%imag_roots(order) == 0d0) then
+         if (imag_roots(order) == 0d0) then
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(mat_ctx%real_roots(order)) < 1e-12) then
+            if (abs(real_roots(order)) < 1e-12) then
                order = order + 1
                cycle
             end if
 
-            ! MF_VEC_DIAG = A * y
-            call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+            ! temp_vec_two = A * y
+            call MatMult(mat, y, temp_vec_two, ierr)            
 
-            ! y = y - theta_i * MF_VEC_DIAG
+            ! y = y - theta_i * temp_vec_two
             call VecAXPY(y, &
-                     -1d0/mat_ctx%real_roots(order), &
-                     mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+                     -1d0/real_roots(order), &
+                     temp_vec_two, ierr)
 
             order = order + 1
 
@@ -878,26 +1037,26 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2 < 1e-12) then
+            if (real_roots(order)**2 + imag_roots(order)**2 < 1e-12) then
                order = order + 2
                cycle
             end if           
             
-            ! MF_VEC_DIAG = A * y
-            call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)   
+            ! temp_vec_two = A * y
+            call MatMult(mat, y, temp_vec_two, ierr)   
 
-            ! MF_VEC_TEMP = A * MF_VEC_DIAG
-            call MatMult(mat_ctx%mat, mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)              
+            ! temp_vec = A * temp_vec_two
+            call MatMult(mat, temp_vec_two, temp_vec, ierr)              
 
-            ! MF_VEC_TEMP = MF_VEC_TEMP - 2 * Re(theta_i) * MF_VEC_DIAG
-            call VecAXPY(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
-                  -2 * mat_ctx%real_roots(order), &
-                  mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+            ! temp_vec = temp_vec - 2 * Re(theta_i) * temp_vec_two
+            call VecAXPY(temp_vec, &
+                  -2 * real_roots(order), &
+                  temp_vec_two, ierr)
 
-            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * MF_VEC_TEMP
+            ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec
             call VecAXPY(y, &
-                     1d0/(mat_ctx%real_roots(order)**2 + mat_ctx%imag_roots(order)**2), &
-                     mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+                     1d0/(real_roots(order)**2 + imag_roots(order)**2), &
+                     temp_vec, ierr)
 
             ! Skip two evals
             order = order + 2
@@ -905,7 +1064,8 @@ module gmres_poly_newton
          end if
       end do
 
-   end subroutine petsc_matvec_gmres_newton_mf_residual
+   end subroutine petsc_newton_residual
+
 !------------------------------------------------------------------------------------------------------------------------
    
    subroutine mat_mult_powers_share_sparsity_newton(matrix, poly_order, poly_sparsity_order, coefficients, &
@@ -1643,7 +1803,7 @@ end if
 
    subroutine build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                   coefficients, &
-                  poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, &
+                  poly_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
                   inv_matrix)
 
       ! Builds a matrix which is an approximation to the inverse of a matrix using the 
@@ -1655,7 +1815,7 @@ end if
       integer, intent(in)                                         :: poly_order
       PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
       integer, intent(in)                                         :: poly_sparsity_order
-      logical, intent(in)                                         :: matrix_free      
+      logical, intent(in)                                         :: matrix_free, diag_scale_polys
       type(tMat), intent(inout)                                   :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)            :: reuse_submatrices
 
@@ -1664,8 +1824,10 @@ end if
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
-      type(mat_ctxtype), pointer :: mat_ctx=>null()
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       logical :: reuse_triggered
+      type(tMat) :: diag_scaled_mat
+      type(tVec) :: diag_inverse_vec
 
       ! ~~~~~~       
 
@@ -1693,9 +1855,17 @@ end if
             ! We pass in the polynomial coefficients as the context
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
                         mat_ctx, inv_matrix, ierr)
-            ! The subroutine petsc_matvec_gmres_newton_mf applies the polynomial inverse
+            if (diag_scale_polys) then
+               ! The subroutine petsc_matvec_right_scale_poly_newton_mf applies
+               ! q(mat_ctx%mat_scaled) D^-1
+               call MatShellSetOperation(inv_matrix, &
+                           MATOP_MULT, petsc_matvec_right_scale_poly_newton_mf, ierr)
+               call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+            else
+               ! The subroutine petsc_matvec_poly_newton_mf applies the polynomial inverse, q(mat_ctx%mat)
             call MatShellSetOperation(inv_matrix, &
-                        MATOP_MULT, petsc_matvec_gmres_newton_mf, ierr)
+                        MATOP_MULT, petsc_matvec_poly_newton_mf, ierr)
+            end if
 
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
@@ -1705,12 +1875,35 @@ end if
             ! Create temporary vectors we use during application
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)
             call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)          
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                
+            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), ierr)             
+
+            ! Need to build mat_ctx%mat_scaled, ie D^-1 A
+            if (diag_scale_polys) then
+
+               ! Have to dynamically allocate this
+               allocate(mat_ctx_scaled)
+               mat_ctx_scaled%real_roots => coefficients(:, 1)
+               mat_ctx_scaled%imag_roots => coefficients(:, 2)               
+               
+               ! Create the matshell
+               call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
+                           mat_ctx_scaled, mat_ctx%mat_scaled, ierr)
+               ! The subroutine petsc_matvec_da_poly_mf applies D^-1 A
+               call MatShellSetOperation(mat_ctx%mat_scaled, &
+                           MATOP_MULT, petsc_matvec_da_poly_mf, ierr)
+
+               call MatAssemblyBegin(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
+               call MatAssemblyEnd(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
+               ! Have to make sure to set the type of vectors the shell creates
+               call ShellSetVecType(matrix, mat_ctx%mat_scaled)
+            end if            
 
          ! Reusing 
          else
             call MatShellGetContext(inv_matrix, mat_ctx, ierr)
-
+            if (diag_scale_polys) then
+               call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
+            end if            
          end if
 
          mat_ctx%real_roots => coefficients(:, 1)
@@ -1722,22 +1915,48 @@ end if
          mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
          mat_ctx%mat = matrix     
+
+         if (diag_scale_polys) then
+            mat_ctx_scaled%mat = matrix 
+            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)            
+
+            ! Get the diagonal
+            call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
+         end if         
          
          ! We're done
          return
       endif
 
-      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)         
-
       ! ~~~~~~~~~~~~
       ! If we're here then we want an assembled approximate inverse
-      ! ~~~~~~~~~~~~         
+      ! ~~~~~~~~~~~~   
+      reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)               
+
+      ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
+      if (diag_scale_polys) then
+         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
+         call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
+         call VecReciprocal(diag_inverse_vec, ierr)
+         call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
+         call MatDiagonalScale(diag_scaled_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
+
+      else
+         diag_scaled_mat = matrix
+      end if   
 
       ! If we're zeroth order poly this is trivial as it's just 1/theta_1 I
       if (poly_order == 0) then
 
-         call build_gmres_polynomial_newton_inverse_0th_order(matrix, poly_order, coefficients, &
-               inv_matrix) 
+         call build_gmres_polynomial_newton_inverse_0th_order(diag_scaled_mat, poly_order, coefficients, &
+               inv_matrix)
+               
+         if (diag_scale_polys) then
+            call MatDestroy(diag_scaled_mat, ierr)
+            call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+            call VecDestroy(diag_inverse_vec, ierr)      
+         end if               
 
          ! Then just return
          return      
@@ -1746,10 +1965,16 @@ end if
       else if (poly_order == 1 .AND. poly_sparsity_order == 1) then
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
-         call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, inv_matrix)         
+         call mat_duplicate_copy_plus_diag(diag_scaled_mat, reuse_triggered, inv_matrix)         
          
-         call build_gmres_polynomial_newton_inverse_1st_1st(matrix, &
+         call build_gmres_polynomial_newton_inverse_1st_1st(diag_scaled_mat, &
                poly_order, coefficients, inv_matrix)
+
+         if (diag_scale_polys) then
+            call MatDestroy(diag_scaled_mat, ierr)
+            call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+            call VecDestroy(diag_inverse_vec, ierr)      
+         end if               
 
          ! Then just return
          return
@@ -1761,8 +1986,14 @@ end if
 
          ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
          ! so that it doen't have to do much comms
-         call mat_mult_powers_share_sparsity_newton(matrix, poly_order, poly_sparsity_order, coefficients, &
+         call mat_mult_powers_share_sparsity_newton(diag_scaled_mat, poly_order, poly_sparsity_order, coefficients, &
                   reuse_mat, reuse_submatrices, inv_matrix)
+
+         if (diag_scale_polys) then
+            call MatDestroy(diag_scaled_mat, ierr)
+            call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+            call VecDestroy(diag_inverse_vec, ierr)      
+         end if                  
 
          ! ! Then just return
          return         
@@ -1772,8 +2003,14 @@ end if
       ! ~~~~~~~~~~
       ! We are only here if we don't constrain_sparsity
       ! ~~~~~~~~~~
-      call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
+      call build_gmres_polynomial_newton_inverse_full(diag_scaled_mat, poly_order, coefficients, &
                   inv_matrix)
+
+      if (diag_scale_polys) then
+         call MatDestroy(diag_scaled_mat, ierr)
+         call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
+         call VecDestroy(diag_inverse_vec, ierr)      
+      end if                  
       
 
    end subroutine build_gmres_polynomial_newton_inverse     

@@ -148,6 +148,21 @@ run_tests_load_serial:
 	done
 #
 	@echo ""
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders with diag scaling"
+	@set -e; for order in 0 1 2 3; do \
+		echo "--- Testing order = $$order ---"; \
+		./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_diag_scale_polys -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$order; \
+	done
+	@echo "Test difference between GMRES polynomial forms for hyperbolic streaming problem for different orders and fixed sparsity with diag scaling"
+	@set -e; for order in 2 3; do \
+		echo "--- Testing order = $$order ---"; \
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				./ex12f_gmres_poly -f data/mat_stream_2364 -pc_air_diag_scale_polys -pc_air_poly_order $$order -pc_air_inverse_sparsity_order $$sparsity; \
+		done; \
+	done	
+#
+	@echo ""
 	@echo "Test Newton GMRES polynomials order 60 matrix-free with added roots in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 6
 	@echo "Test Newton GMRES polynomials order 60 with fixed sparsity with added roots in market matrix problem 1138"
@@ -515,7 +530,20 @@ run_tests_no_load_serial:
 	@echo "Test Arnoldi GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type arnoldi -ksp_max_it 1
 	@echo "Test Power GMRES polynomial on a diagonal matrix"
-	./mat_diag -pc_pflareinv_type power -ksp_max_it 1		
+	./mat_diag -pc_pflareinv_type power -ksp_max_it 1
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -pc_air_diag_scale_polys 1 -ksp_max_it 5
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial smoothing and lAIR"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_z_type lair -ksp_max_it 5	
+				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
 # Include kokkos examples	 
@@ -782,6 +810,18 @@ run_tests_no_load_parallel:
 				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 		done; \
 	done
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -pc_air_diag_scale_polys 1 -ksp_max_it 5
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial smoothing and lAIR in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_z_type lair -ksp_max_it 5		
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -851,7 +891,83 @@ run_tests_medium_serial:
 		./adv_dg_upwind -adv_dg_petscspace_degree 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
-	done					
+	done
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling power basis GMRES polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type power -ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling Arnoldi basis GMRES polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type arnoldi -ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling Newton basis GMRES polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type newton -ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling power basis GMRES polynomial matrix-free smoothing"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type power -pc_air_matrix_free_polys \
+	-ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling Arnoldi basis GMRES polynomial matrix-free smoothing"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys \
+	-ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling Newton basis GMRES polynomial matrix-free smoothing"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type newton -pc_air_matrix_free_polys \
+	-ksp_max_it 8	
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling coarsest grid Newton GMRES polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -ksp_max_it 8 \
+	-pc_air_max_levels 3 \
+	-pc_air_coarsest_matrix_free_polys 1 -pc_air_coarsest_inverse_type newton \
+	-pc_air_coarsest_poly_order 100 -pc_air_coarsest_diag_scale_polys 1
+#
+	@echo ""
+	@echo "Test poorly scaled matrix fixed with diagonal scaling coarsest grid Newton GMRES polynomial auto truncate"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -ksp_max_it 8 \
+	-pc_air_auto_truncate_tol 1e-1 -pc_air_auto_truncate_start_level 1 -pc_air_coarsest_matrix_free_polys 1 \
+	-pc_air_coarsest_inverse_type newton \
+	-pc_air_coarsest_poly_order 100 -pc_air_coarsest_diag_scale_polys 1	
+#
+	@echo ""
+	@echo "Test poorly scaled matrix with Neumann polynomial"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type neumann -ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix with Neumann polynomial matrix-free smoothing"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type neumann -pc_air_matrix_free_polys \
+	-ksp_max_it 8
+#
+	@echo ""
+	@echo "Test poorly scaled matrix with ISAI"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type isai -ksp_max_it 8								
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~

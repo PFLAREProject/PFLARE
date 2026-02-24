@@ -681,6 +681,30 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetMaxLubySteps
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! Always true for neumann
+      if (options%inverse_type == PFLAREINV_NEUMANN) then
+         scale = .TRUE.
+      else
+         scale = options%diag_scale_polys
+      end if
+      ierr = 0
+
+   end subroutine PCAIRGetDiagScalePolys   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1080,6 +1104,25 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetCoarsestMatrixFreePolys
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      scale = options%coarsest_diag_scale_polys
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestDiagScalePolys   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1797,6 +1840,37 @@ module pcair_interfaces
    
       ierr = 0
    end subroutine PCAIRGetSmoothType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetDiagScalePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. scale) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_scale_polys = scale
+      ierr = 0
+
+   end subroutine PCAIRSetDiagScalePolys   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -2448,6 +2522,37 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetCoarsestMatrixFreePolys
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarsestDiagScalePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. scale) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_diag_scale_polys = scale
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestDiagScalePolys   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
