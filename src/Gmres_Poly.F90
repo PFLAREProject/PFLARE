@@ -1492,7 +1492,7 @@ end if
       integer :: comm_size, errorcode, order
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
-      type(tMat) :: mat_power, temp_mat
+      type(tMat) :: mat_power, temp_mat, diag_scaled_mat
       type(tVec) :: diag_inverse_vec
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       logical :: reuse_triggered      
@@ -1604,21 +1604,21 @@ end if
          call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
          call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
          call VecReciprocal(diag_inverse_vec, ierr)
-         call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)
-         call MatDiagonalScale(temp_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
+         call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
+         call MatDiagonalScale(diag_scaled_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
 
       else
-         temp_mat = matrix
+         diag_scaled_mat = matrix
       end if      
 
       ! If we're zeroth order poly this is trivial as it's just the coefficient(1) on the diagonal
       if (poly_order == 0) then
 
-         call build_gmres_polynomial_inverse_0th_order(temp_mat, poly_order, buffers, coefficients, &
+         call build_gmres_polynomial_inverse_0th_order(diag_scaled_mat, poly_order, buffers, coefficients, &
                inv_matrix)         
 
          if (diag_scale_polys) then
-            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(diag_scaled_mat, ierr)
             call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
             call VecDestroy(diag_inverse_vec, ierr)      
          end if         
@@ -1630,7 +1630,7 @@ end if
       else if (poly_order == 1 .AND. poly_sparsity_order == 1) then
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
-         call mat_duplicate_copy_plus_diag(temp_mat, reuse_triggered, inv_matrix)
+         call mat_duplicate_copy_plus_diag(diag_scaled_mat, reuse_triggered, inv_matrix)
 
          ! Flags to prevent reductions when assembling (there are assembles in the shift)
          call MatSetOption(inv_matrix, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr) 
@@ -1647,7 +1647,7 @@ end if
          call MatShift(inv_matrix, coefficients(1), ierr)       
 
          if (diag_scale_polys) then
-            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(diag_scaled_mat, ierr)
             call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
             call VecDestroy(diag_inverse_vec, ierr)      
          end if         
@@ -1663,11 +1663,11 @@ end if
          ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
          ! so that it doen't have to do much comms
          ! This also finishes off the asyn comms and computes the coefficients
-         call mat_mult_powers_share_sparsity(temp_mat, poly_order, poly_sparsity_order, buffers, coefficients, &
+         call mat_mult_powers_share_sparsity(diag_scaled_mat, poly_order, poly_sparsity_order, buffers, coefficients, &
                   reuse_mat, reuse_submatrices, inv_matrix)
 
          if (diag_scale_polys) then
-            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(diag_scaled_mat, ierr)
             call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
             call VecDestroy(diag_inverse_vec, ierr)      
          end if                  
@@ -1685,11 +1685,11 @@ end if
       ! Copy in the initial matrix
       if (.NOT. reuse_triggered) then
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
-         call mat_duplicate_copy_plus_diag(temp_mat, .FALSE., inv_matrix)
+         call mat_duplicate_copy_plus_diag(diag_scaled_mat, .FALSE., inv_matrix)
       else
          ! For the powers > 1 the pattern of the original matrix will be different
          ! to the resulting inverse
-         call MatCopy(temp_mat, inv_matrix, DIFFERENT_NONZERO_PATTERN, ierr)
+         call MatCopy(diag_scaled_mat, inv_matrix, DIFFERENT_NONZERO_PATTERN, ierr)
       end if
 
       ! Don't set any off processor entries so no need for a reduction when assembling
@@ -1712,10 +1712,10 @@ end if
 
          ! TODO - these can be reused
          if (order == 2) then
-            call MatMatMult(temp_mat, temp_mat, &
+            call MatMatMult(diag_scaled_mat, diag_scaled_mat, &
                   MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)     
          else
-            call MatMatMult(temp_mat, mat_power, &
+            call MatMatMult(diag_scaled_mat, mat_power, &
                   MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)      
             call MatDestroy(mat_power, ierr)
          end if       
@@ -1741,7 +1741,7 @@ end if
       call MatShift(inv_matrix, coefficients(1), ierr)  
       
       if (diag_scale_polys) then
-         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(diag_scaled_mat, ierr)
          call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
          call VecDestroy(diag_inverse_vec, ierr)      
       end if      

@@ -1826,7 +1826,7 @@ end if
       MPIU_Comm :: MPI_COMM_MATRIX
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       logical :: reuse_triggered
-      type(tMat) :: temp_mat
+      type(tMat) :: diag_scaled_mat
       type(tVec) :: diag_inverse_vec
 
       ! ~~~~~~       
@@ -1939,21 +1939,21 @@ end if
          call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
          call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
          call VecReciprocal(diag_inverse_vec, ierr)
-         call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)
-         call MatDiagonalScale(temp_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
+         call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
+         call MatDiagonalScale(diag_scaled_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
 
       else
-         temp_mat = matrix
+         diag_scaled_mat = matrix
       end if   
 
       ! If we're zeroth order poly this is trivial as it's just 1/theta_1 I
       if (poly_order == 0) then
 
-         call build_gmres_polynomial_newton_inverse_0th_order(temp_mat, poly_order, coefficients, &
+         call build_gmres_polynomial_newton_inverse_0th_order(diag_scaled_mat, poly_order, coefficients, &
                inv_matrix)
                
          if (diag_scale_polys) then
-            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(diag_scaled_mat, ierr)
             call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
             call VecDestroy(diag_inverse_vec, ierr)      
          end if               
@@ -1965,13 +1965,13 @@ end if
       else if (poly_order == 1 .AND. poly_sparsity_order == 1) then
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
-         call mat_duplicate_copy_plus_diag(temp_mat, reuse_triggered, inv_matrix)         
+         call mat_duplicate_copy_plus_diag(diag_scaled_mat, reuse_triggered, inv_matrix)         
          
-         call build_gmres_polynomial_newton_inverse_1st_1st(temp_mat, &
+         call build_gmres_polynomial_newton_inverse_1st_1st(diag_scaled_mat, &
                poly_order, coefficients, inv_matrix)
 
          if (diag_scale_polys) then
-            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(diag_scaled_mat, ierr)
             call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
             call VecDestroy(diag_inverse_vec, ierr)      
          end if               
@@ -1986,11 +1986,11 @@ end if
 
          ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
          ! so that it doen't have to do much comms
-         call mat_mult_powers_share_sparsity_newton(temp_mat, poly_order, poly_sparsity_order, coefficients, &
+         call mat_mult_powers_share_sparsity_newton(diag_scaled_mat, poly_order, poly_sparsity_order, coefficients, &
                   reuse_mat, reuse_submatrices, inv_matrix)
 
          if (diag_scale_polys) then
-            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(diag_scaled_mat, ierr)
             call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
             call VecDestroy(diag_inverse_vec, ierr)      
          end if                  
@@ -2003,11 +2003,11 @@ end if
       ! ~~~~~~~~~~
       ! We are only here if we don't constrain_sparsity
       ! ~~~~~~~~~~
-      call build_gmres_polynomial_newton_inverse_full(temp_mat, poly_order, coefficients, &
+      call build_gmres_polynomial_newton_inverse_full(diag_scaled_mat, poly_order, coefficients, &
                   inv_matrix)
 
       if (diag_scale_polys) then
-         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(diag_scaled_mat, ierr)
          call MatDiagonalScale(inv_matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)  
          call VecDestroy(diag_inverse_vec, ierr)      
       end if                  
