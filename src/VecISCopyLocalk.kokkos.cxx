@@ -65,6 +65,9 @@ PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 // Copy the input IS's to the device for our_level
 PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt global_row_start, IS *index_fine, IS *index_coarse)
 {
+   auto exec = PetscGetKokkosExecutionSpace();
+   const int level_idx = our_level - 1;
+
    // Get the sizes of the local component of the input IS's
    PetscInt fine_local_size, coarse_local_size;
    PetscCallVoid(ISGetLocalSize(*index_fine, &fine_local_size));
@@ -76,10 +79,10 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 
    // Create a host view of the existing indices
    auto fine_view_h = PetscIntConstKokkosViewHost(fine_indices_ptr, fine_local_size);
-   // Create a device view
-   IS_fine_views_local[our_level] = std::make_shared<PetscIntKokkosView>("IS_fine_view_" + std::to_string(our_level), fine_local_size);
+   // Create a device view - make sure to index with 0 based
+   IS_fine_views_local[level_idx] = std::make_shared<PetscIntKokkosView>("IS_fine_view_" + std::to_string(our_level), fine_local_size);
    // Copy the indices over to the device
-   Kokkos::deep_copy(*IS_fine_views_local[our_level], fine_view_h);
+   Kokkos::deep_copy(*IS_fine_views_local[level_idx], fine_view_h);
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -87,7 +90,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
    PetscIntKokkosView is_d;
-   is_d = *IS_fine_views_local[our_level];
+   is_d = *IS_fine_views_local[level_idx];
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
          is_d[i] -= global_row_start;
@@ -95,21 +98,22 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 
    PetscCallVoid(ISGetIndices(*index_coarse, &coarse_indices_ptr));
    auto coarse_view_h = PetscIntConstKokkosViewHost(coarse_indices_ptr, coarse_local_size);
-   // Create a device view
-   IS_coarse_views_local[our_level] = std::make_shared<PetscIntKokkosView>("IS_coarse_view_" + std::to_string(our_level), coarse_local_size);
+   // Create a device view - make sure to index with 0 based
+   IS_coarse_views_local[level_idx] = std::make_shared<PetscIntKokkosView>("IS_coarse_view_" + std::to_string(our_level), coarse_local_size);
    // Copy the indices over to the device
-   Kokkos::deep_copy(*IS_coarse_views_local[our_level], coarse_view_h);  
+   Kokkos::deep_copy(*IS_coarse_views_local[level_idx], coarse_view_h);  
    // Log copy with petsc
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));   
    PetscCallVoid(ISRestoreIndices(*index_coarse, &coarse_indices_ptr));
    
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
-   is_d = *IS_coarse_views_local[our_level];
+   is_d = *IS_coarse_views_local[level_idx];
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
          is_d[i] -= global_row_start;
-   });    
+   });
+   exec.fence();    
 
    return;
 }
@@ -119,16 +123,19 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
+   const int level_idx = our_level - 1;
+
    // Can't use the shared pointer directly within the parallel 
    // regions on the device
    PetscIntKokkosView is_d;
+   // Make sure to index with 0 based
    if (fine_int)
    {
-      is_d = *IS_fine_views_local[our_level];
+      is_d = *IS_fine_views_local[level_idx];
    }
    else
    {
-      is_d = *IS_coarse_views_local[our_level];
+      is_d = *IS_coarse_views_local[level_idx];
    } 
 
    // SCATTER_REVERSE=1
