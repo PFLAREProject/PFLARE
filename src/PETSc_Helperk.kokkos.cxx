@@ -2456,11 +2456,20 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    auto exec = PetscGetKokkosExecutionSpace();
 
    bool use_cached_views = false;
+   int cache_invalid_reason = 0;
+
+   if (our_level != -1)
+   {
+      if (!IS_fine_views_local || !IS_coarse_views_local || !IS_views_row_start) cache_invalid_reason |= 1;
+      if (!(level_idx >= 0 && level_idx < max_levels)) cache_invalid_reason |= 2;
+      if (!(global_col_start == global_row_start)) cache_invalid_reason |= 4;
+      if (!(IS_views_row_start && level_idx >= 0 && level_idx < max_levels && IS_views_row_start[level_idx] == global_row_start)) cache_invalid_reason |= 8;
+   }
 
    // Only use cached local device IS views when their ownership assumptions are valid
    // for this matrix. The cached views are localized with global_row_start; if the matrix
    // column ownership start differs, they are not valid as local column indices.
-   if (our_level != -1 && IS_fine_views_local && IS_coarse_views_local && IS_views_row_start &&
+      if (our_level != -1 && IS_fine_views_local && IS_coarse_views_local && IS_views_row_start &&
        level_idx >= 0 && level_idx < max_levels &&
        IS_views_row_start[level_idx] == global_row_start &&
        global_col_start == global_row_start)
@@ -2482,6 +2491,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
          if (is_row_d_d.extent(0) != (size_t)is_row_local_size || is_col_d_d.extent(0) != (size_t)is_col_local_size)
          {
             use_cached_views = false;
+            cache_invalid_reason |= 16;
          }
          else
          {
@@ -2530,9 +2540,27 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                 (is_col_d_d.extent(0) > 0 && (col_min < 0 || col_max >= local_cols)))
             {
                use_cached_views = false;
+               cache_invalid_reason |= 32;
             }
          }
       }
+      else
+      {
+         cache_invalid_reason |= 64;
+      }
+   }
+
+   if (our_level != -1 && !use_cached_views)
+   {
+      int rank = -1;
+      MPI_Comm MPI_COMM_MATRIX;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+      PetscInt cached_row_start = PETSC_MIN_INT;
+      if (IS_views_row_start && level_idx >= 0 && level_idx < max_levels) cached_row_start = IS_views_row_start[level_idx];
+      PetscCallVoid(PetscPrintf(PETSC_COMM_SELF,
+         "[PFLARE][rank %d] MatCreateSubMatrix_kokkos cache invalid (reason=%d, level=%d, level_idx=%d, row_start=%" PetscInt_FMT ", col_start=%" PetscInt_FMT ", cached_row_start=%" PetscInt_FMT ")\\n",
+         rank, cache_invalid_reason, our_level, level_idx, global_row_start, global_col_start, cached_row_start));
    }
 
    // If we cannot safely use cached device views, use the passed IS objects

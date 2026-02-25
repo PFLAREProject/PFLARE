@@ -586,8 +586,9 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    PetscIntKokkosViewHost is_coarse_h = PetscIntKokkosViewHost(is_coarse_array, n_coarse);   
 
    // Copy over the indices to the host
-   Kokkos::deep_copy(is_fine_h, is_fine_local_d);
-   Kokkos::deep_copy(is_coarse_h, is_coarse_local_d);
+   Kokkos::deep_copy(exec, is_fine_h, is_fine_local_d);
+   Kokkos::deep_copy(exec, is_coarse_h, is_coarse_local_d);
+   exec.fence();
    // Log copy with petsc
    size_t bytes_fine = is_fine_local_d.extent(0) * sizeof(PetscInt);
    size_t bytes_coarse = is_coarse_local_d.extent(0) * sizeof(PetscInt);
