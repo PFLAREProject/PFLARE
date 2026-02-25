@@ -2454,8 +2454,28 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    // uses PetscGetKokkosExecutionSpace() would be a cross-stream hazard on AMD HIP.
    auto exec = PetscGetKokkosExecutionSpace();
 
-   // If we want the input is_row and is_col to be used
-   if (our_level == -1)
+   bool use_cached_views = false;
+
+   // Only use cached local device IS views when their ownership assumptions are valid
+   // for this matrix. The cached views are localized with global_row_start; if the matrix
+   // column ownership start differs, they are not valid as local column indices.
+   if (our_level != -1 && IS_fine_views_local && IS_coarse_views_local && IS_views_row_start &&
+       our_level >= 0 && our_level < max_levels &&
+       IS_views_row_start[our_level] == global_row_start &&
+       global_col_start == global_row_start)
+   {
+      ViewPetscIntPtr row_view_ptr = is_row_fine_int ? IS_fine_views_local[our_level] : IS_coarse_views_local[our_level];
+      ViewPetscIntPtr col_view_ptr = is_col_fine_int ? IS_fine_views_local[our_level] : IS_coarse_views_local[our_level];
+      if (row_view_ptr && col_view_ptr)
+      {
+         is_row_d_d = *row_view_ptr;
+         is_col_d_d = *col_view_ptr;
+         use_cached_views = true;
+      }
+   }
+
+   // If we cannot safely use cached device views, use the passed IS objects
+   if (!use_cached_views)
    {
       // Get pointers to the indices on the host
       const PetscInt *is_row_indices_ptr, *is_col_indices_ptr;

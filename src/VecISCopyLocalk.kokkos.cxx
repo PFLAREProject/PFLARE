@@ -6,6 +6,7 @@
 // them in this .cxx
 ViewPetscIntPtr* IS_fine_views_local = nullptr;
 ViewPetscIntPtr* IS_coarse_views_local = nullptr;
+PetscInt* IS_views_row_start = nullptr;
 int max_levels = -1;
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -21,7 +22,11 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
    if (IS_coarse_views_local) {
       delete[] IS_coarse_views_local;
       IS_coarse_views_local = nullptr;
-   }   
+   }
+   if (IS_views_row_start) {
+      delete[] IS_views_row_start;
+      IS_views_row_start = nullptr;
+   }
 
     return;
 }
@@ -48,7 +53,11 @@ PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
       IS_coarse_views_local = new ViewPetscIntPtr[max_levels];
       for (int i = 0; i < max_levels; i++) {
          IS_coarse_views_local[i] = nullptr;
-      }      
+      }
+      IS_views_row_start = new PetscInt[max_levels];
+      for (int i = 0; i < max_levels; i++) {
+         IS_views_row_start[i] = PETSC_MIN_INT;
+      }
    }
    // Built but different max size, destroy and rebuild
    else if (max_levels_input != max_levels)
@@ -92,7 +101,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    PetscIntKokkosView is_d;
    is_d = *IS_fine_views_local[level_idx];
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
+      Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
          is_d[i] -= global_row_start;
    });   
 
@@ -110,9 +119,10 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
    is_d = *IS_coarse_views_local[level_idx];
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
+      Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
          is_d[i] -= global_row_start;
    });
+   IS_views_row_start[level_idx] = global_row_start;
    exec.fence();    
 
    return;

@@ -38,6 +38,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosV
 // on each level on the device
 extern ViewPetscIntPtr* IS_fine_views_local;
 extern ViewPetscIntPtr* IS_coarse_views_local;
+extern PetscInt* IS_views_row_start;
 extern int max_levels;
 
 // ~~~~~~~~~~~~~~~~~~
