@@ -1799,6 +1799,17 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 // is_col must be sorted
 PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
 {
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] enter MatCreateSubMatrix_Seq_kokkos(reuse=%d, row_n=%zu, col_n=%zu)\\n",
+         rank, reuse_int, (size_t)is_row_d_d.extent(0), (size_t)is_col_d_d.extent(0));
+      fflush(stderr);
+   }
+
    PetscInt local_rows, local_cols;
    PetscInt nnzs_match_local;
 
@@ -2144,6 +2155,17 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
          PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
 {
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] enter MatCreateSubMatrix_kokkos_view(reuse=%d, row_n=%zu, col_n=%zu, g_rows=%" PetscInt_FMT ", g_cols=%" PetscInt_FMT ")\\n",
+         rank, reuse_int, (size_t)is_row_d_d.extent(0), (size_t)is_col_d_d.extent(0), global_rows_row, global_cols_col);
+      fflush(stderr);
+   }
+
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -2461,6 +2483,17 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                      const int reuse_int, Mat *output_mat, \
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
+
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] enter MatCreateSubMatrix_kokkos(reuse=%d, level=%d, row_fine=%d, col_fine=%d)\\n",
+         rank, reuse_int, our_level, is_row_fine_int, is_col_fine_int);
+      fflush(stderr);
+   }
 
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
