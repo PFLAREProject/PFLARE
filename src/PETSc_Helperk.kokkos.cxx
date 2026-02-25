@@ -1825,17 +1825,27 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    // ~~~~~~~~~~~~
    nnzs_match_local = 0;
 
+   // Obtain the execution space once here so that ALL kernel launches in this function run on
+   // the same HIP stream.  Mixing bare Kokkos::RangePolicy<>() (which uses the default
+   // Kokkos execution-space instance / stream) with TeamPolicy(PetscGetKokkosExecutionSpace())
+   // (which may use a different Kokkos::HIP instance tied to a different HIP stream) creates
+   // cross-stream ordering hazards on AMD HIP: e.g. the smap_d-fill kernel on stream A and
+   // the nnz-count reduce on stream B race, producing nnzs_match_local=0, a zero-sized
+   // j_local_d allocation, and a subsequent GPU memory-access fault when the team kernel
+   // writes to j_local_d(0).
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // We need to know how many entries are in each row 
    nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows_row);    
    // We may have identity
-   Kokkos::deep_copy(nnz_match_local_row_d, 0);              
+   Kokkos::deep_copy(exec, nnz_match_local_row_d, (PetscInt)0);              
    
    // Map which columns in the original mat are in is_col
    PetscIntKokkosView smap_d = PetscIntKokkosView("smap_d", local_cols);  
-   Kokkos::deep_copy(smap_d, 0); 
+   Kokkos::deep_copy(exec, smap_d, (PetscInt)0); 
    // Loop over all the cols in is_col
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
+      Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
 
          smap_d(is_col_d_d(i)) = i + 1; 
    });     
@@ -1847,7 +1857,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    if (!reuse_int)
    {
       Kokkos::parallel_reduce(
-         Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_row, Kokkos::AUTO()),
+         Kokkos::TeamPolicy<>(exec, local_rows_row, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t, PetscInt& thread_total) {
 
          const PetscInt i_idx_is_row = t.league_rank();
@@ -1888,7 +1898,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    PetscInt max_nnz_local = 0;
    if (local_rows_row > 0) {
 
-      Kokkos::parallel_reduce("FindMaxNNZ", local_rows_row,
+      Kokkos::parallel_reduce("FindMaxNNZ", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
          KOKKOS_LAMBDA(const PetscInt i_idx_is_row, PetscInt& thread_max) {
             // The indices in is_row will be global, but we want the local index
             const PetscInt i = is_row_d_d(i_idx_is_row);
@@ -1898,8 +1908,6 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          Kokkos::Max<PetscInt>(max_nnz_local)
       );
    }     
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
@@ -1914,7 +1922,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    if (!reuse_int)
    {
       // Need to do a scan on nnz_match_local_row_d to get where each row starts
-      Kokkos::parallel_scan (local_rows_row, KOKKOS_LAMBDA (const PetscInt i_idx_is_row, PetscInt& update, const bool final) {
+      Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA (const PetscInt i_idx_is_row, PetscInt& update, const bool final) {
          // Inclusive scan
          update += nnz_match_local_row_d(i_idx_is_row);         
          if (final) {
@@ -1931,13 +1939,13 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
 
       // Initialize first entry to zero - the rest get set below
-      Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
+      Kokkos::deep_copy(exec, Kokkos::subview(i_local_d, 0), (PetscInt)0);       
 
       // ~~~~~~~~~~~~~~~
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {      
+         Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {      
 
             // The start of our row index comes from the scan
             i_local_d(i_idx_is_row + 1) = nnz_match_local_row_d(i_idx_is_row);   
@@ -2417,6 +2425,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    const int level_idx = our_level - 1;
    auto exec = PetscGetKokkosExecutionSpace();
 
+   // Use the PETSc Kokkos execution space for all GPU work in this function so that every
+   // kernel launch is on the same HIP stream as those in MatCreateSubMatrix_Seq_kokkos.
+   // Using bare RangePolicy<>() (default exec space) here while MatCreateSubMatrix_Seq_kokkos
+   // uses PetscGetKokkosExecutionSpace() would be a cross-stream hazard on AMD HIP.
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // If we want the input is_row and is_col to be used
    if (our_level == -1)
    {
@@ -2434,7 +2448,11 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       is_row_d_d = PetscIntKokkosView("is_row_d_d", local_rows_row);   
       auto is_col_view_h = PetscIntConstKokkosViewHost(is_col_indices_ptr, local_cols_col);    
       is_col_d_d = PetscIntKokkosView("is_col_d_d", local_cols_col);      
-      // Copy indices to the device
+      // Copy indices to the device.  These use the default (no-exec-space) overload which
+      // performs a synchronous hipMemcpy, ensuring the host pointer is no longer needed before
+      // ISRestoreIndices frees it.  The exec-space parallel_for below runs on the PETSc exec
+      // stream; hipMemcpy is completed before the kernel is even launched, so the data is
+      // visible to it without an extra fence.
       Kokkos::deep_copy(is_row_d_d, is_row_view_h);     
       Kokkos::deep_copy(is_col_d_d, is_col_view_h);
       // Log copy with petsc
@@ -2450,13 +2468,13 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       // Rewrite to local indices
       // ~~~~~~~~~~~~     
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
+         Kokkos::RangePolicy<>(exec, 0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
 
             is_row_d_d(i) -= global_row_start; // Make local
       });
 
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+         Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
             is_col_d_d(i) -= global_col_start; // Make local
       });
