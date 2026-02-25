@@ -2207,7 +2207,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Loop over all the cols in is_col
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
+            Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
 
                x_d(is_col_d_d(i)) = (PetscScalar)is_col_d_d(i); 
                cmap_d(is_col_d_d(i)) = i + isstart; /* global index of iscol[i] */
@@ -2259,10 +2259,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // One bigger for exclusive scan
          auto is_col_o_match_d = PetscIntKokkosView("is_col_o_match_d", cols_ao+1);
-         Kokkos::deep_copy(is_col_o_match_d, 0);
+         Kokkos::deep_copy(exec, is_col_o_match_d, (PetscInt)0);
          if (cols_ao > 0) 
          {
-            Kokkos::parallel_reduce("FindMatches", cols_ao,
+            Kokkos::parallel_reduce("FindMatches", Kokkos::RangePolicy<>(exec, 0, cols_ao),
                KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
                   // This is the scattered x for all of the non-local columns in the input mat
                   // It's not -1 if that column is present on another rank
@@ -2279,7 +2279,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Need to do an exclusive scan on is_col_o_match_d to get the new local indices
          // Have to remember to go up to cols_ao+1
-         Kokkos::parallel_scan (cols_ao+1, KOKKOS_LAMBDA (const PetscInt i, PetscInt& partial_sum, const bool is_final) {
+         Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, cols_ao+1), KOKKOS_LAMBDA (const PetscInt i, PetscInt& partial_sum, const bool is_final) {
                const int input_value = is_col_o_match_d(i);
                if (is_final) {
                   is_col_o_match_d(i) = partial_sum;  // Write exclusive prefix
@@ -2304,7 +2304,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Loop over all the cols in the input matrix
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {     
+            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {     
                
                // We can tell if is_col_o_match_d had 1 in it in this position by comparing the result
                // of the exclusive scan for this index and the next one            
@@ -2353,6 +2353,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(ISRestoreIndices(iscol_o, &iscol_o_indices_ptr));
       }
 
+      // Ensure all off-diagonal index construction kernels are complete and visible
+      // before using is_col_o_d in the next routine.
+      exec.fence();
+
       // We can now create the off-diagonal component
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal);
 
@@ -2364,7 +2368,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscMalloc1(garray_output_d.extent(0), &garray_host));
          PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, garray_output_d.extent(0));
          // Copy the garray output to the host
-         Kokkos::deep_copy(colmap_output_h, garray_output_d);
+         Kokkos::deep_copy(exec, colmap_output_h, garray_output_d);
+         exec.fence();
          bytes = colmap_output_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
          
@@ -2380,7 +2385,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscMalloc1(is_col_o_d.extent(0), &is_col_o_host));
          PetscIntKokkosViewHost is_col_o_h = PetscIntKokkosViewHost(is_col_o_host, is_col_o_d.extent(0));
          // Copy the is_col_o_d output to the host
-         Kokkos::deep_copy(is_col_o_h, is_col_o_d);
+         Kokkos::deep_copy(exec, is_col_o_h, is_col_o_d);
+         exec.fence();
          bytes = is_col_o_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
          // Now create an IS
@@ -2477,8 +2483,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
          Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
             is_col_d_d(i) -= global_col_start; // Make local
-      });
-      exec.fence(); 
+      }); 
+
+      // Ensure local-index rewrite kernels are complete before passing views downstream.
+      exec.fence();
    }
    // Instead if we tell the routine that the is_row and is_col are fine/coarse local indices
    // that already are on the device
