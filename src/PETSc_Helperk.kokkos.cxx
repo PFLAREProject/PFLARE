@@ -2440,6 +2440,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    PetscInt global_col_start, global_col_end_plus_one;   
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));  
    PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one)); 
+   PetscInt local_rows, local_cols;
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    PetscInt global_rows_row, global_cols_col;
    PetscCallVoid(ISGetSize(*is_row, &global_rows_row));
    PetscCallVoid(ISGetSize(*is_col, &global_cols_col));    
@@ -2470,6 +2472,66 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
          is_row_d_d = *row_view_ptr;
          is_col_d_d = *col_view_ptr;
          use_cached_views = true;
+
+         // Validate cached views against current matrix partition before use.
+         // If they are stale/misaligned, fall back to rebuilding from IS arguments.
+         PetscInt is_row_local_size = 0, is_col_local_size = 0;
+         PetscCallVoid(ISGetLocalSize(*is_row, &is_row_local_size));
+         PetscCallVoid(ISGetLocalSize(*is_col, &is_col_local_size));
+
+         if (is_row_d_d.extent(0) != (size_t)is_row_local_size || is_col_d_d.extent(0) != (size_t)is_col_local_size)
+         {
+            use_cached_views = false;
+         }
+         else
+         {
+            PetscInt row_min = PETSC_MAX_INT, row_max = PETSC_MIN_INT;
+            PetscInt col_min = PETSC_MAX_INT, col_max = PETSC_MIN_INT;
+
+            if (is_row_d_d.extent(0) > 0)
+            {
+               Kokkos::parallel_reduce(
+                  Kokkos::RangePolicy<>(exec, 0, is_row_d_d.extent(0)),
+                  KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_min) {
+                     const PetscInt val = is_row_d_d(i);
+                     if (val < thread_min) thread_min = val;
+                  },
+                  Kokkos::Min<PetscInt>(row_min));
+
+               Kokkos::parallel_reduce(
+                  Kokkos::RangePolicy<>(exec, 0, is_row_d_d.extent(0)),
+                  KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max) {
+                     const PetscInt val = is_row_d_d(i);
+                     if (val > thread_max) thread_max = val;
+                  },
+                  Kokkos::Max<PetscInt>(row_max));
+            }
+
+            if (is_col_d_d.extent(0) > 0)
+            {
+               Kokkos::parallel_reduce(
+                  Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)),
+                  KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_min) {
+                     const PetscInt val = is_col_d_d(i);
+                     if (val < thread_min) thread_min = val;
+                  },
+                  Kokkos::Min<PetscInt>(col_min));
+
+               Kokkos::parallel_reduce(
+                  Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)),
+                  KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max) {
+                     const PetscInt val = is_col_d_d(i);
+                     if (val > thread_max) thread_max = val;
+                  },
+                  Kokkos::Max<PetscInt>(col_max));
+            }
+
+            if ((is_row_d_d.extent(0) > 0 && (row_min < 0 || row_max >= local_rows)) ||
+                (is_col_d_d.extent(0) > 0 && (col_min < 0 || col_max >= local_cols)))
+            {
+               use_cached_views = false;
+            }
+         }
       }
    }
 
