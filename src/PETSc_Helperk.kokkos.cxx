@@ -2446,7 +2446,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    
    PetscIntKokkosView is_row_d_d, is_col_d_d;
    const int level_idx = our_level - 1;
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // Use the PETSc Kokkos execution space for all GPU work in this function so that every
    // kernel launch is on the same HIP stream as those in MatCreateSubMatrix_Seq_kokkos.
@@ -2460,12 +2459,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    // for this matrix. The cached views are localized with global_row_start; if the matrix
    // column ownership start differs, they are not valid as local column indices.
    if (our_level != -1 && IS_fine_views_local && IS_coarse_views_local && IS_views_row_start &&
-       our_level >= 0 && our_level < max_levels &&
-       IS_views_row_start[our_level] == global_row_start &&
+       level_idx >= 0 && level_idx < max_levels &&
+       IS_views_row_start[level_idx] == global_row_start &&
        global_col_start == global_row_start)
    {
-      ViewPetscIntPtr row_view_ptr = is_row_fine_int ? IS_fine_views_local[our_level] : IS_coarse_views_local[our_level];
-      ViewPetscIntPtr col_view_ptr = is_col_fine_int ? IS_fine_views_local[our_level] : IS_coarse_views_local[our_level];
+      ViewPetscIntPtr row_view_ptr = is_row_fine_int ? IS_fine_views_local[level_idx] : IS_coarse_views_local[level_idx];
+      ViewPetscIntPtr col_view_ptr = is_col_fine_int ? IS_fine_views_local[level_idx] : IS_coarse_views_local[level_idx];
       if (row_view_ptr && col_view_ptr)
       {
          is_row_d_d = *row_view_ptr;
