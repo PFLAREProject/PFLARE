@@ -2240,6 +2240,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(VecRestoreKokkosView(x, &x_d));
          PetscCallVoid(VecDestroy(&x));
 
+         // Fence after SFBcastEnd: PetscSF writes to lvec_d_ptr on MPI's internal HIP stream.
+         // The Kokkos parallel_reduce below runs on a different HIP stream.  Without a device-
+         // level fence (exec.fence() == hipDeviceSynchronize()) those writes are not guaranteed
+         // to be visible to the Kokkos kernel, causing a GPU memory access fault.
+         exec.fence();
+
          // Let's count how many off-local columns we have
          PetscInt col_ao_output = 0;
 
@@ -2283,6 +2289,11 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Finish the cmap scatter
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, cmap_d_ptr, lcmap_d_ptr, MPI_REPLACE));
 
+         // Fence after SFBcastEnd: PetscSF writes to lcmap_d_ptr on MPI's internal HIP stream.
+         // The Kokkos parallel_for below runs on the Kokkos HIP stream.  Without a device-level
+         // fence the write is not guaranteed to be visible to the kernel.
+         exec.fence();
+
          // Loop over all the cols in the input matrix
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {     
@@ -2295,6 +2306,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                   garray_output_d(is_col_o_match_d(i)) = (PetscInt)lcmap_d_ptr[i];
                }
          });      
+
+         // Must fence before restoring/destroying lcmap: the parallel_for above captures
+         // lcmap_d_ptr as a raw device pointer and runs asynchronously.  VecDestroy(&lcmap)
+         // frees that GPU allocation on the CPU-side immediately after the kernel launch,
+         // which races with the still-running GPU kernel and causes a memory access fault.
+         exec.fence();
 
          PetscCallVoid(VecRestoreKokkosView(cmap, &cmap_d));
          PetscCallVoid(VecRestoreKokkosView(lcmap, &lcmap_d));
