@@ -2217,12 +2217,38 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscScalarKokkosView lvec_d;
          PetscCallVoid(VecGetKokkosView(lvec, &lvec_d));
 
+         PetscInt invalid_is_col_count = 0;
+         if (local_cols_col > 0)
+         {
+            Kokkos::parallel_reduce(
+               Kokkos::RangePolicy<>(exec, 0, local_cols_col),
+               KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+                  const PetscInt col_local = is_col_d_d(i);
+                  if (col_local < 0 || col_local >= local_cols) thread_sum++;
+               },
+               invalid_is_col_count);
+         }
+
+         if (invalid_is_col_count > 0)
+         {
+            int rank = -1;
+            MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view invalid local is_col entries: %" PetscInt_FMT " (local_cols=%" PetscInt_FMT ", is_col_local_size=%" PetscInt_FMT ")\\n",
+               rank, invalid_is_col_count, local_cols, local_cols_col);
+            fflush(stderr);
+         }
+
          // Loop over all the cols in is_col
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
 
-               x_d(is_col_d_d(i)) = (PetscScalar)is_col_d_d(i); 
-               cmap_d(is_col_d_d(i)) = i + isstart; /* global index of iscol[i] */
+               const PetscInt col_local = is_col_d_d(i);
+               if (col_local >= 0 && col_local < local_cols)
+               {
+                  x_d(col_local) = (PetscScalar)col_local;
+                  cmap_d(col_local) = i + isstart; /* global index of iscol[i] */
+               }
          });
 
          PetscScalar *x_d_ptr = NULL;
@@ -2558,9 +2584,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
       PetscInt cached_row_start = PETSC_MIN_INT;
       if (IS_views_row_start && level_idx >= 0 && level_idx < max_levels) cached_row_start = IS_views_row_start[level_idx];
-      PetscCallVoid(PetscPrintf(PETSC_COMM_SELF,
+      fprintf(stderr,
          "[PFLARE][rank %d] MatCreateSubMatrix_kokkos cache invalid (reason=%d, level=%d, level_idx=%d, row_start=%" PetscInt_FMT ", col_start=%" PetscInt_FMT ", cached_row_start=%" PetscInt_FMT ")\\n",
-         rank, cache_invalid_reason, our_level, level_idx, global_row_start, global_col_start, cached_row_start));
+         rank, cache_invalid_reason, our_level, level_idx, global_row_start, global_col_start, cached_row_start);
+      fflush(stderr);
    }
 
    // If we cannot safely use cached device views, use the passed IS objects
