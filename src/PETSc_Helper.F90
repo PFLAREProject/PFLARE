@@ -1036,7 +1036,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
 #if defined(PETSC_HAVE_KOKKOS)                     
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer :: comm_size, errorcode
+   integer :: comm_size, comm_rank, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
       integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
       logical :: reuse_logical
