@@ -2371,6 +2371,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    PetscCallVoid(ISGetSize(*is_col, &global_cols_col));    
    
    PetscIntKokkosView is_row_d_d, is_col_d_d;
+   const int level_idx = our_level - 1;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // If we want the input is_row and is_col to be used
    if (our_level == -1)
@@ -2414,7 +2416,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
          Kokkos::RangePolicy<>(0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
             is_col_d_d(i) -= global_col_start; // Make local
-      }); 
+      });
+      exec.fence(); 
    }
    // Instead if we tell the routine that the is_row and is_col are fine/coarse local indices
    // that already are on the device
@@ -2422,19 +2425,19 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    {
       if (is_row_fine_int)
       {
-         is_row_d_d = *IS_fine_views_local[our_level];
+         is_row_d_d = *IS_fine_views_local[level_idx];
       }
       else
       {
-         is_row_d_d = *IS_coarse_views_local[our_level];
+         is_row_d_d = *IS_coarse_views_local[level_idx];
       }       
       if (is_col_fine_int)
       {
-         is_col_d_d = *IS_fine_views_local[our_level];
+         is_col_d_d = *IS_fine_views_local[level_idx];
       }
       else
       {
-         is_col_d_d = *IS_coarse_views_local[our_level];
+         is_col_d_d = *IS_coarse_views_local[level_idx];
       }        
    }  
 
