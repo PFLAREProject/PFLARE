@@ -1,6 +1,6 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/PFLAREProject/PFLARE/ci_build.yml?branch=main&label=CI)](https://github.com/PFLAREProject/PFLARE/actions/workflows/ci_build.yml)
 [![spack](https://img.shields.io/github/actions/workflow/status/PFLAREProject/PFLARE_spack/ci_build.yml?branch=main&label=spack)](https://github.com/PFLAREProject/PFLARE_spack/actions/workflows/ci_build.yml)
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/PFLAREProject/PFLARE/HEAD?urlpath=tree/notebooks/)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/PFLAREProject/PFLARE/HEAD?urlpath=%2Fdoc%2Ftree%2Fnotebooks%2F)
 
 <img align="right" img src="PFLARE_logo.png" width="300" height="300" />
 
@@ -277,6 +277,10 @@ or in Python with petsc4py:
      # ...[e.g., KSPSolve somewhere here]
      
 or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 20 -pc_pflareinv_matrix_free``.
+
+#### 4) Jupyter notebooks:
+
+There are a number of Jupyter notebooks in `notebooks/` with discussions on the key components of PFLARE and some simple Python examples. These can be run locally, or you can click the Binder badge at the top of the README to run these interactively; the first time these are run in Binder it may take several minutes to startup. 
 
 ## GPU support           
 
