@@ -88,11 +88,24 @@ jobs:
         with:
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
           file: ./dockerfiles/Dockerfile
-          tags: stevendargaville/pflare:latest
+          tags: |
+            stevendargaville/pflare:latest
+            pflare:pr-ci
           build-args: |
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
+
+      - name: Build notebook CI image and execute notebooks for pull requests
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_notebook
+          build-args: |
+            BASE_IMAGE=pflare:pr-ci
 
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
@@ -198,6 +211,20 @@ jobs:
           build-args: |
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-intel
+
+  notebook_tutorial:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    needs: [gnu_opt]
+    steps:
+      - name: Build notebook CI image and execute notebooks
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          file: ./dockerfiles/Dockerfile_notebook
+          build-args: |
+            BASE_IMAGE=stevendargaville/pflare:latest
             
   # Now pflare tracks petsc main, we check to see if this commit can still be built
   # through the petsc configure

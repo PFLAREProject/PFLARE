@@ -1,0 +1,40 @@
+ARG BASE_IMAGE=stevendargaville/pflare:latest
+
+FROM ${BASE_IMAGE}
+
+LABEL maintainer="Steven Dargaville"
+LABEL description="PFLARE notebook CI"
+
+WORKDIR /build/PFLARE
+
+# Ensure pipelines fail if any stage fails
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# ---------------------------------------------------------------
+# Set env vars matching python/Makefile:
+#   PYTHONPATH = ${PETSCPYTHONPATH}:/build/PFLARE/python
+#             = ${PETSC_DIR}/${PETSC_ARCH}/lib:/build/PFLARE/python
+#   LD_LIBRARY_PATH = ${PETSC_DIR}/${PETSC_ARCH}/lib:/build/PFLARE/lib
+# PETSC_DIR=/build/petsc and PETSC_ARCH=arch-linux-c-opt are ENV vars in
+# the base image; Docker expands them here.
+# ---------------------------------------------------------------
+ENV PYTHONPATH=${PETSC_DIR}/${PETSC_ARCH}/lib:/build/PFLARE/python
+ENV LD_LIBRARY_PATH=${PETSC_DIR}/${PETSC_ARCH}/lib:/build/PFLARE/lib
+ENV PETSC_OPTIONS=-on_error_abort
+ENV MPLBACKEND=Agg
+
+RUN set -euo pipefail; \
+    python3 -m pip install --no-cache-dir --upgrade pip; \
+    python3 -m pip install --no-cache-dir jupyter nbconvert ipykernel matplotlib; \
+  mapfile -t notebooks < <(find /build/PFLARE/notebooks -type f -name '*.ipynb' | sort); \
+  if [ ${#notebooks[@]} -eq 0 ]; then echo 'No notebooks found under /build/PFLARE/notebooks'; exit 1; fi; \
+    for nb in "${notebooks[@]}"; do \
+      echo "Executing ${nb}"; \
+      out="/tmp/$(basename "${nb%.ipynb}").executed.ipynb"; \
+      python3 -m jupyter nbconvert \
+        --to notebook \
+        --execute "${nb}" \
+        --output "${out}" \
+        --ExecutePreprocessor.timeout=1200 \
+        --ExecutePreprocessor.kernel_name=python3; \
+    done
