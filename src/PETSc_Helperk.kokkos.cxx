@@ -4,6 +4,57 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
+static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
+{
+   if (!seq_mat) return;
+
+   PetscInt nrows = 0, ncols = 0;
+   PetscCallVoid(MatGetLocalSize(seq_mat, &nrows, &ncols));
+
+   const PetscInt *device_i = nullptr, *device_j = nullptr;
+   PetscScalar *device_a = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(seq_mat, &device_i, &device_j, &device_a, &mtype));
+
+   auto exec = PetscGetKokkosExecutionSpace();
+   ConstMatRowMapKokkosView i_d(device_i, nrows + 1);
+
+   PetscInt bad_rowptr = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, nrows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+         const PetscInt b = i_d(i), e = i_d(i + 1);
+         if (b < 0 || e < b) thread_sum++;
+      },
+      bad_rowptr);
+
+   auto nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(i_d, nrows));
+   const PetscInt nnz = nnz_h();
+
+   PetscInt bad_colidx = 0;
+   if (bad_rowptr == 0 && nnz > 0)
+   {
+      ConstMatColIdxKokkosView j_d(device_j, nnz);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, nnz),
+         KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+            const PetscInt c = j_d(k);
+            if (c < 0 || c >= col_upper_bound) thread_sum++;
+         },
+         bad_colidx);
+   }
+
+   if (bad_rowptr > 0 || bad_colidx > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] %s CSR anomaly (%s): rowptr_bad=%" PetscInt_FMT ", colidx_bad=%" PetscInt_FMT ", nrows=%" PetscInt_FMT ", ncols=%" PetscInt_FMT ", nnz=%" PetscInt_FMT ", col_upper=%" PetscInt_FMT "\\n",
+         rank, func, block, bad_rowptr, bad_colidx, nrows, ncols, nnz, col_upper_bound);
+      fflush(stderr);
+   }
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // Generate the colmap and rewrite input global j indices to local given the calculated colmap
@@ -80,6 +131,25 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
       });         
    }
    exec.fence();
+
+   if (col_ao_output > 0 && j_nonlocal_d.extent(0) > 0)
+   {
+      PetscInt bad_j = 0;
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, j_nonlocal_d.extent(0)),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt v = j_nonlocal_d(i);
+            if (v < 0 || v >= col_ao_output) thread_sum++;
+         },
+         bad_j);
+      if (bad_j > 0)
+      {
+         fprintf(stderr,
+            "[PFLARE] rewrite_j_global_to_local OOB rewritten indices=%" PetscInt_FMT " (col_ao_output=%" PetscInt_FMT ")\\n",
+            bad_j, col_ao_output);
+         fflush(stderr);
+      }
+   }
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -134,6 +204,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
    const PetscInt global_col_start = global_col_start_temp;
    const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
+
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "remove_small_from_sparse_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "remove_small_from_sparse_kokkos", "nonlocal");
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -826,6 +899,11 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
 
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "remove_from_sparse_match_kokkos", "local_in");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao_input, MPI_COMM_MATRIX, "remove_from_sparse_match_kokkos", "nonlocal_in");
+   pflare_guard_seq_csr(mat_local_output, local_cols, MPI_COMM_MATRIX, "remove_from_sparse_match_kokkos", "local_out");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal_output, cols_ao_output, MPI_COMM_MATRIX, "remove_from_sparse_match_kokkos", "nonlocal_out");
+
    // Get the output pointers
    const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_output = nullptr, *device_nonlocal_j_output = nullptr;
    PetscScalar *device_local_vals_output = nullptr, *device_nonlocal_vals_output = nullptr;  
@@ -1118,6 +1196,8 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    }
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
 
    Mat_SeqAIJKokkos *aijkok_nonlocal = NULL;
    Mat_SeqAIJKokkos *aijkok_local = static_cast<Mat_SeqAIJKokkos *>(mat_local->spptr);
@@ -1131,6 +1211,14 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
+
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "MatSetAllValues_kokkos", "local");
+   if (mpi)
+   {
+      PetscInt rows_ao = 0, cols_ao = 0;
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+      pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "MatSetAllValues_kokkos", "nonlocal");
+   }
 
    PetscScalarKokkosView a_local_d, a_nonlocal_d;
    a_local_d = PetscScalarKokkosView(device_local_vals, aijkok_local->csrmat.nnz());   
@@ -1185,6 +1273,9 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    Mat output_mat_local, output_mat_nonlocal;
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
+
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "mat_duplicate_copy_plus_diag_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "mat_duplicate_copy_plus_diag_kokkos", "nonlocal");
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -1644,6 +1735,11 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscCallVoid(MatGetLocalSize(*Y, &local_rows, &local_cols));
    PetscCallVoid(MatGetSize(*Y, &global_rows, &global_cols));
+
+   pflare_guard_seq_csr(mat_local_y, local_cols, MPI_COMM_MATRIX, "MatAXPY_kokkos", "local_y");
+   pflare_guard_seq_csr(mat_local_x, local_cols, MPI_COMM_MATRIX, "MatAXPY_kokkos", "local_x");
+   pflare_guard_seq_csr(mat_nonlocal_y, cols_ao_y, MPI_COMM_MATRIX, "MatAXPY_kokkos", "nonlocal_y");
+   pflare_guard_seq_csr(mat_nonlocal_x, cols_ao_x, MPI_COMM_MATRIX, "MatAXPY_kokkos", "nonlocal_x");
 
    auto exec = PetscGetKokkosExecutionSpace();
 

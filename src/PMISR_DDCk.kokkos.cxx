@@ -4,6 +4,57 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
+static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
+{
+   if (!seq_mat) return;
+
+   PetscInt nrows = 0, ncols = 0;
+   PetscCallVoid(MatGetLocalSize(seq_mat, &nrows, &ncols));
+
+   const PetscInt *device_i = nullptr, *device_j = nullptr;
+   PetscScalar *device_a = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(seq_mat, &device_i, &device_j, &device_a, &mtype));
+
+   auto exec = PetscGetKokkosExecutionSpace();
+   ConstMatRowMapKokkosView i_d(device_i, nrows + 1);
+
+   PetscInt bad_rowptr = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, nrows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+         const PetscInt b = i_d(i), e = i_d(i + 1);
+         if (b < 0 || e < b) thread_sum++;
+      },
+      bad_rowptr);
+
+   auto nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(i_d, nrows));
+   const PetscInt nnz = nnz_h();
+
+   PetscInt bad_colidx = 0;
+   if (bad_rowptr == 0 && nnz > 0)
+   {
+      ConstMatColIdxKokkosView j_d(device_j, nnz);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, nnz),
+         KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+            const PetscInt c = j_d(k);
+            if (c < 0 || c >= col_upper_bound) thread_sum++;
+         },
+         bad_colidx);
+   }
+
+   if (bad_rowptr > 0 || bad_colidx > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] %s CSR anomaly (%s): rowptr_bad=%" PetscInt_FMT ", colidx_bad=%" PetscInt_FMT ", nrows=%" PetscInt_FMT ", ncols=%" PetscInt_FMT ", nnz=%" PetscInt_FMT ", col_upper=%" PetscInt_FMT "\\n",
+         rank, func, block, bad_rowptr, bad_colidx, nrows, ncols, nnz, col_upper_bound);
+      fflush(stderr);
+   }
+}
+
 // This is a device copy of the cf markers on a given level
 // to save having to copy it to/from the host between pmisr and ddc calls
 intKokkosView cf_markers_local_d;
@@ -81,6 +132,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "pmisr_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "pmisr_kokkos", "nonlocal");
+
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
@@ -955,6 +1009,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // ~~~~~~~~~~~~
    // Get pointers to the local i,j,vals on the device
    // ~~~~~~~~~~~~
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "MatDiagDomRatio_kokkos", "local");
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr;
    PetscScalar *device_local_vals = nullptr;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
@@ -1038,6 +1093,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device
       // ~~~~~~~~~~~~
+      pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "MatDiagDomRatio_kokkos", "nonlocal");
       const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
       PetscScalar *device_nonlocal_vals = nullptr;        
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));

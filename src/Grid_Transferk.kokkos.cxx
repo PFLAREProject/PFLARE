@@ -2,6 +2,57 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 
+static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
+{
+   if (!seq_mat) return;
+
+   PetscInt nrows = 0, ncols = 0;
+   PetscCallVoid(MatGetLocalSize(seq_mat, &nrows, &ncols));
+
+   const PetscInt *device_i = nullptr, *device_j = nullptr;
+   PetscScalar *device_a = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(seq_mat, &device_i, &device_j, &device_a, &mtype));
+
+   auto exec = PetscGetKokkosExecutionSpace();
+   ConstMatRowMapKokkosView i_d(device_i, nrows + 1);
+
+   PetscInt bad_rowptr = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, nrows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+         const PetscInt b = i_d(i), e = i_d(i + 1);
+         if (b < 0 || e < b) thread_sum++;
+      },
+      bad_rowptr);
+
+   auto nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(i_d, nrows));
+   const PetscInt nnz = nnz_h();
+
+   PetscInt bad_colidx = 0;
+   if (bad_rowptr == 0 && nnz > 0)
+   {
+      ConstMatColIdxKokkosView j_d(device_j, nnz);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, nnz),
+         KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+            const PetscInt c = j_d(k);
+            if (c < 0 || c >= col_upper_bound) thread_sum++;
+         },
+         bad_colidx);
+   }
+
+   if (bad_rowptr > 0 || bad_colidx > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] %s CSR anomaly (%s): rowptr_bad=%" PetscInt_FMT ", colidx_bad=%" PetscInt_FMT ", nrows=%" PetscInt_FMT ", ncols=%" PetscInt_FMT ", nnz=%" PetscInt_FMT ", col_upper=%" PetscInt_FMT "\\n",
+         rank, func, block, bad_rowptr, bad_colidx, nrows, ncols, nnz, col_upper_bound);
+      fflush(stderr);
+   }
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // Generate one point classical prolongator but with kokkos - keeping everything on the device
@@ -50,6 +101,9 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    // This returns the global index of the local portion of the matrix
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));
    PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one));
+
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "generate_one_point_with_one_entry_from_sparse_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "generate_one_point_with_one_entry_from_sparse_kokkos", "nonlocal");
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -425,6 +479,11 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    // Get the comm
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
 
+   PetscInt local_rows_w = 0, local_cols_w = 0;
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows_w, &local_cols_w));
+   pflare_guard_seq_csr(mat_local, local_cols_w, MPI_COMM_MATRIX, "compute_P_from_W_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "compute_P_from_W_kokkos", "nonlocal");
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
@@ -680,6 +739,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // Annoyingly there isn't currently the ability to get views for i (or j)
       const PetscInt *device_local_i_output = nullptr, *device_nonlocal_i_ouput = nullptr;
       PetscMemType mtype;
+      pflare_guard_seq_csr(mat_local_output, local_cols, MPI_COMM_MATRIX, "compute_P_from_W_kokkos", "local_out_reuse");
+      if (mpi) pflare_guard_seq_csr(mat_nonlocal_output, cols_ao, MPI_COMM_MATRIX, "compute_P_from_W_kokkos", "nonlocal_out_reuse");
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, NULL, NULL, &mtype));  
       if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype));  
 
@@ -945,6 +1006,9 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   pflare_guard_seq_csr(mat_local, local_cols_z, MPI_COMM_MATRIX, "compute_R_from_Z_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "compute_R_from_Z_kokkos", "nonlocal");
+
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
@@ -1213,6 +1277,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // Annoyingly there isn't currently the ability to get views for i (or j)
       const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_ouput = nullptr;
       PetscMemType mtype;
+      pflare_guard_seq_csr(mat_local_output, local_full_cols, MPI_COMM_MATRIX, "compute_R_from_Z_kokkos", "local_out_reuse");
+      if (mpi) pflare_guard_seq_csr(mat_nonlocal_output, cols_ao, MPI_COMM_MATRIX, "compute_R_from_Z_kokkos", "nonlocal_out_reuse");
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));  
       if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype));  
 

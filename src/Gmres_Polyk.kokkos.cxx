@@ -2,6 +2,57 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 
+static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
+{
+   if (!seq_mat) return;
+
+   PetscInt nrows = 0, ncols = 0;
+   PetscCallVoid(MatGetLocalSize(seq_mat, &nrows, &ncols));
+
+   const PetscInt *device_i = nullptr, *device_j = nullptr;
+   PetscScalar *device_a = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(seq_mat, &device_i, &device_j, &device_a, &mtype));
+
+   auto exec = PetscGetKokkosExecutionSpace();
+   ConstMatRowMapKokkosView i_d(device_i, nrows + 1);
+
+   PetscInt bad_rowptr = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, nrows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+         const PetscInt b = i_d(i), e = i_d(i + 1);
+         if (b < 0 || e < b) thread_sum++;
+      },
+      bad_rowptr);
+
+   auto nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(i_d, nrows));
+   const PetscInt nnz = nnz_h();
+
+   PetscInt bad_colidx = 0;
+   if (bad_rowptr == 0 && nnz > 0)
+   {
+      ConstMatColIdxKokkosView j_d(device_j, nnz);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, nnz),
+         KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+            const PetscInt c = j_d(k);
+            if (c < 0 || c >= col_upper_bound) thread_sum++;
+         },
+         bad_colidx);
+   }
+
+   if (bad_rowptr > 0 || bad_colidx > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] %s CSR anomaly (%s): rowptr_bad=%" PetscInt_FMT ", colidx_bad=%" PetscInt_FMT ", nrows=%" PetscInt_FMT ", ncols=%" PetscInt_FMT ", nnz=%" PetscInt_FMT ", col_upper=%" PetscInt_FMT "\\n",
+         rank, func, block, bad_rowptr, bad_colidx, nrows, ncols, nnz, col_upper_bound);
+      fflush(stderr);
+   }
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 
 // Compute matrix-matrix product with fixed order sparsity but with kokkos - keeping everything on the device
@@ -160,6 +211,17 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Get pointers to the i,j,vals on the device
    // This should happen after all the (potentially) host matscale, mataxpy and matshift above
    // ~~~~~~~~~~~~
+   pflare_guard_seq_csr(submatrices[0], cols_ad + cols_ao, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "submat");
+   pflare_guard_seq_csr(mat_local_input, local_cols, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "local_input");
+   pflare_guard_seq_csr(mat_local_sparsity, cols_ad, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "local_sparsity");
+   pflare_guard_seq_csr(mat_local_output, cols_ad, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "local_output");
+   if (mpi)
+   {
+      pflare_guard_seq_csr(mat_nonlocal_input, cols_ao_input, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "nonlocal_input");
+      pflare_guard_seq_csr(mat_nonlocal_sparsity, cols_ao, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "nonlocal_sparsity");
+      pflare_guard_seq_csr(mat_nonlocal_output, cols_ao, MPI_COMM_MATRIX, "mat_mult_powers_share_sparsity_kokkos", "nonlocal_output");
+   }
+
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_submat_vals = nullptr;  

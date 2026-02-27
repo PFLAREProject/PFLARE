@@ -14,6 +14,17 @@ int max_levels = -1;
 // Destroys the data
 PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 {
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
+
+   if ((IS_fine_views_local && !IS_coarse_views_local) || (!IS_fine_views_local && IS_coarse_views_local))
+   {
+      fprintf(stderr,
+         "[PFLARE] destroy_VecISCopyLocal_kokkos inconsistent cache pointers (fine_ptr=%p, coarse_ptr=%p)\n",
+         (void *)IS_fine_views_local, (void *)IS_coarse_views_local);
+      fflush(stderr);
+   }
+
    if (IS_fine_views_local) {
       // Will automatically call the destructor on each element
       delete[] IS_fine_views_local;
@@ -36,6 +47,15 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 // Creates the data we need to do the equivalent of veciscopy on local data in kokkos
 PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 {
+   if (max_levels_input <= 0)
+   {
+      fprintf(stderr,
+         "[PFLARE] create_VecISCopyLocal_kokkos invalid max_levels_input=%d\n",
+         max_levels_input);
+      fflush(stderr);
+      return;
+   }
+
    // If not built
    if (!IS_fine_views_local)
    {
@@ -77,6 +97,15 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    auto exec = PetscGetKokkosExecutionSpace();
    const int level_idx = our_level - 1;
 
+   if (!index_fine || !index_coarse)
+   {
+      fprintf(stderr,
+         "[PFLARE] set_VecISCopyLocal_kokkos_our_level null IS pointer (level=%d)\n",
+         our_level);
+      fflush(stderr);
+      return;
+   }
+
    if (level_idx < 0 || level_idx >= max_levels || !IS_fine_views_local || !IS_coarse_views_local || !IS_views_row_start)
    {
       MPI_Comm comm = MPI_COMM_NULL;
@@ -95,6 +124,19 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    PetscInt fine_local_size, coarse_local_size;
    PetscCallVoid(ISGetLocalSize(*index_fine, &fine_local_size));
    PetscCallVoid(ISGetLocalSize(*index_coarse, &coarse_local_size));
+
+   if (fine_local_size < 0 || coarse_local_size < 0)
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*index_fine, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] set_VecISCopyLocal_kokkos_our_level invalid IS sizes (fine_n=%" PetscInt_FMT ", coarse_n=%" PetscInt_FMT ", level=%d)\n",
+         rank, fine_local_size, coarse_local_size, our_level);
+      fflush(stderr);
+      return;
+   }
 
    // Get pointers to the indices on the host
    const PetscInt *fine_indices_ptr, *coarse_indices_ptr;
