@@ -2,6 +2,18 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 
+struct PflareTraceScope {
+   const char *func;
+   explicit PflareTraceScope(const char *name) : func(name) {
+      fprintf(stderr, "[PFLARE][TRACE] ENTER %s\n", func);
+      fflush(stderr);
+   }
+   ~PflareTraceScope() {
+      fprintf(stderr, "[PFLARE][TRACE] EXIT %s\n", func);
+      fflush(stderr);
+   }
+};
+
 static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
 {
    if (!seq_mat) return;
@@ -59,6 +71,7 @@ static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm
 PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
                const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
 {
+   PflareTraceScope trace_scope("mat_mult_powers_share_sparsity_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;

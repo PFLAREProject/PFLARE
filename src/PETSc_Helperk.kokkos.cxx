@@ -4,6 +4,18 @@
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
+struct PflareTraceScope {
+   const char *func;
+   explicit PflareTraceScope(const char *name) : func(name) {
+      fprintf(stderr, "[PFLARE][TRACE] ENTER %s\n", func);
+      fflush(stderr);
+   }
+   ~PflareTraceScope() {
+      fprintf(stderr, "[PFLARE][TRACE] EXIT %s\n", func);
+      fflush(stderr);
+   }
+};
+
 static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
 {
    if (!seq_mat) return;
@@ -60,6 +72,7 @@ static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm
 // Generate the colmap and rewrite input global j indices to local given the calculated colmap
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscInt **garray_host)
 {
+   PflareTraceScope trace_scope("rewrite_j_global_to_local");
 
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -181,6 +194,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
 PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscReal tol, Mat *output_mat, \
                   const int relative_max_row_tolerance_int, const int lump_int, const int allow_drop_diagonal_int)
 {
+   PflareTraceScope trace_scope("remove_small_from_sparse_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
@@ -851,6 +865,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 // Drop according to a existing sparsity in output_mat but with kokkos - keeping everything on the device
 PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int, const int alpha_int, const PetscReal alpha)
 {
+   PflareTraceScope trace_scope("remove_from_sparse_match_kokkos");
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -1202,6 +1217,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
 // Set all the values of the matrix to val
 PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 {
+   PflareTraceScope trace_scope("MatSetAllValues_kokkos");
    MatType mat_type;
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
@@ -1285,6 +1301,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 // Duplicate and copy a matrix ensuring it always has a diagonal but with kokkos - keeping everything on the device
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int reuse_int, Mat *output_mat)
 {
+   PflareTraceScope trace_scope("mat_duplicate_copy_plus_diag_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
    PetscInt global_col_start_temp, global_col_end_plus_one_temp;
@@ -1697,6 +1714,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
 // Does a MatAXPY for a MPIAIJ Kokkos matrix - the petsc version currently uses the host making it very slow
 PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 {
+   PflareTraceScope trace_scope("MatAXPY_kokkos");
    Mat mat_local_y = NULL, mat_nonlocal_y = NULL;
    Mat mat_local_x = NULL, mat_nonlocal_x = NULL;
 
@@ -1918,6 +1936,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 // is_col must be sorted
 PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
 {
+   PflareTraceScope trace_scope("MatCreateSubMatrix_Seq_kokkos");
    PetscInt local_rows, local_cols;
    PetscInt nnzs_match_local;
 
@@ -2339,6 +2358,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
          PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
 {
+   PflareTraceScope trace_scope("MatCreateSubMatrix_kokkos_view");
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -2689,6 +2709,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                      const int reuse_int, Mat *output_mat, \
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
+   PflareTraceScope trace_scope("MatCreateSubMatrix_kokkos");
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));  

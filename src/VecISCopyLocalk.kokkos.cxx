@@ -2,6 +2,18 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 
+struct PflareTraceScope {
+   const char *func;
+   explicit PflareTraceScope(const char *name) : func(name) {
+      fprintf(stderr, "[PFLARE][TRACE] ENTER %s\n", func);
+      fflush(stderr);
+   }
+   ~PflareTraceScope() {
+      fprintf(stderr, "[PFLARE][TRACE] EXIT %s\n", func);
+      fflush(stderr);
+   }
+};
+
 // These are defined as extern in kokkos_helper.hpp but we allocate
 // them in this .cxx
 ViewPetscIntPtr* IS_fine_views_local = nullptr;
@@ -14,6 +26,7 @@ int max_levels = -1;
 // Destroys the data
 PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 {
+   PflareTraceScope trace_scope("destroy_VecISCopyLocal_kokkos");
    auto exec = PetscGetKokkosExecutionSpace();
    exec.fence();
 
@@ -47,6 +60,7 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 // Creates the data we need to do the equivalent of veciscopy on local data in kokkos
 PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 {
+   PflareTraceScope trace_scope("create_VecISCopyLocal_kokkos");
    if (max_levels_input <= 0)
    {
       fprintf(stderr,
@@ -94,6 +108,7 @@ PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 // Copy the input IS's to the device for our_level
 PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt global_row_start, IS *index_fine, IS *index_coarse)
 {
+   PflareTraceScope trace_scope("set_VecISCopyLocal_kokkos_our_level");
    auto exec = PetscGetKokkosExecutionSpace();
    const int level_idx = our_level - 1;
 
@@ -249,6 +264,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
+   PflareTraceScope trace_scope("VecISCopyLocal_kokkos");
    const int level_idx = our_level - 1;
 
    if (level_idx < 0 || level_idx >= max_levels || !IS_fine_views_local || !IS_coarse_views_local)
