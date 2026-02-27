@@ -1321,6 +1321,9 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
       }
 
       // Go and swap F points to C points
+      PetscIntKokkosView invalid_swap_index_count_d("ddc_invalid_swap_index_count_d", 1);
+      Kokkos::deep_copy(invalid_swap_index_count_d, (PetscInt)0);
+
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
@@ -1328,9 +1331,27 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
             {
                // This is the actual numbering in A, rather than Aff
                PetscInt idx = is_fine_local_d(i);
-               cf_markers_d(idx) *= -1;
+               if (idx < 0 || idx >= (PetscInt)cf_markers_d.extent(0))
+               {
+                  Kokkos::atomic_add(&invalid_swap_index_count_d(0), (PetscInt)1);
+               }
+               else
+               {
+                  cf_markers_d(idx) *= -1;
+               }
             }
       }); 
+
+      auto invalid_swap_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_swap_index_count_d);
+      if (invalid_swap_index_count_h(0) > 0)
+      {
+         int rank = -1;
+         MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] ddc_kokkos invalid swap indices=%" PetscInt_FMT " (local_rows_aff=%" PetscInt_FMT ")\\n",
+            rank, invalid_swap_index_count_h(0), local_rows_aff);
+         fflush(stderr);
+      }
    }   
 
    return;

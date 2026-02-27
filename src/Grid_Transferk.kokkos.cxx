@@ -192,6 +192,13 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       Kokkos::deep_copy(nnz_match_nonlocal_row_d, 0);
    }
 
+   PetscIntKokkosView invalid_local_read_count_d("generate_one_point_invalid_local_read_count_d", 1);
+   PetscIntKokkosView invalid_nonlocal_read_count_d("generate_one_point_invalid_nonlocal_read_count_d", 1);
+   PetscIntKokkosView invalid_colmap_read_count_d("generate_one_point_invalid_colmap_read_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_local_read_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_nonlocal_read_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_colmap_read_count_d, (PetscInt)0);
+
    // Loop over the rows and find the biggest entry in each row
    Kokkos::parallel_for(
       Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
@@ -208,10 +215,24 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          Kokkos::TeamThreadRange(t, ncols_local),
          [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
+            const PetscInt idx = device_local_i[i] + j;
+            if (idx < device_local_i[i] || idx >= device_local_i[i + 1])
+            {
+               Kokkos::atomic_add(&invalid_local_read_count_d(0), (PetscInt)1);
+               return;
+            }
+
+            const PetscInt c = device_local_j[idx];
+            if (c < 0 || c >= local_cols)
+            {
+               Kokkos::atomic_add(&invalid_local_read_count_d(0), (PetscInt)1);
+               return;
+            }
+
             // If it's the biggest value keep it
-            if (Kokkos::abs(device_local_vals[device_local_i[i] + j]) > thread_data.val) {
-               thread_data.val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
-               thread_data.col = device_local_j[device_local_i[i] + j];
+            if (Kokkos::abs(device_local_vals[idx]) > thread_data.val) {
+               thread_data.val = Kokkos::abs(device_local_vals[idx]);
+               thread_data.col = c;
             }
          }, local_row_result
       );
@@ -223,11 +244,32 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
             Kokkos::TeamThreadRange(t, ncols_nonlocal),
             [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
+               const PetscInt idx = device_nonlocal_i[i] + j;
+               if (idx < device_nonlocal_i[i] || idx >= device_nonlocal_i[i + 1])
+               {
+                  Kokkos::atomic_add(&invalid_nonlocal_read_count_d(0), (PetscInt)1);
+                  return;
+               }
+
+               const PetscInt c_local = device_nonlocal_j[idx];
+               if (c_local < 0 || c_local >= cols_ao)
+               {
+                  Kokkos::atomic_add(&invalid_nonlocal_read_count_d(0), (PetscInt)1);
+                  return;
+               }
+
                // If it's the biggest value keep it
-               if (Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]) > thread_data.val) {
-                  thread_data.val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+               if (Kokkos::abs(device_nonlocal_vals[idx]) > thread_data.val) {
+                  thread_data.val = Kokkos::abs(device_nonlocal_vals[idx]);
                   // Set the global index
-                  thread_data.col = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
+                  if (c_local >= 0 && c_local < (PetscInt)colmap_input_d.extent(0))
+                  {
+                     thread_data.col = colmap_input_d(c_local);
+                  }
+                  else
+                  {
+                     Kokkos::atomic_add(&invalid_colmap_read_count_d(0), (PetscInt)1);
+                  }
                }
             }, nonlocal_row_result
          );         
@@ -275,6 +317,18 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          }
       });      
    });      
+
+   exec.fence();
+   auto invalid_local_read_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_read_count_d);
+   auto invalid_nonlocal_read_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_read_count_d);
+   auto invalid_colmap_read_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_colmap_read_count_d);
+   if (invalid_local_read_count_h(0) > 0 || invalid_nonlocal_read_count_h(0) > 0 || invalid_colmap_read_count_h(0) > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] generate_one_point_with_one_entry_from_sparse_kokkos invalid reads local=%" PetscInt_FMT ", nonlocal=%" PetscInt_FMT ", colmap=%" PetscInt_FMT "\\n",
+         rank, invalid_local_read_count_h(0), invalid_nonlocal_read_count_h(0), invalid_colmap_read_count_h(0));
+      fflush(stderr);
+   }
 
    // Get number of nnzs
    Kokkos::parallel_reduce ("ReductionLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
@@ -515,6 +569,16 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows_w, &local_cols_w));
    pflare_guard_seq_csr(mat_local, local_cols_w, MPI_COMM_MATRIX, "compute_P_from_W_kokkos", "local");
    if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "compute_P_from_W_kokkos", "nonlocal");
+
+   if (local_rows_w != local_rows_fine)
+   {
+      int rank = -1;
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] compute_P_from_W_kokkos row mismatch: W_local_rows=%" PetscInt_FMT ", local_rows_fine=%" PetscInt_FMT "\n",
+         rank, local_rows_w, local_rows_fine);
+      fflush(stderr);
+   }
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
@@ -943,17 +1007,42 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // Loop over all the C points - we know they're in the local block
       if (identity_int) 
       {
+         PetscIntKokkosView invalid_identity_write_count_d("compute_P_invalid_identity_write_count_d", 1);
+         Kokkos::deep_copy(exec, invalid_identity_write_count_d, (PetscInt)0);
+
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(0, local_rows_coarse), KOKKOS_LAMBDA(PetscInt i) {
 
             // Convert to global coarse index into a local index into the full matrix
             PetscInt row_index = coarse_view_d(i) - global_row_start;
+            if (row_index < 0 || row_index >= local_rows)
+            {
+               Kokkos::atomic_add(&invalid_identity_write_count_d(0), (PetscInt)1);
+               return;
+            }
+
+            const PetscInt out_idx = i_local_d(row_index);
+            if (out_idx < 0 || out_idx >= nnzs_match_local || i < 0 || i >= local_cols_coarse)
+            {
+               Kokkos::atomic_add(&invalid_identity_write_count_d(0), (PetscInt)1);
+               return;
+            }
 
             // Only a single column
-            j_local_d(i_local_d(row_index)) = i;
-            a_local_d(i_local_d(row_index)) = 1.0;         
+            j_local_d(out_idx) = i;
+            a_local_d(out_idx) = 1.0;         
 
          }); 
+
+         exec.fence();
+         auto invalid_identity_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_identity_write_count_d);
+         if (invalid_identity_write_count_h(0) > 0)
+         {
+            fprintf(stderr,
+               "[PFLARE][rank %d] compute_P_from_W_kokkos invalid identity writes=%" PetscInt_FMT "\\n",
+               rank, invalid_identity_write_count_h(0));
+            fflush(stderr);
+         }
       }   
         
       // Let's make sure everything on the device is finished
@@ -1172,8 +1261,16 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    }
    if (local_cols_z > 0)
    {
+      const PetscInt orig_local_check_n = PetscMin(local_cols_z, size_cols);
+      if (local_cols_z > size_cols)
+      {
+         fprintf(stderr,
+            "[PFLARE][rank %d] compute_R_from_Z_kokkos size mismatch: local_cols_z=%" PetscInt_FMT " > size_cols=%" PetscInt_FMT " (clamping local-map check)\n",
+            rank, local_cols_z, size_cols);
+         fflush(stderr);
+      }
       Kokkos::parallel_reduce(
-         Kokkos::RangePolicy<>(exec, 0, local_cols_z),
+         Kokkos::RangePolicy<>(exec, 0, orig_local_check_n),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
             const PetscInt idx = orig_view_d(i);
             if (idx < global_row_start || idx >= global_row_start + local_full_cols) thread_sum++;
@@ -1196,6 +1293,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
    PetscIntKokkosView invalid_local_map_write_count_d("invalid_local_map_write_count_d", 1);
    Kokkos::deep_copy(exec, invalid_local_map_write_count_d, (PetscInt)0);
+   PetscIntKokkosView invalid_orig_lookup_count_d("compute_R_invalid_orig_lookup_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_orig_lookup_count_d, (PetscInt)0);
    PetscIntKokkosView invalid_reuse_write_count_d("compute_R_reuse_invalid_write_count_d", 1);
    Kokkos::deep_copy(exec, invalid_reuse_write_count_d, (PetscInt)0);
 
@@ -1329,7 +1428,15 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
                // Want the local col indices for the local block
                // The orig_view_d contains the global indices for the original full matrix
-               const PetscInt mapped_col_local = orig_view_d(device_local_j[device_local_i[i] + j]) - global_row_start;
+               const PetscInt col_lookup = device_local_j[device_local_i[i] + j];
+               if (col_lookup < 0 || col_lookup >= size_cols)
+               {
+                  Kokkos::atomic_add(&invalid_orig_lookup_count_d(0), (PetscInt)1);
+                  j_local_d(i_local_d(row_index) + j) = 0;
+                  a_local_d(i_local_d(row_index) + j) = 0.0;
+                  return;
+               }
+               const PetscInt mapped_col_local = orig_view_d(col_lookup) - global_row_start;
                if (mapped_col_local < 0 || mapped_col_local >= local_full_cols)
                {
                   Kokkos::atomic_add(&invalid_local_map_write_count_d(0), (PetscInt)1);
@@ -1367,19 +1474,27 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
                Kokkos::single(Kokkos::PerTeam(t), [&]() {
                   // Let's just stick it at the end and we will sort after
                   // The coarse_view_d contains the global indices for the original full matrix
-                  j_local_d(i_local_d(row_index) + ncols_local) = coarse_view_d(i) - global_row_start;
-                  a_local_d(i_local_d(row_index) + ncols_local) = 1.0;
+                  if (i >= 0 && i < local_coarse_size)
+                  {
+                     j_local_d(i_local_d(row_index) + ncols_local) = coarse_view_d(i) - global_row_start;
+                     a_local_d(i_local_d(row_index) + ncols_local) = 1.0;
+                  }
+                  else
+                  {
+                     Kokkos::atomic_add(&invalid_orig_lookup_count_d(0), (PetscInt)1);
+                  }
                });     
             }         
       }); 
 
       exec.fence();
       auto invalid_local_map_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_map_write_count_d);
-      if (invalid_local_map_write_count_h(0) > 0)
+      auto invalid_orig_lookup_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_orig_lookup_count_d);
+      if (invalid_local_map_write_count_h(0) > 0 || invalid_orig_lookup_count_h(0) > 0)
       {
          fprintf(stderr,
-            "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid local mapped writes=%" PetscInt_FMT "\n",
-            rank, invalid_local_map_write_count_h(0));
+            "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid mapped writes=%" PetscInt_FMT ", invalid orig lookups=%" PetscInt_FMT "\n",
+            rank, invalid_local_map_write_count_h(0), invalid_orig_lookup_count_h(0));
          fflush(stderr);
       }
    }
