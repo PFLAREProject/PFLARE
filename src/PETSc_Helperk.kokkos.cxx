@@ -26,6 +26,22 @@ static void pflare_format_trace_label(char *buf, size_t buf_size, const char *fu
    snprintf(buf, buf_size, "%s block=%s part=%s", func, block_tag, part_tag);
 }
 
+static void pflare_diag_participation(MPI_Comm comm, const char *func, const char *block_tag, const char *part_tag, int has_work)
+{
+   int rank = -1, comm_size = 0;
+   MPI_Comm_rank(comm, &rank);
+   MPI_Comm_size(comm, &comm_size);
+   fprintf(stderr,
+      "[PFLARE][DIAG][rank %d/%d] %s block=%s part=%s has_work=%d\n",
+      rank,
+      comm_size,
+      func,
+      block_tag ? block_tag : "other",
+      part_tag ? part_tag : "n/a",
+      has_work ? 1 : 0);
+   fflush(stderr);
+}
+
 static const char *pflare_submatrix_block_name(const int is_row_fine_int, const int is_col_fine_int)
 {
    if (is_row_fine_int == 1 && is_col_fine_int == 1) return "aff";
@@ -2259,6 +2275,30 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
             rank, write_oob_count_h(0), nnzs_match_local, local_rows_row, local_cols_col);
          fflush(stderr);
       }
+
+      PetscInt bad_output_j_count = 0;
+      if (nnzs_match_local > 0)
+      {
+         Kokkos::parallel_reduce(
+            Kokkos::RangePolicy<>(exec, 0, nnzs_match_local),
+            KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+               const PetscInt c = j_local_d(k);
+               if (c < 0 || c >= local_cols_col) thread_sum++;
+            },
+            bad_output_j_count);
+      }
+      if (bad_output_j_count > 0)
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] MatCreateSubMatrix_Seq_kokkos invalid output col indices=%" PetscInt_FMT " (nnz=%" PetscInt_FMT ", out_cols=%" PetscInt_FMT ", block=%s, part=%s)\\n",
+            rank, bad_output_j_count, nnzs_match_local, local_cols_col,
+            block_tag ? block_tag : "other", part_tag ? part_tag : "n/a");
+         fflush(stderr);
+      }
    }
    // If we're reusing, we can just write directly to the existing views
    else
@@ -2456,6 +2496,13 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
           local_rows_row, local_cols_col, local_rows, local_cols);
        fflush(stderr);
     }
+
+   pflare_diag_participation(
+      MPI_COMM_MATRIX,
+      "MatCreateSubMatrix_kokkos_view",
+      block_tag,
+      "local",
+      (is_row_d_d.extent(0) > 0 && is_col_d_d.extent(0) > 0) ? 1 : 0);
 
    // The diagonal component
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local, block_tag, "local");
@@ -2672,6 +2719,35 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       // Ensure all off-diagonal index construction kernels are complete and visible
       // before using is_col_o_d in the next routine.
       exec.fence();
+
+      PetscInt invalid_is_col_o_count = 0;
+      if (is_col_o_d.extent(0) > 0)
+      {
+         Kokkos::parallel_reduce(
+            Kokkos::RangePolicy<>(exec, 0, is_col_o_d.extent(0)),
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+               const PetscInt v = is_col_o_d(i);
+               if (v < 0 || v >= cols_ao) thread_sum++;
+            },
+            invalid_is_col_o_count);
+      }
+      if (invalid_is_col_o_count > 0)
+      {
+         int rank = -1;
+         MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view invalid is_col_o local indices=%" PetscInt_FMT " (is_col_o_n=%zu, cols_ao=%" PetscInt_FMT ", block=%s)\\n",
+            rank, invalid_is_col_o_count, is_col_o_d.extent(0), cols_ao,
+            block_tag ? block_tag : "other");
+         fflush(stderr);
+      }
+
+      pflare_diag_participation(
+         MPI_COMM_MATRIX,
+         "MatCreateSubMatrix_kokkos_view",
+         block_tag,
+         "offdiag",
+         (is_row_d_d.extent(0) > 0 && is_col_o_d.extent(0) > 0) ? 1 : 0);
 
       // We can now create the off-diagonal component
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal, block_tag, "offdiag");
