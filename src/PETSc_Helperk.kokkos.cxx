@@ -16,6 +16,15 @@ struct PflareTraceScope {
    }
 };
 
+static const char *pflare_submatrix_block_name(const int is_row_fine_int, const int is_col_fine_int)
+{
+   if (is_row_fine_int == 1 && is_col_fine_int == 1) return "aff";
+   if (is_row_fine_int == 1 && is_col_fine_int == 0) return "afc";
+   if (is_row_fine_int == 0 && is_col_fine_int == 1) return "acf";
+   if (is_row_fine_int == 0 && is_col_fine_int == 0) return "acc";
+   return "other";
+}
+
 static void pflare_guard_seq_csr(Mat seq_mat, PetscInt col_upper_bound, MPI_Comm comm, const char *func, const char *block)
 {
    if (!seq_mat) return;
@@ -2356,7 +2365,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 // is_col must be sorted
 // This one uses the views is_row_d_d and is_col_d_d directly, rewritten to be the local indices
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
-         PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
+         PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat, const char *block_tag)
 {
    PflareTraceScope trace_scope("MatCreateSubMatrix_kokkos_view");
    PetscInt local_rows, local_cols;
@@ -2372,6 +2381,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
    PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
 
@@ -2433,6 +2444,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
     }
 
    // The diagonal component
+   fprintf(stderr,
+      "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view dispatch block=%s part=local\n",
+      rank, block_tag ? block_tag : "other");
+   fflush(stderr);
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
 
    // The off-diagonal component requires some comms
@@ -2649,6 +2664,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       exec.fence();
 
       // We can now create the off-diagonal component
+      fprintf(stderr,
+         "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view dispatch block=%s part=offdiag\n",
+         rank, block_tag ? block_tag : "other");
+      fflush(stderr);
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal);
 
       // If it's our first time through we have to create our output matrix
@@ -2710,6 +2729,16 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
    PflareTraceScope trace_scope("MatCreateSubMatrix_kokkos");
+   const char *block_tag = pflare_submatrix_block_name(is_row_fine_int, is_col_fine_int);
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   fprintf(stderr,
+      "[PFLARE][rank %d] MatCreateSubMatrix_kokkos dispatch block=%s (reuse=%d, level=%d, row_fine=%d, col_fine=%d)\n",
+      rank, block_tag, reuse_int, our_level, is_row_fine_int, is_col_fine_int);
+   fflush(stderr);
+
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));  
@@ -2828,7 +2857,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    {
       int rank = -1;
       MPI_Comm MPI_COMM_MATRIX;
-      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
       MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
       PetscInt cached_row_start = PETSC_MIN_INT;
       if (IS_views_row_start && level_idx >= 0 && level_idx < max_levels) cached_row_start = IS_views_row_start[level_idx];
@@ -2910,7 +2939,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       }        
    }  
 
-   MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat);
+   MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat, block_tag);
 
    return;
 }
