@@ -77,6 +77,20 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    auto exec = PetscGetKokkosExecutionSpace();
    const int level_idx = our_level - 1;
 
+   if (level_idx < 0 || level_idx >= max_levels || !IS_fine_views_local || !IS_coarse_views_local || !IS_views_row_start)
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*index_fine, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] set_VecISCopyLocal_kokkos_our_level invalid cache state (level=%d, level_idx=%d, max_levels=%d, fine_ptr=%p, coarse_ptr=%p, row_start_ptr=%p)\\n",
+         rank, our_level, level_idx, max_levels,
+         (void *)IS_fine_views_local, (void *)IS_coarse_views_local, (void *)IS_views_row_start);
+      fflush(stderr);
+      return;
+   }
+
    // Get the sizes of the local component of the input IS's
    PetscInt fine_local_size, coarse_local_size;
    PetscCallVoid(ISGetLocalSize(*index_fine, &fine_local_size));
@@ -105,6 +119,36 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
          is_d[i] -= global_row_start;
    });   
 
+   if (is_d.extent(0) > 0)
+   {
+      PetscInt fine_min = PETSC_MAX_INT, fine_max = PETSC_MIN_INT;
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_min) {
+            const PetscInt val = is_d(i);
+            if (val < thread_min) thread_min = val;
+         },
+         Kokkos::Min<PetscInt>(fine_min));
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max) {
+            const PetscInt val = is_d(i);
+            if (val > thread_max) thread_max = val;
+         },
+         Kokkos::Max<PetscInt>(fine_max));
+      if (fine_min < 0)
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*index_fine, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] set_VecISCopyLocal_kokkos_our_level fine local index underflow (level=%d, min=%" PetscInt_FMT ", max=%" PetscInt_FMT ", row_start=%" PetscInt_FMT ")\\n",
+            rank, our_level, fine_min, fine_max, global_row_start);
+         fflush(stderr);
+      }
+   }
+
    PetscCallVoid(ISGetIndices(*index_coarse, &coarse_indices_ptr));
    auto coarse_view_h = PetscIntConstKokkosViewHost(coarse_indices_ptr, coarse_local_size);
    // Create a device view - make sure to index with 0 based
@@ -122,6 +166,36 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
       Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
          is_d[i] -= global_row_start;
    });
+
+   if (is_d.extent(0) > 0)
+   {
+      PetscInt coarse_min = PETSC_MAX_INT, coarse_max = PETSC_MIN_INT;
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_min) {
+            const PetscInt val = is_d(i);
+            if (val < thread_min) thread_min = val;
+         },
+         Kokkos::Min<PetscInt>(coarse_min));
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max) {
+            const PetscInt val = is_d(i);
+            if (val > thread_max) thread_max = val;
+         },
+         Kokkos::Max<PetscInt>(coarse_max));
+      if (coarse_min < 0)
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*index_coarse, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] set_VecISCopyLocal_kokkos_our_level coarse local index underflow (level=%d, min=%" PetscInt_FMT ", max=%" PetscInt_FMT ", row_start=%" PetscInt_FMT ")\\n",
+            rank, our_level, coarse_min, coarse_max, global_row_start);
+         fflush(stderr);
+      }
+   }
    IS_views_row_start[level_idx] = global_row_start;
    exec.fence();    
 
@@ -135,18 +209,72 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
 {
    const int level_idx = our_level - 1;
 
+   if (level_idx < 0 || level_idx >= max_levels || !IS_fine_views_local || !IS_coarse_views_local)
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*vfull, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] VecISCopyLocal_kokkos invalid cache state (level=%d, level_idx=%d, max_levels=%d, fine_ptr=%p, coarse_ptr=%p)\\n",
+         rank, our_level, level_idx, max_levels, (void *)IS_fine_views_local, (void *)IS_coarse_views_local);
+      fflush(stderr);
+      return;
+   }
+
    // Can't use the shared pointer directly within the parallel 
    // regions on the device
    PetscIntKokkosView is_d;
    // Make sure to index with 0 based
    if (fine_int)
    {
+      if (!IS_fine_views_local[level_idx])
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*vfull, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] VecISCopyLocal_kokkos missing fine cache view (level=%d, level_idx=%d)\\n",
+            rank, our_level, level_idx);
+         fflush(stderr);
+         return;
+      }
       is_d = *IS_fine_views_local[level_idx];
    }
    else
    {
+      if (!IS_coarse_views_local[level_idx])
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*vfull, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] VecISCopyLocal_kokkos missing coarse cache view (level=%d, level_idx=%d)\\n",
+            rank, our_level, level_idx);
+         fflush(stderr);
+         return;
+      }
       is_d = *IS_coarse_views_local[level_idx];
    } 
+
+   PetscInt vfull_local_size = 0, vreduced_local_size = 0;
+   PetscCallVoid(VecGetLocalSize(*vfull, &vfull_local_size));
+   PetscCallVoid(VecGetLocalSize(*vreduced, &vreduced_local_size));
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   if ((PetscInt)is_d.extent(0) != vreduced_local_size)
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*vfull, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] VecISCopyLocal_kokkos extent mismatch (level=%d, fine=%d, mode=%d, is_n=%" PetscInt_FMT ", vreduced_n=%" PetscInt_FMT ", vfull_n=%" PetscInt_FMT ")\\n",
+         rank, our_level, fine_int, mode_int, (PetscInt)is_d.extent(0), vreduced_local_size, vfull_local_size);
+      fflush(stderr);
+   }
 
    // SCATTER_REVERSE=1
    // vreduced[i] = vfull[is[i]]
@@ -157,10 +285,34 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
       ConstPetscScalarKokkosView vfull_d;
       PetscCallVoid(VecGetKokkosView(*vfull, &vfull_d));
 
+      PetscIntKokkosView bad_count_d("veciscopy_bad_count_d", 1);
+      Kokkos::deep_copy(exec, bad_count_d, (PetscInt)0);
+
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {           
-            vreduced_d[i] = vfull_d[is_d(i)];
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+            const PetscInt idx = is_d(i);
+            if (i >= vreduced_local_size || idx < 0 || idx >= vfull_local_size)
+            {
+               Kokkos::atomic_add(&bad_count_d(0), (PetscInt)1);
+            }
+            else
+            {
+               vreduced_d[i] = vfull_d[idx];
+            }
       });
+      exec.fence();
+      auto bad_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bad_count_d);
+      if (bad_count_h(0) > 0)
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*vfull, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] VecISCopyLocal_kokkos reverse invalid accesses=%" PetscInt_FMT " (level=%d, fine=%d, is_n=%" PetscInt_FMT ", vreduced_n=%" PetscInt_FMT ", vfull_n=%" PetscInt_FMT ")\\n",
+            rank, bad_count_h(0), our_level, fine_int, (PetscInt)is_d.extent(0), vreduced_local_size, vfull_local_size);
+         fflush(stderr);
+      }
 
       PetscCallVoid(VecRestoreKokkosViewWrite(*vreduced, &vreduced_d));
       PetscCallVoid(VecRestoreKokkosView(*vfull, &vfull_d)); 
@@ -175,10 +327,34 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
       PetscScalarKokkosView vfull_d;
       PetscCallVoid(VecGetKokkosViewWrite(*vfull, &vfull_d));
 
+      PetscIntKokkosView bad_count_d("veciscopy_bad_count_d", 1);
+      Kokkos::deep_copy(exec, bad_count_d, (PetscInt)0);
+
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {           
-            vfull_d[is_d(i)] = vreduced_d[i];
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+            const PetscInt idx = is_d(i);
+            if (i >= vreduced_local_size || idx < 0 || idx >= vfull_local_size)
+            {
+               Kokkos::atomic_add(&bad_count_d(0), (PetscInt)1);
+            }
+            else
+            {
+               vfull_d[idx] = vreduced_d[i];
+            }
       });     
+      exec.fence();
+      auto bad_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bad_count_d);
+      if (bad_count_h(0) > 0)
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*vfull, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] VecISCopyLocal_kokkos forward invalid accesses=%" PetscInt_FMT " (level=%d, fine=%d, is_n=%" PetscInt_FMT ", vreduced_n=%" PetscInt_FMT ", vfull_n=%" PetscInt_FMT ")\\n",
+            rank, bad_count_h(0), our_level, fine_int, (PetscInt)is_d.extent(0), vreduced_local_size, vfull_local_size);
+         fflush(stderr);
+      }
 
       PetscCallVoid(VecRestoreKokkosView(*vreduced, &vreduced_d));
       PetscCallVoid(VecRestoreKokkosViewWrite(*vfull, &vfull_d));  
