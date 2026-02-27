@@ -489,11 +489,34 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 {
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
 
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
    auto exec = PetscGetKokkosExecutionSpace();
+
+   PetscInt invalid_cf_marker_count = 0;
+   if (local_rows > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const int marker = cf_markers_d(i);
+            if (!(marker == -1 || marker == 0 || marker == 1)) thread_sum++;
+         },
+         invalid_cf_marker_count);
+   }
+   if (invalid_cf_marker_count > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] create_cf_is_device_kokkos invalid cf markers=%" PetscInt_FMT " (match_cf=%d, local_rows=%" PetscInt_FMT ")\\n",
+         rank, invalid_cf_marker_count, match_cf, local_rows);
+      fflush(stderr);
+   }
 
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
@@ -525,18 +548,38 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // This will be equivalent to is_fine - global_row_start, ie the local indices
    is_local_d = PetscIntKokkosView("is_local_d", local_rows_row);    
 
+   PetscIntKokkosView write_oob_count_d("create_cf_is_write_oob_count_d", 1);
+   Kokkos::deep_copy(exec, write_oob_count_d, (PetscInt)0);
+
    // ~~~~~~~~~~~~
    // Write the local indices
    // ~~~~~~~~~~~~     
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          // Is this point match_cf
          if (cf_markers_d(i) == match_cf) {
             // point_offsets_d(i) gives the correct local index
-            is_local_d(point_offsets_d(i)) = i;
+            const PetscInt out_idx = point_offsets_d(i);
+            if (out_idx >= 0 && out_idx < local_rows_row)
+            {
+               is_local_d(out_idx) = i;
+            }
+            else
+            {
+               Kokkos::atomic_add(&write_oob_count_d(0), (PetscInt)1);
+            }
          }              
    });
    exec.fence();
+
+   auto write_oob_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), write_oob_count_d);
+   if (write_oob_count_h(0) > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] create_cf_is_device_kokkos write OOB count=%" PetscInt_FMT " (match_cf=%d, n_out=%" PetscInt_FMT ", local_rows=%" PetscInt_FMT ")\\n",
+         rank, write_oob_count_h(0), match_cf, local_rows_row, local_rows);
+      fflush(stderr);
+   }
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -643,6 +686,34 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
    PetscInt local_rows_row = is_fine_local_d.extent(0);
 
+   if (local_rows_row > 0)
+   {
+      PetscInt fine_min = PETSC_MAX_INT, fine_max = PETSC_MIN_INT;
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_min) {
+            const PetscInt val = is_fine_local_d(i);
+            if (val < thread_min) thread_min = val;
+         },
+         Kokkos::Min<PetscInt>(fine_min));
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max) {
+            const PetscInt val = is_fine_local_d(i);
+            if (val > thread_max) thread_max = val;
+         },
+         Kokkos::Max<PetscInt>(fine_max));
+      if (fine_min < 0 || fine_max >= local_rows)
+      {
+         int rank = -1;
+         MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] MatDiagDomRatio_kokkos invalid fine local index range [min=%" PetscInt_FMT ", max=%" PetscInt_FMT "] (local_rows=%" PetscInt_FMT ", n_fine=%" PetscInt_FMT ")\\n",
+            rank, fine_min, fine_max, local_rows, local_rows_row);
+         fflush(stderr);
+      }
+   }
+
    // Create device memory for the diag_dom_ratio
    diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_row);    
 
@@ -696,6 +767,14 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
             const PetscInt i_idx_is_row = t.league_rank();
             const PetscInt i = is_fine_local_d(i_idx_is_row);
+            if (i < 0 || i >= local_rows)
+            {
+               Kokkos::single(Kokkos::PerTeam(t), [&]() {
+                  diag_dom_ratio_d(i_idx_is_row) = 0.0;
+                  diag_entry_d(i_idx_is_row) = 0.0;
+               });
+               return;
+            }
             const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
             PetscScalar sum_val = 0.0;
@@ -766,6 +845,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
                const PetscInt i_idx_is_row = t.league_rank();
                const PetscInt i = is_fine_local_d(i_idx_is_row);
+               if (i < 0 || i >= local_rows)
+               {
+                  return;
+               }
                const PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                PetscScalar sum_val = 0.0;
