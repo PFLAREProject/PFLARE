@@ -42,6 +42,20 @@ static void pflare_diag_participation(MPI_Comm comm, const char *func, const cha
    fflush(stderr);
 }
 
+static void pflare_diag_stage(MPI_Comm comm, const char *func, const char *block_tag, const char *part_tag, const char *stage)
+{
+   int rank = -1;
+   MPI_Comm_rank(comm, &rank);
+   fprintf(stderr,
+      "[PFLARE][DIAG][rank %d] %s block=%s part=%s stage=%s\n",
+      rank,
+      func,
+      block_tag ? block_tag : "other",
+      part_tag ? part_tag : "n/a",
+      stage ? stage : "unknown");
+   fflush(stderr);
+}
+
 static const char *pflare_submatrix_block_name(const int is_row_fine_int, const int is_col_fine_int)
 {
    if (is_row_fine_int == 1 && is_col_fine_int == 1) return "aff";
@@ -2448,8 +2462,27 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
    if (mpi)
    {
       mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
+      if (!mat_mpi || !mat_mpi->lvec || !mat_mpi->Mvctx)
+      {
+         int rank = -1;
+         MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view invalid Mat_MPIAIJ internals (mat_mpi=%p, lvec=%p, Mvctx=%p, block=%s)\n",
+            rank, (void *)mat_mpi, (void *)(mat_mpi ? mat_mpi->lvec : NULL), (void *)(mat_mpi ? mat_mpi->Mvctx : NULL),
+            block_tag ? block_tag : "other");
+         fflush(stderr);
+      }
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao)); 
+      if (rows_ao != local_rows)
+      {
+         int rank = -1;
+         MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view offdiag row mismatch rows_ao=%" PetscInt_FMT " local_rows=%" PetscInt_FMT " (block=%s)\n",
+            rank, rows_ao, local_rows, block_tag ? block_tag : "other");
+         fflush(stderr);
+      }
       
       if (reuse_int)
       {
@@ -2512,6 +2545,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
    if (mpi)
    {
       PetscIntKokkosView is_col_o_d, garray_output_d;
+      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "build_begin");
 
       if (!reuse_int)
       {
@@ -2637,6 +2671,16 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
             ); 
          }    
 
+         if (col_ao_output < 0 || col_ao_output > cols_ao)
+         {
+            int rank = -1;
+            MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view invalid col_ao_output=%" PetscInt_FMT " (cols_ao=%" PetscInt_FMT ", block=%s)\n",
+               rank, col_ao_output, cols_ao, block_tag ? block_tag : "other");
+            fflush(stderr);
+         }
+
          // Ensure lvec_d_ptr is no longer in-flight before restoring the view.
          exec.fence();
 
@@ -2658,6 +2702,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // the cmap_d given it has isstart 
          is_col_o_d = PetscIntKokkosView("is_col_o_d", col_ao_output);
          garray_output_d = PetscIntKokkosView("garray_output_d", col_ao_output);
+         PetscIntKokkosView is_col_o_write_oob_d("is_col_o_write_oob_d", 1);
+         Kokkos::deep_copy(exec, is_col_o_write_oob_d, (PetscInt)0);
 
          // Fence after SFBcastEnd: PetscSF writes to lcmap_d_ptr on MPI's internal HIP stream.
          // The Kokkos parallel_for below runs on the Kokkos HIP stream.  Without a device-level
@@ -2672,10 +2718,29 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                // of the exclusive scan for this index and the next one            
                if (is_col_o_match_d(i+1) > is_col_o_match_d(i))
                {
-                  is_col_o_d(is_col_o_match_d(i)) = i;
-                  garray_output_d(is_col_o_match_d(i)) = (PetscInt)lcmap_d_ptr[i];
+                  const PetscInt out_idx = is_col_o_match_d(i);
+                  if (out_idx >= 0 && out_idx < col_ao_output)
+                  {
+                     is_col_o_d(out_idx) = i;
+                     garray_output_d(out_idx) = (PetscInt)lcmap_d_ptr[i];
+                  }
+                  else
+                  {
+                     Kokkos::atomic_add(&is_col_o_write_oob_d(0), (PetscInt)1);
+                  }
                }
          });      
+
+         auto is_col_o_write_oob_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), is_col_o_write_oob_d);
+         if (is_col_o_write_oob_h(0) > 0)
+         {
+            int rank = -1;
+            MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view is_col_o write OOB=%" PetscInt_FMT " (col_ao_output=%" PetscInt_FMT ", cols_ao=%" PetscInt_FMT ", block=%s)\n",
+               rank, is_col_o_write_oob_h(0), col_ao_output, cols_ao, block_tag ? block_tag : "other");
+            fflush(stderr);
+         }
 
          // Must fence before restoring/destroying lcmap: the parallel_for above captures
          // lcmap_d_ptr as a raw device pointer and runs asynchronously.  VecDestroy(&lcmap)
@@ -2696,24 +2761,36 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          IS iscol_o;
          /* Retrieve isrow_d, iscol_d and iscol_o from output */
          PetscCallVoid(PetscObjectQuery((PetscObject)(*output_mat), "iscol_o", (PetscObject *)&iscol_o));
-         //PetscCheck(iscol_o, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONGSTATE, "iscol_o passed in was not used before, cannot reuse");
+         if (!iscol_o)
+         {
+            int rank = -1;
+            MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view missing iscol_o on reuse; using empty offdiag index set (block=%s)\n",
+               rank, block_tag ? block_tag : "other");
+            fflush(stderr);
+            is_col_o_d = PetscIntKokkosView("is_col_o_d", 0);
+         }
+         else
+         {
 
-         const PetscInt *iscol_o_indices_ptr;
-         PetscCallVoid(ISGetIndices(iscol_o, &iscol_o_indices_ptr));
+            const PetscInt *iscol_o_indices_ptr;
+            PetscCallVoid(ISGetIndices(iscol_o, &iscol_o_indices_ptr));
 
-         PetscInt local_cols_iscol_o;
-         PetscCallVoid(ISGetLocalSize(iscol_o, &local_cols_iscol_o));
+            PetscInt local_cols_iscol_o;
+            PetscCallVoid(ISGetLocalSize(iscol_o, &local_cols_iscol_o));
 
-         // Copy the iscol_o to the device
-         auto iscol_o_view_h = PetscIntConstKokkosViewHost(iscol_o_indices_ptr, local_cols_iscol_o);    
-         is_col_o_d = PetscIntKokkosView("is_col_o_d", local_cols_iscol_o);   
-         Kokkos::deep_copy(exec, is_col_o_d, iscol_o_view_h);
-         exec.fence();
-         // Log copy with petsc
-         bytes = iscol_o_view_h.extent(0) * sizeof(PetscInt);
-         PetscCallVoid(PetscLogCpuToGpu(bytes));
+            // Copy the iscol_o to the device
+            auto iscol_o_view_h = PetscIntConstKokkosViewHost(iscol_o_indices_ptr, local_cols_iscol_o);    
+            is_col_o_d = PetscIntKokkosView("is_col_o_d", local_cols_iscol_o);   
+            Kokkos::deep_copy(exec, is_col_o_d, iscol_o_view_h);
+            exec.fence();
+            // Log copy with petsc
+            bytes = iscol_o_view_h.extent(0) * sizeof(PetscInt);
+            PetscCallVoid(PetscLogCpuToGpu(bytes));
 
-         PetscCallVoid(ISRestoreIndices(iscol_o, &iscol_o_indices_ptr));
+            PetscCallVoid(ISRestoreIndices(iscol_o, &iscol_o_indices_ptr));
+         }
       }
 
       // Ensure all off-diagonal index construction kernels are complete and visible
@@ -2749,8 +2826,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          "offdiag",
          (is_row_d_d.extent(0) > 0 && is_col_o_d.extent(0) > 0) ? 1 : 0);
 
+      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_seq_call");
+
       // We can now create the off-diagonal component
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal, block_tag, "offdiag");
+
+      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_seq_call");
 
       // If it's our first time through we have to create our output matrix
       if (!reuse_int)
@@ -2767,6 +2848,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          
          // We can now create our MPI matrix
          PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_row, global_cols_col, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_mpi_create");
 
          // ~~~~~~~~~~~~~~
          // If this is the first time through, we need to store the iscol_o in the output_mat
