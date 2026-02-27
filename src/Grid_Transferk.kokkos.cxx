@@ -969,23 +969,42 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
    int rank = -1;
    MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
-   PetscInt invalid_orig_col_idx = 0;
+   PetscInt invalid_orig_col_idx = 0, invalid_orig_local_map_idx = 0;
    if (size_cols > 0)
    {
       Kokkos::parallel_reduce(
          Kokkos::RangePolicy<>(exec, 0, size_cols),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
             const PetscInt idx = orig_view_d(i);
-            if (idx < 0 || idx >= global_fine_size) thread_sum++;
+            if (idx < 0 || idx >= global_full_cols) thread_sum++;
          }, invalid_orig_col_idx);
+   }
+   if (local_cols_z > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_cols_z),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt idx = orig_view_d(i);
+            if (idx < global_row_start || idx >= global_row_start + local_full_cols) thread_sum++;
+         }, invalid_orig_local_map_idx);
    }
    if (invalid_orig_col_idx > 0)
    {
       fprintf(stderr,
-         "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid orig fine column indices=%" PetscInt_FMT " (size_cols=%" PetscInt_FMT ", global_fine=%" PetscInt_FMT ")\n",
-         rank, invalid_orig_col_idx, size_cols, global_fine_size);
+         "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid orig column domain entries=%" PetscInt_FMT " (size_cols=%" PetscInt_FMT ", global_full_cols=%" PetscInt_FMT ")\n",
+         rank, invalid_orig_col_idx, size_cols, global_full_cols);
       fflush(stderr);
    }
+   if (invalid_orig_local_map_idx > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid local mapped columns=%" PetscInt_FMT " (local_cols_z=%" PetscInt_FMT ", row_start=%" PetscInt_FMT ", local_full_cols=%" PetscInt_FMT ")\n",
+         rank, invalid_orig_local_map_idx, local_cols_z, global_row_start, local_full_cols);
+      fflush(stderr);
+   }
+
+   PetscIntKokkosView invalid_local_map_write_count_d("invalid_local_map_write_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_local_map_write_count_d, (PetscInt)0);
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -1117,8 +1136,18 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
                // Want the local col indices for the local block
                // The orig_view_d contains the global indices for the original full matrix
-               j_local_d(i_local_d(row_index) + j) = orig_view_d(device_local_j[device_local_i[i] + j]) - global_row_start;
-               a_local_d(i_local_d(row_index) + j) = device_local_vals[device_local_i[i] + j];
+               const PetscInt mapped_col_local = orig_view_d(device_local_j[device_local_i[i] + j]) - global_row_start;
+               if (mapped_col_local < 0 || mapped_col_local >= local_full_cols)
+               {
+                  Kokkos::atomic_add(&invalid_local_map_write_count_d(0), (PetscInt)1);
+                  j_local_d(i_local_d(row_index) + j) = 0;
+                  a_local_d(i_local_d(row_index) + j) = 0.0;
+               }
+               else
+               {
+                  j_local_d(i_local_d(row_index) + j) = mapped_col_local;
+                  a_local_d(i_local_d(row_index) + j) = device_local_vals[device_local_i[i] + j];
+               }
                      
             });     
 
@@ -1150,6 +1179,16 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
                });     
             }         
       }); 
+
+      exec.fence();
+      auto invalid_local_map_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_map_write_count_d);
+      if (invalid_local_map_write_count_h(0) > 0)
+      {
+         fprintf(stderr,
+            "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid local mapped writes=%" PetscInt_FMT "\n",
+            rank, invalid_local_map_write_count_h(0));
+         fflush(stderr);
+      }
    }
    // If we're reusing, we can just write directly to the existing views
    else
