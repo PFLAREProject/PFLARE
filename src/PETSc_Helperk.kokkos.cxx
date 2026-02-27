@@ -1273,9 +1273,6 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    Mat output_mat_local, output_mat_nonlocal;
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
-
-   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "mat_duplicate_copy_plus_diag_kokkos", "local");
-   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "mat_duplicate_copy_plus_diag_kokkos", "nonlocal");
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
    Mat mat_local = NULL, mat_nonlocal = NULL;
@@ -1301,6 +1298,9 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    const PetscInt global_col_start = global_col_start_temp;
    //const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
+
+   pflare_guard_seq_csr(mat_local, local_cols, MPI_COMM_MATRIX, "mat_duplicate_copy_plus_diag_kokkos", "local");
+   if (mpi) pflare_guard_seq_csr(mat_nonlocal, cols_ao, MPI_COMM_MATRIX, "mat_duplicate_copy_plus_diag_kokkos", "nonlocal");
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
