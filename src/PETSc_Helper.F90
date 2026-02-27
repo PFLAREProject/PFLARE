@@ -1084,15 +1084,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
             if (is_col_fine) is_col_fine_int = 1
          end if
 
-         print *, '[PFLARE][rank', comm_rank, '] MatCreateSubMatrixWrapper -> Kokkos call begin', &
-                  ' reuse=', reuse_int, ' level=', our_level_int, ' row_fine=', is_row_fine_int, ' col_fine=', is_col_fine_int
-
          call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
                   reuse_int, B_array, &
                   our_level_int, is_row_fine_int, is_col_fine_int)
-
-         print *, '[PFLARE][rank', comm_rank, '] MatCreateSubMatrixWrapper -> Kokkos call end', &
-                  ' reuse=', reuse_int, ' level=', our_level_int
 
          output_mat%v = B_array
 

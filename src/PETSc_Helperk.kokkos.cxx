@@ -1799,17 +1799,6 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 // is_col must be sorted
 PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
 {
-   {
-      MPI_Comm comm = MPI_COMM_NULL;
-      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
-      int rank = -1;
-      MPI_Comm_rank(comm, &rank);
-      fprintf(stderr,
-         "[PFLARE][rank %d] enter MatCreateSubMatrix_Seq_kokkos(reuse=%d, row_n=%zu, col_n=%zu)\\n",
-         rank, reuse_int, (size_t)is_row_d_d.extent(0), (size_t)is_col_d_d.extent(0));
-      fflush(stderr);
-   }
-
    PetscInt local_rows, local_cols;
    PetscInt nnzs_match_local;
 
@@ -1949,6 +1938,24 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
          }
       });
 
+      if (local_rows_row > 0)
+      {
+         auto nnz_scan_total_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),
+                                Kokkos::subview(nnz_match_local_row_d, local_rows_row - 1));
+         const PetscInt nnz_scan_total = nnz_scan_total_h();
+         if (nnz_scan_total != nnzs_match_local)
+         {
+            MPI_Comm comm = MPI_COMM_NULL;
+            PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+            int rank = -1;
+            MPI_Comm_rank(comm, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_Seq_kokkos nnz mismatch: reduce=%" PetscInt_FMT " scan=%" PetscInt_FMT " (row_n=%" PetscInt_FMT ", col_n=%" PetscInt_FMT ")\\n",
+               rank, nnzs_match_local, nnz_scan_total, local_rows_row, local_cols_col);
+            fflush(stderr);
+         }
+      }
+
       // ~~~~~~~~~~~~~~~~~  
       // We need to assemble our i,j, vals so we can build our matrix
       // ~~~~~~~~~~~~~~~~~
@@ -1956,6 +1963,8 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
       i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows_row+1);
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
+      PetscIntKokkosView write_oob_count_d("write_oob_count_d", 1);
+      Kokkos::deep_copy(exec, write_oob_count_d, (PetscInt)0);
 
       // Initialize first entry to zero - the rest get set below
       Kokkos::deep_copy(exec, Kokkos::subview(i_local_d, 0), (PetscInt)0);       
@@ -2030,11 +2039,33 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
             if (scratch_indices(j+1) > scratch_indices(j))
             {
                // Be careful to use the correct i_idx_is_row index into i_local_d here
-               j_local_d(i_local_d(i_idx_is_row) + scratch_indices(j)) = smap_d(device_local_j[device_local_i[i] + j]) - 1;
-               a_local_d(i_local_d(i_idx_is_row) + scratch_indices(j)) = device_local_vals[device_local_i[i] + j];            
+               const PetscInt out_idx = i_local_d(i_idx_is_row) + scratch_indices(j);
+               if (out_idx >= 0 && out_idx < nnzs_match_local)
+               {
+                  j_local_d(out_idx) = smap_d(device_local_j[device_local_i[i] + j]) - 1;
+                  a_local_d(out_idx) = device_local_vals[device_local_i[i] + j];
+               }
+               else
+               {
+                  Kokkos::atomic_add(&write_oob_count_d(0), (PetscInt)1);
+               }
             }
          });
       });  
+
+      exec.fence();
+      auto write_oob_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), write_oob_count_d);
+      if (write_oob_count_h(0) > 0)
+      {
+         MPI_Comm comm = MPI_COMM_NULL;
+         PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+         int rank = -1;
+         MPI_Comm_rank(comm, &rank);
+         fprintf(stderr,
+            "[PFLARE][rank %d] MatCreateSubMatrix_Seq_kokkos write OOB count=%" PetscInt_FMT " (nnz_alloc=%" PetscInt_FMT ", row_n=%" PetscInt_FMT ", col_n=%" PetscInt_FMT ")\\n",
+            rank, write_oob_count_h(0), nnzs_match_local, local_rows_row, local_cols_col);
+         fflush(stderr);
+      }
    }
    // If we're reusing, we can just write directly to the existing views
    else
@@ -2155,17 +2186,6 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
          PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
 {
-   {
-      MPI_Comm comm = MPI_COMM_NULL;
-      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
-      int rank = -1;
-      MPI_Comm_rank(comm, &rank);
-      fprintf(stderr,
-         "[PFLARE][rank %d] enter MatCreateSubMatrix_kokkos_view(reuse=%d, row_n=%zu, col_n=%zu, g_rows=%" PetscInt_FMT ", g_cols=%" PetscInt_FMT ")\\n",
-         rank, reuse_int, (size_t)is_row_d_d.extent(0), (size_t)is_col_d_d.extent(0), global_rows_row, global_cols_col);
-      fflush(stderr);
-   }
-
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -2483,18 +2503,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                      const int reuse_int, Mat *output_mat, \
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
-
-   {
-      MPI_Comm comm = MPI_COMM_NULL;
-      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
-      int rank = -1;
-      MPI_Comm_rank(comm, &rank);
-      fprintf(stderr,
-         "[PFLARE][rank %d] enter MatCreateSubMatrix_kokkos(reuse=%d, level=%d, row_fine=%d, col_fine=%d)\\n",
-         rank, reuse_int, our_level, is_row_fine_int, is_col_fine_int);
-      fflush(stderr);
-   }
-
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));  
