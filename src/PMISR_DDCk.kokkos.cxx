@@ -678,6 +678,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
    intKokkosView cf_markers_nonlocal_d;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
@@ -724,7 +725,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    int *cf_markers_nonlocal_d_ptr = NULL;
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
    PetscMemType mtype;
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // The off-diagonal component requires some comms which we can start now
    if (mpi)
