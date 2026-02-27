@@ -83,16 +83,27 @@ jobs:
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}      
-      - name: Build Docker image for pull requests
+      - name: Build and push Docker image for non-pull-request events
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
+          push: true
           file: ./dockerfiles/Dockerfile
-          tags: |
-            stevendargaville/pflare:latest
-            pflare:pr-ci
+          tags: stevendargaville/pflare:latest
+          build-args: |
+            BRANCH=${{ env.BRANCH }}
+            ARCH=arch-linux-c-opt
+
+      - name: Build Docker image for pull requests
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v2
+        with:
+          platforms: linux/amd64
+          push: false
+          load: true
+          file: ./dockerfiles/Dockerfile
+          tags: pflare:pr-ci
           build-args: |
             BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt

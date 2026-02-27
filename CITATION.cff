@@ -1,0 +1,63 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the following metadata."
+title: "PFLARE"
+abstract: "A library containing methods which can be used to solve linear systems in parallel with PETSc, with interfaces in C/Fortran/Python. It aims to provide fast & scalable iterative methods for asymmetric linear systems, in parallel and on both CPUs and GPUs."
+authors:
+  - family-names: "Dargaville"
+    given-names: "S."
+repository-code: "https://github.com/PFLAREProject/PFLARE"
+license: "MIT"
+keywords:
+  - "linear-algebra"
+  - "petsc"
+  - "multigrid"
+  - "air"
+  - "gpu"
+  - "hpc"
+references:
+  - type: article
+    title: "AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport"
+    authors:
+      - family-names: "Dargaville"
+        given-names: "S."
+      - family-names: "Smedley-Stevenson"
+        given-names: "R. P."
+      - family-names: "Smith"
+        given-names: "P. N."
+      - family-names: "Pain"
+        given-names: "C. C."
+    journal: "Journal of Computational Physics"
+    volume: 518
+    year: 2024
+    pages: "113342"
+    doi: "10.1016/j.jcp.2024.113342"
+  - type: article
+    title: "Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport"
+    authors:
+      - family-names: "Dargaville"
+        given-names: "S."
+      - family-names: "Smedley-Stevenson"
+        given-names: "R. P."
+      - family-names: "Smith"
+        given-names: "P. N."
+      - family-names: "Pain"
+        given-names: "C. C."
+    journal: "The International Journal of High Performance Computing Applications"
+    volume: 39
+    issue: 3
+    year: 2025
+    pages: "364-384"
+    doi: " https://doi.org/10.1177/10943420241304759"
+  - type: article
+    title: "Solving advection equations with reduction multigrids on GPUs"
+    authors:
+      - family-names: "Dargaville"
+        given-names: "S."
+      - family-names: "Smedley-Stevenson"
+        given-names: "R. P."
+      - family-names: "Smith"
+        given-names: "P. N."
+      - family-names: "Pain"
+        given-names: "C. C."
+    year: 2025
+    url: "http://arxiv.org/abs/2508.17517"
