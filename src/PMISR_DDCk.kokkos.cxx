@@ -203,10 +203,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscIntKokkosView invalid_nonlocal_neighbor_index_count_d("invalid_nonlocal_neighbor_index_count_d", 1);
    PetscIntKokkosView invalid_local_store_index_count_d("invalid_local_store_index_count_d", 1);
    PetscIntKokkosView invalid_nonlocal_store_index_count_d("invalid_nonlocal_store_index_count_d", 1);
+   PetscIntKokkosView invalid_local_rowptr_runtime_count_d("invalid_local_rowptr_runtime_count_d", 1);
+   PetscIntKokkosView invalid_nonlocal_rowptr_runtime_count_d("invalid_nonlocal_rowptr_runtime_count_d", 1);
    Kokkos::deep_copy(exec, invalid_local_neighbor_index_count_d, (PetscInt)0);
    Kokkos::deep_copy(exec, invalid_nonlocal_neighbor_index_count_d, (PetscInt)0);
    Kokkos::deep_copy(exec, invalid_local_store_index_count_d, (PetscInt)0);
    Kokkos::deep_copy(exec, invalid_nonlocal_store_index_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_local_rowptr_runtime_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_nonlocal_rowptr_runtime_count_d, (PetscInt)0);
 
    if (local_cols != local_rows)
    {
@@ -227,12 +231,26 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // measure_local_d(i) = generator.drand(0., 1.);
       // random_pool.free_state(generator);
          
-      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+      const PetscInt row_b_local = device_local_i[i];
+      const PetscInt row_e_local = device_local_i[i + 1];
+      if (row_b_local < 0 || row_e_local < row_b_local)
+      {
+         Kokkos::atomic_add(&invalid_local_rowptr_runtime_count_d(0), (PetscInt)1);
+         return;
+      }
+      const PetscInt ncols_local = row_e_local - row_b_local;
       measure_local_d(i) += ncols_local;
 
       if (mpi)
       {
-         PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+         const PetscInt row_b_nonlocal = device_nonlocal_i[i];
+         const PetscInt row_e_nonlocal = device_nonlocal_i[i + 1];
+         if (row_b_nonlocal < 0 || row_e_nonlocal < row_b_nonlocal)
+         {
+            Kokkos::atomic_add(&invalid_nonlocal_rowptr_runtime_count_d(0), (PetscInt)1);
+            return;
+         }
+         PetscInt ncols_nonlocal = row_e_nonlocal - row_b_nonlocal;
          measure_local_d(i) += ncols_nonlocal;
       }
       // Flip the sign if pmis
@@ -363,7 +381,15 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             // Check this row isn't already marked
             if (cf_markers_d(i) == 0)
             {
-               const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+               const PetscInt row_b_local = device_local_i[i];
+               const PetscInt row_e_local = device_local_i[i + 1];
+               if (row_b_local < 0 || row_e_local < row_b_local)
+               {
+                  Kokkos::atomic_add(&invalid_local_rowptr_runtime_count_d(0), (PetscInt)1);
+                  Kokkos::single(Kokkos::PerTeam(t), [&]() { mark_d(i) = false; });
+                  return;
+               }
+               const PetscInt ncols_local = row_e_local - row_b_local;
 
                // Reduce over local columns to get the number of strong neighbours
                Kokkos::parallel_reduce(
@@ -430,7 +456,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Check this row isn't already marked
                if (mark_d(i))
                {
-                  PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+                  const PetscInt row_b_nonlocal = device_nonlocal_i[i];
+                  const PetscInt row_e_nonlocal = device_nonlocal_i[i + 1];
+                  if (row_b_nonlocal < 0 || row_e_nonlocal < row_b_nonlocal)
+                  {
+                     Kokkos::atomic_add(&invalid_nonlocal_rowptr_runtime_count_d(0), (PetscInt)1);
+                     return;
+                  }
+                  PetscInt ncols_nonlocal = row_e_nonlocal - row_b_nonlocal;
 
                   // Reduce over nonlocal columns to get the number of strong neighbours
                   Kokkos::parallel_reduce(
@@ -488,7 +521,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Check if this node has been assigned during this top loop
                if (cf_markers_d(i) == loops_through)
                {
-                  PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+                  const PetscInt row_b_nonlocal = device_nonlocal_i[i];
+                  const PetscInt row_e_nonlocal = device_nonlocal_i[i + 1];
+                  if (row_b_nonlocal < 0 || row_e_nonlocal < row_b_nonlocal)
+                  {
+                     Kokkos::atomic_add(&invalid_nonlocal_rowptr_runtime_count_d(0), (PetscInt)1);
+                     return;
+                  }
+                  PetscInt ncols_nonlocal = row_e_nonlocal - row_b_nonlocal;
 
                   // For over nonlocal columns
                   Kokkos::parallel_for(
@@ -520,7 +560,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             // Check if this node has been assigned during this top loop
             if (cf_markers_d(i) == loops_through)
             {
-               const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+               const PetscInt row_b_local = device_local_i[i];
+               const PetscInt row_e_local = device_local_i[i + 1];
+               if (row_b_local < 0 || row_e_local < row_b_local)
+               {
+                  Kokkos::atomic_add(&invalid_local_rowptr_runtime_count_d(0), (PetscInt)1);
+                  return;
+               }
+               const PetscInt ncols_local = row_e_local - row_b_local;
 
                // For over nonlocal columns
                Kokkos::parallel_for(
@@ -607,18 +654,23 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    auto invalid_nonlocal_neighbor_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_neighbor_index_count_d);
    auto invalid_local_store_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_store_index_count_d);
    auto invalid_nonlocal_store_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_store_index_count_d);
+   auto invalid_local_rowptr_runtime_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_rowptr_runtime_count_d);
+   auto invalid_nonlocal_rowptr_runtime_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_rowptr_runtime_count_d);
    if (invalid_local_neighbor_index_count_h(0) > 0 || invalid_nonlocal_neighbor_index_count_h(0) > 0 ||
-       invalid_local_store_index_count_h(0) > 0 || invalid_nonlocal_store_index_count_h(0) > 0)
+       invalid_local_store_index_count_h(0) > 0 || invalid_nonlocal_store_index_count_h(0) > 0 ||
+       invalid_local_rowptr_runtime_count_h(0) > 0 || invalid_nonlocal_rowptr_runtime_count_h(0) > 0)
    {
       int rank = -1;
       MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
       fprintf(stderr,
-         "[PFLARE][rank %d] pmisr_kokkos invalid indices: local_neigh=%" PetscInt_FMT ", nonlocal_neigh=%" PetscInt_FMT ", local_store=%" PetscInt_FMT ", nonlocal_store=%" PetscInt_FMT "\\n",
+         "[PFLARE][rank %d] pmisr_kokkos invalid indices: local_neigh=%" PetscInt_FMT ", nonlocal_neigh=%" PetscInt_FMT ", local_store=%" PetscInt_FMT ", nonlocal_store=%" PetscInt_FMT ", local_rowptr_runtime=%" PetscInt_FMT ", nonlocal_rowptr_runtime=%" PetscInt_FMT "\n",
          rank,
          invalid_local_neighbor_index_count_h(0),
          invalid_nonlocal_neighbor_index_count_h(0),
          invalid_local_store_index_count_h(0),
-         invalid_nonlocal_store_index_count_h(0));
+         invalid_nonlocal_store_index_count_h(0),
+         invalid_local_rowptr_runtime_count_h(0),
+         invalid_nonlocal_rowptr_runtime_count_h(0));
       fflush(stderr);
    }
 

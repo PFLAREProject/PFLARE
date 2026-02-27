@@ -60,6 +60,63 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
 
+   auto exec = PetscGetKokkosExecutionSpace();
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+
+   ConstMatRowMapKokkosView local_i_d(device_local_i, local_rows + 1);
+   PetscInt bad_local_rowptr = 0, bad_local_colidx = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, local_rows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+         const PetscInt b = local_i_d(i), e = local_i_d(i + 1);
+         if (b < 0 || e < b) thread_sum++;
+      }, bad_local_rowptr);
+   auto local_nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(local_i_d, local_rows));
+   const PetscInt local_nnz = local_nnz_h();
+   if (local_nnz > 0)
+   {
+      ConstMatColIdxKokkosView local_j_d(device_local_j, local_nnz);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_nnz),
+         KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+            const PetscInt c = local_j_d(k);
+            if (c < 0 || c >= local_cols) thread_sum++;
+         }, bad_local_colidx);
+   }
+
+   PetscInt bad_nonlocal_rowptr = 0, bad_nonlocal_colidx = 0;
+   if (mpi)
+   {
+      ConstMatRowMapKokkosView nonlocal_i_d(device_nonlocal_i, local_rows + 1);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt b = nonlocal_i_d(i), e = nonlocal_i_d(i + 1);
+            if (b < 0 || e < b) thread_sum++;
+         }, bad_nonlocal_rowptr);
+      auto nonlocal_nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(nonlocal_i_d, local_rows));
+      const PetscInt nonlocal_nnz = nonlocal_nnz_h();
+      if (nonlocal_nnz > 0)
+      {
+         ConstMatColIdxKokkosView nonlocal_j_d(device_nonlocal_j, nonlocal_nnz);
+         Kokkos::parallel_reduce(
+            Kokkos::RangePolicy<>(exec, 0, nonlocal_nnz),
+            KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+               const PetscInt c = nonlocal_j_d(k);
+               if (c < 0 || c >= cols_ao) thread_sum++;
+            }, bad_nonlocal_colidx);
+      }
+   }
+
+   if (bad_local_rowptr > 0 || bad_local_colidx > 0 || bad_nonlocal_rowptr > 0 || bad_nonlocal_colidx > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] generate_one_point_with_one_entry_from_sparse_kokkos CSR anomalies: local_rowptr=%" PetscInt_FMT ", local_colidx=%" PetscInt_FMT ", nonlocal_rowptr=%" PetscInt_FMT ", nonlocal_colidx=%" PetscInt_FMT "\n",
+         rank, bad_local_rowptr, bad_local_colidx, bad_nonlocal_rowptr, bad_nonlocal_colidx);
+      fflush(stderr);
+   }
+
    // ~~~~~~~~~~~~
    // Get the number of nnzs
    // ~~~~~~~~~~~~
@@ -266,7 +323,6 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    });      
 
    // Let's make sure everything on the device is finished
-   auto exec = PetscGetKokkosExecutionSpace();
    exec.fence();
    
    // We can create our local diagonal block matrix directly on the device
@@ -393,6 +449,35 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
    auto exec = PetscGetKokkosExecutionSpace();
+
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   PetscInt invalid_fine_rows = 0, invalid_coarse_rows = 0;
+   if (local_rows_fine > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows_fine),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt row_index = fine_view_d(i) - global_row_start;
+            if (row_index < 0 || row_index >= local_rows) thread_sum++;
+         }, invalid_fine_rows);
+   }
+   if (local_rows_coarse > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows_coarse),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt row_index = coarse_view_d(i) - global_row_start;
+            if (row_index < 0 || row_index >= local_rows) thread_sum++;
+         }, invalid_coarse_rows);
+   }
+   if (invalid_fine_rows > 0 || invalid_coarse_rows > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] compute_P_from_W_kokkos invalid mapped rows: fine_bad=%" PetscInt_FMT ", coarse_bad=%" PetscInt_FMT " (local_rows=%" PetscInt_FMT ")\n",
+         rank, invalid_fine_rows, invalid_coarse_rows, local_rows);
+      fflush(stderr);
+   }
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -881,6 +966,26 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;  
    
    auto exec = PetscGetKokkosExecutionSpace();   
+
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   PetscInt invalid_orig_col_idx = 0;
+   if (size_cols > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, size_cols),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt idx = orig_view_d(i);
+            if (idx < 0 || idx >= global_fine_size) thread_sum++;
+         }, invalid_orig_col_idx);
+   }
+   if (invalid_orig_col_idx > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] compute_R_from_Z_kokkos invalid orig fine column indices=%" PetscInt_FMT " (size_cols=%" PetscInt_FMT ", global_fine=%" PetscInt_FMT ")\n",
+         rank, invalid_orig_col_idx, size_cols, global_fine_size);
+      fflush(stderr);
+   }
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)

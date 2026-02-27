@@ -180,6 +180,75 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_vals_output, &mtype));
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype));
 
+   auto exec = PetscGetKokkosExecutionSpace();
+   int rank = -1;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+
+   auto check_rowptr = [&](const PetscInt *rowptr, PetscInt nrows, PetscInt &bad_count) {
+      ConstMatRowMapKokkosView i_d(rowptr, nrows + 1);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, nrows),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt b = i_d(i), e = i_d(i + 1);
+            if (b < 0 || e < b) thread_sum++;
+         },
+         bad_count);
+   };
+
+   auto check_colidx = [&](const PetscInt *rowptr, PetscInt nrows, const PetscInt *colidx, PetscInt upper_bound, PetscInt &bad_count) {
+      ConstMatRowMapKokkosView i_d(rowptr, nrows + 1);
+      auto nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(i_d, nrows));
+      const PetscInt nnz = nnz_h();
+      if (nnz > 0)
+      {
+         ConstMatColIdxKokkosView j_d(colidx, nnz);
+         Kokkos::parallel_reduce(
+            Kokkos::RangePolicy<>(exec, 0, nnz),
+            KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+               const PetscInt c = j_d(k);
+               if (c < 0 || c >= upper_bound) thread_sum++;
+            },
+            bad_count);
+      }
+   };
+
+   PetscInt bad_local_input_rowptr = 0, bad_local_input_colidx = 0;
+   PetscInt bad_local_sparsity_rowptr = 0, bad_local_sparsity_colidx = 0;
+   PetscInt bad_submat_rowptr = 0, bad_submat_colidx = 0;
+   check_rowptr(device_local_i_input, local_rows, bad_local_input_rowptr);
+   check_colidx(device_local_i_input, local_rows, device_local_j_input, local_cols, bad_local_input_colidx);
+   check_rowptr(device_local_i_sparsity, local_rows, bad_local_sparsity_rowptr);
+   check_colidx(device_local_i_sparsity, local_rows, device_local_j_sparsity, cols_ad, bad_local_sparsity_colidx);
+   check_rowptr(device_submat_i, cols_ao, bad_submat_rowptr);
+   check_colidx(device_submat_i, cols_ao, device_submat_j, cols_ad + cols_ao, bad_submat_colidx);
+
+   PetscInt bad_nonlocal_input_rowptr = 0, bad_nonlocal_input_colidx = 0;
+   PetscInt bad_nonlocal_sparsity_rowptr = 0, bad_nonlocal_sparsity_colidx = 0;
+   if (mpi)
+   {
+      check_rowptr(device_nonlocal_i_input, local_rows, bad_nonlocal_input_rowptr);
+      check_colidx(device_nonlocal_i_input, local_rows, device_nonlocal_j_input, cols_ao_input, bad_nonlocal_input_colidx);
+      check_rowptr(device_nonlocal_i_sparsity, local_rows, bad_nonlocal_sparsity_rowptr);
+      check_colidx(device_nonlocal_i_sparsity, local_rows, device_nonlocal_j_sparsity, cols_ao, bad_nonlocal_sparsity_colidx);
+   }
+
+   if (bad_local_input_rowptr > 0 || bad_local_input_colidx > 0 ||
+       bad_local_sparsity_rowptr > 0 || bad_local_sparsity_colidx > 0 ||
+       bad_submat_rowptr > 0 || bad_submat_colidx > 0 ||
+       bad_nonlocal_input_rowptr > 0 || bad_nonlocal_input_colidx > 0 ||
+       bad_nonlocal_sparsity_rowptr > 0 || bad_nonlocal_sparsity_colidx > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] mat_mult_powers_share_sparsity_kokkos CSR anomalies: lin_r=%" PetscInt_FMT ", lin_c=%" PetscInt_FMT ", lsp_r=%" PetscInt_FMT ", lsp_c=%" PetscInt_FMT ", sub_r=%" PetscInt_FMT ", sub_c=%" PetscInt_FMT ", nin_r=%" PetscInt_FMT ", nin_c=%" PetscInt_FMT ", nsp_r=%" PetscInt_FMT ", nsp_c=%" PetscInt_FMT "\n",
+         rank,
+         bad_local_input_rowptr, bad_local_input_colidx,
+         bad_local_sparsity_rowptr, bad_local_sparsity_colidx,
+         bad_submat_rowptr, bad_submat_colidx,
+         bad_nonlocal_input_rowptr, bad_nonlocal_input_colidx,
+         bad_nonlocal_sparsity_rowptr, bad_nonlocal_sparsity_colidx);
+      fflush(stderr);
+   }
+
    // ~~~~~~~~~~~~~~
    // Build a mapping from the input matrix's nonlocal column indices to the 
    // sparsity matrix's column space ("local" submat column space), which is defined as:
@@ -271,7 +340,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       sparsity_max_nnz = sparsity_max_nnz_local + sparsity_max_nnz_nonlocal; 
    }
 
-   auto exec = PetscGetKokkosExecutionSpace();
+   // Reuse the execution space selected above
 
    // ~~~~~~~~~~~~~
    // Now we have to be careful 
