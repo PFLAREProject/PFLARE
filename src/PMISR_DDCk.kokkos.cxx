@@ -1017,6 +1017,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Have to store the diagonal entry
    PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
    Kokkos::deep_copy(diag_entry_d, 0);
+   PetscIntKokkosView invalid_local_marker_index_count_d("diagdom_invalid_local_marker_index_count_d", 1);
+   PetscIntKokkosView invalid_nonlocal_marker_index_count_d("diagdom_invalid_nonlocal_marker_index_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_local_marker_index_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_nonlocal_marker_index_count_d, (PetscInt)0);
 
    // Scoping to reduce peak memory
    {
@@ -1047,6 +1051,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
                   // Get this local column in the input_mat
                   const PetscInt target_col = device_local_j[device_local_i[i] + j];
+                  if (target_col < 0 || target_col >= local_rows)
+                  {
+                     Kokkos::atomic_add(&invalid_local_marker_index_count_d(0), (PetscInt)1);
+                     return;
+                  }
                   // Is this column fine? F_POINT == -1
                   if (cf_markers_d(target_col) == -1)
                   {               
@@ -1122,6 +1131,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
                      // This is the non-local column we have to check is present
                      const PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                     if (target_col < 0 || target_col >= cols_ao)
+                     {
+                        Kokkos::atomic_add(&invalid_nonlocal_marker_index_count_d(0), (PetscInt)1);
+                        return;
+                     }
                      // Is this column in the input IS? F_POINT == -1
                      if (cf_markers_nonlocal_d(target_col) == -1)
                      {               
@@ -1156,6 +1170,19 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
          diag_dom_ratio_d(i) = 0.0;
       }
    });   
+
+   exec.fence();
+   auto invalid_local_marker_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_marker_index_count_d);
+   auto invalid_nonlocal_marker_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_marker_index_count_d);
+   if (invalid_local_marker_index_count_h(0) > 0 || invalid_nonlocal_marker_index_count_h(0) > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] MatDiagDomRatio_kokkos invalid marker indices: local=%" PetscInt_FMT ", nonlocal=%" PetscInt_FMT "\\n",
+         rank, invalid_local_marker_index_count_h(0), invalid_nonlocal_marker_index_count_h(0));
+      fflush(stderr);
+   }
 
    return;
 }

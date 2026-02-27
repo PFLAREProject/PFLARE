@@ -106,11 +106,16 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
    }
    else
    {
+      PetscIntKokkosView bad_lookup_count_d("rewrite_j_bad_lookup_count_d", 1);
+      Kokkos::deep_copy(exec, bad_lookup_count_d, (PetscInt)0);
+
       // Binary search sorted colmap to find our local index
       // Originally used Kokkos::UnorderedMap here but it only handles up to uint32_t
       // entries
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
+         Kokkos::RangePolicy<>(exec, 0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) {
+
+            const PetscInt target = j_nonlocal_d(i);
 
             PetscInt low = 0;
             PetscInt count = col_ao_output; // Number of elements in colmap_output_d
@@ -127,8 +132,26 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
                   count = step;
                }
             }
-            j_nonlocal_d(i) = low;
+
+            if (low < 0 || low >= col_ao_output || colmap_output_d(low) != target)
+            {
+               Kokkos::atomic_add(&bad_lookup_count_d(0), (PetscInt)1);
+               j_nonlocal_d(i) = 0;
+            }
+            else
+            {
+               j_nonlocal_d(i) = low;
+            }
       });         
+
+      auto bad_lookup_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bad_lookup_count_d);
+      if (bad_lookup_count_h(0) > 0)
+      {
+         fprintf(stderr,
+            "[PFLARE] rewrite_j_global_to_local unmapped global columns=%" PetscInt_FMT " (col_ao_output=%" PetscInt_FMT ")\\n",
+            bad_lookup_count_h(0), col_ao_output);
+         fflush(stderr);
+      }
    }
    exec.fence();
 

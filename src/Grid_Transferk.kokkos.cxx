@@ -361,23 +361,52 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    }          
    
    // Filling the matrix is easy as we know we only have one non-zero per row
+   PetscIntKokkosView invalid_fill_write_count_d("generate_one_point_invalid_fill_write_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_fill_write_count_d, (PetscInt)0);
+
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
       // If our max val is in the local block
       if (has_entry_local_d(i) > 0) {
-         j_local_d(i_local_d(i)) = max_col_row_d(i);
-         a_local_d(i_local_d(i)) = 1.0;
+         const PetscInt out_idx = i_local_d(i);
+         const PetscInt out_col = max_col_row_d(i);
+         if (out_idx < 0 || out_idx >= nnzs_match_local || out_col < 0 || out_col >= local_cols)
+         {
+            Kokkos::atomic_add(&invalid_fill_write_count_d(0), (PetscInt)1);
+         }
+         else
+         {
+            j_local_d(out_idx) = out_col;
+            a_local_d(out_idx) = 1.0;
+         }
       }
       else if (mpi && has_entry_nonlocal_d(i) > 0)
       {
-         j_nonlocal_d(i_nonlocal_d(i)) = max_col_row_d(i);
-         a_nonlocal_d(i_nonlocal_d(i)) = 1.0;         
+         const PetscInt out_idx = i_nonlocal_d(i);
+         const PetscInt out_col = max_col_row_d(i);
+         if (out_idx < 0 || out_idx >= nnzs_match_nonlocal || out_col < 0 || out_col >= cols_ao)
+         {
+            Kokkos::atomic_add(&invalid_fill_write_count_d(0), (PetscInt)1);
+         }
+         else
+         {
+            j_nonlocal_d(out_idx) = out_col;
+            a_nonlocal_d(out_idx) = 1.0;
+         }
       }   
    });      
 
    // Let's make sure everything on the device is finished
    exec.fence();
+   auto invalid_fill_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_fill_write_count_d);
+   if (invalid_fill_write_count_h(0) > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] generate_one_point_with_one_entry_from_sparse_kokkos invalid writes=%" PetscInt_FMT "\\n",
+         rank, invalid_fill_write_count_h(0));
+      fflush(stderr);
+   }
    
    // We can create our local diagonal block matrix directly on the device
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
@@ -541,6 +570,11 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
    {
+      PetscIntKokkosView invalid_row_map_count_d("compute_P_invalid_row_map_count_d", 1);
+      PetscIntKokkosView invalid_write_count_d("compute_P_invalid_write_count_d", 1);
+      Kokkos::deep_copy(exec, invalid_row_map_count_d, (PetscInt)0);
+      Kokkos::deep_copy(exec, invalid_write_count_d, (PetscInt)0);
+
       // ~~~~~~~~~~~~
       // Get the number of nnzs
       // ~~~~~~~~~~~~
@@ -565,6 +599,11 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
+            if (row_index < 0 || row_index >= local_rows)
+            {
+               Kokkos::atomic_add(&invalid_row_map_count_d(0), (PetscInt)1);
+               return;
+            }
             // Still using i here (the local index into W)
             const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
             nnz_match_local_row_d(row_index) = ncols_local;
@@ -584,6 +623,11 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
             // Convert to global coarse index into a local index into the full matrix
             PetscInt row_index = coarse_view_d(i) - global_row_start;
+               if (row_index < 0 || row_index >= local_rows)
+               {
+                  Kokkos::atomic_add(&invalid_row_map_count_d(0), (PetscInt)1);
+                  return;
+               }
             nnz_match_local_row_d(row_index)++;
          }); 
       }  
@@ -657,6 +701,11 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;       
+            if (row_index < 0 || row_index >= local_rows)
+            {
+               Kokkos::atomic_add(&invalid_row_map_count_d(0), (PetscInt)1);
+               return;
+            }
 
             // The start of our row index comes from the scan
             i_local_d(row_index + 1) = nnz_match_local_row_d(row_index);   
@@ -670,6 +719,11 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
          // Convert to global coarse index into a local index into the full matrix
          PetscInt row_index = coarse_view_d(i) - global_row_start;
+         if (row_index < 0 || row_index >= local_rows)
+         {
+            Kokkos::atomic_add(&invalid_row_map_count_d(0), (PetscInt)1);
+            return;
+         }
 
          // The start of our row index comes from the scan
          i_local_d(row_index + 1) = nnz_match_local_row_d(row_index);
@@ -687,15 +741,30 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
+            if (row_index < 0 || row_index >= local_rows)
+            {
+               Kokkos::single(Kokkos::PerTeam(t), [&]() {
+                  Kokkos::atomic_add(&invalid_row_map_count_d(0), (PetscInt)1);
+               });
+               return;
+            }
             // Still using i here (the local index into W)
             const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in W
             Kokkos::parallel_for(
                Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-
-               j_local_d(i_local_d(row_index) + j) = device_local_j[device_local_i[i] + j];
-               a_local_d(i_local_d(row_index) + j) = device_local_vals[device_local_i[i] + j];
+               const PetscInt out_idx = i_local_d(row_index) + j;
+               const PetscInt out_col = device_local_j[device_local_i[i] + j];
+               if (out_idx < 0 || out_idx >= nnzs_match_local || out_col < 0 || out_col >= local_cols)
+               {
+                  Kokkos::atomic_add(&invalid_write_count_d(0), (PetscInt)1);
+               }
+               else
+               {
+                  j_local_d(out_idx) = out_col;
+                  a_local_d(out_idx) = device_local_vals[device_local_i[i] + j];
+               }
                      
             });     
 
@@ -709,12 +778,32 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
                   // We keep the existing local indices in the off-diagonal block here
                   // we have all the same columns as W and hence the same garray
-                  j_nonlocal_d(i_nonlocal_d(row_index) + j) = device_nonlocal_j[device_nonlocal_i[i] + j];
-                  a_nonlocal_d(i_nonlocal_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  const PetscInt out_idx = i_nonlocal_d(row_index) + j;
+                  const PetscInt out_col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                  if (out_idx < 0 || out_idx >= nnzs_match_nonlocal || out_col < 0 || out_col >= cols_ao)
+                  {
+                     Kokkos::atomic_add(&invalid_write_count_d(0), (PetscInt)1);
+                  }
+                  else
+                  {
+                     j_nonlocal_d(out_idx) = out_col;
+                     a_nonlocal_d(out_idx) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  }
                         
                });          
             }
       }); 
+
+      exec.fence();
+      auto invalid_row_map_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_row_map_count_d);
+      auto invalid_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_write_count_d);
+      if (invalid_row_map_count_h(0) > 0 || invalid_write_count_h(0) > 0)
+      {
+         fprintf(stderr,
+            "[PFLARE][rank %d] compute_P_from_W_kokkos invalid row maps=%" PetscInt_FMT ", invalid writes=%" PetscInt_FMT "\\n",
+            rank, invalid_row_map_count_h(0), invalid_write_count_h(0));
+         fflush(stderr);
+      }
    }
    // If we're reusing, we can just write directly to the existing views
    else
@@ -750,6 +839,9 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       if (mpi) i_nonlocal_const_d = ConstMatRowMapKokkosView(device_nonlocal_i_ouput, local_rows+1);        
 
       // Only have to write W as the identity block cannot change
+      PetscIntKokkosView invalid_reuse_write_count_d("compute_P_reuse_invalid_write_count_d", 1);
+      Kokkos::deep_copy(exec, invalid_reuse_write_count_d, (PetscInt)0);
+
       // Loop over the rows of W - annoying we have const views as this is just the same loop as above
       Kokkos::parallel_for(
          Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_fine, Kokkos::AUTO()),
@@ -760,14 +852,28 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
+            if (row_index < 0 || row_index >= local_rows)
+            {
+               Kokkos::single(Kokkos::PerTeam(t), [&]() {
+                  Kokkos::atomic_add(&invalid_reuse_write_count_d(0), (PetscInt)1);
+               });
+               return;
+            }
             // Still using i here (the local index into W)
             const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
 
             // For over local columns - copy in W
             Kokkos::parallel_for(
                Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-
-               a_local_d(i_local_const_d(row_index) + j) = device_local_vals[device_local_i[i] + j];
+               const PetscInt out_idx = i_local_const_d(row_index) + j;
+               if (out_idx < 0 || out_idx >= (PetscInt)a_local_d.extent(0))
+               {
+                  Kokkos::atomic_add(&invalid_reuse_write_count_d(0), (PetscInt)1);
+               }
+               else
+               {
+                  a_local_d(out_idx) = device_local_vals[device_local_i[i] + j];
+               }
                      
             });     
 
@@ -781,11 +887,29 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
                   // We keep the existing local indices in the off-diagonal blocl here
                   // we have all the same columns as W and hence the same garray
-                  a_nonlocal_d(i_nonlocal_const_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  const PetscInt out_idx = i_nonlocal_const_d(row_index) + j;
+                  if (out_idx < 0 || out_idx >= (PetscInt)a_nonlocal_d.extent(0))
+                  {
+                     Kokkos::atomic_add(&invalid_reuse_write_count_d(0), (PetscInt)1);
+                  }
+                  else
+                  {
+                     a_nonlocal_d(out_idx) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  }
                         
                });          
             }
       });   
+
+      exec.fence();
+      auto invalid_reuse_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_reuse_write_count_d);
+      if (invalid_reuse_write_count_h(0) > 0)
+      {
+         fprintf(stderr,
+            "[PFLARE][rank %d] compute_P_from_W_kokkos reuse invalid writes=%" PetscInt_FMT "\\n",
+            rank, invalid_reuse_write_count_h(0));
+         fflush(stderr);
+      }
 
       // Let's make sure everything on the device is finished
       exec.fence();      
@@ -1069,6 +1193,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
    PetscIntKokkosView invalid_local_map_write_count_d("invalid_local_map_write_count_d", 1);
    Kokkos::deep_copy(exec, invalid_local_map_write_count_d, (PetscInt)0);
+   PetscIntKokkosView invalid_reuse_write_count_d("compute_R_reuse_invalid_write_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_reuse_write_count_d, (PetscInt)0);
 
    // Only need things to do with the sparsity pattern if we're not reusing
    if (!reuse_int)
@@ -1313,7 +1439,15 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
                // If we're at or after the C point identity, our index into R gets a +1
                // so we skip over writing to that index in R
                if (j_local_const_d(i_local_const_d(row_index) + j) >= coarse_view_d(i) - global_row_start) offset = 1;
-               a_local_d(i_local_const_d(row_index) + j + offset) = device_local_vals[device_local_i[i] + j];
+               const PetscInt out_idx = i_local_const_d(row_index) + j + offset;
+               if (out_idx < 0 || out_idx >= (PetscInt)a_local_d.extent(0))
+               {
+                  Kokkos::atomic_add(&invalid_reuse_write_count_d(0), (PetscInt)1);
+               }
+               else
+               {
+                  a_local_d(out_idx) = device_local_vals[device_local_i[i] + j];
+               }
             });     
 
             // For over nonlocal columns - copy in Z - identical structure in the off-diag block
@@ -1326,11 +1460,29 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
                   // We keep the existing local indices in the off-diagonal block here
                   // we have all the same columns as Z and hence the same garray
-                  a_nonlocal_d(i_nonlocal_const_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  const PetscInt out_idx = i_nonlocal_const_d(row_index) + j;
+                  if (out_idx < 0 || out_idx >= (PetscInt)a_nonlocal_d.extent(0))
+                  {
+                     Kokkos::atomic_add(&invalid_reuse_write_count_d(0), (PetscInt)1);
+                  }
+                  else
+                  {
+                     a_nonlocal_d(out_idx) = device_nonlocal_vals[device_nonlocal_i[i] + j];
+                  }
                         
                });          
             }
       });   
+
+      exec.fence();
+      auto invalid_reuse_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_reuse_write_count_d);
+      if (invalid_reuse_write_count_h(0) > 0)
+      {
+         fprintf(stderr,
+            "[PFLARE][rank %d] compute_R_from_Z_kokkos reuse invalid writes=%" PetscInt_FMT "\n",
+            rank, invalid_reuse_write_count_h(0));
+         fflush(stderr);
+      }
 
       exec.fence();
 

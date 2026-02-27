@@ -454,6 +454,9 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // We want two views in our scratch space, vals_temp and vals_prev
    policy.set_scratch_size(1, Kokkos::PerTeam(2 * per_view));
 
+   PetscIntKokkosView invalid_kernel_index_count_d("gmres_poly_invalid_kernel_index_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_kernel_index_count_d, (PetscInt)0);
+
    // Execute with scratch memory
    Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
 
@@ -529,11 +532,21 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
             if (row_of_col_j_local)
             {
                row_of_col_j = device_local_j_sparsity[device_local_i_sparsity[i] + j];
+               if (row_of_col_j < 0 || row_of_col_j >= local_rows)
+               {
+                  Kokkos::atomic_add(&invalid_kernel_index_count_d(0), (PetscInt)1);
+                  return;
+               }
                local_cols_row_of_col_j = device_local_i_input[row_of_col_j + 1] - device_local_i_input[row_of_col_j];    
             }
             else
             {
                row_of_col_j = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + (j - local_cols_row_i)];
+               if (row_of_col_j < 0 || row_of_col_j >= cols_ao)
+               {
+                  Kokkos::atomic_add(&invalid_kernel_index_count_d(0), (PetscInt)1);
+                  return;
+               }
             }
 
             // Get how many local and non-local columns there are in the row of column j     
@@ -665,12 +678,32 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
                   {
                      diag_increm = 1;
                   }
-                  device_local_vals_output[device_local_i_output[i] + j + diag_increm] += coeff_term * vals_temp[j];
+                  const PetscInt out_idx = device_local_i_output[i] + j + diag_increm;
+                  const PetscInt row_b = device_local_i_output[i];
+                  const PetscInt row_e = device_local_i_output[i + 1];
+                  if (out_idx < row_b || out_idx >= row_e)
+                  {
+                     Kokkos::atomic_add(&invalid_kernel_index_count_d(0), (PetscInt)1);
+                  }
+                  else
+                  {
+                     device_local_vals_output[out_idx] += coeff_term * vals_temp[j];
+                  }
                }
                // Nonlocal part
                else
                {
-                  device_nonlocal_vals_output[device_nonlocal_i_output[i] + (j - local_cols_row_i)] += coeff_term * vals_temp[j];
+                  const PetscInt out_idx = device_nonlocal_i_output[i] + (j - local_cols_row_i);
+                  const PetscInt row_b = device_nonlocal_i_output[i];
+                  const PetscInt row_e = device_nonlocal_i_output[i + 1];
+                  if (out_idx < row_b || out_idx >= row_e)
+                  {
+                     Kokkos::atomic_add(&invalid_kernel_index_count_d(0), (PetscInt)1);
+                  }
+                  else
+                  {
+                     device_nonlocal_vals_output[out_idx] += coeff_term * vals_temp[j];
+                  }
                }
             }
 
@@ -682,6 +715,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
          t.team_barrier();                
       }
    });
+
+   exec.fence();
+   auto invalid_kernel_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_kernel_index_count_d);
+   if (invalid_kernel_index_count_h(0) > 0)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] mat_mult_powers_share_sparsity_kokkos invalid kernel indices/writes=%" PetscInt_FMT "\n",
+         rank, invalid_kernel_index_count_h(0));
+      fflush(stderr);
+   }
     
    Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
    Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
