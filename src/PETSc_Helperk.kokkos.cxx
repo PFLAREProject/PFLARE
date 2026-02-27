@@ -16,6 +16,13 @@ struct PflareTraceScope {
    }
 };
 
+static void pflare_format_trace_label(char *buf, size_t buf_size, const char *func, const char *block_tag, const char *part_tag)
+{
+   if (!block_tag) block_tag = "other";
+   if (!part_tag) part_tag = "n/a";
+   snprintf(buf, buf_size, "%s block=%s part=%s", func, block_tag, part_tag);
+}
+
 static const char *pflare_submatrix_block_name(const int is_row_fine_int, const int is_col_fine_int)
 {
    if (is_row_fine_int == 1 && is_col_fine_int == 1) return "aff";
@@ -1943,9 +1950,11 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 // Does a MatGetSubMatrix for a sequential Kokkos matrix - the petsc version currently uses the host making it very slow
 // is_row_d_d and is_col_d_d must have the local indices in them
 // is_col must be sorted
-PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
+PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat, const char *block_tag = nullptr, const char *part_tag = nullptr)
 {
-   PflareTraceScope trace_scope("MatCreateSubMatrix_Seq_kokkos");
+   char trace_label[160];
+   pflare_format_trace_label(trace_label, sizeof(trace_label), "MatCreateSubMatrix_Seq_kokkos", block_tag, part_tag);
+   PflareTraceScope trace_scope(trace_label);
    PetscInt local_rows, local_cols;
    PetscInt nnzs_match_local;
 
@@ -2367,7 +2376,9 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
          PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat, const char *block_tag)
 {
-   PflareTraceScope trace_scope("MatCreateSubMatrix_kokkos_view");
+   char trace_label[160];
+   pflare_format_trace_label(trace_label, sizeof(trace_label), "MatCreateSubMatrix_kokkos_view", block_tag, "dispatch");
+   PflareTraceScope trace_scope(trace_label);
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -2448,7 +2459,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view dispatch block=%s part=local\n",
       rank, block_tag ? block_tag : "other");
    fflush(stderr);
-   MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
+   MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local, block_tag, "local");
 
    // The off-diagonal component requires some comms
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
@@ -2668,7 +2679,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view dispatch block=%s part=offdiag\n",
          rank, block_tag ? block_tag : "other");
       fflush(stderr);
-      MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal);
+      MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal, block_tag, "offdiag");
 
       // If it's our first time through we have to create our output matrix
       if (!reuse_int)
@@ -2728,8 +2739,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                      const int reuse_int, Mat *output_mat, \
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
-   PflareTraceScope trace_scope("MatCreateSubMatrix_kokkos");
    const char *block_tag = pflare_submatrix_block_name(is_row_fine_int, is_col_fine_int);
+   char trace_label[160];
+   pflare_format_trace_label(trace_label, sizeof(trace_label), "MatCreateSubMatrix_kokkos", block_tag, "entry");
+   PflareTraceScope trace_scope(trace_label);
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
    int rank = -1;
