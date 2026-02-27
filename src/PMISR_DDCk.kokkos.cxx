@@ -122,6 +122,25 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
    auto exec = PetscGetKokkosExecutionSpace();
 
+   PetscIntKokkosView invalid_local_neighbor_index_count_d("invalid_local_neighbor_index_count_d", 1);
+   PetscIntKokkosView invalid_nonlocal_neighbor_index_count_d("invalid_nonlocal_neighbor_index_count_d", 1);
+   PetscIntKokkosView invalid_local_store_index_count_d("invalid_local_store_index_count_d", 1);
+   PetscIntKokkosView invalid_nonlocal_store_index_count_d("invalid_nonlocal_store_index_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_local_neighbor_index_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_nonlocal_neighbor_index_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_local_store_index_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_nonlocal_store_index_count_d, (PetscInt)0);
+
+   if (local_cols != local_rows)
+   {
+      int rank = -1;
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] pmisr_kokkos local shape mismatch (local_rows=%" PetscInt_FMT ", local_cols=%" PetscInt_FMT ")\\n",
+         rank, local_rows, local_cols);
+      fflush(stderr);
+   }
+
    // Compute the measure
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
@@ -274,9 +293,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   Kokkos::TeamThreadRange(t, ncols_local),
                   [&](const PetscInt j, PetscInt& strong_count) {     
 
+                  const PetscInt target_col = device_local_j[device_local_i[i] + j];
+                  if (target_col < 0 || target_col >= local_rows)
+                  {
+                     Kokkos::atomic_add(&invalid_local_neighbor_index_count_d(0), (PetscInt)1);
+                     return;
+                  }
+
                   // Have to only check active strong neighbours
-                  if (measure_local_d(i) >= measure_local_d(device_local_j[device_local_i[i] + j]) && \
-                           cf_markers_d(device_local_j[device_local_i[i] + j]) == 0)
+                  if (measure_local_d(i) >= measure_local_d(target_col) && \
+                           cf_markers_d(target_col) == 0)
                   {
                      strong_count++;
                   }
@@ -334,8 +360,15 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal),
                      [&](const PetscInt j, PetscInt& strong_count) {     
 
-                     if (measure_local_d(i) >= measure_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j])  && \
-                              cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == 0)
+                     const PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                     if (target_col < 0 || target_col >= cols_ao)
+                     {
+                        Kokkos::atomic_add(&invalid_nonlocal_neighbor_index_count_d(0), (PetscInt)1);
+                        return;
+                     }
+
+                     if (measure_local_d(i) >= measure_nonlocal_d(target_col)  && \
+                              cf_markers_nonlocal_d(target_col) == 0)
                      {
                         strong_count++;
                      }
@@ -384,8 +417,15 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                   Kokkos::parallel_for(
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
+                        const PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                        if (target_col < 0 || target_col >= cols_ao)
+                        {
+                           Kokkos::atomic_add(&invalid_nonlocal_store_index_count_d(0), (PetscInt)1);
+                           return;
+                        }
+
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), 1);     
+                        Kokkos::atomic_store(&cf_markers_nonlocal_d(target_col), 1);
                   });     
                }
          });
@@ -409,10 +449,17 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                Kokkos::parallel_for(
                   Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
+                     const PetscInt target_col = device_local_j[device_local_i[i] + j];
+                     if (target_col < 0 || target_col >= local_rows)
+                     {
+                        Kokkos::atomic_add(&invalid_local_store_index_count_d(0), (PetscInt)1);
+                        return;
+                     }
+
                      // Needs to be atomic as may being set by many threads
                      // Tried a version where instead of a "push" approach I tried a pull approach
                      // that doesn't need an atomic, but it was slower
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
+                     Kokkos::atomic_store(&cf_markers_d(target_col), 1);
                });     
             }
       });   
@@ -478,6 +525,25 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int) cf_markers_d(i) *= -1;
    });
    exec.fence();
+
+   auto invalid_local_neighbor_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_neighbor_index_count_d);
+   auto invalid_nonlocal_neighbor_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_neighbor_index_count_d);
+   auto invalid_local_store_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_local_store_index_count_d);
+   auto invalid_nonlocal_store_index_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_nonlocal_store_index_count_d);
+   if (invalid_local_neighbor_index_count_h(0) > 0 || invalid_nonlocal_neighbor_index_count_h(0) > 0 ||
+       invalid_local_store_index_count_h(0) > 0 || invalid_nonlocal_store_index_count_h(0) > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] pmisr_kokkos invalid indices: local_neigh=%" PetscInt_FMT ", nonlocal_neigh=%" PetscInt_FMT ", local_store=%" PetscInt_FMT ", nonlocal_store=%" PetscInt_FMT "\\n",
+         rank,
+         invalid_local_neighbor_index_count_h(0),
+         invalid_nonlocal_neighbor_index_count_h(0),
+         invalid_local_store_index_count_h(0),
+         invalid_nonlocal_store_index_count_h(0));
+      fflush(stderr);
+   }
 
    return;
 }
