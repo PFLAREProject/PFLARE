@@ -6,12 +6,15 @@
 
 struct PflareTraceScope {
    const char *func;
+   int rank;
    explicit PflareTraceScope(const char *name) : func(name) {
-      fprintf(stderr, "[PFLARE][TRACE] ENTER %s\n", func);
+      rank = -1;
+      MPI_Comm_rank(PETSC_COMM_WORLD, &rank);
+      fprintf(stderr, "[PFLARE][TRACE][rank %d] ENTER %s\n", rank, func);
       fflush(stderr);
    }
    ~PflareTraceScope() {
-      fprintf(stderr, "[PFLARE][TRACE] EXIT %s\n", func);
+      fprintf(stderr, "[PFLARE][TRACE][rank %d] EXIT %s\n", rank, func);
       fflush(stderr);
    }
 };
@@ -2455,10 +2458,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
     }
 
    // The diagonal component
-   fprintf(stderr,
-      "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view dispatch block=%s part=local\n",
-      rank, block_tag ? block_tag : "other");
-   fflush(stderr);
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local, block_tag, "local");
 
    // The off-diagonal component requires some comms
@@ -2675,10 +2674,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       exec.fence();
 
       // We can now create the off-diagonal component
-      fprintf(stderr,
-         "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view dispatch block=%s part=offdiag\n",
-         rank, block_tag ? block_tag : "other");
-      fflush(stderr);
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal, block_tag, "offdiag");
 
       // If it's our first time through we have to create our output matrix
@@ -2745,12 +2740,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    PflareTraceScope trace_scope(trace_label);
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
-   int rank = -1;
-   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
-   fprintf(stderr,
-      "[PFLARE][rank %d] MatCreateSubMatrix_kokkos dispatch block=%s (reuse=%d, level=%d, row_fine=%d, col_fine=%d)\n",
-      rank, block_tag, reuse_int, our_level, is_row_fine_int, is_col_fine_int);
-   fflush(stderr);
 
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
