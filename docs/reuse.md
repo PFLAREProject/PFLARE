@@ -8,7 +8,7 @@ In PETSc the ``KSPSetReusePreconditioner`` flag can be set to ensure the precond
 
 #### 2) Reuse sparsity during setup
 
-When solving a linear system where the matrix has the same sparsity pattern as in a previous solve, PCAIR can can reuse the CF splitting, repartitioning, symbolic matrix-matrix products and resulting sparsity throughout the hierarchy during the setup. This takes more memory (typically 2-5x the storage complexity) but significantly reduces the time required in subsequent setups (10-20x). If we have a PETSc matrix $\mathbf{A}$:
+When solving a linear system where the matrix has the same sparsity pattern as in a previous solve, PCAIR can reuse the CF splitting, repartitioning, symbolic matrix-matrix products and resulting sparsity throughout the hierarchy during the setup. This takes more memory (typically 2-5x the storage complexity) but significantly reduces the time required in subsequent setups (10-20x). If we have a PETSc matrix $\mathbf{A}$:
 
 in Fortran:
 

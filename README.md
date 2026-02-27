@@ -28,9 +28,11 @@ PFLARE adds new methods to PETSc, including:
 
 ## Quick start
 
-1) To run introductory Jupyter notebooks in your browser (without requiring local install), click the Binder badge above. The first time you run the notebooks through Binder it may take several minutes to build.
-2) To download a Docker image with PFLARE and dependencies installed, run `docker run -it stevendargaville/pflare && make check`
-3) To build from source, please see [docs/installation.md](docs/installation.md) 
+You can get started with PFLARE in one of three ways:
+
+* To run the Jupyter notebooks in `notebooks/` in your browser (without requiring local install), click the Binder badge above. These notebooks provide an introduction to some of the methods in PFLARE. The first time you run the notebooks through Binder it may take several minutes to build.
+* To download a Docker image with PFLARE and dependencies installed, run `docker run -it stevendargaville/pflare && make check`
+* To build from source, please see [docs/installation.md](docs/installation.md) 
 
 ## Documentation
 
