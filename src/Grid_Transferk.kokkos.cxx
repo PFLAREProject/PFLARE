@@ -361,8 +361,10 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    }          
    
    // Filling the matrix is easy as we know we only have one non-zero per row
-   PetscIntKokkosView invalid_fill_write_count_d("generate_one_point_invalid_fill_write_count_d", 1);
-   Kokkos::deep_copy(exec, invalid_fill_write_count_d, (PetscInt)0);
+   PetscIntKokkosView invalid_fill_write_local_count_d("generate_one_point_invalid_fill_write_local_count_d", 1);
+   PetscIntKokkosView invalid_fill_write_nonlocal_count_d("generate_one_point_invalid_fill_write_nonlocal_count_d", 1);
+   Kokkos::deep_copy(exec, invalid_fill_write_local_count_d, (PetscInt)0);
+   Kokkos::deep_copy(exec, invalid_fill_write_nonlocal_count_d, (PetscInt)0);
 
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
@@ -373,7 +375,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          const PetscInt out_col = max_col_row_d(i);
          if (out_idx < 0 || out_idx >= nnzs_match_local || out_col < 0 || out_col >= local_cols)
          {
-            Kokkos::atomic_add(&invalid_fill_write_count_d(0), (PetscInt)1);
+            Kokkos::atomic_add(&invalid_fill_write_local_count_d(0), (PetscInt)1);
          }
          else
          {
@@ -385,9 +387,9 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
       {
          const PetscInt out_idx = i_nonlocal_d(i);
          const PetscInt out_col = max_col_row_d(i);
-         if (out_idx < 0 || out_idx >= nnzs_match_nonlocal || out_col < 0 || out_col >= cols_ao)
+         if (out_idx < 0 || out_idx >= nnzs_match_nonlocal || out_col < 0 || out_col >= global_cols)
          {
-            Kokkos::atomic_add(&invalid_fill_write_count_d(0), (PetscInt)1);
+            Kokkos::atomic_add(&invalid_fill_write_nonlocal_count_d(0), (PetscInt)1);
          }
          else
          {
@@ -399,12 +401,13 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 
    // Let's make sure everything on the device is finished
    exec.fence();
-   auto invalid_fill_write_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_fill_write_count_d);
-   if (invalid_fill_write_count_h(0) > 0)
+   auto invalid_fill_write_local_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_fill_write_local_count_d);
+   auto invalid_fill_write_nonlocal_count_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), invalid_fill_write_nonlocal_count_d);
+   if (invalid_fill_write_local_count_h(0) > 0 || invalid_fill_write_nonlocal_count_h(0) > 0)
    {
       fprintf(stderr,
-         "[PFLARE][rank %d] generate_one_point_with_one_entry_from_sparse_kokkos invalid writes=%" PetscInt_FMT "\\n",
-         rank, invalid_fill_write_count_h(0));
+         "[PFLARE][rank %d] generate_one_point_with_one_entry_from_sparse_kokkos invalid writes local=%" PetscInt_FMT ", nonlocal=%" PetscInt_FMT "\\n",
+         rank, invalid_fill_write_local_count_h(0), invalid_fill_write_nonlocal_count_h(0));
       fflush(stderr);
    }
    
