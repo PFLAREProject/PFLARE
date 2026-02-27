@@ -30,6 +30,8 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 // Delete the global cf_markers_local_d
 PETSC_INTERN void delete_device_cf_markers()
 {
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    cf_markers_local_d = intKokkosView(); 
@@ -85,6 +87,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
 
+   // Ensure any prior asynchronous use of the global marker view has finished before reassigning it.
+   auto exec = PetscGetKokkosExecutionSpace();
+   exec.fence();
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
    cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
    // Can't use the global directly within the parallel 
@@ -119,8 +124,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Log copy with petsc
    size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    PetscIntKokkosView invalid_local_neighbor_index_count_d("invalid_local_neighbor_index_count_d", 1);
    PetscIntKokkosView invalid_nonlocal_neighbor_index_count_d("invalid_nonlocal_neighbor_index_count_d", 1);
@@ -564,6 +567,17 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
    auto exec = PetscGetKokkosExecutionSpace();
+
+   const PetscInt marker_extent = static_cast<PetscInt>(cf_markers_d.extent(0));
+   if (marker_extent != local_rows)
+   {
+      fprintf(stderr,
+         "[PFLARE][rank %d] create_cf_is_device_kokkos marker extent mismatch (match_cf=%d, marker_n=%" PetscInt_FMT ", local_rows=%" PetscInt_FMT ")\n",
+         rank, match_cf, marker_extent, local_rows);
+      fflush(stderr);
+      is_local_d = PetscIntKokkosView("is_local_d", 0);
+      return;
+   }
 
    PetscInt invalid_cf_marker_count = 0;
    if (local_rows > 0)

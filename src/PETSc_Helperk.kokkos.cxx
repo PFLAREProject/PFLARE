@@ -1835,6 +1835,40 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    // writes to j_local_d(0).
    auto exec = PetscGetKokkosExecutionSpace();
 
+   PetscInt invalid_is_row_count = 0, invalid_is_col_count = 0;
+   if (local_rows_row > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt row_local = is_row_d_d(i);
+            if (row_local < 0 || row_local >= local_rows) thread_sum++;
+         },
+         invalid_is_row_count);
+   }
+   if (local_cols_col > 0)
+   {
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_cols_col),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt col_local = is_col_d_d(i);
+            if (col_local < 0 || col_local >= local_cols) thread_sum++;
+         },
+         invalid_is_col_count);
+   }
+   if (invalid_is_row_count > 0 || invalid_is_col_count > 0)
+   {
+      MPI_Comm comm = MPI_COMM_NULL;
+      PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &comm));
+      int rank = -1;
+      MPI_Comm_rank(comm, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] MatCreateSubMatrix_Seq_kokkos invalid IS local indices: row_bad=%" PetscInt_FMT ", col_bad=%" PetscInt_FMT " (row_n=%" PetscInt_FMT ", col_n=%" PetscInt_FMT ", local_rows=%" PetscInt_FMT ", local_cols=%" PetscInt_FMT ")\\n",
+         rank, invalid_is_row_count, invalid_is_col_count,
+         local_rows_row, local_cols_col, local_rows, local_cols);
+      fflush(stderr);
+   }
+
    // We need to know how many entries are in each row 
    nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows_row);    
    // We may have identity
@@ -2225,6 +2259,39 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
    }
    size_t bytes = 0;
    auto exec = PetscGetKokkosExecutionSpace();
+
+    PetscInt invalid_is_row_count = 0, invalid_is_col_count = 0;
+    const PetscInt local_rows_row = is_row_d_d.extent(0);
+    if (local_rows_row > 0)
+    {
+       Kokkos::parallel_reduce(
+          Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+          KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+             const PetscInt row_local = is_row_d_d(i);
+             if (row_local < 0 || row_local >= local_rows) thread_sum++;
+          },
+          invalid_is_row_count);
+    }
+    if (local_cols_col > 0)
+    {
+       Kokkos::parallel_reduce(
+          Kokkos::RangePolicy<>(exec, 0, local_cols_col),
+          KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+             const PetscInt col_local = is_col_d_d(i);
+             if (col_local < 0 || col_local >= local_cols) thread_sum++;
+          },
+          invalid_is_col_count);
+    }
+    if (invalid_is_row_count > 0 || invalid_is_col_count > 0)
+    {
+       int rank = -1;
+       MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+       fprintf(stderr,
+          "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view invalid IS local indices: row_bad=%" PetscInt_FMT ", col_bad=%" PetscInt_FMT " (row_n=%" PetscInt_FMT ", col_n=%" PetscInt_FMT ", local_rows=%" PetscInt_FMT ", local_cols=%" PetscInt_FMT ")\\n",
+          rank, invalid_is_row_count, invalid_is_col_count,
+          local_rows_row, local_cols_col, local_rows, local_cols);
+       fflush(stderr);
+    }
 
    // The diagonal component
    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
