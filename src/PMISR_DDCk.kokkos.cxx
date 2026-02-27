@@ -90,6 +90,80 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Ensure any prior asynchronous use of the global marker view has finished before reassigning it.
    auto exec = PetscGetKokkosExecutionSpace();
    exec.fence();
+
+   ConstMatRowMapKokkosView local_i_d(device_local_i, local_rows + 1);
+   PetscInt bad_local_rowptr_count = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, local_rows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+         const PetscInt row_b = local_i_d(i);
+         const PetscInt row_e = local_i_d(i + 1);
+         if (row_b < 0 || row_e < row_b) thread_sum++;
+      },
+      bad_local_rowptr_count);
+
+   PetscInt local_nnz = 0;
+   auto local_nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(local_i_d, local_rows));
+   local_nnz = local_nnz_h();
+
+   PetscInt bad_local_colidx_count = 0;
+   if (bad_local_rowptr_count == 0 && local_nnz > 0)
+   {
+      ConstMatColIdxKokkosView local_j_d(device_local_j, local_nnz);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_nnz),
+         KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+            const PetscInt col = local_j_d(k);
+            if (col < 0 || col >= local_rows) thread_sum++;
+         },
+         bad_local_colidx_count);
+   }
+
+   PetscInt bad_nonlocal_rowptr_count = 0, bad_nonlocal_colidx_count = 0, nonlocal_nnz = 0;
+   if (mpi)
+   {
+      ConstMatRowMapKokkosView nonlocal_i_d(device_nonlocal_i, local_rows + 1);
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+            const PetscInt row_b = nonlocal_i_d(i);
+            const PetscInt row_e = nonlocal_i_d(i + 1);
+            if (row_b < 0 || row_e < row_b) thread_sum++;
+         },
+         bad_nonlocal_rowptr_count);
+
+      auto nonlocal_nnz_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(nonlocal_i_d, local_rows));
+      nonlocal_nnz = nonlocal_nnz_h();
+
+      if (bad_nonlocal_rowptr_count == 0 && nonlocal_nnz > 0)
+      {
+         ConstMatColIdxKokkosView nonlocal_j_d(device_nonlocal_j, nonlocal_nnz);
+         Kokkos::parallel_reduce(
+            Kokkos::RangePolicy<>(exec, 0, nonlocal_nnz),
+            KOKKOS_LAMBDA(const PetscInt k, PetscInt &thread_sum) {
+               const PetscInt col = nonlocal_j_d(k);
+               if (col < 0 || col >= cols_ao) thread_sum++;
+            },
+            bad_nonlocal_colidx_count);
+      }
+   }
+
+   if (bad_local_rowptr_count > 0 || bad_local_colidx_count > 0 || bad_nonlocal_rowptr_count > 0 || bad_nonlocal_colidx_count > 0)
+   {
+      int rank = -1;
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+      fprintf(stderr,
+         "[PFLARE][rank %d] pmisr_kokkos CSR preflight anomalies: local_rowptr=%" PetscInt_FMT ", local_colidx=%" PetscInt_FMT ", nonlocal_rowptr=%" PetscInt_FMT ", nonlocal_colidx=%" PetscInt_FMT " (local_nnz=%" PetscInt_FMT ", nonlocal_nnz=%" PetscInt_FMT ")\\n",
+         rank,
+         bad_local_rowptr_count,
+         bad_local_colidx_count,
+         bad_nonlocal_rowptr_count,
+         bad_nonlocal_colidx_count,
+         local_nnz,
+         nonlocal_nnz);
+      fflush(stderr);
+   }
+
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
    cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
    // Can't use the global directly within the parallel 
