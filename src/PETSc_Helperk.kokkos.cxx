@@ -2558,8 +2558,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Basically a copy of ISGetSeqIS_SameColDist_Private
          /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
-         Vec x, cmap, lcmap;
-         Vec lvec = mat_mpi->lvec;
+         Vec x, cmap, lcmap, lvec;
+         PetscCallVoid(VecDuplicate(mat_mpi->lvec, &lvec));
          PetscCallVoid(MatCreateVecs(*input_mat, &x, NULL));
          PetscCallVoid(VecDuplicate(x, &cmap));
 
@@ -2792,7 +2792,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(VecRestoreKokkosView(lcmap, &lcmap_d));
 
          PetscCallVoid(VecDestroy(&cmap));
-         PetscCallVoid(VecDestroy(&lcmap));         
+         PetscCallVoid(VecDestroy(&lcmap));       
+         PetscCallVoid(VecDestroy(&lvec));         
          pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_destroy_cmap_lcmap");
       }
       // If we're reusing we have the iscol_o associated with the output_mat
