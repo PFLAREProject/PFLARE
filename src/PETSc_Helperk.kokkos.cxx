@@ -2607,6 +2607,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                   cmap_d(col_local) = i + isstart; /* global index of iscol[i] */
                }
          });
+         exec.fence();
 
          PetscScalar *x_d_ptr = NULL;
          x_d_ptr = x_d.data();      
