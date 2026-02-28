@@ -113,6 +113,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
       Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
          is_d[i] -= global_row_start;
    });
+   // Ensure we're finished before we exit
    exec.fence();    
 
    return;
@@ -128,6 +129,7 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
    // Can't use the shared pointer directly within the parallel 
    // regions on the device
    PetscIntKokkosView is_d;
+   auto exec = PetscGetKokkosExecutionSpace();
    // Make sure to index with 0 based
    if (fine_int)
    {
@@ -173,6 +175,8 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
       PetscCallVoid(VecRestoreKokkosView(*vreduced, &vreduced_d));
       PetscCallVoid(VecRestoreKokkosViewWrite(*vfull, &vfull_d));  
    }
+   // Ensure we're done before we exit
+   exec.fence();
 
    return;
 }
