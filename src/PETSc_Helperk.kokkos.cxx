@@ -2561,18 +2561,25 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          Vec x, cmap, lcmap;
          Vec lvec = mat_mpi->lvec;
          PetscCallVoid(MatCreateVecs(*input_mat, &x, NULL));
-         PetscCallVoid(VecSet(x, -1.0));
          PetscCallVoid(VecDuplicate(x, &cmap));
-         PetscCallVoid(VecSet(cmap, -1.0));
-         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_vec_setup");
 
-         // Use the vecs in the scatter provided by the input mat
+         // Get Kokkos views BEFORE filling so that the deep_copy below runs on exec's
+         // stream (PetscGetKokkosExecutionSpace).  The old code used VecSet() which
+         // internally calls KokkosBlas::fill on the DEFAULT Kokkos execution-space stream.
+         // When PetscGetKokkosExecutionSpace() returns a different HIP stream, the VecSet
+         // fill raced with the parallel_for and PetscSFBcast on exec's stream — the same
+         // cross-stream ordering hazard documented in MatCreateSubMatrix_Seq_kokkos.
          PetscScalarKokkosView x_d;
          PetscCallVoid(VecGetKokkosView(x, &x_d));
          PetscScalarKokkosView cmap_d;
          PetscCallVoid(VecGetKokkosView(cmap, &cmap_d));
          PetscScalarKokkosView lvec_d;
          PetscCallVoid(VecGetKokkosView(lvec, &lvec_d));
+
+         // Fill on PETSc's execution-space stream to avoid cross-stream hazard
+         Kokkos::deep_copy(exec, x_d, (PetscScalar)-1.0);
+         Kokkos::deep_copy(exec, cmap_d, (PetscScalar)-1.0);
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_vec_setup");
 
          PetscInt invalid_is_col_count = 0;
          if (local_cols_col > 0)
