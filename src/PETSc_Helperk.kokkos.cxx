@@ -2615,6 +2615,21 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscScalar *lvec_d_ptr = NULL;
          lvec_d_ptr = lvec_d.data();  
 
+         PetscInt x_local_size = 0, cmap_local_size = 0, lvec_local_size = 0;
+         PetscCallVoid(VecGetLocalSize(x, &x_local_size));
+         PetscCallVoid(VecGetLocalSize(cmap, &cmap_local_size));
+         PetscCallVoid(VecGetLocalSize(lvec, &lvec_local_size));
+         if (x_local_size != local_cols || cmap_local_size != local_cols || lvec_local_size != cols_ao)
+         {
+            int rank = -1;
+            MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view vec size mismatch (x=%" PetscInt_FMT ", cmap=%" PetscInt_FMT ", lvec=%" PetscInt_FMT ", expected_local_cols=%" PetscInt_FMT ", expected_cols_ao=%" PetscInt_FMT ", block=%s)\n",
+               rank, x_local_size, cmap_local_size, lvec_local_size, local_cols, cols_ao,
+               block_tag ? block_tag : "other");
+            fflush(stderr);
+         }
+
          if (!x_d_ptr || !cmap_d_ptr || !lvec_d_ptr)
          {
             int rank = -1;
@@ -2624,6 +2639,36 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                rank, (void*)x_d_ptr, (void*)cmap_d_ptr, (void*)lvec_d_ptr, block_tag ? block_tag : "other");
             fflush(stderr);
          }
+
+         PetscInt bad_x_values = 0, bad_cmap_values = 0;
+         if (local_cols > 0)
+         {
+            Kokkos::parallel_reduce(
+               Kokkos::RangePolicy<>(exec, 0, local_cols),
+               KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+                  const PetscScalar xv = x_d(i);
+                  if (!(xv == (PetscScalar)-1.0 || (xv >= (PetscScalar)0.0 && xv < (PetscScalar)local_cols))) thread_sum++;
+               },
+               bad_x_values);
+
+            Kokkos::parallel_reduce(
+               Kokkos::RangePolicy<>(exec, 0, local_cols),
+               KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_sum) {
+                  const PetscScalar cv = cmap_d(i);
+                  if (!(cv == (PetscScalar)-1.0 || (cv >= (PetscScalar)isstart && cv < (PetscScalar)(isstart + local_cols_col)))) thread_sum++;
+               },
+               bad_cmap_values);
+         }
+         if (bad_x_values > 0 || bad_cmap_values > 0)
+         {
+            int rank = -1;
+            MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+            fprintf(stderr,
+               "[PFLARE][rank %d] MatCreateSubMatrix_kokkos_view bad mark vectors (bad_x=%" PetscInt_FMT ", bad_cmap=%" PetscInt_FMT ", local_cols=%" PetscInt_FMT ", isstart=%" PetscInt_FMT ", col_n=%" PetscInt_FMT ", block=%s)\n",
+               rank, bad_x_values, bad_cmap_values, local_cols, isstart, local_cols_col,
+               block_tag ? block_tag : "other");
+            fflush(stderr);
+         }
          
          exec.fence();
          pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_mark_iscol");
@@ -2631,14 +2676,20 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
          // one of the kokkos backends like PETSC_MEMTYPE_HIP
          PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;      
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_sf_x_begin");
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                      mem_type, x_d_ptr,
                      mem_type, lvec_d_ptr,
                      MPI_REPLACE));      
+         exec.fence();
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_sf_x_begin");
 
          // Complete x scatter before starting another Begin() on the same PetscSF.
          // Overlapping Begin calls on one SF context is undefined and can corrupt device buffers.
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_sf_x_end");
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, x_d_ptr, lvec_d_ptr, MPI_REPLACE));
+         exec.fence();
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_sf_x_end");
          pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_sf_x");
 
          PetscCallVoid(VecDuplicate(lvec, &lcmap));
@@ -2658,12 +2709,18 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          }
 
          // Start the cmap scatter
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_sf_cmap_begin");
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                      mem_type, cmap_d_ptr,
                      mem_type, lcmap_d_ptr,
                      MPI_REPLACE));
+         exec.fence();
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_sf_cmap_begin");
          // Finish the cmap scatter
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_sf_cmap_end");
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, cmap_d_ptr, lcmap_d_ptr, MPI_REPLACE));
+         exec.fence();
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_sf_cmap_end");
          pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_sf_cmap");
 
          // We're done with x now
