@@ -2796,6 +2796,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       // Ensure all off-diagonal index construction kernels are complete and visible
       // before using is_col_o_d in the next routine.
       exec.fence();
+      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_build_indices");
 
       PetscInt invalid_is_col_o_count = 0;
       if (is_col_o_d.extent(0) > 0)
@@ -2819,19 +2820,42 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          fflush(stderr);
       }
 
+      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_validate_is_col_o");
+
+      const int has_offdiag_work = (is_row_d_d.extent(0) > 0 && is_col_o_d.extent(0) > 0) ? 1 : 0;
+      fprintf(stderr,
+         "[PFLARE][DIAG][rank %d] MatCreateSubMatrix_kokkos_view block=%s part=offdiag row_n=%zu col_o_n=%zu cols_ao=%" PetscInt_FMT " has_work=%d reuse=%d\n",
+         rank,
+         block_tag ? block_tag : "other",
+         is_row_d_d.extent(0),
+         is_col_o_d.extent(0),
+         cols_ao,
+         has_offdiag_work,
+         reuse_int);
+      fflush(stderr);
+
       pflare_diag_participation(
          MPI_COMM_MATRIX,
          "MatCreateSubMatrix_kokkos_view",
          block_tag,
          "offdiag",
-         (is_row_d_d.extent(0) > 0 && is_col_o_d.extent(0) > 0) ? 1 : 0);
+         has_offdiag_work);
 
-      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_seq_call");
+      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_has_work_diag");
 
-      // We can now create the off-diagonal component
-      MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal, block_tag, "offdiag");
+      if (has_offdiag_work)
+      {
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "before_seq_call");
 
-      pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_seq_call");
+         // We can now create the off-diagonal component
+         MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal, block_tag, "offdiag");
+
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "after_seq_call");
+      }
+      else
+      {
+         pflare_diag_stage(MPI_COMM_MATRIX, "MatCreateSubMatrix_kokkos_view", block_tag, "offdiag", "skip_no_work");
+      }
 
       // If it's our first time through we have to create our output matrix
       if (!reuse_int)
