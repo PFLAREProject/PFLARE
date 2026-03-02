@@ -110,7 +110,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    }
 
    // Device memory for the mark
-   boolKokkosView mark_d("mark_d", local_rows);   
+   boolKokkosView mark_d("mark_d", local_rows);
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // If you want to generate the randoms on the device
    //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
@@ -140,6 +141,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Flip the sign if pmis
       if (pmis_int == 1) measure_local_d(i) *= -1;
    });
+   // Have to ensure the parallel for above finishes before comms
+   exec.fence(); 
 
    // Start the scatter of the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
    // one of the kokkos backends like PETSC_MEMTYPE_HIP
@@ -252,7 +255,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Go and do the local component
       // ~~~~~~~~      
       Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
+         Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
@@ -312,7 +315,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
 
          Kokkos::parallel_for(
-            Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
+            Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
                // Row
@@ -361,10 +364,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (mpi) 
       {
          // We're going to do an add reverse scatter, so set them to zero
-         Kokkos::deep_copy(cf_markers_nonlocal_d, 0.0);  
+         Kokkos::deep_copy(cf_markers_nonlocal_d, 0);  
 
          Kokkos::parallel_for(
-            Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
+            Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
                // Row
@@ -380,10 +383,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), 1.0);     
+                        Kokkos::atomic_store(&cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), 1);     
                   });     
                }
          });
+
+         // Ensure everything is done before we comm
+         exec.fence();
 
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
@@ -397,7 +403,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
       // Go and do local
       Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows, Kokkos::AUTO()),
+         Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             // Row
@@ -415,7 +421,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      // Needs to be atomic as may being set by many threads
                      // Tried a version where instead of a "push" approach I tried a pull approach
                      // that doesn't need an atomic, but it was slower
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1.0);     
+                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
                });     
             }
       });   
@@ -469,6 +475,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       }
       if (pmis_int) cf_markers_d(i) *= -1;
    });
+   // Ensure we're done before we exit
+   exec.fence();
 
    return;
 }
@@ -480,6 +488,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 {
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -526,6 +535,8 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
             is_local_d(point_offsets_d(i)) = i;
          }              
    });
+   // Ensure we're done before we exit
+   exec.fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -620,6 +631,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
    intKokkosView cf_markers_nonlocal_d;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~
    // Get the F point local indices from cf_markers_local_d
@@ -674,7 +686,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // We now go and do a reduce to get the diagonal entry, while also 
       // summing up the local non-diagonals into diag_dom_ratio_d
       Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_row, Kokkos::AUTO()),
+         Kokkos::TeamPolicy<>(exec, local_rows_row, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
             const PetscInt i_idx_is_row = t.league_rank();
@@ -744,7 +756,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       if (cols_ao > 0) 
       {      
          Kokkos::parallel_for(
-            Kokkos::TeamPolicy<>(PetscGetKokkosExecutionSpace(), local_rows_row, Kokkos::AUTO()),
+            Kokkos::TeamPolicy<>(exec, local_rows_row, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
 
                const PetscInt i_idx_is_row = t.league_rank();
@@ -794,6 +806,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
          diag_dom_ratio_d(i) = 0.0;
       }
    });   
+   // Ensure we're done before we exit
+   exec.fence();
 
    return;
 }
@@ -819,6 +833,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
 
    bool trigger_dd_ratio_compute = *max_dd_ratio > 0;
+   auto exec = PetscGetKokkosExecutionSpace();   
 
    // Do a fixed alpha_diag
    PetscInt search_size;
@@ -912,7 +927,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
 
          // Parallel scan to inclusive sum the number of entries we have in 
          // the bins
-         Kokkos::parallel_scan (dom_bins_d.extent(0), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+         Kokkos::parallel_scan(dom_bins_d.extent(0), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
             // Inclusive scan
             update += dom_bins_d(i);         
             if (final) {
@@ -941,7 +956,9 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
                PetscInt idx = is_fine_local_d(i);
                cf_markers_d(idx) *= -1;
             }
-      }); 
+      });
+      // Ensure we're done before we exit
+      exec.fence(); 
    }   
 
    return;
