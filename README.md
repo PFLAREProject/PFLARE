@@ -30,7 +30,7 @@ PFLARE adds new methods to PETSc, including:
 
 You can get started with PFLARE in one of three ways:
 
-* To run the Jupyter notebooks in `notebooks/` in your browser (without requiring local install), click the Binder badge above. These notebooks provide an introduction to some of the methods in PFLARE. The first time you run the notebooks through Binder it may take several minutes to build.
+* To run the Jupyter notebooks in `notebooks/` in your browser (without requiring any local install), click the Binder badge above (may take several minutes to build). These notebooks provide an introduction to some of the methods in PFLARE.
 * To download a Docker image with PFLARE and dependencies installed, run `docker run -it stevendargaville/pflare && make check`
 * To build from source, please see [docs/installation.md](docs/installation.md) 
 
@@ -46,10 +46,20 @@ For details about PFLARE, please see:
 | [docs/gpus.md](docs/gpus.md) | Using GPUs with PFLARE |
 | [docs/reuse.md](docs/reuse.md) | Re-using components of PFLARE |
 | [docs/options.md](docs/options.md) | List of the options available in PFLARE |   
+
+and the Jupyter notebooks:
+
+| Path | Contents |
+|---|---|
+| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduce PFLARE |
+| [notebooks/02_pcpflareinv.ipynb](02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
+| [notebooks/03_cf_splitting.ipynb](03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
+| [notebooks/04_pcair.ipynb](04_pcair.ipynb) | Introduction to PCAIR and the AIRG method |
+| [notebooks/05_parallel.ipynb](05_parallel.ipynb) | Discuss PCAIR, parallelism and GPUs |
      
 ## More examples
 
-For more ways to use the library please see the Jupyter notebooks in `notebooks/`, the Fortran/C examples and the Makefile in `tests/`, along with the Python examples in `python/`.
+For more ways to use the library please see the Fortran/C examples and the Makefile in `tests/`, along with the Python examples in `python/`.
 
 ## References \& citing
 
