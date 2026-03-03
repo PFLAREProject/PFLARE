@@ -392,7 +392,7 @@ module gmres_poly_newton
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
 
       ! Local variables
-      PetscInt :: global_rows, global_cols, local_rows, local_cols
+      PetscInt :: global_rows, global_cols, local_rows, local_cols, vecs_needed
       integer :: lwork, subspace_size, rank, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
       integer :: total_extra, counter, k_loc, m, numerical_order
       PetscErrorCode :: ierr      
@@ -407,7 +407,7 @@ module gmres_poly_newton
       PetscReal :: beta
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
-      type(tVec), dimension(poly_order+2) :: V_n
+      type(tVec), pointer, dimension(:) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
       PetscReal :: rcond = 1e-12, rel_tol, abs_tol, H_norm
 
@@ -681,9 +681,8 @@ module gmres_poly_newton
       end if     
 
       ! Cleanup
-      do i_loc = 1, subspace_size+1
-         call VecDestroy(V_n(i_loc), ierr)
-      end do
+      vecs_needed = subspace_size + 1
+      call VecDestroyVecs(vecs_needed, V_n, ierr)
       call VecDestroy(w_j, ierr)       
 
    end subroutine calculate_gmres_polynomial_roots_newton   

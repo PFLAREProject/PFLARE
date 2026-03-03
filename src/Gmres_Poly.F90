@@ -138,18 +138,19 @@ module gmres_poly
       ! ~~~~~~
       type(tMat), intent(in)                                      :: matrix
       integer, intent(in)                                         :: subspace_size
-      type(tVec), dimension(:)                                    :: V_n
+      type(tVec), pointer, dimension(:)                           :: V_n
 
       ! Local variables
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, row_i
+      PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
       PetscCount :: vec_size
       PetscInt, allocatable, dimension(:) :: indices
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:, :), allocatable, target   :: random_data
+      type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
       ! ~~~~~~    
 
@@ -200,26 +201,32 @@ module gmres_poly
       deallocate(seed)
 
       ! ~~~~~~~~~~
-      ! Create some petsc vecs and assign the data in them to point at K_m+1
-      ! ~~~~~~~~~~ 
-      ! Create vectors pointing at the columns in K_m+1
-      do i_loc = 1, subspace_size+1
-         call MatCreateVecs(matrix, V_n(i_loc), PETSC_NULL_VEC, ierr)         
-      end do     
-      
+      ! Create a single template vec, set the random values into it, then use
+      ! VecDuplicateVecs to allocate all V_n vectors in one contiguous block.
+      ! Contiguous allocation lets VecMAXPY use BLAS-2 operations.
+      ! ~~~~~~~~~~
+      call MatCreateVecs(matrix, temp_vec, PETSC_NULL_VEC, ierr)
+
       allocate(indices(local_rows))
-      ! Set the random values into the first vector
-      ! V_n(1) data will be copied to the gpu when needed
+      ! Set the random values into the template vector
+      ! Data will be copied to the gpu when needed
       do row_i = 1, local_rows
          indices(row_i) = global_row_start + row_i-1
       end do
       ! PetscCount vs PetscInt??
       vec_size = local_rows
-      call VecSetPreallocationCOO(V_n(1), vec_size, indices, ierr)
+      call VecSetPreallocationCOO(temp_vec, vec_size, indices, ierr)
       deallocate(indices)
-      call VecSetValuesCOO(V_n(1), random_data(:, 1), INSERT_VALUES, ierr)
-      
+      call VecSetValuesCOO(temp_vec, random_data(:, 1), INSERT_VALUES, ierr)
+
       deallocate(random_data)
+      vecs_needed = subspace_size + 1
+
+      ! Allocate all subspace_size+1 vectors contiguously from the template
+      call VecDuplicateVecs(temp_vec, vecs_needed, V_n, ierr)
+      ! Copy random data from template into the first vector
+      call VecCopy(temp_vec, V_n(1), ierr)
+      call VecDestroy(temp_vec, ierr)
 
       ! ~~~~~~~~~~~~
 
@@ -301,8 +308,10 @@ module gmres_poly
       integer :: i_loc, subspace_size
       PetscErrorCode :: ierr      
       PetscReal, dimension(poly_order+2) :: c_j, g0
+      PetscReal, dimension(poly_order+1) :: neg_h
       logical :: compute_cn
       PetscReal :: rel_tol
+      PetscInt :: m_petscint 
 
       ! ~~~~~~   
             
@@ -313,7 +322,7 @@ module gmres_poly
       if (present(user_rel_tol)) rel_tol = user_rel_tol
 
       ! This is how many columns we have in K_m
-      subspace_size = poly_order + 1       
+      subspace_size = poly_order + 1   
 
       ! This is the hessenberg matrix
       H_n = 0d0
@@ -338,6 +347,8 @@ module gmres_poly
       ! we want to build
       do m = 1, subspace_size
 
+         m_petscint = m    
+
          ! Compute w_j = A v_j
          call MatMult(matrix, &
                   V_n(m), &
@@ -350,19 +361,21 @@ module gmres_poly
             c_j(2:m + 1) = C_n(1:m, m)  
          end if
                   
-         ! Now loop 
-         do i_loc = 1, m
+         ! Compute all hessenberg entries H_n(1:m, m) = <w_j, V_n(i)> in one reduction
+         ! neg_h is used as a contiguous temporary since H_n is an assumed-shape 2D array
+         call VecMDot(w_j, m_petscint, V_n, neg_h, ierr)
+         H_n(1:m, m) = neg_h(1:m)
 
-            ! Computes the hessenberg entry by the dot product of w_j and v_i
-            call VecDot(w_j, V_n(i_loc), H_n(i_loc, m), ierr)               
+         ! w_j = w_j - sum_i H_n(i,m) * V_n(i)  (all at once)
+         neg_h(1:m) = -neg_h(1:m)
+         call VecMAXPY(w_j, m_petscint, neg_h, V_n, ierr)
 
-            ! w_j = w_j - h_ij v_i
-            call VecAXPY(w_j, -H_n(i_loc, m), V_n(i_loc), ierr)
-
-            ! This is doing -C_n * h_n
-            if (compute_cn) c_j(1:i_loc) = c_j(1:i_loc) - C_n(1:i_loc, i_loc) * H_n(i_loc, m)
-
-         end do
+         ! This is doing -C_n * h_n
+         if (compute_cn) then
+            do i_loc = 1, m
+               c_j(1:i_loc) = c_j(1:i_loc) - C_n(1:i_loc, i_loc) * H_n(i_loc, m)
+            end do
+         end if
 
          ! Now compute new hessenberg entry
          call VecNorm(w_j, NORM_2, H_n(m+1, m), ierr)
@@ -433,8 +446,8 @@ module gmres_poly
       PetscReal, optional, intent(inout)                     :: user_rel_tol
 
       ! Local variables
-      PetscInt :: global_rows, global_cols
-      integer :: i_loc, subspace_size, m
+      PetscInt :: global_rows, global_cols, vecs_needed
+      integer :: subspace_size, m
       integer :: errorcode
       PetscErrorCode :: ierr      
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
@@ -442,7 +455,7 @@ module gmres_poly
       PetscReal, dimension(poly_order+1) :: y
       PetscReal :: beta
       type(tVec) :: w_j
-      type(tVec), dimension(poly_order+2) :: V_n
+      type(tVec), pointer, dimension(:) :: V_n
       PetscReal :: rel_tol
 
       ! ~~~~~~    
@@ -492,9 +505,8 @@ module gmres_poly
                y, 1, &
                0d0, coefficients(1), 1) 
 
-      do i_loc = 1, subspace_size+1
-         call VecDestroy(V_n(i_loc), ierr)
-      end do
+      vecs_needed = subspace_size + 1
+      call VecDestroyVecs(vecs_needed, V_n, ierr)
       call VecDestroy(w_j, ierr)
 
    end subroutine calculate_gmres_polynomial_coefficients_arnoldi   
@@ -520,14 +532,14 @@ module gmres_poly
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, row_i
+      PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
       PetscInt, dimension(:), allocatable :: global_indices
       integer :: comm_size, subspace_size, comm_rank, i_loc
       integer :: errorcode
       PetscErrorCode :: ierr      
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:, :), allocatable, target :: K_m_plus_1_data
-      type(tVec), dimension(poly_order+2) :: V_n
+      type(tVec), pointer, dimension(:) :: V_n
       ! ~~~~~~    
 
       ! This is how many columns we have in K_m
@@ -607,8 +619,9 @@ module gmres_poly
          ! Have to use vecgetvalues interface for gpus
          ! This does a copy of the vec from gpu to cpu if necessary
          call VecGetValues(V_n(i_loc), local_rows, global_indices, K_m_plus_1_data(:, i_loc), ierr)
-         call VecDestroy(V_n(i_loc), ierr)
-      end do         
+      end do
+      vecs_needed = subspace_size + 1
+      call VecDestroyVecs(vecs_needed, V_n, ierr)         
 
       ! ~~~~~~~~~~~~~
       ! Start the tall-skinny QR factorisation of the power basis - this all happens
