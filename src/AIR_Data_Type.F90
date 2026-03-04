@@ -4,12 +4,8 @@ module air_data_type
    
    ! PETSc
    use petscmat
-   use petscvec
-   use petscis
 
 #include "petsc/finclude/petscmat.h"
-#include "petsc/finclude/petscvec.h"
-#include "petsc/finclude/petscis.h"
 
    implicit none
 
