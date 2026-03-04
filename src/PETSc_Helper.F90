@@ -1,7 +1,12 @@
 module petsc_helper
 
    use petscmat
-   use c_petsc_interfaces
+   use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
+         remove_from_sparse_match_kokkos, &
+         MatSetAllValues_kokkos, MatSetAllValues_cpu, &
+         mat_duplicate_copy_plus_diag_kokkos, &
+         MatAXPY_kokkos, MatCreateSubMatrix_kokkos, &
+         MatGetNNZs_both_c, ShellSetVecType_c
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"

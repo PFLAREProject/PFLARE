@@ -2,7 +2,7 @@ module pcair_interfaces
 
    use iso_c_binding
    use petscksp
-   use pcair_shell
+   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
    use pflare_parameters, only: PFLAREINV_NEUMANN, &
          COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 

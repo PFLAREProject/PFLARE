@@ -2,9 +2,11 @@ module pmisr_ddc
 
    use iso_c_binding
    use petscmat
-   use petscsys
-   use petsc_helper
-   use c_petsc_interfaces
+   use petsc_helper, only: kokkos_debug
+   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h, &
+         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, &
+         allreducesum_petscint_mine, boolscatter_mat_begin_c, boolscatter_mat_end_c, &
+         boolscatter_mat_reverse_begin_c, boolscatter_mat_reverse_end_c, ddc_kokkos
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"

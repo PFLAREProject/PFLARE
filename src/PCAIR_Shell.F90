@@ -2,7 +2,7 @@ module pcair_shell
 
    use petscksp
    use c_petsc_interfaces, only: c_PCGetStructureFlag, PCGetSetupCalled_c, PCMarkNotSetUp_c
-   use pcair_data_type
+   use pcair_data_type, only: pc_air_multigrid_data, air_options
    use air_mg_setup, only: setup_air_pcmg
    use air_data_type_routines, only: reset_air_data, destroy_air_data
 
