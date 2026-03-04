@@ -1,13 +1,23 @@
 module approx_inverse_setup
 
    use petscmat
-   use gmres_poly
-   use gmres_poly_newton
-   use neumann_poly
-   use weighted_jacobi
-   use sai_z
-   use repartition
-   use matshell_data_type
+   use tsqr, only: tsqr_buffers
+   use gmres_poly, only: &
+         PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         start_gmres_polynomial_coefficients_power, &
+         calculate_gmres_polynomial_coefficients_arnoldi, &
+         build_gmres_polynomial_inverse, petsc_matvec_da_poly_mf
+   use gmres_poly_newton, only: &
+         build_gmres_polynomial_newton_inverse, &
+         calculate_gmres_polynomial_roots_newton
+   use neumann_poly, only: PFLAREINV_NEUMANN, calculate_and_build_neumann_polynomial_inverse
+   use weighted_jacobi, only: &
+         PFLAREINV_WJACOBI, PFLAREINV_JACOBI, calculate_and_build_weighted_jacobi_inverse
+   use sai_z, only: PFLAREINV_SAI, PFLAREINV_ISAI, AIR_Z_PRODUCT, calculate_and_build_sai
+   use repartition, only: MatMPICreateNonemptySubcomm
+   use petsc_helper, only: destroy_matrix_reuse, ShellSetVecType
+   use matshell_data_type, only: &
+         mat_ctxtype, MF_VEC_DIAG, MF_VEC_TEMP, MF_VEC_RHS, MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE
 
 #include "petsc/finclude/petscmat.h"
       

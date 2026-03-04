@@ -1,13 +1,21 @@
 module air_operators_setup
 
    use petscksp
-   use constrain_z_or_w
-   use approx_inverse_setup
-   use timers
+   use constrain_z_or_w, only: constrain_grid_transfer
+   use approx_inverse_setup, only: &
+         start_approximate_inverse, finish_approximate_inverse, destroy_matrix_reuse
+   use timers, only: &
+         timer_start, timer_finish, &
+         TIMER_ID_AIR_DROP, TIMER_ID_AIR_EXTRACT, TIMER_ID_AIR_INVERSE, &
+         TIMER_ID_AIR_CONSTRAIN, TIMER_ID_AIR_PROLONG, TIMER_ID_AIR_RAP, &
+         TIMER_ID_AIR_RESTRICT
    use fc_smooth
    use c_petsc_interfaces
-   use grid_transfer
-   use grid_transfer_improve
+   use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
+         compute_P_from_W, compute_R_from_Z
+   use grid_transfer_improve, only: improve_w, improve_z
+   use sai_z, only: AIR_Z_PRODUCT, AIR_Z_LAIR, calculate_and_build_sai_z
+   use petsc_helper, only: MatCreateSubMatrixWrapper
 
 #include "petsc/finclude/petscksp.h"
 
