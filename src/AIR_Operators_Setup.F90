@@ -1016,7 +1016,7 @@ module air_operators_setup
       PetscErrorCode :: ierr
       type(tMat) :: temp_mat
       MPIU_Comm            :: MPI_COMM_MATRIX
-      integer :: comm_rank
+      integer :: comm_rank, errorcode
 
       ! ~~~~~~~~~~
 
