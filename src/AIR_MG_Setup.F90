@@ -128,6 +128,8 @@ module air_mg_setup
 
          continue_coarsening = .TRUE.
 
+         print *, comm_rank, "starting our_level loop"
+
          ! ~~~~~~~~~~
          ! We can also check if our coarse grid approximations are good enough to work as a coarse grid solver
          ! If so we can stop coarsening here   
@@ -138,6 +140,8 @@ module air_mg_setup
          if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. &
                      our_level .ge. air_data%options%auto_truncate_start_level .AND. &
                      air_data%options%auto_truncate_start_level /= -1) then         
+
+            print *, comm_rank, "starting truncate"
 
             call timer_start(TIMER_ID_AIR_TRUNCATE)   
 
@@ -232,6 +236,8 @@ module air_mg_setup
             call VecDestroy(temp_vec, ierr)
 
             call timer_finish(TIMER_ID_AIR_TRUNCATE)   
+
+            print *, comm_rank, "finishing truncate"
          end if
 
          ! ~~~~~~~~~~~~
@@ -550,7 +556,9 @@ module air_mg_setup
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))  
 
-         air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
+         air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.     
+
+         print *, comm_rank, "finish compute coarse matrix"
 
          ! ~~~~~~~~~~~
          ! We may be able to destroy the coarse matrix on our_level from here
