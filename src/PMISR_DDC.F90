@@ -5,15 +5,12 @@ module pmisr_ddc
    use petscsys
    use petsc_helper
    use c_petsc_interfaces
+   use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/PETSc_ISO_Types.h"
 
    implicit none
-
-   ! Define C and F points in the CF marker 
-   integer, parameter :: C_POINT = 1
-   integer, parameter :: F_POINT = -1
 
    public   
    

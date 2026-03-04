@@ -89,7 +89,8 @@ endif
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 
 # All the files required by PFLARE
-OBJS := $(SRCDIR)/Binary_Tree.o \
+OBJS := $(SRCDIR)/Pflare_Parameters.o \
+		  $(SRCDIR)/Binary_Tree.o \
 		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
@@ -175,6 +176,18 @@ DEPFILE = Makefile.deps
 
 # Find Fortran source files in the src directory for makedepf90
 FSRC := $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Timed Fortran compilation rule
+# Pattern rules take precedence over PETSc's suffix rule (.F90.o:)
+# so this wrapper adds per-file compile timing without changing any flags.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+%.o: %.F90
+	@_start=$$(date +%s%N); \
+	${PETSC_FCOMPILE_SINGLE} $< ; _rc=$$?; \
+	_end=$$(date +%s%N); \
+	printf "COMPILE_TIME %5d ms  %s\n" "$$(( (_end - _start) / 1000000 ))" "$<"; \
+	exit $$_rc
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Rules

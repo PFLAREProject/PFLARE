@@ -3,6 +3,8 @@ module pcair_interfaces
    use iso_c_binding
    use petscksp
    use pcair_shell
+   use pflare_parameters, only: PFLAREINV_NEUMANN, &
+         COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -30,13 +32,6 @@ module pcair_interfaces
  
    end interface   
 
-   ! Which polynomial coefficients to get/set in 
-   ! PCAIRGetPolyCoeffs/PCAIRSetPolyCoeffs
-   integer, parameter :: COEFFS_INV_AFF = 0
-   integer, parameter :: COEFFS_INV_AFF_DROPPED = 1
-   integer, parameter :: COEFFS_INV_ACC = 2
-   integer, parameter :: COEFFS_INV_COARSE = 3
-   
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! Set routines - interfaces to the C routines in PCAIR
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

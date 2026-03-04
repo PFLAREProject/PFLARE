@@ -4,17 +4,19 @@ module air_mg_setup
    use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
    use cf_splitting, only: compute_cf_splitting
    use matshell_data_type, only: mat_ctxtype
-   use approx_inverse_setup, only: &
-         start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
-         destroy_matrix_reuse, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
-         PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_WJACOBI
-   use timers, only: &
-         timer_start, timer_finish, timer_time, print_timers, &
+   use pflare_parameters, only: &
+         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_WJACOBI, &
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, &
          TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_CONSTRAIN, &
-         TIMER_ID_AIR_IDENTITY, TIMER_ID_AIR_TRUNCATE
-   use air_data_type, only: air_multigrid_data, MAT_INV_AFF, &
-         IS_REPARTITION, MAT_COARSE_REPARTITIONED, MAT_P_REPARTITIONED, MAT_R_REPARTITIONED
+         TIMER_ID_AIR_IDENTITY, TIMER_ID_AIR_TRUNCATE, &
+         MAT_INV_AFF, IS_REPARTITION, MAT_COARSE_REPARTITIONED, &
+         MAT_P_REPARTITIONED, MAT_R_REPARTITIONED
+   use approx_inverse_setup, only: &
+         start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
+         destroy_matrix_reuse
+   use timers, only: timer_start, timer_finish, timer_time, print_timers
+   use air_data_type, only: air_multigrid_data
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c

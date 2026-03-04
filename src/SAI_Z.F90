@@ -2,21 +2,17 @@ module sai_z
 
    use iso_c_binding
    use petscksp
-   use sorting
-   use c_petsc_interfaces
-   use petsc_helper
+   use binary_tree, only: itree, itree2vector, flush_tree
+   use sorting, only: create_knuth_shuffle_tree_array, intersect_pre_sorted_indices_only, &
+         merge_pre_sorted, sorted_binary_search
+   use c_petsc_interfaces, only: mat_mat_symbolic_c
+   use petsc_helper, only: generate_identity
+   use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI
 
 #include "petsc/finclude/petscksp.h"
 
    implicit none
    public
-
-   PetscEnum, parameter :: AIR_Z_PRODUCT=0
-   PetscEnum, parameter :: AIR_Z_LAIR=1
-   PetscEnum, parameter :: AIR_Z_LAIR_SAI=2
-   
-   PetscEnum, parameter :: PFLAREINV_SAI=5
-   PetscEnum, parameter :: PFLAREINV_ISAI=6    
    
    contains
 
