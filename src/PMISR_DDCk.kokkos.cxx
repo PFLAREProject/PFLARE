@@ -13,6 +13,7 @@ intKokkosView cf_markers_local_d;
 // Copy the global cf_markers_local_d back to the host
 PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 {
+   PFLARE_LOG_ROUTINE("copy_cf_markers_d2h");
    // Host wrapper for cf_markers_local
    intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
 
@@ -30,6 +31,7 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 // Delete the global cf_markers_local_d
 PETSC_INTERN void delete_device_cf_markers()
 {
+   PFLARE_LOG_ROUTINE("delete_device_cf_markers");
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    cf_markers_local_d = intKokkosView(); 
@@ -44,6 +46,7 @@ PETSC_INTERN void delete_device_cf_markers()
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
 {
+   PFLARE_LOG_ROUTINE("pmisr_kokkos");
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -545,6 +548,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 // Creates the device local indices for F or C points based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d)
 {
+   PFLARE_LOG_ROUTINE("create_cf_is_device_kokkos");
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    auto exec = PetscGetKokkosExecutionSpace();
@@ -603,6 +607,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 // Creates the host IS is_fine and is_coarse based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse)
 {
+   PFLARE_LOG_ROUTINE("create_cf_is_kokkos");
    PetscIntKokkosView is_fine_local_d, is_coarse_local_d;
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
@@ -660,6 +665,7 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
 {
+   PFLARE_LOG_ROUTINE("MatDiagDomRatio_kokkos");
    PetscInt local_rows, local_cols;
 
    // Are we in parallel?
@@ -891,6 +897,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, PetscReal *max_dd_ratio)
 {
+   PFLARE_LOG_ROUTINE("ddc_kokkos");
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
