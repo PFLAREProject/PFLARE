@@ -1,15 +1,13 @@
 module weighted_jacobi
 
    use petscmat
+   use pflare_parameters, only: PFLAREINV_WJACOBI, PFLAREINV_JACOBI
 
 #include "petsc/finclude/petscmat.h"
 
    implicit none
    public
-   
-   PetscEnum, parameter :: PFLAREINV_WJACOBI=7
-   PetscEnum, parameter :: PFLAREINV_JACOBI=8   
-   
+
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------

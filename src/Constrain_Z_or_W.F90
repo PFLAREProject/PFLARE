@@ -2,8 +2,8 @@ module constrain_z_or_w
 
    use iso_c_binding
    use petscksp
-   use c_petsc_interfaces
-   use petsc_helper
+   use c_petsc_interfaces, only: vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
+   use petsc_helper, only: pseudo_inv
 
 #include "petsc/finclude/petscksp.h"
 

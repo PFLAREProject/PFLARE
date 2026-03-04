@@ -2,10 +2,11 @@ module c_fortran_bindings
 
    use petscksp
    use iso_c_binding
-   use air_mg_setup
-   use pcair_shell
-   use pflare
-   use air_data_type_routines
+   use pcair_data_type, only: pc_air_multigrid_data
+   use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
+   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
+   use cf_splitting, only: compute_cf_splitting
+   use air_data_type_routines, only: create_air_data
 
 #include "petsc/finclude/petscksp.h"
 

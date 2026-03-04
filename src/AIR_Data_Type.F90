@@ -1,16 +1,11 @@
 module air_data_type
 
-   use tsqr
-   use gmres_poly_data_type
+   use gmres_poly_data_type, only: gmres_poly_data
    
    ! PETSc
    use petscmat
-   use petscvec
-   use petscis
 
 #include "petsc/finclude/petscmat.h"
-#include "petsc/finclude/petscvec.h"
-#include "petsc/finclude/petscis.h"
 
    implicit none
 
@@ -255,33 +250,7 @@ module air_data_type
    
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
    
-   ! Indices into reuse_mat
-   integer, parameter :: MAT_AP = 1
-   integer, parameter :: MAT_RAP = 2
-   integer, parameter :: MAT_RAP_DROP = 3
-   integer, parameter :: MAT_Z_DROP = 4
-   integer, parameter :: MAT_W_DROP = 5
-   integer, parameter :: MAT_COARSE_REPARTITIONED = 6
-   integer, parameter :: MAT_P_REPARTITIONED = 7
-   integer, parameter :: MAT_R_REPARTITIONED = 8
-   integer, parameter :: MAT_AFF_DROP = 9
-   integer, parameter :: MAT_ACF_DROP = 10
-   integer, parameter :: MAT_AFC_DROP = 11
-   integer, parameter :: MAT_A_DROP = 12
-   integer, parameter :: MAT_W = 13
-   integer, parameter :: MAT_Z = 14
-   integer, parameter :: MAT_INV_AFF = 15
-   integer, parameter :: MAT_INV_AFF_DROPPED = 16
-   integer, parameter :: MAT_INV_ACC = 17
-   integer, parameter :: MAT_SAI_SUB = 18
-   integer, parameter :: MAT_Z_AFF = 19
-   integer, parameter :: MAT_Z_NO_SPARSITY = 20
-   integer, parameter :: MAT_W_AFF = 21
-   integer, parameter :: MAT_W_NO_SPARSITY = 22
-
-   ! Indices into reuse_is
-   integer, parameter :: IS_REPARTITION = 1
-   integer, parameter :: IS_R_Z_FINE_COLS = 2
+   ! Index parameters moved to pflare_parameters
    
    ! Stores temporary data we use for re-use
    ! The things stored in these structures 

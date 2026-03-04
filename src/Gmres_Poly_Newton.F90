@@ -2,7 +2,7 @@ module gmres_poly_newton
 
    use petscmat
    use gmres_poly
-   use c_petsc_interfaces
+   use c_petsc_interfaces, only: MatSeqAIJGetArrayF90_mine, mat_mult_powers_share_sparsity_kokkos
 
 #include "petsc/finclude/petscmat.h"   
 

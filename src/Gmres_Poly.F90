@@ -1,12 +1,16 @@
 module gmres_poly
 
    use petscmat
-   use sorting
-   use c_petsc_interfaces
-   use matshell_data_type
-   use tsqr
-   use gmres_poly_data_type
-   use petsc_helper
+   use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
+   use c_petsc_interfaces, only: MatSeqAIJGetArrayF90_mine, mat_mult_powers_share_sparsity_kokkos
+   use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
+         PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
+         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE
+   use matshell_data_type, only: mat_ctxtype
+   use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
+   use gmres_poly_data_type, only: gmres_poly_data
+   use petsc_helper, only: MatAXPYWrapper, ShellSetVecType, destroy_matrix_reuse, &
+         kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
 
 #include "petsc/finclude/petscmat.h"   
 
@@ -23,11 +27,6 @@ module gmres_poly
 
    public
 
-   PetscEnum, parameter :: PFLAREINV_POWER=0
-   PetscEnum, parameter :: PFLAREINV_ARNOLDI=1
-   PetscEnum, parameter :: PFLAREINV_NEWTON=2
-   PetscEnum, parameter :: PFLAREINV_NEWTON_NO_EXTRA=3
-   
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------

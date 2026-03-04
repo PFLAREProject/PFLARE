@@ -1,10 +1,12 @@
 module fc_smooth
 
    use petscksp
-   use c_petsc_interfaces
-   use air_data_type
-   use petsc_helper
-   use matshell_data_type
+   use c_petsc_interfaces, only: create_VecISCopyLocal_kokkos, &
+         set_VecISCopyLocal_kokkos_our_level, &
+         destroy_VecISCopyLocal_kokkos, VecISCopyLocal_kokkos
+   use air_data_type, only: air_multigrid_data
+   use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
+   use matshell_data_type, only: mat_ctxtype
 
 #include "petsc/finclude/petscksp.h"
 #include "petscconf.h"

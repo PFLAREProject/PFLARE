@@ -2,6 +2,8 @@ module matshell_data_type
 
    use petscmat
    use air_data_type
+   use pflare_parameters, only: MF_VEC_TEMP, MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
+         MF_VEC_DIAG, MF_VEC_RHS
 
 #include "petsc/finclude/petscmat.h"   
 
@@ -9,19 +11,11 @@ module matshell_data_type
 
    public
 
-   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~       
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! This is our context type for matshells
    ! This has to be in a separate file to matshell
 
-   ! Indices into mf_temp_vec
-   integer, parameter :: MF_VEC_TEMP = 1
-   integer, parameter :: MF_VEC_TEMP_TWO = 2
-   integer, parameter :: MF_VEC_TEMP_THREE = 3   
-   integer, parameter :: MF_VEC_DIAG = 4
-   integer, parameter :: MF_VEC_RHS = 5
-   
    type :: mat_ctxtype
-
       integer :: our_level = -1
       PetscReal, dimension(:), pointer :: coefficients => null()
       logical                     :: own_coefficients = .FALSE.

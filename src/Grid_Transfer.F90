@@ -1,8 +1,9 @@
 module grid_transfer
 
    use petscmat
-   use c_petsc_interfaces
-   use petsc_helper
+   use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
+         compute_P_from_W_kokkos, compute_R_from_Z_kokkos
+   use petsc_helper, only: kokkos_debug
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"

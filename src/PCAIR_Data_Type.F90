@@ -1,7 +1,7 @@
 module pcair_data_type
 
    use petscksp
-   use air_data_type
+   use air_data_type, only: air_multigrid_data, air_options
 
 #include "petsc/finclude/petscksp.h"
 

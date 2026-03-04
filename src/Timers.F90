@@ -3,24 +3,15 @@ module timers
    ! Get MPI types from PETSc as it can control whether using mpi or mpif08 
    use petscsys
    use iso_c_binding, only: c_double
+   use pflare_parameters, only: &
+         TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_DROP, TIMER_ID_AIR_RAP, &
+         TIMER_ID_AIR_EXTRACT, TIMER_ID_AIR_PROLONG, TIMER_ID_AIR_RESTRICT, &
+         TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_CONSTRAIN, &
+         TIMER_ID_AIR_IDENTITY, TIMER_ID_AIR_TRUNCATE
 
 #include "petsc/finclude/petscsys.h"   
 
    implicit none
-
-   ! Timer IDs - Numbers must be between 1 and 1024
-   integer, parameter      :: TIMER_ID_AIR_SETUP = 1, &
-                              TIMER_ID_AIR_INVERSE = 2, &
-                              TIMER_ID_AIR_DROP = 3, &
-                              TIMER_ID_AIR_RAP = 4, &
-                              TIMER_ID_AIR_EXTRACT = 5, &
-                              TIMER_ID_AIR_PROLONG = 6, &
-                              TIMER_ID_AIR_RESTRICT = 7, &
-                              TIMER_ID_AIR_PROC_AGGLOM = 8, &
-                              TIMER_ID_AIR_COARSEN = 9, &
-                              TIMER_ID_AIR_CONSTRAIN = 10, &
-                              TIMER_ID_AIR_IDENTITY = 11, &
-                              TIMER_ID_AIR_TRUNCATE = 12
 
    public :: timer_start, timer_finish, timer_reset, timer_clear
 

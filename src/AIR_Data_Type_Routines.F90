@@ -1,17 +1,14 @@
 module air_data_type_routines
 
-   use air_data_type
-   use approx_inverse_setup
-   use fc_smooth
+   use air_data_type, only: air_multigrid_data
+   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT
+   use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
+   use fc_smooth, only: destroy_VecISCopyLocalWrapper
    
    ! PETSc
    use petscmat
-   use petscvec
-   use petscis
 
 #include "petsc/finclude/petscmat.h"
-#include "petsc/finclude/petscvec.h"
-#include "petsc/finclude/petscis.h"
 
    implicit none
    public

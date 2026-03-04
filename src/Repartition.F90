@@ -1,8 +1,9 @@
 module repartition
 
    use petscmat
-   use c_petsc_interfaces
-   use petsc_helper
+   use c_petsc_interfaces, only: MatGetNNZs_both_c, GenerateIS_ProcAgglomeration_c, &
+         MatPartitioning_c, MatMPICreateNonemptySubcomm_c
+   use petsc_helper, only: MatAXPYWrapper
 
 #include "petsc/finclude/petscmat.h"
                 

@@ -1,9 +1,9 @@
 module air_mg_stats
 
    use petscksp
-   use petsc_helper
-   use air_data_type
-   use gmres_poly
+   use petsc_helper, only: get_nnzs_petsc_sparse
+   use air_data_type, only: air_multigrid_data
+   use gmres_poly, only: compute_mf_gmres_poly_num_matvecs
 
 #include "petsc/finclude/petscksp.h"
       

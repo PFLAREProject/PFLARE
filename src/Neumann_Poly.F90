@@ -1,15 +1,16 @@
 module neumann_poly
 
    use petscmat
-   use gmres_poly
-   use c_petsc_interfaces
+   use gmres_poly, only: build_gmres_polynomial_inverse, petsc_matvec_right_scale_poly_mf
+   use petsc_helper, only: ShellSetVecType
+   use matshell_data_type, only: mat_ctxtype
+   use tsqr, only: tsqr_buffers
+   use pflare_parameters, only: PFLAREINV_NEUMANN, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP
 
 #include "petsc/finclude/petscmat.h"
 
    implicit none
    public
-
-   PetscEnum, parameter :: PFLAREINV_NEUMANN=4
    
    contains
 

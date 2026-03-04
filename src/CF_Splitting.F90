@@ -1,9 +1,11 @@
 module cf_splitting
 
    use petscmat
-   use pmisr_ddc
-   use aggregation
-   use petsc_helper
+   use pflare_parameters, only: C_POINT, F_POINT
+   use pmisr_ddc, only: pmisr, ddc
+   use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers
+   use aggregation, only: generate_serial_aggregation
+   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
 
 #include "petsc/finclude/petscmat.h"
 
