@@ -300,7 +300,7 @@ module air_operators_setup
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
-      integer :: comm_size, errorcode, order, i_loc
+      integer :: comm_size, errorcode, order, i_loc, comm_rank
       MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array, B_array, C_array
       PetscInt :: global_row_start, global_row_end_plus_one
@@ -313,6 +313,7 @@ module air_operators_setup
       call PetscObjectGetComm(air_data%A_ff(our_level), MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
 
       ! ~~~~~~~~~~~
       ! Get some sizes
@@ -943,6 +944,8 @@ module air_operators_setup
                air_data%restrictors(our_level))
 
       call timer_finish(TIMER_ID_AIR_RESTRICT) 
+
+      print *, comm_rank, "done with compute_R_from_Z"
       
       ! Delete temporaries if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -990,6 +993,8 @@ module air_operators_setup
          end if         
 
       end if
+
+      print *, comm_rank, "at the end of finish_comms_compute_restrict_prolong"
          
    end subroutine finish_comms_compute_restrict_prolong  
 

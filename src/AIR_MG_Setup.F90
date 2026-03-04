@@ -581,6 +581,8 @@ module air_mg_setup
          ! Build the coarse matrix
          ! ~~~~~~~~~~~~~~
 
+         print *, comm_rank, "about to compute coarse matrix"
+
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))
 
