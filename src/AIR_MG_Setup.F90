@@ -13,10 +13,11 @@ module air_mg_setup
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, &
          TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_CONSTRAIN, &
          TIMER_ID_AIR_IDENTITY, TIMER_ID_AIR_TRUNCATE
-   use air_mg_stats
-   use fc_smooth
+   use air_data_type, only: air_multigrid_data, MAT_INV_AFF, &
+         IS_REPARTITION, MAT_COARSE_REPARTITIONED, MAT_P_REPARTITIONED, MAT_R_REPARTITIONED
+   use air_mg_stats, only: print_stats
+   use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
-   use grid_transfer
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &
          finish_comms_compute_restrict_prolong, compute_coarse_matrix
