@@ -90,15 +90,16 @@ or in C:
 
      // ...[e.g., KSPSolve somewhere here]
 
-or in Python with petsc4py (via the options database, or equivalently via the command line):
+or in Python with petsc4py:
+
+     import pflare
 
      pc = ksp.getPC()
      pc.setType("pflareinv")
 
-     petsc_options = PETSc.Options()
-     petsc_options['pc_pflareinv_type'] = 'newton'
-     petsc_options['pc_pflareinv_poly_order'] = '20'
-     petsc_options['pc_pflareinv_matrix_free'] = ''
+     pflare.pcpflareinv_set_poly_order(pc, 20)
+     pflare.pcpflareinv_set_type(pc, pflare.PFLAREINV_NEWTON)
+     pflare.pcpflareinv_set_matrix_free(pc, True)
 
      # ...[e.g., KSPSolve somewhere here]
 

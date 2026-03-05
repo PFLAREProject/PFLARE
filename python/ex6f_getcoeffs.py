@@ -1,7 +1,7 @@
 '''
 Demonstrates saving and restoring GMRES polynomial coefficients so that a
 preconditioner built for a previous linear system can be exactly reproduced
-without re-running the parallel polynomial iteration.
+without re-running the polynomial iteration.
 
 Mirrors tests/ex6f_getcoeffs.F90.  Works with both PCAIR (multi-level) and
 PCPFLAREINV (single-level); the PC type is chosen via -pc_type on the command

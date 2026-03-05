@@ -137,10 +137,23 @@ cdef extern:
 	void PCAIRSetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 
+	# PCPFLAREINV - Get routines (PC passed by value, not pointer)
+	int PCPFLAREINVGetPolyOrder(PetscPC pc, PetscInt *order)
+	int PCPFLAREINVGetSparsityOrder(PetscPC pc, PetscInt *order)
+	int PCPFLAREINVGetType(PetscPC pc, int *pflare_type)
+	int PCPFLAREINVGetMatrixFree(PetscPC pc, int *flag)
+	int PCPFLAREINVGetReusePolyCoeffs(PetscPC pc, int *flag)
+
 	# PCPFLAREINV - polynomial coefficients (PC passed by value, not pointer)
 	# Returns a pointer into internal PCPFLAREINV memory (valid until the next PCSetUp or PCReset).
 	# The Python wrapper copies the data before returning.
 	int PCPFLAREINVGetPolyCoeffs(PetscPC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
+
+	# PCPFLAREINV - Set routines (PC passed by value, not pointer)
+	int PCPFLAREINVSetPolyOrder(PetscPC pc, PetscInt order)
+	int PCPFLAREINVSetSparsityOrder(PetscPC pc, PetscInt order)
+	int PCPFLAREINVSetType(PetscPC pc, int pflare_type)
+	int PCPFLAREINVSetMatrixFree(PetscPC pc, int flag)
 
 	# PCPFLAREINV - set polynomial coefficients (copies from the provided pointer)
 	int PCPFLAREINVSetPolyCoeffs(PetscPC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
@@ -654,3 +667,40 @@ cpdef pcpflareinv_set_reuse_poly_coeffs(PC pc, bint flag):
 	Must be called before KSPSolve, after pcpflareinv_set_poly_coeffs, to take effect.
 	"""
 	PCPFLAREINVSetReusePolyCoeffs(pc.pc, <int>flag)
+
+cpdef int pcpflareinv_get_poly_order(PC pc):
+	cdef PetscInt result = 0
+	PCPFLAREINVGetPolyOrder(pc.pc, &result)
+	return <int>result
+
+cpdef int pcpflareinv_get_sparsity_order(PC pc):
+	cdef PetscInt result = 0
+	PCPFLAREINVGetSparsityOrder(pc.pc, &result)
+	return <int>result
+
+cpdef int pcpflareinv_get_type(PC pc):
+	cdef int result = 0
+	PCPFLAREINVGetType(pc.pc, &result)
+	return result
+
+cpdef bint pcpflareinv_get_matrix_free(PC pc):
+	cdef int result = 0
+	PCPFLAREINVGetMatrixFree(pc.pc, &result)
+	return bool(result)
+
+cpdef bint pcpflareinv_get_reuse_poly_coeffs(PC pc):
+	cdef int result = 0
+	PCPFLAREINVGetReusePolyCoeffs(pc.pc, &result)
+	return bool(result)
+
+cpdef pcpflareinv_set_poly_order(PC pc, int order):
+	PCPFLAREINVSetPolyOrder(pc.pc, <PetscInt>order)
+
+cpdef pcpflareinv_set_sparsity_order(PC pc, int order):
+	PCPFLAREINVSetSparsityOrder(pc.pc, <PetscInt>order)
+
+cpdef pcpflareinv_set_type(PC pc, int pflare_type):
+	PCPFLAREINVSetType(pc.pc, pflare_type)
+
+cpdef pcpflareinv_set_matrix_free(PC pc, bint flag):
+	PCPFLAREINVSetMatrixFree(pc.pc, <int>flag)

@@ -140,8 +140,21 @@ pcair_set_reuse_poly_coeffs            = pflare_defs.pcair_set_reuse_poly_coeffs
 pcair_set_poly_coeffs                  = pflare_defs.pcair_set_poly_coeffs
 
 # -----------------------------------------------------------------------
-# PCPFLAREINV polynomial coefficient functions
+# PCPFLAREINV Get functions
 # -----------------------------------------------------------------------
+pcpflareinv_get_poly_order         = pflare_defs.pcpflareinv_get_poly_order
+pcpflareinv_get_sparsity_order     = pflare_defs.pcpflareinv_get_sparsity_order
+pcpflareinv_get_type               = pflare_defs.pcpflareinv_get_type
+pcpflareinv_get_matrix_free        = pflare_defs.pcpflareinv_get_matrix_free
+pcpflareinv_get_reuse_poly_coeffs  = pflare_defs.pcpflareinv_get_reuse_poly_coeffs
 pcpflareinv_get_poly_coeffs        = pflare_defs.pcpflareinv_get_poly_coeffs
+
+# -----------------------------------------------------------------------
+# PCPFLAREINV Set functions
+# -----------------------------------------------------------------------
+pcpflareinv_set_poly_order         = pflare_defs.pcpflareinv_set_poly_order
+pcpflareinv_set_sparsity_order     = pflare_defs.pcpflareinv_set_sparsity_order
+pcpflareinv_set_type               = pflare_defs.pcpflareinv_set_type
+pcpflareinv_set_matrix_free        = pflare_defs.pcpflareinv_set_matrix_free
 pcpflareinv_set_poly_coeffs        = pflare_defs.pcpflareinv_set_poly_coeffs
 pcpflareinv_set_reuse_poly_coeffs  = pflare_defs.pcpflareinv_set_reuse_poly_coeffs
