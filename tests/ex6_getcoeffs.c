@@ -25,7 +25,6 @@ int main(int argc, char **args)
   PetscInt           i, j, II, JJ, m, n;
   PetscInt           Istart, Iend;
   PetscInt           nsteps, count;
-  PetscErrorCode     ierr;
   PetscBool          flg;
   PetscScalar        v;
   PetscReal          norm_first = 0.0, norm_third = 0.0;
