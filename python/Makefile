@@ -65,6 +65,11 @@ run_tests:
 		echo "Test PCAIR direct option set/get API with Python in parallel"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_options.py && echo "OK"; \
 		echo ""; \
+		echo "Test PCPFLAREINV direct option set/get API with Python"; \
+		$(PYTHON) ex_pcpflareinv_options.py && echo "OK"; \
+		echo "Test PCPFLAREINV direct option set/get API with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex_pcpflareinv_options.py && echo "OK"; \
+		echo ""; \
 		echo "Test save/restore poly coefficients with PCAIR with Python"; \
 		$(PYTHON) ex6f_getcoeffs.py -pc_type air; \
 		echo "Test save/restore poly coefficients with PCAIR in parallel with Python"; \
