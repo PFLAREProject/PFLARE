@@ -17,10 +17,13 @@ COEFFS_INV_ACC         = 2  # Inverse of the coarse-coarse block A_cc
 COEFFS_INV_COARSE      = 3  # Inverse on the coarsest grid
 
 # PCAIR polynomial coefficient functions
-pcair_get_num_levels    = pflare_defs.pcair_get_num_levels
-pcair_get_poly_coeffs   = pflare_defs.pcair_get_poly_coeffs
-pcair_set_poly_coeffs   = pflare_defs.pcair_set_poly_coeffs
+pcair_get_num_levels         = pflare_defs.pcair_get_num_levels
+pcair_get_poly_coeffs        = pflare_defs.pcair_get_poly_coeffs
+pcair_set_poly_coeffs        = pflare_defs.pcair_set_poly_coeffs
+pcair_set_reuse_sparsity     = pflare_defs.pcair_set_reuse_sparsity
+pcair_set_reuse_poly_coeffs  = pflare_defs.pcair_set_reuse_poly_coeffs
 
 # PCPFLAREINV polynomial coefficient functions
-pcpflareinv_get_poly_coeffs = pflare_defs.pcpflareinv_get_poly_coeffs
-pcpflareinv_set_poly_coeffs = pflare_defs.pcpflareinv_set_poly_coeffs
+pcpflareinv_get_poly_coeffs        = pflare_defs.pcpflareinv_get_poly_coeffs
+pcpflareinv_set_poly_coeffs        = pflare_defs.pcpflareinv_set_poly_coeffs
+pcpflareinv_set_reuse_poly_coeffs  = pflare_defs.pcpflareinv_set_reuse_poly_coeffs

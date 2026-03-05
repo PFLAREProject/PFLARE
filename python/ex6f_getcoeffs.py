@@ -82,10 +82,11 @@ if not (is_air or is_pflareinv):
         print(f"Unexpected PC type '{pc_type}'; expected 'air' or 'pflareinv'")
     sys.exit(1)
 
-# For PCAIR we also need to reuse sparsity so that the same hierarchy is
-# available when we restore poly coefficients.
+# For PCAIR, tell it to reuse the sparsity pattern (CF splitting and matrix
+# structure) on every subsequent setup.  This must be set via the direct C API
+# because ksp.setFromOptions() has already been called.
 if is_air:
-    OptDB['pc_air_reuse_sparsity'] = ''
+    pflare.pcair_set_reuse_sparsity(pc, True)
 
 # -----------------------------------------------------------------------
 # Storage for saved coefficients
@@ -127,11 +128,11 @@ for count in range(1, nsteps + 1):
             pflare.pcair_set_poly_coeffs(pc, 0,
                                           pflare.COEFFS_INV_COARSE,
                                           coeffs_air[0])
-            OptDB['pc_air_reuse_poly_coeffs'] = ''
+            pflare.pcair_set_reuse_poly_coeffs(pc, True)
 
         elif is_pflareinv:
             pflare.pcpflareinv_set_poly_coeffs(pc, coeffs_pflareinv)
-            OptDB['pc_pflareinv_reuse_poly_coeffs'] = ''
+            pflare.pcpflareinv_set_reuse_poly_coeffs(pc, True)
 
     ksp.solve(b, x)
 

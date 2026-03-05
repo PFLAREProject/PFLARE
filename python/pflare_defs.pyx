@@ -34,6 +34,14 @@ cdef extern:
 	# PCPFLAREINV - set polynomial coefficients (copies from the provided pointer)
 	int PCPFLAREINVSetPolyCoeffs(PetscPC pc, double *coeffs, int rows, int cols)
 
+	# PCAIR - reuse flags (must be called directly; the options-DB equivalents are
+	# only processed during KSPSetFromOptions / PCSetFromOptions)
+	void PCAIRSetReuseSparsity_c(PetscPC *pc, int input_bool)
+	void PCAIRSetReusePolyCoeffs_c(PetscPC *pc, int input_bool)
+
+	# PCPFLAREINV - reuse flag
+	int PCPFLAREINVSetReusePolyCoeffs(PetscPC pc, int flg)
+
 
 cpdef py_PCRegister_PFLARE():
 	PCRegister_PFLARE()
@@ -133,3 +141,24 @@ cpdef pcpflareinv_set_poly_coeffs(PC pc, cnp.ndarray coeffs):
 	cdef int rows = <int>coeffs_f.shape[0]
 	cdef int cols = <int>coeffs_f.shape[1]
 	PCPFLAREINVSetPolyCoeffs(pc.pc, <double*>coeffs_f.data, rows, cols)
+
+cpdef pcair_set_reuse_sparsity(PC pc, bint flag):
+	"""Tell PCAIR to reuse sparsity (CF splitting and matrix structure) on the next setup.
+
+	Must be called before KSPSolve to take effect.
+	"""
+	PCAIRSetReuseSparsity_c(&(pc.pc), <int>flag)
+
+cpdef pcair_set_reuse_poly_coeffs(PC pc, bint flag):
+	"""Tell PCAIR to reuse the current polynomial coefficients on the next setup.
+
+	Must be called before KSPSolve, after pcair_set_poly_coeffs, to take effect.
+	"""
+	PCAIRSetReusePolyCoeffs_c(&(pc.pc), <int>flag)
+
+cpdef pcpflareinv_set_reuse_poly_coeffs(PC pc, bint flag):
+	"""Tell PCPFLAREINV to reuse the current polynomial coefficients on the next setup.
+
+	Must be called before KSPSolve, after pcpflareinv_set_poly_coeffs, to take effect.
+	"""
+	PCPFLAREINVSetReusePolyCoeffs(pc.pc, <int>flag)
