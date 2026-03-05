@@ -1,6 +1,8 @@
-## Options         
+## Options
 
 A brief description of the available options in PFLARE is given below and their default values.
+
+All options can be set either through command line arguments or programmatically via the routine names listed in the table below. In Python (via the `pflare` module), each routine is available under a snake\_case name: for example, `PCAIRSetZType` → `pflare.pcair_set_z_type`, `PCAIRGetPolyOrder` → `pflare.pcair_get_poly_order`. The complete list of Python names and the associated enum constants (e.g. `PFLAREINV_ARNOLDI`, `AIR_Z_LAIR`, `CF_PMISR_DDC`) are defined in `python/pflare.py`.
 
 ### PCPFLAREINV
 

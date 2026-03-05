@@ -53,16 +53,17 @@ or in C:
 
 or in Python with petsc4py:
 
+     import pflare
+
      pc = ksp.getPC()
      pc.setType("air")
 
-     petsc_options = PETSc.Options()
-     petsc_options['pc_air_z_type'] = 'lair'
-     petsc_options['pc_air_inverse_type'] = 'wjacobi'
-     petsc_options['pc_air_smooth_type'] = 'fcf'     
+     pflare.pcair_set_z_type(pc, pflare.AIR_Z_LAIR)
+     pflare.pcair_set_inverse_type(pc, pflare.PFLAREINV_WJACOBI)
+     pflare.pcair_set_smooth_type(pc, "fcf")
 
      # ...[e.g., KSPSolve somewhere here]
-     
+
 or via the command line: ``-pc_type air -pc_air_z_type lair -pc_air_inverse_type wjacobi -pc_air_smooth_type fcf``.
 
 #### 3) Using PCPFLAREINV to apply a 20th order GMRES polynomial as a Newton polynomial matrix free:
@@ -91,16 +92,17 @@ or in C:
 
 or in Python with petsc4py:
 
+     import pflare
+
      pc = ksp.getPC()
      pc.setType("pflareinv")
 
-     petsc_options = PETSc.Options()
-     petsc_options['pc_pflareinv_type'] = 'newton'
-     petsc_options['pc_pflareinv_poly_order'] = '20'
-     petsc_options['pc_pflareinv_matrix_free'] = ''
+     pflare.pcpflareinv_set_poly_order(pc, 20)
+     pflare.pcpflareinv_set_type(pc, pflare.PFLAREINV_NEWTON)
+     pflare.pcpflareinv_set_matrix_free(pc, True)
 
      # ...[e.g., KSPSolve somewhere here]
-     
+
 or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 20 -pc_pflareinv_matrix_free``.
 
 #### 4) Jupyter notebooks:
