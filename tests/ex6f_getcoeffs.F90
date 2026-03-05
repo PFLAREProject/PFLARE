@@ -155,9 +155,7 @@ contains
 
       if (count == nsteps) then
          if (rank == 0) then
-            if (abs(norm_first - norm_third) / norm_first < 1e-8) then
-               print *, "Residuals OK"
-            else
+            if (abs(norm_first - norm_third) / norm_first > 1e-8) then
                print *, "Residuals WRONG"
                error stop 1
             end if
