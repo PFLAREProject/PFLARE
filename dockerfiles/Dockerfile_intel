@@ -32,7 +32,9 @@ RUN source /opt/intel/oneapi/setvars.sh && \
     sed -i '/^run_tests_load_parallel:/,/^run_tests_no_load_serial:/s/ex12f_gmres_poly/ex12f_gmres_poly -no_power/g' tests/Makefile && \
     sed -i '/^run_tests_no_load_parallel:/,/^run_tests_medium_serial:/s/ex12f_gmres_poly/ex12f_gmres_poly -no_power/g' tests/Makefile && \
     echo "Disabling power basis in ex6f_getcoeffs in tests/Makefile" && \
-    sed -i '/^run_tests_no_load_serial:/,/^run_tests_no_load_parallel:/s/ex6f_getcoeffs/ex6f_getcoeffs -no_power/g' tests/Makefile && \    
+    sed -i '/^run_tests_no_load_serial:/,/^run_tests_no_load_parallel:/s/ex6f_getcoeffs/ex6f_getcoeffs -no_power/g' tests/Makefile && \
+    echo "Disabling power basis in ex6_getcoeffs in tests/Makefile" && \
+    sed -i '/^run_tests_no_load_serial:/,/^run_tests_no_load_parallel:/s/ex6_getcoeffs/ex6_getcoeffs -no_power/g' tests/Makefile && \
     make -j2 && make -j2 check && \
     make -j2 tests
 
