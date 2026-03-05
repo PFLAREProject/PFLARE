@@ -60,15 +60,19 @@ run_tests:
 		echo "Test PMISR DDC CF splitting with Python in parallel"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py; \
 		echo ""; \
-		echo "Test save/restore poly coefficients with PCAIR (Python)"; \
+		echo "Test save/restore poly coefficients with PCAIR with Python"; \
 		$(PYTHON) ex6f_getcoeffs.py -pc_type air; \
-		echo "Test save/restore poly coefficients with PCAIR in parallel (Python)"; \
+		echo "Test save/restore poly coefficients with PCAIR in parallel with Python"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type air; \
 		echo ""; \
-		echo "Test save/restore poly coefficients with PCPFLAREINV (Python)"; \
-		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type arnoldi; \
-		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel (Python)"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type arnoldi; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV with Python"; \
+		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel with Python"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV with Python with Newton"; \
+		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type newton; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel with Python with Newton"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type newton; \
 	 else \
 		echo 'Python tests skipped (PFLARE Python module not built or not found)'; \
 	 fi

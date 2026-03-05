@@ -133,7 +133,6 @@ for count in range(1, nsteps + 1):
             pflare.pcpflareinv_set_poly_coeffs(pc, coeffs_pflareinv)
             OptDB['pc_pflareinv_reuse_poly_coeffs'] = ''
 
-    ksp.setReusePreconditioner(False)
     ksp.solve(b, x)
 
     reason = ksp.getConvergedReason()
@@ -142,9 +141,8 @@ for count in range(1, nsteps + 1):
             print(f"KSP did not converge on solve {count} (reason {reason})")
         sys.exit(1)
 
-    # -- Compute residual norm -------------------------------------------
-    r = b.duplicate()
-    A.residual(b, x, r)
+    # -- Compute residual norm: r = b - A*x -----------------------------
+    r = b - A * x
     norm = r.norm(PETSc.NormType.NORM_2)
     if count == 1:
         norm_first = norm
