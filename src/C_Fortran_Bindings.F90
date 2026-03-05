@@ -104,15 +104,22 @@ module c_fortran_bindings
       !
       ! coeffs_ptr/row_size/col_size are in/out:
       !   On entry, if coeffs_ptr is c_null_ptr: compute fresh polynomial coefficients.
-      !     On return, coeffs_ptr is set to c_loc of the newly allocated Fortran array,
-      !     and row_size/col_size reflect its dimensions. The caller owns this memory
-      !     and is responsible for freeing it (Fortran allocate uses the C heap, so a
-      !     plain C free() on the returned pointer is safe).
+      !     On return, coeffs_ptr points to a C-malloc'd copy of the coefficients;
+      !     the caller owns this memory and must free it with C free().
       !   On entry, if coeffs_ptr is non-null: reuse those coefficients; the polynomial
-      !     computation in start_approximate_inverse is skipped via the null-mat trick.
+      !     computation is skipped (see calculate_and_build_approximate_inverse).
       !     coeffs_ptr/row_size/col_size are unchanged on return.
 
 #include "finclude/PETSc_ISO_Types.h"
+
+      ! Interface to C stdlib malloc
+      interface
+         function c_malloc(sz) bind(C, name='malloc')
+            use iso_c_binding
+            integer(c_size_t), value :: sz
+            type(c_ptr) :: c_malloc
+         end function c_malloc
+      end interface
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in)                   :: input_mat_ptr
@@ -125,6 +132,9 @@ module c_fortran_bindings
       type(tMat)  :: input_mat, inv_matrix
       logical     :: matrix_free, subcomm, diag_scale_polys
       PetscReal, dimension(:, :), contiguous, pointer :: coefficients
+      type(c_ptr) :: c_buf
+      real(PFLARE_PETSCREAL_C_KIND), pointer :: c_view(:,:)
+      integer(PFLARE_PETSCINT_C_KIND) :: nr, nc
       ! ~~~~~~~~
 
       input_mat%v = input_mat_ptr
@@ -163,10 +173,23 @@ module c_fortran_bindings
                inv_matrix, coefficients)
 
       if (.NOT. c_associated(coeffs_ptr)) then
-         ! Fresh path: return c_loc of the newly allocated Fortran array
-         coeffs_ptr = c_loc(coefficients(1, 1))
-         row_size   = int(size(coefficients, 1), PFLARE_PETSCINT_C_KIND)
-         col_size   = int(size(coefficients, 2), PFLARE_PETSCINT_C_KIND)
+         ! Fresh path: Fortran allocate may use a compiler-specific allocator
+         ! (e.g. _mm_malloc on Intel) that is incompatible with C free().
+         ! Copy the data into a C-malloc'd buffer so the C side can safely free() it.
+         nr = int(size(coefficients, 1), PFLARE_PETSCINT_C_KIND)
+         nc = int(size(coefficients, 2), PFLARE_PETSCINT_C_KIND)
+         c_buf = c_malloc(int(nr, c_size_t) * int(nc, c_size_t) * int(PFLARE_PETSCREAL_C_KIND, c_size_t))
+         call c_f_pointer(c_buf, c_view, [int(nr), int(nc)])
+         c_view = coefficients
+         ! For non-matrix-free: the matshell does not exist, so the Fortran allocation
+         ! is no longer needed once we have the C copy.
+         ! For matrix-free: the matshell owns its Fortran allocation (own_coefficients=.TRUE.)
+         ! and will deallocate it independently via reset_inverse_mat. The C copy is
+         ! stored separately in poly_coeffs and freed via free() in PCReset_PFLAREINV_c.
+         if (.NOT. matrix_free) deallocate(coefficients)
+         coeffs_ptr = c_buf
+         row_size   = nr
+         col_size   = nc
       end if
 
       ! Pass out the new inverse matrix

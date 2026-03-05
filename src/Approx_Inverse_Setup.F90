@@ -170,14 +170,11 @@ module approx_inverse_setup
 
          if (matrix_free) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
-            if (present(coefficients)) then
-               ! Caller takes ownership; matshell must not free the allocation
-               mat_ctx%own_coefficients = .FALSE.
-               coefficients => work_coefficients
-            else
-               ! No external owner: matshell owns and will free on reset
-               mat_ctx%own_coefficients = .TRUE.
-            end if
+            ! The matshell always owns its coefficients and frees them via deallocate
+            ! in reset_inverse_mat. When present(coefficients), the C binding is
+            ! responsible for making its own C-malloc copy before this pointer is freed.
+            mat_ctx%own_coefficients = .TRUE.
+            if (present(coefficients)) coefficients => work_coefficients
          else if (present(coefficients)) then
             ! Return heap-allocated coefficients to caller
             coefficients => work_coefficients
