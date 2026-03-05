@@ -1590,6 +1590,15 @@ end if
                call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
             end if
          end if
+
+         ! Free old owned coefficients before reassigning.
+         ! Avoids a memory leak when the same matshell is reused across PCSetUp calls
+         ! (SAME_NONZERO_PATTERN) but fresh coefficients are being computed.
+         ! For PCAIR, own_coefficients is always .FALSE., so this is a no-op there.
+         if (mat_ctx%own_coefficients .AND. associated(mat_ctx%coefficients)) then
+            deallocate(mat_ctx%coefficients)
+            mat_ctx%coefficients => null()
+         end if
          
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
          mat_ctx%mat = matrix 
