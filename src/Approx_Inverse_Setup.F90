@@ -254,19 +254,19 @@ module approx_inverse_setup
       ! ~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~
 
-      ! Have to dynamically allocate this
-      allocate(mat_ctx_da)
-      mat_ctx_da%mat_scaled = buffers%matrix
-
       ! If we're on the subcomm, we don't need to do anything
       if (.NOT. PetscObjectIsNull(buffers%matrix)) then
+
+         ! Have to dynamically allocate this
+         allocate(mat_ctx_da)
+         mat_ctx_da%mat_scaled = buffers%matrix           
 
          ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
          if ((inverse_type == PFLAREINV_POWER .OR. &
              inverse_type == PFLAREINV_ARNOLDI .OR. &
              inverse_type == PFLAREINV_NEWTON .OR. &
              inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
-             diag_scale_polys) then
+             diag_scale_polys) then             
 
             ! ~~~~~~~~~~~~~
             ! Now we allocate a new matshell that applies a diagonally scaled version of 
@@ -342,10 +342,10 @@ module approx_inverse_setup
              inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
              diag_scale_polys) then
 
-            call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)
+            call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)             
             call MatDestroy(mat_ctx_da%mat_scaled, ierr)
-            deallocate(mat_ctx_da)               
          end if
+         deallocate(mat_ctx_da)           
       end if
 
       ! If we ended up on a subcomm, we need to comm the coefficients back to 
