@@ -13,6 +13,10 @@
 PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
 PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
+PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int symmetric_int,
+   double strong_threshold, int max_luby_steps, int cf_splitting_type,
+   int ddc_its, double fraction_swap, double max_dd_ratio,
+   IS *is_fine, IS *is_coarse);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
 // External users should use the get/set routines without _c which have 
 // PetscErrorCode defined as return type, those routines are defined below this
@@ -186,6 +190,17 @@ PETSC_EXTERN PetscErrorCode c_PCAIRGetPCShell(PC *pc, PC *pc_air_shell)
 // Now all the get/set routines for options
 // Most of the explanation are in the comments above the set routines
 // ~~~~~~~~~~~~~~~~~~~~~
+
+// CF splitting
+PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
+   double strong_threshold, int max_luby_steps, int cf_splitting_type,
+   int ddc_its, double fraction_swap, double max_dd_ratio,
+   IS *is_fine, IS *is_coarse)
+{
+   compute_cf_splitting_c(&input_mat, symmetric_int, strong_threshold,
+      max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
+      max_dd_ratio, is_fine, is_coarse);
+}
 
 // Get routines
 
