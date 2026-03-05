@@ -233,8 +233,8 @@ or in Python with petsc4py:
      pc = ksp.getPC()
      pc.setType("air")
 
-     petsc_options = PETSc.Options()
-     petsc_options['pc_air_reuse_sparsity'] = ''
+     # Reuse sparsity must be set via the direct API after ksp.setFromOptions()
+     pflare.pcair_set_reuse_sparsity(pc, True)
 
      # First solve - the PCAIR will be setup
      ksp.solve(b, x)
@@ -257,7 +257,7 @@ or in Python with petsc4py:
      for petsc_level in range(num_levels - 1, 0, -1):
          pflare.pcair_set_poly_coeffs(pc, petsc_level, pflare.COEFFS_INV_AFF, coeffs_levels[petsc_level])
      pflare.pcair_set_poly_coeffs(pc, 0, pflare.COEFFS_INV_COARSE, coeffs_levels[0])
-     petsc_options['pc_air_reuse_poly_coeffs'] = ''
+     pflare.pcair_set_reuse_poly_coeffs(pc, True)
 
      # Third solve - reproduces the preconditioner from the first solve
      ksp.solve(b, x)
@@ -336,7 +336,7 @@ or in Python with petsc4py:
 
      # Restore the saved polynomial coefficients and tell PCPFLAREINV to reuse them
      pflare.pcpflareinv_set_poly_coeffs(pc, coeffs)
-     PETSc.Options()['pc_pflareinv_reuse_poly_coeffs'] = ''
+     pflare.pcpflareinv_set_reuse_poly_coeffs(pc, True)
 
      # Third solve - reproduces the preconditioner from the first solve
      ksp.solve(b, x)
