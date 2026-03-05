@@ -95,36 +95,79 @@ module c_fortran_bindings
 
    subroutine calculate_and_build_approximate_inverse_c(input_mat_ptr, inverse_type, &
          poly_order, poly_sparsity_order, &
-         matrix_free_int, diag_scale_polys_int, subcomm_int, inv_matrix_ptr) &
-         bind(C,name='calculate_and_build_approximate_inverse_c')
+         matrix_free_int, diag_scale_polys_int, subcomm_int, &
+         coeffs_ptr, row_size, col_size, &
+         inv_matrix_ptr) &
+         bind(C, name='calculate_and_build_approximate_inverse_c')
 
-      ! Builds an approximate inverse
+      ! Builds an approximate inverse, with optional coefficient passing.
+      !
+      ! coeffs_ptr/row_size/col_size are in/out:
+      !   On entry, if coeffs_ptr is c_null_ptr: compute fresh polynomial coefficients.
+      !     On return, coeffs_ptr is set to c_loc of the newly allocated Fortran array,
+      !     and row_size/col_size reflect its dimensions. The caller owns this memory
+      !     and is responsible for freeing it (Fortran allocate uses the C heap, so a
+      !     plain C free() on the returned pointer is safe).
+      !   On entry, if coeffs_ptr is non-null: reuse those coefficients; the polynomial
+      !     computation in start_approximate_inverse is skipped via the null-mat trick.
+      !     coeffs_ptr/row_size/col_size are unchanged on return.
+
+#include "finclude/PETSc_ISO_Types.h"
 
       ! ~~~~~~~~
-      integer(c_long_long), intent(in)       :: input_mat_ptr
-      integer(c_int), value, intent(in)      :: inverse_type, poly_order, poly_sparsity_order
-      integer(c_int), value, intent(in)      :: matrix_free_int, diag_scale_polys_int, subcomm_int
-      integer(c_long_long), intent(inout)    :: inv_matrix_ptr
+      integer(c_long_long), intent(in)                   :: input_mat_ptr
+      integer(c_int), value, intent(in)                  :: inverse_type, poly_order, poly_sparsity_order
+      integer(c_int), value, intent(in)                  :: matrix_free_int, diag_scale_polys_int, subcomm_int
+      type(c_ptr), intent(inout)                         :: coeffs_ptr
+      integer(PFLARE_PETSCINT_C_KIND), intent(inout)      :: row_size, col_size
+      integer(c_long_long), intent(inout)                :: inv_matrix_ptr
 
       type(tMat)  :: input_mat, inv_matrix
-      logical     :: matrix_free = .FALSE., subcomm = .FALSE., diag_scale_polys = .FALSE.
-      ! ~~~~~~~~      
-      
-      ! Now the input mat long long just gets copied into input_mat%v
-      ! This works as the PETSc types are essentially just wrapped around
-      ! pointers stored in %v
-      input_mat%v = input_mat_ptr   
-      ! inv_matrix_ptr could be passed in as null or as an existing matrix 
-      ! whose sparsity we want to reuse, so we have to pass that in too 
+      logical     :: matrix_free, subcomm, diag_scale_polys
+      PetscReal, dimension(:, :), contiguous, pointer :: coefficients
+      ! ~~~~~~~~
+
+      input_mat%v = input_mat_ptr
+      ! inv_matrix_ptr could be passed in as null or as an existing matrix
+      ! whose sparsity we want to reuse, so we have to pass that in too
       inv_matrix%v = inv_matrix_ptr
-      
-      if (matrix_free_int == 1) matrix_free = .TRUE.
+
+      matrix_free    = .FALSE.
+      diag_scale_polys = .FALSE.
+      subcomm        = .FALSE.
+      if (matrix_free_int    == 1) matrix_free    = .TRUE.
       if (diag_scale_polys_int == 1) diag_scale_polys = .TRUE.
-      if (subcomm_int == 1) subcomm = .TRUE.
+      if (subcomm_int        == 1) subcomm        = .TRUE.
+
+      if (c_associated(coeffs_ptr)) then
+
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Reuse path: wrap the caller's buffer in a Fortran pointer and pass it in.
+         ! calculate_and_build_approximate_inverse uses the null-mat trick to skip
+         ! polynomial computation when coefficients is already associated on entry.
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         call c_f_pointer(coeffs_ptr, coefficients, [int(row_size), int(col_size)])
+
+      else
+
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Fresh path: nullify so calculate_and_build_approximate_inverse allocates
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         nullify(coefficients)
+
+      end if
+
       call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
                poly_order, poly_sparsity_order, &
                matrix_free, diag_scale_polys, subcomm, &
-               inv_matrix)
+               inv_matrix, coefficients)
+
+      if (.NOT. c_associated(coeffs_ptr)) then
+         ! Fresh path: return c_loc of the newly allocated Fortran array
+         coeffs_ptr = c_loc(coefficients(1, 1))
+         row_size   = int(size(coefficients, 1), PFLARE_PETSCINT_C_KIND)
+         col_size   = int(size(coefficients, 2), PFLARE_PETSCINT_C_KIND)
+      end if
 
       ! Pass out the new inverse matrix
       inv_matrix_ptr = inv_matrix%v

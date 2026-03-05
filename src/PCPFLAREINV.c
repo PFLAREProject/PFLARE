@@ -10,9 +10,14 @@
 
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
+// coeffs_ptr/row_size/col_size are in/out:
+//   *coeffs_ptr == NULL on entry  -> fresh: Fortran allocates, writes c_loc to *coeffs_ptr on return
+//   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
 PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, PetscInt inverse_type, PetscInt order, \
                      PetscInt sparsity_order, PetscInt matrix_free_int, PetscInt diag_scale_polys_int, \
-                     PetscInt subcomm_int, Mat *inv_matrix);
+                     PetscInt subcomm_int, \
+                     PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
+                     Mat *inv_matrix);
 
 // The types available as approximate inverses are (see include/pflare.h):
 //
@@ -47,6 +52,17 @@ typedef struct {
    PetscBool matrix_free;
    int subcomm_int;
 
+   // Stored polynomial coefficients (column-major).
+   // Populated after every PCSetUp call. Memory is either Fortran-allocated (from
+   // calculate_and_build_approximate_inverse_c) or C-malloc'd (from SetPolyCoeffs);
+   // in both cases a plain C free() is correct because Fortran allocate uses the C heap.
+   // Populated/updated after every PCSetUp call
+   PetscReal *poly_coeffs;
+   PetscInt   poly_coeffs_rows;
+   PetscInt   poly_coeffs_cols;
+   // If PETSC_TRUE and SAME_NONZERO_PATTERN, skip coefficient recomputation
+   PetscBool  reuse_poly_coeffs;
+
 } PC_PFLAREINV;
 
 // ~~~~~~~~~~
@@ -58,6 +74,12 @@ static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;    
    reset_inverse_mat_c(&(inv_data->mat_inverse));
+   // Free stored polynomial coefficients (Fortran-allocated or C-malloc'd, both freed with free())
+   free(inv_data->poly_coeffs);
+   inv_data->poly_coeffs      = NULL;
+   inv_data->poly_coeffs_rows = 0;
+   inv_data->poly_coeffs_cols = 0;
+   // Note: reuse_poly_coeffs is intentionally NOT reset here (persists across resets)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -251,6 +273,101 @@ static PetscErrorCode PCPFLAREINVSetMatrixFree_PFLAREINV(PC pc, PetscBool flg)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// ~~~~~~~~~~
+
+// Get the stored polynomial coefficients and their dimensions
+// This routine returns a pointer to the coefficients in the PCPFLAREINV object
+// If you want to save/restore them later you will need to copy them yourself
+// The pointer is valid only until the next PCSetUp or PCReset call
+// This is different to the Fortran interface to this routine, which returns a copy
+// in an allocatable array (which knows its own size)
+PetscErrorCode PCPFLAREINVGetPolyCoeffs(PC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
+{
+   PetscFunctionBegin;
+   PetscUseMethod(pc, "PCPFLAREINVGetPolyCoeffs_C", (PC, PetscReal **, PetscInt *, PetscInt *), (pc, coeffs, rows, cols));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVGetPolyCoeffs_PFLAREINV(PC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   *coeffs = inv_data->poly_coeffs;
+   *rows   = inv_data->poly_coeffs_rows;
+   *cols   = inv_data->poly_coeffs_cols;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+// Set (copy in) polynomial coefficients; does not trigger rebuild
+// This routine copies the data from coeffs_ptr into the PCPFLAREINV object
+// row_size == poly_order+1, col_size == 1 (power/arnoldi/neumann) or 2 (newton)
+// The caller's array is not referenced after this call and can be freed or modified
+PetscErrorCode PCPFLAREINVSetPolyCoeffs(PC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
+{
+   PetscFunctionBegin;
+   PetscTryMethod(pc, "PCPFLAREINVSetPolyCoeffs_C", (PC, PetscReal *, PetscInt, PetscInt), (pc, coeffs, rows, cols));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVSetPolyCoeffs_PFLAREINV(PC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   free(inv_data->poly_coeffs);
+   inv_data->poly_coeffs = (PetscReal *)malloc((size_t)rows * (size_t)cols * sizeof(PetscReal));
+   PetscCheck(inv_data->poly_coeffs, PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed in PCPFLAREINVSetPolyCoeffs");
+   memcpy(inv_data->poly_coeffs, coeffs, (size_t)rows * (size_t)cols * sizeof(PetscReal));
+   inv_data->poly_coeffs_rows = rows;
+   inv_data->poly_coeffs_cols = cols;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+// Get the flag that controls whether polynomial coefficients are reused on next setup
+PetscErrorCode PCPFLAREINVGetReusePolyCoeffs(PC pc, PetscBool *flg)
+{
+   PetscFunctionBegin;
+   PetscUseMethod(pc, "PCPFLAREINVGetReusePolyCoeffs_C", (PC, PetscBool *), (pc, flg));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVGetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool *flg)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   *flg = inv_data->reuse_poly_coeffs;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+// Set the flag that controls whether polynomial coefficients are reused on next setup
+PetscErrorCode PCPFLAREINVSetReusePolyCoeffs(PC pc, PetscBool flg)
+{
+   PetscFunctionBegin;
+   PetscTryMethod(pc, "PCPFLAREINVSetReusePolyCoeffs_C", (PC, PetscBool), (pc, flg));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVSetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool flg)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   inv_data->reuse_poly_coeffs = flg;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -287,6 +404,10 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetSparsityOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyCoeffs_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyCoeffs_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetReusePolyCoeffs_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetReusePolyCoeffs_C", NULL));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -309,6 +430,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
    PetscCall(PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg));
    if (flg) PetscCall(PCPFLAREINVSetType(pc, type));
    PetscCall(PetscOptionsBool("-pc_pflareinv_matrix_free", "Apply matrix free", "PCPFLAREINVSetMatrixFree", inv_data->matrix_free, &inv_data->matrix_free, NULL));
+   PetscCall(PetscOptionsBool("-pc_pflareinv_reuse_poly_coeffs", "Reuses gmres polynomial coefficients during setup", "PCPFLAREINVSetReusePolyCoeffs", inv_data->reuse_poly_coeffs, &inv_data->reuse_poly_coeffs, NULL));
    PetscCall(PetscOptionsInt("-pc_pflareinv_poly_order", "Order of polynomial", "PCPFLAREINVSetPolyOrder", inv_data->poly_order, &poly_order, &flg));
    if (flg) PetscCall(PCPFLAREINVSetPolyOrder(pc, poly_order));
    PetscCall(PetscOptionsInt("-pc_pflareinv_sparsity_order", "Sparsity order of assembled inverse", "PCPFLAREINVSetSparsityOrder", inv_data->inverse_sparsity_order, &inverse_sparsity_order, &flg));
@@ -324,6 +446,8 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
    PCPFLAREINVType type;
    MPI_Comm   comm; 
    PC_PFLAREINV *inv_data;
+   PetscReal *new_coeffs;
+   PetscInt   new_rows, new_cols;
 
    PetscFunctionBegin;
 
@@ -353,13 +477,19 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
 
    // If we haven't setup yet
    if (pc->setupcalled == 0)
-   {   
-      // Build the polynomial inverse as a Mat
+   {
+      // Fresh setup: pass NULL to let Fortran allocate and return the coefficient pointer
+      new_coeffs = NULL; new_rows = 0; new_cols = 0;
       calculate_and_build_approximate_inverse_c(&(pc->pmat), \
             type, \
             inv_data->poly_order, inv_data->inverse_sparsity_order, \
             matrix_free_int, diag_scale_polys_int, subcomm_int, \
-            &(inv_data->mat_inverse));      
+            &new_coeffs, &new_rows, &new_cols, \
+            &(inv_data->mat_inverse));
+      free(inv_data->poly_coeffs);
+      inv_data->poly_coeffs      = new_coeffs;
+      inv_data->poly_coeffs_rows = new_rows;
+      inv_data->poly_coeffs_cols = new_cols;
    }
    else
    {
@@ -367,22 +497,39 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       // start again       
       if (pc->flag == DIFFERENT_NONZERO_PATTERN)
       {
+         // PCReset also frees poly_coeffs
          PetscCall(PCReset_PFLAREINV_c(pc));
-         // Build the polynomial inverse as a Mat
+         // Fresh: pass NULL to let Fortran allocate and return the coefficient pointer
+         new_coeffs = NULL; new_rows = 0; new_cols = 0;
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
                type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
                matrix_free_int, diag_scale_polys_int, subcomm_int, \
-               &(inv_data->mat_inverse)); 
+               &new_coeffs, &new_rows, &new_cols, \
+               &(inv_data->mat_inverse));
+         inv_data->poly_coeffs      = new_coeffs;
+         inv_data->poly_coeffs_rows = new_rows;
+         inv_data->poly_coeffs_cols = new_cols;
       }
       else if (pc->flag == SAME_NONZERO_PATTERN)
       {
-         // We don't call reset on the pc here so it reuses the sparsity
-         // Build the polynomial inverse as a Mat
+         // We don't call reset on the pc here so it reuses the sparsity of mat_inverse
+         // Optionally reuse stored polynomial coefficients:
+         //   poly_coeffs != NULL and reuse flag set  ->  pass the existing pointer (reuse path)
+         //   otherwise                               ->  pass NULL so Fortran computes fresh ones
+         if (!(inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL)) {
+            // Fresh: free old coefficients so poly_coeffs is NULL going into the call
+            free(inv_data->poly_coeffs);
+            inv_data->poly_coeffs      = NULL;
+            inv_data->poly_coeffs_rows = 0;
+            inv_data->poly_coeffs_cols = 0;
+         }
+         // Pass poly_coeffs by address: NULL -> fresh allocation on return; non-NULL -> reuse
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
                type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
                matrix_free_int, diag_scale_polys_int, subcomm_int, \
+               &inv_data->poly_coeffs, &inv_data->poly_coeffs_rows, &inv_data->poly_coeffs_cols, \
                &(inv_data->mat_inverse));
       }
    }
@@ -457,6 +604,7 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "  assembled inverse, sparsity order %i\n", inv_data->inverse_sparsity_order));
          }
+         if (inv_data->reuse_poly_coeffs) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing gmres polynomial coefficients during setup \n"));
       }
    }
 
@@ -499,7 +647,12 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    inv_data->inverse_sparsity_order = 1;
    // Whether or not the mat_inverse is just a matshell and applied
    // matrix free
-   inv_data->matrix_free = PETSC_FALSE;   
+   inv_data->matrix_free = PETSC_FALSE;
+   // Polynomial coefficient storage (initially empty)
+   inv_data->poly_coeffs       = NULL;
+   inv_data->poly_coeffs_rows  = 0;
+   inv_data->poly_coeffs_cols  = 0;
+   inv_data->reuse_poly_coeffs = PETSC_FALSE;
 
    // Set the method functions
    pc->ops->apply               = PCApply_PFLAREINV_c;
@@ -516,7 +669,11 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyOrder_C", PCPFLAREINVSetPolyOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyOrder_C", PCPFLAREINVGetPolyOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetSparsityOrder_C", PCPFLAREINVSetSparsityOrder_PFLAREINV));
-   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", PCPFLAREINVGetSparsityOrder_PFLAREINV)); 
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", PCPFLAREINVGetSparsityOrder_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyCoeffs_C", PCPFLAREINVGetPolyCoeffs_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyCoeffs_C", PCPFLAREINVSetPolyCoeffs_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetReusePolyCoeffs_C", PCPFLAREINVGetReusePolyCoeffs_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetReusePolyCoeffs_C", PCPFLAREINVSetReusePolyCoeffs_PFLAREINV));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }

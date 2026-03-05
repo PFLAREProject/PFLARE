@@ -240,9 +240,10 @@ module pcair_interfaces
 
    subroutine PCAIRGetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr) 
 
-      ! This routine returns a copy of the coefficients in coeffs
-      ! The C version of this routine instead just returns a pointer to the coefficients
-      ! in the PCAIR object and hence should be copied externally 
+      ! This routine returns a copy of the polynomial coefficients stored in the PC.
+      ! coeffs is allocated/reallocated as needed; it is safe to keep and use after
+      ! the next PCSetUp or PCReset call (unlike the C interface, which returns a
+      ! raw pointer into internal storage that is only valid until the next setup).
 
       ! ~~~~~~~~
       type(tPC), intent(inout)                           :: pc
@@ -362,7 +363,11 @@ module pcair_interfaces
 
    subroutine PCAIRSetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr) 
 
-      ! ~~~~~~~~
+      ! This routine copies coeffs into the PC's internal storage.
+      ! The caller's array is not referenced after this call and can be
+      ! deallocated or modified freely.
+      ! Does not trigger a rebuild; after setting these coefficients call
+      ! PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE) and then KSPSolve to apply them.
       type(tPC), intent(inout)                           :: pc
       PetscInt, intent(in)                               :: petsc_level
       integer, intent(in)                                :: which_inverse

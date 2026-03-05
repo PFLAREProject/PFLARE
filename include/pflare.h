@@ -54,6 +54,12 @@ PETSC_EXTERN PetscErrorCode PCPFLAREINVSetSparsityOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetType(PC, PCPFLAREINVType);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetMatrixFree(PC, PetscBool);
 
+/* Get/Set polynomial coefficients stored after PCSetUp */
+PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyCoeffs(PC, PetscReal **, PetscInt *, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVSetPolyCoeffs(PC, PetscReal *, PetscInt, PetscInt);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVGetReusePolyCoeffs(PC, PetscBool *);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVSetReusePolyCoeffs(PC, PetscBool);
+
 /* Define PCAIR get routines */
 PETSC_EXTERN PetscErrorCode PCAIRGetPrintStatsTimings(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLevels(PC, PetscInt *);
