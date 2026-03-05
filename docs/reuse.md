@@ -51,18 +51,19 @@ or in Python with petsc4py:
      pc = ksp.getPC()
      pc.setType("air")
 
-     petsc_options = PETSc.Options()
-     petsc_options['pc_air_reuse_sparsity'] = ''
+     # Before the first setup, we tell it to
+     # store any data we need for reuse
+     pflare.pcair_set_reuse_sparsity(pc, True)
 
      # First solve - the PCAIR will be setup
-     ksp.solve(b,x)
-     
+     ksp.solve(b, x)
+
      # ...[Modify entries in A but keep the same sparsity]
 
-     # Second solve - the PCAIR will be setup 
+     # Second solve - the PCAIR will be setup
      # but reusing the same sparsity
-     ksp.solve(b,x)
-     
+     ksp.solve(b, x)
+
 or via the command line: ``-pc_type air -pc_air_reuse_sparsity``.
 
 #### 3) Reuse GMRES polynomial coefficients during setup
@@ -112,18 +113,21 @@ or in Python with petsc4py:
      pc = ksp.getPC()
      pc.setType("air")
 
-     petsc_options = PETSc.Options()
-     petsc_options['pc_air_reuse_sparsity'] = ''
-     petsc_options['pc_air_reuse_poly_coeffs'] = ''
+     # Before the first setup, we tell it to
+     # store any data we need for reuse
+     pflare.pcair_set_reuse_sparsity(pc, True)
+
+     # Tell it to store the gmres polynomial coefficients
+     pflare.pcair_set_reuse_poly_coeffs(pc, True)
 
      # First solve - the PCAIR will be setup
-     ksp.solve(b,x)
-     
+     ksp.solve(b, x)
+
      # ...[Modify entries in A but keep the same sparsity]
 
-     # Second solve - the PCAIR will be setup 
+     # Second solve - the PCAIR will be setup
      # but reusing sparsity & polynomial coefficients
-     ksp.solve(b,x)
+     ksp.solve(b, x)
 
 or via the command line: ``-pc_type air -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs``.
 
@@ -162,6 +166,23 @@ or in C:
      // Second solve - the PCPFLAREINV will be setup
      // but reusing the polynomial coefficients
      ierr = KSPSolve(ksp, b, x);
+
+or in Python with petsc4py:
+
+     pc = ksp.getPC()
+     pc.setType("pflareinv")
+
+     # Tell it to reuse the gmres polynomial coefficients
+     pflare.pcpflareinv_set_reuse_poly_coeffs(pc, True)
+
+     # First solve - the PCPFLAREINV will be setup
+     ksp.solve(b, x)
+
+     # ...[Modify entries in A]
+
+     # Second solve - the PCPFLAREINV will be setup
+     # but reusing the polynomial coefficients
+     ksp.solve(b, x)
 
 or via the command line: ``-pc_type pflareinv -pc_pflareinv_reuse_poly_coeffs``.
 
