@@ -474,10 +474,11 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 // This routine returns a pointer to the coefficients in the PCAIR object
-// If you want to save/restore them later them you will need to copy them yourself
-// the size of the coeff pointer array is also returned 
-// This is different to the fortran interface to this routine, which returns a copy
-// in an allocatable object (which knows its own size)
+// If you want to save/restore them later you will need to copy them yourself
+// The pointer is valid only until the next PCSetUp or PCReset call
+// The size of the coefficient array is also returned
+// This is different to the Fortran interface to this routine, which returns a copy
+// in an allocatable array (which knows its own size)
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 {
    PetscFunctionBegin;
@@ -981,6 +982,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
 }
 // This routine sets the polynomial coefficients in the PCAIR object
 // row_size and col_size are the size of the coeffs_ptr array
+// The caller's array is not referenced after this call and can be freed or modified
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 {
    PetscFunctionBegin;

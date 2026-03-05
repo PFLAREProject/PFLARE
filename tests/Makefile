@@ -407,9 +407,15 @@ run_tests_no_load_serial:
 # 
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and polynomial coeffs stored"
-	./ex6f_getcoeffs -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and polynomial coeffs stored and lumping"
-	./ex6f_getcoeffs -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_a_lump -ksp_max_it 3
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_a_lump -ksp_max_it 3
+	@echo "Test PCPFLAREINV get/set polynomial coefficients - arnoldi basis"
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	@echo "Test PCPFLAREINV get/set polynomial coefficients - power basis"
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
+	@echo "Test PCPFLAREINV get/set polynomial coefficients - newton basis"
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
 # 
 	@echo ""
 	@echo "Test single level GMRES polynomials with PC reused with no sparsity change"

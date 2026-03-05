@@ -95,36 +95,102 @@ module c_fortran_bindings
 
    subroutine calculate_and_build_approximate_inverse_c(input_mat_ptr, inverse_type, &
          poly_order, poly_sparsity_order, &
-         matrix_free_int, diag_scale_polys_int, subcomm_int, inv_matrix_ptr) &
-         bind(C,name='calculate_and_build_approximate_inverse_c')
+         matrix_free_int, diag_scale_polys_int, subcomm_int, &
+         coeffs_ptr, row_size, col_size, &
+         inv_matrix_ptr) &
+         bind(C, name='calculate_and_build_approximate_inverse_c')
 
-      ! Builds an approximate inverse
+      ! Builds an approximate inverse, with optional coefficient passing.
+      !
+      ! coeffs_ptr/row_size/col_size are in/out:
+      !   On entry, if coeffs_ptr is c_null_ptr: compute fresh polynomial coefficients.
+      !     On return, coeffs_ptr points to a C-malloc'd copy of the coefficients;
+      !     the caller owns this memory and must free it with C free().
+      !   On entry, if coeffs_ptr is non-null: reuse those coefficients; the polynomial
+      !     computation is skipped (see calculate_and_build_approximate_inverse).
+      !     coeffs_ptr/row_size/col_size are unchanged on return.
+
+#include "finclude/PETSc_ISO_Types.h"
+
+      ! Interface to C stdlib malloc
+      interface
+         function c_malloc(sz) bind(C, name='malloc')
+            use iso_c_binding
+            integer(c_size_t), value :: sz
+            type(c_ptr) :: c_malloc
+         end function c_malloc
+      end interface
 
       ! ~~~~~~~~
-      integer(c_long_long), intent(in)       :: input_mat_ptr
-      integer(c_int), value, intent(in)      :: inverse_type, poly_order, poly_sparsity_order
-      integer(c_int), value, intent(in)      :: matrix_free_int, diag_scale_polys_int, subcomm_int
-      integer(c_long_long), intent(inout)    :: inv_matrix_ptr
+      integer(c_long_long), intent(in)                   :: input_mat_ptr
+      integer(c_int), value, intent(in)                  :: inverse_type, poly_order, poly_sparsity_order
+      integer(c_int), value, intent(in)                  :: matrix_free_int, diag_scale_polys_int, subcomm_int
+      type(c_ptr), intent(inout)                         :: coeffs_ptr
+      integer(PFLARE_PETSCINT_C_KIND), intent(inout)      :: row_size, col_size
+      integer(c_long_long), intent(inout)                :: inv_matrix_ptr
 
       type(tMat)  :: input_mat, inv_matrix
-      logical     :: matrix_free = .FALSE., subcomm = .FALSE., diag_scale_polys = .FALSE.
-      ! ~~~~~~~~      
-      
-      ! Now the input mat long long just gets copied into input_mat%v
-      ! This works as the PETSc types are essentially just wrapped around
-      ! pointers stored in %v
-      input_mat%v = input_mat_ptr   
-      ! inv_matrix_ptr could be passed in as null or as an existing matrix 
-      ! whose sparsity we want to reuse, so we have to pass that in too 
+      logical     :: matrix_free, subcomm, diag_scale_polys
+      PetscReal, dimension(:, :), contiguous, pointer :: coefficients
+      type(c_ptr) :: c_buf
+      real(PFLARE_PETSCREAL_C_KIND), pointer :: c_view(:,:)
+      integer(PFLARE_PETSCINT_C_KIND) :: nr, nc
+      ! ~~~~~~~~
+
+      input_mat%v = input_mat_ptr
+      ! inv_matrix_ptr could be passed in as null or as an existing matrix
+      ! whose sparsity we want to reuse, so we have to pass that in too
       inv_matrix%v = inv_matrix_ptr
-      
-      if (matrix_free_int == 1) matrix_free = .TRUE.
+
+      matrix_free    = .FALSE.
+      diag_scale_polys = .FALSE.
+      subcomm        = .FALSE.
+      if (matrix_free_int    == 1) matrix_free    = .TRUE.
       if (diag_scale_polys_int == 1) diag_scale_polys = .TRUE.
-      if (subcomm_int == 1) subcomm = .TRUE.
+      if (subcomm_int        == 1) subcomm        = .TRUE.
+
+      if (c_associated(coeffs_ptr)) then
+
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Reuse path: wrap the caller's buffer in a Fortran pointer and pass it in.
+         ! calculate_and_build_approximate_inverse uses the null-mat trick to skip
+         ! polynomial computation when coefficients is already associated on entry.
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         call c_f_pointer(coeffs_ptr, coefficients, [int(row_size), int(col_size)])
+
+      else
+
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Fresh path: nullify so calculate_and_build_approximate_inverse allocates
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         nullify(coefficients)
+
+      end if
+
       call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
                poly_order, poly_sparsity_order, &
                matrix_free, diag_scale_polys, subcomm, &
-               inv_matrix)
+               inv_matrix, coefficients)
+
+      if (.NOT. c_associated(coeffs_ptr)) then
+         ! Fresh path: Fortran allocate may use a compiler-specific allocator
+         ! (e.g. _mm_malloc on Intel) that is incompatible with C free().
+         ! Copy the data into a C-malloc'd buffer so the C side can safely free() it.
+         nr = int(size(coefficients, 1), PFLARE_PETSCINT_C_KIND)
+         nc = int(size(coefficients, 2), PFLARE_PETSCINT_C_KIND)
+         c_buf = c_malloc(int(nr, c_size_t) * int(nc, c_size_t) * int(PFLARE_PETSCREAL_C_KIND, c_size_t))
+         call c_f_pointer(c_buf, c_view, [int(nr), int(nc)])
+         c_view = coefficients
+         ! For non-matrix-free: the matshell does not exist, so the Fortran allocation
+         ! is no longer needed once we have the C copy.
+         ! For matrix-free: the matshell owns its Fortran allocation (own_coefficients=.TRUE.)
+         ! and will deallocate it independently via reset_inverse_mat. The C copy is
+         ! stored separately in poly_coeffs and freed via free() in PCReset_PFLAREINV_c.
+         if (.NOT. matrix_free) deallocate(coefficients)
+         coeffs_ptr = c_buf
+         row_size   = nr
+         col_size   = nc
+      end if
 
       ! Pass out the new inverse matrix
       inv_matrix_ptr = inv_matrix%v

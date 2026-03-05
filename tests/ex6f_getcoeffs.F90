@@ -27,193 +27,125 @@ contains
 
    ! -----------------------------------------------------------------------
    !
-   subroutine solve1(ksp,A,x,b,u,count,nsteps,coeffs_levels,ierr)
+   subroutine test_solve_getcoeffs(ksp, A, x, b, u, count, nsteps, coeffs_levels, coeffs_pflareinv, ierr)
 #include <petsc/finclude/petscksp.h>
       use petscksp
-#include "finclude/pflare.h"  
+#include "finclude/pflare.h"
       use pflare
-      
-   !
-   !   solve1 - This routine is used for repeated linear system solves.
-   !
-   !      A - linear system matrix
+      use pcpflareinv_interfaces
 
-      PetscScalar  v,val
-      PetscInt II,Istart,Iend
-      PetscInt count,nsteps,one,start, start_plus_one
+   !  Runs three linear solves modifying the matrix between each, saving
+   !  polynomial coefficients from solve 1 and restoring them on solve 3.
+   !  Works for both PCAIR (multi-level) and PCPFLAREINV (single-level).
+   !  The PC type is determined by how the KSP was configured from the
+   !  command line (-pc_type air or -pc_type pflareinv).
+
+      PetscScalar  v, val
+      PetscInt II, Istart, Iend
+      PetscInt count, nsteps, one, start, start_plus_one
       PetscErrorCode ierr
       PetscInt num_levels, petsc_level
-      Mat     A
-      KSP     ksp
+      Mat A
+      KSP ksp
       PC pc
-      Vec     x,b,u
+      Vec x, b, u
       KSPConvergedReason reason
       type(real_coeffs), dimension(:), allocatable :: coeffs_levels
+      PetscReal, dimension(:,:), pointer :: coeffs_pflareinv
+      PCType pctype
 
-      ! Use common block to retain stuff between successive subroutine calls
-      PetscMPIInt      rank
-      PetscBool        pflag
-      PetscReal norm_first_solve, norm_third_solve
-      common /my_data/ norm_first_solve,rank, pflag
+      PetscMPIInt rank
+      PetscReal norm_first, norm_third
+      common /ksp_coeffs_data/ norm_first, rank
 
       one = 1
-      call KSPSetInitialGuessNonzero(ksp,PETSC_FALSE,ierr)
+      call KSPSetInitialGuessNonzero(ksp, PETSC_FALSE, ierr)
       call MatGetOwnershipRange(A, start, start_plus_one, ierr)
-      if (start == 0) rank = 0      
-      ! Explicitly tell it not to reuse the preconditioner
-      ! This forces it to regenerate it every time with SAME_NON_ZERO
-      call KSPSetReusePreconditioner(ksp,PETSC_FALSE,ierr)
+      if (start == 0) rank = 0
+      call KSPSetReusePreconditioner(ksp, PETSC_FALSE, ierr)
 
-      ! ~~~~~~~~~~~~~~~~~~
-
-      ! Change the operator A
-      ! On the first solve let's just actually solve a more diagonally dominant
-      ! version of the matrix
-      if (count .eq. 1) then
-
-         ! Alter the matrix A a bit
-         call MatGetOwnershipRange(A,Istart,Iend,ierr)
-         do II=Istart,Iend-1
+      ! Modify the operator between solves so that solve 3 reproduces solve 1
+      if (count == 1) then
+         call MatGetOwnershipRange(A, Istart, Iend, ierr)
+         do II = Istart, Iend-1
             v = 2
-            call MatSetValues(A,one,[II],one,[II],[v],ADD_VALUES,ierr)
+            call MatSetValues(A, one, [II], one, [II], [v], ADD_VALUES, ierr)
          end do
-
-         call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
-         call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)   
-
-      ! On the second solve, we add 0.1 to the diagonal
-      else if (count .eq. 2) then
-
-         ! Alter the matrix A a bit
-         call MatGetOwnershipRange(A,Istart,Iend,ierr)
-         do II=Istart,Iend-1
+         call MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY, ierr)
+         call MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY, ierr)
+      else if (count == 2) then
+         call MatGetOwnershipRange(A, Istart, Iend, ierr)
+         do II = Istart, Iend-1
             v = 0.1
-            call MatSetValues(A,one,[II],one,[II],[v],ADD_VALUES,ierr)
+            call MatSetValues(A, one, [II], one, [II], [v], ADD_VALUES, ierr)
          end do
-
-         call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
-         call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)   
-      
-      ! On the third solve, we minus 0.1 from the diagonal
-      ! Making it the same linear system we solved in solve 1
+         call MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY, ierr)
+         call MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY, ierr)
       else if (count == 3) then
-
-         ! Alter the matrix A a bit
-         call MatGetOwnershipRange(A,Istart,Iend,ierr)
-         do II=Istart,Iend-1
+         call MatGetOwnershipRange(A, Istart, Iend, ierr)
+         do II = Istart, Iend-1
             v = -0.1
-            call MatSetValues(A,one,[II],one,[II],[v],ADD_VALUES,ierr)
+            call MatSetValues(A, one, [II], one, [II], [v], ADD_VALUES, ierr)
          end do
+         call MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY, ierr)
+         call MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY, ierr)
+      end if
 
-         call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
-         call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)         
-      endif     
+      call KSPSetOperators(ksp, A, A, ierr)
 
-      call KSPSetOperators(ksp,A,A,ierr)
-
-      ! ~~~~~~~~~~~~~~~~~~
-
-      ! Set the exact solution; compute the right-hand-side vector
       val = 1d0
-      call VecSet(u,val,ierr)
-      call MatMult(A,u,b,ierr)
+      call VecSet(u, val, ierr)
+      call MatMult(A, u, b, ierr)
 
-      ! We have the first and third solve with the same linear system, but the second is different
-      !
-      ! We want to trigger a rebuild with same_nonzero_pattern every 
-      ! time and reuse the sparsity
-      !
-      ! The first solve will generate poly coefficients (which we store)
-      ! The second solve will generate poly coefficients for the changed operator
-      ! but reusing the same sparsity in the hierarchy
-      ! The third solve will restore the saved poly coefficients, reuse them and
-      ! reuse the same sparsity in the hierarchy
-      ! Hence in the third solve we should have exactly the same residual as in the first
-      !
-      ! This is like if we have an outer loop (e.g., eigenvalue solve) where we have to 
-      ! repeatedly solve the same linear systems in the inner loop but don't have the memory to store
-      ! the hierarchies for every inner solve
-      !
-      ! Here we are only storing the inv Aff coefficients (COEFFS_INV_AFF)
-      ! and the coarse grid solver coefficients (COEFFS_INV_COARSE)
-      ! If strong R threshold /= 0d0, you will also want to store the 
-      ! inv Aff dropped coefficients (COEFFS_INV_AFF_DROPPED)
-      ! If any C smooths are occuring, you will also want to store inv Acc coefficients (COEFFS_INV_COARSE)
+      ! Detect which PC type is configured (set by the user via -pc_type)
+      call KSPGetPC(ksp, pc, ierr)
+      call PCGetType(pc, pctype, ierr)
 
-      call KSPGetPC(ksp,pc,ierr)
-
-      ! ~~~~~~~~~~~~~~~~~~
-
-      ! In the first solve
-      if (count == 1) then
-         ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-         !         Let's use AIRG as our PC
-         ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -     
-         call PCSetType(pc, PCAIR, ierr)
-         ! Always reuse the sparsity
+      ! PC-type-specific first-call setup
+      if (count == 1 .and. pctype == PCAIR) then
          call PCAIRSetReuseSparsity(pc, PETSC_TRUE, ierr)
-         call KSPSetPC(ksp, pc, ierr) 
-         call KSPSetFromOptions(ksp,ierr)         
+      end if
 
-      ! In the third solve
-      else if (count == 3) then
+      ! On solve 3, restore the saved coefficients
+      if (count == 3) then
+         ! Need to set the coefficients on each level for PCAIR
+         if (pctype == PCAIR) then
+            call PCAIRGetNumLevels(pc, num_levels, ierr)
+            do petsc_level = num_levels-1, 1, -1
+               call PCAIRSetPolyCoeffs(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, ierr)
+            end do
+            call PCAIRSetPolyCoeffs(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, ierr)
+            call PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE, ierr)
 
-         ! We need to know how many levels we have in the mg
-         call PCAIRGetNumLevels(pc, num_levels, ierr)    
-         ! On the third solve, restore the gmres polynomial coefficients from the first solve
+         ! If PCPFLAREINV only one level
+         else if (pctype == PCPFLAREINV) then
+            call PCPFLAREINVSetPolyCoeffs(pc, coeffs_pflareinv, ierr)
+            call PCPFLAREINVSetReusePolyCoeffs(pc, PETSC_TRUE, ierr)
+         end if
+      end if
 
-         ! Loop over all levels except the coarse
-         do petsc_level = num_levels - 1, 1, -1
-            ! Set the inverse Aff coefficients
-            call PCAIRSetPolyCoeffs(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, ierr) 
-         end do 
-         ! Get the coarse grid coefficients
-         call PCAIRSetPolyCoeffs(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, ierr)   
+      call KSPSolve(ksp, b, x, ierr)
 
-         ! Tell pcair to not regenerate the gmres polynomial coeffs
-         call PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE, ierr)   
-         
-      end if  
-      
-      ! ~~~~~~~~~~~~~~~~~~
-
-      ! Solve linear system
-      call KSPSolve(ksp,b,x,ierr)
-
-      ! Compute the (non-preconditioned) residual
       call MatResidual(A, b, x, u, ierr)
-      ! Store it after the first solve
+      if (count == 1) call VecNorm(u, NORM_2, norm_first, ierr)
+      if (count == 3) call VecNorm(u, NORM_2, norm_third, ierr)
+
+      ! After solve 1, save the polynomial coefficients
       if (count == 1) then
-         call VecNorm(u, NORM_2, norm_first_solve, ierr)
-      ! and the third
-      else if (count == 3) then
-         call VecNorm(u, NORM_2, norm_third_solve, ierr)
+         ! Multiple levels
+         if (pctype == PCAIR) then
+            call PCAIRGetNumLevels(pc, num_levels, ierr)
+            allocate(coeffs_levels(num_levels))
+            do petsc_level = num_levels-1, 1, -1
+               call PCAIRGetPolyCoeffs(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, ierr)
+            end do
+            call PCAIRGetPolyCoeffs(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, ierr)
+
+         ! Single level
+         else if (pctype == PCPFLAREINV) then
+            call PCPFLAREINVGetPolyCoeffs(pc, coeffs_pflareinv, ierr)
+         end if
       end if
-
-      ! ~~~~~~~~~~~~~~~~~~
-
-      ! We need to know how many levels we have in the mg
-      call PCAIRGetNumLevels(pc, num_levels, ierr)
-      ! Store the polynomial coefficients from the first solve
-      if (count == 1) then
-
-         allocate(coeffs_levels(num_levels))
-
-         ! Loop over all levels except the coarse
-         do petsc_level = num_levels - 1, 1, -1
-            ! Get the inverse Aff coefficients
-            ! Note that the fortran interface passes out a *copy* of the coefficeints in the pcair object
-            ! as a pointer array
-            ! The C inteface however just returns a pointer to the coefficients within the pcair object 
-            ! so if you want to save/restore them later in C you will have to copy the values
-            ! The C interface therefore also passes out the sizes of the coefficients array
-            call PCAIRGetPolyCoeffs(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, ierr) 
-         end do 
-         ! Get the coarse grid coefficients
-         call PCAIRGetPolyCoeffs(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, ierr)   
-      end if
-
-      ! ~~~~~~~~~~~~~~~~~~
 
       call KSPGetConvergedReason(ksp, reason, ierr)
       if (reason%v > 0) then
@@ -221,20 +153,16 @@ contains
          error stop 1
       end if
 
-      ! On the third solve, check the residuals of the first and third solve
-      ! are the same
-      if (count .eq. nsteps) then
-         if (rank .eq. 0) then
-            if (abs(norm_first_solve - norm_third_solve)/norm_first_solve < 1e-8) then
-               print *, "Residuals OK"
-            else
+      if (count == nsteps) then
+         if (rank == 0) then
+            if (abs(norm_first - norm_third) / norm_first > 1e-8) then
                print *, "Residuals WRONG"
                error stop 1
             end if
          end if
       end if
 
-   end subroutine
+   end subroutine test_solve_getcoeffs
   
   end module solve_module
 
@@ -247,6 +175,7 @@ contains
       use petscksp
 #include "finclude/pflare.h"
       use pflare
+      use pcpflareinv_interfaces
       implicit none
 
      
@@ -261,6 +190,7 @@ contains
       Vec     x,u,b
       Mat     A
       KSP    ksp
+      PC     pc
       PetscInt i,j,II,JJ,m,n
       PetscInt Istart,Iend
       PetscInt nsteps,one
@@ -268,6 +198,10 @@ contains
       PetscBool  flg
       PetscScalar  v
       type(real_coeffs), dimension(:), allocatable :: coeffs_levels
+      PetscReal, dimension(:,:), pointer :: coeffs_pflareinv => null()
+      PCPFLAREINVType :: pflare_type
+      PetscBool :: no_power, skip
+      PCType pctype
 
 
       call PetscInitialize(PETSC_NULL_CHARACTER,ierr)
@@ -349,19 +283,37 @@ contains
       ! Register the pflare types
       call PCRegister_PFLARE()
 
-!  Create linear solver context
+      ! Read no_power flag (disables power basis for Intel MPI CI)
+      no_power = PETSC_FALSE
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-no_power', no_power, flg, ierr)
 
-      call KSPCreate(PETSC_COMM_WORLD,ksp,ierr)
+!  Create KSP; the PC type is determined by -pc_type on the command line
 
-!  Set runtime options (e.g., -ksp_type <type> -pc_type <type>)
+      call KSPCreate(PETSC_COMM_WORLD, ksp, ierr)
+      call KSPSetFromOptions(ksp, ierr)
 
-      call KSPSetFromOptions(ksp,ierr)
+!  If -no_power is set and the user configured PCPFLAREINV with power type, skip
+
+      skip = PETSC_FALSE
+      if (no_power) then
+         call KSPGetPC(ksp, pc, ierr)
+         call PCGetType(pc, pctype, ierr)
+         if (pctype == PCPFLAREINV) then
+            call PCPFLAREINVGetType(pc, pflare_type, ierr)
+            if (pflare_type == PFLAREINV_POWER) skip = PETSC_TRUE
+         end if
+      end if
 
 !  Solve several linear systems in succession
 
-      do 100 i=1,nsteps
-         call solve1(ksp,A,x,b,u,i,nsteps, coeffs_levels,ierr)
- 100  continue
+      if (.not. skip) then
+         do 100 i=1,nsteps
+            call test_solve_getcoeffs(ksp, A, x, b, u, i, nsteps, coeffs_levels, coeffs_pflareinv, ierr)
+ 100     continue
+      end if
+
+      if (associated(coeffs_pflareinv)) deallocate(coeffs_pflareinv)
 
 !  Free work space.  All PETSc objects should be destroyed when they
 !  are no longer needed.

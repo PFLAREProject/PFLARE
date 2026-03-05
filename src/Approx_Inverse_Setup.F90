@@ -33,7 +33,7 @@ module approx_inverse_setup
    subroutine calculate_and_build_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   matrix_free, diag_scale_polys, subcomm, &
-                  inv_matrix)
+                  inv_matrix, coefficients)
 
       ! Builds an approximate inverse
       ! inverse_type:
@@ -48,47 +48,44 @@ module approx_inverse_setup
       ! PFLAREINV_JACOBI - Unweighted Jacobi                  
       ! This is just a wrapper around the start and finish routines below
       ! No opportunity to put work between the async comms
-      ! If you want to do that, you will have to call the individual routines 
+      ! If you want to do that, you will have to call the individual routines
+      !
+      ! Optional coefficients argument:
+      !   - If present and associated on entry: the existing coefficients are reused and
+      !     start_approximate_inverse is skipped entirely. buffers is set up manually
+      !     (subcomm=.FALSE., buffers%matrix = matrix with ref incremented) so that
+      !     finish_approximate_inverse can clean up normally. For a matrix-free inverse
+      !     the matshell does NOT take ownership (the caller owns them).
+      !   - If present but not associated on entry: fresh coefficients are computed, a
+      !     heap allocation is made, and on return the pointer is associated with that
+      !     allocation. For matrix-free the matshell also does NOT take ownership (the
+      !     caller takes ownership via the returned pointer).
+      !   - If absent: existing behaviour. The matshell takes ownership of heap-allocated
+      !     coefficients (matrix-free case) or stack storage is used (assembled case).
 
       ! ~~~~~~
-      type(tMat), intent(in)                            :: matrix
-      integer, intent(in)                               :: inverse_type, poly_order
-      integer, intent(in)                               :: inverse_sparsity_order
-      logical, intent(in)                               :: matrix_free, diag_scale_polys, subcomm
-      type(tMat), intent(inout)                         :: inv_matrix
-
-      type(tsqr_buffers)                           :: buffers 
+      type(tMat), intent(in)                                        :: matrix
+      integer, intent(in)                                           :: inverse_type, poly_order
+      integer, intent(in)                                           :: inverse_sparsity_order
+      logical, intent(in)                                           :: matrix_free, diag_scale_polys, subcomm
+      type(tMat), intent(inout)                                     :: inv_matrix
       ! This pointer must be declared contiguous, as we require coefficients
       ! to be contiguous in build_gmres_polynomial_newton_inverse as 
       ! we muck about with the rank and if this pointer is not declared
       ! contiguous it creates a temporary copy which then disappears and
       ! we segfault when trying to apply mf
-      PetscReal, dimension(:, :), contiguous, pointer   :: coefficients
+      PetscReal, dimension(:, :), contiguous, pointer, optional, intent(inout) :: coefficients
+
+      type(tsqr_buffers)                           :: buffers
+      PetscReal, dimension(:, :), contiguous, pointer   :: work_coefficients
       PetscReal, dimension(poly_order + 1, 1), target   :: coefficients_stack
       type(mat_ctxtype), pointer :: mat_ctx => null()
       PetscErrorCode :: ierr
       type(tMat) :: reuse_mat, inv_matrix_temp
       type(tMat), dimension(:), pointer :: reuse_submatrices => null()
+      logical :: heap_allocated
 
       ! ~~~~~~  
-      
-      ! Have to allocate heap memory if matrix-free as the context in inv_matrix
-      ! just points at the coefficients
-      if (matrix_free) then
-         if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
-            ! Newton basis needs storage for real and imaginary roots
-            allocate(coefficients(poly_order + 1, 2))
-         else 
-            allocate(coefficients(poly_order + 1, 1))
-         end if
-      else
-         if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
-            ! Newton basis needs storage for real and imaginary roots
-            allocate(coefficients(poly_order + 1, 2))
-         else         
-            coefficients => coefficients_stack
-         end if
-      end if
 
       ! This is diabolical - In petsc 3.22, they changed the way to test for 
       ! a null matrix in fortran
@@ -114,24 +111,80 @@ module approx_inverse_setup
       buffers%subcomm = subcomm
       ! Don't do any overlapping of comms, if you want that call the start/finish yourself   
 
-      ! Start the calculation
-      call start_approximate_inverse(matrix, inverse_type, &
-                  poly_order, diag_scale_polys, &
-                  buffers, coefficients)
-      ! Finish it
-      call finish_approximate_inverse(matrix, inverse_type, &
-                  poly_order, inverse_sparsity_order, &
-                  buffers, coefficients, &
-                  matrix_free, diag_scale_polys, &
-                  reuse_mat, &
-                  reuse_submatrices, &
-                  inv_matrix_temp)
-            
-      ! Have to tell the matshell to own the coefficient pointers
-      if (matrix_free) then
-         call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
-         mat_ctx%own_coefficients = .TRUE.               
+      if (present(coefficients) .AND. associated(coefficients)) then
+
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Reuse path: valid coefficients supplied by the caller;
+         ! skip start_approximate_inverse entirely to avoid calling
+         ! PetscObjectReference on a potential null matrix.
+         ! Replicate the non-subcomm setup that start_approximate_inverse
+         ! would have done so that finish_approximate_inverse can clean up normally.
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         work_coefficients => coefficients
+         buffers%on_subcomm = .FALSE.
+         buffers%matrix     = matrix
+         call PetscObjectReference(matrix, ierr)
+         call finish_approximate_inverse(matrix, inverse_type, &
+                     poly_order, inverse_sparsity_order, &
+                     buffers, work_coefficients, &
+                     matrix_free, diag_scale_polys, &
+                     reuse_mat, reuse_submatrices, inv_matrix_temp)
+         ! Caller owns the coefficient memory; matshell must not free it
+         if (matrix_free) then
+            call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
+            mat_ctx%own_coefficients = .FALSE.
+         end if
+
+      else
+
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Fresh computation path
+         ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         ! Heap-allocate when: matrix-free (matshell will hold the pointer),
+         ! coefficients are being returned to the caller, or Newton basis (2 columns).
+         ! Otherwise, stack storage suffices.
+         heap_allocated = matrix_free .OR. &
+                          (present(coefficients) .AND. .NOT. associated(coefficients)) .OR. &
+                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+         if (heap_allocated) then
+            if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+               ! Newton basis needs storage for real and imaginary roots
+               allocate(work_coefficients(poly_order + 1, 2))
+            else
+               allocate(work_coefficients(poly_order + 1, 1))
+            end if
+         else
+            work_coefficients => coefficients_stack
+         end if
+
+         ! Start the calculation
+         call start_approximate_inverse(matrix, inverse_type, &
+                     poly_order, diag_scale_polys, &
+                     buffers, work_coefficients)
+         ! Finish it
+         call finish_approximate_inverse(matrix, inverse_type, &
+                     poly_order, inverse_sparsity_order, &
+                     buffers, work_coefficients, &
+                     matrix_free, diag_scale_polys, &
+                     reuse_mat, reuse_submatrices, inv_matrix_temp)
+
+         if (matrix_free) then
+            call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
+            ! The matshell always owns its coefficients and frees them via deallocate
+            ! in reset_inverse_mat. When present(coefficients), the C binding is
+            ! responsible for making its own C-malloc copy before this pointer is freed.
+            mat_ctx%own_coefficients = .TRUE.
+            if (present(coefficients)) coefficients => work_coefficients
+         else if (present(coefficients)) then
+            ! Return heap-allocated coefficients to caller
+            coefficients => work_coefficients
+         else if (heap_allocated) then
+            ! Heap-allocated (Newton assembled path) but not needed further: free
+            deallocate(work_coefficients)
+         end if
+
       end if
+
       if (.NOT. PetscObjectIsNull(reuse_mat)) then
          call destroy_matrix_reuse(reuse_mat, reuse_submatrices)
       end if
@@ -198,19 +251,19 @@ module approx_inverse_setup
       ! ~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~
 
-      ! Have to dynamically allocate this
-      allocate(mat_ctx_da)
-      mat_ctx_da%mat_scaled = buffers%matrix
-
       ! If we're on the subcomm, we don't need to do anything
       if (.NOT. PetscObjectIsNull(buffers%matrix)) then
+
+         ! Have to dynamically allocate this
+         allocate(mat_ctx_da)
+         mat_ctx_da%mat_scaled = buffers%matrix           
 
          ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
          if ((inverse_type == PFLAREINV_POWER .OR. &
              inverse_type == PFLAREINV_ARNOLDI .OR. &
              inverse_type == PFLAREINV_NEWTON .OR. &
              inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
-             diag_scale_polys) then
+             diag_scale_polys) then             
 
             ! ~~~~~~~~~~~~~
             ! Now we allocate a new matshell that applies a diagonally scaled version of 
@@ -286,10 +339,10 @@ module approx_inverse_setup
              inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
              diag_scale_polys) then
 
-            call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)
+            call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)             
             call MatDestroy(mat_ctx_da%mat_scaled, ierr)
-            deallocate(mat_ctx_da)               
          end if
+         deallocate(mat_ctx_da)           
       end if
 
       ! If we ended up on a subcomm, we need to comm the coefficients back to 
