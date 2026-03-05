@@ -375,6 +375,8 @@ jobs:
 #          make -j2 tests FFLAGS="-Werror" CFLAGS="-Werror" CXXFLAGS="-Werror" CPPFLAGS="-Werror"
 
   # No docker on macos with github actions so have to just build petsc first
+  # It then caches petsc for speed based on the hash of the HEAD of petsc main
+  # so it will rebuild petsc only if there is a new main
   macos_debug:
     runs-on: macos-15
     needs: [setup]
@@ -387,8 +389,9 @@ jobs:
           clang --version
 
       - name: Install deps
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
-          brew update
           brew install gcc open-mpi
 
       - name: Set up Python venv
@@ -417,7 +420,20 @@ jobs:
           # Sanity: ensure mpifort exists and can find gfortran now
           "$(brew --prefix open-mpi)"/bin/mpifort -showme
 
+      - name: Get PETSc HEAD hash
+        id: petsc_hash
+        run: |
+          echo "hash=$(git ls-remote https://gitlab.com/petsc/petsc.git refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache PETSc
+        id: cache_petsc
+        uses: actions/cache@v4
+        with:
+          path: petsc
+          key: v1-petsc-macos15-debug-${{ steps.petsc_hash.outputs.hash }}
+
       - name: Build PETSc (debug, CPU, Open MPI + Fortran + petsc4py)
+        if: steps.cache_petsc.outputs.cache-hit != 'true'
         shell: bash
         env:
           # Tell Open MPI wrappers exactly which gfortran to invoke
@@ -450,7 +466,7 @@ jobs:
           make python
           make -j3 tests
 
-  # No docker on macos with github actions so have to just build petsc first
+  # 64 bit macos build with kokkos
   macos_64_bit_kokkos:
     runs-on: macos-15
     needs: [setup]
@@ -463,8 +479,9 @@ jobs:
           clang --version
 
       - name: Install deps
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
-          brew update
           brew install gcc open-mpi
 
       - name: Set up Python venv
@@ -493,7 +510,20 @@ jobs:
           # Sanity: ensure mpifort exists and can find gfortran now
           "$(brew --prefix open-mpi)"/bin/mpifort -showme
 
+      - name: Get PETSc HEAD hash
+        id: petsc_hash
+        run: |
+          echo "hash=$(git ls-remote https://gitlab.com/petsc/petsc.git refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache PETSc
+        id: cache_petsc
+        uses: actions/cache@v4
+        with:
+          path: petsc
+          key: v1-petsc-macos15-debug-kokkos-64bit-${{ steps.petsc_hash.outputs.hash }}
+
       - name: Build PETSc (debug, CPU, Open MPI + Fortran + petsc4py)
+        if: steps.cache_petsc.outputs.cache-hit != 'true'
         shell: bash
         env:
           # Tell Open MPI wrappers exactly which gfortran to invoke
@@ -527,7 +557,7 @@ jobs:
           cd PFLARE
           make -j3
           make python
-          make -j3 tests          
+          make -j3 tests
 
   # Builds PFLARE with spack when the main branch is updated
   # Does this by sending a dispatch event to the PFLARE_spack repository
