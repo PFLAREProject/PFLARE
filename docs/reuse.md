@@ -169,7 +169,7 @@ or via the command line: ``-pc_type pflareinv -pc_pflareinv_reuse_poly_coeffs``.
 
 Often an outer loop (e.g., eigenvalue) will require solving a series of different linear systems one after another, and then returning to the first linear system to start the loop again. If the linear systems are close enough to each other to get good performance from reusing sparsity, but different enough from each other that reusing the GMRES polynomial coefficients from a different linear system gives poor performance, both PCAIR and PCPFLAREINV allow the GMRES polynomial coefficients to be saved externally and then restored before a solve.
 
-This means we can cheaply generate the exact same preconditioner when periodically solving the same linear system. An example of this is given in ``tests/ex6f_getcoeffs.F90``, which demonstrates this for both PCAIR and PCPFLAREINV. We should note this type of reuse is not yet available in Python.
+This means we can cheaply generate the exact same preconditioner when periodically solving the same linear system. Examples of this are given in ``tests/ex6f_getcoeffs.F90`` and ``python/ex6f_getcoeffs.py``, which demonstrate this for both PCAIR and PCPFLAREINV.
 
 **With PCAIR (AIRG):** The sparsity should also be reused alongside the polynomial coefficients:
 
@@ -226,6 +226,42 @@ or in C:
      // Third solve - reproduces the preconditioner from the first solve
      ierr = KSPSolve(ksp, b, x);
 
+or in Python with petsc4py:
+
+     import pflare
+
+     pc = ksp.getPC()
+     pc.setType("air")
+
+     petsc_options = PETSc.Options()
+     petsc_options['pc_air_reuse_sparsity'] = ''
+
+     # First solve - the PCAIR will be setup
+     ksp.solve(b, x)
+
+     # Save the polynomial coefficients from the first solve
+     num_levels = pflare.pcair_get_num_levels(pc)
+     coeffs_levels = {}
+     for petsc_level in range(num_levels - 1, 0, -1):
+         coeffs_levels[petsc_level] = pflare.pcair_get_poly_coeffs(pc, petsc_level, pflare.COEFFS_INV_AFF)
+     coeffs_levels[0] = pflare.pcair_get_poly_coeffs(pc, 0, pflare.COEFFS_INV_COARSE)
+
+     # ...[Modify entries in A to get a different linear system]
+
+     # Second solve - the PCAIR will be setup with reuse for the new system
+     ksp.solve(b2, x2)
+
+     # ...[Restore the original A]
+
+     # Restore the saved polynomial coefficients and tell PCAIR to reuse them
+     for petsc_level in range(num_levels - 1, 0, -1):
+         pflare.pcair_set_poly_coeffs(pc, petsc_level, pflare.COEFFS_INV_AFF, coeffs_levels[petsc_level])
+     pflare.pcair_set_poly_coeffs(pc, 0, pflare.COEFFS_INV_COARSE, coeffs_levels[0])
+     petsc_options['pc_air_reuse_poly_coeffs'] = ''
+
+     # Third solve - reproduces the preconditioner from the first solve
+     ksp.solve(b, x)
+
 **With PCPFLAREINV:** As with PCAIR, this requires that the sparsity pattern of A is the same for the first and third solves, since the sparsity of the assembled approximate inverse depends on A. The polynomial coefficients can be saved and restored without a separate sparsity-reuse flag:
 
 in Fortran:
@@ -277,3 +313,30 @@ or in C:
 
      // Third solve - reproduces the preconditioner from the first solve
      ierr = KSPSolve(ksp, b, x);
+
+or in Python with petsc4py:
+
+     import pflare
+
+     pc = ksp.getPC()
+     pc.setType("pflareinv")
+
+     # First solve - the PCPFLAREINV will be setup
+     ksp.solve(b, x)
+
+     # Save the polynomial coefficients from the first solve
+     coeffs = pflare.pcpflareinv_get_poly_coeffs(pc)
+
+     # ...[Modify entries in A to get a different linear system]
+
+     # Second solve - the PCPFLAREINV will be setup for the new system
+     ksp.solve(b2, x2)
+
+     # ...[Restore the original A]
+
+     # Restore the saved polynomial coefficients and tell PCPFLAREINV to reuse them
+     pflare.pcpflareinv_set_poly_coeffs(pc, coeffs)
+     PETSc.Options()['pc_pflareinv_reuse_poly_coeffs'] = ''
+
+     # Third solve - reproduces the preconditioner from the first solve
+     ksp.solve(b, x)

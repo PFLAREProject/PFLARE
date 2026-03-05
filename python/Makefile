@@ -59,6 +59,16 @@ run_tests:
 		$(PYTHON) ex2_cf_splitting.py; \
 		echo "Test PMISR DDC CF splitting with Python in parallel"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py; \
+		echo ""; \
+		echo "Test save/restore poly coefficients with PCAIR (Python)"; \
+		$(PYTHON) ex6f_getcoeffs.py -pc_type air; \
+		echo "Test save/restore poly coefficients with PCAIR in parallel (Python)"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type air; \
+		echo ""; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV (Python)"; \
+		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type arnoldi; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel (Python)"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type arnoldi; \
 	 else \
 		echo 'Python tests skipped (PFLARE Python module not built or not found)'; \
 	 fi
