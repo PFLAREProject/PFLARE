@@ -196,7 +196,9 @@ jobs:
             ARCH=arch-linux-c-opt
             MALLOC_DUMP=true
 
-  gnu_opt_kokkos_valgrind:
+  # Although this runs on the kokkos petsc image which has optimisation 
+  # turned on we explicitly build pflare with debug to run with valgrind          
+  gnu_kokkos_valgrind:
     runs-on: ubuntu-22.04
     needs: [setup]
     steps:
