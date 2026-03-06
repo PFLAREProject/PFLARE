@@ -314,6 +314,12 @@ contains
       end if
 
       if (associated(coeffs_pflareinv)) deallocate(coeffs_pflareinv)
+      if (allocated(coeffs_levels)) then
+         do i = 1, size(coeffs_levels)
+            if (associated(coeffs_levels(i)%coeffs)) deallocate(coeffs_levels(i)%coeffs)
+         end do
+         deallocate(coeffs_levels)
+      end if
 
 !  Free work space.  All PETSc objects should be destroyed when they
 !  are no longer needed.
