@@ -195,10 +195,8 @@ jobs:
           build-args: |
             ARCH=arch-linux-c-opt
             MALLOC_DUMP=true
-
-  # Although this runs on the kokkos petsc image which has optimisation 
-  # turned on we explicitly build pflare with debug to run with valgrind          
-  gnu_kokkos_valgrind:
+        
+  gnu_debug_kokkos_valgrind:
     runs-on: ubuntu-22.04
     needs: [setup]
     steps:
@@ -213,7 +211,7 @@ jobs:
           context: .
           file: ./dockerfiles/Dockerfile_kokkos_valgrind
           build-args: |
-            ARCH=arch-linux-c-opt
+            ARCH=arch-linux-c-debug
 
   gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
