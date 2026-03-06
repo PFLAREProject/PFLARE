@@ -1245,7 +1245,7 @@ end if
       PetscInt, parameter :: one = 1, zero = 0
       logical :: output_first_complex, skip_add
       PetscReal :: square_sum
-      integer, dimension(poly_order + 1, 2) :: status_output
+      integer, dimension(size(coefficients, 1), 2) :: status_output
       PetscReal, dimension(poly_sparsity_order+1,2) :: coeffs_contig
       
       ! ~~~~~~~~~~  
