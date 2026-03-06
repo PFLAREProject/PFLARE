@@ -93,7 +93,7 @@ int main(int argc,char **args)
  // Is the matrix symmetric?
  int symmetric = 0;
 
- compute_cf_splitting_c(&A, \
+ compute_cf_splitting(A, \
      symmetric, \
      strong_threshold, max_luby_steps, \
      algorithm, \

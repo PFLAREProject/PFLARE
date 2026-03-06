@@ -85,7 +85,7 @@ in Fortran:
            max_dd_ratio, &
            is_fine, is_coarse) 
 
-or in C (please note the slightly modified name in C):
+or in C:
 
      IS is_fine, is_coarse;
      // Threshold for a strong connection
@@ -104,7 +104,7 @@ or in C (please note the slightly modified name in C):
      // Is the matrix symmetric?
      int symmetric = 0;
 
-     compute_cf_splitting_c(&A, \
+     compute_cf_splitting(A, \
          symmetric, \
          strong_threshold, max_luby_steps, \
          algorithm, \
