@@ -222,21 +222,27 @@ build_tests_check: $(OUT)
 	+$(MAKE) -C tests $(CHECK_TARGETS)	
 
 # Separate out the different test cases
-# Only run the tests that load the 32 bit test matrix in /tests/data
-# if PETSC has been configured without 64 bit integers
 .PHONY: tests_short_serial
 tests_short_serial: build_tests
-ifeq ($(PETSC_USE_64BIT_INDICES),0)
-	$(MAKE) -C tests run_tests_load_serial
-endif
 	$(MAKE) -C tests run_tests_no_load_short_serial
 
 .PHONY: tests_short_parallel
 tests_short_parallel: build_tests
+	$(MAKE) -C tests run_tests_no_load_short_parallel
+
+# Only run the tests that load the 32 bit test matrix in /tests/data
+# if PETSC has been configured without 64 bit integers
+.PHONY: tests_load_serial
+tests_load_serial: build_tests
+ifeq ($(PETSC_USE_64BIT_INDICES),0)
+	$(MAKE) -C tests run_tests_load_serial
+endif
+
+.PHONY: tests_load_parallel
+tests_load_parallel: build_tests
 ifeq ($(PETSC_USE_64BIT_INDICES),0)
 	$(MAKE) -C tests run_tests_load_parallel
 endif
-	$(MAKE) -C tests run_tests_no_load_short_parallel
 
 .PHONY: tests_medium_serial
 tests_medium_serial: build_tests
@@ -263,6 +269,8 @@ tests_medium: build_tests
 .PHONY: tests
 tests: build_tests
 	($(MAKE) tests_short || (echo "Short tests failed" && exit 1)) && \
+	($(MAKE) tests_load_serial || (echo "Load serial tests failed" && exit 1)) && \
+	($(MAKE) tests_load_parallel || (echo "Load parallel tests failed" && exit 1)) && \
 	($(MAKE) -C tests run_tests_no_load_serial || (echo "No-load serial tests failed" && exit 1)) && \
 	($(MAKE) -C tests run_tests_no_load_parallel || (echo "No-load parallel tests failed" && exit 1)) && \
 	($(MAKE) tests_medium || (echo "Medium tests failed" && exit 1)) && \

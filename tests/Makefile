@@ -242,6 +242,15 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with random diagonally dominant matrix"
 	./matrandom -ksp_max_it 5
 	@echo ""
+	@echo "Test AIRG with random diagonally dominant matrix and fc smoothing"
+	./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with random diagonally dominant matrix and fc smoothing with diagonal sparsity C smoothing"
+	./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
+	@echo ""
+	@echo "Test AIRG with random diagonally dominant matrix and fixed dd ratio"
+	./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_max_dd_ratio 0.9
+	@echo ""
 	@echo "Test AIRG with parameter resets on random diagonally dominant matrix"
 	./matrandom_check_reset -ksp_max_it 7
 	@echo "Test PCPFLAREINV with parameter resets on random diagonally dominant matrix"
@@ -339,6 +348,8 @@ run_tests_no_load_short_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_z_type lair -pc_air_reuse_sparsity -ksp_max_it 3
 	@echo "Test lAIR SAI with GMRES polynomials with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_z_type lair_sai -pc_air_reuse_sparsity -ksp_max_it 3
+	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain z"
+	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 4 -pc_air_constrain_z	
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
@@ -590,6 +601,9 @@ run_tests_no_load_serial:
 # ~~~~~~~~~~~
 run_tests_no_load_short_parallel:
 #
+	@echo ""	
+	@echo "Test AIRG with random diagonally dominant matrix and fc smoothing in parallel"
+	$(MPIEXEC) -n 2 ./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_smooth_type fc
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
