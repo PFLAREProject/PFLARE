@@ -1,27 +1,24 @@
 ARG BASE_IMAGE=stevendargaville/petsc_intel
 
 FROM ${BASE_IMAGE}
-# Checkout the main branch by default
-ARG BRANCH=main
 ARG ARCH=arch-linux-intel
 
 LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE_intel"
 
-ENV CHECKOUT_BRANCH=$BRANCH
 ENV PETSC_ARCH=$ARCH
 # Ensure any test failures are caught and the build fails
 ENV PETSC_OPTIONS="-on_error_abort"
 
 WORKDIR /build
 
-# Clone PFLARE and run all the tests
-# Have to change the power basis parallel tests to arnoldi until we figure out what is breaking the 
+COPY . /build/PFLARE
+
+# Build and test PFLARE
+# Have to change the power basis parallel tests to arnoldi until we figure out what is breaking the
 # custom reduction in the power basis in parallel (it looks like the Intel MPI rather than the compilers)
 RUN source /opt/intel/oneapi/setvars.sh && \
     set -e; \
-    echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
-    git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
     echo "Replacing 'power' with 'arnoldi' in parallel test targets of tests/Makefile" && \
     sed -i '/^run_tests_load_parallel:/,/^run_tests_no_load_serial:/s/-pc_air_inverse_type power/-pc_air_inverse_type arnoldi/g' tests/Makefile && \
