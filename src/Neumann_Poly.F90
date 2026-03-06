@@ -105,12 +105,14 @@ module neumann_poly
          if (PetscObjectIsNull(inv_matrix)) then
 
             allocate(coefficients(poly_order + 1))
-            coefficients = 1d0 
+            coefficients = 1d0
 
             ! Have to dynamically allocate this
             allocate(mat_ctx)
             ! A Neumann polynomial has coefficients of 1
-            mat_ctx%coefficients => coefficients                      
+            mat_ctx%coefficients => coefficients
+            ! mat_ctx owns the heap-allocated coefficients array and must free it on cleanup
+            mat_ctx%own_coefficients = .TRUE.                      
 
             ! Create the matshell
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
