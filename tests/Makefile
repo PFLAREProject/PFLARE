@@ -242,19 +242,20 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with random diagonally dominant matrix"
 	./matrandom -ksp_max_it 5
 	@echo ""
-	@echo "Test AIRG with random diagonally dominant matrix and fc smoothing"
-	./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_smooth_type fc
-	@echo ""
-	@echo "Test AIRG with random diagonally dominant matrix and fc smoothing with diagonal sparsity C smoothing"
-	./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
-	@echo ""
-	@echo "Test AIRG with random diagonally dominant matrix and fixed dd ratio"
-	./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_max_dd_ratio 0.9
-	@echo ""
 	@echo "Test AIRG with parameter resets on random diagonally dominant matrix"
 	./matrandom_check_reset -ksp_max_it 7
 	@echo "Test PCPFLAREINV with parameter resets on random diagonally dominant matrix"
 	./matrandom_check_reset -ksp_max_it 12 -check_airg 0
+#	
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
+	@echo ""
+	@echo "Test AIRG with advection and fixed dd ratio"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_max_dd_ratio 0.9
 #	
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
@@ -601,9 +602,15 @@ run_tests_no_load_serial:
 # ~~~~~~~~~~~
 run_tests_no_load_short_parallel:
 #
-	@echo ""	
-	@echo "Test AIRG with random diagonally dominant matrix and fc smoothing in parallel"
-	$(MPIEXEC) -n 2 ./matrandom -ksp_max_it 6 -m 10 -n 10 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
+	@echo ""
+	@echo "Test AIRG with advection and fixed dd ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_max_dd_ratio 0.9
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
