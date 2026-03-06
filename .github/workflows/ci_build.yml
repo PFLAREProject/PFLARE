@@ -42,57 +42,60 @@ jobs:
   gnu_debug:
     runs-on: ubuntu-22.04
     needs: setup
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with debug PETSc
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-debug
 
   gnu_debug_malloc_dump:
     runs-on: ubuntu-22.04
     needs: setup
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with debug PETSc and malloc dump flag
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile
           build-args: |
-            BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-c-debug            
+            ARCH=arch-linux-c-debug
             MALLOC_DUMP=true
 
   gnu_opt:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}      
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build and push Docker image for non-pull-request events
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: true
+          context: .
           file: ./dockerfiles/Dockerfile
           tags: stevendargaville/pflare:latest
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
 
       - name: Build Docker image for pull requests
@@ -102,10 +105,10 @@ jobs:
           platforms: linux/amd64
           push: false
           load: true
+          context: .
           file: ./dockerfiles/Dockerfile
           tags: pflare:pr-ci
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
 
       - name: Build notebook CI image and execute notebooks for pull requests
@@ -121,106 +124,112 @@ jobs:
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}        
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build Docker image for pull requests with 64-bit PETSc
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
+          context: .
           file: ./dockerfiles/Dockerfile_64_bit
           tags: stevendargaville/pflare_64_bit:latest
           build-args: |
-            BRANCH=${{ env.BRANCH }}
-            ARCH=arch-linux-c-opt        
+            ARCH=arch-linux-c-opt
 
   gnu_opt_kokkos:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with KOKKOS and PETSc
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile_kokkos
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
             
   gnu_opt_kokkos_malloc_dump:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with KOKKOS and PETSc and malloc dump flag
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile_kokkos
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt
-            MALLOC_DUMP=true          
+            MALLOC_DUMP=true
             
   gnu_opt_64_bit_kokkos:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with KOKKOS and 64-bit PETSc
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile_kokkos
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-c-opt-64bit
 
   # Use 2 OMP threads by default as the github action runners have 2 cores by default
   gnu_opt_omp_kokkos:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with KOKKOS OMP backend and PETSc
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile_kokkos
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             OMP_NUM_THREADS=2
             ARCH=arch-linux-c-opt-omp
             
   intel_opt:
     runs-on: ubuntu-22.04
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Build Docker image with PETSc and Intel
         uses: docker/build-push-action@v2
         with:
           platforms: linux/amd64
           push: false
+          context: .
           file: ./dockerfiles/Dockerfile_intel
           build-args: |
-            BRANCH=${{ env.BRANCH }}
             ARCH=arch-linux-intel
 
   notebook_tutorial:
@@ -380,9 +389,10 @@ jobs:
   macos_debug:
     runs-on: macos-15
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Show toolchain
         run: |
           sw_vers
@@ -460,8 +470,7 @@ jobs:
           set -e
           export PETSC_DIR="$(pwd)/petsc"
           export PETSC_ARCH="arch-darwin-c-debug"
-          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git
-          cd PFLARE
+          cd "$GITHUB_WORKSPACE"
           make -j3
           make python
           make -j3 tests
@@ -470,9 +479,10 @@ jobs:
   macos_64_bit_kokkos:
     runs-on: macos-15
     needs: [setup]
-    env:
-      BRANCH: ${{ needs.setup.outputs.branch }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Show toolchain
         run: |
           sw_vers
@@ -553,8 +563,7 @@ jobs:
           set -e
           export PETSC_DIR="$(pwd)/petsc"
           export PETSC_ARCH="arch-darwin-c-debug"
-          git clone -b "$BRANCH" https://github.com/PFLAREProject/PFLARE.git
-          cd PFLARE
+          cd "$GITHUB_WORKSPACE"
           make -j3
           make python
           make -j3 tests

@@ -1,8 +1,6 @@
 ARG BASE_IMAGE=stevendargaville/petsc
 
 FROM ${BASE_IMAGE}
-# Checkout the main branch by default
-ARG BRANCH=main
 # Use the optimised petsc build by default
 ARG ARCH=arch-linux-c-opt
 # Don't use malloc dump by default
@@ -11,7 +9,6 @@ ARG MALLOC_DUMP=false
 LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE"
 
-ENV CHECKOUT_BRANCH=$BRANCH
 ENV PETSC_ARCH=$ARCH
 # -on_error_abort ensures any test failures are caught and the build fails
 # fp trap turns on floating point exception trapping in petsc
@@ -19,10 +16,12 @@ ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"
 
 WORKDIR /build
 
+COPY . /build/PFLARE
+
 # Ensure pipelines fail if any stage fails
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Clone PFLARE and run all the tests
+# Build and test PFLARE
 # Set the line length to 132 to check for truncation problems - the cray fortran
 # compiler was defaulting to 132 and we don't have a CI for that, so this will trigger it
 # If MALLOC_DUMP is true:
@@ -32,8 +31,6 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN set -euo pipefail; \
     if [ "${MALLOC_DUMP}" = "true" ]; then export PETSC_OPTIONS="-malloc_dump"; fi; \
     echo "Using PETSC_OPTIONS=${PETSC_OPTIONS}"; \
-    echo "Cloning branch: ${CHECKOUT_BRANCH}" && \
-    git clone --branch ${CHECKOUT_BRANCH} https://github.com/PFLAREProject/PFLARE.git && \
     cd PFLARE && \
     if [ "${MALLOC_DUMP}" = "true" ]; then \
         echo "Stripping -on_error_abort from test Makefiles for malloc dump run"; \
