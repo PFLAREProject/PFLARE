@@ -23,6 +23,8 @@ RUN source /opt/intel/oneapi/setvars.sh && \
     echo "Replacing 'power' with 'arnoldi' in parallel test targets of tests/Makefile" && \
     sed -i '/^run_tests_load_parallel:/,/^run_tests_no_load_serial:/s/-pc_air_inverse_type power/-pc_air_inverse_type arnoldi/g' tests/Makefile && \
     sed -i '/^run_tests_load_parallel:/,/^run_tests_no_load_serial:/s/-pc_pflareinv_type power/-pc_pflareinv_type arnoldi/g' tests/Makefile && \
+    sed -i '/^run_tests_no_load_short_parallel:/,/^run_tests_no_load_parallel:/s/-pc_air_inverse_type power/-pc_air_inverse_type arnoldi/g' tests/Makefile && \
+    sed -i '/^run_tests_no_load_short_parallel:/,/^run_tests_no_load_parallel:/s/-pc_pflareinv_type power/-pc_pflareinv_type arnoldi/g' tests/Makefile && \
     sed -i '/^run_tests_no_load_parallel:/,/^run_tests_medium_serial:/s/-pc_air_inverse_type power/-pc_air_inverse_type arnoldi/g' tests/Makefile && \
     sed -i '/^run_tests_no_load_parallel:/,/^run_tests_medium_serial:/s/-pc_pflareinv_type power/-pc_pflareinv_type arnoldi/g' tests/Makefile && \
     echo "Disabling power basis in parallel test ex12f_gmres_poly in tests/Makefile" && \

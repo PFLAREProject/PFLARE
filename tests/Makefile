@@ -236,7 +236,7 @@ run_tests_load_parallel:
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
-run_tests_no_load_serial:
+run_tests_no_load_short_serial:
 #
 	@echo ""
 	@echo "Test AIRG with random diagonally dominant matrix"
@@ -248,6 +248,16 @@ run_tests_no_load_serial:
 	./matrandom_check_reset -ksp_max_it 12 -check_airg 0
 #	
 	@echo ""
+	@echo "Test AIRG with advection and fc smoothing"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
+	@echo ""
+	@echo "Test AIRG with advection and fixed dd ratio"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_max_dd_ratio 0.9
+#	
+	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
 	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
@@ -257,10 +267,7 @@ run_tests_no_load_serial:
 	@echo "Test AIRG with SUPG CG FEM in 3D"
 	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
-	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets"
-	./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump	 
-#	 
+#
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads"
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -288,12 +295,6 @@ run_tests_no_load_serial:
 	./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
 	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1
-#	 
-	@echo ""
-	@echo "Test AIRG with upwind DG FEM in 3D with tets"
-	./adv_dg_upwind -dm_plex_filename data/cube_unstruc.msh \
-	 -pc_type air -pc_air_a_lump \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4		 
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil"
@@ -348,6 +349,8 @@ run_tests_no_load_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_z_type lair -pc_air_reuse_sparsity -ksp_max_it 3
 	@echo "Test lAIR SAI with GMRES polynomials with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_z_type lair_sai -pc_air_reuse_sparsity -ksp_max_it 3
+	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain z"
+	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 4 -pc_air_constrain_z	
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
@@ -434,58 +437,18 @@ run_tests_no_load_serial:
 	./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 8
 	@echo "Test single level GMRES polynomials with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -regen -ksp_max_it 8
-# 
-	@echo ""
-	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace"
-	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
-	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
-	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
-	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14 \
-	 -pc_air_inverse_type power
-# 
+#
 	@echo ""
 	@echo "Test AIRG on steady 1D advection"
 	./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
-# 
-	@echo ""
-	@echo "Test curved velocity 2D upwind finite-difference"
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
-# 
+#
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
-# 
-	@echo ""
-	@echo "Test lAIR on steady 2D structured advection"
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
-	 -pc_air_z_type lair -pc_air_inverse_type wjacobi -ksp_max_it 10
-# 
-	@echo ""
-	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
-	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 0 -ksp_max_it 7 \
-	 -pc_air_inverse_type power
-# 
-	@echo ""
-	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and multiple DDC its"
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
-	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 2 -pc_air_ddc_fraction 0.02 -ksp_max_it 7 \
-	 -pc_air_inverse_type power	 
-# 
-	@echo ""
-	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio"
-	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
-    -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
-	 -pc_air_inverse_type power		 
-# 
+#
 	@echo ""
 	@echo "Test high order GMRES polynomials in small linear system"
 	./adv_diff_fd -da_grid_x 5 -da_grid_y 5 -pc_type pflareinv -pc_pflareinv_type newton \
@@ -502,45 +465,18 @@ run_tests_no_load_serial:
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
-	@echo "Test improving Z" 
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
-	@echo "Test improving Z with 1 iteration" 
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 1 -ksp_max_it 3	-pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 3 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with PC regenerated with no sparsity change with 1 iteration"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 1 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power			
 #
 	@echo ""
-	@echo "Test improving W" 
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
-	 -pc_air_improve_w_its 3 -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
-	@echo "Test improving W with 1 iteration" 
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
-	 -pc_air_improve_w_its 1 -ksp_max_it 4	-pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
 	 -pc_air_improve_w_its 3 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with PC regenerated with no sparsity change with 1 iteration"
 	./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
 	 -pc_air_improve_w_its 1 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
-#
-	@echo ""
-	@echo "Test Newton AIRG on advection for for different orders"
-	@set -e; for order in 0 1 2 3 4 5 6; do \
-		echo "--- Testing order = $$order ---"; \
-		./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
-		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 6; \
-	done
-	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity"
-	@set -e; for order in 2 3 4 5 6; do \
-		echo "--- Testing order = $$order ---"; \
-		for sparsity in $$(seq 1 $$(($$order - 1))); do \
-			echo "  --- Testing sparsity order = $$sparsity ---"; \
-				./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
-				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
-		done; \
-	done
 #
 	@echo ""
 	@echo "Test Newton GMRES polynomial on a diagonal matrix"
@@ -578,8 +514,103 @@ endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
-run_tests_no_load_parallel:
+run_tests_no_load_serial:
 #
+	@echo ""
+	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets"
+	./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
+#
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 3D with tets"
+	./adv_dg_upwind -dm_plex_filename data/cube_unstruc.msh \
+	 -pc_type air -pc_air_a_lump \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
+#
+	@echo ""
+	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace"
+	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
+	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
+	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
+	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test curved velocity 2D upwind finite-difference"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
+#
+	@echo ""
+	@echo "Test lAIR on steady 2D structured advection"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -pc_air_z_type lair -pc_air_inverse_type wjacobi -ksp_max_it 10
+#
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 0 -ksp_max_it 7 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and multiple DDC its"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 2 -pc_air_ddc_fraction 0.02 -ksp_max_it 7 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio"
+	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+    -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test improving Z"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	@echo "Test improving Z with 1 iteration"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 1 -ksp_max_it 3	-pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test improving W"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 3 -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	@echo "Test improving W with 1 iteration"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 1 -ksp_max_it 4	-pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test Newton AIRG on advection for for different orders"
+	@set -e; for order in 0 1 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 6; \
+	done
+	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity"
+	@set -e; for order in 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+		done; \
+	done
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_tests_no_load_short_parallel:
+#
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
+	@echo ""
+	@echo "Test AIRG with advection and fixed dd ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_max_dd_ratio 0.9
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -592,10 +623,7 @@ run_tests_no_load_parallel:
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 \
 	 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
-	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump		 
-#	 
+#
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -623,12 +651,6 @@ run_tests_no_load_parallel:
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
 	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1		 
-#	 
-	@echo ""
-	@echo "Test AIRG with upwind DG FEM in 3D with tets in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/cube_unstruc.msh \
-	 -pc_type air -pc_air_a_lump \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4		
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for 2D finite difference stencil in parallel"
@@ -673,14 +695,7 @@ run_tests_no_load_parallel:
 	$(MPIEXEC) -n 2 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air \
 	 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 -pc_air_inverse_type jacobi \
 	 -mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it 10 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 1
-# 
-	@echo ""
-	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
-	 -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
-	 -pc_air_inverse_type power		 
-# 
+#
 	@echo ""
 	@echo "Test auto truncation with matrix-free Newton polynomials as coarse grid solver in parallel" 
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -ksp_type richardson -pc_type air \
@@ -771,63 +786,27 @@ run_tests_no_load_parallel:
 	@echo "Test AIRG Newton with GMRES polynomials with PC regenerated with no sparsity change in parallel with 0th order fixed sparsity"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 0 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton	  	
-# 
-	@echo ""
-	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"
-	$(MPIEXEC) -n 4 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
-	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
-	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
-	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14 \
-	 -pc_air_inverse_type power
-# 
+#
 	@echo ""
 	@echo "Test AIRG on steady 1D advection in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
-# 
-	@echo ""
-	@echo "Test curved velocity 2D upwind finite-difference in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity	 
-# 
+#
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4	 
 #
 	@echo ""
-	@echo "Test improving Z in parallel" 
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3 \
-	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_improve_z_its 3 -ksp_max_it 3 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
-	@echo "Test improving W in parallel" 
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
-	 -pc_air_improve_w_its 3 -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving W with PC regenerated with no sparsity change in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -pc_air_one_point_classical_prolong 0 \
 	 -pc_air_improve_w_its 3 -ksp_max_it 3	-pc_air_a_drop 1e-3 -pc_air_inverse_type power
-#
-	@echo ""
-	@echo "Test Newton AIRG on advection for for different orders in parallel"
-	@set -e; for order in 0 1 2 3 4 5 6; do \
-		echo "--- Testing order = $$order ---"; \
-		$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
-		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 6; \
-	done
-	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity in parallel"
-	@set -e; for order in 2 3 4 5 6; do \
-		echo "--- Testing order = $$order ---"; \
-		for sparsity in $$(seq 1 $$(($$order - 1))); do \
-			echo "  --- Testing sparsity order = $$sparsity ---"; \
-				$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
-				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
-		done; \
-	done
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial in parallel"
@@ -854,6 +833,68 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power	
 
 endif
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_tests_no_load_parallel:
+#
+	@echo ""
+	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
+#
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 3D with tets in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/cube_unstruc.msh \
+	 -pc_type air -pc_air_a_lump \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
+#
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+	 -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
+	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
+	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
+	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test curved velocity 2D upwind finite-difference in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
+#
+	@echo ""
+	@echo "Test improving Z in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3 \
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test improving W in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_w_its 3 -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test Newton AIRG on advection for for different orders in parallel"
+	@set -e; for order in 0 1 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+		-pc_air_inverse_sparsity_order $$order -ksp_norm_type unpreconditioned -ksp_max_it 6; \
+	done
+	@echo "Test Newton AIRG on advection for for different orders and fixed sparsity in parallel"
+	@set -e; for order in 2 3 4 5 6; do \
+		echo "--- Testing order = $$order ---"; \
+		for sparsity in $$(seq 1 $$(($$order - 1))); do \
+			echo "  --- Testing sparsity order = $$sparsity ---"; \
+				$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order $$order \
+				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
+		done; \
+	done
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~

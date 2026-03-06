@@ -1,0 +1,35 @@
+ARG BASE_IMAGE=stevendargaville/petsc
+
+FROM ${BASE_IMAGE}
+# Use the debug petsc build
+ARG ARCH=arch-linux-c-debug
+
+LABEL maintainer="Steven Dargaville"
+LABEL description="PFLARE_valgrind"
+
+ENV PETSC_ARCH=$ARCH
+# -on_error_abort ensures any test failures are caught and the build fails
+ENV PETSC_OPTIONS="-on_error_abort"
+
+WORKDIR /build
+
+COPY . /build/PFLARE
+
+# Ensure pipelines fail if any stage fails
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Build PFLARE and run tests_short with valgrind --leak-check=full
+# Inject valgrind into test invocations via sed:
+#   - Serial tests:   <tab>./executable -> <tab>valgrind ... ./executable
+#   - Parallel tests: $(MPIEXEC) -n N ./executable -> $(MPIEXEC) -n N valgrind ... ./executable
+# --error-exitcode=1 causes valgrind to return non-zero on errors or leaks
+# --errors-for-leak-kinds=definite,indirect ensures definitely/indirectly lost memory is treated as an error
+RUN set -euo pipefail; \
+    cd PFLARE && \
+    make clean && \
+    make -j2 build_tests && \
+    sed -i 's|\t\./|\tvalgrind --leak-check=full --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \./|g' tests/Makefile && \
+    sed -i 's|\$(MPIEXEC) -n \([0-9]*\) \./|\$(MPIEXEC) -n \1 valgrind --leak-check=full --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \./|g' tests/Makefile && \
+    make tests_short
+
+WORKDIR /build/PFLARE
