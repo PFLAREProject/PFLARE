@@ -129,9 +129,9 @@ module air_data_type_routines
             ! If we setup Aff
             if (air_data%allocated_matrices_A_ff(our_level)) then
 
-               ! Destroy any data that only depends on the CF splitting 
-               ! and poly inv_A_ff_poly_data if not doing any reuse 
-               ! otherwise we keep this for reuse
+               ! Destroy data that depends on the CF splitting and poly coefficients
+               ! only when not reusing (the IS device copy and poly coefficients
+               ! remain valid across setups when reusing)
                if (.NOT. reuse) then
                   call destroy_VecISCopyLocalWrapper(air_data, our_level)
                   if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
@@ -142,7 +142,11 @@ module air_data_type_routines
                      deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
                      air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
                   end if
+               end if
 
+               ! temp_vecs are sized from A_ff/A_fc; they must be destroyed whenever
+               ! A_ff/A_fc are destroyed (amounts 1 and 2 destroy them even when reusing)
+               if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
                   call VecDestroy(air_data%temp_vecs(1)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_fine(1)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_fine(2)%array(our_level), ierr)
@@ -151,7 +155,6 @@ module air_data_type_routines
                   call VecDestroy(air_data%temp_vecs_coarse(1)%array(our_level), ierr)
                   if (air_data%options%any_c_smooths .AND. &
                         .NOT. air_data%options%full_smoothing_up_and_down) then
-
                      call VecDestroy(air_data%temp_vecs_coarse(2)%array(our_level), ierr)
                      call VecDestroy(air_data%temp_vecs_coarse(3)%array(our_level), ierr)
                      call VecDestroy(air_data%temp_vecs_coarse(4)%array(our_level), ierr)
