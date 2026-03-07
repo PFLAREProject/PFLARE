@@ -64,7 +64,7 @@ module air_mg_setup
       PetscErrorCode      :: ierr
       MPIU_Comm            :: MPI_COMM_MATRIX
       PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b
-      logical             :: continue_coarsening, trigger_proc_agglom
+      logical             :: continue_coarsening, trigger_proc_agglom, cf_split_reused
       type(tMat)          :: temp_mat
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
@@ -255,11 +255,15 @@ module air_mg_setup
 
          ! ~~~~~~~~~~~~
          ! Compute the coarsening
-         ! ~~~~~~~~~~~~     
-         call timer_start(TIMER_ID_AIR_COARSEN)     
-         
+         ! ~~~~~~~~~~~~
+         call timer_start(TIMER_ID_AIR_COARSEN)
+
+         ! Track whether the CF splitting was already present before this setup
+         ! (used below to avoid redundant device IS copies when reusing)
+         cf_split_reused = air_data%allocated_is(our_level)
+
          ! Are we reusing our CF splitting
-         if (.NOT. air_data%allocated_is(our_level) .AND. .NOT. auto_truncated) then
+         if (.NOT. cf_split_reused .AND. .NOT. auto_truncated) then
 
             ! Do the CF splitting
             call compute_cf_splitting(air_data%coarse_matrix(our_level), &
@@ -348,15 +352,19 @@ module air_mg_setup
 
          end if   
          
-         ! ~~~~~~~~~~~~~~  
-         ! Copy over the fine/coarse IS's to the device, we use them 
-         ! in our matrix extract to save h2d copies, and they are also used 
-         ! in the fc smooth
-         ! ~~~~~~~~~~~~~~  
-         call timer_start(TIMER_ID_AIR_IDENTITY)            
-         call create_VecISCopyLocalWrapper(air_data, our_level, &
-               mat_type, air_data%coarse_matrix(our_level))
-         call timer_finish(TIMER_ID_AIR_IDENTITY)            
+         ! ~~~~~~~~~~~~~~
+         ! Copy over the fine/coarse IS's to the device, we use them
+         ! in our matrix extract to save h2d copies, and they are also used
+         ! in the fc smooth.
+         ! Skip when the CF splitting was reused: the device copy already exists
+         ! and the IS indices are unchanged.
+         ! ~~~~~~~~~~~~~~
+         if (.NOT. cf_split_reused) then
+            call timer_start(TIMER_ID_AIR_IDENTITY)
+            call create_VecISCopyLocalWrapper(air_data, our_level, &
+                  mat_type, air_data%coarse_matrix(our_level))
+            call timer_finish(TIMER_ID_AIR_IDENTITY)
+         end if            
 
          ! ~~~~~~~~~~~~~~     
          ! Now let's go and build all our operators
