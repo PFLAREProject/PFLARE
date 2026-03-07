@@ -1,7 +1,7 @@
 module air_data_type_routines
 
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
-   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP
+   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP, MAT_INV_AFF
    use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
    use fc_smooth, only: destroy_VecISCopyLocalWrapper
    
@@ -247,12 +247,17 @@ module air_data_type_routines
 
          if (air_data%no_levels /= -1) then
             ! Coarse grid solver
-            if (.NOT. reuse) then
+            ! Reset when not reusing, or when reusing but inv_A_ff is not stored
+            ! at this reuse_amount level (amounts 1 and 2); otherwise reuse_triggered
+            ! would be TRUE in build_gmres_polynomial_inverse even though the old
+            ! inv_A_ff is stale relative to the rebuilt coarse matrix.
+            if (.NOT. reuse .OR. &
+                 .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
                call reset_inverse_mat(air_data%inv_A_ff(air_data%no_levels))
                if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
                   deallocate(air_data%inv_coarsest_poly_data%coefficients)
                   air_data%inv_coarsest_poly_data%coefficients => null()
-               end if         
+               end if
             end if
             ! If we're not doing full smoothing, we have built a matshell on the top grid
             ! we use in the fc smoothing that needs to be destroyed

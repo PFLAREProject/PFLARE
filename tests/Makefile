@@ -180,8 +180,8 @@ run_tests_load_serial:
 run_tests_load_parallel:
 #
 	@echo ""
-	@echo "Test PCAIR reuse_amount (2=+SpGEMMs, 3=everything) in Fortran in parallel"
-	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 5 -test_reuse_amount_start 2
+	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"
+	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 5
 #
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_matrix_free_polys -ksp_max_it 5
@@ -437,8 +437,8 @@ run_tests_no_load_short_serial:
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
 #
 	@echo ""
-	@echo "Test PCAIR reuse_amount (2=+SpGEMMs, 3=everything) in Fortran"
-	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 5 -test_reuse_amount_start 2
+	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
+	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 5
 #
 	@echo ""
 	@echo "Test single level GMRES polynomials with PC reused with no sparsity change"

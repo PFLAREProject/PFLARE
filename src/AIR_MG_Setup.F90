@@ -574,7 +574,7 @@ module air_mg_setup
          ! ~~~~~~~~~~~~~~
 
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
-                  air_data%coarse_matrix(our_level_coarse))  
+                  air_data%coarse_matrix(our_level_coarse))
 
          air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
 
@@ -1109,8 +1109,8 @@ module air_mg_setup
             end if
 
             ! Now we've finished the coarse grid solver, output the time
-            call timer_finish(TIMER_ID_AIR_INVERSE)              
-         end if        
+            call timer_finish(TIMER_ID_AIR_INVERSE)
+         end if
 
          ! Use the mf coarse grid solver or not
          ! Let's store the coarse grid solver in inv_A_ff(no_levels)
