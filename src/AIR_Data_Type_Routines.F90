@@ -1,7 +1,7 @@
 module air_data_type_routines
 
-   use air_data_type, only: air_multigrid_data
-   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT
+   use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
+   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP
    use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
    use fc_smooth, only: destroy_VecISCopyLocalWrapper
    
@@ -129,23 +129,15 @@ module air_data_type_routines
             ! If we setup Aff
             if (air_data%allocated_matrices_A_ff(our_level)) then
 
+               ! Destroy any data that only depends on the CF splitting 
+               ! and poly inv_A_ff_poly_data if not doing any reuse 
+               ! otherwise we keep this for reuse
                if (.NOT. reuse) then
-                  call MatDestroy(air_data%A_ff(our_level), ierr)
-                  call MatDestroy(air_data%A_fc(our_level), ierr)
-                  call MatDestroy(air_data%A_cf(our_level), ierr)                  
-                  call MatDestroy(air_data%prolongators(our_level), ierr)
-                  if (.NOT. air_data%options%symmetric) then
-                     call MatDestroy(air_data%restrictors(our_level), ierr)
-                  end if                  
-
                   call destroy_VecISCopyLocalWrapper(air_data, our_level)
-
-                  air_data%allocated_matrices_A_ff(our_level) = .FALSE.
-                  call reset_inverse_mat(air_data%inv_A_ff(our_level))
                   if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
                      deallocate(air_data%inv_A_ff_poly_data(our_level)%coefficients)
                      air_data%inv_A_ff_poly_data(our_level)%coefficients => null()
-                  end if         
+                  end if
                   if (associated(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
                      deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
                      air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
@@ -155,29 +147,50 @@ module air_data_type_routines
                   call VecDestroy(air_data%temp_vecs_fine(1)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_fine(2)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_fine(3)%array(our_level), ierr)
-                  call VecDestroy(air_data%temp_vecs_fine(4)%array(our_level), ierr)             
+                  call VecDestroy(air_data%temp_vecs_fine(4)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_coarse(1)%array(our_level), ierr)
                   if (air_data%options%any_c_smooths .AND. &
-                        .NOT. air_data%options%full_smoothing_up_and_down) then               
-   
+                        .NOT. air_data%options%full_smoothing_up_and_down) then
+
                      call VecDestroy(air_data%temp_vecs_coarse(2)%array(our_level), ierr)
                      call VecDestroy(air_data%temp_vecs_coarse(3)%array(our_level), ierr)
-                     call VecDestroy(air_data%temp_vecs_coarse(4)%array(our_level), ierr) 
-                  end if                   
-               end if                                       
-            end if  
+                     call VecDestroy(air_data%temp_vecs_coarse(4)%array(our_level), ierr)
+                  end if
+               end if          
+               
+               ! Only amount=3 preserves A_ff/A_fc/A_cf and grid-transfer operators
+               ! between setups.  For amount<=2 these are destroyed and rebuilt
+               ! from scratch (SpGEMM reuse at amount=2 works via stored W/Z/AP/RAP
+               ! whose sparsity is guaranteed by stored RAP_DROP).
+               if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
 
+                  call MatDestroy(air_data%prolongators(our_level), ierr)
+                  if (.NOT. air_data%options%symmetric) then
+                     call MatDestroy(air_data%restrictors(our_level), ierr)
+                  end if                     
+                  call reset_inverse_mat(air_data%inv_A_ff(our_level))
+                  call MatDestroy(air_data%A_ff(our_level), ierr)
+                  call MatDestroy(air_data%A_fc(our_level), ierr)
+                  call MatDestroy(air_data%A_cf(our_level), ierr)
+                  air_data%allocated_matrices_A_ff(our_level) = .FALSE.
+               end if
+            end if
+
+            ! IS_fine_index and IS_coarse_index (the CF splitting) are always kept
+            ! whenever reuse=.TRUE., regardless of reuse_amount.  The CF splitting
+            ! is the basis for all other reuse at every amount level.
             if (air_data%allocated_is(our_level)) then
                if (.NOT. reuse) then
                   call ISDestroy(air_data%IS_fine_index(our_level), ierr)
                   call ISDestroy(air_data%IS_coarse_index(our_level), ierr)
                   air_data%allocated_is(our_level) = .FALSE.
                end if
-            end if            
-            
+            end if
+
             ! Did we do C point smoothing?
             if (air_data%allocated_matrices_A_cc(our_level)) then
-               if (.NOT. reuse) then
+               ! Same logic as A_ff: only amount=3 preserves A_cc between setups.
+               if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
                   call MatDestroy(air_data%A_cc(our_level), ierr)
                   call reset_inverse_mat(air_data%inv_A_cc(our_level))
                   if (associated(air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
@@ -186,7 +199,7 @@ module air_data_type_routines
                   end if
                   air_data%allocated_matrices_A_cc(our_level) = .FALSE.
                end if
-            end if            
+            end if
             ! Did we create a coarse grid on this level
             if (air_data%allocated_coarse_matrix(our_level)) then
                call reset_inverse_mat(air_data%coarse_matrix(our_level))
@@ -198,14 +211,35 @@ module air_data_type_routines
                   temp_mat = air_data%reuse(our_level)%reuse_mat(i_loc)
                   if (.NOT. PetscObjectIsNull(temp_mat)) then
                      call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(i_loc), &
-                        air_data%reuse(our_level)%reuse_submatrices(i_loc)%array)                     
+                        air_data%reuse(our_level)%reuse_submatrices(i_loc)%array)
                   end if
                end do
 
                do i_loc = 1, size(air_data%reuse(our_level)%reuse_is)
                   temp_is = air_data%reuse(our_level)%reuse_is(i_loc)
                   if (.NOT. PetscObjectIsNull(temp_is)) then
-                     call ISDestroy(air_data%reuse(our_level)%reuse_is(i_loc), ierr)                    
+                     call ISDestroy(air_data%reuse(our_level)%reuse_is(i_loc), ierr)
+                  end if
+               end do
+            else
+               ! When reusing, destroy any reuse entries not active at the
+               ! current amount level (handles amount being lowered between setups)
+               do i_loc = 1, size(air_data%reuse(our_level)%reuse_mat)
+                  if (.NOT. REUSE_MAT_ACTIVE(i_loc, air_data%options%reuse_amount)) then
+                     temp_mat = air_data%reuse(our_level)%reuse_mat(i_loc)
+                     if (.NOT. PetscObjectIsNull(temp_mat)) then
+                        call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(i_loc), &
+                           air_data%reuse(our_level)%reuse_submatrices(i_loc)%array)
+                     end if
+                  end if
+               end do
+
+               do i_loc = 1, size(air_data%reuse(our_level)%reuse_is)
+                  if (.NOT. REUSE_IS_ACTIVE(i_loc, air_data%options%reuse_amount)) then
+                     temp_is = air_data%reuse(our_level)%reuse_is(i_loc)
+                     if (.NOT. PetscObjectIsNull(temp_is)) then
+                        call ISDestroy(air_data%reuse(our_level)%reuse_is(i_loc), ierr)
+                     end if
                   end if
                end do
             end if

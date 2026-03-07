@@ -72,6 +72,7 @@ cdef extern:
 	void PCAIRGetALump_c(PetscPC *pc, unsigned char *lump)
 	void PCAIRGetReuseSparsity_c(PetscPC *pc, unsigned char *reuse)
 	void PCAIRGetReusePolyCoeffs_c(PetscPC *pc, unsigned char *reuse)
+	void PCAIRGetReuseAmount_c(PetscPC *pc, PetscInt *amount)
 	void PCAIRGetSmoothType_c(PetscPC *pc, char *output_string)
 
 	# PCAIR - polynomial coefficients
@@ -132,6 +133,7 @@ cdef extern:
 	# PCAIR - reuse flags
 	void PCAIRSetReuseSparsity_c(PetscPC *pc, int input_bool)
 	void PCAIRSetReusePolyCoeffs_c(PetscPC *pc, int input_bool)
+	void PCAIRSetReuseAmount_c(PetscPC *pc, PetscInt amount)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer)
 	void PCAIRSetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
@@ -408,6 +410,11 @@ cpdef bint pcair_get_reuse_poly_coeffs(PC pc):
 	PCAIRGetReusePolyCoeffs_c(&(pc.pc), &result)
 	return bool(result)
 
+cpdef int pcair_get_reuse_amount(PC pc):
+	cdef PetscInt amount = 3
+	PCAIRGetReuseAmount_c(&(pc.pc), &amount)
+	return int(amount)
+
 cpdef str pcair_get_smooth_type(PC pc):
 	cdef char buf[256]
 	cdef int i
@@ -602,6 +609,15 @@ cpdef pcair_set_reuse_poly_coeffs(PC pc, bint flag):
 	Must be called before KSPSolve, after pcair_set_poly_coeffs, to take effect.
 	"""
 	PCAIRSetReusePolyCoeffs_c(&(pc.pc), <int>flag)
+
+cpdef pcair_set_reuse_amount(PC pc, int amount):
+	"""Set how much data PCAIR stores for reuse when reuse_sparsity is enabled.
+
+	1 - store only graph-partitioner IS and symbolic SpGEMM matrices (MAT_AP, MAT_RAP)
+	2 - additionally store repartitioned matrices and CF-splitting related matrices/IS
+	3 - store everything (default, preserves previous behaviour)
+	"""
+	PCAIRSetReuseAmount_c(&(pc.pc), <PetscInt>amount)
 
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, cnp.ndarray coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.
