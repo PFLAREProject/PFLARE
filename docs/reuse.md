@@ -66,6 +66,33 @@ or in Python with petsc4py:
 
 or via the command line: ``-pc_type air -pc_air_reuse_sparsity``.
 
+##### Controlling the amount of data stored with reuse_amount
+
+By default (``-pc_air_reuse_amount = 3``), PCAIR stores everything when reuse is enabled via ``-pc_air_reuse_sparsity`` : the CF splitting, all intermediate SpGEMM results, and the approximate inverse matrices. This gives the fastest subsequent setups but uses the most memory (typically 2-5x the storage complexity of the matrix).
+
+The ``-pc_air_reuse_amount`` option trades memory for a slightly higher setup cost on subsequent solves:
+
+- **1** — Store only the CF splitting (IS_fine_index, IS_coarse_index) and parallel repartitioning. All matrices are rebuilt from scratch each setup. Lowest memory overhead.
+- **2** — Store the CF splitting plus all matrices needed to guarantee stable SpGEMM sparsity (W, Z, W_DROP, Z_DROP, AP, RAP, RAP_DROP, and when ``strong_r_threshold != 0`` also the dropped submatrices). A_ff/A_fc/A_cf, prolongators and restrictors are rebuilt each setup. Moderate memory overhead.
+- **3** — Store everything, including the approximate inverse matrices and the grid-transfer operators. Fastest setup but highest memory (default).
+
+in Fortran:
+
+     call PCAIRSetReuseSparsity(pc, PETSC_TRUE, ierr)
+     call PCAIRSetReuseAmount(pc, 2, ierr)   ! store CF splitting + SpGEMM sparsity only
+
+or in C:
+
+     ierr = PCAIRSetReuseSparsity(pc, PETSC_TRUE);
+     ierr = PCAIRSetReuseAmount(pc, 2);
+
+or in Python with petsc4py:
+
+     pflare.pcair_set_reuse_sparsity(pc, True)
+     pflare.pcair_set_reuse_amount(pc, 2)
+
+or via the command line: ``-pc_type air -pc_air_reuse_sparsity -pc_air_reuse_amount 2``.
+
 #### 3) Reuse GMRES polynomial coefficients during setup
 
 When the matrix is very similar to that used in a previous solve, the GMRES polynomial coefficients can be reused to save the parallel polynomial iteration in the setup. Note that the GMRES polynomial coefficients are very sensitive to changes in the matrix, so this may not always give good results.
