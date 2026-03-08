@@ -448,7 +448,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
          // Parallel reduction!
          PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
-         counter_undecided = counter_parallel;            
+         counter_undecided = counter_parallel;
+      } else {
+         // If we're doing a fixed number of steps, then we need an extra fence
+         // as we don't hit the parallel reduce above (which implicitly fences)
+         exec.fence();
       }
 
    }
