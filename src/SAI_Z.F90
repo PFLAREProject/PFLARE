@@ -482,7 +482,7 @@ module sai_z
                call KSPSetOperators(ksp, transpose_mat, transpose_mat, ierr)                           
                call KSPSetUp(ksp, ierr)
 
-               call MatCreateVecs(submatrices(1), solution, rhs, ierr)  
+               call MatCreateVecs(submatrices(1), rhs, solution, ierr)
                ! Have to restore the array before the solve in case this is kokkos
                call VecGetArray(rhs, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
