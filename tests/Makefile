@@ -267,6 +267,11 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with SUPG CG FEM in 3D"
 	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
+#	
+	@echo ""
+	@echo "Test AIR with SAI with SUPG CG FEM in 2D"	 
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+	 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -ksp_max_it 6 -pc_air_inverse_type sai -dm_refine 1
 #
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads"
@@ -639,6 +644,11 @@ run_tests_no_load_short_parallel:
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 5,5,5 \
 	 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -pc_air_a_lump -u 1 -v 1 -w 0 -unit_velocity 1
+#	
+	@echo ""
+	@echo "Test AIR with SAI with SUPG CG FEM in 2D in parallel"	 
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+	 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -ksp_max_it 6 -pc_air_inverse_type sai -dm_refine 1	 
 #
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with quads in parallel"
