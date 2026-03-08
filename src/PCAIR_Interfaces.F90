@@ -1236,9 +1236,28 @@ module pcair_interfaces
       reuse = options%reuse_poly_coeffs
       ierr = 0
 
-   end subroutine PCAIRGetReusePolyCoeffs    
-   
-! -------------------------------------------------------------------------------------------------------------------------------   
+   end subroutine PCAIRGetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseAmount(pc, amount, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: amount
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)
+      amount = options%reuse_amount
+      ierr = 0
+
+   end subroutine PCAIRGetReuseAmount
+
+! -------------------------------------------------------------------------------------------------------------------------------
 
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! Set routines - Fortran versions of the C routines in PCAIR
@@ -2702,7 +2721,41 @@ module pcair_interfaces
       options%reuse_poly_coeffs = reuse
       ierr = 0
 
-   end subroutine PCAIRSetReusePolyCoeffs    
+   end subroutine PCAIRSetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetReuseAmount(pc, amount, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: amount
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetReuseAmount(pc, old_int, ierr)
+      if (old_int == amount) then
+         ierr = 0
+         return
+      end if     
+      
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)         
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)
+      options%reuse_amount = int(amount)
+      ierr = 0
+
+   end subroutine PCAIRSetReuseAmount
+
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -10,13 +10,13 @@ module air_mg_setup
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, &
          TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_CONSTRAIN, &
          TIMER_ID_AIR_IDENTITY, TIMER_ID_AIR_TRUNCATE, &
-         MAT_INV_AFF, IS_REPARTITION, MAT_COARSE_REPARTITIONED, &
+         MAT_INV_AFF, MAT_RAP_DROP, IS_REPARTITION, MAT_COARSE_REPARTITIONED, &
          MAT_P_REPARTITIONED, MAT_R_REPARTITIONED
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
          destroy_matrix_reuse
    use timers, only: timer_start, timer_finish, timer_time, print_timers
-   use air_data_type, only: air_multigrid_data
+   use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
@@ -64,7 +64,7 @@ module air_mg_setup
       PetscErrorCode      :: ierr
       MPIU_Comm            :: MPI_COMM_MATRIX
       PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b
-      logical             :: continue_coarsening, trigger_proc_agglom
+      logical             :: continue_coarsening, trigger_proc_agglom, cf_split_reused
       type(tMat)          :: temp_mat
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
@@ -233,10 +233,11 @@ module air_mg_setup
                auto_truncated = .TRUE.
 
                ! Delete temporary if not reusing
-               if (.NOT. air_data%options%reuse_sparsity) then
+               if (.NOT. air_data%options%reuse_sparsity .OR. &
+                   .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
                   call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-                           air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)                                    
-               end if                  
+                           air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)
+               end if
 
             ! If this isn't good enough, destroy everything we used - no chance for reuse
             else
@@ -254,11 +255,15 @@ module air_mg_setup
 
          ! ~~~~~~~~~~~~
          ! Compute the coarsening
-         ! ~~~~~~~~~~~~     
-         call timer_start(TIMER_ID_AIR_COARSEN)     
-         
+         ! ~~~~~~~~~~~~
+         call timer_start(TIMER_ID_AIR_COARSEN)
+
+         ! Track whether the CF splitting was already present before this setup
+         ! (used below to avoid redundant device IS copies when reusing)
+         cf_split_reused = air_data%allocated_is(our_level)
+
          ! Are we reusing our CF splitting
-         if (.NOT. air_data%allocated_is(our_level) .AND. .NOT. auto_truncated) then
+         if (.NOT. cf_split_reused .AND. .NOT. auto_truncated) then
 
             ! Do the CF splitting
             call compute_cf_splitting(air_data%coarse_matrix(our_level), &
@@ -347,15 +352,19 @@ module air_mg_setup
 
          end if   
          
-         ! ~~~~~~~~~~~~~~  
-         ! Copy over the fine/coarse IS's to the device, we use them 
-         ! in our matrix extract to save h2d copies, and they are also used 
-         ! in the fc smooth
-         ! ~~~~~~~~~~~~~~  
-         call timer_start(TIMER_ID_AIR_IDENTITY)            
-         call create_VecISCopyLocalWrapper(air_data, our_level, &
-               mat_type, air_data%coarse_matrix(our_level))
-         call timer_finish(TIMER_ID_AIR_IDENTITY)            
+         ! ~~~~~~~~~~~~~~
+         ! Copy over the fine/coarse IS's to the device, we use them
+         ! in our matrix extract to save h2d copies, and they are also used
+         ! in the fc smooth.
+         ! Skip when the CF splitting was reused: the device copy already exists
+         ! and the IS indices are unchanged.
+         ! ~~~~~~~~~~~~~~
+         if (.NOT. cf_split_reused) then
+            call timer_start(TIMER_ID_AIR_IDENTITY)
+            call create_VecISCopyLocalWrapper(air_data, our_level, &
+                  mat_type, air_data%coarse_matrix(our_level))
+            call timer_finish(TIMER_ID_AIR_IDENTITY)
+         end if            
 
          ! ~~~~~~~~~~~~~~     
          ! Now let's go and build all our operators
@@ -388,8 +397,10 @@ module air_mg_setup
          if (air_data%allocated_matrices_A_ff(our_level)) then
             call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
 
-            ! If our Aff was previously converted to a matdiagonal, can't call matcreatesubmatrix 
-            ! with MAT_REUSE_MATRIX
+            ! If our Aff was previously converted to a matdiagonal, can't call matcreatesubmatrix
+            ! with MAT_REUSE_MATRIX.  However a diagonal matrix always has the same sparsity
+            ! structure regardless of any changes to the coarse matrix, so this path is safe
+            ! at all reuse_amount levels.
             if (mat_type_aff == MATDIAGONAL) then
 
                ! Easy to get out Aff if we know its diagonal
@@ -402,20 +413,27 @@ module air_mg_setup
                call VecISCopy(diag_vec, air_data%IS_fine_index(our_level), &
                         SCATTER_REVERSE, diag_vec_aff, ierr)
                call MatDiagonalRestoreDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)
-               call VecDestroy(diag_vec, ierr)                             
+               call VecDestroy(diag_vec, ierr)
 
-            ! If its not matdiagonal we can do reuse as normal
-            else
+            ! For non-diagonal Aff, MAT_REUSE_MATRIX is only safe when the coarse matrix
+            ! structure is guaranteed unchanged.  allocated_matrices_A_ff is only TRUE at
+            ! amount=3 (A_ff preserved across setups), so this branch is amount=3 only.
+            else if (air_data%options%reuse_sparsity) then
                call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
                      air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
                      air_data%A_ff(our_level), &
-                     our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)         
+                     our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)
+            else
+               call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
+                     air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                     air_data%A_ff(our_level), &
+                     our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)
             end if
          else
             call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
                   air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_ff(our_level), &
-                  our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)               
+                  our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)
          end if
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -564,7 +582,7 @@ module air_mg_setup
          ! ~~~~~~~~~~~~~~
 
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
-                  air_data%coarse_matrix(our_level_coarse))  
+                  air_data%coarse_matrix(our_level_coarse))
 
          air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.                  
 
@@ -706,9 +724,10 @@ module air_mg_setup
                            MAT_COPY_VALUES, air_data%coarse_matrix(our_level_coarse), ierr)
 
                   ! Delete temporary if not reusing
-                  if (.NOT. air_data%options%reuse_sparsity) then
-                     call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_COARSE_REPARTITIONED), ierr)                
-                  end if                   
+                  if (.NOT. air_data%options%reuse_sparsity .OR. &
+                      .NOT. REUSE_MAT_ACTIVE(MAT_COARSE_REPARTITIONED, air_data%options%reuse_amount)) then
+                     call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_COARSE_REPARTITIONED), ierr)
+                  end if
 
                   ! Create an IS to represent the row indices of the prolongator 
                   ! as we are only repartitioning the coarse matrix not the matrix on this level
@@ -749,9 +768,10 @@ module air_mg_setup
                   end if
 
                   ! Delete temporary if not reusing
-                  if (.NOT. air_data%options%reuse_sparsity) then
-                     call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_P_REPARTITIONED), ierr)                
-                  end if                   
+                  if (.NOT. air_data%options%reuse_sparsity .OR. &
+                      .NOT. REUSE_MAT_ACTIVE(MAT_P_REPARTITIONED, air_data%options%reuse_amount)) then
+                     call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_P_REPARTITIONED), ierr)
+                  end if
                   
                   ! ~~~~~~~~~~~~~~~~~~
                   ! If need to repartition a restrictor
@@ -778,9 +798,10 @@ module air_mg_setup
                               MAT_COPY_VALUES, air_data%restrictors(our_level), ierr)
 
                      ! Delete temporary if not reusing
-                     if (.NOT. air_data%options%reuse_sparsity) then
-                        call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_R_REPARTITIONED), ierr)                   
-                     end if                     
+                     if (.NOT. air_data%options%reuse_sparsity .OR. &
+                         .NOT. REUSE_MAT_ACTIVE(MAT_R_REPARTITIONED, air_data%options%reuse_amount)) then
+                        call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_R_REPARTITIONED), ierr)
+                     end if
                   end if
 
                   ! ~~~~~~~~~~~~~~~~~~
@@ -859,9 +880,10 @@ module air_mg_setup
 
                   call ISDestroy(is_unchanged, ierr)
                   ! Delete temporary if not reusing
-                  if (.NOT. air_data%options%reuse_sparsity) then
-                     call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_REPARTITION), ierr)                 
-                  end if                  
+                  if (.NOT. air_data%options%reuse_sparsity .OR. &
+                      .NOT. REUSE_IS_ACTIVE(IS_REPARTITION, air_data%options%reuse_amount)) then
+                     call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_REPARTITION), ierr)
+                  end if
 
                   call timer_finish(TIMER_ID_AIR_PROC_AGGLOM)
 
@@ -1088,14 +1110,15 @@ module air_mg_setup
                   air_data%inv_A_ff(air_data%no_levels))           
 
             ! Delete temporary if not reusing
-            if (.NOT. air_data%options%reuse_sparsity) then
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
                call destroy_matrix_reuse(air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
-                        air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array)               
-            end if                      
+                        air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array)
+            end if
 
             ! Now we've finished the coarse grid solver, output the time
-            call timer_finish(TIMER_ID_AIR_INVERSE)              
-         end if        
+            call timer_finish(TIMER_ID_AIR_INVERSE)
+         end if
 
          ! Use the mf coarse grid solver or not
          ! Let's store the coarse grid solver in inv_A_ff(no_levels)

@@ -52,10 +52,11 @@ and the Jupyter notebooks:
 | Path | Contents |
 |---|---|
 | [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduce PFLARE |
-| [notebooks/02_pcpflareinv.ipynb](02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
-| [notebooks/03_cf_splitting.ipynb](03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
-| [notebooks/04_pcair.ipynb](04_pcair.ipynb) | Introduction to PCAIR and the AIRG method |
-| [notebooks/05_parallel.ipynb](05_parallel.ipynb) | Discuss PCAIR, parallelism and GPUs |
+| [notebooks/02_pcpflareinv.ipynb](notebooks/02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
+| [notebooks/03_cf_splitting.ipynb](notebooks/03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
+| [notebooks/04_pcair.ipynb](notebooks/04_pcair.ipynb) | Introduction to PCAIR and the AIRG method |
+| [notebooks/05_parallel.ipynb](notebooks/05_parallel.ipynb) | Discuss PCAIR, parallelism and GPUs |
+| [notebooks/06_reuse.ipynb](notebooks/06_reuse.ipynb) | Discuss PCAIR and reuse |
      
 ## More examples
 

@@ -68,6 +68,7 @@ PETSC_EXTERN void PCAIRGetADrop_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetALump_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseSparsity_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
 
 // Setters
@@ -117,6 +118,7 @@ PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size);
 
 // ~~~~~~~~~~~~~
@@ -990,10 +992,27 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
 // Default: false
 // -pc_air_reuse_poly_coeffs
 PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
-{   
+{
    PetscFunctionBegin;
    PCAIRSetReusePolyCoeffs_c(&pc, input_bool);
-   PetscFunctionReturn(PETSC_SUCCESS); 
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+// Controls how much data is stored when reuse_sparsity is enabled (1, 2, or 3).
+// 1 - store only CF splitting and parallel repartitioning
+// 2 - additionally store everything required to reuse sparsity in SpGEMMs
+// 3 - store everything (default, preserves previous behaviour)
+// -pc_air_reuse_amount
+PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PCAIRGetReuseAmount_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PCAIRSetReuseAmount_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
 }
 // This routine sets the polynomial coefficients in the PCAIR object
 // row_size and col_size are the size of the coeffs_ptr array
@@ -1100,7 +1119,12 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PCAIRGetReusePolyCoeffs(pc, &old_flag));
    flg = old_flag;
    PetscCall(PetscOptionsBool("-pc_air_reuse_poly_coeffs", "Reuses gmres polynomial coefficients during setup", "PCAIRSetReusePolyCoeffs", old_flag, &flg, NULL));
-   PetscCall(PCAIRSetReusePolyCoeffs(pc, flg));   
+   PetscCall(PCAIRSetReusePolyCoeffs(pc, flg));
+   // ~~~~
+   PetscCall(PCAIRGetReuseAmount(pc, &old_int));
+   input_int = old_int;
+   PetscCall(PetscOptionsInt("-pc_air_reuse_amount", "Amount of data to reuse during setup with reuse_sparsity (1, 2, or 3 - 3 is store everything)", "PCAIRSetReuseAmount", old_int, &input_int, NULL));
+   PetscCall(PCAIRSetReuseAmount(pc, input_int));
    // ~~~~
    PetscCall(PCAIRGetProcessorAgglomRatio(pc, &old_real));
    input_real = old_real;
@@ -1303,7 +1327,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetALump(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Lumping \n"));
       PetscCall(PCAIRGetReuseSparsity(pc, &flg));
-      if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing sparsity during setup \n"));
+      if (flg)
+      {
+         PetscCall(PCAIRGetReuseAmount(pc, &input_int));
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing sparsity during setup (reuse amount=%" PetscInt_FMT ")\n", input_int));
+      }
       PetscCall(PCAIRGetReusePolyCoeffs(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing gmres polynomial coefficients during setup \n"));
 

@@ -140,6 +140,15 @@ check('reuse_sparsity',  pflare.pcair_get_reuse_sparsity(pc),  True)
 pflare.pcair_set_reuse_sparsity(pc, False)
 check('reuse_sparsity_false', pflare.pcair_get_reuse_sparsity(pc), False)
 
+pflare.pcair_set_reuse_amount(pc, 1)
+check('reuse_amount_1',  pflare.pcair_get_reuse_amount(pc),  1)
+
+pflare.pcair_set_reuse_amount(pc, 2)
+check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
+
+pflare.pcair_set_reuse_amount(pc, 3)
+check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
+
 if errors:
     if rank == 0:
         for e in errors:

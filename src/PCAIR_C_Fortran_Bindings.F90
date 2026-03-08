@@ -1814,7 +1814,43 @@ module pcair_c_fortran_bindings
       call PCAIRSetReusePolyCoeffs(pc, dummy, ierr)
 
    end subroutine PCAIRSetReusePolyCoeffs_c
-   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseAmount_c(pc_ptr, amount) bind(C, name='PCAIRGetReuseAmount_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout)              :: pc_ptr
+      integer(PFLARE_PETSCINT_C_KIND), intent(out)     :: amount
+
+      type(tPC)          :: pc
+      PetscErrorCode     :: ierr
+      PetscInt           :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetReuseAmount(pc, dummy, ierr)
+      amount = dummy
+
+   end subroutine PCAIRGetReuseAmount_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetReuseAmount_c(pc_ptr, amount) bind(C, name='PCAIRSetReuseAmount_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout)                     :: pc_ptr
+      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)      :: amount
+
+      type(tPC)          :: pc
+      PetscErrorCode     :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetReuseAmount(pc, amount, ierr)
+
+   end subroutine PCAIRSetReuseAmount_c
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine PCAIRSetPolyCoeffs_c(pc_ptr, petsc_level, which_inverse, &

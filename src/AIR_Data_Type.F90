@@ -228,15 +228,32 @@ module air_data_type
 
       ! Whether or not to re-use the existing sparsity when PCSetup is called
       ! with SAME_NONZERO_PATTERN
-      ! This involves re-using the CF splitting, the symbolic mat-mat mults, 
+      ! This involves re-using the CF splitting, the symbolic mat-mat mults,
       ! the repartitioning, the structure of the matrices with drop tolerances applied, etc
-      ! This will take more memory but 
-      ! will make the setup much cheaper on subsequent calls. If the matrix has 
+      ! This will take more memory but
+      ! will make the setup much cheaper on subsequent calls. If the matrix has
       ! changed entries convergence may suffer if the matrix is sufficiently different
       ! -pc_air_reuse_sparsity
       logical :: reuse_sparsity = .FALSE.
 
-      ! Whether or not to also re-use the gmres polynomial coefficients when 
+      ! Controls how much data is stored for reuse when reuse_sparsity is enabled.
+      ! Higher values store more data (less recomputation) at the cost of more memory.
+      ! The CF splitting (IS_fine_index/IS_coarse_index) is always kept regardless of
+      ! reuse_amount as it is the foundation on which all other reuse depends.
+      ! 1 - store nothing beyond the CF splitting; all matrices and derived IS are
+      !     rebuilt from scratch each setup; saves only PMISR/DDC CF-splitting cost
+      ! 2 - additionally store IS_REPARTITION + IS_R_Z_FINE_COLS + all matrices needed
+      !     to guarantee stable SpGEMM sparsity (MAT_RAP_DROP, MAT_Z, MAT_W,
+      !     MAT_Z_DROP, MAT_W_DROP, MAT_AP, MAT_RAP, and when strong_r_threshold!=0
+      !     also MAT_A_DROP, MAT_AFF_DROP, MAT_ACF_DROP, MAT_AFC_DROP);
+      !     A_ff/A_fc/A_cf/prolongators/restrictors are rebuilt fresh each setup.
+      !     reuse_grid_transfer and reuse_one_point_classical_prolong are FALSE.
+      !     Saves CF splitting + SpGEMM symbolic cost
+      ! 3 - store everything (default, preserves previous behaviour)
+      ! -pc_air_reuse_amount
+      integer :: reuse_amount = 3
+
+      ! Whether or not to also re-use the gmres polynomial coefficients when
       ! reuse_sparsity is set to true
       ! If the matrix has been changed the reused coefficients won't be correct, 
       ! and the coefficients are very sensitive to changes in the matrix
@@ -337,9 +354,71 @@ module air_data_type
 
    end type air_multigrid_data  
    
-   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~       
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   contains    
+   ! 2D logical arrays controlling which reuse_mat and reuse_is entries are kept
+   ! for each reuse_amount level (1, 2, or 3).  Dimension 1 is the mat/IS index,
+   ! dimension 2 is the reuse_amount value.  Each row below corresponds to one
+   ! MAT_*/IS_* index; the three columns give the active flag for amount=1/2/3.
+   ! reshape order=[2,1] is used so the source data is listed row-by-row.
+   !
+   ! Note: the CF splitting (IS_fine_index / IS_coarse_index, stored directly in
+   ! air_multigrid_data and controlled by allocated_is) is ALWAYS kept whenever
+   ! reuse_sparsity is enabled regardless of reuse_amount.  This is handled in
+   ! reset_air_data: the IS block is gated only on (.NOT. reuse), not on reuse_amount.
+   ! Without the CF splitting there is no basis for any other reuse.
+   !
+   ! Amount 1: CF splitting + IS_REPARTITION
+   !           No reuse_mats are stored.  All matrices are rebuilt
+   !           from scratch each setup.  Saves only the PMISR/DDC CF-splitting cost.
+   !           and the ParMETIS calls for repartitioning in parallel
+   ! Amount 2: CF splitting + IS_REPARTITION + SpGEMM matrices
+   !           (MAT_AP, MAT_RAP) + all matrices needed to guarantee stable SpGEMM
+   !           sparsity (MAT_RAP_DROP, MAT_Z_DROP, MAT_W_DROP).  MAT_RAP_DROP preserves coarse matrix
+   !           structure → A_ff/A_fc/A_cf/A_cc have stable sparsity → Z/W/R/P stable
+   !           → MAT_AP and MAT_RAP sparsity is guaranteed unchanged on reuse.
+   ! Amount 3: everything (preserves previous behaviour)
+   !
+   ! Index order matches the MAT_* parameters in pflare_parameters:
+   logical, parameter :: REUSE_MAT_ACTIVE(22, 3) = reshape( [ &
+      !amt=1    amt=2    amt=3
+      .FALSE., .TRUE.,  .TRUE.,  &  !  1=AP
+      .FALSE., .TRUE.,  .TRUE.,  &  !  2=RAP
+      .FALSE., .TRUE.,  .TRUE.,  &  !  3=RAP_DROP
+      .FALSE., .TRUE.,  .TRUE.,  &  !  4=Z_DROP
+      .FALSE., .TRUE.,  .TRUE.,  &  !  5=W_DROP
+      .FALSE., .FALSE., .TRUE.,  &  !  6=COARSE_REPARTITIONED
+      .FALSE., .FALSE., .TRUE.,  &  !  7=P_REPARTITIONED
+      .FALSE., .FALSE., .TRUE.,  &  !  8=R_REPARTITIONED
+      .FALSE., .TRUE.,  .TRUE.,  &  !  9=AFF_DROP
+      .FALSE., .TRUE.,  .TRUE.,  &  ! 10=ACF_DROP
+      .FALSE., .TRUE.,  .TRUE.,  &  ! 11=AFC_DROP
+      .FALSE., .TRUE.,  .TRUE.,  &  ! 12=A_DROP
+      .FALSE., .TRUE.,  .TRUE.,  &  ! 13=W
+      .FALSE., .TRUE.,  .TRUE.,  &  ! 14=Z
+      .FALSE., .FALSE., .TRUE.,  &  ! 15=INV_AFF
+      .FALSE., .FALSE., .TRUE.,  &  ! 16=INV_AFF_DROPPED
+      .FALSE., .FALSE., .TRUE.,  &  ! 17=INV_ACC
+      .FALSE., .FALSE., .TRUE.,  &  ! 18=SAI_SUB
+      .FALSE., .FALSE., .TRUE.,  &  ! 19=Z_AFF
+      .FALSE., .FALSE., .TRUE.,  &  ! 20=Z_NO_SPARSITY
+      .FALSE., .FALSE., .TRUE.,  &  ! 21=W_AFF
+      .FALSE., .FALSE., .TRUE.   &  ! 22=W_NO_SPARSITY
+   ], [22, 3], order=[2, 1] )
+
+   ! Index order matches the IS_* parameters in pflare_parameters:
+   ! IS_R_Z_FINE_COLS depends on Z's sparsity (see note above), so it is only safe
+   ! to store when Z is also stored and its sparsity is guaranteed unchanged (amount>=2).
+   ! IS_REPARTITION (graph partitioner output) is stored at all amounts.
+   logical, parameter :: REUSE_IS_ACTIVE(2, 3) = reshape( [ &
+      !amt=1    amt=2   amt=3
+      .TRUE.,  .TRUE.,  .TRUE.,  &  ! 1=IS_REPARTITION
+      .FALSE., .TRUE.,  .TRUE.   &  ! 2=IS_R_Z_FINE_COLS
+   ], [2, 3], order=[2, 1] )
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
       
