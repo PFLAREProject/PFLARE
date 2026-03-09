@@ -162,8 +162,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    {
       // PetscSF owns measure_local_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
-      // If you alias it in overlapped GPU work, the failure shows up intermittently
-      // in parallel runs on GPUs.
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
@@ -206,6 +204,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          cf_markers_d(i) = 0;
       }      
    }, counter_in_set_start);
+
+   // This is where the measure scatter would End if async
 
    // Check the total number of undecided in parallel
    PetscInt counter_undecided, counter_parallel;
@@ -255,12 +255,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
-         // If you alias it in overlapped GPU work, the failure shows up intermittently
-         // in parallel runs on GPUs.
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+
       }
 
 
@@ -327,11 +327,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // ~~~~~~~~           
       if (mpi) {
 
-         // Finish the async scatter
-         // Be careful these aren't petscints
-         // End releases the send snapshot for normal access again.
-         // The scattered cf_markers_nonlocal_d values are now safe to read.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         // This is where the cf_markers scatter would End if async
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -392,9 +388,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                // Row
                const PetscInt i = t.league_rank();
 
+               // Reuse the send buffer as a temporary local-update buffer.
+               // Value 2 marks rows assigned in this top loop and already stored
+               // in cf_markers_d as loops_through. Value 1 marks locally discovered
+               // neighbours that must be merged into cf_markers_d after ReduceEnd.
+               cf_markers_send_d(i) = 0;
+
                // Check if this node has been assigned during this top loop
                if (cf_markers_d(i) == loops_through)
                {
+                  cf_markers_send_d(i) = 2;
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                   // For over nonlocal columns
@@ -415,47 +418,74 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
          // Be careful these aren't petscints
          // PetscSF now owns cf_markers_nonlocal_d_ptr as the active send buffer.
-         // The local kernel below only touches cf_markers_d, and that is fine here
-         // because we only care about zero versus nonzero after ReduceEnd.
+         // The local kernel below only touches cf_markers_send_d so the PETSc root
+         // buffer cf_markers_d_ptr remains untouched until ReduceEnd completes.
          PetscCallVoid(PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
             mem_type, cf_markers_nonlocal_d_ptr,
             mem_type, cf_markers_d_ptr,
             MPIU_SUM));
-      }
-
-      // Go and do local
-      Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
-         KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
-
-            // Row
-            const PetscInt i = t.league_rank();
-
-            // Check if this node has been assigned during this top loop
-            if (cf_markers_d(i) == loops_through)
-            {
-               const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-
-               // For over nonlocal columns
-               Kokkos::parallel_for(
-                  Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-
-                     // Needs to be atomic as may being set by many threads
-                     // Tried a version where instead of a "push" approach I tried a pull approach
-                     // that doesn't need an atomic, but it was slower
-                     Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);     
-               });     
-            }
-      });   
-
-      if (mpi) 
-      {
-         // Finish the scatter
-         // Be careful these aren't petscints
-         // After End the accumulated cf_markers_d values are complete.
-         // This is the first point where later logic should consume the reduced
-         // result rather than the in-flight root buffer.
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
+
+         // Go and do local
+         Kokkos::parallel_for(
+            Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
+            KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+
+               // Row
+               const PetscInt i = t.league_rank();
+
+               // Check if this node was assigned during this top loop.
+               // We read the temporary buffer here so we do not race with the
+               // in-flight PetscSF reduction into cf_markers_d.
+               if (cf_markers_send_d(i) == 2)
+               {
+                  const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+
+                  // For over local columns
+                  Kokkos::parallel_for(
+                     Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+
+                        // Needs to be atomic as may be set by many threads.
+                        // Use atomic_max so that assigned-row markers stay at 2.
+                        Kokkos::atomic_max(&cf_markers_send_d(device_local_j[device_local_i[i] + j]), 1);
+                  });
+               }
+         });
+
+         // This is where the cf_markers reduce would End if async
+
+         // Merge the local updates after the PetscSF reduction has completed.
+         Kokkos::parallel_for(
+            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+
+            // Only the locally discovered neighbours are merged here.
+            // Entries left at 2 were already selected into the set earlier.
+            if (cf_markers_send_d(i) == 1 && cf_markers_d(i) == 0) cf_markers_d(i) = 1;
+         });                     
+      }
+      // In serial we can just update cf_markers_d directly without needing the send buffer
+      else
+      {
+         Kokkos::parallel_for(
+            Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
+            KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+
+               // Row
+               const PetscInt i = t.league_rank();
+
+               // In serial there is no in-flight PetscSF reduction, so we can
+               // update cf_markers_d directly as before.
+               if (cf_markers_d(i) == loops_through)
+               {
+                  const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+
+                  Kokkos::parallel_for(
+                     Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
+
+                        Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);
+                  });
+               }
+         });         
       }
 
       // We've done another top level loop
@@ -703,12 +733,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // Be careful these aren't petscints
       // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
-      // If you alias it in overlapped GPU work, the failure shows up intermittently
-      // in parallel runs on GPUs.
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                   mem_type, cf_markers_send_d_ptr,
                   mem_type, cf_markers_nonlocal_d_ptr,
                   MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
    }   
 
    // ~~~~~~~~~~~~~~~
@@ -786,11 +815,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
    if (mpi)
    {           
-      // Finish the scatter of the cf splitting
-      // Be careful these aren't petscints
-      // End releases the send snapshot for normal access again.
-      // The scattered cf_markers_nonlocal_d values are now safe to read.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+      // This is where the cf_markers scatter would End if async
 
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device

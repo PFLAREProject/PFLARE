@@ -2201,6 +2201,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                      mem_type, x_d_ptr,
                      mem_type, lvec_d_ptr,
                      MPI_REPLACE));      
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, x_d_ptr, lvec_d_ptr, MPI_REPLACE));
          
          PetscIntKokkosView lcmap_d("lcmap_d", cols_ao);
          PetscInt *lcmap_d_ptr = NULL;
@@ -2215,18 +2216,16 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Finish the x scatter
          // End releases the send buffer for normal access again.
          // The scattered lvec_d values are now safe to read below.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, x_d_ptr, lvec_d_ptr, MPI_REPLACE));
 
          // Start the cmap scatter
          // We make sure not to launch another broadcast on the same Mvctx (ie SF) until the first one has ended
          // PetscSF owns cmap_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
-         // If you alias it in overlapped GPU work, the failure shows up intermittently
-         // in parallel runs on GPUs.
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_INT,
                      mem_type, cmap_d_ptr,
                      mem_type, lcmap_d_ptr,
                      MPI_REPLACE));
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, cmap_d_ptr, lcmap_d_ptr, MPI_REPLACE));
 
          if (cols_ao > 0) 
          {
@@ -2260,10 +2259,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          is_col_o_d = PetscIntKokkosView("is_col_o_d", col_ao_output);
          garray_output_d = PetscIntKokkosView("garray_output_d", col_ao_output);
 
-         // Finish the cmap scatter
-         // End releases the send buffer for normal access again.
-         // The scattered lcmap_d values are now safe to read below.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, cmap_d_ptr, lcmap_d_ptr, MPI_REPLACE));
+         // This is where the cmap scatter would End if async
 
          // Loop over all the cols in the input matrix
          Kokkos::parallel_for(
