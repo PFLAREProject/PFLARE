@@ -108,8 +108,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
    PetscScalarKokkosView measure_send_d;
-   PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
-   measure_local_d_ptr = local_rows > 0 ? measure_local_d.data() : sf_scalar_dummy_d.data();
+   PetscScalar *measure_nonlocal_d_ptr = NULL;
    PetscScalar *measure_send_d_ptr = NULL;
    PetscScalarKokkosView measure_nonlocal_d;
 
@@ -214,7 +213,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       }      
    }, counter_in_set_start);
 
+   // Finish the broadcast for the nonlocal measure
+   if (mpi)
+   {
+      // End releases the active send buffer for normal access again.
+      // The scattered values in measure_nonlocal_d are now safe to consume.
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_send_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+   }    
+
    // Check the total number of undecided in parallel
+   // Ensure the PetscSFBcastEnd is called before this is started
    PetscInt counter_undecided, counter_parallel;
    if (max_luby_steps < 0) {
       counter_undecided = local_rows - counter_in_set_start;
@@ -229,15 +237,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    }
    else {
       counter_undecided = 1;
-   }   
-
-   // Finish the broadcast for the nonlocal measure
-   if (mpi)
-   {
-      // End releases the active send buffer for normal access again.
-      // The scattered values in measure_nonlocal_d are now safe to consume.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_send_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
-   }   
+   }  
 
    // ~~~~~~~~~~~~
    // Now go through the outer Luby loop
