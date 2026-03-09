@@ -93,6 +93,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Can't use the global directly within the parallel 
    // regions on the device so just take a shallow copy
    intKokkosView cf_markers_d = cf_markers_local_d;    
+   PetscScalarKokkosView sf_scalar_dummy_d("sf_scalar_dummy_d", 1);
+   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
 
    // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
    // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
