@@ -107,13 +107,17 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Host and device memory for the measure
    PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
+   PetscScalarKokkosView measure_send_d;
    PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
    measure_local_d_ptr = local_rows > 0 ? measure_local_d.data() : sf_scalar_dummy_d.data();
+   PetscScalar *measure_send_d_ptr = NULL;
    PetscScalarKokkosView measure_nonlocal_d;
 
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
       measure_nonlocal_d_ptr = cols_ao > 0 ? measure_nonlocal_d.data() : sf_scalar_dummy_d.data();
+      measure_send_d = PetscScalarKokkosView("measure_send_d", local_rows);
+      measure_send_d_ptr = local_rows > 0 ? measure_send_d.data() : sf_scalar_dummy_d.data();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
       cf_markers_send_d = intKokkosView("cf_markers_send_d", local_rows);
@@ -160,12 +164,16 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
    if (mpi)
    {
-      // PetscSF owns measure_local_d_ptr as the active send buffer until End.
+      // Copy the measure into a temporary send buffer.
+      // If we gave the comms routine measure_local_d directly we couldn't even read
+      // from it until comms ended, meaning we couldn't do the local work below.
+      Kokkos::deep_copy(measure_send_d, measure_local_d);
+      // PetscSF owns measure_send_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
       // If you alias it in overlapped GPU work, the failure shows up intermittently
       // in parallel runs on GPUs.
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
-                                 mem_type, measure_local_d_ptr,
+                                 mem_type, measure_send_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
                                  MPI_REPLACE));      
    }
@@ -228,7 +236,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    {
       // End releases the active send buffer for normal access again.
       // The scattered values in measure_nonlocal_d are now safe to consume.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_send_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
    }   
 
    // ~~~~~~~~~~~~
@@ -701,7 +709,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // it until comms ended, meaning we couldn't do the work overlapping below      
       Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
       cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
-      exec.fence();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
 
