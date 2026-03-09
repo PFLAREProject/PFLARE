@@ -2181,12 +2181,16 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                cmap_d(is_col_d_d(i)) = i + isstart; /* global index of iscol[i] */
          });
 
+         // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
+         // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
+         // so that every pointer passed to PetscSF is always backed by valid device memory.
+         PetscIntKokkosView sf_petscint_dummy_d("sf_petscint_dummy_d", 1);
          PetscInt *x_d_ptr = NULL;
-         x_d_ptr = x_d.data();      
+         x_d_ptr = local_cols > 0 ? x_d.data() : sf_petscint_dummy_d.data();      
          PetscInt *cmap_d_ptr = NULL;
-         cmap_d_ptr = cmap_d.data();
+         cmap_d_ptr = local_cols > 0 ? cmap_d.data() : sf_petscint_dummy_d.data();
          PetscInt *lvec_d_ptr = NULL;
-         lvec_d_ptr = lvec_d.data();
+         lvec_d_ptr = cols_ao > 0 ? lvec_d.data() : sf_petscint_dummy_d.data();
          // Fence to ensure the parallel for above finishes before we call comms 
          exec.fence();       
 
@@ -2200,7 +2204,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          
          PetscIntKokkosView lcmap_d("lcmap_d", cols_ao);
          PetscInt *lcmap_d_ptr = NULL;
-         lcmap_d_ptr = lcmap_d.data();
+         lcmap_d_ptr = cols_ao > 0 ? lcmap_d.data() : sf_petscint_dummy_d.data();
          // Let's count how many off-local columns we have
          PetscInt col_ao_output = 0;
 
