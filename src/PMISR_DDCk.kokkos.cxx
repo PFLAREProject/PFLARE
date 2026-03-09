@@ -91,22 +91,27 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // regions on the device so just take a shallow copy
    intKokkosView cf_markers_d = cf_markers_local_d;    
 
+   // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
+   // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
+   // so that every pointer passed to PetscSF is always backed by valid device memory.
+   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
+   PetscScalarKokkosView sf_scalar_dummy_d("sf_scalar_dummy_d", 1);
    intKokkosView cf_markers_nonlocal_d;
    int *cf_markers_d_ptr = NULL, *cf_markers_nonlocal_d_ptr = NULL;
-   cf_markers_d_ptr = cf_markers_d.data();
+   cf_markers_d_ptr = local_rows > 0 ? cf_markers_d.data() : sf_int_dummy_d.data();
 
    // Host and device memory for the measure
    PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
    PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
-   measure_local_d_ptr = measure_local_d.data();
+   measure_local_d_ptr = local_rows > 0 ? measure_local_d.data() : sf_scalar_dummy_d.data();
    PetscScalarKokkosView measure_nonlocal_d;
 
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
-      measure_nonlocal_d_ptr = measure_nonlocal_d.data();
+      measure_nonlocal_d_ptr = cols_ao > 0 ? measure_nonlocal_d.data() : sf_scalar_dummy_d.data();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
-      cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();
+      cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
    }
 
    // Device memory for the mark
@@ -650,7 +655,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
-   int *cf_markers_d_ptr = cf_markers_d.data();
+   // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
+   // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
+   // so that every pointer passed to PetscSF is always backed by valid device memory.
+   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
+   int *cf_markers_d_ptr = local_rows > 0 ? cf_markers_d.data() : sf_int_dummy_d.data();
    int *cf_markers_nonlocal_d_ptr = NULL;
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
    PetscMemType mtype;
@@ -659,7 +668,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    if (mpi)
    {
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
-      cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();   
+      cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();   
 
       // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
       // one of the kokkos backends like PETSC_MEMTYPE_HIP
