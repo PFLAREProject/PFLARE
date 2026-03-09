@@ -118,4 +118,22 @@ namespace Kokkos {
     };
 }
 
+// ~~~~~~~~~~~~~~~~~~
+// RAII logger for Kokkos routines - prints MPI rank and routine name to stderr on enter/exit
+// ~~~~~~~~~~~~~~~~~~
+struct PflareKokkosLogger {
+    int rank;
+    const char* name;
+    PflareKokkosLogger(const char* routine_name) : name(routine_name) {
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        fprintf(stderr, "[RANK %d] ENTER: %s\n", rank, name);
+        fflush(stderr);
+    }
+    ~PflareKokkosLogger() {
+        fprintf(stderr, "[RANK %d] EXIT: %s\n", rank, name);
+        fflush(stderr);
+    }
+};
+#define PFLARE_LOG_ROUTINE(rname) PflareKokkosLogger _pflare_kokkos_logger(rname)
+
 #endif
