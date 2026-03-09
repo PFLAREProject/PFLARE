@@ -91,22 +91,33 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // regions on the device so just take a shallow copy
    intKokkosView cf_markers_d = cf_markers_local_d;    
 
+   // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
+   // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
+   // so that every pointer passed to PetscSF is always backed by valid device memory.
+   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
+   PetscScalarKokkosView sf_scalar_dummy_d("sf_scalar_dummy_d", 1);
+
    intKokkosView cf_markers_nonlocal_d;
    int *cf_markers_d_ptr = NULL, *cf_markers_nonlocal_d_ptr = NULL;
-   cf_markers_d_ptr = cf_markers_d.data();
+   cf_markers_d_ptr = local_rows > 0 ? cf_markers_d.data() : sf_int_dummy_d.data();
+
+   intKokkosView cf_markers_send_d;
+   int *cf_markers_send_d_ptr = NULL;  
 
    // Host and device memory for the measure
    PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
    PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
    PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
-   measure_local_d_ptr = measure_local_d.data();
+   measure_local_d_ptr = local_rows > 0 ? measure_local_d.data() : sf_scalar_dummy_d.data();
    PetscScalarKokkosView measure_nonlocal_d;
 
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
-      measure_nonlocal_d_ptr = measure_nonlocal_d.data();
+      measure_nonlocal_d_ptr = cols_ao > 0 ? measure_nonlocal_d.data() : sf_scalar_dummy_d.data();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
-      cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();
+      cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
+      cf_markers_send_d = intKokkosView("cf_markers_send_d", local_rows);
+      cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();       
    }
 
    // Device memory for the mark
@@ -149,7 +160,10 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
    if (mpi)
    {
-      // Have to make sure we don't modify measure_local_d while the comms is in progress
+      // PetscSF owns measure_local_d_ptr as the active send buffer until End.
+      // Do not even read from that send buffer before End is called.
+      // If you alias it in overlapped GPU work, the failure shows up intermittently
+      // in parallel runs on GPUs.
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
@@ -212,6 +226,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Finish the broadcast for the nonlocal measure
    if (mpi)
    {
+      // End releases the active send buffer for normal access again.
+      // The scattered values in measure_nonlocal_d are now safe to consume.
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
    }   
 
@@ -239,13 +255,21 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Start the async scatter of the nonlocal cf_markers
       // ~~~~~~~~~
       if (mpi) {
-         // We can't overwrite any of the values in cf_markers_d while the forward scatter is still going
+         // Copy cf_markers_d into a temporary buffer
+         // If we gave the comms routine cf_markers_d we couldn't even read from 
+         // it until comms ended, meaning we couldn't do the work overlapping below
+         Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
+         // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
+         // Do not even read from that send buffer before End is called.
+         // If you alias it in overlapped GPU work, the failure shows up intermittently
+         // in parallel runs on GPUs.
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-                     mem_type, cf_markers_d_ptr,
+                     mem_type, cf_markers_send_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
       }
+
 
       // mark_d keeps track of which of the candidate nodes can become in the set
       // Only need this because we want to do async comms so we need a way to trigger
@@ -312,7 +336,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
          // Finish the async scatter
          // Be careful these aren't petscints
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         // End releases the send snapshot for normal access again.
+         // The scattered cf_markers_nonlocal_d values are now safe to read.
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -395,6 +421,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Calling a reverse scatter add will then update the values of cf_markers_local
          // Reduce with a sum, equivalent to VecScatterBegin with ADD_VALUES, SCATTER_REVERSE
          // Be careful these aren't petscints
+         // PetscSF now owns cf_markers_nonlocal_d_ptr as the active send buffer.
+         // The local kernel below only touches cf_markers_d, and that is fine here
+         // because we only care about zero versus nonzero after ReduceEnd.
          PetscCallVoid(PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
             mem_type, cf_markers_nonlocal_d_ptr,
             mem_type, cf_markers_d_ptr,
@@ -430,6 +459,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       {
          // Finish the scatter
          // Be careful these aren't petscints
+         // After End the accumulated cf_markers_d values are complete.
+         // This is the first point where later logic should consume the reduced
+         // result rather than the in-flight root buffer.
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
       }
 
@@ -448,7 +480,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
          // Parallel reduction!
          PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
-         counter_undecided = counter_parallel;            
+         counter_undecided = counter_parallel;
+      } else {
+         // If we're doing a fixed number of steps, then we need an extra fence
+         // as we don't hit the parallel reduce above (which implicitly fences)
+         exec.fence();
       }
 
    }
@@ -630,7 +666,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
+   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
    intKokkosView cf_markers_nonlocal_d;
+   intKokkosView cf_markers_send_d;
    auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~
@@ -646,22 +684,36 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
-   int *cf_markers_d_ptr = cf_markers_d.data();
+   // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
+   // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
+   // so that every pointer passed to PetscSF is always backed by valid device memory.
    int *cf_markers_nonlocal_d_ptr = NULL;
+   int *cf_markers_send_d_ptr = NULL;
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
    PetscMemType mtype;
 
    // The off-diagonal component requires some comms which we can start now
    if (mpi)
    {
+      cf_markers_send_d = intKokkosView("cf_markers_send_d", local_rows);
+      // Copy cf_markers_d into a temporary buffer
+      // If we gave the comms routine cf_markers_d we couldn't even read from 
+      // it until comms ended, meaning we couldn't do the work overlapping below      
+      Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
+      cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
+      exec.fence();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
-      cf_markers_nonlocal_d_ptr = cf_markers_nonlocal_d.data();   
+      cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
 
       // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
       // one of the kokkos backends like PETSC_MEMTYPE_HIP
       // Be careful these aren't petscints
+      // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
+      // Do not even read from that send buffer before End is called.
+      // If you alias it in overlapped GPU work, the failure shows up intermittently
+      // in parallel runs on GPUs.
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-                  mem_type, cf_markers_d_ptr,
+                  mem_type, cf_markers_send_d_ptr,
                   mem_type, cf_markers_nonlocal_d_ptr,
                   MPI_REPLACE));
    }   
@@ -743,7 +795,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    {           
       // Finish the scatter of the cf splitting
       // Be careful these aren't petscints
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+      // End releases the send snapshot for normal access again.
+      // The scattered cf_markers_nonlocal_d values are now safe to read.
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
 
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device
