@@ -167,7 +167,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
-                                 MPI_REPLACE));      
+                                 MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
    }
 
    // Initialise the set
@@ -221,15 +222,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    }
    else {
       counter_undecided = 1;
-   }   
-
-   // Finish the broadcast for the nonlocal measure
-   if (mpi)
-   {
-      // End releases the active send buffer for normal access again.
-      // The scattered values in measure_nonlocal_d are now safe to consume.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
-   }   
+   } 
 
    // ~~~~~~~~~~~~
    // Now go through the outer Luby loop
