@@ -602,9 +602,10 @@ jobs:
           make python
           make -j3 tests
 
-  # Builds PFLARE with spack when the main branch is updated
-  # Does this by sending a dispatch event to the PFLARE_spack repository
-  notify_spack:
+  # Triggers external repos to build which depend on 
+  # PFLARE when the main branch is updated
+  # Does this by sending a dispatch event
+  notify_external_builds:
     runs-on: ubuntu-22.04
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -613,4 +614,11 @@ jobs:
         with:
           token: ${{ secrets.PFLARE_SPACK_TOKEN }}
           repository: PFLAREProject/PFLARE_spack
+          event-type: pflare-main-updated
+
+      - name: Trigger box_2D_gen_unstruc_mesh repository_dispatch
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.BOX_MESH_DISPATCH_TOKEN }}
+          repository: stevendargaville/box_2D_gen_unstruc_mesh
           event-type: pflare-main-updated
