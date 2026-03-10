@@ -273,12 +273,14 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,int final_smooths, AppCtx *options, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length, double width, double height, 
+   int final_smooths, PetscBool integrity_check, PetscBool print_stats, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
 
   // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE, PETSC_TRUE);
+  *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
+                           final_smooths, integrity_check, print_stats);
 
   PetscCall(DMSetFromOptions(*dm));
   // Give the DM access to the application context (which includes diffusion coefficient and advection velocity)
@@ -508,17 +510,30 @@ int main(int argc, char **argv)
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
-    double target_len = 0.0025;
-    PetscBool set;
-    PetscCall(PetscOptionsGetReal(NULL, NULL, "-target_edge_length", &target_len, &set));
+  double target_len = 0.0025;
+  PetscBool set;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-target_edge_length", &target_len, &set));
 
-    PetscInt final_smooth_its = 4;
-    PetscCall(PetscOptionsGetInt(NULL, NULL, "-final_smooth_its", &final_smooth_its, &set));  
-    int final_smooths = final_smooth_its;
+  PetscInt final_smooth_its = 4;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-final_smooth_its", &final_smooth_its, &set));  
+  int final_smooths = final_smooth_its;
+
+  double domain_width = 1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_width", &domain_width, &set));
+   
+  double domain_height = 1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_height", &domain_height, &set));
+  
+  PetscBool integrity_check = PETSC_TRUE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-integrity_check", &integrity_check, NULL));    
+
+  PetscBool print_stats = PETSC_TRUE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));   
 
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, final_smooths, &options, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, domain_width, domain_height, 
+                     final_smooths, integrity_check, print_stats, &options, &dm));
   PetscCall(SNESSetDM(snes, dm));
   PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &options));
   // *** Set up the auxiliary vector for SUPG stabilization ***

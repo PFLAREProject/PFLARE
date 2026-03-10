@@ -219,23 +219,25 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
 }
 
 /* -----------------------------------------------------------------------
-   Mesh creation — identical to the SUPG code
+   Mesh creation
    ----------------------------------------------------------------------- */
 static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,
+                                 double width, double height,
+                                 PetscBool integrity_check, PetscBool print_stats,
                                  int final_smooths, AppCtx *opt, DM *dm)
 {
   PetscFunctionBeginUser;
   // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, final_smooths, PETSC_TRUE, PETSC_TRUE);
+  *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
+                           final_smooths, integrity_check, print_stats);
 
-  /* DG requires a 1-cell overlap so that each rank sees the neighbour cells
-     across partition boundaries.  Set this as a default; the user can still
-     override with -dm_distribute_overlap <n> on the command line.         */
-  {
-    PetscBool overlap_set;
-    PetscCall(PetscOptionsHasName(NULL, NULL, "-dm_distribute_overlap", &overlap_set));
-    if (!overlap_set)
-      PetscCall(PetscOptionsSetValue(NULL, "-dm_distribute_overlap", "1"));
+  // Explicitly add 1-cell ghost layer needed for DG cross-rank flux assembly.
+  DM dmOverlap = NULL;
+  PetscInt field = 1;
+  PetscCall(DMPlexDistributeOverlap(*dm, field, NULL, &dmOverlap));
+  if (dmOverlap) {
+    PetscCall(DMDestroy(dm));
+    *dm = dmOverlap;
   }
   // This sets the adjacency so that only elements that share faces are neighbours
   // rather than elements that share vertices - ie tells the DM 
@@ -1694,9 +1696,23 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-target_edge_length", &target_len, &set));
   PetscInt final_smooth_its = 4;
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-final_smooth_its", &final_smooth_its, &set));  
+  int final_smooths = final_smooth_its;
+
+  double domain_width = 1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_width", &domain_width, &set));
+   
+  double domain_height = 1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_height", &domain_height, &set));
+  
+  PetscBool integrity_check = PETSC_TRUE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-integrity_check", &integrity_check, NULL));    
+
+  PetscBool print_stats = PETSC_TRUE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));  
 
   PetscCall(PetscLogStagePush(setup_stage));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, final_smooth_its, &ctx, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, domain_width, domain_height, 
+                     final_smooths, integrity_check, print_stats, &ctx, &dm));
 
   PetscCall(DMGetDimension(dm, &dim));
 
