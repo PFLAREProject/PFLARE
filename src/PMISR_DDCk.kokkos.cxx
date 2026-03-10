@@ -110,7 +110,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    measure_local_d_ptr = local_rows > 0 ? measure_local_d.data() : sf_scalar_dummy_d.data();
    PetscScalarKokkosView measure_nonlocal_d;
    PetscScalarKokkosView measure_local_send_d;
-   PetscScalar *measure_local_send_d_ptr = NULL;
 
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);   
@@ -164,7 +163,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // PetscSF owns measure_local_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
-                     mem_type, measure_local_send_d_ptr,
+                                 mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
                                  MPI_REPLACE));
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
@@ -248,8 +247,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // ~~~~~~~~~
       // Start the async scatter of the nonlocal cf_markers
       // ~~~~~~~~~
-      intKokkosView cf_markers_send_d;
-      int *cf_markers_send_d_ptr = NULL;
       if (mpi) {
          // Copy cf_markers_d into a temporary buffer
          // If we gave the comms routine cf_markers_d we couldn't even read from 
