@@ -91,6 +91,7 @@ typedef struct {
   PetscBool diag_scale;
   PetscBool second_solve;
   PetscBool write_vtk;
+  PetscBool verify_solution;
 } AppCtx;
 
 /* -----------------------------------------------------------------------
@@ -179,6 +180,13 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
   if (fv) opt->advection_velocity[1] = vv;
   if (fw) opt->advection_velocity[2] = wv;
   if (fu || fv || fw) opt->unit_velocity = PETSC_FALSE;
+
+  opt->verify_solution = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-verify_solution", &opt->verify_solution, NULL));
+  if (opt->verify_solution) {
+    opt->bottom_only_inflow_one = PETSC_TRUE;
+    opt->unit_velocity          = PETSC_FALSE;
+  }
 
   PetscOptionsEnd();
   PetscFunctionReturn(PETSC_SUCCESS);
@@ -1471,6 +1479,16 @@ int main(int argc, char **argv)
   PetscCall(CreateMesh(PETSC_COMM_WORLD, &ctx, &dm));
 
   PetscCall(DMGetDimension(dm, &dim));
+
+  /* To verify the solution set the bottom inlet condition as 1
+     and then have the velocity either as [0, 1] in 2D or [0, 0, 1] in 3D
+     so the solution should be 1 everywhere */
+  if (ctx.verify_solution) {
+    ctx.advection_velocity[0] = 0.0;
+    ctx.advection_velocity[1] = (dim == 2) ? 1.0 : 0.0;
+    ctx.advection_velocity[2] = (dim == 3) ? 1.0 : 0.0;
+  }
+
   PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
   PetscCall(DMPlexGetCellType(dm, cStart, &ct));
   simplex = (DMPolytopeTypeGetNumVertices(ct) == DMPolytopeTypeGetDim(ct) + 1)
@@ -1693,6 +1711,19 @@ int main(int argc, char **argv)
   /* ---- View solution ---- */
   if (ctx.write_vtk) {
     PetscCall(WriteDGFieldVTU(dm, fe, sec, x, "dg_solution"));
+  }
+
+  /* ---- Verify solution is 1 everywhere ---- */
+  if (ctx.verify_solution) {
+    Vec       x_ones;
+    PetscReal err_norm;
+    PetscCall(VecDuplicate(x, &x_ones));
+    PetscCall(VecSet(x_ones, 1.0));
+    PetscCall(VecAXPY(x_ones, -1.0, x));
+    PetscCall(VecNorm(x_ones, NORM_INFINITY, &err_norm));
+    PetscCall(VecDestroy(&x_ones));
+    PetscCheck(err_norm < 1e-10, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+               "Solution verification FAILED: max|u - 1| = %g > 1e-10", (double)err_norm);
   }
 
   /* ---- Cleanup ---- */
