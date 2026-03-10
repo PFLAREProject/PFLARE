@@ -96,12 +96,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscScalarKokkosView sf_scalar_dummy_d("sf_scalar_dummy_d", 1);
    intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
 
-   // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
-   // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
-   // so that every pointer passed to PetscSF is always backed by valid device memory.
-   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
-   PetscScalarKokkosView sf_scalar_dummy_d("sf_scalar_dummy_d", 1);
-
    intKokkosView cf_markers_nonlocal_d;
    int *cf_markers_d_ptr = NULL, *cf_markers_nonlocal_d_ptr = NULL;
    cf_markers_d_ptr = local_rows > 0 ? cf_markers_d.data() : sf_int_dummy_d.data();
