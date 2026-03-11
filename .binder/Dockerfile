@@ -41,9 +41,10 @@ ENV LD_LIBRARY_PATH=${PETSC_DIR}/${PETSC_ARCH}/lib:/build/PFLARE/lib
 ENV PETSC_OPTIONS=-on_error_abort
 
 # ---------------------------------------------------------------
-# Copy notebooks and hand ownership to the Binder user
+# Copy notebooks and tools, and hand ownership to the Binder user
 # ---------------------------------------------------------------
 COPY notebooks/ ${HOME}/notebooks/
+COPY tools/ ${HOME}/tools/
 RUN chown -R ${NB_UID}:${NB_UID} ${HOME}
 
 USER ${NB_USER}
