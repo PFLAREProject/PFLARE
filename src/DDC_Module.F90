@@ -2,11 +2,12 @@ module ddc_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug
+   use petsc_helper, only: kokkos_debug, remove_small_from_sparse
    use c_petsc_interfaces, only: copy_cf_markers_d2h, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, &
          allreducesum_petscint_mine, boolscatter_mat_begin_c, boolscatter_mat_end_c, &
          boolscatter_mat_reverse_begin_c, boolscatter_mat_reverse_end_c, ddc_kokkos
+   use pmisr_module, only: pmisr_existing_measure_cf_markers
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
@@ -125,24 +126,42 @@ module ddc_module
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
 
       ! Local
-      PetscInt :: local_rows, local_cols, one=1
+      PetscInt :: local_rows, local_cols, one=1, global_rows, global_cols
       PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
-      PetscInt :: input_row_start, input_row_end_plus_one
-      PetscInt :: jfree, idx, search_size, diag_index, fine_size, frac_size
-      integer :: bin_sum, bin_boundary, bin, errorcode
+      PetscInt :: input_row_start, input_row_end_plus_one, cols_ao, rows_ao
+      PetscInt :: jfree, idx, search_size, diag_index, fine_size, frac_size, n_ad, n_ao
+      integer :: bin_sum, bin_boundary, bin, errorcode, seed_size, comm_size, comm_rank
+      integer :: max_luby_steps
+      integer, dimension(:), allocatable :: seed
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
       PetscReal, dimension(:), pointer :: vals => null()
-      PetscReal, dimension(:), allocatable :: diag_dom_ratio
+      PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_measure
+      integer, dimension(:), allocatable :: cf_markers_local_aff
       PetscInt, dimension(:), pointer :: is_pointer
-      type(tMat) :: Aff
+      type(tMat) :: Aff, Aff_transpose, temp_mat
       PetscReal :: diag_val, max_dd_ratio_local, max_dd_ratio_achieved
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
       MPIU_Comm :: MPI_COMM_MATRIX      
-      logical :: trigger_dd_ratio_compute
+      logical :: trigger_dd_ratio_compute, non_zero_neighbour
+      type(tMat) :: Ad, Ao
+      type(tVec) :: measure_vec
+      PetscInt, dimension(:), pointer :: colmap
+      integer(c_long_long) :: A_array, vec_long
+      PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja     
+      type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr
+      real(c_double), pointer :: measure_nonlocal(:) => null() 
+      PetscInt :: shift = 0
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
 
       ! ~~~~~~  
+
+      ! Get the comm size 
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      ! Get the comm rank 
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)       
 
       ! The indices are the numbering in Aff matrix
       call ISGetIndices(is_fine, is_pointer, ierr)  
@@ -183,6 +202,7 @@ module ddc_module
             
       ! Get the local sizes
       call MatGetLocalSize(Aff, local_rows, local_cols, ierr)
+      call MatGetSize(Aff, global_rows, global_cols, ierr)
       call MatGetOwnershipRange(Aff, a_global_row_start, a_global_row_end_plus_one, ierr)
       call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
 
@@ -232,9 +252,12 @@ module ddc_module
 
       ! Get the maximum diagonal dominance ratio
       if (trigger_dd_ratio_compute) then
-         max_dd_ratio_local = maxval(diag_dom_ratio)
+         if (local_rows == 0) then
+            max_dd_ratio_local = 0
+         else
+            max_dd_ratio_local = maxval(diag_dom_ratio)
+         end if
          call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX, errorcode)
-         ! print *, "computed diag dom ratio", max_dd_ratio_achieved
          ! If we have hit the required diagonal dominance ratio, then return without swapping any F points
          if (max_dd_ratio_achieved < max_dd_ratio) then
             max_dd_ratio = max_dd_ratio_achieved
@@ -242,6 +265,179 @@ module ddc_module
             call MatDestroy(Aff, ierr)     
             return
          end if
+
+         ! If we haven't hit the required diagonal dominance ratio, 
+         ! then we need to swap some F points to C points, and we will do that with a 
+         ! PMIS style algorithm
+         allocate(diag_dom_ratio_measure(local_rows))
+
+         ! Let's fill diag_dom_ratio_measure with random numbers
+         call random_seed(size=seed_size)
+         allocate(seed(seed_size))
+         do ifree = 1, seed_size
+            seed(ifree) = comm_rank + 1 + ifree
+         end do   
+         call random_seed(put=seed) 
+         ! Fill the measure with random numbers
+         call random_number(diag_dom_ratio_measure)
+         deallocate(seed)
+
+         ! Now we take the existing random number and scale it down
+         ! to break ties but not change the diagonal dominance very much
+         ! PMISR sets the smallest measure as F points (which is what 
+         ! we're going to use to denote points that need to swap in the loop below)
+         ! Hence the least diagonally dominant are the smallest
+         ! We have to ensure
+         ! abs(measure) .ge. 1 otherwise it will trigger the zero measure on points
+         ! that aren't explicitly assigned to 0 below that we don't want to touch
+         diag_dom_ratio_measure = max(10d0, max_dd_ratio_achieved*2d0) - (diag_dom_ratio - diag_dom_ratio_measure/1d10)
+
+         ! And then any points with diagonal dominance ratio already below
+         ! the minimum, we set the measure to 0
+         do ifree = 1, local_rows
+            if (diag_dom_ratio(ifree) < max_dd_ratio) then
+               diag_dom_ratio_measure(ifree) = 0d0
+            end if
+         end do
+
+         ! Keep everything but drop the diagonal
+         ! @@@ SHOULD JUST BE CALL SABS
+         call remove_small_from_sparse(Aff, 0d0, Aff_transpose, &
+                  relative_max_row_tol_int = -1, lump=.FALSE., drop_diagonal_int=-1)
+
+         ! Form Aff + Aff^T - this will be our strength matrix
+         call MatTranspose(Aff_transpose, MAT_INITIAL_MATRIX, temp_mat, ierr)
+         call MatAXPY(Aff_transpose, 1d0, temp_mat, DIFFERENT_NONZERO_PATTERN, ierr)      
+         call MatDestroy(temp_mat, ierr)   
+
+         ! If we have single isolated points that are the only one in a neighbour
+         ! that have diagonal dominance larger than the ratio, then they can be swapped directly
+         ! The Luby wouldn't pick those up as they would have no neighbours with non-zero measure
+         ! which are already set as C points by the first loop in the Luby
+         if (comm_size /= 1) then
+            call MatMPIAIJGetSeqAIJ(Aff_transpose, Ad, Ao, colmap, ierr) 
+            ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
+            call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
+         else
+            Ad = Aff_transpose    
+         end if
+
+         ! ~~~~~~~~
+         ! Get pointers to the sequential diagonal and off diagonal aij structures 
+         ! ~~~~~~~~
+         call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+         if (.NOT. done) then
+            print *, "Pointers not set in call to MatGetRowIJ"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         if (comm_size /= 1) then
+            call MatGetRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+            if (.NOT. done) then
+               print *, "Pointers not set in call to MatGetRowIJ"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+         end if     
+         
+         ! ~~~~~~~~~~~~
+         ! Create parallel vec and scatter the measure
+         ! ~~~~~~~~~~~~
+         if (comm_size/=1) then
+
+            ! This is fine being mpi type specifically as strength_mat is always a mataij
+            call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, &
+               local_rows, global_rows, diag_dom_ratio_measure, measure_vec, ierr)
+
+            A_array = Aff_transpose%v
+            vec_long = measure_vec%v
+            ! We're just going to use the existing lvec to scatter the measure
+            ! Have to call restore after we're done with lvec (ie measure_nonlocal_ptr)
+            call vecscatter_mat_begin_c(A_array, vec_long, measure_nonlocal_ptr)
+            call vecscatter_mat_end_c(A_array, vec_long, measure_nonlocal_ptr)
+            ! This is the lvec so we have to make sure we don't do a matvec anywhere 
+            ! before calling restore
+            call c_f_pointer(measure_nonlocal_ptr, measure_nonlocal, shape=[cols_ao])
+         end if   
+         
+         allocate(cf_markers_local_aff(local_rows))
+         cf_markers_local_aff = 0            
+
+         ! ~~~~~~~~~~~~
+         ! Now we can check for any F points with diagonal dominance > max with neighbours
+         ! all < max
+         ! They can be turned into C points directly - ie we feed them into 
+         ! the Luby as F points (ie already assigned)
+         ! This could JUST BE A MATVEC + MATVEC OF TRANSPOSE
+         ! AS WE ONLY NEED TO CHECK THE RESULT - DON'T ACTUALLY HAVE TO ASSEMBLE AFF + AFF^T HERE
+         ! ~~~~~~~~~~~~         
+         do ifree = 1, local_rows     
+
+            ! Cycle if ifree is < max
+            if (diag_dom_ratio_measure(ifree) == 0d0) cycle
+         
+            ! Do local component
+            non_zero_neighbour = .FALSE.
+            ! Check all local neighbours to see if we've got a neighbour > max
+            do jfree = ad_ia(ifree)+1, ad_ia(ifree+1)
+               if (diag_dom_ratio_measure(ad_ja(jfree) + 1) /= 0d0) then
+                  non_zero_neighbour = .TRUE.
+                  exit
+               end if
+            end do
+
+            ! Do non local component
+            if (comm_size /= 1) then
+               ! Check all non-local neighbours to see if we've got a neighbour > max
+               do jfree = ao_ia(ifree)+1, ao_ia(ifree+1)
+                  if (measure_nonlocal(ao_ja(jfree) + 1) /= 0d0) then
+                     non_zero_neighbour = .TRUE.
+                     exit
+                  end if
+               end do
+            end if
+
+            ! If all our neighbours are < max and we are > max
+            ! We can instantly assign this as a needing swap
+            if (.NOT. non_zero_neighbour) cf_markers_local_aff(ifree) = F_POINT
+         end do    
+
+         ! Call PMISR, using the diagonal dominance of Aff as the measure
+         ! and the strength as Aff + Aff^T
+         ! Now we explicitly set zero_measure_c_point as true
+         ! So any points with zero measure will be returned as C points, and hence
+         ! the F points are the largest diagonal dominant rows that need to be swapped
+
+         max_luby_steps = -1
+         call pmisr_existing_measure_cf_markers(Aff_transpose, max_luby_steps, .FALSE., &
+                  diag_dom_ratio_measure, cf_markers_local_aff, &
+                  zero_measure_c_point = .TRUE.)
+
+         ! Let's go and swap the badly diagonally dominant rows to F points
+         do ifree = 1, local_rows
+
+            if (cf_markers_local_aff(ifree) == F_POINT) then
+               ! This is the actual numbering in A, rather than Aff
+               ! Careful here to minus away the row_start of A, not Aff, as cf_markers_local is as big as A
+               idx = is_pointer(ifree) - input_row_start + 1
+
+               ! Swap by multiplying by -1
+               cf_markers_local(idx) = cf_markers_local(idx) * (-1)
+            end if
+         end do               
+         
+         ! Restore the sequantial pointers once we're done
+         call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+         if (comm_size /= 1) then
+            call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         end if            
+         deallocate(cf_markers_local_aff, diag_dom_ratio_measure)
+         call MatDestroy(Aff_transpose, ierr)
+         if (comm_size/=1) then
+            call VecDestroy(measure_vec, ierr)    
+            ! Don't forget to restore on lvec from our matrix
+            call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)             
+         end if
+
+         return
       end if  
       
       ! ~~~~~~~~~~~~~

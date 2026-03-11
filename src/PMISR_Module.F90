@@ -141,29 +141,20 @@ module pmisr_module
       ! Local
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one, ifree, ncols
-      PetscInt :: jfree
       PetscInt :: rows_ao, cols_ao, n_ad, n_ao
-      PetscInt :: counter_undecided, counter_in_set_start, counter_parallel
-      integer :: comm_size, comm_size_world, loops_through, seed_size
+      integer :: comm_size, seed_size
       integer :: comm_rank, errorcode       
       integer :: kfree
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable :: measure_local
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable :: in_set_this_loop
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
-      type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
-      real(c_double), pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
-      type(tVec) :: measure_vec
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: A_array, vec_long
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       logical :: zero_measure_c = .FALSE.  
-      PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
 
       ! ~~~~~~           
 
@@ -172,7 +163,6 @@ module pmisr_module
       ! Get the comm size 
       call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
-      call MPI_Comm_size(MPI_COMM_WORLD, comm_size_world, errorcode)      
       ! Get the comm rank 
       call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
 
@@ -209,9 +199,7 @@ module pmisr_module
       ! Get the number of connections in S
       allocate(measure_local(local_rows))
       allocate(cf_markers_local(local_rows))  
-      cf_markers_local = C_POINT
-      allocate(in_set_this_loop(local_rows))
-      allocate(assigned_local(local_rows))
+      cf_markers_local = 0
 
       ! ~~~~~~~~~~~~
       ! Seed the measure_local between 0 and 1
@@ -252,7 +240,13 @@ module pmisr_module
             ncols = ao_ia(ifree+1) - ao_ia(ifree)      
             measure_local(ifree) = measure_local(ifree) + ncols
          end if
-      end do     
+      end do    
+      
+      ! Restore the sequantial pointers once we're done
+      call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      if (comm_size /= 1) then
+         call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+      end if         
 
       ! If PMIS then we want to search the measure based on the largest entry
       ! PMISR searches the measure based on the smallest entry
@@ -260,6 +254,101 @@ module pmisr_module
       ! in our Luby below
       if (pmis) measure_local = measure_local * (-1)
       
+      call pmisr_existing_measure_cf_markers(strength_mat, max_luby_steps, pmis, &
+               measure_local, cf_markers_local, zero_measure_c_point)
+
+      deallocate(measure_local)
+      ! If PMIS then we swap the CF markers from PMISR
+      if (pmis) then
+         cf_markers_local = cf_markers_local * (-1)
+      end if               
+
+   end subroutine pmisr_cpu  
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_existing_measure_cf_markers(strength_mat, max_luby_steps, pmis, measure_local, cf_markers_local, zero_measure_c_point)
+
+      ! PMISR implementation that takes an existing measure_local and cf_markers_local 
+      ! and then does the Luby algorithm to assign the rest of the CF markers
+
+      ! ~~~~~~
+
+      type(tMat), target, intent(in)       :: strength_mat
+      integer, intent(in)                  :: max_luby_steps
+      logical, intent(in)                  :: pmis
+      PetscReal, dimension(:), allocatable :: measure_local
+      integer, dimension(:), intent(inout) :: cf_markers_local
+      logical, optional, intent(in)        :: zero_measure_c_point
+
+      ! Local
+      PetscInt :: local_rows, local_cols, global_rows, global_cols
+      PetscInt :: global_row_start, global_row_end_plus_one, ifree
+      PetscInt :: jfree
+      PetscInt :: rows_ao, cols_ao, n_ad, n_ao
+      PetscInt :: counter_undecided, counter_in_set_start, counter_parallel
+      integer :: comm_size, loops_through
+      integer :: comm_rank, errorcode       
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX      
+      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable :: in_set_this_loop
+      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
+      type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
+      real(c_double), pointer :: measure_nonlocal(:) => null()
+      type(tMat) :: Ad, Ao
+      type(tVec) :: measure_vec
+      PetscInt, dimension(:), pointer :: colmap
+      integer(c_long_long) :: A_array, vec_long
+      PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
+      PetscInt :: shift = 0
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
+      logical :: zero_measure_c = .FALSE.  
+      PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
+
+      ! ~~~~~~           
+
+      if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
+
+      ! Get the comm size 
+      call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      ! Get the comm rank 
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
+
+      ! Get the local sizes
+      call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
+      call MatGetSize(strength_mat, global_rows, global_cols, ierr)      
+      call MatGetOwnershipRange(strength_mat, global_row_start, global_row_end_plus_one, ierr)   
+
+      if (comm_size /= 1) then
+         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
+         ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
+         call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
+      else
+         Ad = strength_mat    
+      end if
+
+      ! ~~~~~~~~
+      ! Get pointers to the sequential diagonal and off diagonal aij structures 
+      ! ~~~~~~~~
+      call MatGetRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+      if (.NOT. done) then
+         print *, "Pointers not set in call to MatGetRowIJ"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      if (comm_size /= 1) then
+         call MatGetRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         if (.NOT. done) then
+            print *, "Pointers not set in call to MatGetRowIJ"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if      
+      ! ~~~~~~~~~~      
+
+      ! Get the number of connections in S
+      allocate(in_set_this_loop(local_rows))
+      allocate(assigned_local(local_rows))
+        
       ! ~~~~~~~~~~~~
       ! Create parallel vec and scatter the measure
       ! ~~~~~~~~~~~~
@@ -294,7 +383,18 @@ module pmisr_module
       assigned_local = .FALSE.
       assigned_nonlocal = .FALSE.
 
+      ! If already assigned by the input
       do ifree = 1, local_rows
+         if (cf_markers_local(ifree) /= 0) assigned_local(ifree) = .TRUE.         
+      end do
+
+      do ifree = 1, local_rows
+
+         ! Skip if already assigned
+         if (assigned_local(ifree)) then
+            counter_in_set_start = counter_in_set_start + 1
+            cycle
+         end if
 
          ! If there are no strong neighbours (not measure_local == 0 as we have added a random number to it)
          ! then we treat it special
@@ -398,14 +498,13 @@ module pmisr_module
          ! ~~~~~~~~
          ! Go and do the local component
          ! ~~~~~~~~
-         node_loop_local: do ifree = 1, local_rows   
+         node_loop_local: do ifree = 1, local_rows
 
             ! Check if this node is already in A
             if (assigned_local(ifree)) cycle node_loop_local
-
             ! Loop over all the active strong neighbours on the local processors
-            do jfree = ad_ia(ifree)+1, ad_ia(ifree+1)
-               
+            do jfree = ad_ia(ifree)+1, ad_ia(ifree+1)  
+
                ! Have to only check unassigned strong neighbours
                if (assigned_local(ad_ja(jfree) + 1)) cycle
 
@@ -530,6 +629,11 @@ module pmisr_module
          end if
       end do
 
+      ! Any unassigned become C points
+      do ifree = 1, local_rows
+         if (cf_markers_local(ifree) == 0) cf_markers_local(ifree) = C_POINT
+      end do
+
       ! ~~~~~~~~~~~~
       ! We're finished our IS now
       ! ~~~~~~~~~~~~
@@ -539,16 +643,11 @@ module pmisr_module
       if (comm_size /= 1) then
          call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
       end if    
-            
-      ! If PMIS then we swap the CF markers from PMISR
-      if (pmis) then
-         cf_markers_local = cf_markers_local * (-1)
-      end if
 
       ! ~~~~~~~~~
       ! Cleanup
       ! ~~~~~~~~~      
-      deallocate(measure_local, in_set_this_loop, assigned_local)
+      deallocate(in_set_this_loop, assigned_local)
       if (comm_size/=1) then
          call VecDestroy(measure_vec, ierr)    
          ! Don't forget to restore on lvec from our matrix
@@ -556,9 +655,9 @@ module pmisr_module
       end if
       deallocate(assigned_nonlocal)    
 
-   end subroutine pmisr_cpu  
+   end subroutine pmisr_existing_measure_cf_markers  
 
-   ! -------------------------------------------------------------------------------------------------------------------------------
+   ! -------------------------------------------------------------------------------------------------------------------------------   
 
 end module pmisr_module
 
