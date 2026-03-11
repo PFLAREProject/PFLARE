@@ -138,6 +138,17 @@ jobs:
           build-args: |
             BASE_IMAGE=pflare:pr-ci
 
+      - name: Run parser output tests
+        run: |
+          IMAGE=${{ github.event_name == 'pull_request' && 'pflare:pr-ci' || 'stevendargaville/pflare:latest' }}
+          docker run --rm \
+            -v "${{ github.workspace }}/tools:/pflare_ci_tools:ro" \
+            -v "${{ github.workspace }}/python:/pflare_ci_python:ro" \
+            -e PFLARE_TESTS_DIR=/build/PFLARE/tests \
+            -e PFLARE_TOOLS_DIR=/pflare_ci_tools \
+            "$IMAGE" \
+            python3 /pflare_ci_python/run_parse_tests.py
+
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
     needs: [setup]
@@ -279,7 +290,7 @@ jobs:
           file: ./dockerfiles/Dockerfile_notebook
           build-args: |
             BASE_IMAGE=stevendargaville/pflare:latest
-            
+
   # Now pflare tracks petsc main, we check to see if this commit can still be built
   # through the petsc configure
   # We do this by checking out petsc main and just replacing the hash it pulls down
