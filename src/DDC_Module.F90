@@ -400,6 +400,17 @@ module ddc_module
             if (.NOT. non_zero_neighbour) cf_markers_local_aff(ifree) = F_POINT
          end do    
 
+         ! Restore the sequantial pointers once we're done
+         call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
+         if (comm_size /= 1) then
+            call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
+         end if            
+         if (comm_size/=1) then
+            call VecDestroy(measure_vec, ierr)    
+            ! Don't forget to restore on lvec from our matrix
+            call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)             
+         end if         
+
          ! Call PMISR, using the diagonal dominance of Aff as the measure
          ! and the strength as Aff + Aff^T
          ! Now we explicitly set zero_measure_c_point as true
@@ -422,21 +433,12 @@ module ddc_module
                ! Swap by multiplying by -1
                cf_markers_local(idx) = cf_markers_local(idx) * (-1)
             end if
-         end do               
+         end do   
          
-         ! Restore the sequantial pointers once we're done
-         call MatRestoreRowIJ(Ad,shift,symmetric,inodecompressed,n_ad,ad_ia,ad_ja,done,ierr) 
-         if (comm_size /= 1) then
-            call MatRestoreRowIJ(Ao,shift,symmetric,inodecompressed,n_ao,ao_ia,ao_ja,done,ierr) 
-         end if            
          deallocate(cf_markers_local_aff, diag_dom_ratio_measure)
-         call MatDestroy(Aff_transpose, ierr)
-         if (comm_size/=1) then
-            call VecDestroy(measure_vec, ierr)    
-            ! Don't forget to restore on lvec from our matrix
-            call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)             
-         end if
+         call MatDestroy(Aff_transpose, ierr)         
 
+         ! Return as we're done
          return
       end if  
       
