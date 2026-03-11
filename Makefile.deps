@@ -7,9 +7,10 @@ src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/PETSc_Helper.o src/S
 src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/Matshell_Data_Type.o src/PETSc_Helper.o src/Repartition.o src/SAI_Z.o src/Weighted_Jacobi.o src/Neumann_Poly.o src/Gmres_Poly_Newton.o src/Gmres_Poly.o src/Pflare_Parameters.o src/TSQR.o 
 src/Binary_Tree.o : src/Binary_Tree.F90 
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/AIR_Data_Type_Routines.o src/CF_Splitting.o src/Approx_Inverse_Setup.o src/PCAIR_Shell.o src/PCAIR_Data_Type.o 
-src/CF_Splitting.o : src/CF_Splitting.F90 src/PETSc_Helper.o src/Aggregation.o src/C_PETSc_Interfaces.o src/PMISR_DDC.o src/Pflare_Parameters.o 
+src/CF_Splitting.o : src/CF_Splitting.F90 src/PETSc_Helper.o src/Aggregation.o src/C_PETSc_Interfaces.o src/DDC_Module.o src/PMISR_Module.o src/Pflare_Parameters.o 
 src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
+src/DDC_Module.o : src/DDC_Module.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
 src/FC_Smooth.o : src/FC_Smooth.F90 src/Matshell_Data_Type.o src/PETSc_Helper.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/Gmres_Poly_Data_Type.o : src/Gmres_Poly_Data_Type.F90 src/TSQR.o 
 src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Matshell_Data_Type.o src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/Sorting.o 
@@ -26,7 +27,7 @@ src/PCPFLAREINV_Interfaces.o : src/PCPFLAREINV_Interfaces.F90
 src/PETSc_Helper.o : src/PETSc_Helper.F90 src/C_PETSc_Interfaces.o 
 src/PFLARE.o : src/PFLARE.F90 src/Pflare_Parameters.o src/PCAIR_Interfaces.o src/PCPFLAREINV_Interfaces.o 
 src/Pflare_Parameters.o : src/Pflare_Parameters.F90 
-src/PMISR_DDC.o : src/PMISR_DDC.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
+src/PMISR_Module.o : src/PMISR_Module.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
 src/Repartition.o : src/Repartition.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/SAI_Z.o : src/SAI_Z.F90 src/Pflare_Parameters.o src/PETSc_Helper.o src/C_PETSc_Interfaces.o src/Sorting.o src/Binary_Tree.o 
 src/Sorting.o : src/Sorting.F90 src/Binary_Tree.o 

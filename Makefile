@@ -116,7 +116,8 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
-		  $(SRCDIR)/PMISR_DDC.o \
+		  $(SRCDIR)/DDC_Module.o \
+		  $(SRCDIR)/PMISR_Module.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/CF_Splitting.o \
 		  $(SRCDIR)/Repartition.o \
