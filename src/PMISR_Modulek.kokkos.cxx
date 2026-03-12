@@ -10,10 +10,10 @@
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// PMISR cf splitting but on the device
-// This no longer copies back to the host pointer cf_markers_local at the end
-// You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
-PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
+// PMISR implementation that takes an existing measure and cf_markers on the device
+// and then does the Luby algorithm to assign the rest of the CF markers
+// This mirrors the CPU version pmisr_existing_measure_cf_markers in PMISR_Module.F90
+PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int)
 {
 
    MPI_Comm MPI_COMM_MATRIX;
@@ -52,15 +52,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~~~~
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
-
-   // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
-   cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
-   // Can't use the global directly within the parallel 
-   // regions on the device so just take a shallow copy
-   intKokkosView cf_markers_d = cf_markers_local_d;    
+   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
 
    // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
    // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
@@ -73,11 +67,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    cf_markers_d_ptr = local_rows > 0 ? cf_markers_d.data() : sf_int_dummy_d.data();
 
    intKokkosView cf_markers_send_d;
-   int *cf_markers_send_d_ptr = NULL;  
+   int *cf_markers_send_d_ptr = NULL;
 
-   // Host and device memory for the measure
-   PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
-   PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);   
    PetscScalar *measure_local_d_ptr = NULL, *measure_nonlocal_d_ptr = NULL;
    measure_local_d_ptr = local_rows > 0 ? measure_local_d.data() : sf_scalar_dummy_d.data();
    PetscScalarKokkosView measure_nonlocal_d;
@@ -95,38 +86,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    boolKokkosView mark_d("mark_d", local_rows);
    auto exec = PetscGetKokkosExecutionSpace();
 
-   // If you want to generate the randoms on the device
-   //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
-   // Copy the input measure from host to device
-   Kokkos::deep_copy(measure_local_d, measure_local_h);  
-   // Log copy with petsc
-   size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));
-
-   // Compute the measure
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-
-      // Randoms on the device
-      // auto generator = random_pool.get_state();
-      // measure_local_d(i) = generator.drand(0., 1.);
-      // random_pool.free_state(generator);
-         
-      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-      measure_local_d(i) += ncols_local;
-
-      if (mpi)
-      {
-         PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
-         measure_local_d(i) += ncols_nonlocal;
-      }
-      // Flip the sign if pmis
-      if (pmis_int == 1) measure_local_d(i) *= -1;
-   });
-   // Have to ensure the parallel for above finishes before comms
-   exec.fence(); 
-
-   // Start the scatter of the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
+   // Start the scatter of the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or
    // one of the kokkos backends like PETSC_MEMTYPE_HIP
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
    if (mpi)
@@ -145,7 +105,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    PetscInt counter_in_set_start = 0;
    // Count how many in the set to begin with and set their CF markers
    Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
-      if (Kokkos::abs(measure_local_d[i]) < 1) 
+      // If already assigned by the input
+      if (cf_markers_d(i) != 0)
+      {
+         update++;
+      }
+      else if (Kokkos::abs(measure_local_d[i]) < 1)
       {
          if (zero_measure_c_point_int == 1) {
             if (pmis_int == 1) {
@@ -171,10 +136,6 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Count
          update++;
       }
-      else
-      {
-         cf_markers_d(i) = 0;
-      }      
    }, counter_in_set_start);
 
    // Check the total number of undecided in parallel
@@ -216,7 +177,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // If max_luby_steps is positive, then we only take that many times through this top loop
       // We typically find 2-3 iterations decides >99% of the nodes 
       // and a fixed number of outer loops means we don't have to do any parallel reductions
-      // We will do redundant nearest neighbour comms in the case we have already 
+      // We will do redundant nearest neighbour comms in the case we have already
       // finished deciding all the nodes, but who cares
       // Any undecided nodes just get turned into C points
       // We can do this as we know we won't ruin Aff by doing so, unlike in a normal multigrid
@@ -227,7 +188,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // ~~~~~~~~~
       if (mpi) {
          // Copy cf_markers_d into a temporary buffer
-         // If we gave the comms routine cf_markers_d we couldn't even read from 
+         // If we gave the comms routine cf_markers_d we couldn't even read from
          // it until comms ended, meaning we couldn't do the work overlapping below
          Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
@@ -361,7 +322,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (mpi) 
       {
          // We're going to do an add reverse scatter, so set them to zero
-         Kokkos::deep_copy(cf_markers_nonlocal_d, 0);  
+         Kokkos::deep_copy(cf_markers_nonlocal_d, 0);
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -380,8 +341,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                         // Needs to be atomic as may being set by many threads
-                        Kokkos::atomic_store(&cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), 1);     
-                  });     
+                        Kokkos::atomic_store(&cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]), 1);
+                  });
                }
          });
 
@@ -426,7 +387,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             }
       });   
 
-      if (mpi) 
+      if (mpi)
       {
          // Finish the scatter
          // Be careful these aren't petscints
@@ -480,10 +441,111 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       {
          cf_markers_d(i) = 1;
       }
-      if (pmis_int) cf_markers_d(i) *= -1;
    });
    // Ensure we're done before we exit
    exec.fence();
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// PMISR cf splitting but on the device
+// This no longer copies back to the host pointer cf_markers_local at the end
+// You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
+PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
+{
+
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscInt local_rows, local_cols, global_rows, global_cols;
+   PetscInt rows_ao, cols_ao;
+   MatType mat_type;
+
+   PetscCallVoid(MatGetType(*strength_mat, &mat_type));
+   // Are we in parallel?
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+
+   if (mpi)
+   {
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, NULL));
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+   }
+   else
+   {
+      mat_local = *strength_mat;
+   }
+
+   // Get the comm
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*strength_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetLocalSize(*strength_mat, &local_rows, &local_cols));
+   PetscCallVoid(MatGetSize(*strength_mat, &global_rows, &global_cols));
+
+   // ~~~~~~~~~~~~
+   // Get pointers to the i,j,vals on the device
+   // ~~~~~~~~~~~~
+   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+   PetscMemType mtype;
+   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
+
+   // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
+   cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
+   // Can't use the global directly within the parallel
+   // regions on the device so just take a shallow copy
+   intKokkosView cf_markers_d = cf_markers_local_d;
+
+   // Host and device memory for the measure
+   PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
+   PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);
+
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   // If you want to generate the randoms on the device
+   //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
+   // Copy the input measure from host to device
+   Kokkos::deep_copy(measure_local_d, measure_local_h);
+   // Log copy with petsc
+   size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
+
+   // Compute the measure
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+
+      // Randoms on the device
+      // auto generator = random_pool.get_state();
+      // measure_local_d(i) = generator.drand(0., 1.);
+      // random_pool.free_state(generator);
+
+      const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
+      measure_local_d(i) += ncols_local;
+
+      if (mpi)
+      {
+         PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+         measure_local_d(i) += ncols_nonlocal;
+      }
+      // Flip the sign if pmis
+      if (pmis_int == 1) measure_local_d(i) *= -1;
+   });
+   // Have to ensure the parallel for above finishes before comms
+   exec.fence();
+
+   // Call the existing measure cf markers function
+   pmisr_existing_measure_cf_markers_kokkos(strength_mat, max_luby_steps, pmis_int, measure_local_d, cf_markers_d, zero_measure_c_point_int);
+
+   // If PMIS then we swap the CF markers from PMISR
+   if (pmis_int) {
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            cf_markers_d(i) *= -1;
+      });
+      // Ensure we're done before we exit
+      exec.fence();
+   }
 
    return;
 }
