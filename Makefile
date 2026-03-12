@@ -105,7 +105,9 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
 							  $(SRCDIR)/Grid_Transferk.o \
 							  $(SRCDIR)/VecISCopyLocalk.o \
-							  $(SRCDIR)/PMISR_DDCk.o \
+							  $(SRCDIR)/Device_CF_Markersk.o \
+							  $(SRCDIR)/PMISR_Modulek.o \
+							  $(SRCDIR)/DDC_Modulek.o \
 							  $(SRCDIR)/Gmres_Polyk.o
 endif	
 

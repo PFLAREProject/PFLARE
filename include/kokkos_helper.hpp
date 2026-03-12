@@ -33,12 +33,14 @@ using ViewPetscIntPtr = std::shared_ptr<PetscIntKokkosView>;
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
+PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d);
 
 // Define array of shared pointers representing fine and coarse IS's 
 // on each level on the device
 extern ViewPetscIntPtr* IS_fine_views_local;
 extern ViewPetscIntPtr* IS_coarse_views_local;
 extern int max_levels;
+extern intKokkosView cf_markers_local_d;
 
 // ~~~~~~~~~~~~~~~~~~
 // Some custom reductions we use 
