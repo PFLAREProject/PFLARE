@@ -7,6 +7,7 @@ module ddc_module
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, &
          allreducesum_petscint_mine, boolscatter_mat_begin_c, boolscatter_mat_end_c, &
          boolscatter_mat_reverse_begin_c, boolscatter_mat_reverse_end_c, ddc_kokkos
+   use sabs, only: generate_sabs
    use pmisr_module, only: pmisr_existing_measure_cf_markers
    use pflare_parameters, only: C_POINT, F_POINT
 
@@ -139,7 +140,7 @@ module ddc_module
       PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_measure
       integer, dimension(:), allocatable :: cf_markers_local_aff
       PetscInt, dimension(:), pointer :: is_pointer
-      type(tMat) :: Aff, Aff_transpose, temp_mat
+      type(tMat) :: Aff, Aff_transpose
       PetscReal :: diag_val, max_dd_ratio_local, max_dd_ratio_achieved
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
@@ -340,15 +341,8 @@ module ddc_module
             end if
          end do
 
-         ! Keep everything but drop the diagonal
-         ! @@@ SHOULD JUST BE CALL SABS
-         call remove_small_from_sparse(Aff, 0d0, Aff_transpose, &
-                  relative_max_row_tol_int = -1, lump=.FALSE., drop_diagonal_int=-1)
-
-         ! Form Aff + Aff^T - this will be our strength matrix
-         call MatTranspose(Aff_transpose, MAT_INITIAL_MATRIX, temp_mat, ierr)
-         call MatAXPY(Aff_transpose, 1d0, temp_mat, DIFFERENT_NONZERO_PATTERN, ierr)      
-         call MatDestroy(temp_mat, ierr)
+         ! Generate strength matrix Aff + Aff^T - keep everything but drop the diagonal
+         call generate_sabs(Aff, 0d0, .TRUE., .FALSE., Aff_transpose)
 
          ! Call PMISR with as many steps as necessary
          max_luby_steps = -1
