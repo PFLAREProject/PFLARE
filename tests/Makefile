@@ -604,6 +604,18 @@ run_tests_no_load_serial:
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
     -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a small fixed dd ratio"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_strong_threshold 0.1 -pc_air_max_dd_ratio 0.1 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_strong_threshold 0.9 -pc_air_max_dd_ratio 0.9 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11
 #
 	@echo ""
 	@echo "Test improving Z"
@@ -931,6 +943,18 @@ run_tests_no_load_parallel:
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
 	 -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a small fixed dd ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_strong_threshold 0.1 -pc_air_max_dd_ratio 0.1 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_strong_threshold 0.9 -pc_air_max_dd_ratio 0.9 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11	 
 #
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"
