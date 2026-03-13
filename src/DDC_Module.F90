@@ -3,7 +3,8 @@ module ddc_module
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
-   use c_petsc_interfaces, only: copy_cf_markers_d2h, ddc_kokkos, create_cf_is_kokkos 
+      use c_petsc_interfaces, only: copy_cf_markers_d2h, ddc_kokkos, create_cf_is_kokkos, &
+         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
    use sabs, only: generate_sabs
    use pmisr_module, only: pmisr_existing_measure_cf_markers
    use pflare_parameters, only: C_POINT, F_POINT
@@ -50,7 +51,7 @@ module ddc_module
       integer(c_long_long) :: A_array, Aff_transpose_array, is_fine_array, is_coarse_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
-      integer :: errorcode
+   integer :: errorcode
       !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
       PetscReal :: max_dd_ratio_cpu, max_dd_ratio_kokkos
@@ -113,6 +114,7 @@ module ddc_module
                         Aff_ddc) 
 
             call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
+            call MatDestroy(Aff_ddc, ierr)
             Aff_transpose_array = Aff_transpose_ddc%v
             call ISDestroy(is_fine_temp, ierr)
             call ISDestroy(is_coarse_temp, ierr)
@@ -122,12 +124,6 @@ module ddc_module
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
-            ! Need Aff for CPU comparison in non-trigger case
-            if (.NOT. trigger_dd_ratio_compute_local) then
-               call MatCreateSubMatrix(input_mat, &
-                     is_fine, is_fine, MAT_INITIAL_MATRIX, &
-                     Aff_ddc, ierr)
-            end if
             allocate(cf_markers_local_two(size(cf_markers_local)))
             cf_markers_local_two = cf_markers_local
          end if
@@ -144,8 +140,14 @@ module ddc_module
             ! use the existing device data
             call copy_cf_markers_d2h(cf_markers_local_ptr)
             max_dd_ratio_cpu = max_dd_ratio
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, &
-                  cf_markers_local_two, Aff_ddc, Aff_transpose_ddc, diag_dom_ratio_random)
+            if (trigger_dd_ratio_compute_local) then
+               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, &
+                  cf_markers_local_two, Aff_transpose=Aff_transpose_ddc, &
+                  diag_dom_ratio_random=diag_dom_ratio_random)
+            else
+               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, &
+                  cf_markers_local_two)
+            end if
 
             if (any(cf_markers_local /= cf_markers_local_two)) then
 
@@ -164,39 +166,38 @@ module ddc_module
          ! Cleanup
          if (trigger_dd_ratio_compute_local) then
             call MatDestroy(Aff_transpose_ddc, ierr)
-            call MatDestroy(Aff_ddc, ierr)
-         else if (kokkos_debug()) then
-            call MatDestroy(Aff_ddc, ierr)
          end if
 
       else
-         ! CPU path: always extract Aff, only build sabs if trigger_dd_ratio_compute
-         call MatCreateSubMatrix(input_mat, &
-               is_fine, is_fine, MAT_INITIAL_MATRIX, &
-               Aff_ddc, ierr)
+         ! CPU path: only extract Aff if trigger_dd_ratio_compute
          if (trigger_dd_ratio_compute_local) then
+            call MatCreateSubMatrix(input_mat, &
+                  is_fine, is_fine, MAT_INITIAL_MATRIX, &
+                  Aff_ddc, ierr)
             call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-         end if
-         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, &
-               Aff_ddc, Aff_transpose_ddc, diag_dom_ratio_random)
-         call MatDestroy(Aff_ddc, ierr)
-         if (trigger_dd_ratio_compute_local) then
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, &
+                  Aff_transpose=Aff_transpose_ddc, &
+                  diag_dom_ratio_random=diag_dom_ratio_random)
+            call MatDestroy(Aff_ddc, ierr)
             call MatDestroy(Aff_transpose_ddc, ierr)
+         else
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
          end if
       end if
 #else
-      ! CPU path: always extract Aff, only build sabs if trigger_dd_ratio_compute
-      call MatCreateSubMatrix(input_mat, &
-            is_fine, is_fine, MAT_INITIAL_MATRIX, &
-            Aff_ddc, ierr)
+      ! CPU path: only extract Aff if trigger_dd_ratio_compute
       if (trigger_dd_ratio_compute_local) then
+         call MatCreateSubMatrix(input_mat, &
+               is_fine, is_fine, MAT_INITIAL_MATRIX, &
+               Aff_ddc, ierr)
          call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-      end if
-      call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, &
-            Aff_ddc, Aff_transpose_ddc, diag_dom_ratio_random)
-      call MatDestroy(Aff_ddc, ierr)
-      if (trigger_dd_ratio_compute_local) then
+         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, &
+               Aff_transpose=Aff_transpose_ddc, &
+               diag_dom_ratio_random=diag_dom_ratio_random)
+         call MatDestroy(Aff_ddc, ierr)
          call MatDestroy(Aff_transpose_ddc, ierr)
+      else
+         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
       end if
 #endif
 
@@ -206,7 +207,161 @@ module ddc_module
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, Aff, Aff_transpose, &
+   subroutine MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio)
+
+      ! Compute diagonal dominance ratio over local fine rows of input_mat
+      ! without extracting Aff. This mirrors the Kokkos MatDiagDomRatio path:
+      ! sum abs(F-neighbour off-diagonals) / abs(F-diagonal), with nonlocal
+      ! F markers obtained from the matrix halo scatter.
+
+      ! ~~~~~~
+
+      type(tMat), target, intent(in)      :: input_mat
+      type(tIS), intent(in)               :: is_fine
+      integer, dimension(:), intent(in)   :: cf_markers_local
+      PetscReal, dimension(:), allocatable, intent(out) :: diag_dom_ratio
+
+      ! Local
+      PetscInt :: local_rows, local_cols, global_rows, global_cols, fine_size
+      PetscInt :: input_row_start, input_row_end_plus_one
+      PetscInt :: ifree, jfree, local_row, target_col, rows_ao, cols_ao
+      PetscInt :: n_ad, n_ao
+      PetscInt, parameter :: one = 1
+      PetscErrorCode :: ierr
+      integer :: errorcode, comm_size
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer(c_long_long) :: A_array, vec_long, Ad_array, Ao_array
+      type(tMat) :: Ad, Ao
+      type(tVec) :: cf_markers_vec
+      PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
+      PetscInt, dimension(:), pointer :: ad_ia => null(), ad_ja => null(), ao_ia => null(), ao_ja => null()
+      PetscReal, dimension(:), pointer :: ad_vals => null(), ao_vals => null(), cf_markers_nonlocal => null()
+      PetscReal, dimension(:), allocatable, target :: cf_markers_local_real
+      type(c_ptr) :: ad_vals_c_ptr, ao_vals_c_ptr, cf_markers_nonlocal_ptr
+      PetscInt :: shift = 0
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
+      PetscReal :: diag_val, off_diag_sum
+      logical :: mpi
+
+      ! ~~~~~~
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+      call MatGetSize(input_mat, global_rows, global_cols, ierr)
+      call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)
+      call ISGetLocalSize(is_fine, fine_size, ierr)
+      call ISGetIndices(is_fine, is_pointer, ierr)
+
+      allocate(diag_dom_ratio(fine_size))
+      diag_dom_ratio = 0d0
+
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      mpi = comm_size /= 1
+
+      if (mpi) then
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr)
+         call MatGetSize(Ao, rows_ao, cols_ao, ierr)
+      else
+         Ad = input_mat
+      end if
+
+      ! Get pointers to the local/off-diagonal CSR structures.
+      ! This mirrors the Kokkos path, which accesses local and nonlocal CSR directly.
+      call MatGetRowIJ(Ad, shift, symmetric, inodecompressed, n_ad, ad_ia, ad_ja, done, ierr)
+      if (.NOT. done) then
+         print *, "Pointers not set in call to MatGetRowIJ"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      if (mpi) then
+         call MatGetRowIJ(Ao, shift, symmetric, inodecompressed, n_ao, ao_ia, ao_ja, done, ierr)
+         if (.NOT. done) then
+            print *, "Pointers not set in call to MatGetRowIJ"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if
+
+      Ad_array = Ad%v
+      call MatSeqAIJGetArrayF90_mine(Ad_array, ad_vals_c_ptr)
+      call c_f_pointer(ad_vals_c_ptr, ad_vals, shape=[size(ad_ja)])
+
+      ! Off-diagonal rows require a halo exchange of cf markers.
+      ! Start and finish the scatter once, then reuse the received nonlocal markers
+      ! while looping over all local fine rows.
+      if (mpi) then
+         Ao_array = Ao%v
+         call MatSeqAIJGetArrayF90_mine(Ao_array, ao_vals_c_ptr)
+         call c_f_pointer(ao_vals_c_ptr, ao_vals, shape=[size(ao_ja)])
+
+         allocate(cf_markers_local_real(local_rows))
+         if (local_rows > 0) cf_markers_local_real = dble(cf_markers_local(1:local_rows))
+
+         call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, local_rows, global_rows, &
+               cf_markers_local_real, cf_markers_vec, ierr)
+         A_array = input_mat%v
+         vec_long = cf_markers_vec%v
+         call vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal_ptr)
+         call vecscatter_mat_end_c(A_array, vec_long, cf_markers_nonlocal_ptr)
+         call c_f_pointer(cf_markers_nonlocal_ptr, cf_markers_nonlocal, shape=[cols_ao])
+      end if
+
+      ! Compute diagonal-dominance sums over the local fine-row list.
+      ! For each row: accumulate abs(off-diagonal) over F neighbors only,
+      ! store abs(diagonal) for an F diagonal entry, then form ratio.
+      do ifree = 1, fine_size
+         local_row = is_pointer(ifree) - input_row_start + 1
+         diag_val = 0d0
+         off_diag_sum = 0d0
+
+         do jfree = ad_ia(local_row) + 1, ad_ia(local_row + 1)
+            target_col = ad_ja(jfree) + 1
+
+            if (cf_markers_local(target_col) /= F_POINT) cycle
+
+            if (target_col == local_row) then
+               diag_val = abs(ad_vals(jfree))
+            else
+               off_diag_sum = off_diag_sum + abs(ad_vals(jfree))
+            end if
+         end do
+
+         if (mpi) then
+            do jfree = ao_ia(local_row) + 1, ao_ia(local_row + 1)
+               target_col = ao_ja(jfree) + 1
+
+               if (nint(cf_markers_nonlocal(target_col)) /= F_POINT) cycle
+
+               off_diag_sum = off_diag_sum + abs(ao_vals(jfree))
+            end do
+         end if
+
+         ! If no diagonal was found, keep ratio at zero.
+         ! This matches the Kokkos behavior for rows without a diagonal entry.
+         if (diag_val /= 0d0) then
+            diag_dom_ratio(ifree) = off_diag_sum / diag_val
+         end if
+      end do
+
+      ! Cleanup for halo scatter resources.
+      if (mpi) then
+         call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)
+         call VecDestroy(cf_markers_vec, ierr)
+         deallocate(cf_markers_local_real)
+      end if
+
+      ! Restore CSR pointers before returning.
+      call MatRestoreRowIJ(Ad, shift, symmetric, inodecompressed, n_ad, ad_ia, ad_ja, done, ierr)
+      if (mpi) then
+         call MatRestoreRowIJ(Ao, shift, symmetric, inodecompressed, n_ao, ao_ia, ao_ja, done, ierr)
+      end if
+
+      call ISRestoreIndices(is_fine, is_pointer, ierr)
+
+   end subroutine MatDiagDomRatio_cpu
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+      subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, Aff_transpose, &
          diag_dom_ratio_random)
 
       ! Second pass diagonal dominance cleanup
@@ -223,24 +378,21 @@ module ddc_module
       PetscReal, intent(in)               :: fraction_swap
       PetscReal, intent(inout)            :: max_dd_ratio
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
-      type(tMat), intent(in)              :: Aff
-      type(tMat), intent(in)              :: Aff_transpose
-      PetscReal, dimension(:), intent(in) :: diag_dom_ratio_random
+      type(tMat), intent(in), optional    :: Aff_transpose
+      PetscReal, dimension(:), intent(in), optional :: diag_dom_ratio_random
 
       ! Local
-      PetscInt :: local_rows, local_cols, one=1, global_rows, global_cols
-      PetscInt :: a_global_row_start, a_global_row_end_plus_one, ifree, ncols
+      PetscInt :: local_rows, one=1
+      PetscInt :: ifree
       PetscInt :: input_row_start, input_row_end_plus_one
-      PetscInt :: jfree, idx, search_size, diag_index, fine_size, frac_size
-      integer :: bin_sum, bin_boundary, bin, errorcode, comm_size, comm_rank
+      PetscInt :: idx, search_size, fine_size, frac_size
+      integer :: bin_sum, bin_boundary, bin, errorcode
       integer :: max_luby_steps
       PetscErrorCode :: ierr
-      PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_measure
       integer, dimension(:), allocatable :: cf_markers_local_aff
       PetscInt, dimension(:), pointer :: is_pointer
-      PetscReal :: diag_val, max_dd_ratio_local, max_dd_ratio_achieved
+      PetscReal :: max_dd_ratio_local, max_dd_ratio_achieved
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -248,17 +400,22 @@ module ddc_module
 
       ! ~~~~~~  
 
-      ! Get the comm size 
+      ! Get the communicator
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
-      ! Get the comm rank 
-      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)       
 
-      ! The indices are the numbering in Aff matrix
+      ! The indices are the numbering in the local fine row set
       call ISGetIndices(is_fine, is_pointer, ierr)  
       call ISGetLocalSize(is_fine, fine_size, ierr) 
 
       trigger_dd_ratio_compute = max_dd_ratio > 0
+
+      ! Trigger path requires Aff_transpose and pre-generated random numbers
+      if (trigger_dd_ratio_compute) then
+         if (.NOT. present(Aff_transpose) .OR. .NOT. present(diag_dom_ratio_random)) then
+            print *, "ddc_cpu missing Aff_transpose/randoms for trigger path"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if
       
       ! Do a fixed alpha_diag
       if (fraction_swap < 0) then
@@ -282,57 +439,14 @@ module ddc_module
          end if
       end if
       
-      ! ~~~~~~~~~~~~~
-
-      ! Get the local sizes
-      call MatGetLocalSize(Aff, local_rows, local_cols, ierr)
-      call MatGetSize(Aff, global_rows, global_cols, ierr)
-      call MatGetOwnershipRange(Aff, a_global_row_start, a_global_row_end_plus_one, ierr)
       call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
 
       ! ~~~~~~~~~~~~~
       ! Compute diagonal dominance ratio
       ! ~~~~~~~~~~~~~
-      allocate(diag_dom_ratio(local_rows))   
-      diag_dom_ratio = 0
+      call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio)
+      local_rows = fine_size
       dom_bins = 0
-      
-      ! Sum the rows and find the diagonal entry in each local row
-      do ifree = a_global_row_start, a_global_row_end_plus_one-1                  
-         call MatGetRow(Aff, ifree, ncols, cols, vals, ierr)
-
-         ! Index of the diagonal
-         diag_index = -1
-         diag_val = 1.0d0
-
-         do jfree = 1, ncols
-            ! Store the diagonal
-            if (cols(jfree) == ifree) then
-               diag_val = abs(vals(jfree))
-               diag_index = jfree
-            else
-               ! Row sum of off-diagonals
-               diag_dom_ratio(ifree - a_global_row_start + 1) = diag_dom_ratio(ifree - a_global_row_start + 1) + abs(vals(jfree))
-            end if
-         end do
-
-         ! If we don't have a diagonal entry in this row there is no point trying to 
-         ! compute a diagonal dominance ratio
-         ! We set diag_dom_ratio to zero and that means this row will stay as an F point
-         if (diag_index == -1) then
-            diag_dom_ratio(ifree - a_global_row_start + 1) = 0.0
-            call MatRestoreRow(Aff, ifree, ncols, cols, vals, ierr)    
-            cycle
-         end if 
-
-         ! If we have non-diagonal entries
-         if (diag_dom_ratio(ifree - a_global_row_start + 1) /= 0d0) then
-            ! Compute the diagonal dominance ratio
-            diag_dom_ratio(ifree - a_global_row_start + 1) = diag_dom_ratio(ifree - a_global_row_start + 1) / diag_val
-         end if
-
-         call MatRestoreRow(Aff, ifree, ncols, cols, vals, ierr) 
-      end do
 
       ! ~~~~~~~~
       ! Get the maximum diagonal dominance ratio
@@ -458,17 +572,16 @@ module ddc_module
       ! So we just swap a fixed fraction of the worst F points to C
       ! ~~~~~~~~~~~~~
 
-      ! Can't put this above because of collective operations in parallel (namely the getsubmatrix)
       ! If we have local points to swap
       if (search_size > 0) then     
 
          ! If we reach here then we want to swap some local F points to C points
 
-         do ifree = a_global_row_start, a_global_row_end_plus_one-1           
+         do ifree = 1, local_rows
 
             ! Bin the entries between 0 and 1
             ! The top bin has entries greater than 0.9 (including greater than 1)
-            bin = min(floor(diag_dom_ratio(ifree - a_global_row_start + 1) * size(dom_bins)) + 1, size(dom_bins))
+            bin = min(floor(diag_dom_ratio(ifree) * size(dom_bins)) + 1, size(dom_bins))
             ! If the diagonal dominance ratio is really large the expression above will overflow
             ! the int to negative, so we just stick that in the top bin            
             if (bin < 0) then
