@@ -67,9 +67,6 @@ in Fortran:
      int :: ddc_its = 1
      ! Fraction of F points to convert to C per ddc it
      PetscReal :: ddc_fraction = 0.1
-     ! If not 0, keep doing ddc its until this diagonal dominance
-     ! ratio is hit
-     PetscReal :: max_dd_ratio = 0.0
      ! As many steps as needed
      int :: max_luby_steps = -1
      ! PMISR DDC
@@ -83,7 +80,6 @@ in Fortran:
            algorithm, &
            ddc_its, &
            ddc_fraction, &
-           max_dd_ratio, &
            is_fine, is_coarse) 
 
 or in C:
@@ -95,9 +91,6 @@ or in C:
      int ddc_its = 1;
      // Fraction of F points to convert to C per ddc it
      PetscReal ddc_fraction = 0.1;
-     // If not 0, keep doing ddc its until this diagonal dominance
-     // ratio is hit
-     PetscReal max_dd_ratio = 0.0;
      // As many steps as needed
      int max_luby_steps = -1;
      // PMISR DDC
@@ -111,7 +104,6 @@ or in C:
          algorithm, \
          ddc_its, \
          ddc_fraction, \
-         max_dd_ratio, \
          &is_fine, &is_coarse);
 
 or in Python with petsc4py:
@@ -122,9 +114,6 @@ or in Python with petsc4py:
      ddc_its = 1
      # Fraction of F points to convert to C per ddc it
      ddc_fraction = 0.1
-     # If not 0, keep doing ddc its until this diagonal dominance
-     # ratio is hit
-     max_dd_ratio = 0.0     
      # As many steps as needed
      max_luby_steps = -1
      # PMISR DDC
@@ -137,8 +126,9 @@ or in Python with petsc4py:
            strong_threshold, max_luby_steps, \
            algorithm, \
            ddc_its, \
-           ddc_fraction, \
-           max_dd_ratio)
+           ddc_fraction)
+
+To enforce a fixed diagonal dominance ratio, set `-pc_air_cf_splitting_type diag_dom` (or `algorithm = CF_DIAG_DOM`) and use `-pc_air_strong_threshold` as the target row-wise ratio in $\mathbf{A}_{ff}$; the section below details a convenience wrapper provided for this purpose.
 
 ### Diagonally dominant submatrix extraction
 

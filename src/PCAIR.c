@@ -15,7 +15,7 @@ PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
 PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int symmetric_int,
    double strong_threshold, int max_luby_steps, int cf_splitting_type,
-   int ddc_its, double fraction_swap, double max_dd_ratio,
+   int ddc_its, double fraction_swap,
    IS *is_fine, IS *is_coarse);
 PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, double max_dd_ratio, Mat *output_mat);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
@@ -35,7 +35,6 @@ PETSC_EXTERN void PCAIRGetProcessEqLimit_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetSubcomm_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetStrongThreshold_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetDDCIts_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetMaxDDRatio_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
 PETSC_EXTERN void PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
@@ -85,7 +84,6 @@ PETSC_EXTERN void PCAIRSetProcessEqLimit_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetSubcomm_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetStrongThreshold_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetDDCIts_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetMaxDDRatio_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
 PETSC_EXTERN void PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
@@ -197,12 +195,12 @@ PETSC_EXTERN PetscErrorCode c_PCAIRGetPCShell(PC *pc, PC *pc_air_shell)
 // CF splitting
 PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
    double strong_threshold, int max_luby_steps, int cf_splitting_type,
-   int ddc_its, double fraction_swap, double max_dd_ratio,
+   int ddc_its, double fraction_swap,
    IS *is_fine, IS *is_coarse)
 {
    compute_cf_splitting_c(&input_mat, symmetric_int, strong_threshold,
       max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
-      max_dd_ratio, is_fine, is_coarse);
+      is_fine, is_coarse);
 }
 
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, double max_dd_ratio, Mat *output_mat)
@@ -284,12 +282,6 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC pc, PetscReal *input_real
 {
    PetscFunctionBegin;
    PCAIRGetStrongThreshold_c(&pc, input_real);
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-PETSC_EXTERN PetscErrorCode PCAIRGetMaxDDRatio(PC pc, PetscReal *input_real)
-{
-   PetscFunctionBegin;
-   PCAIRGetMaxDDRatio_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
@@ -636,18 +628,6 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetDDCIts_c(&pc, input_int);
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-// If using CF splitting type pmisr_ddc, rather than do a fixed number of DDC iterations, 
-// converting a fixed fraction of F points to C based on diagonal dominance at each iteration, 
-// compute a parallel independent set of F points greater than this ratio, converting the worst
-// at each iteration and do as many iterations as necessary. If 0.0 this is not used.
-// Default: 0.0
-// -pc_air_max_dd_ratio
-PETSC_EXTERN PetscErrorCode PCAIRSetMaxDDRatio(PC pc, PetscReal input_real)
-{
-   PetscFunctionBegin;
-   PCAIRSetMaxDDRatio_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 // Second pass in the PMISR DDC CF splitting converts 
@@ -1149,11 +1129,6 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsReal("-pc_air_strong_threshold", "Strong threshold for CF splitting", "PCAIRSetStrongThreshold", old_real, &input_real, NULL));
    PetscCall(PCAIRSetStrongThreshold(pc, input_real));
    // ~~~~ 
-   PetscCall(PCAIRGetMaxDDRatio(pc, &old_real));
-   input_real = old_real;
-   PetscCall(PetscOptionsReal("-pc_air_max_dd_ratio", "Max DDC ratio for CF splitting", "PCAIRGetMaxDDRatio", old_real, &input_real, NULL));
-   PetscCall(PCAIRSetMaxDDRatio(pc, input_real));
-   // ~~~~ 
    PetscCall(PCAIRGetDDCFraction(pc, &old_real));
    input_real = old_real;
    PetscCall(PetscOptionsReal("-pc_air_ddc_fraction", "DDC fraction for CF splitting", "PCAIRGetDDCFraction", old_real, &input_real, NULL));
@@ -1174,7 +1149,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsReal("-pc_air_a_drop", "Drop tolerance for A", "PCAIRSetADrop", old_real, &input_real, NULL));
    PetscCall(PCAIRSetADrop(pc, input_real));
    // ~~~~  
-   const char *const CFSplittingTypes[] = {"PMISR_DDC", "PMIS", "PMIS_DIST2", "AGG", "PMIS_AGG", "CFSplittingType", "CF_", NULL};
+   const char *const CFSplittingTypes[] = {"PMISR_DDC", "DIAG_DOM", "PMIS", "PMIS_DIST2", "AGG", "PMIS_AGG", "CFSplittingType", "CF_", NULL};
    PetscCall(PCAIRGetCFSplittingType(pc, &old_cf_type));
    cf_type = old_cf_type;
    PetscCall(PetscOptionsEnum("-pc_air_cf_splitting_type", "CF splitting algorithm", "PCAIRSetCFSplittingType", CFSplittingTypes, (PetscEnum)old_cf_type, (PetscEnum *)&cf_type, &flg));
@@ -1305,7 +1280,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 
    PetscInt input_int, input_int_two, input_int_three, input_int_four;
    PetscBool flg, flg_f_smooth, flg_c_smooth, flg_diag_scale;
-   PetscReal input_real, input_real_two, input_real_three;
+   PetscReal input_real, input_real_two;
    PCPFLAREINVType input_type;
    PCAIRZType z_type;
    CFSplittingType cf_type;
@@ -1354,36 +1329,19 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetCFSplittingType(pc, &cf_type));
       PetscCall(PCAIRGetStrongThreshold(pc, &input_real));
       PetscCall(PCAIRGetDDCIts(pc, &input_int_three));
-      PetscCall(PCAIRGetMaxDDRatio(pc, &input_real_three));
       PetscCall(PCAIRGetDDCFraction(pc, &input_real_two));
       PetscCall(PCAIRGetMaxLubySteps(pc, &input_int_two));
       if (cf_type == CF_PMISR_DDC)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMISR_DDC \n"));
-         if (input_real_three == 0.0)
-         {
-            PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, DDC its=%" PetscInt_FMT ", DDC fraction=%f \n", \
-                  input_int_two, input_real, input_int_three, input_real_two));
-         }
-         else
-         {
-            PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, Max DD Ratio=%f, DDC fraction=%f \n", \
-                  input_int_two, input_real, input_real_three, input_real_two));
-         }     
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, DDC its=%" PetscInt_FMT ", DDC fraction=%f \n", \
+               input_int_two, input_real, input_int_three, input_real_two));
       }
-      if (cf_type == CF_DIAG_DOM)
+      else if (cf_type == CF_DIAG_DOM)
       {
-         PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMISR_DDC with max dd ratio \n"));
-         if (input_real_three == 0.0)
-         {
-            PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, DDC its=%" PetscInt_FMT ", DDC fraction=%f \n", \
-                  input_int_two, input_real, input_int_three, input_real_two));
-         }
-         else
-         {
-            PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, Max DD Ratio=%f, DDC fraction=%f \n", \
-                  input_int_two, input_real, input_real_three, input_real_two));
-         }     
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=DIAG_DOM \n"));
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Diagonal dominance target (strong threshold)=%f \n", \
+               input_int_two, input_real));
       }      
       else if (cf_type == CF_PMIS)
       {

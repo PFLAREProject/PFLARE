@@ -157,9 +157,6 @@ strong_threshold = 0.5
 ddc_its = 1
 # Fraction of F points to convert to C per ddc it
 ddc_fraction = 0.1
-# If not 0, keep doing ddc its until this diagonal dominance
-# ratio is hit
-max_dd_ratio = 0.0    
 # As many steps as needed
 max_luby_steps = -1
 # PMISR DDC
@@ -172,8 +169,7 @@ symmetric = False
       strong_threshold, max_luby_steps,\
       algorithm,\
       ddc_its, \
-      ddc_fraction, \
-      max_dd_ratio)
+    ddc_fraction)
 
 # ~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~

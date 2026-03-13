@@ -53,12 +53,13 @@ TESTS = [
         3,
     ),
     (
-        "adv_diff_fd max_dd_ratio 0.9 (8x8)",
+        "adv_diff_fd diag_dom threshold 0.9 (8x8)",
         [
             "./adv_diff_fd",
             "-da_grid_x", "8", "-da_grid_y", "8",
             "-pc_type", "air", "-ksp_max_it", "3",
-            "-pc_air_max_dd_ratio", "0.9",
+            "-pc_air_cf_splitting_type", "diag_dom",
+            "-pc_air_strong_threshold", "0.9",
             "-ksp_monitor",
             "-pc_air_print_stats_timings",
             "-second_solve",

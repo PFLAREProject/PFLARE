@@ -212,9 +212,6 @@ int main(int argc,char **args)
  int ddc_its = 1;
  // Fraction of F points to convert to C per ddc it
  PetscReal ddc_fraction = 0.1;
- // If not 0, keep doing ddc its until this diagonal dominance
- // ratio is hit
- PetscReal max_dd_ratio = 0.0;
  // As many steps as needed
  int max_luby_steps = -1;
  // PMISR DDC
@@ -227,11 +224,10 @@ int main(int argc,char **args)
      strong_threshold, max_luby_steps, \
      algorithm, \
      ddc_its, \
-     ddc_fraction, \
-     max_dd_ratio, \
+    ddc_fraction, \
      &is_fine, &is_coarse);
 
-  PetscCall(CheckSplitting(A, is_fine, is_coarse, "default max_dd_ratio"));
+  PetscCall(CheckSplitting(A, is_fine, is_coarse, "default PMISR_DDC"));
 
   PetscCall(ISDestroy(&is_fine));
   PetscCall(ISDestroy(&is_coarse));  
@@ -239,12 +235,11 @@ int main(int argc,char **args)
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  //       Compute a cf splitting with max_dd_ratio set
+  //       Compute a CF splitting with diag_dom target
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
 
- // This will keep doing ddc until this diagonal dominance
- // ratio is hit
- max_dd_ratio = 0.5;
+ strong_threshold = 0.5;
+ algorithm = CF_DIAG_DOM;
 
  compute_cf_splitting(A, \
      symmetric, \
@@ -252,10 +247,9 @@ int main(int argc,char **args)
      algorithm, \
      ddc_its, \
      ddc_fraction, \
-     max_dd_ratio, \
      &is_fine, &is_coarse);
 
-  PetscCall(CheckSplitting(A, is_fine, is_coarse, "max_dd_ratio=0.5"));
+  PetscCall(CheckSplitting(A, is_fine, is_coarse, "diag_dom strong_threshold=0.5"));
 
   PetscCall(ISDestroy(&is_fine));
   PetscCall(ISDestroy(&is_coarse));  

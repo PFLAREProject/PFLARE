@@ -41,9 +41,9 @@ module matdiagdomsubmatrix
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
       end if
 
-     ! Ignored as we pass in non-zero max_dd_ratio 
+   ! Ignored for CF_DIAG_DOM
      ddc_its = 0
-     ! Ignored as we pass in non-zero max_dd_ratio
+   ! Ignored for CF_DIAG_DOM
      ddc_fraction = 0.0
      ! As many steps as needed
      max_luby_steps = -1
@@ -61,7 +61,6 @@ module matdiagdomsubmatrix
            algorithm, &
            ddc_its, &
            ddc_fraction, &
-           max_dd_ratio, &
            is_fine, is_coarse)  
 
      call ISDestroy(is_coarse, ierr)

@@ -228,7 +228,7 @@ module cf_splitting
 
    subroutine compute_cf_splitting(input_mat, symmetric, &
                      strong_threshold, max_luby_steps, &
-                     cf_splitting_type, ddc_its, fraction_swap, max_dd_ratio, &
+                     cf_splitting_type, ddc_its, fraction_swap, &
                      is_fine, is_coarse)
 
       ! Computes a CF splitting and returns the F and C point ISs
@@ -236,7 +236,7 @@ module cf_splitting
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
       logical, intent(in)                 :: symmetric
-      PetscReal, intent(in)               :: strong_threshold, max_dd_ratio
+      PetscReal, intent(in)               :: strong_threshold
       integer, intent(in)                 :: max_luby_steps, cf_splitting_type, ddc_its
       PetscReal, intent(in)               :: fraction_swap
       type(tIS), intent(inout)            :: is_fine, is_coarse
@@ -289,21 +289,22 @@ module cf_splitting
       if (strong_threshold /= 0d0 .AND. &
             (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM)) then
 
-         ! Do a set number of ddc iterations, unless we are aiming for a set diagonal 
-         ! dominance ratio, in which case we do as many iterations as necessary
+         ! Do a set number of DDC iterations for PMISR_DDC.
+         ! For CF_DIAG_DOM, iterate until the requested strong_threshold ratio is reached.
          ddc_its_max = ddc_its
-         if (max_dd_ratio > 0) ddc_its_max = huge(ddc_its_max)
+         if (cf_splitting_type == CF_DIAG_DOM) ddc_its_max = huge(ddc_its_max)
 
          ddc_its_loop: do its = 1, ddc_its_max
 
             ! Do the second pass cleanup - this will directly modify the values in cf_markers_local
             ! (or the equivalent device cf_markers, is_fine is ignored if on the device)
-            max_dd_ratio_achieved = max_dd_ratio
+            max_dd_ratio_achieved = 0d0
+            if (cf_splitting_type == CF_DIAG_DOM) max_dd_ratio_achieved = strong_threshold
             call ddc(input_mat, is_fine, fraction_swap, max_dd_ratio_achieved, cf_markers_local)
 
             ! If we did anything in our ddc second pass and hence need to rebuild
             ! the is_fine and is_coarse
-            if ((fraction_swap /= 0d0 .OR. max_dd_ratio_achieved /= max_dd_ratio) &
+            if ((fraction_swap /= 0d0 .OR. max_dd_ratio_achieved /= 0d0) &
                   .AND. need_intermediate_is) then
             
                ! These are now outdated
@@ -315,7 +316,7 @@ module cf_splitting
             end if
 
             ! Terminate if we've reached the ratio
-            if (max_dd_ratio > 0 .AND. max_dd_ratio_achieved < max_dd_ratio) exit ddc_its_loop
+            if (cf_splitting_type == CF_DIAG_DOM .AND. max_dd_ratio_achieved < strong_threshold) exit ddc_its_loop
          end do ddc_its_loop
       end if
 
