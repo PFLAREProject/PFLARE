@@ -7,6 +7,8 @@
 // This is a device copy of the cf markers on a given level
 // to save having to copy it to/from the host between pmisr and ddc calls
 intKokkosView cf_markers_local_d;
+// Device copy of local fine-point diagonal-dominance ratios for DDC
+PetscScalarKokkosView diag_dom_ratio_local_d;
 
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -27,12 +29,41 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Copy the global diag_dom_ratio_local_d back to the host
+PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
+{
+   // Host wrapper for diag_dom_ratio_local
+   PetscScalarKokkosViewHost diag_dom_ratio_h(diag_dom_ratio_local, diag_dom_ratio_local_d.extent(0));
+
+   // Copy device diag_dom_ratio_local_d back to host
+   Kokkos::deep_copy(diag_dom_ratio_h, diag_dom_ratio_local_d);
+   // Log copy with petsc
+   size_t bytes = diag_dom_ratio_local_d.extent(0) * sizeof(PetscReal);
+   PetscCallVoid(PetscLogGpuToCpu(bytes));
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Delete the global cf_markers_local_d
 PETSC_INTERN void delete_device_cf_markers()
 {
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    cf_markers_local_d = intKokkosView();
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Delete the global diag_dom_ratio_local_d
+PETSC_INTERN void delete_device_diag_dom_ratio()
+{
+   // Delete the device view - this assigns an empty view
+   // and hence the old view has its ref counter decremented
+   diag_dom_ratio_local_d = PetscScalarKokkosView();
 
    return;
 }

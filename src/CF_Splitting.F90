@@ -5,7 +5,7 @@ module cf_splitting
    use pmisr_module, only: pmisr
    use ddc_module, only: ddc
    use sabs, only: generate_sabs
-   use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers
+   use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio
    use aggregation, only: generate_serial_aggregation
    use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
 
@@ -325,6 +325,7 @@ module cf_splitting
          if (cf_splitting_type == CF_PMIS_AGG) then
             ! Destroys the device cf_markers_local
             call delete_device_cf_markers()
+            call delete_device_diag_dom_ratio()
          end if
       
          ! Aggregation is not on the device at all
@@ -365,6 +366,7 @@ module cf_splitting
 
             ! Destroys the device cf_markers_local
             call delete_device_cf_markers()
+            call delete_device_diag_dom_ratio()
          end if
 
       end if    

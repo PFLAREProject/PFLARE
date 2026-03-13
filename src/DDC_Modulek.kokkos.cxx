@@ -12,7 +12,7 @@
 
 // Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
 // This code is very similar to MatCreateSubMatrix_kokkos
-PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
+PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
 {
    PetscInt local_rows, local_cols;
 
@@ -46,6 +46,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
    intKokkosView cf_markers_nonlocal_d;
    intKokkosView cf_markers_send_d;
+   PetscIntKokkosView is_fine_local_d;
    auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~
@@ -54,9 +55,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    const int match_cf = -1; // F_POINT == -1
    create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
    PetscInt local_rows_row = is_fine_local_d.extent(0);
+   *local_rows_aff = local_rows_row;
 
    // Create device memory for the diag_dom_ratio
-   diag_dom_ratio_d = PetscScalarKokkosView("diag_dom_ratio_d", local_rows_row);    
+   diag_dom_ratio_local_d = PetscScalarKokkosView("diag_dom_ratio_local_d", local_rows_row);
+   PetscScalarKokkosView diag_dom_ratio_d = diag_dom_ratio_local_d;
 
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
@@ -240,6 +243,17 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Ensure we're done before we exit
    exec.fence();
 
+   PetscReal max_dd_ratio_local = 0.0;
+   Kokkos::parallel_reduce("max_dd_ratio", local_rows_row,
+      KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
+         PetscReal dd_ratio = diag_dom_ratio_d(i);
+         thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;
+      },
+      Kokkos::Max<PetscReal>(max_dd_ratio_local)
+   );
+
+   PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX));
+
    return;
 }
 
@@ -248,22 +262,19 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 // ddc cleanup but on the device - uses the global variable cf_markers_local_d
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, PetscReal *max_dd_ratio, Mat *aff_transpose, PetscReal *random_numbers)
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, Mat *aff_transpose, PetscReal *random_numbers)
 {
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
-   PetscScalarKokkosView diag_dom_ratio_d;
+   PetscScalarKokkosView diag_dom_ratio_d = diag_dom_ratio_local_d;
    PetscIntKokkosView is_fine_local_d;
-   
-   // Compute the diagonal dominance ratio over the fine points in cf_markers_local_d
-   // ie the diag domminance ratio of Aff
-   MatDiagDomRatio_kokkos(input_mat, is_fine_local_d, diag_dom_ratio_d);
-   PetscInt local_rows_aff = is_fine_local_d.extent(0);
-   MPI_Comm MPI_COMM_MATRIX;
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
 
-   bool trigger_dd_ratio_compute = *max_dd_ratio > 0;
+   const int match_cf = -1; // F_POINT == -1
+   create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
+   PetscInt local_rows_aff = is_fine_local_d.extent(0);
+
+   bool trigger_dd_ratio_compute = max_dd_ratio > 0;
    auto exec = PetscGetKokkosExecutionSpace();   
 
    // Do a fixed alpha_diag
@@ -292,30 +303,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
       }
    }
    
-   PetscReal max_dd_ratio_achieved = 0.0;
-   // Compute the maximum diagonal dominance ratio
    if (trigger_dd_ratio_compute) 
    {
-      PetscReal max_dd_ratio_local = 0.0;
-      // Do a reduction to get the local max
-      Kokkos::parallel_reduce("max_dd_ratio", local_rows_aff,
-         KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
-            PetscReal dd_ratio = diag_dom_ratio_d(i);
-            thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;
-         },
-         Kokkos::Max<PetscReal>(max_dd_ratio_local)
-      );
-      // Comms to get the global max
-      PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&max_dd_ratio_local, &max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX));
-
-      //printf("computed diag dom ratio %f \n", max_dd_ratio_achieved);
-      // If we have hit the required diagonal dominance ratio, then return without swapping any F points
-      if (max_dd_ratio_achieved < *max_dd_ratio)
-      {
-         *max_dd_ratio = max_dd_ratio_achieved;
-         return;
-      }
-
       // ~~~~~~~~~~~~~~~
       // Ratio not met - use PMIS-based independent set to swap F points
       // This mirrors the CPU ddc_cpu logic when trigger_dd_ratio_compute is true
@@ -337,7 +326,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
          PetscCallVoid(PetscLogCpuToGpu(local_rows_aff * sizeof(PetscReal)));
 
          const PetscReal max_scale = std::max(10.0, max_dd_ratio_achieved * 2.0);
-         const PetscReal target_ratio = *max_dd_ratio;
+         const PetscReal target_ratio = max_dd_ratio;
 
          // Build the measure:
          // pmisr_existing_measure_cf_markers tags the smallest measure as F points

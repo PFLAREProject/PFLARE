@@ -3,7 +3,8 @@ module ddc_module
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
-      use c_petsc_interfaces, only: copy_cf_markers_d2h, ddc_kokkos, create_cf_is_kokkos, &
+      use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
+         MatDiagDomRatio_kokkos, create_cf_is_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
    use sabs, only: generate_sabs
    use pmisr_module, only: pmisr_existing_measure_cf_markers
@@ -13,6 +14,9 @@ module ddc_module
 #include "finclude/PETSc_ISO_Types.h"
 
    implicit none
+
+   PetscReal, parameter :: dd_ratio_abs_tol = 1d-12
+   PetscReal, parameter :: dd_ratio_rel_tol = 1d-10
 
    public   
    
@@ -41,8 +45,10 @@ module ddc_module
       PetscErrorCode :: ierr
       logical :: trigger_dd_ratio_compute_local
       PetscInt :: local_rows, local_cols
+      PetscReal :: max_dd_ratio_achieved
       integer :: seed_size_ddc, comm_rank_ddc, errorcode_ddc, i_loc
       integer, dimension(:), allocatable :: seed_ddc
+      PetscReal, dimension(:), allocatable :: diag_dom_ratio
       PetscReal, dimension(:), allocatable, target :: diag_dom_ratio_random
       type(c_ptr) :: random_numbers_ptr
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -51,10 +57,9 @@ module ddc_module
       integer(c_long_long) :: A_array, Aff_transpose_array, is_fine_array, is_coarse_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
-   integer :: errorcode
+      integer :: errorcode
       !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
-      PetscReal :: max_dd_ratio_cpu, max_dd_ratio_kokkos
       type(tIS) :: is_fine_temp, is_coarse_temp
 #endif
       ! ~~~~~~
@@ -65,6 +70,19 @@ module ddc_module
       end if
 
       trigger_dd_ratio_compute_local = max_dd_ratio > 0
+
+      ! Compute the diagonal dominance ratio - either returned in diag_dom_ratio
+      ! or stored in a device copy for kokkos
+      ! max_dd_ratio_achieved is always returned and is the max diag dom ratio across
+      ! all ranks
+      call MatDiagDomRatio(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+
+      ! If we have hit the required diagonal dominance ratio, return
+      if (trigger_dd_ratio_compute_local .AND. max_dd_ratio_achieved < max_dd_ratio) then
+         max_dd_ratio = max_dd_ratio_achieved
+         if (allocated(diag_dom_ratio)) deallocate(diag_dom_ratio)
+         return
+      end if
 
       ! Generate random numbers for the PMIS tie-breaking in the trigger path
       ! These are generated here so both CPU and Kokkos use the same randoms
@@ -129,9 +147,8 @@ module ddc_module
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         max_dd_ratio_kokkos = max_dd_ratio
-         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio_kokkos, Aff_transpose_array, &
-               random_numbers_ptr)
+         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_transpose_array, &
+            random_numbers_ptr)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
@@ -139,14 +156,13 @@ module ddc_module
             ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls
             ! use the existing device data
             call copy_cf_markers_d2h(cf_markers_local_ptr)
-            max_dd_ratio_cpu = max_dd_ratio
             if (trigger_dd_ratio_compute_local) then
-               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, &
-                  cf_markers_local_two, Aff_transpose=Aff_transpose_ddc, &
+               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+                  diag_dom_ratio, cf_markers_local_two, Aff_transpose=Aff_transpose_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
             else
-               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio_cpu, &
-                  cf_markers_local_two)
+               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+                  diag_dom_ratio, cf_markers_local_two)
             end if
 
             if (any(cf_markers_local /= cf_markers_local_two)) then
@@ -161,7 +177,6 @@ module ddc_module
             end if
             deallocate(cf_markers_local_two)
          end if
-         max_dd_ratio = max_dd_ratio_kokkos
 
          ! Cleanup
          if (trigger_dd_ratio_compute_local) then
@@ -175,13 +190,15 @@ module ddc_module
                   is_fine, is_fine, MAT_INITIAL_MATRIX, &
                   Aff_ddc, ierr)
             call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, &
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+               diag_dom_ratio, cf_markers_local, &
                   Aff_transpose=Aff_transpose_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
             call MatDestroy(Aff_ddc, ierr)
             call MatDestroy(Aff_transpose_ddc, ierr)
          else
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+               diag_dom_ratio, cf_markers_local)
          end if
       end if
 #else
@@ -191,23 +208,101 @@ module ddc_module
                is_fine, is_fine, MAT_INITIAL_MATRIX, &
                Aff_ddc, ierr)
          call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, &
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+               diag_dom_ratio, cf_markers_local, &
                Aff_transpose=Aff_transpose_ddc, &
                diag_dom_ratio_random=diag_dom_ratio_random)
          call MatDestroy(Aff_ddc, ierr)
          call MatDestroy(Aff_transpose_ddc, ierr)
       else
-         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local)
+            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+               diag_dom_ratio, cf_markers_local)
       end if
 #endif
 
       if (allocated(diag_dom_ratio_random)) deallocate(diag_dom_ratio_random)
+         if (allocated(diag_dom_ratio)) deallocate(diag_dom_ratio)
 
    end subroutine ddc
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio)
+   subroutine MatDiagDomRatio(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+
+      ! Wrapper for diagonal-dominance ratio computation.
+      ! Chooses Kokkos or CPU implementation and optionally compares the
+      ! resulting host ratios in debug mode.
+
+      type(tMat), target, intent(in)      :: input_mat
+      type(tIS), intent(in)               :: is_fine
+      integer, dimension(:), intent(in)   :: cf_markers_local
+      PetscReal, dimension(:), allocatable, target, intent(out) :: diag_dom_ratio
+      PetscReal, intent(out)              :: max_dd_ratio_achieved
+
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: errorcode, ifree
+      PetscReal :: tol, diff
+
+#if defined(PETSC_HAVE_KOKKOS)
+      MatType :: mat_type
+      integer(c_long_long) :: A_array
+      PetscInt :: local_rows_aff_kokkos
+      type(c_ptr) :: diag_dom_ratio_ptr
+      PetscReal, dimension(:), allocatable :: diag_dom_ratio_cpu
+      PetscReal :: max_dd_ratio_cpu
+#endif
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+
+#if defined(PETSC_HAVE_KOKKOS)
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         A_array = input_mat%v
+         local_rows_aff_kokkos = 0
+         max_dd_ratio_achieved = 0d0
+         call MatDiagDomRatio_kokkos(A_array, max_dd_ratio_achieved, local_rows_aff_kokkos)
+
+         if (kokkos_debug()) then
+            allocate(diag_dom_ratio(local_rows_aff_kokkos))
+            if (local_rows_aff_kokkos > 0) then
+               diag_dom_ratio_ptr = c_loc(diag_dom_ratio)
+               call copy_diag_dom_ratio_d2h(diag_dom_ratio_ptr)
+            end if
+
+            call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio_cpu, max_dd_ratio_cpu)
+
+            tol = dd_ratio_abs_tol + dd_ratio_rel_tol * max(abs(max_dd_ratio_cpu), abs(max_dd_ratio_achieved))
+            if (abs(max_dd_ratio_cpu - max_dd_ratio_achieved) > tol) then
+               print *, "Kokkos and CPU MatDiagDomRatio global max do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            do ifree = 1, size(diag_dom_ratio)
+               diff = abs(diag_dom_ratio(ifree) - diag_dom_ratio_cpu(ifree))
+               tol = dd_ratio_abs_tol + dd_ratio_rel_tol * max(abs(diag_dom_ratio(ifree)), abs(diag_dom_ratio_cpu(ifree)))
+               if (diff > tol) then
+                  print *, "Kokkos and CPU MatDiagDomRatio entries do not match"
+                  call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+               end if
+            end do
+
+            deallocate(diag_dom_ratio_cpu)
+         end if
+      else
+         call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+      end if
+#else
+      call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+#endif
+
+   end subroutine MatDiagDomRatio
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
 
       ! Compute diagonal dominance ratio over local fine rows of input_mat
       ! without extracting Aff. This mirrors the Kokkos MatDiagDomRatio path:
@@ -220,6 +315,7 @@ module ddc_module
       type(tIS), intent(in)               :: is_fine
       integer, dimension(:), intent(in)   :: cf_markers_local
       PetscReal, dimension(:), allocatable, intent(out) :: diag_dom_ratio
+      PetscReal, intent(out)              :: max_dd_ratio_achieved
 
       ! Local
       PetscInt :: local_rows, local_cols, global_rows, global_cols, fine_size
@@ -241,6 +337,7 @@ module ddc_module
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       PetscReal :: diag_val, off_diag_sum
+      PetscReal :: max_dd_ratio_local
       logical :: mpi
 
       ! ~~~~~~
@@ -357,12 +454,19 @@ module ddc_module
 
       call ISRestoreIndices(is_fine, is_pointer, ierr)
 
+      if (fine_size == 0) then
+         max_dd_ratio_local = 0d0
+      else
+         max_dd_ratio_local = maxval(diag_dom_ratio)
+      end if
+      call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX, errorcode)
+
    end subroutine MatDiagDomRatio_cpu
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-      subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, cf_markers_local, Aff_transpose, &
-         diag_dom_ratio_random)
+      subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, diag_dom_ratio, &
+         cf_markers_local, Aff_transpose, diag_dom_ratio_random)
 
       ! Second pass diagonal dominance cleanup
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -376,7 +480,9 @@ module ddc_module
       type(tMat), target, intent(in)      :: input_mat
       type(tIS), intent(in)               :: is_fine
       PetscReal, intent(in)               :: fraction_swap
-      PetscReal, intent(inout)            :: max_dd_ratio
+      PetscReal, intent(in)               :: max_dd_ratio
+      PetscReal, intent(in)               :: max_dd_ratio_achieved
+      PetscReal, dimension(:), intent(in) :: diag_dom_ratio
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
       type(tMat), intent(in), optional    :: Aff_transpose
       PetscReal, dimension(:), intent(in), optional :: diag_dom_ratio_random
@@ -389,10 +495,9 @@ module ddc_module
       integer :: bin_sum, bin_boundary, bin, errorcode
       integer :: max_luby_steps
       PetscErrorCode :: ierr
-      PetscReal, dimension(:), allocatable :: diag_dom_ratio, diag_dom_ratio_measure
+      PetscReal, dimension(:), allocatable :: diag_dom_ratio_measure
       integer, dimension(:), allocatable :: cf_markers_local_aff
       PetscInt, dimension(:), pointer :: is_pointer
-      PetscReal :: max_dd_ratio_local, max_dd_ratio_achieved
       real(c_double) :: swap_dom_val
       integer, dimension(1000) :: dom_bins
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -441,33 +546,13 @@ module ddc_module
       
       call MatGetOwnershipRange(input_mat, input_row_start, input_row_end_plus_one, ierr)                                    
 
-      ! ~~~~~~~~~~~~~
-      ! Compute diagonal dominance ratio
-      ! ~~~~~~~~~~~~~
-      call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio)
       local_rows = fine_size
       dom_bins = 0
 
       ! ~~~~~~~~
-      ! Get the maximum diagonal dominance ratio
+      ! Trigger path: use PMIS-based independent set to swap F points
       ! ~~~~~~~~
       if (trigger_dd_ratio_compute) then
-         if (local_rows == 0) then
-            max_dd_ratio_local = 0
-         else
-            max_dd_ratio_local = maxval(diag_dom_ratio)
-         end if
-         call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX, errorcode)
-         ! If we have hit the required diagonal dominance ratio, then return without swapping any F points
-         if (max_dd_ratio_achieved < max_dd_ratio) then
-            max_dd_ratio = max_dd_ratio_achieved
-            deallocate(diag_dom_ratio)
-            call ISRestoreIndices(is_fine, is_pointer, ierr)
-
-            ! Return if we are < max_dd_ratio
-            return
-         end if
-
          ! ~~~~~~~~
          ! If we haven't hit the required diagonal dominance ratio, 
          ! then we need to swap some F points to C points, and we will do that with a 
@@ -560,7 +645,7 @@ module ddc_module
             end if
          end do   
          
-         deallocate(cf_markers_local_aff, diag_dom_ratio_measure, diag_dom_ratio)
+         deallocate(cf_markers_local_aff, diag_dom_ratio_measure)
          call ISRestoreIndices(is_fine, is_pointer, ierr)
 
          ! Return as we're done
@@ -630,7 +715,6 @@ module ddc_module
          end do
       end if
 
-      deallocate(diag_dom_ratio)
       call ISRestoreIndices(is_fine, is_pointer, ierr)
 
    end subroutine ddc_cpu      

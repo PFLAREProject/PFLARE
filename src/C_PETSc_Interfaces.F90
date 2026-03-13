@@ -404,13 +404,26 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, Aff_transpose_array, &
+      subroutine MatDiagDomRatio_kokkos(A_array, max_dd_ratio_achieved, local_rows_aff) &
+         bind(c, name="MatDiagDomRatio_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         real(PFLARE_PETSCREAL_C_KIND) :: max_dd_ratio_achieved
+         integer(PFLARE_PETSCINT_C_KIND) :: local_rows_aff
+      end subroutine MatDiagDomRatio_kokkos
+ 
+   end interface
+
+   interface   
+      
+      subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_transpose_array, &
             random_numbers_ptr) &
          bind(c, name="ddc_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
          real(PFLARE_PETSCREAL_C_KIND), value :: fraction_swap
-         real(PFLARE_PETSCREAL_C_KIND) :: max_dd_ratio
+         real(PFLARE_PETSCREAL_C_KIND), value :: max_dd_ratio
+         real(PFLARE_PETSCREAL_C_KIND), value :: max_dd_ratio_achieved
          integer(c_long_long) :: Aff_transpose_array
          type(c_ptr), value :: random_numbers_ptr
       end subroutine ddc_kokkos         
@@ -429,12 +442,31 @@ module c_petsc_interfaces
    
    interface   
       
+      subroutine copy_diag_dom_ratio_d2h(diag_dom_ratio_local) &
+         bind(c, name="copy_diag_dom_ratio_d2h")
+         use iso_c_binding
+         type(c_ptr), value :: diag_dom_ratio_local
+      end subroutine copy_diag_dom_ratio_d2h
+ 
+   end interface
+
+   interface   
+      
       subroutine delete_device_cf_markers() &
          bind(c, name="delete_device_cf_markers")
          use iso_c_binding
       end subroutine delete_device_cf_markers         
  
    end interface       
+
+   interface   
+      
+      subroutine delete_device_diag_dom_ratio() &
+         bind(c, name="delete_device_diag_dom_ratio")
+         use iso_c_binding
+      end subroutine delete_device_diag_dom_ratio
+ 
+   end interface
 
    interface   
       
