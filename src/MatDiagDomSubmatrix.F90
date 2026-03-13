@@ -42,9 +42,9 @@ module matdiagdomsubmatrix
       end if
 
      ! Ignored as we pass in non-zero max_dd_ratio 
-     ddc_its = 1
-     ! Ignored as we pass in non-zero max_dd_ratio - but can't be sent in as 0
-     ddc_fraction = 0.1
+     ddc_its = 0
+     ! Ignored as we pass in non-zero max_dd_ratio
+     ddc_fraction = 0.0
      ! As many steps as needed
      max_luby_steps = -1
      ! PMISR DDC

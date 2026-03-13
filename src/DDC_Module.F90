@@ -63,12 +63,12 @@ module ddc_module
 #endif
       ! ~~~~~~
 
+      trigger_dd_ratio_compute_local = max_dd_ratio > 0
+
       ! If we don't need to swap anything, return
-      if (fraction_swap == 0d0) then
+      if (fraction_swap == 0d0 .AND. .NOT. trigger_dd_ratio_compute_local) then
          return
       end if
-
-      trigger_dd_ratio_compute_local = max_dd_ratio > 0
 
       ! Compute the diagonal dominance ratio - either returned in diag_dom_ratio
       ! or stored in a device copy for kokkos
