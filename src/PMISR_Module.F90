@@ -267,7 +267,8 @@ module pmisr_module
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pmisr_existing_measure_cf_markers(strength_mat, max_luby_steps, pmis, measure_local, cf_markers_local, zero_measure_c_point)
+   subroutine pmisr_existing_measure_cf_markers(strength_mat, max_luby_steps, pmis, &
+                  measure_local, cf_markers_local, zero_measure_c_point)
 
       ! PMISR implementation that takes an existing measure_local and cf_markers_local 
       ! and then does the Luby algorithm to assign the rest of the CF markers
