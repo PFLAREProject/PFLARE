@@ -39,7 +39,7 @@ module ddc_module
       PetscReal, intent(inout)            :: max_dd_ratio
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
-      type(tMat) :: Aff_ddc, Aff_transpose_ddc
+      type(tMat) :: Aff_ddc
       PetscErrorCode :: ierr
       logical :: trigger_dd_ratio_compute_local
       PetscInt :: local_rows, local_cols
@@ -52,6 +52,7 @@ module ddc_module
       MPIU_Comm :: MPI_COMM_MATRIX
 
 #if defined(PETSC_HAVE_KOKKOS)
+      type(tMat) :: Aff_transpose_ddc
       integer(c_long_long) :: A_array, Aff_transpose_array, is_fine_array, is_coarse_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
