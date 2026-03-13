@@ -7,7 +7,7 @@ module ddc_module
          MatDiagDomRatio_kokkos, create_cf_is_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
    use sabs, only: generate_sabs
-   use pmisr_module, only: pmisr_existing_measure_cf_markers
+   use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
    use pflare_parameters, only: C_POINT, F_POINT
    use matdiagdom, only: MatDiagDomRatio
 
@@ -130,7 +130,6 @@ module ddc_module
                         Aff_ddc) 
 
             call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-            call MatDestroy(Aff_ddc, ierr)
             Aff_transpose_array = Aff_transpose_ddc%v
             call ISDestroy(is_fine_temp, ierr)
             call ISDestroy(is_coarse_temp, ierr)
@@ -156,7 +155,7 @@ module ddc_module
             call copy_cf_markers_d2h(cf_markers_local_ptr)
             if (trigger_dd_ratio_compute_local) then
                call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-                  diag_dom_ratio, cf_markers_local_two, Aff_transpose=Aff_transpose_ddc, &
+                  diag_dom_ratio, cf_markers_local_two, Aff=Aff_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
             else
                call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
@@ -178,6 +177,7 @@ module ddc_module
 
          ! Cleanup
          if (trigger_dd_ratio_compute_local) then
+            call MatDestroy(Aff_ddc, ierr)
             call MatDestroy(Aff_transpose_ddc, ierr)
          end if
 
@@ -187,13 +187,11 @@ module ddc_module
             call MatCreateSubMatrix(input_mat, &
                   is_fine, is_fine, MAT_INITIAL_MATRIX, &
                   Aff_ddc, ierr)
-            call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local, &
-                  Aff_transpose=Aff_transpose_ddc, &
+                  Aff=Aff_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
             call MatDestroy(Aff_ddc, ierr)
-            call MatDestroy(Aff_transpose_ddc, ierr)
          else
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local)
@@ -205,13 +203,11 @@ module ddc_module
          call MatCreateSubMatrix(input_mat, &
                is_fine, is_fine, MAT_INITIAL_MATRIX, &
                Aff_ddc, ierr)
-         call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local, &
-               Aff_transpose=Aff_transpose_ddc, &
+               Aff=Aff_ddc, &
                diag_dom_ratio_random=diag_dom_ratio_random)
          call MatDestroy(Aff_ddc, ierr)
-         call MatDestroy(Aff_transpose_ddc, ierr)
       else
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local)
@@ -226,7 +222,7 @@ module ddc_module
 ! -------------------------------------------------------------------------------------------------------------------------------
 
       subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, diag_dom_ratio, &
-         cf_markers_local, Aff_transpose, diag_dom_ratio_random)
+         cf_markers_local, Aff, diag_dom_ratio_random)
 
       ! Second pass diagonal dominance cleanup
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -244,7 +240,7 @@ module ddc_module
       PetscReal, intent(in)               :: max_dd_ratio_achieved
       PetscReal, dimension(:), intent(in) :: diag_dom_ratio
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
-      type(tMat), intent(in), optional    :: Aff_transpose
+      type(tMat), intent(in), optional    :: Aff
       PetscReal, dimension(:), intent(in), optional :: diag_dom_ratio_random
 
       ! Local
@@ -274,10 +270,10 @@ module ddc_module
 
       trigger_dd_ratio_compute = max_dd_ratio > 0
 
-      ! Trigger path requires Aff_transpose and pre-generated random numbers
+      ! Trigger path requires Aff and pre-generated random numbers
       if (trigger_dd_ratio_compute) then
-         if (.NOT. present(Aff_transpose) .OR. .NOT. present(diag_dom_ratio_random)) then
-            print *, "ddc_cpu missing Aff_transpose/randoms for trigger path"
+         if (.NOT. present(Aff) .OR. .NOT. present(diag_dom_ratio_random)) then
+            print *, "ddc_cpu missing Aff/randoms for trigger path"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
          end if
       end if
@@ -386,8 +382,10 @@ module ddc_module
          end do
 
          ! Call PMISR with as many steps as necessary
+         ! Uses the implicit transpose version which takes Aff directly
+         ! and handles Aff+Aff^T internally without forming the explicit sum
          max_luby_steps = -1
-         call pmisr_existing_measure_cf_markers(Aff_transpose, max_luby_steps, .FALSE., &
+         call pmisr_existing_measure_implicit_transpose(Aff, max_luby_steps, .FALSE., &
                   diag_dom_ratio_measure, cf_markers_local_aff)
 
          ! Let's go and swap the badly diagonally dominant rows to F points
