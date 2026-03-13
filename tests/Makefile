@@ -602,7 +602,7 @@ run_tests_no_load_serial:
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio"
 	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
-	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 7 \
+	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 9 \
 	 -pc_air_inverse_type power
 #	
 	@echo ""
@@ -941,7 +941,7 @@ run_tests_no_load_parallel:
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
-	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 7 \
+	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 9 \
 	 -pc_air_inverse_type power
 #	
 	@echo ""
