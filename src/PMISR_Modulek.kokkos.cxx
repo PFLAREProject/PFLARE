@@ -5,7 +5,7 @@
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 
 // The definition of the device copy of the cf markers on a given level
-// is stored in Device_CF_Markersk.kokkos.cxx and imported as extern from
+// is stored in Device_Datak.kokkos.cxx and imported as extern from
 // kokkos_helper.hpp
 
 //------------------------------------------------------------------------------------------------------------------------
