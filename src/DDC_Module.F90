@@ -241,11 +241,11 @@ module ddc_module
 
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer :: errorcode, ifree
-      PetscReal :: tol, diff
 
 #if defined(PETSC_HAVE_KOKKOS)
+      integer :: errorcode, ifree
       MatType :: mat_type
+      PetscReal :: tol, diff
       integer(c_long_long) :: A_array
       PetscInt :: local_rows_aff_kokkos
       type(c_ptr) :: diag_dom_ratio_ptr
