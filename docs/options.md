@@ -48,7 +48,7 @@ All options can be set either through command line arguments or programmatically
    | ``-pc_air_max_luby_steps``  |  PCAIRGetMaxLubySteps  PCAIRSetMaxLubySteps  | If using CF splitting type pmisr_ddc, pmis, or pmis_dist2, this is the maximum number of Luby steps to use. If negative, use as many steps as necessary | -1 |   
    | ``-pc_air_ddc_its``  |  PCAIRGetDDCIts  PCAIRSetDDCIts  | If using CF splitting type pmisr_ddc, this is the number of iterations of DDC performed | 1 |   
    | ``-pc_air_ddc_fraction``  |  PCAIRGetDDCFraction  PCAIRSetDDCFraction  | If using CF splitting type pmisr_ddc, this is the local fraction of F points to convert to C points based on diagonal dominance. If negative, any row which has a diagonal dominance ratio less than the absolute value will be converted from F to C | 0.1 |
-   | ``-pc_air_max_dd_ratio``  |  PCAIRGetMaxDDRatio  PCAIRSetMaxDDRatio  | If using CF splitting type pmisr_ddc, do as many DDC iterations as necessary to hit this diagonal dominance ratio. If 0.0 do the number in -pc_air_ddc_its | 0.0 |   
+   | ``-pc_air_max_dd_ratio``  |  PCAIRGetMaxDDRatio  PCAIRSetMaxDDRatio  | Rather than do a fixed number of DDC iterations, converting a fixed fraction of F points to C based on diagonal dominance at each iteration, compute a parallel independent set of F points greater than this ratio, converting the worst at each iteration and do as many iterations as necessary. If 0.0 this is not used. 0.0 |   
 
 #### Approximate inverse options
 

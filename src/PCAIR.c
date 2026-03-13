@@ -632,8 +632,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
    PCAIRSetDDCIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// If using CF splitting type pmisr_ddc, do as many DDC iterations as necessary to 
-// hit this diagonal dominance ratio. If 0.0 do the number in -pc_air_ddc_its
+// If using CF splitting type pmisr_ddc, rather than do a fixed number of DDC iterations, 
+// converting a fixed fraction of F points to C based on diagonal dominance at each iteration, 
+// compute a parallel independent set of F points greater than this ratio, converting the worst
+// at each iteration and do as many iterations as necessary. If 0.0 this is not used.
 // Default: 0.0
 // -pc_air_max_dd_ratio
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxDDRatio(PC pc, PetscReal input_real)
