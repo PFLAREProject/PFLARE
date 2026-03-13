@@ -2,11 +2,8 @@ module ddc_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug, remove_small_from_sparse
-   use c_petsc_interfaces, only: copy_cf_markers_d2h, &
-         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, &
-         allreducesum_petscint_mine, boolscatter_mat_begin_c, boolscatter_mat_end_c, &
-         boolscatter_mat_reverse_begin_c, boolscatter_mat_reverse_end_c, ddc_kokkos
+   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
+   use c_petsc_interfaces, only: copy_cf_markers_d2h, ddc_kokkos, create_cf_is_kokkos 
    use sabs, only: generate_sabs
    use pmisr_module, only: pmisr_existing_measure_cf_markers
    use pflare_parameters, only: C_POINT, F_POINT
@@ -42,21 +39,22 @@ module ddc_module
       type(tMat) :: Aff_ddc, Aff_transpose_ddc
       PetscErrorCode :: ierr
       logical :: trigger_dd_ratio_compute_local
-      PetscInt :: fine_size_ddc
-      integer :: seed_size_ddc, comm_rank_ddc, errorcode_ddc
+      PetscInt :: local_rows, local_cols
+      integer :: seed_size_ddc, comm_rank_ddc, errorcode_ddc, i_loc
       integer, dimension(:), allocatable :: seed_ddc
       PetscReal, dimension(:), allocatable, target :: diag_dom_ratio_random
       type(c_ptr) :: random_numbers_ptr
       MPIU_Comm :: MPI_COMM_MATRIX
 
 #if defined(PETSC_HAVE_KOKKOS)
-      integer(c_long_long) :: A_array, Aff_transpose_array
+      integer(c_long_long) :: A_array, Aff_transpose_array, is_fine_array, is_coarse_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
       integer :: errorcode
       !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
       PetscReal :: max_dd_ratio_cpu, max_dd_ratio_kokkos
+      type(tIS) :: is_fine_temp, is_coarse_temp
 #endif
       ! ~~~~~~
 
@@ -74,14 +72,17 @@ module ddc_module
          
          call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
          call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank_ddc, errorcode_ddc)
-         call ISGetLocalSize(is_fine, fine_size_ddc, ierr)
-         allocate(diag_dom_ratio_random(fine_size_ddc))
+         call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+         ! We allocate randoms here to be the size of input, rather than 
+         ! just F points as if we are on the device the is_fine won't be allocated
+         ! on the host yet
+         allocate(diag_dom_ratio_random(local_rows))
          
          call random_seed(size=seed_size_ddc)
          allocate(seed_ddc(seed_size_ddc))
          
-         do fine_size_ddc = 1, seed_size_ddc
-            seed_ddc(fine_size_ddc) = comm_rank_ddc + 1 + fine_size_ddc
+         do i_loc = 1, seed_size_ddc
+            seed_ddc(i_loc) = comm_rank_ddc + 1 + i_loc
          end do
          call random_seed(put=seed_ddc)
          call random_number(diag_dom_ratio_random)
@@ -99,22 +100,31 @@ module ddc_module
          ! Kokkos path: only extract Aff and build sabs if trigger_dd_ratio_compute
          ! as the kokkos ddc computes diag dominance ratio without needing Aff
          Aff_transpose_array = 0
+         A_array = input_mat%v
          if (trigger_dd_ratio_compute_local) then
-            call MatCreateSubMatrix(input_mat, &
-                  is_fine, is_fine, MAT_INITIAL_MATRIX, &
-                  Aff_ddc, ierr)
+
+            ! Create the host is_fine and is_coarse based on device cf_markers
+            call create_cf_is_kokkos(A_array, is_fine_array, is_coarse_array)            
+            is_fine_temp%v = is_fine_array
+            is_coarse_temp%v = is_coarse_array
+
+            call MatCreateSubMatrixWrapper(input_mat, &
+                        is_fine_temp, is_fine_temp, MAT_INITIAL_MATRIX, &
+                        Aff_ddc) 
+
             call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
             Aff_transpose_array = Aff_transpose_ddc%v
+            call ISDestroy(is_fine_temp, ierr)
+            call ISDestroy(is_coarse_temp, ierr)
          end if
 
-         A_array = input_mat%v
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
             ! Need Aff for CPU comparison in non-trigger case
             if (.NOT. trigger_dd_ratio_compute_local) then
-               call MatCreateSubMatrix(input_mat, &
+               call MatCreateSubMatrixWrapper(input_mat, &
                      is_fine, is_fine, MAT_INITIAL_MATRIX, &
                      Aff_ddc, ierr)
             end if
@@ -161,7 +171,7 @@ module ddc_module
 
       else
          ! CPU path: always extract Aff, only build sabs if trigger_dd_ratio_compute
-         call MatCreateSubMatrix(input_mat, &
+         call MatCreateSubMatrixWrapper(input_mat, &
                is_fine, is_fine, MAT_INITIAL_MATRIX, &
                Aff_ddc, ierr)
          if (trigger_dd_ratio_compute_local) then
@@ -176,7 +186,7 @@ module ddc_module
       end if
 #else
       ! CPU path: always extract Aff, only build sabs if trigger_dd_ratio_compute
-      call MatCreateSubMatrix(input_mat, &
+      call MatCreateSubMatrixWrapper(input_mat, &
             is_fine, is_fine, MAT_INITIAL_MATRIX, &
             Aff_ddc, ierr)
       if (trigger_dd_ratio_compute_local) then
@@ -377,7 +387,7 @@ module ddc_module
 
          ! Use the random numbers passed in from the wrapper
          ! so that CPU and Kokkos use the same randoms for PMIS tie-breaking
-         diag_dom_ratio_measure = diag_dom_ratio_random
+         diag_dom_ratio_measure = diag_dom_ratio_random(1:local_rows)
 
          ! ~~~~~~~~
          ! pmisr_existing_measure_cf_markers tags the points with the smallest
