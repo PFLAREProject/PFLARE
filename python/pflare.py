@@ -33,6 +33,10 @@ COEFFS_INV_AFF_DROPPED = 1  # Inverse of the dropped fine-fine block
 COEFFS_INV_ACC         = 2  # Inverse of the coarse-coarse block A_cc
 COEFFS_INV_COARSE      = 3  # Inverse on the coarsest grid
 
+# Standalone matrix utility wrappers
+compute_cf_splitting          = pflare_defs.compute_cf_splitting
+compute_diag_dom_submatrix    = pflare_defs.compute_diag_dom_submatrix
+
 # -----------------------------------------------------------------------
 # PCAIR Get functions
 # The exact Python names for all pflare functions are listed here in

@@ -167,7 +167,7 @@ algorithm = pflare.CF_PMISR_DDC
 # Is the matrix symmetric?
 symmetric = False
 
-[is_fine, is_coarse] = pflare.pflare_defs.compute_cf_splitting(A,\
+[is_fine, is_coarse] = pflare.compute_cf_splitting(A,\
       symmetric,\
       strong_threshold, max_luby_steps,\
       algorithm,\
@@ -188,3 +188,10 @@ if n_fine + n_coarse==local_rows:
 else:
    PETSc.Sys.Print("- NOT OK",comm=comm)
    sys.exit(1)
+
+# ~~~~~~~~~~~~~~
+# Compute a diagonally dominant submatrix
+# ~~~~~~~~~~~~~~
+
+A_dd = pflare.compute_diag_dom_submatrix(A, 0.5)
+A_dd.destroy()

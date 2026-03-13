@@ -25,6 +25,7 @@ PFLARE adds new methods to PETSc, including:
 1) Polynomial approximate inverses, e.g., GMRES and Neumann polynomials
 2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
 3) CF splittings, e.g., PMISR DDC
+4) Extracting diagonally dominant submatrices
 
 ## Quick start
 

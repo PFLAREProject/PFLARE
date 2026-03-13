@@ -117,7 +117,7 @@ run_tests_load_serial:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1
 # 
 	@echo ""
-	@echo "Test PMISR DDC CF splitting in C"
+	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C"
 	./ex6_cf_splitting  -f data/mat_stream_2364
 #
 	@echo ""
@@ -203,7 +203,7 @@ run_tests_load_parallel:
 	$(MPIEXEC) -n 4 ./ex12f -f data/mat_stream_2364 -pc_air_subcomm -pc_air_inverse_type arnoldi -pc_air_coarsest_subcomm \
 	 -pc_air_coarsest_inverse_type arnoldi -ksp_max_it 5 -pc_air_a_drop 1e-3	 
 # 
-	@echo "Test PMISR DDC CF splitting in C in parallel"
+	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364
 #
 	@echo ""

@@ -17,6 +17,7 @@ PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int symmetric_int,
    double strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, double fraction_swap, double max_dd_ratio,
    IS *is_fine, IS *is_coarse);
+PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, double max_dd_ratio, Mat *output_mat);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
 // External users should use the get/set routines without _c which have 
 // PetscErrorCode defined as return type, those routines are defined below this
@@ -202,6 +203,11 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
    compute_cf_splitting_c(&input_mat, symmetric_int, strong_threshold,
       max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
       max_dd_ratio, is_fine, is_coarse);
+}
+
+PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, double max_dd_ratio, Mat *output_mat)
+{
+   compute_diag_dom_submatrix_c(&input_mat, max_dd_ratio, output_mat);
 }
 
 // Get routines

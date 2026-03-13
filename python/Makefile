@@ -55,9 +55,9 @@ run_tests:
 		echo "Test single level GMRES polynomial preconditioning with Python in parallel"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_type pflareinv -pc_pflareinv_type power; \
 		echo ""; \
-		echo "Test PMISR DDC CF splitting with Python"; \
+		echo "Test PMISR DDC CF splitting and diagonal dominance extract with Python"; \
 		$(PYTHON) ex2_cf_splitting.py; \
-		echo "Test PMISR DDC CF splitting with Python in parallel"; \
+		echo "Test PMISR DDC CF splitting and diagonal dominance extract with Python in parallel"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py; \
 		echo ""; \
 		echo "Test PCAIR direct option set/get API with Python"; \

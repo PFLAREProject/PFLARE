@@ -19,6 +19,7 @@ cdef extern from "petsc.h":
 cdef extern:
 	void PCRegister_PFLARE()
 	void compute_cf_splitting_c(PetscMat *A, int symmetric_int, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap, double max_dd_ratio, PetscIS* is_fine, PetscIS* is_coarse)
+	void compute_diag_dom_submatrix_c(PetscMat *A, double max_dd_ratio, PetscMat *output_mat)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Get routines
@@ -174,6 +175,12 @@ cpdef compute_cf_splitting(Mat A, bint symmetric, double strong_threshold, int m
 	is_coarse = IS()
 	compute_cf_splitting_c(&(A.mat), symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, max_dd_ratio, &(is_fine.iset), &(is_coarse.iset))
 	return is_fine, is_coarse
+
+cpdef compute_diag_dom_submatrix(Mat A, double max_dd_ratio):
+	cdef Mat output_mat
+	output_mat = Mat()
+	compute_diag_dom_submatrix_c(&(A.mat), max_dd_ratio, &(output_mat.mat))
+	return output_mat
 
 # -----------------------------------------------------------------------
 # PCAIR Get wrappers

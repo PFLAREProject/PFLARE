@@ -45,7 +45,7 @@ There are several features used to improve the parallel performance of PCAIR [2-
 
 ### CF splittings
 
-The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarchy. They can also be called independently from PCAIR. The CF splitting type within PCAIR can be specified with ``-pc_air_cf_splitting_type``: 
+The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarchy. The CF splitting type within PCAIR can be specified with ``-pc_air_cf_splitting_type``: 
 
    | Command line type  | Flag | Description | GPU setup |
    | ------------- | -- | ------------- | -- |
@@ -131,10 +131,48 @@ or in Python with petsc4py:
      # Is the matrix symmetric?
      symmetric = False
 
-     [is_fine, is_coarse] = pflare.pflare_defs.compute_cf_splitting(A, \
+     [is_fine, is_coarse] = pflare.compute_cf_splitting(A, \
            symmetric, \
            strong_threshold, max_luby_steps, \
            algorithm, \
            ddc_its, \
            ddc_fraction, \
            max_dd_ratio)
+
+### Diagonally dominant submatrix extraction
+
+PFLARE also provides a standalone convenience routine to extract a diagonally dominant submatrix from a PETSc matrix, enforced to have a row-wise diagonal dominance ratio of less than `max_dd_ratio`. This works in serial, parallel and with Kokkos (and hence GPUs).
+
+For a row `i` of the extracted submatrix, define the row-wise ratio as
+
+$$
+r_i = \frac{\sum_{j \neq i} |a_{ij}|}{|a_{ii}|}.
+$$
+
+Then the extracted submatrix is required to satisfy
+
+$$
+r_i < \texttt{max\_dd\_ratio} \quad \text{for all rows } i.
+$$
+
+If a row has zero/missing diagonal, the ratio is treated as `0.0`. The parameter `max_dd_ratio` must satisfy `0.0 < max_dd_ratio < 1.0`. For example, to extract a diagonally dominant submatrix from a PETSc matrix `A`:
+
+in Fortran:
+
+      type(tMat) :: A_dd
+      PetscReal :: max_dd_ratio = 0.5
+
+      call compute_diag_dom_submatrix(A, max_dd_ratio, A_dd)
+
+or in C:
+
+      Mat A_dd;
+      PetscReal max_dd_ratio = 0.5;
+
+      compute_diag_dom_submatrix(A, max_dd_ratio, &A_dd);
+
+or in Python with petsc4py:
+
+      max_dd_ratio = 0.5
+
+      A_dd = pflare.compute_diag_dom_submatrix(A, max_dd_ratio)

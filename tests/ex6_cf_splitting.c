@@ -73,6 +73,67 @@ static PetscErrorCode CheckSplitting(Mat A, IS is_fine, IS is_coarse, const char
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Check that a returned diagonally dominant submatrix is diagonally dominant
+//   ratio = sum(abs(offdiag entries)) / abs(diagonal), with ratio=0 if no diagonal exists.
+static PetscErrorCode CheckDiagDomSubmatrix(Mat A, Mat A_dd, PetscReal max_dd_ratio, const char *label)
+{
+  PetscInt    a_local_rows, a_local_cols, a_global_rows, a_global_cols;
+  PetscInt    dd_local_rows, dd_local_cols, dd_global_rows, dd_global_cols;
+  PetscInt    rstart, rend, i, j, ncols;
+  const PetscInt *cols;
+  const PetscScalar *vals;
+  PetscReal   diag_val, off_diag_sum, row_ratio;
+  PetscReal   max_row_ratio_local = 0.0, max_row_ratio_global = 0.0;
+  const PetscReal dd_ratio_abs_tol = 1e-12;
+  const PetscReal dd_ratio_rel_tol = 1e-10;
+  PetscReal   tol;
+  PetscMPIInt rank;
+
+  PetscFunctionBeginUser;
+  PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
+
+  PetscCall(MatGetLocalSize(A, &a_local_rows, &a_local_cols));
+  PetscCall(MatGetSize(A, &a_global_rows, &a_global_cols));
+  PetscCall(MatGetLocalSize(A_dd, &dd_local_rows, &dd_local_cols));
+  PetscCall(MatGetSize(A_dd, &dd_global_rows, &dd_global_cols));
+
+  PetscCall(MatGetOwnershipRange(A_dd, &rstart, &rend));
+  for (i = rstart; i < rend; i++) {
+    diag_val = 0.0;
+    off_diag_sum = 0.0;
+
+    PetscCall(MatGetRow(A_dd, i, &ncols, &cols, &vals));
+    for (j = 0; j < ncols; j++) {
+      if (cols[j] == i) {
+        diag_val = PetscAbsScalar(vals[j]);
+      } else {
+        off_diag_sum += PetscAbsScalar(vals[j]);
+      }
+    }
+    PetscCall(MatRestoreRow(A_dd, i, &ncols, &cols, &vals));
+
+    // Ensure we don't divide by zero if no diagonal
+    row_ratio = (diag_val != 0.0) ? (off_diag_sum / diag_val) : 0.0;
+    max_row_ratio_local = PetscMax(max_row_ratio_local, row_ratio);
+
+  }
+
+  PetscCallMPI(MPI_Allreduce(&max_row_ratio_local, &max_row_ratio_global, 1, MPIU_REAL, MPIU_MAX, PETSC_COMM_WORLD));
+
+  tol = dd_ratio_abs_tol + dd_ratio_rel_tol * PetscMax(PetscAbsReal(max_dd_ratio), PetscAbsReal(max_row_ratio_global));
+  PetscCheck(max_row_ratio_global <= max_dd_ratio + tol, PETSC_COMM_SELF, PETSC_ERR_PLIB,
+             "%s: max observed dd ratio %.16e > max_dd_ratio %.16e (tol %.3e)",
+             label, (double)max_row_ratio_global, (double)max_dd_ratio, (double)tol);
+
+  if (!rank) {
+    PetscCall(PetscPrintf(PETSC_COMM_SELF,
+                          "%s: OK (submatrix size %" PetscInt_FMT " x %" PetscInt_FMT ", max observed ratio %.16e <= %.16e)\n",
+                          label, dd_global_rows, dd_global_cols, (double)max_row_ratio_global, (double)max_dd_ratio));
+  }
+
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc,char **args)
 {
 #if defined(PETSC_USE_LOG)
@@ -84,6 +145,7 @@ int main(int argc,char **args)
   PetscViewer    fd;
   PetscBool      flg,b_in_f = PETSC_TRUE;
   IS is_fine, is_coarse;
+  Mat A_dd;
   VecType vtype;
 
   PetscCall(PetscInitialize(&argc,&args,(char*)0,help));
@@ -199,6 +261,16 @@ int main(int argc,char **args)
   PetscCall(ISDestroy(&is_coarse));  
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
+
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  //    Compute a diagonally dominant submatrix
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  compute_diag_dom_submatrix(A, 0.5, &A_dd);
+  PetscCall(CheckDiagDomSubmatrix(A, A_dd, 0.5, "diag_dom_submatrix max_dd_ratio=0.5"));
+  PetscCall(MatDestroy(&A_dd));
+
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /* Cleanup */
   PetscCall(VecDestroy(&x));

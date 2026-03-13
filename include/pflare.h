@@ -42,6 +42,7 @@ PETSC_EXTERN void PCRegister_PFLARE();
 
 /* Can call the CF splitting separate to everything */
 PETSC_EXTERN void compute_cf_splitting(Mat, int, double, int, int, int, double, double, IS*, IS*);
+PETSC_EXTERN void compute_diag_dom_submatrix(Mat, double, Mat*);
 
 /* Define PCPFLAREINV get routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyOrder(PC, PetscInt *);
