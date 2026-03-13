@@ -124,7 +124,7 @@ module ddc_module
          if (kokkos_debug()) then
             ! Need Aff for CPU comparison in non-trigger case
             if (.NOT. trigger_dd_ratio_compute_local) then
-               call MatCreateSubMatrixWrapper(input_mat, &
+               call MatCreateSubMatrix(input_mat, &
                      is_fine, is_fine, MAT_INITIAL_MATRIX, &
                      Aff_ddc, ierr)
             end if
@@ -171,7 +171,7 @@ module ddc_module
 
       else
          ! CPU path: always extract Aff, only build sabs if trigger_dd_ratio_compute
-         call MatCreateSubMatrixWrapper(input_mat, &
+         call MatCreateSubMatrix(input_mat, &
                is_fine, is_fine, MAT_INITIAL_MATRIX, &
                Aff_ddc, ierr)
          if (trigger_dd_ratio_compute_local) then
@@ -186,7 +186,7 @@ module ddc_module
       end if
 #else
       ! CPU path: always extract Aff, only build sabs if trigger_dd_ratio_compute
-      call MatCreateSubMatrixWrapper(input_mat, &
+      call MatCreateSubMatrix(input_mat, &
             is_fine, is_fine, MAT_INITIAL_MATRIX, &
             Aff_ddc, ierr)
       if (trigger_dd_ratio_compute_local) then
