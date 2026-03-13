@@ -125,6 +125,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/PMISR_Module.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/CF_Splitting.o \
+		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/Repartition.o \
 		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \

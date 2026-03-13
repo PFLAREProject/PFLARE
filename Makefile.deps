@@ -18,6 +18,7 @@ src/Gmres_Poly_Newton.o : src/Gmres_Poly_Newton.F90 src/C_PETSc_Interfaces.o src
 src/Grid_Transfer.o : src/Grid_Transfer.F90 src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/Grid_Transfer_Improve.o : src/Grid_Transfer_Improve.F90 src/PETSc_Helper.o src/Pflare_Parameters.o src/Timers.o 
 src/MatDiagDom.o : src/MatDiagDom.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
+src/MatDiagDomSubmatrix.o : src/MatDiagDomSubmatrix.F90 src/Pflare_Parameters.o src/PETSc_Helper.o src/CF_Splitting.o 
 src/Matshell_Data_Type.o : src/Matshell_Data_Type.F90 src/Pflare_Parameters.o src/AIR_Data_Type.o 
 src/Neumann_Poly.o : src/Neumann_Poly.F90 src/Pflare_Parameters.o src/TSQR.o src/Matshell_Data_Type.o src/PETSc_Helper.o src/Gmres_Poly.o 
 src/PCAIR_C_Fortran_Bindings.o : src/PCAIR_C_Fortran_Bindings.F90 src/PCAIR_Interfaces.o 
