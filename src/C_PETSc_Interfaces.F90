@@ -286,7 +286,8 @@ module c_petsc_interfaces
    interface   
       
       subroutine remove_small_from_sparse_kokkos(A_array, tol, B_array, &
-                     relative_max_row_tolerance_int, lump_int, allow_drop_diagonal_int) &
+                     relative_max_row_tolerance_int, lump_int, allow_drop_diagonal_int, &
+                     allow_diag_strength_int) &
          bind(c, name="remove_small_from_sparse_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
@@ -294,7 +295,7 @@ module c_petsc_interfaces
          integer(c_long_long) :: B_array
          integer(c_int), value :: relative_max_row_tolerance_int
          integer(c_int), value :: lump_int
-         integer(c_int), value :: allow_drop_diagonal_int
+         integer(c_int), value :: allow_drop_diagonal_int, allow_diag_strength_int
       end subroutine remove_small_from_sparse_kokkos         
  
    end interface

@@ -102,7 +102,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
  
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tol_int, lump, drop_diagonal_int)
+   subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tol_int, &
+                  lump, drop_diagonal_int, diag_strength_int)
 
       ! Wrapper around remove_small_from_sparse_cpu and remove_small_from_sparse_kokkos
    
@@ -112,11 +113,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(inout) :: output_mat
       PetscReal, intent(in) :: tol
       logical, intent(in), optional :: lump
-      integer, intent(in), optional :: relative_max_row_tol_int, drop_diagonal_int
+      integer, intent(in), optional :: relative_max_row_tol_int, drop_diagonal_int, diag_strength_int
       
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array
-      integer :: lump_int, allow_drop_diagonal_int, rel_max_row_tol_int, errorcode
+      integer :: lump_int, allow_drop_diagonal_int, allow_diag_strength_int, rel_max_row_tol_int, errorcode
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
@@ -147,11 +148,18 @@ logical, protected :: kokkos_debug_global = .FALSE.
          allow_drop_diagonal_int = 0
          if (present(drop_diagonal_int)) then
             allow_drop_diagonal_int = drop_diagonal_int
-         end if         
+         end if
+         ! Whether we use a strength of connection defined by |a_ij| .ge. tol * |a_ii|
+         allow_diag_strength_int = 0
+         if (present(diag_strength_int)) then
+            allow_diag_strength_int = diag_strength_int
+         end if                    
 
          A_array = input_mat%v             
          call remove_small_from_sparse_kokkos(A_array, tol, &
-                  B_array, rel_max_row_tol_int, lump_int, allow_drop_diagonal_int) 
+                  B_array, rel_max_row_tol_int, &
+                  lump_int, allow_drop_diagonal_int, &
+                  allow_diag_strength_int) 
          output_mat%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -159,7 +167,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             ! Debug check if the CPU and Kokkos versions are the same
             call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tol_int, &
-                     lump, drop_diagonal_int)       
+                     lump, drop_diagonal_int, diag_strength_int)       
 
             call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
@@ -180,12 +188,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       else
 
          call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
-                  lump, drop_diagonal_int)          
+                  lump, drop_diagonal_int, diag_strength_int)          
 
       end if
 #else
       call remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
-               lump, drop_diagonal_int)  
+               lump, drop_diagonal_int, diag_strength_int)  
 #endif  
      
          
@@ -193,7 +201,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, lump, drop_diagonal_int)
+   subroutine remove_small_from_sparse_cpu(input_mat, tol, output_mat, relative_max_row_tol_int, &
+                     lump, drop_diagonal_int, diag_strength_int)
 
       ! Returns a copy of a sparse matrix with entries below abs(val) < tol removed
       ! If rel_max_row_tol_int is 1, then the tol is taken to be a relative scaling 
@@ -206,11 +215,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(inout) :: output_mat
       PetscReal, intent(in) :: tol
       logical, intent(in), optional :: lump
-      integer, intent(in), optional :: drop_diagonal_int, relative_max_row_tol_int
+      integer, intent(in), optional :: drop_diagonal_int, relative_max_row_tol_int, diag_strength_int
 
       PetscInt :: col, ncols, ifree, max_nnzs
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start
-      PetscInt :: global_row_end_plus_one, max_nnzs_total
+      PetscInt :: global_row_end_plus_one, max_nnzs_total, diag_index
       PetscCount :: counter
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
@@ -219,7 +228,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, allocatable, dimension(:) :: v          
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries
-      integer :: drop_diag_int, errorcode, rel_max_row_tol_int
+      integer :: drop_diag_int, diag_stren_int, errorcode, rel_max_row_tol_int
       PetscReal :: rel_row_tol
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
@@ -236,8 +245,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! -1 - Always drop diagonal
       ! Never drop the diagonal by default
       drop_diag_int = 0
+      diag_stren_int = 0
       if (present(lump)) lump_entries = lump
       if (present(drop_diagonal_int)) drop_diag_int = drop_diagonal_int
+      if (present(diag_strength_int)) diag_stren_int = diag_strength_int
       rel_row_tol = tol
       ! 1  - Relative row tolerance (including diagonal)
       ! 0  - Absolute tolerance
@@ -303,24 +314,58 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! Copy in all the values
          v(counter:counter + ncols - 1) = vals(1:ncols)
 
+         ! Find where the diagonal is
+         diag_index = -1
+         if (diag_stren_int == 1) then
+            do col = 1, ncols
+               if (cols(col) == ifree) then
+                  diag_index = col
+               end if 
+            end do              
+         end if
+
          ! If we want a relative row tolerance
          if (rel_max_row_tol_int /= 0) then
             ! Include the diagonal in the relative row tolerance
             if (rel_max_row_tol_int == 1) then
-               rel_row_tol = tol * maxval(abs(vals(1:ncols)))
+               if (diag_stren_int == 1) then
+                  ! If there is a zero diagonal
+                  if (diag_index == -1) then
+                     rel_row_tol = 0d0
+                  else
+                     ! We are measuring relative to the strength of the diagonal
+                     rel_row_tol = tol * abs(vals(diag_index))
+                  end if
+               else
+                  rel_row_tol = tol * maxval(abs(vals(1:ncols)))
+               end if
 
             ! Don't include the diagonal in the relative row tolerance
             else if (rel_max_row_tol_int == -1) then
                
-               ! Be careful here to use huge(0d0) rather than huge(0)!
-               abs_biggest_entry = -huge(0d0)
-               ! Find the biggest entry in the row thats not the diagonal
-               do col = 1, ncols
-                  if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
-                     abs_biggest_entry = abs(vals(col))
-                  end if 
-               end do  
-               rel_row_tol = tol * abs_biggest_entry
+               ! If the user has specified they don't want to include the diagonal in the 
+               ! relative row tolerance, but also have said they want to measure
+               ! everything by the strength of the diagonal, it doesn't make
+               ! sense to exclude the diagonal!
+               if (diag_stren_int == 1) then
+                  ! If there is a zero diagonal
+                  if (diag_index == -1) then
+                     rel_row_tol = 0d0
+                  else
+                     ! We are measuring relative to the strength of the diagonal
+                     rel_row_tol = tol * abs(vals(diag_index))
+                  end if                  
+               else
+                  ! Be careful here to use huge(0d0) rather than huge(0)!
+                  abs_biggest_entry = -huge(0d0)
+                  ! Find the biggest entry in the row thats not the diagonal
+                  do col = 1, ncols
+                     if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
+                        abs_biggest_entry = abs(vals(col))
+                     end if 
+                  end do  
+                  rel_row_tol = tol * abs_biggest_entry
+               end if
             end if
          end if 
                   

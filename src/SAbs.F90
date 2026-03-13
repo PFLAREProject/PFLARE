@@ -12,7 +12,8 @@ module sabs
    
 !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine generate_sabs(input_mat, strong_threshold, symmetrize, square, output_mat, allow_drop_diagonal)
+   subroutine generate_sabs(input_mat, strong_threshold, symmetrize, square, output_mat, &
+                  allow_drop_diagonal, allow_diag_strength)
       
       ! Generate strength of connection matrix with absolute value 
       ! Output has no diagonal entries
@@ -23,7 +24,7 @@ module sabs
       type(tMat), intent(inout)  :: output_mat
       PetscReal, intent(in)           :: strong_threshold
       logical, intent(in)        :: symmetrize, square
-      logical, intent(in), optional :: allow_drop_diagonal
+      logical, intent(in), optional :: allow_drop_diagonal, allow_diag_strength
       
       PetscInt :: ifree
       PetscInt :: local_rows, local_cols, global_rows, global_cols
@@ -36,12 +37,14 @@ module sabs
       type(tMat) :: transpose_mat
       type(tIS) :: zero_diags
       PetscInt, dimension(:), pointer :: zero_diags_pointer
-      logical :: drop_diag
+      logical :: drop_diag, diag_strength
       
       ! ~~~~~~~~~~
 
       drop_diag = .TRUE.
+      diag_strength = .FALSE.
       if (present(allow_drop_diagonal)) drop_diag = allow_drop_diagonal
+      if (present(allow_diag_strength)) diag_strength = allow_diag_strength
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
@@ -56,8 +59,16 @@ module sabs
       
       ! Drop entries smaller than the strong_threshold, with a relative tolerance measured 
       ! against the biggest abs non-diagonal entry, don't lump and always drop the diagonal
-      call remove_small_from_sparse(input_mat, strong_threshold, output_mat, &
+      if (.NOT. diag_strength) then
+         call remove_small_from_sparse(input_mat, strong_threshold, output_mat, &
                relative_max_row_tol_int = -1, lump=.FALSE., drop_diagonal_int=-1)
+      else
+         ! Measure the strength of connection relative to the diagonal entry, 
+         ! not the max row value excluding the diagonal
+         call remove_small_from_sparse(input_mat, strong_threshold, output_mat, &
+               relative_max_row_tol_int = -1, lump=.FALSE., drop_diagonal_int=-1, &
+               diag_strength_int = 1)
+      end if
 
       ! Now symmetrize if desired
       if (symmetrize) then

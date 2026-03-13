@@ -87,7 +87,8 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
 
 // Drop according to a tolerance but with kokkos - keeping everything on the device
 PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscReal tol, Mat *output_mat, \
-                  const int relative_max_row_tolerance_int, const int lump_int, const int allow_drop_diagonal_int)
+                  const int relative_max_row_tolerance_int, const int lump_int, \
+                  const int allow_drop_diagonal_int, const int allow_diag_strength_int)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -180,56 +181,102 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 
             const PetscInt i = t.league_rank();
             const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-            PetscScalar max_val = -1.0;
             const PetscInt row_index_global = i + global_row_start;
 
-            // Reduce over local columns
-            Kokkos::parallel_reduce(
-               Kokkos::TeamVectorRange(t, ncols_local),
-               [&](const PetscInt j, PetscScalar& thread_max) {
+            // If we're measuring relative to the diagonal strength, we need to find the diagonal entry first
+            if (allow_diag_strength_int) {
+               PetscScalar diag_val_abs = -1.0;
 
-                  // Is this column the diagonal
-                  const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
-
-                  // If our current tolerance is bigger than the max value we've seen so far
-                  PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
-                  // If we're not comparing against the diagonal when computing relative residual
-                  if (not_include_diag && is_diagonal) val = -1.0;
-                  if (val > thread_max) thread_max = val;
-
-               },
-               Kokkos::Max<PetscScalar>(max_val)
-            );
-
-            if (mpi) {
-               PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
-               PetscScalar max_val_nonlocal = -1.0;
-               
-               // Reduce over nonlocal columns
+               // Find the diagonal magnitude in the local block, if present.
                Kokkos::parallel_reduce(
-                  Kokkos::TeamVectorRange(t, ncols_nonlocal),
+                  Kokkos::TeamVectorRange(t, ncols_local),
+                  [&](const PetscInt j, PetscScalar &thread_diag_abs) {
+                     const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
+                     if (is_diagonal) {
+                        const PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
+                        if (val > thread_diag_abs) thread_diag_abs = val;
+                     }
+                  },
+                  Kokkos::Max<PetscScalar>(diag_val_abs)
+               );
+
+               if (mpi) {
+                  const PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+                  PetscScalar diag_val_abs_nonlocal = -1.0;
+
+                  // Diagonal can be in the off-diagonal block for rectangular distributions.
+                  Kokkos::parallel_reduce(
+                     Kokkos::TeamVectorRange(t, ncols_nonlocal),
+                     [&](const PetscInt j, PetscScalar &thread_diag_abs) {
+                        const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
+                        if (is_diagonal) {
+                           const PetscScalar val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                           if (val > thread_diag_abs) thread_diag_abs = val;
+                        }
+                     },
+                     Kokkos::Max<PetscScalar>(diag_val_abs_nonlocal)
+                  );
+
+                  if (diag_val_abs_nonlocal > diag_val_abs) diag_val_abs = diag_val_abs_nonlocal;
+               }
+
+               Kokkos::single(Kokkos::PerTeam(t), [&]() {
+                  // If there is no explicit diagonal entry, use a zero threshold to avoid over-dropping.
+                  rel_row_tol_d(i) = (diag_val_abs >= 0.0) ? tol * diag_val_abs : 0.0;
+               });
+
+            // If instead we're measuring relative to the max value in the row that isn't the diagonal
+            } else {
+               PetscScalar max_val = -1.0;
+
+               // Reduce over local columns
+               Kokkos::parallel_reduce(
+                  Kokkos::TeamVectorRange(t, ncols_local),
                   [&](const PetscInt j, PetscScalar& thread_max) {
 
                      // Is this column the diagonal
-                     const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
+                     const bool is_diagonal = (device_local_j[device_local_i[i] + j] + global_col_start == row_index_global);
 
                      // If our current tolerance is bigger than the max value we've seen so far
-                     PetscScalar val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                     PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);
                      // If we're not comparing against the diagonal when computing relative residual
-                     if (not_include_diag && is_diagonal) val = -1.0;                  
+                     if (not_include_diag && is_diagonal) val = -1.0;
                      if (val > thread_max) thread_max = val;
 
                   },
-                  Kokkos::Max<PetscScalar>(max_val_nonlocal)
+                  Kokkos::Max<PetscScalar>(max_val)
                );
-               // Take max of local and nonlocal
-               if (max_val_nonlocal > max_val) max_val = max_val_nonlocal;               
-            }
 
-            // Only want one thread in the team to write the result
-            Kokkos::single(Kokkos::PerTeam(t), [&]() {
-               rel_row_tol_d(i) = tol * max_val;
-            });
+               if (mpi) {
+                  PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+                  PetscScalar max_val_nonlocal = -1.0;
+                  
+                  // Reduce over nonlocal columns
+                  Kokkos::parallel_reduce(
+                     Kokkos::TeamVectorRange(t, ncols_nonlocal),
+                     [&](const PetscInt j, PetscScalar& thread_max) {
+
+                        // Is this column the diagonal
+                        const bool is_diagonal = (colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == row_index_global);
+
+                        // If our current tolerance is bigger than the max value we've seen so far
+                        PetscScalar val = Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                        // If we're not comparing against the diagonal when computing relative residual
+                        if (not_include_diag && is_diagonal) val = -1.0;                  
+                        if (val > thread_max) thread_max = val;
+
+                     },
+                     Kokkos::Max<PetscScalar>(max_val_nonlocal)
+                  );
+                  // Take max of local and nonlocal
+                  if (max_val_nonlocal > max_val) max_val = max_val_nonlocal;               
+               }
+
+               // Only want one thread in the team to write the result
+               Kokkos::single(Kokkos::PerTeam(t), [&]() {
+                  rel_row_tol_d(i) = tol * max_val;
+               });
+            }
       });
    }
    // If we're using a constant tolerance, we can just copy it in

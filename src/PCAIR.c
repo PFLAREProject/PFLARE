@@ -1371,6 +1371,20 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
                   input_int_two, input_real, input_real_three, input_real_two));
          }     
       }
+      if (cf_type == CF_DIAG_DOM)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMISR_DDC with max dd ratio \n"));
+         if (input_real_three == 0.0)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, DDC its=%" PetscInt_FMT ", DDC fraction=%f \n", \
+                  input_int_two, input_real, input_int_three, input_real_two));
+         }
+         else
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f, Max DD Ratio=%f, DDC fraction=%f \n", \
+                  input_int_two, input_real, input_real_three, input_real_two));
+         }     
+      }      
       else if (cf_type == CF_PMIS)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMIS \n"));

@@ -50,6 +50,7 @@ The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarch
    | Command line type  | Flag | Description | GPU setup |
    | ------------- | -- | ------------- | -- |
    | pmisr_ddc  |  CF_PMISR_DDC  | Two-pass splitting giving diagonally dominant $\mathbf{A}_\textrm{ff}$ | Yes |
+   | diag_dom  |  CF_DIAG_DOM  | Two-pass splitting enforcing fixed diagonal dominance ratio (set by strong_threshold) in $\mathbf{A}_\textrm{ff}$ | Yes |   
    | pmis  |  CF_PMIS  | PMIS method with symmetrised strength matrix | Yes |
    | pmis_dist2  |  CF_PMIS_DIST2  | Distance 2 PMIS method with strength matrix formed by S'S + S and then symmetrised | Partial |
    | agg  |  CF_AGG  | Aggregation method with root-nodes as C points. In parallel this is processor local aggregation  | No |

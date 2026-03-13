@@ -21,6 +21,7 @@ typedef enum {
 }  PCAIRZType;
 typedef enum {
    CF_PMISR_DDC,
+   CF_DIAG_DOM,
    CF_PMIS,
    CF_PMIS_DIST2,
    CF_AGG,

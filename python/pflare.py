@@ -5,10 +5,11 @@ pflare_defs.py_PCRegister_PFLARE()
 
 # CF splitting type constants
 CF_PMISR_DDC  = 0
-CF_PMIS       = 1
-CF_PMIS_DIST2 = 2
-CF_AGG        = 3
-CF_PMIS_AGG   = 4
+CF_DIAG_DOM   = 1
+CF_PMIS       = 2
+CF_PMIS_DIST2 = 3
+CF_AGG        = 4
+CF_PMIS_AGG   = 5
 
 # Approximate inverse type constants (PCPFLAREINVType / PCAIRInverseType)
 PFLAREINV_POWER           = 0

@@ -15,10 +15,11 @@ module cf_splitting
    public   
 
    PetscEnum, parameter :: CF_PMISR_DDC=0
-   PetscEnum, parameter :: CF_PMIS=1
-   PetscEnum, parameter :: CF_PMIS_DIST2=2
-   PetscEnum, parameter :: CF_AGG=3
-   PetscEnum, parameter :: CF_PMIS_AGG=4
+   PetscEnum, parameter :: CF_DIAG_DOM=1
+   PetscEnum, parameter :: CF_PMIS=2
+   PetscEnum, parameter :: CF_PMIS_DIST2=3
+   PetscEnum, parameter :: CF_AGG=4
+   PetscEnum, parameter :: CF_PMIS_AGG=5
    
    contains
 
@@ -134,6 +135,13 @@ module cf_splitting
          ! Note we are symmetrizing the strength matrix here
          call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
 
+      ! If we are trying to hit a fixed diagonal dominance ratio, we define the strength
+      ! matrix as relative to the abs value of the diagonal entry
+      else if (cf_splitting_type == CF_DIAG_DOM) then
+         ! Only symmetrize if not already symmetric
+         call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat, &
+                  allow_diag_strength = .TRUE.)         
+
       ! PMISR DDC and Aggregation
       else 
          ! Only symmetrize if not already symmetric
@@ -145,7 +153,7 @@ module cf_splitting
       ! ~~~~~~~~~~~~
 
       ! PMISR
-      if (cf_splitting_type == CF_PMISR_DDC) then
+      if (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM) then
 
          call pmisr(strength_mat, max_luby_steps, .FALSE., cf_markers_local)
 
@@ -278,7 +286,8 @@ module cf_splitting
       ! Only do the DDC pass if we're doing PMISR_DDC
       ! and if we haven't requested an exact independent set, ie strong threshold is not zero
       ! as this gives diagonal Aff)
-      if (strong_threshold /= 0d0 .AND. cf_splitting_type == CF_PMISR_DDC) then
+      if (strong_threshold /= 0d0 .AND. &
+            (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM)) then
 
          ! Do a set number of ddc iterations, unless we are aiming for a set diagonal 
          ! dominance ratio, in which case we do as many iterations as necessary

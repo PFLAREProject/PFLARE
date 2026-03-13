@@ -1,7 +1,7 @@
 module matdiagdomsubmatrix
 
    use petscmat
-   use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC
+   use cf_splitting, only: compute_cf_splitting, CF_DIAG_DOM
    use petsc_helper, only: MatCreateSubMatrixWrapper
    use pflare_parameters, only: 
 
@@ -47,12 +47,13 @@ module matdiagdomsubmatrix
      ddc_fraction = 0.0
      ! As many steps as needed
      max_luby_steps = -1
-     ! PMISR DDC
-     algorithm = CF_PMISR_DDC
+     ! PMISR DDC where strength of connection is given by 
+     ! |a_ij| .ge. max_dd_ratio |a_ii|
+     algorithm = CF_DIAG_DOM
      ! Assume asymmetric - still works for symmetric
      symmetric = .FALSE.
 
-     ! Calll the PMISR_DDC
+     ! Call the CF splitting
      ! We call with max_dd_ratio as the strong_threshold
      call compute_cf_splitting(input_mat, &
            symmetric, &
