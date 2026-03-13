@@ -135,12 +135,15 @@ module cf_splitting
          ! Note we are symmetrizing the strength matrix here
          call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
 
-      ! If we are trying to hit a fixed diagonal dominance ratio, we define the strength
-      ! matrix as relative to the abs value of the diagonal entry
       else if (cf_splitting_type == CF_DIAG_DOM) then
          ! Only symmetrize if not already symmetric
-         call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat, &
-                  allow_diag_strength = .TRUE.)         
+         
+         ! Tried to generate a strength matrix based on the relative size compared to the 
+         ! diagonal, but it produces a worse initial coarsening when fed to PMISR, making
+         ! the DDC cleanup take a lot more work
+         !call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat, &
+         !         allow_diag_strength = .TRUE.)
+         call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat)                   
 
       ! PMISR DDC and Aggregation
       else 
