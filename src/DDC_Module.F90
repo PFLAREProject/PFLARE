@@ -6,7 +6,6 @@ module ddc_module
       use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
          MatDiagDomRatio_kokkos, create_cf_is_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
-   use sabs, only: generate_sabs
    use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
    use pflare_parameters, only: C_POINT, F_POINT
    use matdiagdom, only: MatDiagDomRatio
@@ -52,8 +51,7 @@ module ddc_module
       MPIU_Comm :: MPI_COMM_MATRIX
 
 #if defined(PETSC_HAVE_KOKKOS)
-      type(tMat) :: Aff_transpose_ddc
-      integer(c_long_long) :: A_array, Aff_transpose_array, is_fine_array, is_coarse_array
+      integer(c_long_long) :: A_array, Aff_array, is_fine_array, is_coarse_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
       integer :: errorcode
@@ -115,23 +113,22 @@ module ddc_module
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
-         ! Kokkos path: only extract Aff and build sabs if trigger_dd_ratio_compute
+         ! Kokkos path: only extract Aff if trigger_dd_ratio_compute
          ! as the kokkos ddc computes diag dominance ratio without needing Aff
-         Aff_transpose_array = 0
+         Aff_array = 0
          A_array = input_mat%v
          if (trigger_dd_ratio_compute_local) then
 
             ! Create the host is_fine and is_coarse based on device cf_markers
-            call create_cf_is_kokkos(A_array, is_fine_array, is_coarse_array)            
+            call create_cf_is_kokkos(A_array, is_fine_array, is_coarse_array)
             is_fine_temp%v = is_fine_array
             is_coarse_temp%v = is_coarse_array
 
             call MatCreateSubMatrixWrapper(input_mat, &
                         is_fine_temp, is_fine_temp, MAT_INITIAL_MATRIX, &
-                        Aff_ddc) 
+                        Aff_ddc)
 
-            call generate_sabs(Aff_ddc, 0d0, .TRUE., .FALSE., Aff_transpose_ddc)
-            Aff_transpose_array = Aff_transpose_ddc%v
+            Aff_array = Aff_ddc%v
             call ISDestroy(is_fine_temp, ierr)
             call ISDestroy(is_coarse_temp, ierr)
          end if
@@ -145,7 +142,7 @@ module ddc_module
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_transpose_array, &
+         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
             random_numbers_ptr)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -179,7 +176,6 @@ module ddc_module
          ! Cleanup
          if (trigger_dd_ratio_compute_local) then
             call MatDestroy(Aff_ddc, ierr)
-            call MatDestroy(Aff_transpose_ddc, ierr)
          end if
 
       else
