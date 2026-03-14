@@ -25,7 +25,7 @@ PFLARE adds new methods to PETSc, including:
 1) Polynomial approximate inverses, e.g., GMRES and Neumann polynomials
 2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
 3) CF splittings, e.g., PMISR DDC
-4) Extracting diagonally dominant submatrices
+4) Methods to extract diagonally dominant submatrices
 
 ## Quick start
 
@@ -53,10 +53,10 @@ and the Jupyter notebooks:
 
 | Path | Contents |
 |---|---|
-| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduction to PFLARE |
+| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduce PFLARE |
 | [notebooks/02_pcpflareinv.ipynb](notebooks/02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
 | [notebooks/03_cf_splitting.ipynb](notebooks/03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
-| [notebooks/04_pcair.ipynb](notebooks/04_pcair.ipynb) | Introduction to PCAIR and the AIRG method |
+| [notebooks/04_pcair.ipynb](notebooks/04_pcair.ipynb) | Introduce PCAIR and the AIRG method |
 | [notebooks/05_parallel.ipynb](notebooks/05_parallel.ipynb) | Discuss PCAIR, parallelism and GPUs |
 | [notebooks/06_reuse.ipynb](notebooks/06_reuse.ipynb) | Discuss PCAIR and reuse |
      
