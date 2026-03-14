@@ -47,12 +47,13 @@ For details about PFLARE, please see:
 | [docs/gpus.md](docs/gpus.md) | Using GPUs with PFLARE |
 | [docs/reuse.md](docs/reuse.md) | Re-using components of PFLARE |
 | [docs/options.md](docs/options.md) | List of the options available in PFLARE |   
+| [docs/faq.md](docs/faq.md) | Frequently asked questions and help! |   
 
 and the Jupyter notebooks:
 
 | Path | Contents |
 |---|---|
-| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduce PFLARE |
+| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduction to PFLARE |
 | [notebooks/02_pcpflareinv.ipynb](notebooks/02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
 | [notebooks/03_cf_splitting.ipynb](notebooks/03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
 | [notebooks/04_pcair.ipynb](notebooks/04_pcair.ipynb) | Introduction to PCAIR and the AIRG method |
