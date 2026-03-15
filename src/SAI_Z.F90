@@ -37,12 +37,12 @@ module sai_z
       PetscInt :: i_loc, j_loc, cols_ad, rows_ad
       PetscInt :: rows_ao, cols_ao, ifree, row_size, i_size, j_size
       PetscInt :: global_row_start_aff, global_row_end_plus_one_aff
-      integer :: lwork, intersect_count, location
+      integer :: lwork, intersect_count
       integer :: errorcode, comm_size
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: transpose_mat, A_ff
-      type(tIS), dimension(1) :: i_row_is, j_col_is, all_cols_indices, row_indices
+      type(tIS), dimension(1) :: all_cols_indices, row_indices
       type(tIS), dimension(1) :: col_indices
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
       PetscInt, dimension(:), allocatable, target :: j_rows
@@ -60,7 +60,6 @@ module sai_z
       type(tKSP) :: ksp
       type(tPC) :: pc
       PetscInt, dimension(:), pointer :: colmap
-      type(tMat), dimension(:), pointer :: submatrices
       logical :: deallocate_submatrices = .FALSE.
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       integer(c_long_long) :: A_array
@@ -273,10 +272,10 @@ module sai_z
       ncols_max = 0
       do i_loc = global_row_start, global_row_end_plus_one-1
          call MatGetRow(sparsity_mat_cf, i_loc, ncols, &
-                  cols, PETSC_NULL_SCALAR_POINTER, ierr)
+                  PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
          if (ncols > ncols_max) ncols_max = ncols
          call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, &
-                  cols, PETSC_NULL_SCALAR_POINTER, ierr)
+                  PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
       ! Pre-allocate arrays that are sized by ncols from sparsity_mat_cf
