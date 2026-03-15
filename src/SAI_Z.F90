@@ -182,48 +182,37 @@ module sai_z
          call MatSetOption(A_ff, MAT_SUBMAT_SINGLEIS, PETSC_TRUE, ierr)       
          
          ! Now this will be doing comms to get the non-local rows we want
+         ! Only fetch the non-local rows - local rows are already in A_ff
+         ! This scales much better than fetching both local and non-local rows
          ! This returns a sequential matrix
-         if (incomplete) then
+         call ISCreateGeneral(PETSC_COMM_SELF, cols_ao, colmap, &
+                  PETSC_USE_POINTER, row_indices(1), ierr)
 
-            ! Only fetch the non-local rows - local rows are already in A_ff
-            ! This scales much better than fetching both local and non-local rows
-            call ISCreateGeneral(PETSC_COMM_SELF, cols_ao, colmap, &
-                     PETSC_USE_POINTER, row_indices(1), ierr)
-            if (.NOT. PetscObjectIsNull(reuse_mat)) then
-               reuse_submatrices(1) = reuse_mat
+         if (.NOT. incomplete) then
+            ! For full SAI we need all columns with global indices preserved
+            ! so the shadow I computation can see all non-zero columns
+            call ISCreateStride(PETSC_COMM_SELF, global_cols, zero, one, all_cols_indices(1), ierr)
+            call ISSetIdentity(all_cols_indices(1), ierr)
+         end if
+
+         if (.NOT. PetscObjectIsNull(reuse_mat)) then
+            reuse_submatrices(1) = reuse_mat
+            if (incomplete) then
                call MatCreateSubMatrices(A_ff, one, row_indices, col_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
             else
-               call MatCreateSubMatrices(A_ff, one, row_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
-               reuse_mat = reuse_submatrices(1)
+               call MatCreateSubMatrices(A_ff, one, row_indices, all_cols_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
             end if
-            call ISDestroy(row_indices(1), ierr)
-
          else
-
-            ! Now we need to create a sequential IS that points at all the columns of the full matrix
-            ! The IS stride doesn't actually store all the column integers, it just stores the start, end and stride
-            ! So no need to worry about memory use
-            ! The size and identity are what MatCreateSubMatrices uses to match allcolumns
-            call ISCreateStride(PETSC_COMM_SELF, global_cols, zero, one, all_cols_indices(1), ierr) 
-            ! This plus MAT_SUBMAT_SINGLEIS above tells the matcreatesubmatrices that we have an identity for the columns
-            call ISSetIdentity(all_cols_indices(1), ierr)            
-
-            ! We need to get all the column entries in the nonlocal rows 
-            ! Have to be careful though, when we trigger allcolumns, the column indices are returned without 
-            ! change, ie they are not rewritten to be the local row indices
-            ! This means we will have to map any column indices we use 
-            ! This is very slow in parallel and doesn't scale well! 
-            ! There is no easy way in petsc to return only the non-zero columns for a given set of rows
-            if (.NOT. PetscObjectIsNull(reuse_mat)) then             
-               reuse_submatrices(1) = reuse_mat        
-               call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_REUSE_MATRIX, reuse_submatrices, ierr)
+            if (incomplete) then
+               call MatCreateSubMatrices(A_ff, one, row_indices, col_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
             else
-               call MatCreateSubMatrices(A_ff, one, col_indices, all_cols_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
-               reuse_mat = reuse_submatrices(1)
+               call MatCreateSubMatrices(A_ff, one, row_indices, all_cols_indices, MAT_INITIAL_MATRIX, reuse_submatrices, ierr)
             end if
-            call ISDestroy(all_cols_indices(1), ierr)
-
+            reuse_mat = reuse_submatrices(1)
          end if
+
+         call ISDestroy(row_indices(1), ierr)
+         if (.NOT. incomplete) call ISDestroy(all_cols_indices(1), ierr)
 
          row_size = size(col_indices_off_proc_array)
          call ISDestroy(col_indices(1), ierr)
@@ -320,20 +309,8 @@ module sai_z
 
          ! ~~~~~~~~
 
-         ! We already have the global indices, we need the local ones
-         ! This is why we sort the col_indices_off_proc_array above, to make this search easy
-         ! For the incomplete case, keep j_rows as global indices - we access
-         ! local rows directly from A_ff and non-local rows from the submatrix
-         if (.NOT. incomplete) then
-            do j_loc = 1, size(j_rows)
-               call sorted_binary_search(col_indices_off_proc_array, j_rows(j_loc), location)
-               if (location == -1) then
-                  print *, "Couldn't find location"
-                  call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-               end if
-               j_rows(j_loc) = location-1
-            end do
-         end if                    
+         ! j_rows stays as global indices - we access local rows directly
+         ! from A_ff and non-local rows from the submatrix                    
 
          approx_solve = .FALSE.
 
@@ -353,57 +330,6 @@ module sai_z
 
             ! Loop over all the non zero column indices, and get the nonzero columns in those rows
             ! ie get the shadow I
-            do j_loc = 1, size(j_rows)
-
-               ! We just want the indices
-               call MatGetRow(reuse_submatrices(1), j_rows(j_loc), ncols, &
-                        cols, PETSC_NULL_SCALAR_POINTER, ierr) 
-   
-               call create_knuth_shuffle_tree_array(cols(1:ncols), &
-                        i_rows_tree)                       
-   
-               call MatRestoreRow(reuse_submatrices(1), j_rows(j_loc), ncols, &
-                        cols, PETSC_NULL_SCALAR_POINTER, ierr)             
-   
-            end do
-
-            allocate(i_rows(i_rows_tree%length))
-            call itree2vector(i_rows_tree, i_rows)
-            call flush_tree(i_rows_tree)
-
-         end if
-
-         ! If we have a big system to solve, do its iteratively
-         if (size(i_rows) > 40 .OR. size(j_rows) > 40) approx_solve = .TRUE.
-
-         ! This determines the indices of J^* in I*
-         allocate(j_indices(size(j_rows)))
-         allocate(i_indices(size(i_rows)))
-         if (incomplete) then
-            call intersect_pre_sorted_indices_only(i_rows, j_rows, i_indices, j_indices, intersect_count)       
-         else
-            ! The i_rows are the global column indexes, the j_rows are the local
-            call intersect_pre_sorted_indices_only(i_rows, col_indices_off_proc_array(j_rows+1), &
-                     i_indices, j_indices, intersect_count)       
-         end if
-
-         i_size = size(i_rows)
-         j_size = size(j_rows)
-
-         if (incomplete) then
-
-            ! Build the dense block directly from A_ff (local rows) and submatrix (non-local rows)
-            if (.NOT. approx_solve) then
-               allocate(submat_vals(i_size, j_size))
-               submat_vals = 0
-            else
-               ! Create small SeqAIJ for KSP
-               call MatCreate(PETSC_COMM_SELF, small_mat, ierr)
-               call MatSetSizes(small_mat, j_size, i_size, j_size, i_size, ierr)
-               call MatSetType(small_mat, MATSEQAIJ, ierr)
-               call MatSetUp(small_mat, ierr)
-            end if
-
             row_index_into_submatrix = 1
             do j_loc = 1, size(j_rows)
 
@@ -417,110 +343,147 @@ module sai_z
                      row_index_into_submatrix = row_index_into_submatrix + 1
                   end do
 
+                  ! Cols are GLOBAL (all_cols_indices preserves them)
                   call MatGetRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
-                           cols, vals, ierr)
+                           cols, PETSC_NULL_SCALAR_POINTER, ierr)
+                  call create_knuth_shuffle_tree_array(cols(1:ncols), i_rows_tree)
+                  call MatRestoreRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
+                           cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
+               else
+
+                  ! Local row: get directly from A_ff - cols are global
+                  call MatGetRow(A_ff, j_rows(j_loc), ncols, &
+                           cols, PETSC_NULL_SCALAR_POINTER, ierr)
+                  call create_knuth_shuffle_tree_array(cols(1:ncols), i_rows_tree)
+                  call MatRestoreRow(A_ff, j_rows(j_loc), ncols, &
+                           cols, PETSC_NULL_SCALAR_POINTER, ierr)
+
+               end if
+
+            end do
+
+            allocate(i_rows(i_rows_tree%length))
+            call itree2vector(i_rows_tree, i_rows)
+            call flush_tree(i_rows_tree)
+
+         end if
+
+         ! If we have a big system to solve, do its iteratively
+         if (size(i_rows) > 40 .OR. size(j_rows) > 40) approx_solve = .TRUE.
+
+         ! This determines the indices of J^* in I*
+         ! Both i_rows and j_rows are global indices
+         allocate(j_indices(size(j_rows)))
+         allocate(i_indices(size(i_rows)))
+         call intersect_pre_sorted_indices_only(i_rows, j_rows, i_indices, j_indices, intersect_count)
+
+         i_size = size(i_rows)
+         j_size = size(j_rows)
+
+         ! Build the dense block directly from A_ff (local rows) and submatrix (non-local rows)
+         if (.NOT. approx_solve) then
+            allocate(submat_vals(i_size, j_size))
+            submat_vals = 0
+         else
+            ! Create small SeqAIJ for KSP
+            call MatCreate(PETSC_COMM_SELF, small_mat, ierr)
+            call MatSetSizes(small_mat, j_size, i_size, j_size, i_size, ierr)
+            call MatSetType(small_mat, MATSEQAIJ, ierr)
+            call MatSetUp(small_mat, ierr)
+         end if
+
+         row_index_into_submatrix = 1
+         do j_loc = 1, size(j_rows)
+
+            ! Check if this is a non-local row
+            if (comm_size /= 1 .AND. &
+                (j_rows(j_loc) < global_row_start_aff .OR. j_rows(j_loc) >= global_row_end_plus_one_aff)) then
+
+               ! Non-local row: find position in colmap via walk
+               do while (row_index_into_submatrix <= cols_ao .AND. &
+                         colmap(row_index_into_submatrix) < j_rows(j_loc))
+                  row_index_into_submatrix = row_index_into_submatrix + 1
+               end do
+
+               call MatGetRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
+                        cols, vals, ierr)
+
+               if (incomplete) then
+                  ! Incomplete: col_indices used for columns, so indices are local
                   ! Convert local col indices to global
                   allocate(cols_global_temp(ncols))
                   cols_global_temp = col_indices_off_proc_array(cols(1:ncols) + 1)
 
-                  ! Intersect with i_rows (global) to find matching columns
                   allocate(row_i_match(i_size))
                   allocate(row_col_match(ncols))
                   call intersect_pre_sorted_indices_only(i_rows, cols_global_temp, &
                            row_i_match, row_col_match, match_count_sub)
-
-                  if (.NOT. approx_solve) then
-                     ! Transpose: row of A_ff becomes column of submat_vals
-                     submat_vals(row_i_match(1:match_count_sub), j_loc) = vals(row_col_match(1:match_count_sub))
-                  else
-                     ! Set row in small_mat (0-based indices)
-                     ncols_match = match_count_sub
-                     cols_global_temp(1:match_count_sub) = row_i_match(1:match_count_sub) - 1
-                     call MatSetValues(small_mat, one, [j_loc-1], ncols_match, &
-                              cols_global_temp(1:match_count_sub), vals(row_col_match(1:match_count_sub)), &
-                              INSERT_VALUES, ierr)
-                  end if
-
-                  deallocate(row_i_match, row_col_match, cols_global_temp)
-                  call MatRestoreRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
-                           cols, vals, ierr)
-
                else
-
-                  ! Local row: get directly from A_ff
-                  call MatGetRow(A_ff, j_rows(j_loc), ncols, cols, vals, ierr)
-
-                  ! Intersect with i_rows (global) to find matching columns
+                  ! Full SAI: all_cols_indices used for columns, so indices are already global
                   allocate(row_i_match(i_size))
                   allocate(row_col_match(ncols))
                   call intersect_pre_sorted_indices_only(i_rows, cols(1:ncols), &
                            row_i_match, row_col_match, match_count_sub)
+               end if
 
-                  if (.NOT. approx_solve) then
-                     ! Transpose: row of A_ff becomes column of submat_vals
-                     submat_vals(row_i_match(1:match_count_sub), j_loc) = vals(row_col_match(1:match_count_sub))
+               if (.NOT. approx_solve) then
+                  ! Transpose: row of A_ff becomes column of submat_vals
+                  submat_vals(row_i_match(1:match_count_sub), j_loc) = vals(row_col_match(1:match_count_sub))
+               else
+                  ! Set row in small_mat (0-based indices)
+                  ncols_match = match_count_sub
+                  if (incomplete) then
+                     cols_global_temp(1:match_count_sub) = row_i_match(1:match_count_sub) - 1
                   else
-                     ! Set row in small_mat (0-based indices)
-                     ncols_match = match_count_sub
                      allocate(cols_global_temp(match_count_sub))
                      cols_global_temp = row_i_match(1:match_count_sub) - 1
-                     call MatSetValues(small_mat, one, [j_loc-1], ncols_match, &
-                              cols_global_temp, vals(row_col_match(1:match_count_sub)), &
-                              INSERT_VALUES, ierr)
-                     deallocate(cols_global_temp)
                   end if
-
-                  deallocate(row_i_match, row_col_match)
-                  call MatRestoreRow(A_ff, j_rows(j_loc), ncols, cols, vals, ierr)
-
+                  call MatSetValues(small_mat, one, [j_loc-1], ncols_match, &
+                           cols_global_temp(1:match_count_sub), vals(row_col_match(1:match_count_sub)), &
+                           INSERT_VALUES, ierr)
+                  if (.NOT. incomplete) deallocate(cols_global_temp)
                end if
-            end do
 
-            if (approx_solve) then
-               call MatAssemblyBegin(small_mat, MAT_FINAL_ASSEMBLY, ierr)
-               call MatAssemblyEnd(small_mat, MAT_FINAL_ASSEMBLY, ierr)
+               if (incomplete) deallocate(cols_global_temp)
+               deallocate(row_i_match, row_col_match)
+               call MatRestoreRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
+                        cols, vals, ierr)
+
+            else
+
+               ! Local row: get directly from A_ff
+               call MatGetRow(A_ff, j_rows(j_loc), ncols, cols, vals, ierr)
+
+               ! Intersect with i_rows (global) to find matching columns
+               allocate(row_i_match(i_size))
+               allocate(row_col_match(ncols))
+               call intersect_pre_sorted_indices_only(i_rows, cols(1:ncols), &
+                        row_i_match, row_col_match, match_count_sub)
+
+               if (.NOT. approx_solve) then
+                  ! Transpose: row of A_ff becomes column of submat_vals
+                  submat_vals(row_i_match(1:match_count_sub), j_loc) = vals(row_col_match(1:match_count_sub))
+               else
+                  ! Set row in small_mat (0-based indices)
+                  ncols_match = match_count_sub
+                  allocate(cols_global_temp(match_count_sub))
+                  cols_global_temp = row_i_match(1:match_count_sub) - 1
+                  call MatSetValues(small_mat, one, [j_loc-1], ncols_match, &
+                           cols_global_temp, vals(row_col_match(1:match_count_sub)), &
+                           INSERT_VALUES, ierr)
+                  deallocate(cols_global_temp)
+               end if
+
+               deallocate(row_i_match, row_col_match)
+               call MatRestoreRow(A_ff, j_rows(j_loc), ncols, cols, vals, ierr)
+
             end if
+         end do
 
-         else
-
-            ! Full SAI case: extract via IS and second MatCreateSubMatrices
-            call ISCreateGeneral(PETSC_COMM_SELF, i_size, &
-                  i_rows, &
-                  PETSC_COPY_VALUES, i_row_is(1), ierr)
-            call ISCreateGeneral(PETSC_COMM_SELF, j_size, &
-                  j_rows, &
-                  PETSC_COPY_VALUES, j_col_is(1), ierr)
-
-            ! Setting this is necessary to avoid an allreduce when calling createsubmatrices
-            ! This will be reset to false after the call to createsubmatrices
-            ! Shouldn't be needed given reuse_submatrices(1) is sequential, but whats the harm
-            call MatSetOption(reuse_submatrices(1), MAT_SUBMAT_SINGLEIS, PETSC_TRUE, ierr)
-
-            ! This should just be an entirely local operation
-            call MatCreateSubMatrices(reuse_submatrices(1), one, j_col_is, i_row_is, MAT_INITIAL_MATRIX, submatrices, ierr)
-
-            ! Pull out the entries of the submatrix into a dense mat
-            if (.NOT. approx_solve) then
-
-               ! This is the correct size as we are going to transpose directly
-               allocate(submat_vals(i_size, j_size))
-               submat_vals = 0
-
-               ! Pull out the submat into a dense matrix
-               do j_loc = 1, size(j_rows)
-
-                  call MatGetRow(submatrices(1), j_loc - 1, ncols, &
-                           cols, vals, ierr)
-
-                  ! There is a transpose here! As we want to solve A(J*, I*)^T z(j,J^*)^T = -A_cf(j,I*)^T
-                  submat_vals(cols(1:ncols)+1, j_loc) = vals(1:ncols)
-
-                  call MatRestoreRow(submatrices(1), j_loc - 1, ncols, &
-                           cols, vals, ierr)
-               end do
-            end if
-
+         if (approx_solve) then
+            call MatAssemblyBegin(small_mat, MAT_FINAL_ASSEMBLY, ierr)
+            call MatAssemblyEnd(small_mat, MAT_FINAL_ASSEMBLY, ierr)
          end if
 
          allocate(e_row(size(i_rows)))
@@ -584,18 +547,18 @@ module sai_z
             ! ~~~~~~~~~~~~~
             if (approx_solve) then
 
-               ! We can't seem to call KSPSolveTranspose with LSQR, so we explicitly 
+               ! We can't seem to call KSPSolveTranspose with LSQR, so we explicitly
                ! take a transpose here
-               call MatTranspose(submatrices(1), MAT_INITIAL_MATRIX, transpose_mat, ierr)
+               call MatTranspose(small_mat, MAT_INITIAL_MATRIX, transpose_mat, ierr)
 
-               call KSPSetOperators(ksp, transpose_mat, transpose_mat, ierr)                           
+               call KSPSetOperators(ksp, transpose_mat, transpose_mat, ierr)
                call KSPSetUp(ksp, ierr)
 
-               call MatCreateVecs(submatrices(1), rhs, solution, ierr)
+               call MatCreateVecs(small_mat, rhs, solution, ierr)
                ! Have to restore the array before the solve in case this is kokkos
                call VecGetArray(rhs, vec_vals, ierr)
                vec_vals(1:i_size) = e_row(1:i_size)
-               call VecRestoreArray(rhs, vec_vals, ierr)                                
+               call VecRestoreArray(rhs, vec_vals, ierr)
 
                ! Do the solve
                call KSPSolve(ksp, rhs, solution, ierr)
@@ -604,12 +567,13 @@ module sai_z
                ! Copy solution into e_row
                call VecGetArray(solution, vec_vals, ierr)
                e_row(1:size(j_rows)) = vec_vals(1:size(j_rows))
-               call VecRestoreArray(solution, vec_vals, ierr) 
+               call VecRestoreArray(solution, vec_vals, ierr)
 
                call KSPReset(ksp, ierr)
                call VecDestroy(solution, ierr)
                call VecDestroy(rhs, ierr)
                call MatDestroy(transpose_mat, ierr)
+               call MatDestroy(small_mat, ierr)
 
             ! ~~~~~~~~~~~~~
             ! Exact dense solve with QR
@@ -630,30 +594,17 @@ module sai_z
             end if
          end if
 
-         if (.NOT. incomplete) then
-            call MatDestroySubMatrices(one, submatrices, ierr)
-         end if
-
          ! ~~~~~~~~~~~~~
          ! Set all the row values
          ! ~~~~~~~~~~~~~
+         ! j_rows are global indices for both cases
          if (j_size /= 0) then
-            if (incomplete) then
-               ! j_rows are global indices
-               call MatSetValues(z, one, [i_loc], &
-                     j_size, j_rows, e_row, INSERT_VALUES, ierr)
-            else
-               call MatSetValues(z, one, [i_loc], &
-                     j_size, col_indices_off_proc_array(j_rows+1), e_row, INSERT_VALUES, ierr)
-            end if
+            call MatSetValues(z, one, [i_loc], &
+                  j_size, j_rows, e_row, INSERT_VALUES, ierr)
          end if
 
          deallocate(j_rows, i_rows, e_row, j_vals, j_indices, i_indices)
-         if (allocated(submat_vals)) deallocate(submat_vals)
-         if (.NOT. incomplete) then
-            call ISDestroy(i_row_is(1), ierr)
-            call ISDestroy(j_col_is(1), ierr)
-         end if               
+         if (allocated(submat_vals)) deallocate(submat_vals)               
       end do  
 
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
