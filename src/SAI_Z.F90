@@ -32,7 +32,7 @@ module sai_z
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
       ! Local variables 
-      PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one
+      PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one, ncols_max
       PetscInt :: global_rows, global_cols, iterations_taken
       PetscInt :: i_loc, j_loc, cols_ad, rows_ad
       PetscInt :: rows_ao, cols_ao, ifree, row_size, i_size, j_size
@@ -45,9 +45,10 @@ module sai_z
       type(tIS), dimension(1) :: i_row_is, j_col_is, all_cols_indices, row_indices
       type(tIS), dimension(1) :: col_indices
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
-      PetscInt, dimension(:), allocatable :: j_rows, i_rows, ad_indices
+      PetscInt, dimension(:), allocatable, target :: j_rows
+      PetscInt, dimension(:), allocatable :: i_rows, ad_indices
       integer, dimension(:), allocatable :: pivots, j_indices, i_indices
-      PetscInt, dimension(:), pointer :: cols => null()
+      PetscInt, dimension(:), pointer :: cols => null(), j_rows_ptr => null()
       PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: e_row, j_vals
       PetscReal, dimension(:,:), allocatable :: submat_vals
@@ -268,41 +269,49 @@ module sai_z
          
       end if
 
+      ! Pre-pass to find the maximum number of columns in any row of sparsity_mat_cf
+      ncols_max = 0
+      do i_loc = global_row_start, global_row_end_plus_one-1
+         call MatGetRow(sparsity_mat_cf, i_loc, ncols, &
+                  cols, PETSC_NULL_SCALAR_POINTER, ierr)
+         if (ncols > ncols_max) ncols_max = ncols
+         call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, &
+                  cols, PETSC_NULL_SCALAR_POINTER, ierr)
+      end do
+
+      ! Pre-allocate arrays that are sized by ncols from sparsity_mat_cf
+      allocate(j_rows(ncols_max), j_vals(ncols_max), j_indices(ncols_max))
 
       ! Now go through each of the rows
       ! GetRow has to happen over the global indices
-      do i_loc = global_row_start, global_row_end_plus_one-1                  
+      do i_loc = global_row_start, global_row_end_plus_one-1
 
          ! We just want the F-indices of whatever distance we are going out to
          call MatGetRow(sparsity_mat_cf, i_loc, ncols, &
-                  cols, PETSC_NULL_SCALAR_POINTER, ierr) 
-                  
-         allocate(j_rows(ncols))
-         allocate(j_vals(ncols))
-         j_vals = 0
-         j_rows = cols(1:ncols)
+                  cols, PETSC_NULL_SCALAR_POINTER, ierr)
+
+         j_size = ncols
+         j_vals(1:j_size) = 0
+         j_rows(1:j_size) = cols(1:j_size)
+         j_rows_ptr => j_rows(1:j_size)
 
          call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, &
                   cols, PETSC_NULL_SCALAR_POINTER, ierr) 
 
          ! If we have no non-zeros in this row skip it
          ! This means we have a c point with no neighbour f points
-         if (size(j_rows) == 0) then
-            deallocate(j_rows, j_vals)
-            cycle
-         end if                  
+         if (j_size == 0) cycle
 
          ! ~~~~~~~~
-         ! We need to stick the non-zero row of A_cf into the indices of 
+         ! We need to stick the non-zero row of A_cf into the indices of
          ! A_cf, or A_cf A_ff, or A_cf A_ff^2, etc given whatever distance we're going out to
          call MatGetRow(A_cf, i_loc, ncols, &
-                  cols, vals, ierr) 
+                  cols, vals, ierr)
 
-         allocate(j_indices(size(j_rows)))
          allocate(i_indices(ncols))
-         call intersect_pre_sorted_indices_only(j_rows, cols(1:ncols), j_indices, i_indices, intersect_count)                   
+         call intersect_pre_sorted_indices_only(j_rows_ptr, cols(1:ncols), j_indices, i_indices, intersect_count)
          j_vals(j_indices(1:intersect_count)) = vals(i_indices(1:intersect_count))
-         deallocate(j_indices, i_indices)
+         deallocate(i_indices)
 
          call MatRestoreRow(A_cf, i_loc, ncols, &
                   cols, vals, ierr)                   
@@ -320,8 +329,8 @@ module sai_z
          ! This is equivalent to a restricted additive schwarz
          ! ||M(j, J) A(J, J) - eye(j, J)||_2             
          if (incomplete) then
-            allocate(i_rows(size(j_rows)))
-            i_rows = j_rows
+            allocate(i_rows(j_size))
+            i_rows = j_rows(1:j_size)
 
          ! This is the SAI which minimises for column j
          ! which gives the rectangular system that must be minimised
@@ -331,7 +340,7 @@ module sai_z
             ! Loop over all the non zero column indices, and get the nonzero columns in those rows
             ! ie get the shadow I
             row_index_into_submatrix = 1
-            do j_loc = 1, size(j_rows)
+            do j_loc = 1, j_size
 
                ! Check if this is a non-local row
                if (comm_size /= 1 .AND. &
@@ -370,16 +379,13 @@ module sai_z
          end if
 
          ! If we have a big system to solve, do its iteratively
-         if (size(i_rows) > 40 .OR. size(j_rows) > 40) approx_solve = .TRUE.
+         if (size(i_rows) > 40 .OR. j_size > 40) approx_solve = .TRUE.
 
          ! This determines the indices of J^* in I*
          ! Both i_rows and j_rows are global indices
-         allocate(j_indices(size(j_rows)))
-         allocate(i_indices(size(i_rows)))
-         call intersect_pre_sorted_indices_only(i_rows, j_rows, i_indices, j_indices, intersect_count)
-
          i_size = size(i_rows)
-         j_size = size(j_rows)
+         allocate(i_indices(i_size))
+         call intersect_pre_sorted_indices_only(i_rows, j_rows_ptr, i_indices, j_indices, intersect_count)
 
          ! Build the dense block directly from A_ff (local rows) and submatrix (non-local rows)
          if (.NOT. approx_solve) then
@@ -394,7 +400,7 @@ module sai_z
          end if
 
          row_index_into_submatrix = 1
-         do j_loc = 1, size(j_rows)
+         do j_loc = 1, j_size
 
             ! Check if this is a non-local row
             if (comm_size /= 1 .AND. &
@@ -566,7 +572,7 @@ module sai_z
 
                ! Copy solution into e_row
                call VecGetArray(solution, vec_vals, ierr)
-               e_row(1:size(j_rows)) = vec_vals(1:size(j_rows))
+               e_row(1:j_size) = vec_vals(1:j_size)
                call VecRestoreArray(solution, vec_vals, ierr)
 
                call KSPReset(ksp, ierr)
@@ -582,13 +588,13 @@ module sai_z
 
                allocate(work(1))
                lwork = -1
-               call dgels('N', size(i_rows), size(j_rows), 1, submat_vals, size(i_rows), &
-                           e_row, size(i_rows), work, lwork, errorcode)
+               call dgels('N', i_size, j_size, 1, submat_vals, i_size, &
+                           e_row, i_size, work, lwork, errorcode)
                lwork = int(work(1))
                deallocate(work)
-               allocate(work(lwork))  
-               call dgels('N', size(i_rows), size(j_rows), 1, submat_vals, size(i_rows), &
-                           e_row, size(i_rows), work, lwork, errorcode)
+               allocate(work(lwork))
+               call dgels('N', i_size, j_size, 1, submat_vals, i_size, &
+                           e_row, i_size, work, lwork, errorcode)
                deallocate(work)
 
             end if
@@ -603,9 +609,12 @@ module sai_z
                   j_size, j_rows, e_row, INSERT_VALUES, ierr)
          end if
 
-         deallocate(j_rows, i_rows, e_row, j_vals, j_indices, i_indices)
-         if (allocated(submat_vals)) deallocate(submat_vals)               
-      end do  
+         deallocate(i_rows, e_row, i_indices)
+         if (allocated(submat_vals)) deallocate(submat_vals)
+      end do
+
+      ! Deallocate pre-allocated arrays
+      deallocate(j_rows, j_vals, j_indices)
 
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
