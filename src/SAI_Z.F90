@@ -155,24 +155,6 @@ module sai_z
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
          call MatGetSize(Ao, rows_ao, cols_ao, ierr)         
 
-         ! These are the global indices of the columns we want
-         ! Taking care here to use cols_ad and not rows_ao  
-         allocate(col_indices_off_proc_array(cols_ad + cols_ao))
-         allocate(ad_indices(cols_ad))
-         ! Local rows (as global indices)
-         do ifree = 1, cols_ad
-            ad_indices(ifree) = global_row_start_aff + ifree - 1
-         end do
-
-         ! Do a sort on the indices
-         ! Both ad_indices and colmap should already be sorted so we can merge them together quickly
-         call merge_pre_sorted(ad_indices, colmap, col_indices_off_proc_array)
-         deallocate(ad_indices)
-
-         ! Create the sequential IS we want with the cols we want (written as global indices)
-         call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, col_indices_off_proc_array, &
-                  PETSC_USE_POINTER, col_indices(1), ierr) 
-
          ! ~~~~~~~
          ! Now we can pull out the chunk of matrix that we need
          ! ~~~~~~~
@@ -188,7 +170,26 @@ module sai_z
          call ISCreateGeneral(PETSC_COMM_SELF, cols_ao, colmap, &
                   PETSC_USE_POINTER, row_indices(1), ierr)
 
-         if (.NOT. incomplete) then
+         if (incomplete) then
+
+            ! These are the global indices of the columns we want
+            ! Taking care here to use cols_ad and not rows_ao  
+            allocate(col_indices_off_proc_array(cols_ad + cols_ao))
+            allocate(ad_indices(cols_ad))
+            ! Local rows (as global indices)
+            do ifree = 1, cols_ad
+               ad_indices(ifree) = global_row_start_aff + ifree - 1
+            end do
+
+            ! Do a sort on the indices
+            ! Both ad_indices and colmap should already be sorted so we can merge them together quickly
+            call merge_pre_sorted(ad_indices, colmap, col_indices_off_proc_array)
+            deallocate(ad_indices)
+
+            ! Create the sequential IS we want with the cols we want (written as global indices)
+            call ISCreateGeneral(PETSC_COMM_SELF, cols_ad + cols_ao, col_indices_off_proc_array, &
+                     PETSC_USE_POINTER, col_indices(1), ierr)             
+         else
             ! For full SAI we need all columns with global indices preserved
             ! so the shadow I computation can see all non-zero columns
             call ISCreateStride(PETSC_COMM_SELF, global_cols, zero, one, all_cols_indices(1), ierr)
@@ -225,10 +226,6 @@ module sai_z
          reuse_submatrices(1) = A_ff
          ! local rows is the size of c, local cols is the size of f
          row_size = local_cols
-         allocate(col_indices_off_proc_array(local_cols))
-         do ifree = 1, local_cols
-            col_indices_off_proc_array(ifree) = ifree-1
-         end do
       end if        
 
       call MatGetOwnershipRange(sparsity_mat_cf, global_row_start, global_row_end_plus_one, ierr)              
@@ -617,6 +614,7 @@ module sai_z
 
       ! Deallocate pre-allocated arrays
       deallocate(j_rows, j_vals, j_indices)
+      if (allocated(col_indices_off_proc_array)) deallocate(col_indices_off_proc_array)
 
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
          call MatDestroy(temp_mat, ierr)
