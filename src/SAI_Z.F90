@@ -32,7 +32,7 @@ module sai_z
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
 
       ! Local variables 
-      PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one, ncols_max
+      PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one, ncols_sparsity_max
       PetscInt :: global_rows, global_cols, iterations_taken
       PetscInt :: i_loc, j_loc, cols_ad, rows_ad
       PetscInt :: rows_ao, cols_ao, ifree, row_size, i_size, j_size
@@ -269,17 +269,17 @@ module sai_z
       end if
 
       ! Pre-pass to find the maximum number of columns in any row of sparsity_mat_cf
-      ncols_max = 0
+      ncols_sparsity_max = 0
       do i_loc = global_row_start, global_row_end_plus_one-1
          call MatGetRow(sparsity_mat_cf, i_loc, ncols, &
                   PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > ncols_max) ncols_max = ncols
+         if (ncols > ncols_sparsity_max) ncols_sparsity_max = ncols
          call MatRestoreRow(sparsity_mat_cf, i_loc, ncols, &
                   PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
       end do
 
       ! Pre-allocate arrays that are sized by ncols from sparsity_mat_cf
-      allocate(j_rows(ncols_max), j_vals(ncols_max), j_indices(ncols_max))
+      allocate(j_rows(ncols_sparsity_max), j_vals(ncols_sparsity_max), j_indices(ncols_sparsity_max))
 
       ! Now go through each of the rows
       ! GetRow has to happen over the global indices
@@ -434,6 +434,7 @@ module sai_z
 
                if (.NOT. approx_solve) then
                   ! Transpose: row of A_ff becomes column of submat_vals
+                  ! as we solve A(J*, I*)^T z(j,J^*)^T = -A_cf(j,I*)^T
                   submat_vals(row_i_match(1:match_count_sub), j_loc) = vals(row_col_match(1:match_count_sub))
                else
                   ! Set row in small_mat (0-based indices)
