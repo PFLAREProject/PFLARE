@@ -391,6 +391,8 @@ module sai_z
             allocate(submat_vals(i_size, j_size))
             submat_vals = 0
          else
+            ! Prevent uninitialised warning
+            allocate(submat_vals(0, 0))
             ! Create small SeqAIJ for KSP
             call MatCreate(PETSC_COMM_SELF, small_mat, ierr)
             call MatSetSizes(small_mat, j_size, i_size, j_size, i_size, ierr)
