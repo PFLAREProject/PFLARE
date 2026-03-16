@@ -18,7 +18,8 @@ module sai_z
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, reuse_mat, reuse_submatrices, z)
+   subroutine calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, &
+                  reuse_mat, reuse_submatrices, z, no_approx_solve)
 
       ! Computes an approximation to z using sai/isai
       ! If incomplete is true then this is lAIR
@@ -30,6 +31,7 @@ module sai_z
       logical, intent(in)                               :: incomplete
       type(tMat), intent(inout)                         :: reuse_mat, z
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
+      logical, intent(in), optional                     :: no_approx_solve
 
       ! Local variables 
       PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one, ncols_sparsity_max
@@ -55,7 +57,7 @@ module sai_z
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs, diag_vec
-      logical :: approx_solve
+      logical :: approx_solve, disable_approx_solve
       type(tMat) :: Ao, Ad, temp_mat
       type(tKSP) :: ksp
       type(tPC) :: pc
@@ -72,6 +74,9 @@ module sai_z
       type(tMat) :: small_mat
 
       ! ~~~~~~
+
+      disable_approx_solve = .FALSE.
+      if (present(no_approx_solve)) disable_approx_solve = no_approx_solve
 
       call PetscObjectGetComm(A_ff_input, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
@@ -375,7 +380,7 @@ module sai_z
          end if
 
          ! If we have a big system to solve, do its iteratively
-         if (size(i_rows) > 40 .OR. j_size > 40) approx_solve = .TRUE.
+         if ((size(i_rows) > 40 .OR. j_size > 40) .AND. .NOT. disable_approx_solve) approx_solve = .TRUE.
 
          ! This determines the indices of J^* in I*
          ! Both i_rows and j_rows are global indices
@@ -711,9 +716,12 @@ module sai_z
 
             ! We send in an empty reuse_mat_cpu here always, as we can't pass through
             ! the same one Kokkos uses as it now only gets out the non-local rows we need
+            ! We also disable the approximate solve if the size of any of the dense 
+            ! matrices are greater than 40x40, as the kokkos code always does direct solves
             reuse_submatrices_cpu => null()
             call calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, &
-                     reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+                     reuse_mat_cpu, reuse_submatrices_cpu, temp_mat, &
+                     no_approx_solve = .TRUE.)
             call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)
 
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
