@@ -117,7 +117,7 @@ run_tests_load_serial:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1
 # 
 	@echo ""
-	@echo "Test PMISR DDC CF splitting in C"
+	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C"
 	./ex6_cf_splitting  -f data/mat_stream_2364
 #
 	@echo ""
@@ -203,7 +203,7 @@ run_tests_load_parallel:
 	$(MPIEXEC) -n 4 ./ex12f -f data/mat_stream_2364 -pc_air_subcomm -pc_air_inverse_type arnoldi -pc_air_coarsest_subcomm \
 	 -pc_air_coarsest_inverse_type arnoldi -ksp_max_it 5 -pc_air_a_drop 1e-3	 
 # 
-	@echo "Test PMISR DDC CF splitting in C in parallel"
+	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364
 #
 	@echo ""
@@ -255,7 +255,7 @@ run_tests_no_load_short_serial:
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
 	@echo ""
 	@echo "Test AIRG with advection and fixed dd ratio"
-	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_max_dd_ratio 0.9
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
 #	
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
@@ -602,8 +602,20 @@ run_tests_no_load_serial:
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio"
 	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
-    -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
+	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a small fixed dd ratio"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11
 #
 	@echo ""
 	@echo "Test improving Z"
@@ -656,7 +668,7 @@ run_tests_no_load_short_parallel:
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
 	@echo ""
 	@echo "Test AIRG with advection and fixed dd ratio in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_max_dd_ratio 0.9
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -929,8 +941,20 @@ run_tests_no_load_parallel:
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
-	 -pc_air_strong_threshold 0.99 -pc_air_max_dd_ratio 0.50001 -pc_air_ddc_fraction 0.01 -ksp_max_it 7 \
+	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a small fixed dd ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
+#	
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9 \
+	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11	 
 #
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"

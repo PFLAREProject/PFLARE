@@ -18,7 +18,8 @@ cdef extern from "petsc.h":
 
 cdef extern:
 	void PCRegister_PFLARE()
-	void compute_cf_splitting_c(PetscMat *A, int symmetric_int, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap, double max_dd_ratio, PetscIS* is_fine, PetscIS* is_coarse)
+	void compute_cf_splitting_c(PetscMat *A, int symmetric_int, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
+	void compute_diag_dom_submatrix_c(PetscMat *A, double max_dd_ratio, PetscMat *output_mat)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Get routines
@@ -39,7 +40,6 @@ cdef extern:
 	void PCAIRGetSubcomm_c(PetscPC *pc, unsigned char *subcomm)
 	void PCAIRGetStrongThreshold_c(PetscPC *pc, PetscReal *thresh)
 	void PCAIRGetDDCIts_c(PetscPC *pc, PetscInt *its)
-	void PCAIRGetMaxDDRatio_c(PetscPC *pc, PetscReal *ratio)
 	void PCAIRGetDDCFraction_c(PetscPC *pc, PetscReal *frac)
 	void PCAIRGetCFSplittingType_c(PetscPC *pc, int *algo)
 	void PCAIRGetMaxLubySteps_c(PetscPC *pc, PetscInt *steps)
@@ -97,7 +97,6 @@ cdef extern:
 	void PCAIRSetSubcomm_c(PetscPC *pc, int subcomm)
 	void PCAIRSetStrongThreshold_c(PetscPC *pc, PetscReal thresh)
 	void PCAIRSetDDCIts_c(PetscPC *pc, PetscInt its)
-	void PCAIRSetMaxDDRatio_c(PetscPC *pc, PetscReal ratio)
 	void PCAIRSetDDCFraction_c(PetscPC *pc, PetscReal frac)
 	void PCAIRSetCFSplittingType_c(PetscPC *pc, int algo)
 	void PCAIRSetMaxLubySteps_c(PetscPC *pc, PetscInt steps)
@@ -167,13 +166,19 @@ cdef extern:
 cpdef py_PCRegister_PFLARE():
 	PCRegister_PFLARE()
 
-cpdef compute_cf_splitting(Mat A, bint symmetric, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap, double max_dd_ratio):
+cpdef compute_cf_splitting(Mat A, bint symmetric, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap):
 	cdef IS is_fine
 	cdef IS is_coarse
 	is_fine = IS()
 	is_coarse = IS()
-	compute_cf_splitting_c(&(A.mat), symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, max_dd_ratio, &(is_fine.iset), &(is_coarse.iset))
+	compute_cf_splitting_c(&(A.mat), symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, &(is_fine.iset), &(is_coarse.iset))
 	return is_fine, is_coarse
+
+cpdef compute_diag_dom_submatrix(Mat A, double max_dd_ratio):
+	cdef Mat output_mat
+	output_mat = Mat()
+	compute_diag_dom_submatrix_c(&(A.mat), max_dd_ratio, &(output_mat.mat))
+	return output_mat
 
 # -----------------------------------------------------------------------
 # PCAIR Get wrappers
@@ -244,11 +249,6 @@ cpdef int pcair_get_ddc_its(PC pc):
 	cdef PetscInt result = 0
 	PCAIRGetDDCIts_c(&(pc.pc), &result)
 	return <int>result
-
-cpdef double pcair_get_max_dd_ratio(PC pc):
-	cdef PetscReal result = 0.0
-	PCAIRGetMaxDDRatio_c(&(pc.pc), &result)
-	return <double>result
 
 cpdef double pcair_get_ddc_fraction(PC pc):
 	cdef PetscReal result = 0.0
@@ -490,9 +490,6 @@ cpdef pcair_set_strong_threshold(PC pc, double thresh):
 
 cpdef pcair_set_ddc_its(PC pc, int its):
 	PCAIRSetDDCIts_c(&(pc.pc), <PetscInt>its)
-
-cpdef pcair_set_max_dd_ratio(PC pc, double ratio):
-	PCAIRSetMaxDDRatio_c(&(pc.pc), <PetscReal>ratio)
 
 cpdef pcair_set_ddc_fraction(PC pc, double frac):
 	PCAIRSetDDCFraction_c(&(pc.pc), <PetscReal>frac)

@@ -5,10 +5,11 @@ pflare_defs.py_PCRegister_PFLARE()
 
 # CF splitting type constants
 CF_PMISR_DDC  = 0
-CF_PMIS       = 1
-CF_PMIS_DIST2 = 2
-CF_AGG        = 3
-CF_PMIS_AGG   = 4
+CF_DIAG_DOM   = 1
+CF_PMIS       = 2
+CF_PMIS_DIST2 = 3
+CF_AGG        = 4
+CF_PMIS_AGG   = 5
 
 # Approximate inverse type constants (PCPFLAREINVType / PCAIRInverseType)
 PFLAREINV_POWER           = 0
@@ -33,6 +34,10 @@ COEFFS_INV_AFF_DROPPED = 1  # Inverse of the dropped fine-fine block
 COEFFS_INV_ACC         = 2  # Inverse of the coarse-coarse block A_cc
 COEFFS_INV_COARSE      = 3  # Inverse on the coarsest grid
 
+# Standalone matrix utility wrappers
+compute_cf_splitting          = pflare_defs.compute_cf_splitting
+compute_diag_dom_submatrix    = pflare_defs.compute_diag_dom_submatrix
+
 # -----------------------------------------------------------------------
 # PCAIR Get functions
 # The exact Python names for all pflare functions are listed here in
@@ -52,7 +57,6 @@ pcair_get_process_eq_limit             = pflare_defs.pcair_get_process_eq_limit
 pcair_get_subcomm                      = pflare_defs.pcair_get_subcomm
 pcair_get_strong_threshold             = pflare_defs.pcair_get_strong_threshold
 pcair_get_ddc_its                      = pflare_defs.pcair_get_ddc_its
-pcair_get_max_dd_ratio                 = pflare_defs.pcair_get_max_dd_ratio
 pcair_get_ddc_fraction                 = pflare_defs.pcair_get_ddc_fraction
 pcair_get_cf_splitting_type            = pflare_defs.pcair_get_cf_splitting_type
 pcair_get_max_luby_steps               = pflare_defs.pcair_get_max_luby_steps
@@ -104,7 +108,6 @@ pcair_set_process_eq_limit             = pflare_defs.pcair_set_process_eq_limit
 pcair_set_subcomm                      = pflare_defs.pcair_set_subcomm
 pcair_set_strong_threshold             = pflare_defs.pcair_set_strong_threshold
 pcair_set_ddc_its                      = pflare_defs.pcair_set_ddc_its
-pcair_set_max_dd_ratio                 = pflare_defs.pcair_set_max_dd_ratio
 pcair_set_ddc_fraction                 = pflare_defs.pcair_set_ddc_fraction
 pcair_set_cf_splitting_type            = pflare_defs.pcair_set_cf_splitting_type
 pcair_set_max_luby_steps               = pflare_defs.pcair_set_max_luby_steps

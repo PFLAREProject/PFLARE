@@ -6,6 +6,7 @@ module c_fortran_bindings
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
    use cf_splitting, only: compute_cf_splitting
+   use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
    use air_data_type_routines, only: create_air_data
 
 #include "petsc/finclude/petscksp.h"
@@ -219,7 +220,7 @@ module c_fortran_bindings
 
    subroutine compute_cf_splitting_c(input_mat_ptr, symmetric_int, &
          strong_threshold, max_luby_steps, &
-         cf_splitting_type, ddc_its, fraction_swap, max_dd_ratio, &
+         cf_splitting_type, ddc_its, fraction_swap, &
          is_fine_ptr, is_coarse_ptr) &
          bind(C,name='compute_cf_splitting_c')
 
@@ -228,7 +229,7 @@ module c_fortran_bindings
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
       integer(c_int), value, intent(in)      :: symmetric_int, max_luby_steps, cf_splitting_type, ddc_its
-      real(c_double), value, intent(in)      :: strong_threshold, fraction_swap, max_dd_ratio
+      real(c_double), value, intent(in)      :: strong_threshold, fraction_swap
       integer(c_long_long), intent(inout)    :: is_fine_ptr, is_coarse_ptr
 
       type(tMat)  :: input_mat
@@ -244,7 +245,7 @@ module c_fortran_bindings
       if (symmetric_int == 1) symmetric = .TRUE.
       call compute_cf_splitting(input_mat, symmetric, &
                         strong_threshold, max_luby_steps, &
-                        cf_splitting_type, ddc_its, fraction_swap, max_dd_ratio, &
+                        cf_splitting_type, ddc_its, fraction_swap, &
                         is_fine, is_coarse)
 
       ! Pass out the IS's
@@ -252,6 +253,31 @@ module c_fortran_bindings
       is_coarse_ptr = is_coarse%v
 
    end subroutine compute_cf_splitting_c
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine compute_diag_dom_submatrix_c(input_mat_ptr, max_dd_ratio, output_mat_ptr) &
+         bind(C,name='compute_diag_dom_submatrix_c')
+
+      ! Computes a diagonally dominant submatrix
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(in)       :: input_mat_ptr
+      real(c_double), value, intent(in)      :: max_dd_ratio
+      integer(c_long_long), intent(inout)    :: output_mat_ptr
+
+      type(tMat)  :: input_mat, output_mat
+      ! ~~~~~~~~
+
+      ! Copy the input matrix pointer into the Fortran PETSc handle wrapper
+      input_mat%v = input_mat_ptr
+
+      call compute_diag_dom_submatrix(input_mat, max_dd_ratio, output_mat)
+
+      ! Pass out the resulting submatrix handle
+      output_mat_ptr = output_mat%v
+
+   end subroutine compute_diag_dom_submatrix_c
 
    !------------------------------------------------------------------------------------------------------------------------
 

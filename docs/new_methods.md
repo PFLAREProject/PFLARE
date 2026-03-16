@@ -45,11 +45,12 @@ There are several features used to improve the parallel performance of PCAIR [2-
 
 ### CF splittings
 
-The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarchy. They can also be called independently from PCAIR. The CF splitting type within PCAIR can be specified with ``-pc_air_cf_splitting_type``: 
+The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarchy. The CF splitting type within PCAIR can be specified with ``-pc_air_cf_splitting_type``: 
 
    | Command line type  | Flag | Description | GPU setup |
    | ------------- | -- | ------------- | -- |
    | pmisr_ddc  |  CF_PMISR_DDC  | Two-pass splitting giving diagonally dominant $\mathbf{A}_\textrm{ff}$ | Yes |
+   | diag_dom  |  CF_DIAG_DOM  | Two-pass splitting enforcing fixed diagonal dominance ratio (set by strong_threshold) in $\mathbf{A}_\textrm{ff}$ | Yes |   
    | pmis  |  CF_PMIS  | PMIS method with symmetrised strength matrix | Yes |
    | pmis_dist2  |  CF_PMIS_DIST2  | Distance 2 PMIS method with strength matrix formed by S'S + S and then symmetrised | Partial |
    | agg  |  CF_AGG  | Aggregation method with root-nodes as C points. In parallel this is processor local aggregation  | No |
@@ -66,9 +67,6 @@ in Fortran:
      int :: ddc_its = 1
      ! Fraction of F points to convert to C per ddc it
      PetscReal :: ddc_fraction = 0.1
-     ! If not 0, keep doing ddc its until this diagonal dominance
-     ! ratio is hit
-     PetscReal :: max_dd_ratio = 0.0
      ! As many steps as needed
      int :: max_luby_steps = -1
      ! PMISR DDC
@@ -82,7 +80,6 @@ in Fortran:
            algorithm, &
            ddc_its, &
            ddc_fraction, &
-           max_dd_ratio, &
            is_fine, is_coarse) 
 
 or in C:
@@ -94,9 +91,6 @@ or in C:
      int ddc_its = 1;
      // Fraction of F points to convert to C per ddc it
      PetscReal ddc_fraction = 0.1;
-     // If not 0, keep doing ddc its until this diagonal dominance
-     // ratio is hit
-     PetscReal max_dd_ratio = 0.0;
      // As many steps as needed
      int max_luby_steps = -1;
      // PMISR DDC
@@ -110,7 +104,6 @@ or in C:
          algorithm, \
          ddc_its, \
          ddc_fraction, \
-         max_dd_ratio, \
          &is_fine, &is_coarse);
 
 or in Python with petsc4py:
@@ -121,9 +114,6 @@ or in Python with petsc4py:
      ddc_its = 1
      # Fraction of F points to convert to C per ddc it
      ddc_fraction = 0.1
-     # If not 0, keep doing ddc its until this diagonal dominance
-     # ratio is hit
-     max_dd_ratio = 0.0     
      # As many steps as needed
      max_luby_steps = -1
      # PMISR DDC
@@ -131,10 +121,49 @@ or in Python with petsc4py:
      # Is the matrix symmetric?
      symmetric = False
 
-     [is_fine, is_coarse] = pflare.pflare_defs.compute_cf_splitting(A, \
+     [is_fine, is_coarse] = pflare.compute_cf_splitting(A, \
            symmetric, \
            strong_threshold, max_luby_steps, \
            algorithm, \
            ddc_its, \
-           ddc_fraction, \
-           max_dd_ratio)
+           ddc_fraction)
+
+To enforce a fixed diagonal dominance ratio, set `-pc_air_cf_splitting_type diag_dom` (or `algorithm = CF_DIAG_DOM`) and use `-pc_air_strong_threshold` as the target row-wise ratio in $\mathbf{A}_{ff}$; the section below details a convenience wrapper provided for this purpose.
+
+### Diagonally dominant submatrix extraction
+
+PFLARE also provides a standalone convenience routine to extract a diagonally dominant submatrix from a PETSc matrix, enforced to have a row-wise diagonal dominance ratio of less than `max_dd_ratio`. This works in serial, parallel and with Kokkos (and hence GPUs).
+
+For a row `i` of the extracted submatrix, define the row-wise ratio as
+
+$$
+r_i = \frac{\sum_{j \neq i} |a_{ij}|}{|a_{ii}|}.
+$$
+
+Then the extracted submatrix is required to satisfy
+
+$$
+r_i < \texttt{max\_dd\_ratio} \quad \text{for all rows } i.
+$$
+
+If a row has zero/missing diagonal, the ratio is treated as `0.0`. The parameter `max_dd_ratio` must satisfy `0.0 < max_dd_ratio < 1.0`. For example, to extract a diagonally dominant submatrix from a PETSc matrix `A`:
+
+in Fortran:
+
+      type(tMat) :: A_dd
+      PetscReal :: max_dd_ratio = 0.5
+
+      call compute_diag_dom_submatrix(A, max_dd_ratio, A_dd)
+
+or in C:
+
+      Mat A_dd;
+      PetscReal max_dd_ratio = 0.5;
+
+      compute_diag_dom_submatrix(A, max_dd_ratio, &A_dd);
+
+or in Python with petsc4py:
+
+      max_dd_ratio = 0.5
+
+      A_dd = pflare.compute_diag_dom_submatrix(A, max_dd_ratio)

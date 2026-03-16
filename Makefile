@@ -105,7 +105,10 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
 							  $(SRCDIR)/Grid_Transferk.o \
 							  $(SRCDIR)/VecISCopyLocalk.o \
-							  $(SRCDIR)/PMISR_DDCk.o \
+							  $(SRCDIR)/Device_Datak.o \
+							  $(SRCDIR)/MatDiagDomk.o \
+							  $(SRCDIR)/PMISR_Modulek.o \
+							  $(SRCDIR)/DDC_Modulek.o \
 							  $(SRCDIR)/Gmres_Polyk.o
 endif	
 
@@ -116,9 +119,13 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
-		  $(SRCDIR)/PMISR_DDC.o \
+		  $(SRCDIR)/MatDiagDom.o \
+		  $(SRCDIR)/SAbs.o \
+		  $(SRCDIR)/DDC_Module.o \
+		  $(SRCDIR)/PMISR_Module.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/CF_Splitting.o \
+		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/Repartition.o \
 		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \

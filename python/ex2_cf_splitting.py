@@ -157,9 +157,6 @@ strong_threshold = 0.5
 ddc_its = 1
 # Fraction of F points to convert to C per ddc it
 ddc_fraction = 0.1
-# If not 0, keep doing ddc its until this diagonal dominance
-# ratio is hit
-max_dd_ratio = 0.0    
 # As many steps as needed
 max_luby_steps = -1
 # PMISR DDC
@@ -167,13 +164,12 @@ algorithm = pflare.CF_PMISR_DDC
 # Is the matrix symmetric?
 symmetric = False
 
-[is_fine, is_coarse] = pflare.pflare_defs.compute_cf_splitting(A,\
+[is_fine, is_coarse] = pflare.compute_cf_splitting(A,\
       symmetric,\
       strong_threshold, max_luby_steps,\
       algorithm,\
       ddc_its, \
-      ddc_fraction, \
-      max_dd_ratio)
+      ddc_fraction)
 
 # ~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~
@@ -188,3 +184,10 @@ if n_fine + n_coarse==local_rows:
 else:
    PETSc.Sys.Print("- NOT OK",comm=comm)
    sys.exit(1)
+
+# ~~~~~~~~~~~~~~
+# Compute a diagonally dominant submatrix
+# ~~~~~~~~~~~~~~
+
+A_dd = pflare.compute_diag_dom_submatrix(A, 0.5)
+A_dd.destroy()
