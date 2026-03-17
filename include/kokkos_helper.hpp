@@ -12,6 +12,8 @@
 #include <Kokkos_Core.hpp>
 #include <Kokkos_DualView.hpp>
 #include <KokkosSparse_spadd.hpp>
+#include <Kokkos_NestedSort.hpp>
+#include <KokkosBatched_Gesv.hpp>
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
 using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;
