@@ -174,11 +174,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    auto colmap_cf_d = PetscIntKokkosView("colmap_cf_d", mpi ? cols_ao_cf : 1);
    if (mpi && cols_ao_cf > 0)
    {
-      auto colmap_cf_h = Kokkos::create_mirror_view(colmap_cf_d);
-      for (PetscInt k = 0; k < cols_ao_cf; k++)
-      {
-         colmap_cf_h(k) = colmap_cf[k];
-      }
+      auto colmap_cf_h = PetscIntConstKokkosViewHost(colmap_cf, cols_ao_cf);
       Kokkos::deep_copy(colmap_cf_d, colmap_cf_h);
       PetscCallVoid(PetscLogCpuToGpu(cols_ao_cf * sizeof(PetscInt)));
    }
@@ -186,11 +182,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    auto colmap_ff_d = PetscIntKokkosView("colmap_ff_d", mpi ? cols_ao_ff : 1);
    if (mpi && cols_ao_ff > 0)
    {
-      auto colmap_ff_h = Kokkos::create_mirror_view(colmap_ff_d);
-      for (PetscInt k = 0; k < cols_ao_ff; k++)
-      {
-         colmap_ff_h(k) = colmap_ff[k];
-      }
+      auto colmap_ff_h = PetscIntConstKokkosViewHost(colmap_ff, cols_ao_ff);
       Kokkos::deep_copy(colmap_ff_d, colmap_ff_h);
       PetscCallVoid(PetscLogCpuToGpu(cols_ao_ff * sizeof(PetscInt)));
    }
@@ -198,11 +190,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    // Copy col_indices_off_proc_array to device (for converting submatrix columns to global)
    auto col_indices_off_proc_d = PetscIntKokkosView("col_indices_off_proc_d", size_cols);
    {
-      auto col_indices_off_proc_h = Kokkos::create_mirror_view(col_indices_off_proc_d);
-      for (PetscInt i = 0; i < size_cols; i++)
-      {
-         col_indices_off_proc_h(i) = col_indices_off_proc_array[i];
-      }
+      auto col_indices_off_proc_h = PetscIntConstKokkosViewHost(col_indices_off_proc_array, size_cols);
       Kokkos::deep_copy(col_indices_off_proc_d, col_indices_off_proc_h);
       PetscCallVoid(PetscLogCpuToGpu(size_cols * sizeof(PetscInt)));
    }
@@ -211,11 +199,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    auto colmap_sparsity_d = PetscIntKokkosView("colmap_sparsity_d", mpi ? cols_ao_sparsity : 1);
    if (mpi && cols_ao_sparsity > 0)
    {
-      auto colmap_sparsity_h = Kokkos::create_mirror_view(colmap_sparsity_d);
-      for (PetscInt i = 0; i < cols_ao_sparsity; i++)
-      {
-         colmap_sparsity_h(i) = colmap_sparsity[i];
-      }
+      auto colmap_sparsity_h = PetscIntConstKokkosViewHost(colmap_sparsity, cols_ao_sparsity);
       Kokkos::deep_copy(colmap_sparsity_d, colmap_sparsity_h);
       PetscCallVoid(PetscLogCpuToGpu(cols_ao_sparsity * sizeof(PetscInt)));
    }
@@ -330,7 +314,6 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
 
       // ~~~~~~~~~~~~~~
       // Main kernel: one thread per row, build dense system and solve
-      // All column lookups use sorted global indices for correctness in parallel
       // ~~~~~~~~~~~~~~
       Kokkos::parallel_for("SAI_Z_build_and_solve",
          Kokkos::RangePolicy<>(exec, 0, this_chunk),
