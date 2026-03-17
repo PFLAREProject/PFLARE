@@ -370,6 +370,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
          // Convert A_cf columns to global, then binary search in sorted J
          // rhs[pos] = -A_cf(i, J[pos]) for each match
          // ~~~~~~~~
+         auto j_global_row = Kokkos::subview(j_global_batch, idx, Kokkos::ALL());
+
          // A_cf local columns
          const PetscInt ncols_local_cf = device_local_i_cf[i + 1] - device_local_i_cf[i];
          for (PetscInt k = 0; k < ncols_local_cf; k++)
@@ -377,21 +379,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
             PetscInt col_local = device_local_j_cf[device_local_i_cf[i] + k];
             PetscScalar val = device_local_vals_cf[device_local_i_cf[i] + k];
             PetscInt global_col = col_local + global_row_start_ff;
-            // Binary search in sorted j_global
-            PetscInt lo = 0, hi = j_size - 1;
-            while (lo <= hi)
-            {
-               PetscInt mid = (lo + hi) / 2;
-               if (j_global_batch(idx, mid) == global_col)
-               {
-                  rhs_batch(idx, mid) = -val;
-                  break;
-               }
-               else if (j_global_batch(idx, mid) < global_col)
-                  lo = mid + 1;
-               else
-                  hi = mid - 1;
-            }
+            PetscInt pos = binary_search_sorted(j_global_row, j_size, global_col);
+            if (pos >= 0) rhs_batch(idx, pos) = -val;
          }
 
          // A_cf nonlocal columns
@@ -403,21 +392,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                PetscInt col_nonlocal = device_nonlocal_j_cf[device_nonlocal_i_cf[i] + k];
                PetscScalar val = device_nonlocal_vals_cf[device_nonlocal_i_cf[i] + k];
                PetscInt global_col = colmap_cf_d(col_nonlocal);
-               // Binary search in sorted j_global
-               PetscInt lo = 0, hi = j_size - 1;
-               while (lo <= hi)
-               {
-                  PetscInt mid = (lo + hi) / 2;
-                  if (j_global_batch(idx, mid) == global_col)
-                  {
-                     rhs_batch(idx, mid) = -val;
-                     break;
-                  }
-                  else if (j_global_batch(idx, mid) < global_col)
-                     lo = mid + 1;
-                  else
-                     hi = mid - 1;
-               }
+               PetscInt pos = binary_search_sorted(j_global_row, j_size, global_col);
+               if (pos >= 0) rhs_batch(idx, pos) = -val;
             }
          }
 
@@ -429,7 +405,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
          // ~~~~~~~~
          for (PetscInt j = 0; j < j_size; j++)
          {
-            PetscInt global_row = j_global_batch(idx, j);
+            PetscInt global_row = j_global_row(j);
             bool is_local = (global_row >= global_row_start_ff &&
                              global_row < global_row_start_ff + local_rows_ff);
 
@@ -444,21 +420,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                   PetscInt col_local = device_local_j_ff[device_local_i_ff[local_row] + k];
                   PetscScalar val = device_local_vals_ff[device_local_i_ff[local_row] + k];
                   PetscInt global_col = col_local + global_row_start_ff;
-                  // Binary search in sorted j_global
-                  PetscInt lo = 0, hi = j_size - 1;
-                  while (lo <= hi)
-                  {
-                     PetscInt mid = (lo + hi) / 2;
-                     if (j_global_batch(idx, mid) == global_col)
-                     {
-                        dense_mat_batch(idx, mid, j) = val;
-                        break;
-                     }
-                     else if (j_global_batch(idx, mid) < global_col)
-                        lo = mid + 1;
-                     else
-                        hi = mid - 1;
-                  }
+                  PetscInt pos = binary_search_sorted(j_global_row, j_size, global_col);
+                  if (pos >= 0) dense_mat_batch(idx, pos, j) = val;
                }
                // Nonlocal columns of A_ff — convert to global via colmap
                if (mpi)
@@ -469,42 +432,15 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                      PetscInt col_nonlocal = device_nonlocal_j_ff[device_nonlocal_i_ff[local_row] + k];
                      PetscScalar val = device_nonlocal_vals_ff[device_nonlocal_i_ff[local_row] + k];
                      PetscInt global_col = colmap_ff_d(col_nonlocal);
-                     // Binary search in sorted j_global
-                     PetscInt lo = 0, hi = j_size - 1;
-                     while (lo <= hi)
-                     {
-                        PetscInt mid = (lo + hi) / 2;
-                        if (j_global_batch(idx, mid) == global_col)
-                        {
-                           dense_mat_batch(idx, mid, j) = val;
-                           break;
-                        }
-                        else if (j_global_batch(idx, mid) < global_col)
-                           lo = mid + 1;
-                        else
-                           hi = mid - 1;
-                     }
+                     PetscInt pos = binary_search_sorted(j_global_row, j_size, global_col);
+                     if (pos >= 0) dense_mat_batch(idx, pos, j) = val;
                   }
                }
             }
             else
             {
                // Non-local row: find in submatrix via binary search into colmap_sparsity
-               PetscInt lo = 0, hi = cols_ao_sparsity - 1;
-               PetscInt submat_row = -1;
-               while (lo <= hi)
-               {
-                  PetscInt mid = (lo + hi) / 2;
-                  if (colmap_sparsity_d(mid) == global_row)
-                  {
-                     submat_row = mid;
-                     break;
-                  }
-                  else if (colmap_sparsity_d(mid) < global_row)
-                     lo = mid + 1;
-                  else
-                     hi = mid - 1;
-               }
+               PetscInt submat_row = binary_search_sorted(colmap_sparsity_d, cols_ao_sparsity, global_row);
                if (submat_row < 0) continue;  // shouldn't happen
 
                // Read from submatrix — convert column indices to global via col_indices_off_proc
@@ -514,21 +450,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                   PetscInt submat_col = device_submat_j[device_submat_i[submat_row] + k];
                   PetscScalar val = device_submat_vals[device_submat_i[submat_row] + k];
                   PetscInt global_col = col_indices_off_proc_d(submat_col);
-                  // Binary search in sorted j_global
-                  PetscInt lo2 = 0, hi2 = j_size - 1;
-                  while (lo2 <= hi2)
-                  {
-                     PetscInt mid = (lo2 + hi2) / 2;
-                     if (j_global_batch(idx, mid) == global_col)
-                     {
-                        dense_mat_batch(idx, mid, j) = val;
-                        break;
-                     }
-                     else if (j_global_batch(idx, mid) < global_col)
-                        lo2 = mid + 1;
-                     else
-                        hi2 = mid - 1;
-                  }
+                  PetscInt pos = binary_search_sorted(j_global_row, j_size, global_col);
+                  if (pos >= 0) dense_mat_batch(idx, pos, j) = val;
                }
             }
          }
