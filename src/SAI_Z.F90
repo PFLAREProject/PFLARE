@@ -5,8 +5,8 @@ module sai_z
    use binary_tree, only: itree, itree2vector, flush_tree
    use sorting, only: create_knuth_shuffle_tree_array, intersect_pre_sorted_indices_only, &
          merge_pre_sorted, sorted_binary_search
-   use c_petsc_interfaces, only: mat_mat_symbolic_c
-   use petsc_helper, only: generate_identity
+   use c_petsc_interfaces, only: mat_mat_symbolic_c, calculate_and_build_sai_z_kokkos
+   use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI
 
 #include "petsc/finclude/petscksp.h"
@@ -18,7 +18,8 @@ module sai_z
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_sai_z(A_ff_input, A_cf, sparsity_mat_cf, incomplete, reuse_mat, reuse_submatrices, z)
+   subroutine calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, &
+                  reuse_mat, reuse_submatrices, z, no_approx_solve)
 
       ! Computes an approximation to z using sai/isai
       ! If incomplete is true then this is lAIR
@@ -30,6 +31,7 @@ module sai_z
       logical, intent(in)                               :: incomplete
       type(tMat), intent(inout)                         :: reuse_mat, z
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
+      logical, intent(in), optional                     :: no_approx_solve
 
       ! Local variables 
       PetscInt :: local_rows, local_cols, ncols, global_row_start, global_row_end_plus_one, ncols_sparsity_max
@@ -55,7 +57,7 @@ module sai_z
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs, diag_vec
-      logical :: approx_solve
+      logical :: approx_solve, disable_approx_solve
       type(tMat) :: Ao, Ad, temp_mat
       type(tKSP) :: ksp
       type(tPC) :: pc
@@ -72,6 +74,9 @@ module sai_z
       type(tMat) :: small_mat
 
       ! ~~~~~~
+
+      disable_approx_solve = .FALSE.
+      if (present(no_approx_solve)) disable_approx_solve = no_approx_solve
 
       call PetscObjectGetComm(A_ff_input, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
@@ -375,7 +380,7 @@ module sai_z
          end if
 
          ! If we have a big system to solve, do its iteratively
-         if (size(i_rows) > 40 .OR. j_size > 40) approx_solve = .TRUE.
+         if ((size(i_rows) > 40 .OR. j_size > 40) .AND. .NOT. disable_approx_solve) approx_solve = .TRUE.
 
          ! This determines the indices of J^* in I*
          ! Both i_rows and j_rows are global indices
@@ -630,6 +635,131 @@ module sai_z
       call KSPDestroy(ksp, ierr)
       call MatAssemblyBegin(z, MAT_FINAL_ASSEMBLY, ierr)
       call MatAssemblyEnd(z, MAT_FINAL_ASSEMBLY, ierr)       
+
+   end subroutine calculate_and_build_sai_z_cpu
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine calculate_and_build_sai_z(A_ff_input, A_cf, sparsity_mat_cf, incomplete, reuse_mat, reuse_submatrices, z)
+
+      ! Wrapper around calculate_and_build_sai_z_cpu and calculate_and_build_sai_z_kokkos
+      ! Dispatches to Kokkos for the incomplete (lAIR & isai) case with aijkokkos matrices
+
+      ! ~~~~~~
+      type(tMat), intent(in)                            :: A_ff_input, A_cf, sparsity_mat_cf
+      logical, intent(in)                               :: incomplete
+      type(tMat), intent(inout)                         :: reuse_mat, z
+      type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
+
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_ff_arr, A_cf_arr, sparsity_arr, reuse_arr, z_arr
+      integer :: errorcode, reuse_int
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      logical :: reuse_triggered
+      type(tMat) :: temp_mat, temp_mat_reuse, temp_mat_compare
+      type(tMat) :: reuse_mat_cpu
+      type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+#endif
+      ! ~~~~~~     
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A_ff_input, mat_type, ierr)
+      if ((mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) .AND. incomplete) then
+
+         ! We're enforcing the same sparsity 
+         ! If not re-using
+         if (PetscObjectIsNull(z)) then
+            call MatDuplicate(sparsity_mat_cf, MAT_DO_NOT_COPY_VALUES, z, ierr)
+         end if
+
+         ! We know we will never have non-zero locations outside of the sparsity 
+         call MatSetOption(z, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)
+         call MatSetOption(z, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
+         call MatSetOption(z, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)                
+
+         ! Extract opaque pointers for C interop
+         A_ff_arr = A_ff_input%v
+         A_cf_arr = A_cf%v
+         sparsity_arr = sparsity_mat_cf%v
+         reuse_arr = reuse_mat%v
+         z_arr = z%v
+
+         reuse_triggered = .NOT. PetscObjectIsNull(reuse_mat)
+         reuse_int = 0
+         if (reuse_triggered) reuse_int = 1
+
+         ! Call the Kokkos implementation
+         call calculate_and_build_sai_z_kokkos(A_ff_arr, A_cf_arr, sparsity_arr, &
+                  reuse_int, reuse_arr, z_arr)
+
+         ! Copy back the opaque pointers
+         reuse_mat%v = reuse_arr
+         z%v = z_arr
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            ! If we're doing reuse and debug, then we have to always output the result
+            ! from the cpu version, as it will have coo preallocation structures set
+            if (reuse_triggered) then
+               temp_mat = z
+               call MatConvert(z, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)
+            else
+               temp_mat_compare = z
+            end if
+
+            ! We send in an empty reuse_mat_cpu here always, as we can't pass through
+            ! the same one Kokkos uses as it now only gets out the non-local rows we need
+            ! We also disable the approximate solve if the size of any of the dense 
+            ! matrices are greater than 40x40, as the kokkos code always does direct solves
+            reuse_submatrices_cpu => null()
+            call calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, &
+                     reuse_mat_cpu, reuse_submatrices_cpu, temp_mat, &
+                     no_approx_solve = .TRUE.)
+            call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)
+
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)
+
+            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
+            ! There is floating point compute in these inverses, so we have to be a
+            ! bit more tolerant to rounding differences
+            if (normy .gt. 4d-11 .OR. normy/=normy) then
+               print *, "Diff Kokkos and CPU calculate_and_build_sai_z", normy, "row", row_loc
+
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse_triggered) then
+               call MatDestroy(z, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            z = temp_mat
+         end if
+
+      else
+
+         call calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, &
+                  reuse_mat, reuse_submatrices, z)
+
+      end if
+#else
+      call calculate_and_build_sai_z_cpu(A_ff_input, A_cf, sparsity_mat_cf, incomplete, &
+               reuse_mat, reuse_submatrices, z)
+#endif
 
    end subroutine calculate_and_build_sai_z
 

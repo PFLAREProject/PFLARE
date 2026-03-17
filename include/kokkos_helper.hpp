@@ -12,6 +12,8 @@
 #include <Kokkos_Core.hpp>
 #include <Kokkos_DualView.hpp>
 #include <KokkosSparse_spadd.hpp>
+#include <Kokkos_NestedSort.hpp>
+#include <KokkosBatched_Gesv.hpp>
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
 using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;
@@ -123,6 +125,25 @@ namespace Kokkos {
             return ReduceDataMaxRow();  // Returns {col=-1, val=-1}
         }
     };
+}
+
+// Binary search for target in a sorted array, returns the index or -1 if not found
+template <typename ViewType>
+KOKKOS_INLINE_FUNCTION
+PetscInt binary_search_sorted(const ViewType &sorted_view, const PetscInt size, const PetscInt target)
+{
+   PetscInt lo = 0, hi = size - 1;
+   while (lo <= hi)
+   {
+      PetscInt mid = (lo + hi) / 2;
+      if (sorted_view(mid) == target)
+         return mid;
+      else if (sorted_view(mid) < target)
+         lo = mid + 1;
+      else
+         hi = mid - 1;
+   }
+   return -1;
 }
 
 #endif

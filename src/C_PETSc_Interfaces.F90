@@ -550,10 +550,23 @@ module c_petsc_interfaces
          integer(c_int), value :: reuse_int_cmat, reuse_int_reuse_mat
       end subroutine mat_mult_powers_share_sparsity_kokkos         
  
-   end interface     
+   end interface
 
-   interface   
-      
+   interface
+
+      subroutine calculate_and_build_sai_z_kokkos(A_ff_array, A_cf_array, sparsity_array, &
+                  reuse_int_reuse_mat, reuse_array, z_array) &
+         bind(c, name="calculate_and_build_sai_z_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_ff_array, A_cf_array, sparsity_array
+         integer(c_long_long) :: reuse_array, z_array
+         integer(c_int), value :: reuse_int_reuse_mat
+      end subroutine calculate_and_build_sai_z_kokkos
+
+   end interface
+
+   interface
+
       subroutine mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array) &
          bind(c, name="mat_duplicate_copy_plus_diag_kokkos")
          use iso_c_binding

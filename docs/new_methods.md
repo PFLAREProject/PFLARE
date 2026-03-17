@@ -14,7 +14,7 @@ PCPFLAREINV contains methods for computing approximate inverses, most of which c
    | newton_no_extra  |  PFLAREINV_NEWTON_NO_EXTRA  | GMRES polynomial, applied as a Newton polynomial, with roots computed with an Arnoldi method and with no extra roots added   | Matrix-free: Yes Assembled: No |
    | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  | Yes |
    | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  | No |
-   | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | No |
+   | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | Yes |
    | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi  | Partial |
    | jacobi  |  PFLAREINV_JACOBI  | Jacobi  | Yes |
 
@@ -27,9 +27,9 @@ PCAIR contains different types of reduction multigrids. PCAIR can be used with t
    | product  |  power, arnoldi or newton  | AIRG  | Yes |
    | product  |  neumann  | nAIR with Neumann smoothing  | Yes |
    | product  |  sai  | SAI reduction multigrid  | No |
-   | product  |  isai  | ISAI reduction multigrid  | No |
+   | product  |  isai  | ISAI reduction multigrid  | Yes |
    | product  |  wjacobi or jacobi  | Distance 0 reduction multigrid  | Yes |
-   | lair  |  wjacobi or jacobi  | lAIR  | No |
+   | lair  |  wjacobi or jacobi  | lAIR  | Yes |
    | lair_sai  |  wjacobi or jacobi  | SAI version of lAIR  | No |
 
 Different combinations of these types can also be used, e.g., ``-pc_air_z_type lair -pc_air_inverse_type power`` uses a lAIR grid transfer operator and GMRES polynomial smoothing with the power basis.
