@@ -140,11 +140,7 @@ $$
 r_i = \frac{\sum_{j \neq i} |a_{ij}|}{|a_{ii}|}.
 $$
 
-Then the extracted submatrix is required to satisfy
-
-$$
-r_i < \text{max\_dd\_ratio} \quad \text{for all rows } i.
-$$
+Then the extracted submatrix is required to satisfy $r_i$ < `max_dd_ratio` for all rows $i$.
 
 If a row has zero/missing diagonal, the ratio is treated as `0.0`. The parameter `max_dd_ratio` must satisfy `0.0 < max_dd_ratio < 1.0`. For example, to extract a diagonally dominant submatrix from a PETSc matrix `A`:
 
