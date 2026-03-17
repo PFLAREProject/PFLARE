@@ -4,12 +4,11 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 // Compute lAIR Z matrix with kokkos - keeping everything on the device
-// This is the incomplete SAI case where I = J (square system)
 // For each row i of Z:
 //   1. Get J indices from sparsity_mat_cf row i (sorted global indices)
 //   2. Build RHS from A_cf row i intersected with J
 //   3. Build dense A_ff(J,J)^T
-//   4. Solve A_ff(J,J)^T * z = -A_cf(i,J)^T with SerialGesv
+//   4. Solve A_ff(J,J)^T * z = -A_cf(i,J)^T
 //   5. Write solution to Z row i (using permutation to map sorted→original order)
 PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sparsity_mat_cf,
                const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *z_mat)
@@ -387,7 +386,10 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
 
       // ~~~~~~~~
       // Step C: Build dense matrix A_ff(J,J)^T (parallel over J rows)
-      // Each thread handles one j, writing to dense_mat(*, j) — no races
+      // Each thread handles one j, writing to dense_mat(*, j) — no races.
+      // On GPU (LayoutLeft), the transpose is cache-friendly: each thread reads
+      // row J[j] of A_ff sequentially from CSR and writes down column j of
+      // dense_mat, which is contiguous in column-major layout.
       // ~~~~~~~~
       Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
          [&](const PetscInt j) {
