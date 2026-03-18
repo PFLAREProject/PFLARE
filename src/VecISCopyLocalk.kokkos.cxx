@@ -117,7 +117,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
          is_d[i] -= global_row_start;
    });
    // Ensure we're finished before we exit
-   exec.fence();    
+   Kokkos::fence();    
 
    return;
 }
@@ -180,7 +180,7 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
       PetscCallVoid(VecRestoreKokkosViewWrite(*vfull, &vfull_d));  
    }
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }

@@ -153,7 +153,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int == 1) measure_local_d(i) *= -1;
    });
    // Have to ensure the parallel for above finishes before comms
-   exec.fence(); 
+   Kokkos::fence(); 
 
    // Start the scatter of the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
    // one of the kokkos backends like PETSC_MEMTYPE_HIP
@@ -167,6 +167,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                                  mem_type, measure_nonlocal_d_ptr,
                                  MPI_REPLACE));
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
    }
 
    // Initialise the set
@@ -260,6 +261,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
       }
 
@@ -411,7 +413,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          });
 
          // Ensure everything is done before we comm
-         exec.fence();
+         Kokkos::fence();
 
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
@@ -425,6 +427,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             mem_type, cf_markers_d_ptr,
             MPIU_SUM));
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
+         Kokkos::fence();
 
          // Go and do local
          Kokkos::parallel_for(
@@ -507,7 +510,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       } else {
          // If we're doing a fixed number of steps, then we need an extra fence
          // as we don't hit the parallel reduce above (which implicitly fences)
-         exec.fence();
+         Kokkos::fence();
       }
 
    }
@@ -535,7 +538,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int) cf_markers_d(i) *= -1;
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }
@@ -596,7 +599,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
          }              
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -727,7 +730,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // it until comms ended, meaning we couldn't do the work overlapping below      
       Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
       cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
-      exec.fence();
+      Kokkos::fence();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
 
@@ -741,6 +744,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
                   mem_type, cf_markers_nonlocal_d_ptr,
                   MPI_REPLACE));
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
    }   
 
    // ~~~~~~~~~~~~~~~
@@ -882,7 +886,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       }
    });   
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }
@@ -1034,7 +1038,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
             }
       });
       // Ensure we're done before we exit
-      exec.fence(); 
+      Kokkos::fence(); 
    }   
 
    return;

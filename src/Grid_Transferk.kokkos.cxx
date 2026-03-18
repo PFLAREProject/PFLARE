@@ -268,7 +268,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    });      
 
    // Let's make sure everything on the device is finished
-   exec.fence();
+   Kokkos::fence();
    
    // We can create our local diagonal block matrix directly on the device
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
@@ -642,7 +642,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
             }
       });   
 
-      exec.fence();
+      Kokkos::fence();
 
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -684,7 +684,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       }   
         
       // Let's make sure everything on the device is finished
-      exec.fence();      
+      Kokkos::fence();      
 
       // We can create our local diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols_coarse, i_local_d, j_local_d, a_local_d, &output_mat_local));
@@ -1122,7 +1122,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
             }
       });   
 
-      exec.fence();
+      Kokkos::fence();
 
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -1148,7 +1148,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    if (!reuse_int)
    {
       // Let's make sure everything on the device is finished
-      exec.fence();   
+      Kokkos::fence();   
 
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
@@ -1156,7 +1156,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       KokkosSparse::sort_crs_matrix(csrmat_local);
       
       // Let's make sure everything on the device is finished
-      exec.fence();       
+      Kokkos::fence();       
       
       // Create the matrix given the sorted csr
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
