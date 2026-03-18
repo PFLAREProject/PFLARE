@@ -692,7 +692,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // If we gave the comms routine cf_markers_d we couldn't even read from
          // it until comms ended, meaning we couldn't do the work overlapping below
          Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
-         Kokkos::fence();
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
@@ -935,7 +934,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
          // Copy cf_markers_d into a temporary buffer for the forward scatter
          Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
-         Kokkos::fence();
          // Be careful these aren't petscints
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
