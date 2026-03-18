@@ -127,7 +127,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // If you want to generate the randoms on the device
    //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
    // Copy the input measure from host to device
-   Kokkos::deep_copy(measure_local_d, measure_local_h);  
+   Kokkos::deep_copy(exec, measure_local_d, measure_local_h);
    // Log copy with petsc
    size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -253,7 +253,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Copy cf_markers_d into a temporary buffer
          // If we gave the comms routine cf_markers_d we couldn't even read from 
          // it until comms ended, meaning we couldn't do the work overlapping below
-         Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
+         Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
@@ -383,7 +383,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (mpi) 
       {
          // We're going to do an add reverse scatter, so set them to zero
-         Kokkos::deep_copy(cf_markers_nonlocal_d, 0);  
+         Kokkos::deep_copy(exec, cf_markers_nonlocal_d, 0);
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -732,7 +732,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // Copy cf_markers_d into a temporary buffer
       // If we gave the comms routine cf_markers_d we couldn't even read from 
       // it until comms ended, meaning we couldn't do the work overlapping below      
-      Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
+      Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
       cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
@@ -764,7 +764,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 
    // Have to store the diagonal entry
    PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
-   Kokkos::deep_copy(diag_entry_d, 0);
+   Kokkos::deep_copy(exec, diag_entry_d, 0);
 
    // Scoping to reduce peak memory
    {
@@ -978,7 +978,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
 
       // Create device memory for bins
       auto dom_bins_d = PetscIntKokkosView("dom_bins_d", 1000);
-      Kokkos::deep_copy(dom_bins_d, 0);
+      Kokkos::deep_copy(exec, dom_bins_d, 0);
 
       // Bin the diagonal dominance ratio
       if (fraction_swap > 0)
