@@ -2263,6 +2263,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // End releases the send buffer for normal access again.
          // The scattered lvec_d values are now safe to read below.
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, x_d_ptr, lvec_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
          // Start the cmap scatter
          // We make sure not to launch another broadcast on the same Mvctx (ie SF) until the first one has ended
@@ -2311,6 +2312,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // End releases the send buffer for normal access again.
          // The scattered lcmap_d values are now safe to read below.
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, cmap_d_ptr, lcmap_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
          // Loop over all the cols in the input matrix
          Kokkos::parallel_for(

@@ -161,6 +161,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       // End releases the active send buffer for normal access again.
       // The scattered values in measure_nonlocal_d are now safe to consume.
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
    }   
 
    // ~~~~~~~~~~~~
@@ -271,6 +272,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // End releases the send snapshot for normal access again.
          // The scattered cf_markers_nonlocal_d values are now safe to read.
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -395,6 +397,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // This is the first point where later logic should consume the reduced
          // result rather than the in-flight root buffer.
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
+         Kokkos::fence();
       }
 
       // We've done another top level loop
@@ -666,6 +669,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       // End releases the active send buffer for normal access again.
       // The scattered values in measure_nonlocal_d are now safe to consume.
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~
@@ -784,6 +788,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // End releases the send snapshot for normal access again.
          // The scattered cf_markers_nonlocal_d values are now safe to read.
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
          // Let's go and mark any non-local entries that have strong influences and comm to other ranks
          // We iterate over the transpose of the non-local part of S
@@ -839,6 +844,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             MPI_LOR));
          // Not sure we have any chance to overlap this with anything else
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_C_BOOL, veto_nonlocal_d_ptr, veto_local_d_ptr, MPI_LOR));
+         Kokkos::fence();
 
          // Now the comms have finished, we know exactly which local nodes on this rank have no
          // local strong dependencies, influences, non-local influences but not yet non-local dependencies
@@ -976,10 +982,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
          // Finish the forward scatter before we write to cf_markers_d
          // Also ensure this broadcast is done before we launch another on the same SF mat_mpi->Mvctx
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));         
-
-         // Ensure everything is done before we comm
-         exec.fence();
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
          // Now we reduce the veto_nonlocal_d with a lor
          // Any local node with veto set to true is not in the set
@@ -989,6 +993,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             MPI_LOR));
          // Not sure if there is anywhere to overlap these comms
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_C_BOOL, veto_nonlocal_d_ptr, veto_local_d_ptr, MPI_LOR));
+         Kokkos::fence();
 
          // Let's finish the non-local dependencies
          // If this node has been veto'd, then set it to not in the set

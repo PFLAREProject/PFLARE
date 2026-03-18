@@ -178,6 +178,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // End releases the send snapshot for normal access again.
       // The scattered cf_markers_nonlocal_d values are now safe to read.
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
 
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device
