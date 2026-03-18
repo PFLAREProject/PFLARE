@@ -134,7 +134,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
    // Compute the measure
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
       // Randoms on the device
       // auto generator = random_pool.get_state();
@@ -174,7 +174,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // Initialise the set
    PetscInt counter_in_set_start = 0;
    // Count how many in the set to begin with and set their CF markers
-   Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+   Kokkos::parallel_reduce ("Reduction", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
       if (Kokkos::abs(measure_local_d[i]) < 1) 
       {
          if (zero_measure_c_point_int == 1) {
@@ -374,7 +374,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // The nodes that have mark equal to true have no strong active neighbours in the IS
          // hence they can be in the IS
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
                if (mark_d(i)) cf_markers_d(i) = loops_through;
          });      
@@ -461,7 +461,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
          // Merge the local updates after the PetscSF reduction has completed.
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
             // Only the locally discovered neighbours are merged here.
             // Entries left at 2 were already selected into the set earlier.
@@ -502,9 +502,9 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (max_luby_steps < 0) {
 
          counter_undecided = 0;  
-         Kokkos::parallel_reduce ("ReductionCounter_undecided", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionCounter_undecided", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             if (cf_markers_d(i) == 0) update++;
-         }, counter_undecided); 
+         }, counter_undecided);
 
          // Parallel reduction!
          PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
@@ -523,8 +523,8 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~
 
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-         
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+
       if (cf_markers_d(i) == 0)
       {
          cf_markers_d(i) = 1;
@@ -567,7 +567,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // Doing an exclusive scan to get the offsets for our local indices
    // Doing one larger so we can get the total number of points
    Kokkos::parallel_scan("point_offsets_d_scan",
-      Kokkos::RangePolicy<>(0, local_rows+1),
+      Kokkos::RangePolicy<>(exec, 0, local_rows+1),
       KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
          bool is_f_point = false;
          if (i < local_rows) { // Predicate is based on original data up to local_rows-1
@@ -593,7 +593,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // Write the local indices
    // ~~~~~~~~~~~~     
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) { 
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          // Is this point match_cf
          if (cf_markers_d(i) == match_cf) {
             // point_offsets_d(i) gives the correct local index
@@ -624,18 +624,20 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
 
    // Now convert them back to global indices
    PetscInt global_row_start, global_row_end_plus_one;
-   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));   
+   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));
+
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Convert F points
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_fine_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
-   
+      Kokkos::RangePolicy<>(exec, 0, is_fine_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+
       is_fine_local_d(i) += global_row_start;
    });
    // Convert C points
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_coarse_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) { 
-   
+      Kokkos::RangePolicy<>(exec, 0, is_coarse_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+
       is_coarse_local_d(i) += global_row_start;
    });       
 
@@ -876,8 +878,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
    // Compute the diag dominance ratio
    // ~~~~~~~~~~~~~
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {     
-         
+      Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {
+
       // If diag_val is zero we didn't find a diagonal
       if (diag_entry_d(i) != 0.0){
          // Compute the diagonal dominance ratio
@@ -949,7 +951,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
    {
       PetscReal max_dd_ratio_local = 0.0;
       // Do a reduction to get the local max
-      Kokkos::parallel_reduce("max_dd_ratio", local_rows_aff,
+      Kokkos::parallel_reduce("max_dd_ratio", Kokkos::RangePolicy<>(exec, 0, local_rows_aff),
          KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
             PetscReal dd_ratio = diag_dom_ratio_d(i);
             thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;
@@ -982,7 +984,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
       if (fraction_swap > 0)
       {
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) { 
+            Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
             // Let's bin the entry
             int bin;
@@ -1009,17 +1011,17 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
 
          // Parallel scan to inclusive sum the number of entries we have in 
          // the bins
-         Kokkos::parallel_scan(dom_bins_d.extent(0), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+         Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, dom_bins_d.extent(0)), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
             // Inclusive scan
-            update += dom_bins_d(i);         
+            update += dom_bins_d(i);
             if (final) {
                dom_bins_d(i) = update; // only update array on final pass
             }
-         });        
+         });
 
          // Now if we reduce how many are > the search_size, we know the bin boundary we want
-         int bin_boundary = 0;  
-         Kokkos::parallel_reduce ("ReductionBin", dom_bins_d.extent(0), KOKKOS_LAMBDA (const int i, int& update) {
+         int bin_boundary = 0;
+         Kokkos::parallel_reduce ("ReductionBin", Kokkos::RangePolicy<>(exec, 0, dom_bins_d.extent(0)), KOKKOS_LAMBDA (const int i, int& update) {
             if (dom_bins_d(i) > dom_bins_d(dom_bins_d.extent(0)-1) - search_size) update++;
          }, bin_boundary);   
 
@@ -1030,7 +1032,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
 
       // Go and swap F points to C points
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
+         Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
             if (diag_dom_ratio_d(i) != 0.0 && diag_dom_ratio_d(i) >= swap_dom_val)
             {

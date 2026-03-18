@@ -95,9 +95,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    PetscIntKokkosView is_d;
    is_d = *IS_fine_views_local[level_idx];
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
+      Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
          is_d[i] -= global_row_start;
-   });   
+   });
 
    PetscCallVoid(ISGetIndices(*index_coarse, &coarse_indices_ptr));
    auto coarse_view_h = PetscIntConstKokkosViewHost(coarse_indices_ptr, coarse_local_size);
@@ -113,7 +113,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
    is_d = *IS_coarse_views_local[level_idx];
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {     
+      Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
          is_d[i] -= global_row_start;
    });
    // Ensure we're finished before we exit
@@ -154,7 +154,7 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
       PetscCallVoid(VecGetKokkosView(*vfull, &vfull_d));
 
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {           
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
             vreduced_d[i] = vfull_d[is_d(i)];
       });
 
@@ -172,7 +172,7 @@ PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull,
       PetscCallVoid(VecGetKokkosViewWrite(*vfull, &vfull_d));
 
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {           
+         Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
             vfull_d[is_d(i)] = vreduced_d[i];
       });     
 
