@@ -24,7 +24,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
       // Scoped so we don't keep the copy of j around very long
       {
          PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
-         Kokkos::deep_copy(j_nonlocal_d_sorted, j_nonlocal_d);
+         Kokkos::deep_copy(exec, j_nonlocal_d_sorted, j_nonlocal_d);
          Kokkos::sort(j_nonlocal_d_sorted);
 
          // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
@@ -104,22 +104,23 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
    Mat mat_local = NULL, mat_nonlocal = NULL;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    PetscIntConstKokkosViewHost colmap_input_h;
-   PetscIntKokkosView colmap_input_d;   
+   PetscIntKokkosView colmap_input_d;
    const PetscInt *colmap_input;
    if (mpi)
    {
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap_input));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao)); 
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
 
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntConstKokkosViewHost(colmap_input, cols_ao);
       colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);  
+      Kokkos::deep_copy(exec, colmap_input_d, colmap_input_h);
       // Log copy with petsc
       size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
-      PetscCallVoid(PetscLogCpuToGpu(bytes));              
+      PetscCallVoid(PetscLogCpuToGpu(bytes));
    }
    else
    {
@@ -143,8 +144,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // ~~~~~~~~~~~~
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
+   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
 
    // ~~~~~~~~~~~~
@@ -157,20 +158,19 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Let's build our i, j, and a on the device
    // ~~~~~~~~~~~~~~~~~~~~~~~
    // We need the relative row tolerance, let's create some device memory to store it
-   PetscScalarKokkosView rel_row_tol_d("rel_row_tol_d", local_rows);      
+   PetscScalarKokkosView rel_row_tol_d("rel_row_tol_d", local_rows);
    // Log copy with petsc
    size_t bytes = sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
 
-   // We need to know how many entries are in each row after our dropping  
-   PetscIntKokkosView nnz_match_local_row_d("nnz_match_local_row_d", local_rows);             
+   // We need to know how many entries are in each row after our dropping
+   PetscIntKokkosView nnz_match_local_row_d("nnz_match_local_row_d", local_rows);
    PetscIntKokkosView nnz_match_nonlocal_row_d;
-   if (mpi) nnz_match_nonlocal_row_d = PetscIntKokkosView("nnz_match_nonlocal_row_d", local_rows);                  
+   if (mpi) nnz_match_nonlocal_row_d = PetscIntKokkosView("nnz_match_nonlocal_row_d", local_rows);
    // Device memory for whether there is an existing diagonal in each row
-   boolKokkosView existing_diag_d("existing_diag_d", local_rows);     
-   Kokkos::deep_copy(existing_diag_d, false);
+   boolKokkosView existing_diag_d("existing_diag_d", local_rows);
+   Kokkos::deep_copy(exec, existing_diag_d, false);
    const bool not_include_diag = relative_max_row_tolerance_int == -1;
-   auto exec = PetscGetKokkosExecutionSpace();
    
    // Compute the relative row tolerances if needed
    if (relative_max_row_tolerance_int) 
@@ -238,7 +238,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    else
    {
       // Copy in the tolerance
-      Kokkos::deep_copy(rel_row_tol_d, tol);   
+      Kokkos::deep_copy(exec, rel_row_tol_d, tol);
    }
 
    // ~~~~~~~~~~~~
@@ -427,28 +427,28 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    Kokkos::View<PetscInt *> j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
 
    // Initialize first entry to zero - the rest get set below
-   Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);     
+   Kokkos::deep_copy(exec, Kokkos::subview(i_local_d, 0), 0);
 
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
       i_local_d(i + 1) = nnz_match_local_row_d(i);
-   });  
+   });
 
-   // Nonlocal stuff 
+   // Nonlocal stuff
    Kokkos::View<PetscScalar *> a_nonlocal_d;
-   Kokkos::View<PetscInt *> i_nonlocal_d;          
-   Kokkos::View<PetscInt *> j_nonlocal_d;    
+   Kokkos::View<PetscInt *> i_nonlocal_d;
+   Kokkos::View<PetscInt *> j_nonlocal_d;
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
-   if (mpi) 
+   if (mpi)
    {
-      // Non-local 
+      // Non-local
       a_nonlocal_d = Kokkos::View<PetscScalar *>("a_nonlocal_d", nnzs_match_nonlocal);
       i_nonlocal_d = Kokkos::View<PetscInt *>("i_nonlocal_d", local_rows+1);
-      j_nonlocal_d = Kokkos::View<PetscInt *>("j_nonlocal_d", nnzs_match_nonlocal);  
+      j_nonlocal_d = Kokkos::View<PetscInt *>("j_nonlocal_d", nnzs_match_nonlocal);
 
       // Initialize first entry to zero - the rest get set below
-      Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                 
+      Kokkos::deep_copy(exec, Kokkos::subview(i_nonlocal_d, 0), 0);                 
 
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
@@ -768,6 +768,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Get the comm
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
@@ -779,13 +780,13 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    const PetscInt global_row_start = global_row_start_temp;
    //const PetscInt global_row_end_plus_one = global_row_end_plus_one_temp;
    const PetscInt global_col_start = global_col_start_temp;
-   const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;   
+   const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
 
    Mat mat_local = NULL, mat_nonlocal = NULL;
-   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
+   Mat mat_local_output = NULL, mat_nonlocal_output = NULL;
 
    PetscIntConstKokkosViewHost colmap_input_h, colmap_output_h;
-   PetscIntKokkosView colmap_input_d, colmap_output_d;   
+   PetscIntKokkosView colmap_input_d, colmap_output_d;
    const PetscInt *colmap_input, *colmap_output;
    if (mpi)
    {
@@ -795,23 +796,23 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntConstKokkosViewHost(colmap_input, cols_ao_input);
       colmap_input_d = PetscIntKokkosView("colmap_input_d", cols_ao_input);
-      Kokkos::deep_copy(colmap_input_d, colmap_input_h);  
+      Kokkos::deep_copy(exec, colmap_input_d, colmap_input_h);
 
       // Log copy with petsc
       size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));
-      
-      // Same for output 
+
+      // Same for output
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*output_mat, &mat_local_output, &mat_nonlocal_output, &colmap_output));
       PetscCallVoid(MatGetSize(mat_nonlocal_output, &rows_ao_output, &cols_ao_output));
 
       colmap_output_h = PetscIntConstKokkosViewHost(colmap_output, cols_ao_output);
       colmap_output_d = PetscIntKokkosView("colmap_output_d", cols_ao_output);
-      Kokkos::deep_copy(colmap_output_d, colmap_output_h); 
+      Kokkos::deep_copy(exec, colmap_output_d, colmap_output_h);
 
       bytes = colmap_output_h.extent(0) * sizeof(PetscInt);
-      PetscCallVoid(PetscLogCpuToGpu(bytes));      
- 
+      PetscCallVoid(PetscLogCpuToGpu(bytes));
+
    }
    else
    {
@@ -837,8 +838,6 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
    Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // Find maximum non-zeros per row of the input mat for sizing scratch memory
    PetscInt max_nnz_local = 0, max_nnz_nonlocal = 0;
@@ -1124,27 +1123,28 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    Mat_SeqAIJKokkos *aijkok_nonlocal = NULL;
    Mat_SeqAIJKokkos *aijkok_local = static_cast<Mat_SeqAIJKokkos *>(mat_local->spptr);
    if(mpi) aijkok_nonlocal = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal->spptr);
-   
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));  
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));          
+   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
 
    PetscScalarKokkosView a_local_d, a_nonlocal_d;
-   a_local_d = PetscScalarKokkosView(device_local_vals, aijkok_local->csrmat.nnz());   
-   if (mpi) a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, aijkok_nonlocal->csrmat.nnz()); 
+   a_local_d = PetscScalarKokkosView(device_local_vals, aijkok_local->csrmat.nnz());
+   if (mpi) a_nonlocal_d = PetscScalarKokkosView(device_nonlocal_vals, aijkok_nonlocal->csrmat.nnz());
    // Copy in the val
-   Kokkos::deep_copy(a_local_d, val); 
+   Kokkos::deep_copy(exec, a_local_d, val);
    // Log copy with petsc
    size_t bytes = sizeof(PetscReal);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));   
-   if (mpi) 
-   {  
-      Kokkos::deep_copy(a_nonlocal_d, val); 
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
+   if (mpi)
+   {
+      Kokkos::deep_copy(exec, a_nonlocal_d, val); 
       PetscCallVoid(PetscLogCpuToGpu(bytes));   
    }
 
@@ -1237,8 +1237,8 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
 
    // We always need to know if we found a diagonal in each row of the input_matrix
-   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);    
-   Kokkos::deep_copy(found_diag_row_d, 0); 
+   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);
+   Kokkos::deep_copy(exec, found_diag_row_d, 0);
 
    // ~~~~~~~~~~~~
    // Get the number of nnzs
@@ -1247,10 +1247,10 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    nnzs_match_nonlocal = 0;
 
    // We need to know how many entries are in each row 
-   nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows);    
+   nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows);
    // We may have identity
-   Kokkos::deep_copy(nnz_match_local_row_d, 0);              
-   if (mpi) nnz_match_nonlocal_row_d = PetscIntKokkosView("nnz_match_nonlocal_row_d", local_rows);      
+   Kokkos::deep_copy(exec, nnz_match_local_row_d, 0);
+   if (mpi) nnz_match_nonlocal_row_d = PetscIntKokkosView("nnz_match_nonlocal_row_d", local_rows);
 
    // Calculate if each row has a diagonal, we need to know this for both 
    // reuse and not reuse
@@ -1354,19 +1354,19 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
 
       // Initialize first entry to zero - the rest get set below
-      Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
+      Kokkos::deep_copy(exec, Kokkos::subview(i_local_d, 0), 0);
 
       // we also have to go and build the a, i, j for the non-local off-diagonal block
-      if (mpi) 
+      if (mpi)
       {
-         // Non-local 
+         // Non-local
          a_nonlocal_d = Kokkos::View<PetscScalar *>("a_nonlocal_d", nnzs_match_nonlocal);
          i_nonlocal_d = Kokkos::View<PetscInt *>("i_nonlocal_d", local_rows+1);
-         j_nonlocal_d = Kokkos::View<PetscInt *>("j_nonlocal_d", nnzs_match_nonlocal);  
+         j_nonlocal_d = Kokkos::View<PetscInt *>("j_nonlocal_d", nnzs_match_nonlocal);
 
          // Initialize first entry to zero - the rest get set below
-         Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                
-      }  
+         Kokkos::deep_copy(exec, Kokkos::subview(i_nonlocal_d, 0), 0);
+      }
 
       // ~~~~~~~~~~~~~~~
       // Create i indices
@@ -1446,9 +1446,9 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Annoying we can't just call MatSeqAIJGetKokkosView
       a_local_d = aijkok_local_output->a_dual.view_device();
       if (mpi) a_nonlocal_d = aijkok_nonlocal_output->a_dual.view_device();
-      // Because we might be missing diagonals and we're going to skip some of them 
+      // Because we might be missing diagonals and we're going to skip some of them
       // in the writing loop below
-      Kokkos::deep_copy(a_local_d, 0.0);
+      Kokkos::deep_copy(exec, a_local_d, 0.0);
 
       // Annoyingly there isn't currently the ability to get views for i (or j)
       const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_ouput = nullptr;
@@ -1617,33 +1617,32 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
     }  
 
    PetscInt rows_ao_y, cols_ao_y, rows_ao_x, cols_ao_x;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    PetscCallVoid(MatGetSize(mat_nonlocal_y, &rows_ao_y, &cols_ao_y));
    PetscCallVoid(MatGetSize(mat_nonlocal_x, &rows_ao_x, &cols_ao_x));
-   
+
    // We also copy the colmaps over to the device as we need it
    PetscIntConstKokkosViewHost colmap_input_h_y = PetscIntConstKokkosViewHost(colmap_y, cols_ao_y);
    PetscIntKokkosView colmap_input_d_y = PetscIntKokkosView("colmap_input_d_y", cols_ao_y);
-   Kokkos::deep_copy(colmap_input_d_y, colmap_input_h_y);  
+   Kokkos::deep_copy(exec, colmap_input_d_y, colmap_input_h_y);
    // Log copy with petsc
    size_t bytes = colmap_input_h_y.extent(0) * sizeof(PetscInt);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));     
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
 
    PetscIntConstKokkosViewHost colmap_input_h_x = PetscIntConstKokkosViewHost(colmap_x, cols_ao_x);
    PetscIntKokkosView colmap_input_d_x = PetscIntKokkosView("colmap_input_d_x", cols_ao_x);
-   Kokkos::deep_copy(colmap_input_d_x, colmap_input_h_x);  
+   Kokkos::deep_copy(exec, colmap_input_d_x, colmap_input_h_x);
    // Log copy with petsc
    bytes = colmap_input_h_x.extent(0) * sizeof(PetscInt);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));  
-   
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
+
    // Get the comm
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*Y, &MPI_COMM_MATRIX));
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscCallVoid(MatGetLocalSize(*Y, &local_rows, &local_cols));
    PetscCallVoid(MatGetSize(*Y, &global_rows, &global_cols));
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~~~~
    // Let's go and add the local components together
@@ -1676,9 +1675,9 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       i_local_d_copy = Kokkos::View<PetscInt *>("i_local_d_copy", i_local_d_z.extent(0));
       j_local_d_copy = Kokkos::View<PetscInt *>("j_local_d_copy", j_local_d_z.extent(0));   
 
-      Kokkos::deep_copy(a_local_d_copy, a_local_d_z);
-      Kokkos::deep_copy(i_local_d_copy, i_local_d_z);
-      Kokkos::deep_copy(j_local_d_copy, j_local_d_z);
+      Kokkos::deep_copy(exec, a_local_d_copy, a_local_d_z);
+      Kokkos::deep_copy(exec, i_local_d_copy, i_local_d_z);
+      Kokkos::deep_copy(exec, j_local_d_copy, j_local_d_z);
    }
 
    // We can create our local diagonal block matrix directly on the device
@@ -1766,9 +1765,9 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       i_nonlocal_d_copy = Kokkos::View<PetscInt *>("i_local_d_copy", i_nonlocal_d_z.extent(0));
       j_nonlocal_d_copy = Kokkos::View<PetscInt *>("j_local_d_copy", j_nonlocal_d_z.extent(0));   
 
-      Kokkos::deep_copy(a_nonlocal_d_copy, a_nonlocal_d_z);
-      Kokkos::deep_copy(i_nonlocal_d_copy, i_nonlocal_d_z);
-      Kokkos::deep_copy(j_nonlocal_d_copy, j_nonlocal_d_z);   
+      Kokkos::deep_copy(exec, a_nonlocal_d_copy, a_nonlocal_d_z);
+      Kokkos::deep_copy(exec, i_nonlocal_d_copy, i_nonlocal_d_z);
+      Kokkos::deep_copy(exec, j_nonlocal_d_copy, j_nonlocal_d_z);
    }
 
    // We can create our nonlocal diagonal block matrix directly on the device
@@ -1821,13 +1820,13 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    nnzs_match_local = 0;
 
    // We need to know how many entries are in each row 
-   nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows_row);    
+   nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows_row);
    // We may have identity
-   Kokkos::deep_copy(nnz_match_local_row_d, 0);              
-   
+   Kokkos::deep_copy(exec, nnz_match_local_row_d, 0);
+
    // Map which columns in the original mat are in is_col
-   PetscIntKokkosView smap_d = PetscIntKokkosView("smap_d", local_cols);  
-   Kokkos::deep_copy(smap_d, 0); 
+   PetscIntKokkosView smap_d = PetscIntKokkosView("smap_d", local_cols);
+   Kokkos::deep_copy(exec, smap_d, 0);
    // Loop over all the cols in is_col
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
@@ -1924,7 +1923,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
 
       // Initialize first entry to zero - the rest get set below
-      Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);       
+      Kokkos::deep_copy(exec, Kokkos::subview(i_local_d, 0), 0);
 
       // ~~~~~~~~~~~~~~~
       // Create i indices
@@ -2176,9 +2175,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Basically a copy of ISGetSeqIS_SameColDist_Private
          /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
          PetscIntKokkosView x_d("x_d", local_cols);
-         Kokkos::deep_copy(x_d, -1);
+         Kokkos::deep_copy(exec, x_d, -1);
          PetscIntKokkosView cmap_d("cmap_d", local_cols);
-         Kokkos::deep_copy(cmap_d, -1);
+         Kokkos::deep_copy(exec, cmap_d, -1);
          PetscIntKokkosView lvec_d("lvec_d", cols_ao);
          // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
          // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
@@ -2224,7 +2223,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // One bigger for exclusive scan
          auto is_col_o_match_d = PetscIntKokkosView("is_col_o_match_d", cols_ao+1);
-         Kokkos::deep_copy(is_col_o_match_d, 0);         
+         Kokkos::deep_copy(exec, is_col_o_match_d, 0);
 
          // Finish the x scatter
          // End releases the send buffer for normal access again.
@@ -2308,8 +2307,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Copy the iscol_o to the device
          auto iscol_o_view_h = PetscIntConstKokkosViewHost(iscol_o_indices_ptr, local_cols_iscol_o);    
-         is_col_o_d = PetscIntKokkosView("is_col_o_d", local_cols_iscol_o);   
-         Kokkos::deep_copy(is_col_o_d, iscol_o_view_h);
+         is_col_o_d = PetscIntKokkosView("is_col_o_d", local_cols_iscol_o);
+         Kokkos::deep_copy(exec, is_col_o_d, iscol_o_view_h);
          // Log copy with petsc
          bytes = iscol_o_view_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -2408,8 +2407,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       auto is_col_view_h = PetscIntConstKokkosViewHost(is_col_indices_ptr, local_cols_col);    
       is_col_d_d = PetscIntKokkosView("is_col_d_d", local_cols_col);      
       // Copy indices to the device
-      Kokkos::deep_copy(is_row_d_d, is_row_view_h);     
-      Kokkos::deep_copy(is_col_d_d, is_col_view_h);
+      Kokkos::deep_copy(exec, is_row_d_d, is_row_view_h);
+      Kokkos::deep_copy(exec, is_col_d_d, is_col_view_h);
       // Log copy with petsc
       size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));        

@@ -37,11 +37,13 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    const PetscInt global_col_start = global_col_start_temp;
    //const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // We also copy the coefficients over to the device as we need it
    PetscInt coeff_size = poly_order + 1;
    auto coefficients_h = PetscScalarKokkosViewHost(coefficients, coeff_size);
    auto coefficients_d = PetscScalarKokkosView("coefficients_d", coeff_size);
-   Kokkos::deep_copy(coefficients_d, coefficients_h);       
+   Kokkos::deep_copy(exec, coefficients_d, coefficients_h);       
    // Log copy with petsc
    size_t bytes = coefficients_h.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -240,13 +242,11 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
             input_nonlocal_to_submat_col_h(k) = COLMAP_NOT_FOUND;
          }
       }
-      Kokkos::deep_copy(input_nonlocal_to_submat_col_d, input_nonlocal_to_submat_col_h);
+      Kokkos::deep_copy(exec, input_nonlocal_to_submat_col_d, input_nonlocal_to_submat_col_h);
       // Log copy with petsc
       bytes = input_nonlocal_to_submat_col_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));
    }
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
@@ -289,7 +289,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // ~~~~~~~~~~~~~
 
    auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);    
-   Kokkos::deep_copy(found_diag_row_d, 0); 
+   Kokkos::deep_copy(exec, found_diag_row_d, 0);
 
    Kokkos::parallel_for(
       Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
