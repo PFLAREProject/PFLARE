@@ -477,7 +477,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    Mat_SeqAIJKokkos *aijkok_nonlocal_z = NULL;
    if (mpi) aijkok_nonlocal_z = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_z->spptr);
 
-   exec.fence();
+   Kokkos::fence();
 
    // Have to specify we've modified data on the device
    aijkok_local_z->a_dual.clear_sync_state();

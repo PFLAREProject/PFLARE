@@ -349,7 +349,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          });
 
          // Ensure everything is done before we comm
-         exec.fence();
+         Kokkos::fence();
 
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
@@ -419,7 +419,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       } else {
          // If we're doing a fixed number of steps, then we need an extra fence
          // as we don't hit the parallel reduce above (which implicitly fences)
-         exec.fence();
+         Kokkos::fence();
       }
 
    }
@@ -446,7 +446,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       }
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }
@@ -700,7 +700,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // If we gave the comms routine cf_markers_d we couldn't even read from
          // it until comms ended, meaning we couldn't do the work overlapping below
          Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
-         exec.fence();
+         Kokkos::fence();
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
@@ -834,7 +834,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          }
 
          // Ensure everything is done before we comm
-         exec.fence();
+         Kokkos::fence();
 
          // Now we reduce the vetos with a lor
          // This tells each rank whether any of its local nodes have been vetoed by non-local influences
@@ -943,7 +943,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
          // Copy cf_markers_d into a temporary buffer for the forward scatter
          Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
-         exec.fence();
+         Kokkos::fence();
          // Be careful these aren't petscints
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
@@ -1053,7 +1053,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       } else {
          // If we're doing a fixed number of steps, then we need an extra fence
          // as we don't hit the parallel reduce above (which implicitly fences)
-         exec.fence();
+         Kokkos::fence();
       }
 
    }
@@ -1084,7 +1084,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       }
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }
@@ -1173,7 +1173,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int == 1) measure_local_d(i) *= -1;
    });
    // Have to ensure the parallel for above finishes before comms
-   exec.fence();
+   Kokkos::fence();
 
    // Call the existing measure cf markers function
    pmisr_existing_measure_cf_markers_kokkos(strength_mat, max_luby_steps, pmis_int, measure_local_d, cf_markers_d, zero_measure_c_point_int);
@@ -1185,7 +1185,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             cf_markers_d(i) *= -1;
       });
       // Ensure we're done before we exit
-      exec.fence();
+      Kokkos::fence();
    }
 
    return;

@@ -123,7 +123,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
          }
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------

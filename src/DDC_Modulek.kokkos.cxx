@@ -97,7 +97,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
                   cf_markers_aff_d(i) = 1; // C_POINT
                }
          });
-         exec.fence();
+         Kokkos::fence();
 
          // Call PMISR with implicit transpose - takes Aff directly, handles Aff+Aff^T internally
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
@@ -111,7 +111,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
                   cf_markers_d(idx) *= -1;
                }
          });
-         exec.fence();
+         Kokkos::fence();
       }
       return;
    }
@@ -188,7 +188,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
             }
       });
       // Ensure we're done before we exit
-      exec.fence(); 
+      Kokkos::fence(); 
    }   
 
    return;
