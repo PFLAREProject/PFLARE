@@ -98,7 +98,13 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
-                                 MPI_REPLACE));      
+                                 MPI_REPLACE));   
+      // End releases the active send buffer for normal access again.
+      // The scattered values in measure_nonlocal_d are now safe to consume.
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      // We have to fence not just exec but all streams after the comms finish
+      // eg see src/vec/is/sf/tests/ex4k.kokkos.cxx
+      Kokkos::fence();                                    
    }
 
    // Initialise the set
@@ -153,16 +159,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    }
    else {
       counter_undecided = 1;
-   }   
-
-   // Finish the broadcast for the nonlocal measure
-   if (mpi)
-   {
-      // End releases the active send buffer for normal access again.
-      // The scattered values in measure_nonlocal_d are now safe to consume.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
-      Kokkos::fence();
-   }   
+   } 
 
    // ~~~~~~~~~~~~
    // Now go through the outer Luby loop
@@ -605,6 +602,10 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
                                  MPI_REPLACE));
+      // End releases the active send buffer for normal access again.
+      // The scattered values in measure_nonlocal_d are now safe to consume.
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();                                 
    }
 
    // ~~~~~~~~~~~~
@@ -661,15 +662,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    }
    else {
       counter_undecided = 1;
-   }
-
-   // Finish the broadcast for the nonlocal measure
-   if (mpi)
-   {
-      // End releases the active send buffer for normal access again.
-      // The scattered values in measure_nonlocal_d are now safe to consume.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
-      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~
