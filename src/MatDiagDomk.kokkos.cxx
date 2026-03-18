@@ -82,7 +82,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // Copy cf_markers_d into a temporary buffer
       // If we gave the comms routine cf_markers_d we couldn't even read from 
       // it until comms ended, meaning we couldn't do the work overlapping below      
-      Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);      
+      Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
 
       // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
       // one of the kokkos backends like PETSC_MEMTYPE_HIP
@@ -117,7 +117,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
 
    // Have to store the diagonal entry
    PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
-   Kokkos::deep_copy(diag_entry_d, 0);
+   Kokkos::deep_copy(exec, diag_entry_d, 0);
 
    // Scoping to reduce peak memory
    {
@@ -230,8 +230,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Compute the diag dominance ratio
    // ~~~~~~~~~~~~~
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {     
-         
+      Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {
+
       // If diag_val is zero we didn't find a diagonal
       if (diag_entry_d(i) != 0.0){
          // Compute the diagonal dominance ratio
@@ -245,7 +245,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    Kokkos::fence();
 
    PetscReal max_dd_ratio_local = 0.0;
-   Kokkos::parallel_reduce("max_dd_ratio", local_rows_row,
+   Kokkos::parallel_reduce("max_dd_ratio", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
       KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
          PetscReal dd_ratio = diag_dom_ratio_d(i);
          thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;

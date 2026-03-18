@@ -36,11 +36,13 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    const PetscInt global_col_start = global_col_start_temp;
    //const PetscInt global_col_end_plus_one = global_col_end_plus_one_temp;
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // We also copy the coefficients over to the device as we need it
    PetscInt coeff_size = poly_order + 1;
    auto coefficients_h = PetscScalarKokkosViewHost(coefficients, coeff_size);
    auto coefficients_d = PetscScalarKokkosView("coefficients_d", coeff_size);
-   Kokkos::deep_copy(coefficients_d, coefficients_h);       
+   Kokkos::deep_copy(exec, coefficients_d, coefficients_h);
    // Log copy with petsc
    size_t bytes = coefficients_h.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -239,7 +241,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
             input_nonlocal_to_submat_col_h(k) = COLMAP_NOT_FOUND;
          }
       }
-      Kokkos::deep_copy(input_nonlocal_to_submat_col_d, input_nonlocal_to_submat_col_h);
+      Kokkos::deep_copy(exec, input_nonlocal_to_submat_col_d, input_nonlocal_to_submat_col_h);
       // Log copy with petsc
       bytes = input_nonlocal_to_submat_col_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -251,7 +253,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscInt sparsity_max_nnz = 0, sparsity_max_nnz_local = 0, sparsity_max_nnz_nonlocal = 0;
    if (local_rows > 0) {        
       // Also consider sparsity matrix row width if needed
-      Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows,
+      Kokkos::parallel_reduce("FindMaxNNZSparsity", Kokkos::RangePolicy<>(exec, 0, local_rows),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -260,21 +262,19 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       );
       if (mpi)
       {
-         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", local_rows,
+         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", Kokkos::RangePolicy<>(exec, 0, local_rows),
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
                PetscInt row_nnz = device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
                thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
             },
             Kokkos::Max<PetscInt>(sparsity_max_nnz_nonlocal)
-         );   
-      }  
+         );
+      }
       sparsity_max_nnz = sparsity_max_nnz_local + sparsity_max_nnz_nonlocal; 
    }
 
-   auto exec = PetscGetKokkosExecutionSpace();
-
    // ~~~~~~~~~~~~~
-   // Now we have to be careful 
+   // Now we have to be careful
    // mat_sparsity_match may not have diagonal entries in some rows
    // but we know our gmres polynomial inverse must 
    // and after calling mat_duplicate_copy_plus_diag_kokkos we know our output_mat
@@ -287,8 +287,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // matsetvalues to write out to output_mat, rather than writing out to the csr directly
    // ~~~~~~~~~~~~~
 
-   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);    
-   Kokkos::deep_copy(found_diag_row_d, 0); 
+   auto found_diag_row_d = PetscIntKokkosView("found_diag_row_d", local_rows);
+   Kokkos::deep_copy(exec, found_diag_row_d, 0);
 
    Kokkos::parallel_for(
       Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),

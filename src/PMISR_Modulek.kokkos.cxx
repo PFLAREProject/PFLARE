@@ -111,7 +111,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    // Initialise the set
    PetscInt counter_in_set_start = 0;
    // Count how many in the set to begin with and set their CF markers
-   Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+   Kokkos::parallel_reduce ("Reduction", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
       // If already assigned by the input
       if (cf_markers_d(i) != 0)
       {
@@ -127,7 +127,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
             else {
                // Becomes C
                cf_markers_d(i) = 1;
-            }  
+            }
          }
          else {
             if (pmis_int == 1) {
@@ -139,7 +139,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                // Becomes F
                cf_markers_d(i) = -1;
             }
-         }         
+         }
          // Count
          update++;
       }
@@ -152,15 +152,15 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       // Parallel reduction!
       PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
       counter_undecided = counter_parallel;
-      
+
    // If we're doing a fixed number of steps, then we don't care
    // how many undecided nodes we have - have to take care here not to use
    // local_rows for counter_undecided, as we may have zero DOFs on some procs
-   // but we have to enter the loop below for the collective scatters 
+   // but we have to enter the loop below for the collective scatters
    }
    else {
       counter_undecided = 1;
-   } 
+   }
 
    // ~~~~~~~~~~~~
    // Now go through the outer Luby loop
@@ -189,7 +189,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Copy cf_markers_d into a temporary buffer
          // If we gave the comms routine cf_markers_d we couldn't even read from
          // it until comms ended, meaning we couldn't do the work overlapping below
-         Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
+         Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
@@ -205,7 +205,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // End releases the send snapshot for normal access again.
          // The scattered cf_markers_nonlocal_d values are now safe to read.
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
-         Kokkos::fence();                     
+         Kokkos::fence();
       }
 
 
@@ -313,16 +313,16 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // The nodes that have mark equal to true have no strong active neighbours in the IS
          // hence they can be in the IS
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
                if (mark_d(i)) cf_markers_d(i) = loops_through;
-         });      
+         });
       }
 
       if (mpi)
       {
          // We're going to do an add reverse scatter, so set them to zero
-         Kokkos::deep_copy(cf_markers_nonlocal_d, 0);
+         Kokkos::deep_copy(exec, cf_markers_nonlocal_d, 0);
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -405,7 +405,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 
          // Merge the local updates after the PetscSF reduction has completed.
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
             // Only the locally discovered neighbours are merged here.
             // Entries left at 2 were already selected into the set earlier.
@@ -444,9 +444,9 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       if (max_luby_steps < 0) {
 
          counter_undecided = 0;  
-         Kokkos::parallel_reduce ("ReductionCounter_undecided", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionCounter_undecided", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             if (cf_markers_d(i) == 0) update++;
-         }, counter_undecided); 
+         }, counter_undecided);
 
          // Parallel reduction!
          PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
@@ -465,8 +465,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    // ~~~~~~~~~
 
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-         
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+
       if (cf_markers_d(i) == 0)
       {
          cf_markers_d(i) = 1;
@@ -652,7 +652,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // ~~~~~~~~~~~~
    PetscInt counter_in_set_start = 0;
    // Count how many in the set to begin with and set their CF markers
-   Kokkos::parallel_reduce ("Reduction", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+   Kokkos::parallel_reduce ("Reduction", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
       // If already assigned by the input
       if (cf_markers_d(i) != 0)
       {
@@ -730,7 +730,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // Copy cf_markers_d into a temporary buffer
          // If we gave the comms routine cf_markers_d we couldn't even read from
          // it until comms ended, meaning we couldn't do the work overlapping below
-         Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
+         Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
@@ -818,7 +818,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       if (mpi) {
 
          // Initialise to false
-         Kokkos::deep_copy(veto_nonlocal_d, false);
+         Kokkos::deep_copy(exec, veto_nonlocal_d, false);
 
          // Let's go and mark any non-local entries that have strong influences and comm to other ranks
          // We iterate over the transpose of the non-local part of S
@@ -923,7 +923,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // The nodes that have .NOT. veto(i) have no strong active neighbours in the IS
          // hence they can be in the IS
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
                if (!veto_local_d(i)) cf_markers_d(i) = loops_through;
          });
@@ -980,14 +980,14 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
          // Merge the local updates into cf_markers_d before we broadcast
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
             if (cf_markers_send_d(i) == 1 && cf_markers_d(i) == 0) cf_markers_d(i) = 1;
          });
 
          // Now for the influences, we need to broadcast the cf_markers so that
          // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
          // Copy cf_markers_d into a temporary buffer for the forward scatter
-         Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
+         Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
          Kokkos::fence();
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
@@ -1002,8 +1002,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // We can overlap this with setting the non-local dependencies
 
          // We use the veto arrays here to do this comms
-         Kokkos::deep_copy(veto_nonlocal_d, false);
-         Kokkos::deep_copy(veto_local_d, false);
+         Kokkos::deep_copy(exec, veto_nonlocal_d, false);
+         Kokkos::deep_copy(exec, veto_local_d, false);
 
          // Set non-local strong dependencies
          Kokkos::parallel_for(
@@ -1043,7 +1043,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // Let's finish the non-local dependencies
          // If this node has been veto'd, then set it to not in the set
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
                if (veto_local_d(i)) {
                   cf_markers_d(i) = 1;
                }
@@ -1120,7 +1120,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       if (max_luby_steps < 0) {
 
          counter_undecided = 0;
-         Kokkos::parallel_reduce ("ReductionCounter_undecided", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionCounter_undecided", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             if (cf_markers_d(i) == 0) update++;
          }, counter_undecided);
 
@@ -1145,7 +1145,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // ~~~~~~~~~
 
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
       if (cf_markers_d(i) == 0)
       {
@@ -1224,14 +1224,14 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // If you want to generate the randoms on the device
    //Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
    // Copy the input measure from host to device
-   Kokkos::deep_copy(measure_local_d, measure_local_h);
+   Kokkos::deep_copy(exec, measure_local_d, measure_local_h);
    // Log copy with petsc
    size_t bytes = measure_local_h.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
 
    // Compute the measure
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
       // Randoms on the device
       // auto generator = random_pool.get_state();
@@ -1258,7 +1258,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // If PMIS then we swap the CF markers from PMISR
    if (pmis_int) {
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+         Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
             cf_markers_d(i) *= -1;
       });
       // Ensure we're done before we exit
