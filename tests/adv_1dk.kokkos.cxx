@@ -10,6 +10,7 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
      petscviewer.h - viewers
 */
 #include <petscvec_kokkos.hpp>
+#include <petsc_kokkos.hpp>
 #include <petscksp.h>
 #include "pflare.h"
 #include <iostream>
@@ -127,11 +128,12 @@ int main(int argc, char **args)
 
   {
    // coo_v is stored on the device
+   auto exec = PetscGetKokkosExecutionSpace();
    PetscScalarKokkosView coo_v("coo_v", 2 * local_size);
    // Set the values of the device pointer - has to match the ordering
    // of oor and ooc
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_size), KOKKOS_LAMBDA(int i) {
+      Kokkos::RangePolicy<>(exec, 0, local_size), KOKKOS_LAMBDA(int i) {
 
          // Upwinded dimensionless uniform grid finite difference operator
          coo_v(i*2) = -1.0;

@@ -246,13 +246,15 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       PetscCallVoid(PetscLogCpuToGpu(bytes));
    }
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // ~~~~~~~~~~~~~~
    // Find maximum non-zeros per row for sizing scratch memory
    // ~~~~~~~~~~~~~~
    PetscInt sparsity_max_nnz = 0, sparsity_max_nnz_local = 0, sparsity_max_nnz_nonlocal = 0;
    if (local_rows > 0) {        
       // Also consider sparsity matrix row width if needed
-      Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows,
+      Kokkos::parallel_reduce("FindMaxNNZSparsity", Kokkos::RangePolicy<>(exec, 0, local_rows),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -261,18 +263,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       );
       if (mpi)
       {
-         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", local_rows,
+         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", Kokkos::RangePolicy<>(exec, 0, local_rows),
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
                PetscInt row_nnz = device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
                thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
             },
             Kokkos::Max<PetscInt>(sparsity_max_nnz_nonlocal)
-         );   
+         );
       }  
       sparsity_max_nnz = sparsity_max_nnz_local + sparsity_max_nnz_nonlocal; 
    }
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~~
    // Now we have to be careful 

@@ -60,7 +60,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
       // Originally used Kokkos::UnorderedMap here but it only handles up to uint32_t
       // entries
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
+         Kokkos::RangePolicy<>(exec, 0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
 
             PetscInt low = 0;
             PetscInt count = col_ao_output; // Number of elements in colmap_output_d
@@ -309,7 +309,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // ~~~~~~~~~~~~
 
    // Need to do a scan on nnz_match_local_row_d to get where each row starts
-   Kokkos::parallel_scan (local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+   Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
       // Inclusive scan
       update += nnz_match_local_row_d(i);         
       if (final) {
@@ -386,7 +386,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       // ~~~~~~~~~~~~
 
       // Need to do a scan on nnz_match_nonlocal_row_d to get where each row starts
-      Kokkos::parallel_scan (local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+      Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
          // Inclusive scan
          update += nnz_match_nonlocal_row_d(i);         
          if (final) {
@@ -399,7 +399,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    PetscInt max_nnz_local = 0, max_nnz_nonlocal = 0;
    if (local_rows > 0) {
 
-      Kokkos::parallel_reduce("FindMaxNNZ", local_rows,
+      Kokkos::parallel_reduce("FindMaxNNZ", Kokkos::RangePolicy<>(exec, 0, local_rows),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_local_i[i + 1] - device_local_i[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -408,7 +408,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       );
       if (mpi)
       {
-         Kokkos::parallel_reduce("FindMaxNNZNonLocal", local_rows,
+         Kokkos::parallel_reduce("FindMaxNNZNonLocal", Kokkos::RangePolicy<>(exec, 0, local_rows),
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
                PetscInt row_nnz = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
                thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -430,7 +430,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    Kokkos::deep_copy(Kokkos::subview(i_local_d, 0), 0);     
 
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
       i_local_d(i + 1) = nnz_match_local_row_d(i);
    });  
 
@@ -451,7 +451,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       Kokkos::deep_copy(Kokkos::subview(i_nonlocal_d, 0), 0);                 
 
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+         Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          i_nonlocal_d(i + 1) = nnz_match_nonlocal_row_d(i);
       });      
    }           
@@ -694,7 +694,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       // Reduce to see if we ever added a diagonal
       bool added_any_diagonal = false;
       Kokkos::parallel_reduce(
-         Kokkos::RangePolicy<>(0, local_rows),
+         Kokkos::RangePolicy<>(exec, 0, local_rows),
          KOKKOS_LAMBDA(const PetscInt i, bool& thread_result) {
             // If this row had a diagonal added, set the result to true
             if (!existing_diag_d(i)) thread_result = true;
@@ -836,13 +836,15 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
 
    Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
    Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
-   if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
+   if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
+
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Find maximum non-zeros per row of the input mat for sizing scratch memory
    PetscInt max_nnz_local = 0, max_nnz_nonlocal = 0;
    if (local_rows > 0) {
 
-      Kokkos::parallel_reduce("FindMaxNNZ", local_rows,
+      Kokkos::parallel_reduce("FindMaxNNZ", Kokkos::RangePolicy<>(exec, 0, local_rows),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_local_i[i + 1] - device_local_i[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -851,7 +853,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
       );
       if (mpi)
       {
-         Kokkos::parallel_reduce("FindMaxNNZNonLocal", local_rows,
+         Kokkos::parallel_reduce("FindMaxNNZNonLocal", Kokkos::RangePolicy<>(exec, 0, local_rows),
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
                PetscInt row_nnz = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
                thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -859,10 +861,8 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
             Kokkos::Max<PetscInt>(max_nnz_nonlocal)
          );         
       }
-   }   
+   }
 
-   auto exec = PetscGetKokkosExecutionSpace();
-   
    // Create a team policy with scratch memory allocation
    // We want scratch space for each row
    // We will have ncols of integers which tell us what the matching indices we have
@@ -1312,13 +1312,13 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       if (mpi)
       {      
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
                PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
                nnz_match_nonlocal_row_d(i) = ncols_nonlocal;
          });
 
-         Kokkos::parallel_reduce ("ReductionNonLocal", local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
+         Kokkos::parallel_reduce ("ReductionNonLocal", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
             update += nnz_match_nonlocal_row_d(i); 
          }, nnzs_match_nonlocal);       
       }
@@ -1326,7 +1326,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // ~~~~~~~~~~~~
 
       // Need to do a scan on nnz_match_local_row_d to get where each row starts
-      Kokkos::parallel_scan (local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+      Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
          // Inclusive scan
          update += nnz_match_local_row_d(i);         
          if (final) {
@@ -1336,7 +1336,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       if (mpi)
       { 
          // Need to do a scan on nnz_match_nonlocal_row_d to get where each row starts
-         Kokkos::parallel_scan (local_rows, KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+         Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
             // Inclusive scan
             update += nnz_match_nonlocal_row_d(i);         
             if (final) {
@@ -1372,7 +1372,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {      
+         Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {      
 
             // The start of our row index comes from the scan
             i_local_d(i + 1) = nnz_match_local_row_d(i);   
@@ -1706,14 +1706,14 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
    // Rewrite the Y nonlocal indices to be global
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, ykok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(PetscInt i) { 
+      Kokkos::RangePolicy<>(exec, 0, ykok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(PetscInt i) { 
 
          device_nonlocal_y_j[i] = colmap_input_d_y(device_nonlocal_y_j[i]);
    }); 
 
    // Rewrite the X nonlocal indices to be global
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, xkok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(PetscInt i) { 
+      Kokkos::RangePolicy<>(exec, 0, xkok_nonlocal->csrmat.nnz()), KOKKOS_LAMBDA(PetscInt i) { 
 
          device_nonlocal_x_j[i] = colmap_input_d_x(device_nonlocal_x_j[i]);
    });    
@@ -1830,7 +1830,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    Kokkos::deep_copy(smap_d, 0); 
    // Loop over all the cols in is_col
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
+      Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
 
          smap_d(is_col_d_d(i)) = i + 1; 
    });     
@@ -1883,7 +1883,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    PetscInt max_nnz_local = 0;
    if (local_rows_row > 0) {
 
-      Kokkos::parallel_reduce("FindMaxNNZ", local_rows_row,
+      Kokkos::parallel_reduce("FindMaxNNZ", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
          KOKKOS_LAMBDA(const PetscInt i_idx_is_row, PetscInt& thread_max) {
             // The indices in is_row will be global, but we want the local index
             const PetscInt i = is_row_d_d(i_idx_is_row);
@@ -1907,7 +1907,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    if (!reuse_int)
    {
       // Need to do a scan on nnz_match_local_row_d to get where each row starts
-      Kokkos::parallel_scan (local_rows_row, KOKKOS_LAMBDA (const PetscInt i_idx_is_row, PetscInt& update, const bool final) {
+      Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA (const PetscInt i_idx_is_row, PetscInt& update, const bool final) {
          // Inclusive scan
          update += nnz_match_local_row_d(i_idx_is_row);         
          if (final) {
@@ -1930,7 +1930,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {      
+         Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {      
 
             // The start of our row index comes from the scan
             i_local_d(i_idx_is_row + 1) = nnz_match_local_row_d(i_idx_is_row);   
@@ -2187,7 +2187,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Loop over all the cols in is_col
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
+            Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
 
                x_d(is_col_d_d(i)) = (PetscScalar)is_col_d_d(i); 
                cmap_d(is_col_d_d(i)) = i + isstart; /* global index of iscol[i] */
@@ -2244,7 +2244,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          if (cols_ao > 0) 
          {
-            Kokkos::parallel_reduce("FindMatches", cols_ao,
+            Kokkos::parallel_reduce("FindMatches", Kokkos::RangePolicy<>(exec, 0, cols_ao),
                KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
                   // This is the scattered x for all of the non-local columns in the input mat
                   // It's not -1 if that column is present on another rank
@@ -2259,7 +2259,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Need to do an exclusive scan on is_col_o_match_d to get the new local indices
          // Have to remember to go up to cols_ao+1
-         Kokkos::parallel_scan (cols_ao+1, KOKKOS_LAMBDA (const PetscInt i, PetscInt& partial_sum, const bool is_final) {
+         Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, cols_ao+1), KOKKOS_LAMBDA (const PetscInt i, PetscInt& partial_sum, const bool is_final) {
                const int input_value = is_col_o_match_d(i);
                if (is_final) {
                   is_col_o_match_d(i) = partial_sum;  // Write exclusive prefix
@@ -2278,7 +2278,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Loop over all the cols in the input matrix
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {     
+            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {     
                
                // We can tell if is_col_o_match_d had 1 in it in this position by comparing the result
                // of the exclusive scan for this index and the next one            
@@ -2423,13 +2423,13 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       // Rewrite to local indices
       // ~~~~~~~~~~~~     
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
+         Kokkos::RangePolicy<>(exec, 0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
 
             is_row_d_d(i) -= global_row_start; // Make local
       });
 
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+         Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
             is_col_d_d(i) -= global_col_start; // Make local
       });
