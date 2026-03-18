@@ -146,7 +146,7 @@ module air_mg_setup
 
          continue_coarsening = .TRUE.
 
-         print *, comm_rank, "starting our_level loop"
+         !print *, comm_rank, "starting our_level loop"
 
          ! ~~~~~~~~~~
          ! We can also check if our coarse grid approximations are good enough to work as a coarse grid solver
@@ -159,7 +159,7 @@ module air_mg_setup
                      our_level .ge. air_data%options%auto_truncate_start_level .AND. &
                      air_data%options%auto_truncate_start_level /= -1) then         
 
-            print *, comm_rank, "starting truncate"
+            !print *, comm_rank, "starting truncate"
 
             call timer_start(TIMER_ID_AIR_TRUNCATE)   
 
@@ -256,7 +256,7 @@ module air_mg_setup
 
             call timer_finish(TIMER_ID_AIR_TRUNCATE)   
 
-            print *, comm_rank, "finishing truncate"
+            !print *, comm_rank, "finishing truncate"
          end if
 
          ! ~~~~~~~~~~~~
@@ -587,14 +587,14 @@ module air_mg_setup
          ! Build the coarse matrix
          ! ~~~~~~~~~~~~~~
 
-         print *, comm_rank, "about to compute coarse matrix"
+         !print *, comm_rank, "about to compute coarse matrix"
 
          call compute_coarse_matrix(air_data%coarse_matrix(our_level), our_level, air_data, &
                   air_data%coarse_matrix(our_level_coarse))
 
          air_data%allocated_coarse_matrix(our_level_coarse) = .TRUE.     
 
-         print *, comm_rank, "finish compute coarse matrix"
+         !print *, comm_rank, "finish compute coarse matrix"
 
          ! ~~~~~~~~~~~
          ! We may be able to destroy the coarse matrix on our_level from here
