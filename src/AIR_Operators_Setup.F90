@@ -945,7 +945,7 @@ module air_operators_setup
 
       call timer_finish(TIMER_ID_AIR_RESTRICT) 
 
-      print *, comm_rank, "done with compute_R_from_Z"
+      !print *, comm_rank, "done with compute_R_from_Z"
       
       ! Delete temporaries if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -994,7 +994,7 @@ module air_operators_setup
 
       end if
 
-      print *, comm_rank, "at the end of finish_comms_compute_restrict_prolong"
+      !print *, comm_rank, "at the end of finish_comms_compute_restrict_prolong"
          
    end subroutine finish_comms_compute_restrict_prolong  
 
@@ -1068,17 +1068,17 @@ module air_operators_setup
          ! First time
          else
 
-            print *, comm_rank, "AP start"
+            !print *, comm_rank, "AP start"
 
             call MatMatMult(A, air_data%prolongators(our_level), &
                      MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
 
-            print *, comm_rank, "AP end"
+            !print *, comm_rank, "AP end"
                      
             call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
                      MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
 
-            print *, comm_rank, "R(AP) end"
+            !print *, comm_rank, "R(AP) end"
          end if
          
          ! Delete temporary if not reusing
@@ -1113,7 +1113,7 @@ module air_operators_setup
          if (.NOT. air_data%options%reuse_sparsity .OR. &
              .NOT. REUSE_MAT_ACTIVE(MAT_RAP_DROP, air_data%options%reuse_amount)) then
             
-            print *, comm_rank, "remove small sparse start"
+            !print *, comm_rank, "remove small sparse start"
 
             call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                      air_data%options%a_drop, coarse_matrix, &
@@ -1127,7 +1127,7 @@ module air_operators_setup
                         MAT_COPY_VALUES, coarse_matrix, ierr)
          end if
 
-         print *, comm_rank, "remove small sparse end"
+         !print *, comm_rank, "remove small sparse end"
       end if
 
       ! Delete temporaries if not reusing
