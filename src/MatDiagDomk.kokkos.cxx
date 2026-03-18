@@ -76,13 +76,13 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    if (mpi)
    {
       cf_markers_send_d = intKokkosView("cf_markers_send_d", local_rows);
-      // Copy cf_markers_d into a temporary buffer
-      // If we gave the comms routine cf_markers_d we couldn't even read from 
-      // it until comms ended, meaning we couldn't do the work overlapping below      
-      Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
       cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
+      // Copy cf_markers_d into a temporary buffer
+      // If we gave the comms routine cf_markers_d we couldn't even read from 
+      // it until comms ended, meaning we couldn't do the work overlapping below      
+      Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);      
 
       // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
       // one of the kokkos backends like PETSC_MEMTYPE_HIP
@@ -91,10 +91,17 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // Do not even read from that send buffer before End is called.
       // If you alias it in overlapped GPU work, the failure shows up intermittently
       // in parallel runs on GPUs.
+      Kokkos::fence();
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                   mem_type, cf_markers_send_d_ptr,
                   mem_type, cf_markers_nonlocal_d_ptr,
                   MPI_REPLACE));
+      // Finish the scatter of the cf splitting
+      // Be careful these aren't petscints
+      // End releases the send snapshot for normal access again.
+      // The scattered cf_markers_nonlocal_d values are now safe to read.
+      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();                  
    }   
 
    // ~~~~~~~~~~~~~~~
@@ -171,13 +178,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // The off-diagonal component requires some comms
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
    if (mpi)
-   {           
-      // Finish the scatter of the cf splitting
-      // Be careful these aren't petscints
-      // End releases the send snapshot for normal access again.
-      // The scattered cf_markers_nonlocal_d values are now safe to read.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
-      Kokkos::fence();
+   {
 
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device

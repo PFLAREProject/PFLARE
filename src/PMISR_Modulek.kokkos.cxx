@@ -91,6 +91,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;
    if (mpi)
    {
+      Kokkos::fence();
       // PetscSF owns measure_local_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
       // If you alias it in overlapped GPU work, the failure shows up intermittently
@@ -194,10 +195,17 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Do not even read from that send buffer before End is called.
          // If you alias it in overlapped GPU work, the failure shows up intermittently
          // in parallel runs on GPUs.
+         Kokkos::fence();
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
+         // Finish the async scatter
+         // Be careful these aren't petscints
+         // End releases the send snapshot for normal access again.
+         // The scattered cf_markers_nonlocal_d values are now safe to read.
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();                     
       }
 
 
@@ -263,13 +271,6 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       // Now go through and do the non-local part of the matrix
       // ~~~~~~~~           
       if (mpi) {
-
-         // Finish the async scatter
-         // Be careful these aren't petscints
-         // End releases the send snapshot for normal access again.
-         // The scattered cf_markers_nonlocal_d values are now safe to read.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
-         Kokkos::fence();
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -366,6 +367,11 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
             mem_type, cf_markers_nonlocal_d_ptr,
             mem_type, cf_markers_d_ptr,
             MPIU_SUM));
+         // Finish the scatter
+         // Be careful these aren't petscints
+         // After End the accumulated cf_markers_d values are complete.
+         PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
+         Kokkos::fence();            
       }
 
       if (mpi)
@@ -396,12 +402,6 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                   });
                }
          });
-
-         // Finish the scatter
-         // Be careful these aren't petscints
-         // After End the accumulated cf_markers_d values are complete.
-         PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
-         Kokkos::fence();
 
          // Merge the local updates after the PetscSF reduction has completed.
          Kokkos::parallel_for(
@@ -636,6 +636,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       // Do not even read from that send buffer before End is called.
       // If you alias it in overlapped GPU work, the failure shows up intermittently
       // in parallel runs on GPUs.
+      Kokkos::fence();
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
@@ -735,10 +736,17 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // Do not even read from that send buffer before End is called.
          // If you alias it in overlapped GPU work, the failure shows up intermittently
          // in parallel runs on GPUs.
+         Kokkos::fence();
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
+         // Finish the async scatter
+         // Be careful these aren't petscints
+         // End releases the send snapshot for normal access again.
+         // The scattered cf_markers_nonlocal_d values are now safe to read.
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();                     
       }
 
       // ~~~~~~~~
@@ -811,13 +819,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
          // Initialise to false
          Kokkos::deep_copy(veto_nonlocal_d, false);
-
-         // Finish the async scatter
-         // Be careful these aren't petscints
-         // End releases the send snapshot for normal access again.
-         // The scattered cf_markers_nonlocal_d values are now safe to read.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
-         Kokkos::fence();
 
          // Let's go and mark any non-local entries that have strong influences and comm to other ranks
          // We iterate over the transpose of the non-local part of S
@@ -988,10 +989,15 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // Copy cf_markers_d into a temporary buffer for the forward scatter
          Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
          // Be careful these aren't petscints
+         Kokkos::fence();
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
+         // Finish the forward scatter before we write to cf_markers_d
+         // Also ensure this broadcast is done before we launch another on the same SF mat_mpi->Mvctx
+         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();                     
 
          // We can overlap this with setting the non-local dependencies
 
@@ -1023,11 +1029,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                }
          });
 
-         // Finish the forward scatter before we write to cf_markers_d
-         // Also ensure this broadcast is done before we launch another on the same SF mat_mpi->Mvctx
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
          Kokkos::fence();
-
          // Now we reduce the veto_nonlocal_d with a lor
          // Any local node with veto set to true is not in the set
          PetscCallVoid(PetscSFReduceWithMemTypeBegin(mat_mpi->Mvctx, MPI_C_BOOL,
