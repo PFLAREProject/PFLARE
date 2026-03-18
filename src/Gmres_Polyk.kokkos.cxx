@@ -8,7 +8,7 @@
 PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
                const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
 {
-   PFLARE_LOG_ROUTINE("mat_mult_powers_share_sparsity_kokkos");
+   //PFLARE_LOG_ROUTINE("mat_mult_powers_share_sparsity_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
@@ -557,7 +557,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
    if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
 
-   exec.fence();
+   Kokkos::fence();
 
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN

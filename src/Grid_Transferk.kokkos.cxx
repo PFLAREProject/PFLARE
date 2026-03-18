@@ -7,7 +7,7 @@
 // Generate one point classical prolongator but with kokkos - keeping everything on the device
 PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *input_mat, Mat *output_mat)
 {
-   PFLARE_LOG_ROUTINE("generate_one_point_with_one_entry_from_sparse_kokkos");
+   //PFLARE_LOG_ROUTINE("generate_one_point_with_one_entry_from_sparse_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -268,7 +268,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    });      
 
    // Let's make sure everything on the device is finished
-   exec.fence();
+   Kokkos::fence();
    
    // We can create our local diagonal block matrix directly on the device
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
@@ -305,7 +305,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_start, IS *is_fine, \
                   IS *is_coarse, int identity_int, int reuse_int, Mat *output_mat)
 {
-   PFLARE_LOG_ROUTINE("compute_P_from_W_kokkos");
+   //PFLARE_LOG_ROUTINE("compute_P_from_W_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_W, global_row_end_plus_one_W;
    PetscInt global_col_start_W, global_col_end_plus_one_W;
@@ -642,7 +642,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
             }
       });   
 
-      exec.fence();
+      Kokkos::fence();
 
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -684,7 +684,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       }   
         
       // Let's make sure everything on the device is finished
-      exec.fence();      
+      Kokkos::fence();      
 
       // We can create our local diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols_coarse, i_local_d, j_local_d, a_local_d, &output_mat_local));
@@ -727,7 +727,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
                   IS *is_coarse, IS *orig_fine_col_indices, int identity_int, int reuse_int, int reuse_indices_int, \
                   Mat *output_mat)
 {
-   PFLARE_LOG_ROUTINE("compute_R_from_Z_kokkos");
+   //PFLARE_LOG_ROUTINE("compute_R_from_Z_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_Z, global_row_end_plus_one_Z;
    PetscInt global_col_start_Z, global_col_end_plus_one_Z;
@@ -1122,7 +1122,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
             }
       });   
 
-      exec.fence();
+      Kokkos::fence();
 
       // Have to specify we've modifed data on the device
       // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -1148,7 +1148,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    if (!reuse_int)
    {
       // Let's make sure everything on the device is finished
-      exec.fence();   
+      Kokkos::fence();   
 
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
@@ -1156,7 +1156,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       KokkosSparse::sort_crs_matrix(csrmat_local);
       
       // Let's make sure everything on the device is finished
-      exec.fence();       
+      Kokkos::fence();       
       
       // Create the matrix given the sorted csr
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));

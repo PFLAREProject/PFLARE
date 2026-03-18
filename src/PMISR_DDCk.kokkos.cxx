@@ -13,7 +13,7 @@ intKokkosView cf_markers_local_d;
 // Copy the global cf_markers_local_d back to the host
 PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 {
-   PFLARE_LOG_ROUTINE("copy_cf_markers_d2h");
+   //PFLARE_LOG_ROUTINE("copy_cf_markers_d2h");
    // Host wrapper for cf_markers_local
    intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
 
@@ -31,7 +31,7 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 // Delete the global cf_markers_local_d
 PETSC_INTERN void delete_device_cf_markers()
 {
-   PFLARE_LOG_ROUTINE("delete_device_cf_markers");
+   //PFLARE_LOG_ROUTINE("delete_device_cf_markers");
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    cf_markers_local_d = intKokkosView(); 
@@ -46,7 +46,7 @@ PETSC_INTERN void delete_device_cf_markers()
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
 {
-   PFLARE_LOG_ROUTINE("pmisr_kokkos");
+   //PFLARE_LOG_ROUTINE("pmisr_kokkos");
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -153,7 +153,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int == 1) measure_local_d(i) *= -1;
    });
    // Have to ensure the parallel for above finishes before comms
-   exec.fence(); 
+   Kokkos::fence(); 
 
    // Start the scatter of the measure - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
    // one of the kokkos backends like PETSC_MEMTYPE_HIP
@@ -162,11 +162,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    {
       // PetscSF owns measure_local_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
+      Kokkos::fence();
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_SCALAR,
                                  mem_type, measure_local_d_ptr,
                                  mem_type, measure_nonlocal_d_ptr,
                                  MPI_REPLACE));
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_SCALAR, measure_local_d_ptr, measure_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
    }
 
    // Initialise the set
@@ -255,11 +257,13 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          // Be careful these aren't petscints
          // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
          // Do not even read from that send buffer before End is called.
+         Kokkos::fence();
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                      mem_type, cf_markers_send_d_ptr,
                      mem_type, cf_markers_nonlocal_d_ptr,
                      MPI_REPLACE));
          PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+         Kokkos::fence();
 
       }
 
@@ -411,7 +415,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
          });
 
          // Ensure everything is done before we comm
-         exec.fence();
+         Kokkos::fence();
 
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
@@ -425,6 +429,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
             mem_type, cf_markers_d_ptr,
             MPIU_SUM));
          PetscCallVoid(PetscSFReduceEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_nonlocal_d_ptr, cf_markers_d_ptr, MPIU_SUM));
+         Kokkos::fence();
 
          // Go and do local
          Kokkos::parallel_for(
@@ -503,7 +508,11 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 
          // Parallel reduction!
          PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
-         counter_undecided = counter_parallel;            
+         counter_undecided = counter_parallel;
+      } else {
+         // If we're doing a fixed number of steps, then we need an extra fence
+         // as we don't hit the parallel reduce above (which implicitly fences)
+         Kokkos::fence();
       }
 
    }
@@ -531,7 +540,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       if (pmis_int) cf_markers_d(i) *= -1;
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }
@@ -541,7 +550,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
 // Creates the device local indices for F or C points based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d)
 {
-   PFLARE_LOG_ROUTINE("create_cf_is_device_kokkos");
+   //PFLARE_LOG_ROUTINE("create_cf_is_device_kokkos");
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    auto exec = PetscGetKokkosExecutionSpace();
@@ -592,7 +601,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
          }              
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -600,7 +609,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 // Creates the host IS is_fine and is_coarse based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse)
 {
-   PFLARE_LOG_ROUTINE("create_cf_is_kokkos");
+   //PFLARE_LOG_ROUTINE("create_cf_is_kokkos");
    PetscIntKokkosView is_fine_local_d, is_coarse_local_d;
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
@@ -658,7 +667,7 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_fine_local_d, PetscScalarKokkosView &diag_dom_ratio_d)
 {
-   PFLARE_LOG_ROUTINE("MatDiagDomRatio_kokkos");
+   //PFLARE_LOG_ROUTINE("MatDiagDomRatio_kokkos");
    PetscInt local_rows, local_cols;
 
    // Are we in parallel?
@@ -723,7 +732,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // it until comms ended, meaning we couldn't do the work overlapping below      
       Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
       cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
-      exec.fence();
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
       cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
 
@@ -732,11 +740,13 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       // Be careful these aren't petscints
       // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
       // Do not even read from that send buffer before End is called.
+      Kokkos::fence();
       PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
                   mem_type, cf_markers_send_d_ptr,
                   mem_type, cf_markers_nonlocal_d_ptr,
                   MPI_REPLACE));
       PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
+      Kokkos::fence();
    }   
 
    // ~~~~~~~~~~~~~~~
@@ -878,7 +888,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
       }
    });   
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    return;
 }
@@ -890,7 +900,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscIntKokkosView &is_
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, PetscReal *max_dd_ratio)
 {
-   PFLARE_LOG_ROUTINE("ddc_kokkos");
+   //PFLARE_LOG_ROUTINE("ddc_kokkos");
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
@@ -1030,7 +1040,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, Pets
             }
       });
       // Ensure we're done before we exit
-      exec.fence(); 
+      Kokkos::fence(); 
    }   
 
    return;
