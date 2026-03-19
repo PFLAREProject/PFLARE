@@ -4,7 +4,7 @@ module ddc_module
    use petscmat
    use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
       use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
-         MatDiagDomRatio_kokkos, create_cf_is_kokkos, &
+         MatDiagDomRatio_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
    use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
    use pflare_parameters, only: C_POINT, F_POINT
@@ -38,7 +38,6 @@ module ddc_module
       PetscReal, intent(inout)            :: max_dd_ratio
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
-      type(tMat) :: Aff_ddc
       PetscErrorCode :: ierr
       logical :: trigger_dd_ratio_compute_local
       PetscInt :: local_rows, local_cols
@@ -51,13 +50,12 @@ module ddc_module
       MPIU_Comm :: MPI_COMM_MATRIX
 
 #if defined(PETSC_HAVE_KOKKOS)
-      integer(c_long_long) :: A_array, Aff_array, is_fine_array, is_coarse_array
+   integer(c_long_long) :: A_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
       integer :: errorcode
       !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
-      type(tIS) :: is_fine_temp, is_coarse_temp
 #endif
       ! ~~~~~~
 
@@ -113,26 +111,7 @@ module ddc_module
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
-         ! Kokkos path: only extract Aff if trigger_dd_ratio_compute
-         ! as the kokkos ddc computes diag dominance ratio without needing Aff
-         Aff_array = 0
          A_array = input_mat%v
-         if (trigger_dd_ratio_compute_local) then
-
-            ! Create the host is_fine and is_coarse based on device cf_markers
-            call create_cf_is_kokkos(A_array, is_fine_array, is_coarse_array)
-            is_fine_temp%v = is_fine_array
-            is_coarse_temp%v = is_coarse_array
-
-            call MatCreateSubMatrixWrapper(input_mat, &
-                        is_fine_temp, is_fine_temp, MAT_INITIAL_MATRIX, &
-                        Aff_ddc)
-
-            Aff_array = Aff_ddc%v
-            call ISDestroy(is_fine_temp, ierr)
-            call ISDestroy(is_coarse_temp, ierr)
-         end if
-
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -142,7 +121,7 @@ module ddc_module
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
+         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
             random_numbers_ptr)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -171,11 +150,6 @@ module ddc_module
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
             end if
             deallocate(cf_markers_local_two)
-         end if
-
-         ! Cleanup
-         if (trigger_dd_ratio_compute_local) then
-            call MatDestroy(Aff_ddc, ierr)
          end if
 
       else
@@ -360,19 +334,14 @@ module ddc_module
             ! diag_dom_ratio is of size F points
             diag_dom_ratio_measure(idx) = max(10d0, max_dd_ratio_achieved*2d0) - &
                (diag_dom_ratio(ifree) - diag_dom_ratio_random(idx)/1d10)
-         end do
 
-         ! And then any points with diagonal dominance ratio already below
-         ! the minimum, we set the measure to PETSC_MAX_REAL and assign them as "C" already
-         ! so they won't be swapped
-         do ifree = 1, fine_size
-            idx = is_pointer(ifree) - input_row_start + 1
-
-            ! Check against the diag_dom_ratio that we haven't modified.
+            ! And then any points with diagonal dominance ratio already below
+            ! the minimum, we set the measure to PETSC_MAX_REAL and assign them as "C" already
+            ! so they won't be swapped
             if (diag_dom_ratio(ifree) < max_dd_ratio) then
                diag_dom_ratio_measure(idx) = PETSC_MAX_REAL
                cf_markers_local_ddc(idx) = C_POINT
-            end if
+            end if               
          end do
 
          ! Call PMISR with as many steps as necessary

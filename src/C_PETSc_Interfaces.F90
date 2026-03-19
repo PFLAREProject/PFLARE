@@ -417,7 +417,7 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
+      subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
             random_numbers_ptr) &
          bind(c, name="ddc_kokkos")
          use iso_c_binding
@@ -425,7 +425,6 @@ module c_petsc_interfaces
          real(PFLARE_PETSCREAL_C_KIND), value :: fraction_swap
          real(PFLARE_PETSCREAL_C_KIND), value :: max_dd_ratio
          real(PFLARE_PETSCREAL_C_KIND), value :: max_dd_ratio_achieved
-         integer(c_long_long) :: Aff_array
          type(c_ptr), value :: random_numbers_ptr
       end subroutine ddc_kokkos         
  
