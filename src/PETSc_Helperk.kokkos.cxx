@@ -2167,6 +2167,18 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
       if (!reuse_int)
       {
+
+
+PetscInt sf_nroots, sf_nleaves;
+PetscCallVoid(PetscSFGetGraph(mat_mpi->Mvctx, &sf_nroots, &sf_nleaves, NULL, NULL));
+if (sf_nroots != local_cols || sf_nleaves != cols_ao) {
+   PetscInt rank;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   fprintf(stderr, "[Rank %d] SF MISMATCH: nroots=%d vs local_cols=%d, nleaves=%d vs cols_ao=%d\n",
+           (int)rank, (int)sf_nroots, (int)local_cols, (int)sf_nleaves, (int)cols_ao);
+   MPI_Abort(MPI_COMM_MATRIX, 1);
+}            
+
          PetscInt isstart = 0;
          /* Get start indices on each rank for the new columns */
          MPI_Scan(&local_cols_col, &isstart, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
@@ -2197,7 +2209,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscInt *cmap_d_ptr = NULL;
          cmap_d_ptr = local_cols > 0 ? cmap_d.data() : sf_int_dummy_d.data();
          PetscInt *lvec_d_ptr = NULL;
-         lvec_d_ptr = cols_ao > 0 ? lvec_d.data() : sf_int_dummy_d.data();       
+         lvec_d_ptr = cols_ao > 0 ? lvec_d.data() : sf_int_dummy_d.data();             
 
          // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
          // one of the kokkos backends like PETSC_MEMTYPE_HIP
