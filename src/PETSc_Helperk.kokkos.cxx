@@ -2172,10 +2172,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 PetscInt sf_nroots, sf_nleaves;
 PetscCallVoid(PetscSFGetGraph(mat_mpi->Mvctx, &sf_nroots, &sf_nleaves, NULL, NULL));
 if (sf_nroots != local_cols || sf_nleaves != cols_ao) {
-   PetscInt rank;
+   int rank;
    MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
    fprintf(stderr, "[Rank %d] SF MISMATCH: nroots=%d vs local_cols=%d, nleaves=%d vs cols_ao=%d\n",
-           (int)rank, (int)sf_nroots, (int)local_cols, (int)sf_nleaves, (int)cols_ao);
+           rank, (int)sf_nroots, (int)local_cols, (int)sf_nleaves, (int)cols_ao);
    MPI_Abort(MPI_COMM_MATRIX, 1);
 }            
 
