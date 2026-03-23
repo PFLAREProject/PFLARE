@@ -84,6 +84,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
 
       // Start comms, then overlap with local-only work below.
       // Mvctx must have only one active comm at a time.
+      // Ensure send/receive buffers are stable before Begin.
+      Kokkos::fence();      
       PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
    }
 

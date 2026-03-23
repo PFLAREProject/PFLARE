@@ -2258,6 +2258,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          /* (2) Scatter x and cmap using Mvctx to get their off-process portions */
          // Keep at most one active communication on Mvctx at a time.
          // While Begin/End is in flight, do not touch the corresponding send/recv buffers.
+         // Ensure send/receive buffers are stable before Begin.
+         Kokkos::fence();         
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
 
          // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
@@ -2286,6 +2288,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
 
          // Start cmap scatter only after finishing x scatter on the same Mvctx.
+         // Ensure send/receive buffers are stable before Begin.
+         Kokkos::fence();         
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
 
          if (cols_ao > 0)
