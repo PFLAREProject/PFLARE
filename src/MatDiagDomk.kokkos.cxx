@@ -44,7 +44,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
    intKokkosView cf_markers_nonlocal_d;
-   intKokkosView cf_markers_send_d;
+   Vec scatter_root_vec = NULL;
    PetscIntKokkosView is_fine_local_d;
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -68,36 +68,23 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // The off-diagonal component requires some comms which we can start now
    if (mpi)
    {
-      cf_markers_send_d = intKokkosView("cf_markers_send_d", local_rows);
-      // Copy cf_markers_d into a temporary buffer
-      Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
 
-      // Scatter cf_markers via VecScatter (int → PetscScalar conversion required)
-      Vec scatter_root_vec;
+      // Scatter cf_markers via VecScatter (int -> PetscScalar conversion required)
       PetscCallVoid(MatCreateVecs(*input_mat, &scatter_root_vec, NULL));
       {
          PetscScalarKokkosView root_scalar_d;
          PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-               root_scalar_d(i) = (PetscScalar)cf_markers_send_d(i);
+               root_scalar_d(i) = (PetscScalar)cf_markers_d(i);
          });
          PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
       }
+
+      // Start comms, then overlap with local-only work below.
+      // Mvctx must have only one active comm at a time.
       PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
-      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
-      {
-         ConstPetscScalarKokkosView lvec_scalar_d;
-         PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
-               cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
-         });
-         PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
-      }
-      PetscCallVoid(VecDestroy(&scatter_root_vec));
-      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~~~~
@@ -164,6 +151,23 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                diag_dom_ratio_d(i_idx_is_row) = sum_val;
             });
       });  
+   }
+
+   // Finish the in-flight scatter and only then read from the receive buffer.
+   if (mpi)
+   {
+      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      {
+         ConstPetscScalarKokkosView lvec_scalar_d;
+         PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         Kokkos::parallel_for(
+            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
+               cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
+         });
+         PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+      }
+      PetscCallVoid(VecDestroy(&scatter_root_vec));
+      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~~~~
