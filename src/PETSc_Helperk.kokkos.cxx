@@ -1,8 +1,27 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <../src/mat/impls/aij/seq/aij.h>
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
+
+//------------------------------------------------------------------------------------------------------------------------
+
+static PetscErrorCode check_exact_petscint_to_scalar_encoding(PetscInt max_encoded_value, MPI_Comm comm)
+{
+   PetscFunctionBegin;
+   if (max_encoded_value <= 0) PetscFunctionReturn(PETSC_SUCCESS);
+
+   const int digits = std::numeric_limits<PetscScalar>::digits;
+   const long double max_exact_ld = std::ldexp(1.0L, digits);
+
+   PetscCheck((long double)max_encoded_value <= max_exact_ld, comm, PETSC_ERR_ARG_OUTOFRANGE,
+              "MatCreateSubMatrix_kokkos_view encodes indices via PetscScalar, but max index %" PetscInt_FMT " exceeds exact integer range 2^%" PetscInt_FMT " = %.0Lf",
+              max_encoded_value, (PetscInt)digits, max_exact_ld);
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -2206,6 +2225,14 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          /* Get start indices on each rank for the new columns */
          MPI_Scan(&local_cols_col, &isstart, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
          isstart -= local_cols_col;
+
+         // cmap values are encoded through PetscScalar and then cast back to PetscInt,
+         // so guard the exact integer range before using VecScatter transport.
+         // Anything larger than 9,000 trillion with 64 bit ints and 64 bit floats will break - should be fine for now
+         // Can't rely on PetscSFBcast with MPIU_INT as that was intermittently breaking
+         // on gpus so want to avoid
+         PetscInt max_encoded_value = global_cols_col > 0 ? global_cols_col - 1 : 0;
+         PetscCallVoid(check_exact_petscint_to_scalar_encoding(max_encoded_value, MPI_COMM_MATRIX));
 
          // Kokkos version of ISGetSeqIS_SameColDist_Private (mpiaij.c)
          // Uses VecScatter with PetscScalar Vecs (matching PETSc's own pattern)
