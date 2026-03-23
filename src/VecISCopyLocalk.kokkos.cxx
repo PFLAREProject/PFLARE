@@ -13,7 +13,6 @@ int max_levels = -1;
 // Destroys the data
 PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 {
-   //PFLARE_LOG_ROUTINE("destroy_VecISCopyLocal_kokkos");
    if (IS_fine_views_local) {
       // Will automatically call the destructor on each element
       delete[] IS_fine_views_local;
@@ -32,7 +31,6 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 // Creates the data we need to do the equivalent of veciscopy on local data in kokkos
 PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 {
-   //PFLARE_LOG_ROUTINE("create_VecISCopyLocal_kokkos");
    // If not built
    if (!IS_fine_views_local)
    {
@@ -67,7 +65,6 @@ PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 // Copy the input IS's to the device for our_level
 PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt global_row_start, IS *index_fine, IS *index_coarse)
 {
-   //PFLARE_LOG_ROUTINE("set_VecISCopyLocal_kokkos_our_level");
    auto exec = PetscGetKokkosExecutionSpace();
    const int level_idx = our_level - 1;
 
@@ -127,7 +124,6 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
-   //PFLARE_LOG_ROUTINE("VecISCopyLocal_kokkos");
    const int level_idx = our_level - 1;
 
    // Can't use the shared pointer directly within the parallel 
