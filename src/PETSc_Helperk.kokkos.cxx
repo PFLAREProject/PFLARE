@@ -2216,126 +2216,121 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          MPI_Scan(&local_cols_col, &isstart, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
          isstart -= local_cols_col;
 
-         // Basically a copy of ISGetSeqIS_SameColDist_Private
+         // Kokkos version of ISGetSeqIS_SameColDist_Private (mpiaij.c)
+         // Do not use PetscSFBcastWithMemTypeBegin/End directly — passing pointers derived from
+         // Kokkos GPU views to PetscSF causes intermittent failures in parallel GPU runs.
+         // The exact cause is not fully understood, but using VecScatter through PETSc's own
+         // Vec infrastructure (which manages buffer ownership correctly) avoids the problem.
+
          /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
-         PetscIntKokkosView x_d("x_d", local_cols);
-         Kokkos::deep_copy(exec, x_d, -1);
-         PetscIntKokkosView cmap_d("cmap_d", local_cols);
-         Kokkos::deep_copy(exec, cmap_d, -1);
-         PetscIntKokkosView lvec_d("lvec_d", cols_ao);
-         // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
-         // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
-         // so that every pointer passed to PetscSF is always backed by valid device memory.
-         PetscIntKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);         
+         Vec x_vec, cmap_vec;
+         PetscCallVoid(MatCreateVecs(*input_mat, &x_vec, NULL));
+         PetscCallVoid(VecDuplicate(x_vec, &cmap_vec));
 
-         // Loop over all the cols in is_col
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
+         // Fill x_vec on device: x[is_col(i)] = is_col(i), rest = -1
+         {
+            PetscScalarKokkosView x_scalar_d;
+            PetscCallVoid(VecGetKokkosViewWrite(x_vec, &x_scalar_d));
+            Kokkos::deep_copy(exec, x_scalar_d, -1.0);
+            Kokkos::parallel_for(
+               Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {
+                  x_scalar_d(is_col_d_d(i)) = (PetscScalar)is_col_d_d(i);
+            });
+            PetscCallVoid(VecRestoreKokkosViewWrite(x_vec, &x_scalar_d));
+         }
 
-               x_d(is_col_d_d(i)) = is_col_d_d(i);
-               cmap_d(is_col_d_d(i)) = i + isstart; /* global index of iscol[i] */
-         });
+         // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
+         {
+            PetscScalarKokkosView cmap_scalar_d;
+            PetscCallVoid(VecGetKokkosViewWrite(cmap_vec, &cmap_scalar_d));
+            Kokkos::deep_copy(exec, cmap_scalar_d, -1.0);
+            Kokkos::parallel_for(
+               Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {
+                  cmap_scalar_d(is_col_d_d(i)) = (PetscScalar)(i + isstart);
+            });
+            PetscCallVoid(VecRestoreKokkosViewWrite(cmap_vec, &cmap_scalar_d));
+         }
 
-         PetscInt *x_d_ptr = NULL;
-         x_d_ptr = local_cols > 0 ? x_d.data() : sf_int_dummy_d.data();
-         PetscInt *cmap_d_ptr = NULL;
-         cmap_d_ptr = local_cols > 0 ? cmap_d.data() : sf_int_dummy_d.data();
-         PetscInt *lvec_d_ptr = NULL;
-         lvec_d_ptr = cols_ao > 0 ? lvec_d.data() : sf_int_dummy_d.data(); 
-         // Start the scatter of the x - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
-         // one of the kokkos backends like PETSC_MEMTYPE_HIP
-         PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;         
-         
-         // Fence to ensure the parallel for above finishes before we call comms 
-         Kokkos::fence();       
-      
-         // PetscSF owns x_d_ptr as the active send buffer until End.
-         // Do not even read from that send buffer before End is called.
-         // If you alias it in overlapped GPU work, the failure shows up intermittently
-         // in parallel runs on GPUs.
-         PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_INT,
-                     mem_type, x_d_ptr,
-                     mem_type, lvec_d_ptr,
-                     MPI_REPLACE));
-         // Finish the x scatter
-         // End releases the send buffer for normal access again.
-         // The scattered lvec_d values are now safe to read below.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, x_d_ptr, lvec_d_ptr, MPI_REPLACE));
-         Kokkos::fence();                           
-         
-         PetscIntKokkosView lcmap_d("lcmap_d", cols_ao);
-         PetscInt *lcmap_d_ptr = NULL;
-         lcmap_d_ptr = cols_ao > 0 ? lcmap_d.data() : sf_int_dummy_d.data();
-         // Let's count how many off-local columns we have
+         /* (2) Scatter x and cmap using Mvctx to get their off-process portions */
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+
+         Vec lcmap_vec;
+         PetscCallVoid(VecDuplicate(mat_mpi->lvec, &lcmap_vec));
+
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
+
+         /* (3) Count how many off-local columns match */
          PetscInt col_ao_output = 0;
 
          // One bigger for exclusive scan
          auto is_col_o_match_d = PetscIntKokkosView("is_col_o_match_d", cols_ao+1);
-         Kokkos::deep_copy(exec, is_col_o_match_d, 0);         
+         Kokkos::deep_copy(exec, is_col_o_match_d, 0);
 
-         // Start the cmap scatter
-         // We make sure not to launch another broadcast on the same Mvctx (ie SF) until the first one has ended
-         // PetscSF owns cmap_d_ptr as the active send buffer until End.
-         // Do not even read from that send buffer before End is called.
-         // If you alias it in overlapped GPU work, the failure shows up intermittently
-         // in parallel runs on GPUs.
-         Kokkos::fence();
-         PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPIU_INT,
-                     mem_type, cmap_d_ptr,
-                     mem_type, lcmap_d_ptr,
-                     MPI_REPLACE));
-         // Finish the cmap scatter
-         // End releases the send buffer for normal access again.
-         // The scattered lcmap_d values are now safe to read below.
-         PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPIU_INT, cmap_d_ptr, lcmap_d_ptr, MPI_REPLACE));
-         Kokkos::fence();                     
-
-         if (cols_ao > 0) 
+         if (cols_ao > 0)
          {
+            ConstPetscScalarKokkosView lvec_scalar_d;
+            PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+
             Kokkos::parallel_reduce("FindMatches", Kokkos::RangePolicy<>(exec, 0, cols_ao),
                KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
                   // This is the scattered x for all of the non-local columns in the input mat
-                  // It's not -1 if that column is present on another rank
-                     if (lvec_d_ptr[i] > -1) {
+                  // It's not -1.0 if that column is present on another rank
+                  if (lvec_scalar_d(i) > -1.0) {
                      thread_sum++;
                      is_col_o_match_d(i) = 1; // Mark this as a match
                   }
                },
                Kokkos::Sum<PetscInt>(col_ao_output)
-            ); 
-         }    
+            );
+
+            PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         }
 
          // Need to do an exclusive scan on is_col_o_match_d to get the new local indices
          // Have to remember to go up to cols_ao+1
-         Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, cols_ao+1), KOKKOS_LAMBDA (const PetscInt i, PetscInt& partial_sum, const bool is_final) {
+         Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, cols_ao+1), KOKKOS_LAMBDA(const PetscInt i, PetscInt& partial_sum, const bool is_final) {
                const int input_value = is_col_o_match_d(i);
                if (is_final) {
                   is_col_o_match_d(i) = partial_sum;  // Write exclusive prefix
                }
                partial_sum += input_value;  // Update running total
-         }); 
+         });
 
          // Local indices into input garray of the columns we want to keep
          // but remember this doesn't mean garray_output = garray_input(is_col_o_d)
-         // as the of columns we have in the output has changed, ie we need 
-         // the cmap_d given it has isstart 
+         // as the of columns we have in the output has changed, ie we need
+         // the cmap_d given it has isstart
          is_col_o_d = PetscIntKokkosView("is_col_o_d", col_ao_output);
          garray_output_d = PetscIntKokkosView("garray_output_d", col_ao_output);
 
          // Loop over all the cols in the input matrix
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {     
-               
-               // We can tell if is_col_o_match_d had 1 in it in this position by comparing the result
-               // of the exclusive scan for this index and the next one            
-               if (is_col_o_match_d(i+1) > is_col_o_match_d(i))
-               {
-                  is_col_o_d(is_col_o_match_d(i)) = i;
-                  garray_output_d(is_col_o_match_d(i)) = lcmap_d_ptr[i];
-               }
-         });
-         // Fence so the parallel for finishes
-         Kokkos::fence();       
+         {
+            ConstPetscScalarKokkosView lcmap_scalar_d;
+            PetscCallVoid(VecGetKokkosView(lcmap_vec, &lcmap_scalar_d));
+
+            Kokkos::parallel_for(
+               Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
+
+                  // We can tell if is_col_o_match_d had 1 in it in this position by comparing the result
+                  // of the exclusive scan for this index and the next one
+                  if (is_col_o_match_d(i+1) > is_col_o_match_d(i))
+                  {
+                     is_col_o_d(is_col_o_match_d(i)) = i;
+                     garray_output_d(is_col_o_match_d(i)) = (PetscInt)lcmap_scalar_d(i);
+                  }
+            });
+            // Fence so the parallel for finishes
+            Kokkos::fence();
+
+            PetscCallVoid(VecRestoreKokkosView(lcmap_vec, &lcmap_scalar_d));
+         }
+
+         // Cleanup Vecs
+         PetscCallVoid(VecDestroy(&x_vec));
+         PetscCallVoid(VecDestroy(&cmap_vec));
+         PetscCallVoid(VecDestroy(&lcmap_vec));
       }
       // If we're reusing we have the iscol_o associated with the output_mat
       else
