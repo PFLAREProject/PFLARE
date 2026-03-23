@@ -300,7 +300,7 @@ module air_operators_setup
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
-      integer :: comm_size, errorcode, order, i_loc, comm_rank
+      integer :: comm_size, errorcode, order, i_loc
       MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array, B_array, C_array
       PetscInt :: global_row_start, global_row_end_plus_one
@@ -313,7 +313,6 @@ module air_operators_setup
       call PetscObjectGetComm(air_data%A_ff(our_level), MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
-      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
 
       ! ~~~~~~~~~~~
       ! Get some sizes
@@ -944,8 +943,6 @@ module air_operators_setup
                air_data%restrictors(our_level))
 
       call timer_finish(TIMER_ID_AIR_RESTRICT) 
-
-      !print *, comm_rank, "done with compute_R_from_Z"
       
       ! Delete temporaries if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -993,8 +990,6 @@ module air_operators_setup
          end if         
 
       end if
-
-      !print *, comm_rank, "at the end of finish_comms_compute_restrict_prolong"
          
    end subroutine finish_comms_compute_restrict_prolong  
 
@@ -1015,8 +1010,6 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: temp_mat
-      MPIU_Comm            :: MPI_COMM_MATRIX
-      integer :: comm_rank, errorcode
 
       ! ~~~~~~~~~~
 
@@ -1027,11 +1020,7 @@ module air_operators_setup
       ! Z A_ff W + A_cf W + Z A_fc + A_cc
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~
-      call timer_start(TIMER_ID_AIR_RAP)
-      call PetscObjectGetComm(A, MPI_COMM_MATRIX, ierr)
-      ! Get the comm size 
-      ! Get the comm rank
-      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)                                     
+      call timer_start(TIMER_ID_AIR_RAP)                          
 
       ! Can just do PtAP
       if (air_data%options%symmetric) then  
@@ -1068,17 +1057,11 @@ module air_operators_setup
          ! First time
          else
 
-            !print *, comm_rank, "AP start"
-
             call MatMatMult(A, air_data%prolongators(our_level), &
                      MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
-
-            !print *, comm_rank, "AP end"
                      
             call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
                      MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
-
-            !print *, comm_rank, "R(AP) end"
          end if
          
          ! Delete temporary if not reusing
@@ -1112,9 +1095,6 @@ module air_operators_setup
          ! If we know we're not reusing MAT_RAP_DROP, compute directly into coarse_matrix
          if (.NOT. air_data%options%reuse_sparsity .OR. &
              .NOT. REUSE_MAT_ACTIVE(MAT_RAP_DROP, air_data%options%reuse_amount)) then
-            
-            !print *, comm_rank, "remove small sparse start"
-
             call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                      air_data%options%a_drop, coarse_matrix, &
                      relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
@@ -1126,8 +1106,6 @@ module air_operators_setup
             call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
                         MAT_COPY_VALUES, coarse_matrix, ierr)
          end if
-
-         !print *, comm_rank, "remove small sparse end"
       end if
 
       ! Delete temporaries if not reusing
