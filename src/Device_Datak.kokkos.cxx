@@ -19,6 +19,7 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
    intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
 
    // Now copy device cf_markers_local_d back to host
+   // Device to host so don't need to specify exec space
    Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
    // Log copy with petsc
    size_t bytes = cf_markers_local_d.extent(0) * sizeof(int);
@@ -36,6 +37,7 @@ PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
    PetscScalarKokkosViewHost diag_dom_ratio_h(diag_dom_ratio_local, diag_dom_ratio_local_d.extent(0));
 
    // Copy device diag_dom_ratio_local_d back to host
+   // Device to host so don't need to specify exec space
    Kokkos::deep_copy(diag_dom_ratio_h, diag_dom_ratio_local_d);
    // Log copy with petsc
    size_t bytes = diag_dom_ratio_local_d.extent(0) * sizeof(PetscReal);
@@ -89,7 +91,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // Doing an exclusive scan to get the offsets for our local indices
    // Doing one larger so we can get the total number of points
    Kokkos::parallel_scan("point_offsets_d_scan",
-      Kokkos::RangePolicy<>(0, local_rows+1),
+      Kokkos::RangePolicy<>(exec, 0, local_rows+1),
       KOKKOS_LAMBDA(const PetscInt i, PetscInt& update, const bool final_pass) {
          bool is_f_point = false;
          if (i < local_rows) { // Predicate is based on original data up to local_rows-1
@@ -106,6 +108,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 
    // The last entry in point_offsets_d is the total number of points that match match_cf
    PetscInt local_rows_row = 0;
+   // Device to host so don't need to specify exec space
    Kokkos::deep_copy(local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
 
    // This will be equivalent to is_fine - global_row_start, ie the local indices
@@ -115,7 +118,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // Write the local indices
    // ~~~~~~~~~~~~
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
          // Is this point match_cf
          if (cf_markers_d(i) == match_cf) {
             // point_offsets_d(i) gives the correct local index
@@ -123,7 +126,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
          }
    });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -146,16 +149,17 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    // Now convert them back to global indices
    PetscInt global_row_start, global_row_end_plus_one;
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // Convert F points
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_fine_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, is_fine_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
       is_fine_local_d(i) += global_row_start;
    });
    // Convert C points
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, is_coarse_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::RangePolicy<>(exec, 0, is_coarse_local_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
       is_coarse_local_d(i) += global_row_start;
    });
@@ -170,6 +174,7 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    PetscIntKokkosViewHost is_coarse_h = PetscIntKokkosViewHost(is_coarse_array, n_coarse);
 
    // Copy over the indices to the host
+   // Device to host so don't need to specify exec space
    Kokkos::deep_copy(is_fine_h, is_fine_local_d);
    Kokkos::deep_copy(is_coarse_h, is_coarse_local_d);
    // Log copy with petsc

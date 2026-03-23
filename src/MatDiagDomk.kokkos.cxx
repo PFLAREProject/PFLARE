@@ -43,7 +43,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Can't use the global directly within the parallel 
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
-   intKokkosView sf_int_dummy_d("sf_int_dummy_d", 1);
    intKokkosView cf_markers_nonlocal_d;
    intKokkosView cf_markers_send_d;
    PetscIntKokkosView is_fine_local_d;
@@ -64,12 +63,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
-   // PetscSF comms cannot be started with a pointer derived from a zero-extent Kokkos view -
-   // doing so causes intermittent failures in parallel on GPUs. Use a size-1 dummy view
-   // so that every pointer passed to PetscSF is always backed by valid device memory.
-   int *cf_markers_nonlocal_d_ptr = NULL;
-   int *cf_markers_send_d_ptr = NULL;
-   PetscMemType mem_type = PETSC_MEMTYPE_KOKKOS;       
    PetscMemType mtype;
 
    // The off-diagonal component requires some comms which we can start now
@@ -77,26 +70,35 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    {
       cf_markers_send_d = intKokkosView("cf_markers_send_d", local_rows);
       // Copy cf_markers_d into a temporary buffer
-      // If we gave the comms routine cf_markers_d we couldn't even read from 
-      // it until comms ended, meaning we couldn't do the work overlapping below      
-      Kokkos::deep_copy(cf_markers_send_d, cf_markers_d);
-      cf_markers_send_d_ptr = local_rows > 0 ? cf_markers_send_d.data() : sf_int_dummy_d.data();
-      exec.fence();
-      cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao); 
-      cf_markers_nonlocal_d_ptr = cols_ao > 0 ? cf_markers_nonlocal_d.data() : sf_int_dummy_d.data();
+      Kokkos::deep_copy(exec, cf_markers_send_d, cf_markers_d);
+      cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
 
-      // Start the scatter of the cf splitting - the kokkos memtype is set as PETSC_MEMTYPE_HOST or 
-      // one of the kokkos backends like PETSC_MEMTYPE_HIP
-      // Be careful these aren't petscints
-      // PetscSF owns cf_markers_send_d_ptr as the active send buffer until End.
-      // Do not even read from that send buffer before End is called.
-      // If you alias it in overlapped GPU work, the failure shows up intermittently
-      // in parallel runs on GPUs.
-      PetscCallVoid(PetscSFBcastWithMemTypeBegin(mat_mpi->Mvctx, MPI_INT,
-                  mem_type, cf_markers_send_d_ptr,
-                  mem_type, cf_markers_nonlocal_d_ptr,
-                  MPI_REPLACE));
-   }   
+      // Scatter cf_markers via VecScatter (int → PetscScalar conversion required)
+      Vec scatter_root_vec;
+      PetscCallVoid(MatCreateVecs(*input_mat, &scatter_root_vec, NULL));
+      {
+         PetscScalarKokkosView root_scalar_d;
+         PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
+         Kokkos::parallel_for(
+            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+               root_scalar_d(i) = (PetscScalar)cf_markers_send_d(i);
+         });
+         PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
+      }
+      PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      {
+         ConstPetscScalarKokkosView lvec_scalar_d;
+         PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         Kokkos::parallel_for(
+            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
+               cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
+         });
+         PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+      }
+      PetscCallVoid(VecDestroy(&scatter_root_vec));
+      Kokkos::fence();
+   }
 
    // ~~~~~~~~~~~~~~~
    // Do the local component so work/comms are overlapped
@@ -111,7 +113,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
 
    // Have to store the diagonal entry
    PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
-   Kokkos::deep_copy(diag_entry_d, 0);
+   Kokkos::deep_copy(exec, diag_entry_d, 0);
 
    // Scoping to reduce peak memory
    {
@@ -172,13 +174,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // The off-diagonal component requires some comms
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
    if (mpi)
-   {           
-      // Finish the scatter of the cf splitting
-      // Be careful these aren't petscints
-      // End releases the send snapshot for normal access again.
-      // The scattered cf_markers_nonlocal_d values are now safe to read.
-      PetscCallVoid(PetscSFBcastEnd(mat_mpi->Mvctx, MPI_INT, cf_markers_send_d_ptr, cf_markers_nonlocal_d_ptr, MPI_REPLACE));
-
+   {
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device
       // ~~~~~~~~~~~~
@@ -229,8 +225,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Compute the diag dominance ratio
    // ~~~~~~~~~~~~~
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {     
-         
+      Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {
+
       // If diag_val is zero we didn't find a diagonal
       if (diag_entry_d(i) != 0.0){
          // Compute the diagonal dominance ratio
@@ -239,12 +235,12 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       else{
          diag_dom_ratio_d(i) = 0.0;
       }
-   });   
+   });
    // Ensure we're done before we exit
-   exec.fence();
+   Kokkos::fence();
 
    PetscReal max_dd_ratio_local = 0.0;
-   Kokkos::parallel_reduce("max_dd_ratio", local_rows_row,
+   Kokkos::parallel_reduce("max_dd_ratio", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
       KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
          PetscReal dd_ratio = diag_dom_ratio_d(i);
          thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;

@@ -67,13 +67,13 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          // Create measure and cf_markers for Aff
          PetscScalarKokkosView measure_d("measure_d", local_rows_aff);
          intKokkosView cf_markers_aff_d("cf_markers_aff_d", local_rows_aff);
-         Kokkos::deep_copy(cf_markers_aff_d, 0);
+         Kokkos::deep_copy(exec, cf_markers_aff_d, 0);
 
          // Copy the random numbers from host to device
          // These are generated in the Fortran wrapper so CPU and Kokkos use the same randoms
          PetscScalarKokkosViewHost random_h(random_numbers, local_rows_aff);
          PetscScalarKokkosView random_d("random_d", local_rows_aff);
-         Kokkos::deep_copy(random_d, random_h);
+         Kokkos::deep_copy(exec, random_d, random_h);
          PetscCallVoid(PetscLogCpuToGpu(local_rows_aff * sizeof(PetscReal)));
 
          const PetscReal max_scale = std::max(10.0, max_dd_ratio_achieved * 2.0);
@@ -85,7 +85,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          // which picks the biggest diagonal dominance ratio
          // We have to ensure abs(measure) >= 1 as PMISR sets anything with measure < 1 as F directly
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
                // Scale: measure = max(10, max_achieved*2) - (diag_dom_ratio - random/1e10)
                measure_d(i) = max_scale - (diag_dom_ratio_d(i) - random_d(i) / 1e10);
@@ -97,7 +97,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
                   cf_markers_aff_d(i) = 1; // C_POINT
                }
          });
-         exec.fence();
+         Kokkos::fence();
 
          // Call PMISR with implicit transpose - takes Aff directly, handles Aff+Aff^T internally
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
@@ -105,13 +105,13 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
          // Swap F-tagged points back into cf_markers_d
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
                if (cf_markers_aff_d(i) == -1) { // F_POINT
                   PetscInt idx = is_fine_local_d(i);
                   cf_markers_d(idx) *= -1;
                }
          });
-         exec.fence();
+         Kokkos::fence();
       }
       return;
    }
@@ -124,13 +124,13 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
       // Create device memory for bins
       auto dom_bins_d = PetscIntKokkosView("dom_bins_d", 1000);
-      Kokkos::deep_copy(dom_bins_d, 0);
+      Kokkos::deep_copy(exec, dom_bins_d, 0);
 
       // Bin the diagonal dominance ratio
       if (fraction_swap > 0)
       {
          Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) { 
+            Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
             // Let's bin the entry
             int bin;
@@ -157,7 +157,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
          // Parallel scan to inclusive sum the number of entries we have in 
          // the bins
-         Kokkos::parallel_scan(dom_bins_d.extent(0), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
+         Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, dom_bins_d.extent(0)), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update, const bool final) {
             // Inclusive scan
             update += dom_bins_d(i);         
             if (final) {
@@ -167,7 +167,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
          // Now if we reduce how many are > the search_size, we know the bin boundary we want
          int bin_boundary = 0;  
-         Kokkos::parallel_reduce ("ReductionBin", dom_bins_d.extent(0), KOKKOS_LAMBDA (const int i, int& update) {
+         Kokkos::parallel_reduce ("ReductionBin", Kokkos::RangePolicy<>(exec, 0, dom_bins_d.extent(0)), KOKKOS_LAMBDA (const int i, int& update) {
             if (dom_bins_d(i) > dom_bins_d(dom_bins_d.extent(0)-1) - search_size) update++;
          }, bin_boundary);   
 
@@ -178,7 +178,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
       // Go and swap F points to C points
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
+         Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
             if (diag_dom_ratio_d(i) != 0.0 && diag_dom_ratio_d(i) >= swap_dom_val)
             {
@@ -188,7 +188,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
             }
       });
       // Ensure we're done before we exit
-      exec.fence(); 
+      Kokkos::fence(); 
    }   
 
    return;

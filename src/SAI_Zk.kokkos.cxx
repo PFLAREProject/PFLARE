@@ -160,6 +160,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       mat_local_z = *z_mat;
    }
 
+   auto exec = PetscGetKokkosExecutionSpace();
+
    // ~~~~~~~~~~~~~~
    // Copy colmaps to device for global index conversion in the kernel
    // colmap_cf: converts A_cf nonlocal column indices to global
@@ -173,7 +175,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    if (mpi && cols_ao_cf > 0)
    {
       auto colmap_cf_h = PetscIntConstKokkosViewHost(colmap_cf, cols_ao_cf);
-      Kokkos::deep_copy(colmap_cf_d, colmap_cf_h);
+      Kokkos::deep_copy(exec, colmap_cf_d, colmap_cf_h);
       PetscCallVoid(PetscLogCpuToGpu(cols_ao_cf * sizeof(PetscInt)));
    }
 
@@ -181,7 +183,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    if (mpi && cols_ao_ff > 0)
    {
       auto colmap_ff_h = PetscIntConstKokkosViewHost(colmap_ff, cols_ao_ff);
-      Kokkos::deep_copy(colmap_ff_d, colmap_ff_h);
+      Kokkos::deep_copy(exec, colmap_ff_d, colmap_ff_h);
       PetscCallVoid(PetscLogCpuToGpu(cols_ao_ff * sizeof(PetscInt)));
    }
 
@@ -189,7 +191,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    auto col_indices_off_proc_d = PetscIntKokkosView("col_indices_off_proc_d", size_cols);
    {
       auto col_indices_off_proc_h = PetscIntConstKokkosViewHost(col_indices_off_proc_array, size_cols);
-      Kokkos::deep_copy(col_indices_off_proc_d, col_indices_off_proc_h);
+      Kokkos::deep_copy(exec, col_indices_off_proc_d, col_indices_off_proc_h);
       PetscCallVoid(PetscLogCpuToGpu(size_cols * sizeof(PetscInt)));
    }
 
@@ -198,7 +200,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    if (mpi && cols_ao_sparsity > 0)
    {
       auto colmap_sparsity_h = PetscIntConstKokkosViewHost(colmap_sparsity, cols_ao_sparsity);
-      Kokkos::deep_copy(colmap_sparsity_d, colmap_sparsity_h);
+      Kokkos::deep_copy(exec, colmap_sparsity_d, colmap_sparsity_h);
       PetscCallVoid(PetscLogCpuToGpu(cols_ao_sparsity * sizeof(PetscInt)));
    }
 
@@ -246,7 +248,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    PetscInt sparsity_max_nnz = 0, sparsity_max_nnz_local = 0, sparsity_max_nnz_nonlocal = 0;
    if (local_rows_cf > 0)
    {
-      Kokkos::parallel_reduce("FindMaxNNZSparsity", local_rows_cf,
+      Kokkos::parallel_reduce("FindMaxNNZSparsity", Kokkos::RangePolicy<>(exec, 0, local_rows_cf),
          KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
             PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
             thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -255,7 +257,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       );
       if (mpi)
       {
-         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", local_rows_cf,
+         Kokkos::parallel_reduce("FindMaxNNZSparsityNonLocal", Kokkos::RangePolicy<>(exec, 0, local_rows_cf),
             KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
                PetscInt row_nnz = device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
                thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
@@ -274,8 +276,6 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       (void)PetscFree(col_indices_off_proc_array);
       return;
    }
-
-   auto exec = PetscGetKokkosExecutionSpace();
 
    // ~~~~~~~~~~~~~~
    // TeamPolicy: one team per row, with per-team scratch memory
@@ -477,7 +477,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    Mat_SeqAIJKokkos *aijkok_nonlocal_z = NULL;
    if (mpi) aijkok_nonlocal_z = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_z->spptr);
 
-   exec.fence();
+   Kokkos::fence();
 
    // Have to specify we've modified data on the device
    aijkok_local_z->a_dual.clear_sync_state();
