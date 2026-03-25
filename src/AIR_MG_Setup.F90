@@ -80,6 +80,8 @@ module air_mg_setup
       PetscRandom :: rctx
       MatType:: mat_type, mat_type_aff
       integer(c_int) :: diag_only
+      PetscInt, dimension(:), pointer :: debug_is_ptr => null()
+      PetscInt :: debug_fine_sum, debug_coarse_sum
 
       ! ~~~~~~     
 
@@ -228,6 +230,8 @@ module air_mg_setup
             ! Get the achieved norm
             call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
 
+print *, "achieved_rel_tol", achieved_rel_tol, "norm b", norm_b, "tol", achieved_rel_tol/norm_b            
+
             ! If it's good enough we can truncate on this level and our coarse solver has been computed
             if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol) then
                auto_truncated = .TRUE.
@@ -287,7 +291,24 @@ module air_mg_setup
             call ISGetSize(air_data%IS_fine_index(our_level), global_fine_is_size, ierr)
             call ISGetLocalSize(air_data%IS_fine_index(our_level), local_fine_is_size, ierr)
             call ISGetSize(air_data%IS_coarse_index(our_level), global_coarse_is_size, ierr)
-            call ISGetLocalSize(air_data%IS_coarse_index(our_level), local_coarse_is_size, ierr)  
+            call ISGetLocalSize(air_data%IS_coarse_index(our_level), local_coarse_is_size, ierr)
+
+            ! Debug: CF splitting index checksums per rank
+            call ISGetIndices(air_data%IS_fine_index(our_level), debug_is_ptr, ierr)
+            debug_fine_sum = 0
+            do i_loc = 1, local_fine_is_size
+               debug_fine_sum = debug_fine_sum + debug_is_ptr(i_loc)
+            end do
+            call ISRestoreIndices(air_data%IS_fine_index(our_level), debug_is_ptr, ierr)
+            call ISGetIndices(air_data%IS_coarse_index(our_level), debug_is_ptr, ierr)
+            debug_coarse_sum = 0
+            do i_loc = 1, local_coarse_is_size
+               debug_coarse_sum = debug_coarse_sum + debug_is_ptr(i_loc)
+            end do
+            call ISRestoreIndices(air_data%IS_coarse_index(our_level), debug_is_ptr, ierr)
+            print *, "DEBUG CF level", our_level, "rank", comm_rank, &
+                     "IS_fine size=", local_fine_is_size, "index_sum=", debug_fine_sum, &
+                     "IS_coarse size=", local_coarse_is_size, "index_sum=", debug_coarse_sum
 
          ! We're not continuing the coarsening anyway, this is just to ensure the continue_coarsening
          ! test below doesn't break

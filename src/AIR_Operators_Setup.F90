@@ -46,9 +46,12 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: smoothing_mat, temp_mat
+      PetscReal :: debug_norm
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: debug_comm_rank, debug_errorcode
 
-      ! ~~~~~~~~~~   
-        
+      ! ~~~~~~~~~~
+
       ! ~~~~~~~~~~~~~
       ! Now to apply a strong R tolerance as lAIR in hypre does, we have to drop entries 
       ! from A_cf and A_ff according to the strong R tolerance on A 
@@ -216,7 +219,15 @@ module air_operators_setup
                our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)
       end if
 
-      call timer_finish(TIMER_ID_AIR_EXTRACT)   
+      call timer_finish(TIMER_ID_AIR_EXTRACT)
+
+      ! Debug: norms of A_ff and A_fc
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, debug_comm_rank, debug_errorcode)
+      call MatNorm(air_data%A_ff(our_level), NORM_FROBENIUS, debug_norm, ierr)
+      if (debug_comm_rank == 0) print *, "DEBUG level", our_level, "A_ff NORM_FROBENIUS:", debug_norm
+      call MatNorm(air_data%A_fc(our_level), NORM_FROBENIUS, debug_norm, ierr)
+      if (debug_comm_rank == 0) print *, "DEBUG level", our_level, "A_fc NORM_FROBENIUS:", debug_norm
 
       ! ~~~~~~~~~~~~~~
       ! Apply the strong R threshold to A_cf
@@ -300,8 +311,10 @@ module air_operators_setup
       type(tIS)  :: temp_is
       type(tVec) :: diag_vec
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
-      integer :: comm_size, errorcode, order, i_loc
+      integer :: comm_size, comm_rank, errorcode, order, i_loc
       MPIU_Comm :: MPI_COMM_MATRIX
+      PetscReal :: debug_norm
+      MatType :: debug_mat_type
       integer(c_long_long) :: A_array, B_array, C_array
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
@@ -310,9 +323,10 @@ module air_operators_setup
 
       ! ~~~~~~~~~~
 
-      call PetscObjectGetComm(air_data%A_ff(our_level), MPI_COMM_MATRIX, ierr)    
-      ! Get the comm size 
+      call PetscObjectGetComm(air_data%A_ff(our_level), MPI_COMM_MATRIX, ierr)
+      ! Get the comm size and rank
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
 
       ! ~~~~~~~~~~~
       ! Get some sizes
@@ -381,8 +395,20 @@ module air_operators_setup
             air_data%options%diag_scale_polys, &
             air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
             air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
-            air_data%inv_A_ff(our_level)) 
-            
+            air_data%inv_A_ff(our_level))
+
+      ! Debug: inv_A_ff norm or polynomial checksum
+      call MatGetType(air_data%inv_A_ff(our_level), debug_mat_type, ierr)
+      if (debug_mat_type /= MATSHELL) then
+         call MatNorm(air_data%inv_A_ff(our_level), NORM_FROBENIUS, debug_norm, ierr)
+         if (comm_rank == 0) print *, "DEBUG level", our_level, "inv_A_ff NORM_FROBENIUS:", debug_norm
+      else
+         if (comm_rank == 0 .AND. &
+             associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) &
+            print *, "DEBUG level", our_level, "inv_A_ff poly coeffs sum:", &
+                     sum(air_data%inv_A_ff_poly_data(our_level)%coefficients)
+      end if
+
       ! Delete temporary if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
           .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
@@ -690,6 +716,10 @@ module air_operators_setup
                      air_data%prolongators(our_level))
          end if
 
+         ! Debug: prolongator norm
+         call MatNorm(air_data%prolongators(our_level), NORM_FROBENIUS, debug_norm, ierr)
+         if (comm_rank == 0) print *, "DEBUG level", our_level, "prolongator NORM_FROBENIUS:", debug_norm
+
          ! Delete temporary if not reusing
          if (.NOT. air_data%options%reuse_sparsity .OR. &
              .NOT. REUSE_MAT_ACTIVE(MAT_W_DROP, air_data%options%reuse_amount)) then
@@ -942,8 +972,12 @@ module air_operators_setup
                reuse_grid_transfer, &
                air_data%restrictors(our_level))
 
-      call timer_finish(TIMER_ID_AIR_RESTRICT) 
-      
+      ! Debug: restrictor norm (before potential transpose/destroy for symmetric case)
+      call MatNorm(air_data%restrictors(our_level), NORM_FROBENIUS, debug_norm, ierr)
+      if (comm_rank == 0) print *, "DEBUG level", our_level, "restrictor NORM_FROBENIUS:", debug_norm
+
+      call timer_finish(TIMER_ID_AIR_RESTRICT)
+
       ! Delete temporaries if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
           .NOT. REUSE_MAT_ACTIVE(MAT_Z_DROP, air_data%options%reuse_amount)) then
@@ -952,12 +986,15 @@ module air_operators_setup
       if (.NOT. air_data%options%reuse_sparsity .OR. &
           .NOT. REUSE_IS_ACTIVE(IS_R_Z_FINE_COLS, air_data%options%reuse_amount)) then
          call ISDestroy(air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), ierr)
-      end if        
-            
+      end if
+
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
          call MatTranspose(air_data%restrictors(our_level), MAT_INITIAL_MATRIX, air_data%prolongators(our_level), ierr)
          call MatDestroy(air_data%restrictors(our_level), ierr)
+         ! Debug: prolongator norm (symmetric case — P = R^T)
+         call MatNorm(air_data%prolongators(our_level), NORM_FROBENIUS, debug_norm, ierr)
+         if (comm_rank == 0) print *, "DEBUG level", our_level, "prolongator NORM_FROBENIUS:", debug_norm
       end if
 
       ! ~~~~~~~~~~~
@@ -1010,6 +1047,9 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: temp_mat
+      PetscReal :: debug_norm
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: debug_comm_rank, debug_errorcode
 
       ! ~~~~~~~~~~
 
@@ -1118,10 +1158,15 @@ module air_operators_setup
          call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), ierr)
       end if       
 
-      call timer_finish(TIMER_ID_AIR_DROP)    
+      call timer_finish(TIMER_ID_AIR_DROP)
 
-         
-   end subroutine compute_coarse_matrix  
+      ! Debug: coarse matrix norm
+      call PetscObjectGetComm(coarse_matrix, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, debug_comm_rank, debug_errorcode)
+      call MatNorm(coarse_matrix, NORM_FROBENIUS, debug_norm, ierr)
+      if (debug_comm_rank == 0) print *, "DEBUG level", our_level, "coarse_matrix NORM_FROBENIUS:", debug_norm
+
+   end subroutine compute_coarse_matrix
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
