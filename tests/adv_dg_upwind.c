@@ -327,11 +327,14 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscFE fe, PetscInt Nb, const Ap
     for (PetscInt i = 0; i < Nb; i++) d_nnz[goff - rstart + i] += Nb;
   }
 
-  /* Interior facets: upwind DG coupling is one-directional per face.
-     Evaluate b·n at the face centroid to identify the downwind cell.
-     Only the face-active DOFs of the downwind cell (those whose basis
-     functions are non-zero on the shared face) receive off-diagonal column
-     entries, and only for the face-active DOFs of the upwind cell.        */
+  /* Interior facets: both K_LR (supp[0] rows, supp[1] cols) and K_RL
+     (supp[1] rows, supp[0] cols) can be non-zero for the same face when
+     the velocity field is curved or when a non-planar face has a varying
+     normal — both b·n > 0 and b·n < 0 can occur at different quadrature
+     points.  We therefore always preallocate both off-diagonal blocks.
+     Only the face-active DOFs (those whose basis functions are non-zero
+     on the shared face) participate; this is read from the face tabulation
+     and gives a much tighter allocation than a full Nb x Nb block.         */
   for (PetscInt f = fStart; f < fEnd; f++) {
     const PetscInt *supp;
     PetscInt        suppSize;
@@ -339,59 +342,64 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscFE fe, PetscInt Nb, const Ap
     PetscCall(DMPlexGetSupport(dm, f, &supp));
     if (suppSize != 2) continue; /* boundary facet — no inter-cell coupling */
 
-    /* Determine flow direction via b·n_L at the face centroid */
-    PetscReal n_L[3], fc[3] = {0.0, 0.0, 0.0}, bv[3];
-    PetscCall(FacetOutwardNormal(dm, f, supp[0], dim, n_L));
-    PetscCall(DMPlexComputeCellGeometryFVM(dm, f, NULL, fc, NULL));
-    GetVelocity(dim, ctx, fc, bv);
-    PetscReal bn = 0.0;
-    for (PetscInt d = 0; d < dim; d++) bn += bv[d] * n_L[d];
-    if (bn == 0.0) continue; /* tangential flow — no off-diagonal coupling */
+    PetscInt goff0, goff1;
+    GlobalOffset(supp[0], goff0);
+    GlobalOffset(supp[1], goff1);
 
-    /* cDown = downwind cell (receives inflow), cUp = upwind cell (source) */
-    PetscInt cDown = (bn < 0.0) ? supp[0] : supp[1];
-    PetscInt cUp   = (bn < 0.0) ? supp[1] : supp[0];
-
-    PetscInt goffDown, goffUp;
-    GlobalOffset(cDown, goffDown);
-    GlobalOffset(cUp,   goffUp);
-
-    PetscBool ownDown = (goffDown >= rstart && goffDown < rend) ? PETSC_TRUE : PETSC_FALSE;
-    PetscBool ownUp   = (goffUp   >= rstart && goffUp   < rend) ? PETSC_TRUE : PETSC_FALSE;
-    if (!ownDown) continue; /* only allocate rows we own */
+    PetscBool own0 = (goff0 >= rstart && goff0 < rend) ? PETSC_TRUE : PETSC_FALSE;
+    PetscBool own1 = (goff1 >= rstart && goff1 < rend) ? PETSC_TRUE : PETSC_FALSE;
+    if (!own0 && !own1) continue;
 
     /* Find local face indices in each cell's cone */
-    PetscInt        fDown = -1, fUp = -1;
-    const PetscInt *coneDown, *coneUp;
-    PetscInt        coneSizeDown, coneSizeUp;
-    PetscCall(DMPlexGetConeSize(dm, cDown, &coneSizeDown));
-    PetscCall(DMPlexGetCone(dm, cDown, &coneDown));
-    for (PetscInt lf = 0; lf < coneSizeDown; lf++) {
-      if (coneDown[lf] == f) { fDown = lf; break; }
+    PetscInt        fL = -1, fR = -1;
+    const PetscInt *coneL, *coneR;
+    PetscInt        coneSizeL, coneSizeR;
+    PetscCall(DMPlexGetConeSize(dm, supp[0], &coneSizeL));
+    PetscCall(DMPlexGetCone(dm, supp[0], &coneL));
+    for (PetscInt lf = 0; lf < coneSizeL; lf++) {
+      if (coneL[lf] == f) { fL = lf; break; }
     }
-    PetscCall(DMPlexGetConeSize(dm, cUp, &coneSizeUp));
-    PetscCall(DMPlexGetCone(dm, cUp, &coneUp));
-    for (PetscInt lf = 0; lf < coneSizeUp; lf++) {
-      if (coneUp[lf] == f) { fUp = lf; break; }
+    PetscCall(DMPlexGetConeSize(dm, supp[1], &coneSizeR));
+    PetscCall(DMPlexGetCone(dm, supp[1], &coneR));
+    for (PetscInt lf = 0; lf < coneSizeR; lf++) {
+      if (coneR[lf] == f) { fR = lf; break; }
     }
 
-    /* Count face-active DOFs of the upwind cell (non-zero basis on face fUp) */
-    PetscInt nactive_up = 0;
+    /* Count face-active DOFs for each cell */
+    PetscInt nactiveL = 0, nactiveR = 0;
     for (PetscInt j = 0; j < Nb; j++) {
       for (PetscInt q = 0; q < Nfq; q++) {
-        if (Tf->T[0][(fUp * Nfq + q) * Nb + j] != 0.0) { nactive_up++; break; }
+        if (Tf->T[0][(fL * Nfq + q) * Nb + j] != 0.0) { nactiveL++; break; }
+      }
+      for (PetscInt q = 0; q < Nfq; q++) {
+        if (Tf->T[0][(fR * Nfq + q) * Nb + j] != 0.0) { nactiveR++; break; }
       }
     }
 
-    /* For each face-active DOF of the downwind cell, add nactive_up columns */
-    for (PetscInt i = 0; i < Nb; i++) {
-      PetscBool active_i = PETSC_FALSE;
-      for (PetscInt q = 0; q < Nfq; q++) {
-        if (Tf->T[0][(fDown * Nfq + q) * Nb + i] != 0.0) { active_i = PETSC_TRUE; break; }
+    /* K_LR: supp[0] (active rows) needs supp[1] (active cols) */
+    if (own0) {
+      for (PetscInt i = 0; i < Nb; i++) {
+        PetscBool active_i = PETSC_FALSE;
+        for (PetscInt q = 0; q < Nfq; q++) {
+          if (Tf->T[0][(fL * Nfq + q) * Nb + i] != 0.0) { active_i = PETSC_TRUE; break; }
+        }
+        if (!active_i) continue;
+        if (own1) d_nnz[goff0 - rstart + i] += nactiveR;
+        else      o_nnz[goff0 - rstart + i] += nactiveR;
       }
-      if (!active_i) continue;
-      if (ownUp) d_nnz[goffDown - rstart + i] += nactive_up;
-      else       o_nnz[goffDown - rstart + i] += nactive_up;
+    }
+
+    /* K_RL: supp[1] (active rows) needs supp[0] (active cols) */
+    if (own1) {
+      for (PetscInt i = 0; i < Nb; i++) {
+        PetscBool active_i = PETSC_FALSE;
+        for (PetscInt q = 0; q < Nfq; q++) {
+          if (Tf->T[0][(fR * Nfq + q) * Nb + i] != 0.0) { active_i = PETSC_TRUE; break; }
+        }
+        if (!active_i) continue;
+        if (own0) d_nnz[goff1 - rstart + i] += nactiveL;
+        else      o_nnz[goff1 - rstart + i] += nactiveL;
+      }
     }
   }
 #undef GlobalOffset
