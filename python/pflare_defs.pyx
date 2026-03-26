@@ -1,13 +1,10 @@
 import numpy as np
-cimport numpy as cnp
 from libc.string cimport memcpy, strlen
 
 from petsc4py.PETSc cimport Mat, PetscMat
 from petsc4py.PETSc cimport PC, PetscPC
 from petsc4py.PETSc cimport IS, PetscIS
 
-# Required for NumPy C-API initialisation; no-op in Cython 3+
-cnp.import_array()
 
 # Bring PetscInt and PetscReal from petsc.h so the C compiler resolves the
 # correct widths regardless of whether PETSc was built with 32- or 64-bit
@@ -423,7 +420,7 @@ cpdef str pcair_get_smooth_type(PC pc):
 	PCAIRGetSmoothType_c(&(pc.pc), buf)
 	return buf[:strlen(buf)].decode('utf-8')
 
-cpdef cnp.ndarray pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
+cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 	"""Return a copy of the GMRES polynomial coefficients at the given PCAIR level.
 
 	Parameters
@@ -447,8 +444,9 @@ cpdef cnp.ndarray pcair_get_poly_coeffs(PC pc, int petsc_level, int which_invers
 	cdef PetscInt row_size = 0, col_size = 0
 	PCAIRGetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
 	                      &coeffs_ptr, &row_size, &col_size)
-	cdef cnp.ndarray result = np.empty((row_size, col_size), dtype=np.float64, order='F')
-	memcpy(<void*>result.data, <void*>coeffs_ptr, row_size * col_size * sizeof(PetscReal))
+	result = np.empty((row_size, col_size), dtype=np.float64, order='F')
+	cdef double[::1, :] result_view = result
+	memcpy(&result_view[0, 0], <void*>coeffs_ptr, row_size * col_size * sizeof(PetscReal))
 	return result
 
 # -----------------------------------------------------------------------
@@ -616,7 +614,7 @@ cpdef pcair_set_reuse_amount(PC pc, int amount):
 	"""
 	PCAIRSetReuseAmount_c(&(pc.pc), <PetscInt>amount)
 
-cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, cnp.ndarray coeffs):
+cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.
 
 	Parameters
@@ -632,17 +630,17 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, cnp.ndarr
 	    Coefficient array as returned by pcair_get_poly_coeffs.
 	    Must have shape (poly_order+1, 1_or_2).
 	"""
-	cdef cnp.ndarray coeffs_f = np.asfortranarray(coeffs, dtype=np.float64)
+	cdef double[::1, :] coeffs_f = np.asfortranarray(coeffs, dtype=np.float64)
 	cdef PetscInt row_size = <PetscInt>coeffs_f.shape[0]
 	cdef PetscInt col_size = <PetscInt>coeffs_f.shape[1]
 	PCAIRSetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
-	                      <PetscReal*>coeffs_f.data, row_size, col_size)
+	                      <PetscReal*>&coeffs_f[0, 0], row_size, col_size)
 
 # -----------------------------------------------------------------------
 # PCPFLAREINV wrappers
 # -----------------------------------------------------------------------
 
-cpdef cnp.ndarray pcpflareinv_get_poly_coeffs(PC pc):
+cpdef pcpflareinv_get_poly_coeffs(PC pc):
 	"""Return a copy of the GMRES polynomial coefficients from a PCPFLAREINV preconditioner.
 
 	Returns
@@ -654,11 +652,12 @@ cpdef cnp.ndarray pcpflareinv_get_poly_coeffs(PC pc):
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt rows = 0, cols = 0
 	PCPFLAREINVGetPolyCoeffs(pc.pc, &coeffs_ptr, &rows, &cols)
-	cdef cnp.ndarray result = np.empty((rows, cols), dtype=np.float64, order='F')
-	memcpy(<void*>result.data, <void*>coeffs_ptr, rows * cols * sizeof(PetscReal))
+	result = np.empty((rows, cols), dtype=np.float64, order='F')
+	cdef double[::1, :] result_view = result
+	memcpy(&result_view[0, 0], <void*>coeffs_ptr, rows * cols * sizeof(PetscReal))
 	return result
 
-cpdef pcpflareinv_set_poly_coeffs(PC pc, cnp.ndarray coeffs):
+cpdef pcpflareinv_set_poly_coeffs(PC pc, coeffs):
 	"""Copy polynomial coefficients into the PCPFLAREINV preconditioner.
 
 	Parameters
@@ -669,10 +668,10 @@ cpdef pcpflareinv_set_poly_coeffs(PC pc, cnp.ndarray coeffs):
 	    Coefficient array as returned by pcpflareinv_get_poly_coeffs.
 	    Must have shape (poly_order+1, 1_or_2).
 	"""
-	cdef cnp.ndarray coeffs_f = np.asfortranarray(coeffs, dtype=np.float64)
+	cdef double[::1, :] coeffs_f = np.asfortranarray(coeffs, dtype=np.float64)
 	cdef PetscInt rows = <PetscInt>coeffs_f.shape[0]
 	cdef PetscInt cols = <PetscInt>coeffs_f.shape[1]
-	PCPFLAREINVSetPolyCoeffs(pc.pc, <PetscReal*>coeffs_f.data, rows, cols)
+	PCPFLAREINVSetPolyCoeffs(pc.pc, <PetscReal*>&coeffs_f[0, 0], rows, cols)
 
 cpdef pcpflareinv_set_reuse_poly_coeffs(PC pc, bint flag):
 	"""Tell PCPFLAREINV to reuse the current polynomial coefficients on the next setup.

@@ -41,10 +41,14 @@ def configure():
         runtime_library_dirs=LIBRARY_DIRS,
     )
 
+# -Werror is added to ensure any warnings building the Python 
+# interface (e.g., deprecation warnings) are treated as errors
+# to match the PETSc CI
 extensions = [
     Extension('pflare_defs',
               sources = ['pflare_defs.pyx'],
               extra_link_args=['-lpetsc'],
+              extra_compile_args=['-Werror=cpp'],
               **configure()),
 ]
 
