@@ -1641,8 +1641,6 @@ int main(int argc, char **argv)
   PetscCall(AssembleSystem(dm, fe, &ctx, Nb, Nq, A, b_rhs));
   PetscCall(MatGetType(A, &mat_type));
 
-  MatView(A, PETSC_VIEWER_STDOUT_SELF);
-
   /* ---- Block diagonal scaling: D^{-1} A x = D^{-1} b ---- */
   if (ctx.diag_scale) {
     Mat         Dinv, DinvA, DinvA_f;
@@ -1701,30 +1699,104 @@ int main(int argc, char **argv)
 
     /* Filter near-zero entries from DinvA */
     {
-      PetscReal filter_tol = 1e-15;
-      PetscInt  rstart, rend;
+      PetscReal     filter_tol = 1e-15;
+      PetscInt      rstart, rend;
+      MPI_Comm      comm;
+      PetscMPIInt   comm_size;
+      PetscCount    total_nnz, count;
+      PetscInt      *coo_i, *coo_j;
+      PetscScalar   *coo_v;
 
+      PetscCall(MatGetOwnershipRange(DinvA, &rstart, &rend));
+
+      /* Count total (unfiltered) NNZ without copying — NULL cols/vals skips copy+sort */
+      total_nnz = 0;
+      for (PetscInt i = rstart; i < rend; i++) {
+        PetscInt ncols;
+        PetscCall(MatGetRow(DinvA, i, &ncols, NULL, NULL));
+        total_nnz += ncols;
+        PetscCall(MatRestoreRow(DinvA, i, &ncols, NULL, NULL));
+      }
+
+      /* Preallocate COO arrays to the total unfiltered NNZ */
+      PetscCall(PetscMalloc1(total_nnz, &coo_i));
+      PetscCall(PetscMalloc1(total_nnz, &coo_j));
+      PetscCall(PetscMalloc1(total_nnz, &coo_v));
+
+      /* Access diagonal (+off-diagonal) CSR blocks directly and fill COO */
+      PetscCall(PetscObjectGetComm((PetscObject)DinvA, &comm));
+      PetscCallMPI(MPI_Comm_size(comm, &comm_size));
+
+      /* For MPI decompose into diagonal + off-diagonal sub-matrices */
+      Mat             mat_local, mat_nonlocal = NULL;
+      const PetscInt *garray = NULL;
+      if (comm_size != 1) {
+        PetscCall(MatMPIAIJGetSeqAIJ(DinvA, &mat_local, &mat_nonlocal, &garray));
+      } else {
+        mat_local = DinvA;
+      }
+
+      /* Scan local (diagonal) block — col global index = rstart + aj[k] */
+      {
+        const PetscInt   *ai, *aj;
+        const PetscScalar *av;
+        PetscInt          n;
+        PetscBool         done;
+
+        PetscCall(MatGetRowIJ(mat_local, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+        PetscCall(MatSeqAIJGetArrayRead(mat_local, &av));
+
+        count = 0;
+        for (PetscInt i = 0; i < nrows; i++) {
+          for (PetscInt k = ai[i]; k < ai[i + 1]; k++) {
+            if (PetscAbsScalar(av[k]) > filter_tol) {
+              coo_i[count] = rstart + i;
+              coo_j[count] = rstart + aj[k];
+              coo_v[count] = av[k];
+              count++;
+            }
+          }
+        }
+
+        PetscCall(MatSeqAIJRestoreArrayRead(mat_local, &av));
+        PetscCall(MatRestoreRowIJ(mat_local, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+      }
+
+      /* Scan off-diagonal block (parallel only) — col global index = garray[aj[k]] */
+      if (comm_size != 1) {
+        const PetscInt   *ai, *aj;
+        const PetscScalar *av;
+        PetscInt          n;
+        PetscBool         done;
+
+        PetscCall(MatGetRowIJ(mat_nonlocal, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+        PetscCall(MatSeqAIJGetArrayRead(mat_nonlocal, &av));
+
+        for (PetscInt i = 0; i < nrows; i++) {
+          for (PetscInt k = ai[i]; k < ai[i + 1]; k++) {
+            if (PetscAbsScalar(av[k]) > filter_tol) {
+              coo_i[count] = rstart + i;
+              coo_j[count] = garray[aj[k]];
+              coo_v[count] = av[k];
+              count++;
+            }
+          }
+        }
+
+        PetscCall(MatSeqAIJRestoreArrayRead(mat_nonlocal, &av));
+        PetscCall(MatRestoreRowIJ(mat_nonlocal, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+      }
+
+      /* Build DinvA_f via COO interface */
       PetscCall(MatCreate(PETSC_COMM_WORLD, &DinvA_f));
       PetscCall(MatSetSizes(DinvA_f, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
       PetscCall(MatSetType(DinvA_f, mat_type));
-      PetscCall(MatSetOption(DinvA_f, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE));
-      PetscCall(MatSetUp(DinvA_f));
+      PetscCall(MatSetPreallocationCOO(DinvA_f, count, coo_i, coo_j));
+      PetscCall(MatSetValuesCOO(DinvA_f, coo_v, INSERT_VALUES));
 
-      PetscCall(MatGetOwnershipRange(DinvA, &rstart, &rend));
-      for (PetscInt i = rstart; i < rend; i++) {
-        PetscInt          ncols;
-        const PetscInt    *cols;
-        const PetscScalar *vals;
-        PetscCall(MatGetRow(DinvA, i, &ncols, &cols, &vals));
-        for (PetscInt j = 0; j < ncols; j++) {
-          if (PetscAbsScalar(vals[j]) > filter_tol) {
-            PetscCall(MatSetValue(DinvA_f, i, cols[j], vals[j], INSERT_VALUES));
-          }
-        }
-        PetscCall(MatRestoreRow(DinvA, i, &ncols, &cols, &vals));
-      }
-      PetscCall(MatAssemblyBegin(DinvA_f, MAT_FINAL_ASSEMBLY));
-      PetscCall(MatAssemblyEnd(DinvA_f, MAT_FINAL_ASSEMBLY));
+      PetscCall(PetscFree(coo_i));
+      PetscCall(PetscFree(coo_j));
+      PetscCall(PetscFree(coo_v));
     }
 
     /* Replace A and b_rhs with the scaled versions */
