@@ -248,10 +248,14 @@ static PetscErrorCode BuildBrokenSection(DM dm, PetscInt Nb, PetscSection *sec)
 /* -----------------------------------------------------------------------
    Preallocate the global matrix.
 
-   Each cell has a diagonal block of size Nb x Nb (from volume + own-facet
-   terms).  Each interior facet couples two cells, adding two off-diagonal
-   blocks.  We walk all facets of height 1 (codimension 1)
-   and use DMPlexGetSupport to find the owning cells.
+   Each cell has a diagonal block of size Nb x Nb (from the volume term).
+   Each interior facet contributes an off-diagonal block in exactly one
+   direction (the downwind cell's rows need the upwind cell's columns).
+   Within that off-diagonal block, only DOFs whose basis functions are
+   non-zero on the shared face participate: for the downwind cell these
+   are the face-active test DOFs (rows), and for the upwind cell these
+   are the face-active trial DOFs (columns).  The face tabulation from
+   PetscFE is used to identify them exactly.
 
    For the parallel case we must distinguish on-process (d_nnz) from
    off-process (o_nnz) column entries.  For DG this is straightforward:
@@ -266,14 +270,23 @@ static PetscErrorCode BuildBrokenSection(DM dm, PetscInt Nb, PetscSection *sec)
    We decode this to get the true global column index and compare it
    against [rstart, rend) to decide d_nnz vs o_nnz.
    ----------------------------------------------------------------------- */
-static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
+/* Forward declaration — FacetOutwardNormal is defined after this function */
+static PetscErrorCode FacetOutwardNormal(DM dm, PetscInt f, PetscInt c,
+                                          PetscInt dim, PetscReal n_out[]);
+
+static PetscErrorCode PreallocateMatrix(DM dm, PetscFE fe, PetscInt Nb, const AppCtx *ctx, Mat A)
 {
-  PetscInt     fStart, fEnd, cStart, cEnd;
-  PetscInt    *d_nnz, *o_nnz;
-  PetscInt     nlocal, rstart, rend;
-  PetscSection gsec; /* global section — gives global DOF offsets */
+  PetscInt        fStart, fEnd, cStart, cEnd;
+  PetscInt       *d_nnz, *o_nnz;
+  PetscInt        nlocal, rstart, rend;
+  PetscSection    gsec; /* global section — gives global DOF offsets */
+  PetscInt        dim;
+  PetscTabulation Tf;
+  PetscQuadrature fquad;
+  PetscInt        Nfq;
 
   PetscFunctionBeginUser;
+  PetscCall(DMGetDimension(dm, &dim));
   PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
   PetscCall(DMPlexGetHeightStratum(dm, 1, &fStart, &fEnd));
 
@@ -287,6 +300,13 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
 
   /* Local ownership range in global DOF indices */
   PetscCall(MatGetOwnershipRange(A, &rstart, &rend));
+
+  /* Face tabulation: Tf->T[0][(fLocal * Nfq + q) * Nb + i] is the value
+     of basis function i at the q-th quadrature point on local face fLocal.
+     A basis function is zero on a face iff all its values there are 0.0.  */
+  PetscCall(PetscFEGetFaceTabulation(fe, 0, &Tf));
+  PetscCall(PetscFEGetFaceQuadrature(fe, &fquad));
+  PetscCall(PetscQuadratureGetData(fquad, NULL, NULL, &Nfq, NULL, NULL));
 
   /* Helper lambda (C99 inline logic): given a DAG point p, return its
      global DOF base index (always non-negative).                          */
@@ -307,9 +327,11 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
     for (PetscInt i = 0; i < Nb; i++) d_nnz[goff - rstart + i] += Nb;
   }
 
-  /* Interior facets couple two cells.  For each locally-owned cell on the
-     facet we record Nb column entries in d_nnz (neighbour is on-process)
-     or o_nnz (neighbour is a ghost owned by another rank).               */
+  /* Interior facets: upwind DG coupling is one-directional per face.
+     Evaluate b·n at the face centroid to identify the downwind cell.
+     Only the face-active DOFs of the downwind cell (those whose basis
+     functions are non-zero on the shared face) receive off-diagonal column
+     entries, and only for the face-active DOFs of the upwind cell.        */
   for (PetscInt f = fStart; f < fEnd; f++) {
     const PetscInt *supp;
     PetscInt        suppSize;
@@ -317,24 +339,59 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
     PetscCall(DMPlexGetSupport(dm, f, &supp));
     if (suppSize != 2) continue; /* boundary facet — no inter-cell coupling */
 
-    PetscInt goff0, goff1;
-    GlobalOffset(supp[0], goff0);
-    GlobalOffset(supp[1], goff1);
+    /* Determine flow direction via b·n_L at the face centroid */
+    PetscReal n_L[3], fc[3] = {0.0, 0.0, 0.0}, bv[3];
+    PetscCall(FacetOutwardNormal(dm, f, supp[0], dim, n_L));
+    PetscCall(DMPlexComputeCellGeometryFVM(dm, f, NULL, fc, NULL));
+    GetVelocity(dim, ctx, fc, bv);
+    PetscReal bn = 0.0;
+    for (PetscInt d = 0; d < dim; d++) bn += bv[d] * n_L[d];
+    if (bn == 0.0) continue; /* tangential flow — no off-diagonal coupling */
 
-    PetscBool own0 = (goff0 >= rstart && goff0 < rend) ? PETSC_TRUE : PETSC_FALSE;
-    PetscBool own1 = (goff1 >= rstart && goff1 < rend) ? PETSC_TRUE : PETSC_FALSE;
+    /* cDown = downwind cell (receives inflow), cUp = upwind cell (source) */
+    PetscInt cDown = (bn < 0.0) ? supp[0] : supp[1];
+    PetscInt cUp   = (bn < 0.0) ? supp[1] : supp[0];
 
-    if (own0) {
-      for (PetscInt i = 0; i < Nb; i++) {
-        if (own1) d_nnz[goff0 - rstart + i] += Nb;  /* both cells on this rank */
-        else      o_nnz[goff0 - rstart + i] += Nb;  /* supp[1] lives on another rank */
+    PetscInt goffDown, goffUp;
+    GlobalOffset(cDown, goffDown);
+    GlobalOffset(cUp,   goffUp);
+
+    PetscBool ownDown = (goffDown >= rstart && goffDown < rend) ? PETSC_TRUE : PETSC_FALSE;
+    PetscBool ownUp   = (goffUp   >= rstart && goffUp   < rend) ? PETSC_TRUE : PETSC_FALSE;
+    if (!ownDown) continue; /* only allocate rows we own */
+
+    /* Find local face indices in each cell's cone */
+    PetscInt        fDown = -1, fUp = -1;
+    const PetscInt *coneDown, *coneUp;
+    PetscInt        coneSizeDown, coneSizeUp;
+    PetscCall(DMPlexGetConeSize(dm, cDown, &coneSizeDown));
+    PetscCall(DMPlexGetCone(dm, cDown, &coneDown));
+    for (PetscInt lf = 0; lf < coneSizeDown; lf++) {
+      if (coneDown[lf] == f) { fDown = lf; break; }
+    }
+    PetscCall(DMPlexGetConeSize(dm, cUp, &coneSizeUp));
+    PetscCall(DMPlexGetCone(dm, cUp, &coneUp));
+    for (PetscInt lf = 0; lf < coneSizeUp; lf++) {
+      if (coneUp[lf] == f) { fUp = lf; break; }
+    }
+
+    /* Count face-active DOFs of the upwind cell (non-zero basis on face fUp) */
+    PetscInt nactive_up = 0;
+    for (PetscInt j = 0; j < Nb; j++) {
+      for (PetscInt q = 0; q < Nfq; q++) {
+        if (Tf->T[0][(fUp * Nfq + q) * Nb + j] != 0.0) { nactive_up++; break; }
       }
     }
-    if (own1) {
-      for (PetscInt i = 0; i < Nb; i++) {
-        if (own0) d_nnz[goff1 - rstart + i] += Nb;  /* both cells on this rank */
-        else      o_nnz[goff1 - rstart + i] += Nb;  /* supp[0] lives on another rank */
+
+    /* For each face-active DOF of the downwind cell, add nactive_up columns */
+    for (PetscInt i = 0; i < Nb; i++) {
+      PetscBool active_i = PETSC_FALSE;
+      for (PetscInt q = 0; q < Nfq; q++) {
+        if (Tf->T[0][(fDown * Nfq + q) * Nb + i] != 0.0) { active_i = PETSC_TRUE; break; }
       }
+      if (!active_i) continue;
+      if (ownUp) d_nnz[goffDown - rstart + i] += nactive_up;
+      else       o_nnz[goffDown - rstart + i] += nactive_up;
     }
   }
 #undef GlobalOffset
@@ -342,6 +399,7 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
   PetscCall(MatSeqAIJSetPreallocation(A, 0, d_nnz));
   PetscCall(MatMPIAIJSetPreallocation(A, 0, d_nnz, 0, o_nnz));
   PetscCall(MatSetOption(A, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE));
+  PetscCall(MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES ,PETSC_TRUE));
 
   PetscCall(PetscFree(d_nnz));
   PetscCall(PetscFree(o_nnz));
@@ -1570,7 +1628,7 @@ int main(int argc, char **argv)
   PetscCall(MatCreate(PETSC_COMM_WORLD, &A));
   PetscCall(MatSetSizes(A, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
   PetscCall(MatSetFromOptions(A));
-  PetscCall(PreallocateMatrix(dm, Nb, A));
+  PetscCall(PreallocateMatrix(dm, fe, Nb, &ctx, A));
 
   PetscCall(MatCreateVecs(A, &b_rhs, NULL));
   PetscCall(VecSet(b_rhs, 0.0));
@@ -1582,6 +1640,8 @@ int main(int argc, char **argv)
   /* ---- Assemble ---- */
   PetscCall(AssembleSystem(dm, fe, &ctx, Nb, Nq, A, b_rhs));
   PetscCall(MatGetType(A, &mat_type));
+
+  MatView(A, PETSC_VIEWER_STDOUT_SELF);
 
   /* ---- Block diagonal scaling: D^{-1} A x = D^{-1} b ---- */
   if (ctx.diag_scale) {
