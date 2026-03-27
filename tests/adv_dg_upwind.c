@@ -248,10 +248,14 @@ static PetscErrorCode BuildBrokenSection(DM dm, PetscInt Nb, PetscSection *sec)
 /* -----------------------------------------------------------------------
    Preallocate the global matrix.
 
-   Each cell has a diagonal block of size Nb x Nb (from volume + own-facet
-   terms).  Each interior facet couples two cells, adding two off-diagonal
-   blocks.  We walk all facets of height 1 (codimension 1)
-   and use DMPlexGetSupport to find the owning cells.
+   Each cell has a diagonal block of size Nb x Nb (from the volume term).
+   Each interior facet contributes an off-diagonal block in exactly one
+   direction (the downwind cell's rows need the upwind cell's columns).
+   Within that off-diagonal block, only DOFs whose basis functions are
+   non-zero on the shared face participate: for the downwind cell these
+   are the face-active test DOFs (rows), and for the upwind cell these
+   are the face-active trial DOFs (columns).  The face tabulation from
+   PetscFE is used to identify them exactly.
 
    For the parallel case we must distinguish on-process (d_nnz) from
    off-process (o_nnz) column entries.  For DG this is straightforward:
@@ -266,14 +270,23 @@ static PetscErrorCode BuildBrokenSection(DM dm, PetscInt Nb, PetscSection *sec)
    We decode this to get the true global column index and compare it
    against [rstart, rend) to decide d_nnz vs o_nnz.
    ----------------------------------------------------------------------- */
-static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
+/* Forward declaration — FacetOutwardNormal is defined after this function */
+static PetscErrorCode FacetOutwardNormal(DM dm, PetscInt f, PetscInt c,
+                                          PetscInt dim, PetscReal n_out[]);
+
+static PetscErrorCode PreallocateMatrix(DM dm, PetscFE fe, PetscInt Nb, const AppCtx *ctx, Mat A)
 {
-  PetscInt     fStart, fEnd, cStart, cEnd;
-  PetscInt    *d_nnz, *o_nnz;
-  PetscInt     nlocal, rstart, rend;
-  PetscSection gsec; /* global section — gives global DOF offsets */
+  PetscInt        fStart, fEnd, cStart, cEnd;
+  PetscInt       *d_nnz, *o_nnz;
+  PetscInt        nlocal, rstart, rend;
+  PetscSection    gsec; /* global section — gives global DOF offsets */
+  PetscInt        dim;
+  PetscTabulation Tf;
+  PetscQuadrature fquad;
+  PetscInt        Nfq;
 
   PetscFunctionBeginUser;
+  PetscCall(DMGetDimension(dm, &dim));
   PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
   PetscCall(DMPlexGetHeightStratum(dm, 1, &fStart, &fEnd));
 
@@ -287,6 +300,13 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
 
   /* Local ownership range in global DOF indices */
   PetscCall(MatGetOwnershipRange(A, &rstart, &rend));
+
+  /* Face tabulation: Tf->T[0][(fLocal * Nfq + q) * Nb + i] is the value
+     of basis function i at the q-th quadrature point on local face fLocal.
+     A basis function is zero on a face iff all its values there are 0.0.  */
+  PetscCall(PetscFEGetFaceTabulation(fe, 0, &Tf));
+  PetscCall(PetscFEGetFaceQuadrature(fe, &fquad));
+  PetscCall(PetscQuadratureGetData(fquad, NULL, NULL, &Nfq, NULL, NULL));
 
   /* Helper lambda (C99 inline logic): given a DAG point p, return its
      global DOF base index (always non-negative).                          */
@@ -307,9 +327,14 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
     for (PetscInt i = 0; i < Nb; i++) d_nnz[goff - rstart + i] += Nb;
   }
 
-  /* Interior facets couple two cells.  For each locally-owned cell on the
-     facet we record Nb column entries in d_nnz (neighbour is on-process)
-     or o_nnz (neighbour is a ghost owned by another rank).               */
+  /* Interior facets: both K_LR (supp[0] rows, supp[1] cols) and K_RL
+     (supp[1] rows, supp[0] cols) can be non-zero for the same face when
+     the velocity field is curved or when a non-planar face has a varying
+     normal — both b·n > 0 and b·n < 0 can occur at different quadrature
+     points.  We therefore always preallocate both off-diagonal blocks.
+     Only the face-active DOFs (those whose basis functions are non-zero
+     on the shared face) participate; this is read from the face tabulation
+     and gives a much tighter allocation than a full Nb x Nb block.         */
   for (PetscInt f = fStart; f < fEnd; f++) {
     const PetscInt *supp;
     PetscInt        suppSize;
@@ -323,17 +348,57 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
 
     PetscBool own0 = (goff0 >= rstart && goff0 < rend) ? PETSC_TRUE : PETSC_FALSE;
     PetscBool own1 = (goff1 >= rstart && goff1 < rend) ? PETSC_TRUE : PETSC_FALSE;
+    if (!own0 && !own1) continue;
 
-    if (own0) {
-      for (PetscInt i = 0; i < Nb; i++) {
-        if (own1) d_nnz[goff0 - rstart + i] += Nb;  /* both cells on this rank */
-        else      o_nnz[goff0 - rstart + i] += Nb;  /* supp[1] lives on another rank */
+    /* Find local face indices in each cell's cone */
+    PetscInt        fL = -1, fR = -1;
+    const PetscInt *coneL, *coneR;
+    PetscInt        coneSizeL, coneSizeR;
+    PetscCall(DMPlexGetConeSize(dm, supp[0], &coneSizeL));
+    PetscCall(DMPlexGetCone(dm, supp[0], &coneL));
+    for (PetscInt lf = 0; lf < coneSizeL; lf++) {
+      if (coneL[lf] == f) { fL = lf; break; }
+    }
+    PetscCall(DMPlexGetConeSize(dm, supp[1], &coneSizeR));
+    PetscCall(DMPlexGetCone(dm, supp[1], &coneR));
+    for (PetscInt lf = 0; lf < coneSizeR; lf++) {
+      if (coneR[lf] == f) { fR = lf; break; }
+    }
+
+    /* Count face-active DOFs for each cell */
+    PetscInt nactiveL = 0, nactiveR = 0;
+    for (PetscInt j = 0; j < Nb; j++) {
+      for (PetscInt q = 0; q < Nfq; q++) {
+        if (Tf->T[0][(fL * Nfq + q) * Nb + j] != 0.0) { nactiveL++; break; }
+      }
+      for (PetscInt q = 0; q < Nfq; q++) {
+        if (Tf->T[0][(fR * Nfq + q) * Nb + j] != 0.0) { nactiveR++; break; }
       }
     }
+
+    /* K_LR: supp[0] (active rows) needs supp[1] (active cols) */
+    if (own0) {
+      for (PetscInt i = 0; i < Nb; i++) {
+        PetscBool active_i = PETSC_FALSE;
+        for (PetscInt q = 0; q < Nfq; q++) {
+          if (Tf->T[0][(fL * Nfq + q) * Nb + i] != 0.0) { active_i = PETSC_TRUE; break; }
+        }
+        if (!active_i) continue;
+        if (own1) d_nnz[goff0 - rstart + i] += nactiveR;
+        else      o_nnz[goff0 - rstart + i] += nactiveR;
+      }
+    }
+
+    /* K_RL: supp[1] (active rows) needs supp[0] (active cols) */
     if (own1) {
       for (PetscInt i = 0; i < Nb; i++) {
-        if (own0) d_nnz[goff1 - rstart + i] += Nb;  /* both cells on this rank */
-        else      o_nnz[goff1 - rstart + i] += Nb;  /* supp[0] lives on another rank */
+        PetscBool active_i = PETSC_FALSE;
+        for (PetscInt q = 0; q < Nfq; q++) {
+          if (Tf->T[0][(fR * Nfq + q) * Nb + i] != 0.0) { active_i = PETSC_TRUE; break; }
+        }
+        if (!active_i) continue;
+        if (own0) d_nnz[goff1 - rstart + i] += nactiveL;
+        else      o_nnz[goff1 - rstart + i] += nactiveL;
       }
     }
   }
@@ -342,6 +407,7 @@ static PetscErrorCode PreallocateMatrix(DM dm, PetscInt Nb, Mat A)
   PetscCall(MatSeqAIJSetPreallocation(A, 0, d_nnz));
   PetscCall(MatMPIAIJSetPreallocation(A, 0, d_nnz, 0, o_nnz));
   PetscCall(MatSetOption(A, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE));
+  PetscCall(MatSetOption(A,MAT_IGNORE_ZERO_ENTRIES ,PETSC_TRUE));
 
   PetscCall(PetscFree(d_nnz));
   PetscCall(PetscFree(o_nnz));
@@ -1570,7 +1636,7 @@ int main(int argc, char **argv)
   PetscCall(MatCreate(PETSC_COMM_WORLD, &A));
   PetscCall(MatSetSizes(A, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
   PetscCall(MatSetFromOptions(A));
-  PetscCall(PreallocateMatrix(dm, Nb, A));
+  PetscCall(PreallocateMatrix(dm, fe, Nb, &ctx, A));
 
   PetscCall(MatCreateVecs(A, &b_rhs, NULL));
   PetscCall(VecSet(b_rhs, 0.0));
@@ -1641,30 +1707,104 @@ int main(int argc, char **argv)
 
     /* Filter near-zero entries from DinvA */
     {
-      PetscReal filter_tol = 1e-15;
-      PetscInt  rstart, rend;
+      PetscReal     filter_tol = 1e-15;
+      PetscInt      rstart, rend;
+      MPI_Comm      comm;
+      PetscMPIInt   comm_size;
+      PetscCount    total_nnz, count;
+      PetscInt      *coo_i, *coo_j;
+      PetscScalar   *coo_v;
 
+      PetscCall(MatGetOwnershipRange(DinvA, &rstart, &rend));
+
+      /* Count total (unfiltered) NNZ without copying — NULL cols/vals skips copy+sort */
+      total_nnz = 0;
+      for (PetscInt i = rstart; i < rend; i++) {
+        PetscInt ncols;
+        PetscCall(MatGetRow(DinvA, i, &ncols, NULL, NULL));
+        total_nnz += ncols;
+        PetscCall(MatRestoreRow(DinvA, i, &ncols, NULL, NULL));
+      }
+
+      /* Preallocate COO arrays to the total unfiltered NNZ */
+      PetscCall(PetscMalloc1(total_nnz, &coo_i));
+      PetscCall(PetscMalloc1(total_nnz, &coo_j));
+      PetscCall(PetscMalloc1(total_nnz, &coo_v));
+
+      /* Access diagonal (+off-diagonal) CSR blocks directly and fill COO */
+      PetscCall(PetscObjectGetComm((PetscObject)DinvA, &comm));
+      PetscCallMPI(MPI_Comm_size(comm, &comm_size));
+
+      /* For MPI decompose into diagonal + off-diagonal sub-matrices */
+      Mat             mat_local, mat_nonlocal = NULL;
+      const PetscInt *garray = NULL;
+      if (comm_size != 1) {
+        PetscCall(MatMPIAIJGetSeqAIJ(DinvA, &mat_local, &mat_nonlocal, &garray));
+      } else {
+        mat_local = DinvA;
+      }
+
+      /* Scan local (diagonal) block — col global index = rstart + aj[k] */
+      {
+        const PetscInt   *ai, *aj;
+        const PetscScalar *av;
+        PetscInt          n;
+        PetscBool         done;
+
+        PetscCall(MatGetRowIJ(mat_local, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+        PetscCall(MatSeqAIJGetArrayRead(mat_local, &av));
+
+        count = 0;
+        for (PetscInt i = 0; i < nrows; i++) {
+          for (PetscInt k = ai[i]; k < ai[i + 1]; k++) {
+            if (PetscAbsScalar(av[k]) > filter_tol) {
+              coo_i[count] = rstart + i;
+              coo_j[count] = rstart + aj[k];
+              coo_v[count] = av[k];
+              count++;
+            }
+          }
+        }
+
+        PetscCall(MatSeqAIJRestoreArrayRead(mat_local, &av));
+        PetscCall(MatRestoreRowIJ(mat_local, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+      }
+
+      /* Scan off-diagonal block (parallel only) — col global index = garray[aj[k]] */
+      if (comm_size != 1) {
+        const PetscInt   *ai, *aj;
+        const PetscScalar *av;
+        PetscInt          n;
+        PetscBool         done;
+
+        PetscCall(MatGetRowIJ(mat_nonlocal, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+        PetscCall(MatSeqAIJGetArrayRead(mat_nonlocal, &av));
+
+        for (PetscInt i = 0; i < nrows; i++) {
+          for (PetscInt k = ai[i]; k < ai[i + 1]; k++) {
+            if (PetscAbsScalar(av[k]) > filter_tol) {
+              coo_i[count] = rstart + i;
+              coo_j[count] = garray[aj[k]];
+              coo_v[count] = av[k];
+              count++;
+            }
+          }
+        }
+
+        PetscCall(MatSeqAIJRestoreArrayRead(mat_nonlocal, &av));
+        PetscCall(MatRestoreRowIJ(mat_nonlocal, 0, PETSC_FALSE, PETSC_FALSE, &n, &ai, &aj, &done));
+      }
+
+      /* Build DinvA_f via COO interface */
       PetscCall(MatCreate(PETSC_COMM_WORLD, &DinvA_f));
       PetscCall(MatSetSizes(DinvA_f, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
       PetscCall(MatSetType(DinvA_f, mat_type));
-      PetscCall(MatSetOption(DinvA_f, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE));
-      PetscCall(MatSetUp(DinvA_f));
+      PetscCall(MatSetPreallocationCOO(DinvA_f, count, coo_i, coo_j));
+      PetscCall(MatSetValuesCOO(DinvA_f, coo_v, INSERT_VALUES));
 
-      PetscCall(MatGetOwnershipRange(DinvA, &rstart, &rend));
-      for (PetscInt i = rstart; i < rend; i++) {
-        PetscInt          ncols;
-        const PetscInt    *cols;
-        const PetscScalar *vals;
-        PetscCall(MatGetRow(DinvA, i, &ncols, &cols, &vals));
-        for (PetscInt j = 0; j < ncols; j++) {
-          if (PetscAbsScalar(vals[j]) > filter_tol) {
-            PetscCall(MatSetValue(DinvA_f, i, cols[j], vals[j], INSERT_VALUES));
-          }
-        }
-        PetscCall(MatRestoreRow(DinvA, i, &ncols, &cols, &vals));
-      }
-      PetscCall(MatAssemblyBegin(DinvA_f, MAT_FINAL_ASSEMBLY));
-      PetscCall(MatAssemblyEnd(DinvA_f, MAT_FINAL_ASSEMBLY));
+      PetscCall(PetscFree(coo_i));
+      PetscCall(PetscFree(coo_j));
+      PetscCall(PetscFree(coo_v));
     }
 
     /* Replace A and b_rhs with the scaled versions */
