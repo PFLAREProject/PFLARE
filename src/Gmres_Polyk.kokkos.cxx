@@ -162,6 +162,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Get pointers to the i,j,vals on the device
    // This should happen after all the (potentially) host matscale, mataxpy and matshift above
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_submat_vals = nullptr;  

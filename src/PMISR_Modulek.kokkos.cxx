@@ -50,6 +50,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
@@ -603,6 +604,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device for all the matrices we need
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i_spst = nullptr, *device_local_j_spst = nullptr;
    const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    const PetscInt *device_nonlocal_i_transpose = nullptr, *device_nonlocal_j_transpose = nullptr;
@@ -1263,6 +1265,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;

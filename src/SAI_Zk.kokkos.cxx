@@ -207,6 +207,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    // ~~~~~~~~~~~~~~
    // Get device CSR pointers for all matrices
    // ~~~~~~~~~~~~~~
+   Kokkos::fence();
    PetscMemType mtype;
 
    // Submatrix (non-local rows of A_ff)
