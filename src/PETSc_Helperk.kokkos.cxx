@@ -43,6 +43,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
          PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
          Kokkos::deep_copy(exec, j_nonlocal_d_sorted, j_nonlocal_d);
          Kokkos::sort(j_nonlocal_d_sorted);
+         Kokkos::fence();
 
          // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
          auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
@@ -1208,6 +1209,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
       Kokkos::deep_copy(exec, a_nonlocal_d, val); 
       PetscCallVoid(PetscLogCpuToGpu(bytes));   
    }
+   Kokkos::fence();
 
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -1740,6 +1742,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       Kokkos::deep_copy(exec, i_local_d_copy, i_local_d_z);
       Kokkos::deep_copy(exec, j_local_d_copy, j_local_d_z);
    }
+   Kokkos::fence();
 
    // We can create our local diagonal block matrix directly on the device
    Mat Z_local;
@@ -1830,6 +1833,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       Kokkos::deep_copy(exec, i_nonlocal_d_copy, i_nonlocal_d_z);
       Kokkos::deep_copy(exec, j_nonlocal_d_copy, j_nonlocal_d_z);
    }
+
+   Kokkos::fence();
 
    // We can create our nonlocal diagonal block matrix directly on the device
    Mat Z_nonlocal;

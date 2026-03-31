@@ -173,6 +173,8 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    PetscCallVoid(PetscMalloc1(n_coarse, &is_coarse_array));
    PetscIntKokkosViewHost is_coarse_h = PetscIntKokkosViewHost(is_coarse_array, n_coarse);
 
+   Kokkos::fence();
+
    // Copy over the indices to the host
    // Device to host so don't need to specify exec space
    Kokkos::deep_copy(is_fine_h, is_fine_local_d);

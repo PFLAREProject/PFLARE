@@ -1312,6 +1312,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
       // Flip the sign if pmis
       if (pmis_int == 1) measure_local_d(i) *= -1;
    });
+   Kokkos::fence();
 
    // Call the existing measure cf markers function
    pmisr_existing_measure_cf_markers_kokkos(strength_mat, max_luby_steps, pmis_int, measure_local_d, cf_markers_d, zero_measure_c_point_int);
