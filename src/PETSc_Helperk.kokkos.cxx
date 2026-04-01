@@ -2407,6 +2407,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       }
 
       // We can now create the off-diagonal component
+      Kokkos::fence();
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal);
 
       // If it's our first time through we have to create our output matrix
