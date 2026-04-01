@@ -42,7 +42,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
       {
          PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
          Kokkos::deep_copy(exec, j_nonlocal_d_sorted, j_nonlocal_d);
-         Kokkos::sort(j_nonlocal_d_sorted);
+         Kokkos::sort(exec, j_nonlocal_d_sorted);
          Kokkos::fence();
 
          // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
@@ -770,6 +770,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       if (added_any_diagonal) 
       {
          KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+         Kokkos::fence(); 
          KokkosSparse::sort_crs_matrix(csrmat_local); 
          
          if (mpi)
@@ -777,6 +778,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
             // The column size is not right here (it will be <= cols_ao)
             // but it shouldn't matter as we are only construting an explicit kokkos csr matrix here so it can sort
             KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, cols_ao, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);  
+            Kokkos::fence(); 
             KokkosSparse::sort_crs_matrix(csrmat_nonlocal);         
          }
       }
@@ -1603,6 +1605,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
       KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+      Kokkos::fence();
       KokkosSparse::sort_crs_matrix(csrmat_local);       
 
       // Let's make sure everything on the device is finished
@@ -1723,8 +1726,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       KernelHandle    kh_local;      
       kh_local.create_spadd_handle(true); // X, Y are sorted
 
-      KokkosSparse::spadd_symbolic(&kh_local, xkok_local->csrmat, ykok_local->csrmat, zcsr_local);
-      KokkosSparse::spadd_numeric(&kh_local, alpha, xkok_local->csrmat, (PetscScalar)1.0, ykok_local->csrmat, zcsr_local);
+      KokkosSparse::spadd_symbolic(exec, &kh_local, xkok_local->csrmat, ykok_local->csrmat, zcsr_local);
+      KokkosSparse::spadd_numeric(exec, &kh_local, alpha, xkok_local->csrmat, (PetscScalar)1.0, ykok_local->csrmat, zcsr_local);
 
       kh_local.destroy_spadd_handle();
       
@@ -1737,6 +1740,9 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       a_local_d_copy = Kokkos::View<PetscScalar *>("a_local_d_copy", a_local_d_z.extent(0));
       i_local_d_copy = Kokkos::View<PetscInt *>("i_local_d_copy", i_local_d_z.extent(0));
       j_local_d_copy = Kokkos::View<PetscInt *>("j_local_d_copy", j_local_d_z.extent(0));   
+
+      // Let's make sure everything on the device is finished
+      Kokkos::fence();      
 
       Kokkos::deep_copy(exec, a_local_d_copy, a_local_d_z);
       Kokkos::deep_copy(exec, i_local_d_copy, i_local_d_z);
@@ -1798,10 +1804,12 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       KernelHandle    kh_nonlocal;      
       kh_nonlocal.create_spadd_handle(true); 
 
-      KokkosSparse::spadd_symbolic(&kh_nonlocal, xkok_nonlocal->csrmat, ykok_nonlocal->csrmat, zcsr_nonlocal);
-      KokkosSparse::spadd_numeric(&kh_nonlocal, alpha, xkok_nonlocal->csrmat, (PetscScalar)1.0, ykok_nonlocal->csrmat, zcsr_nonlocal);
+      KokkosSparse::spadd_symbolic(exec, &kh_nonlocal, xkok_nonlocal->csrmat, ykok_nonlocal->csrmat, zcsr_nonlocal);
+      KokkosSparse::spadd_numeric(exec, &kh_nonlocal, alpha, xkok_nonlocal->csrmat, (PetscScalar)1.0, ykok_nonlocal->csrmat, zcsr_nonlocal);
 
       kh_nonlocal.destroy_spadd_handle();
+
+      Kokkos::fence();      
 
       // Can now destroy the copy
       PetscCallVoid(MatDestroy(&mat_nonlocal_x_copy));
