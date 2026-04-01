@@ -124,6 +124,7 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
+   Kokkos::fence();
    const int level_idx = our_level - 1;
 
    // Can't use the shared pointer directly within the parallel 
