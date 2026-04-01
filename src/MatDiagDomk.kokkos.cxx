@@ -87,6 +87,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // Ensure send/receive buffers are stable before Begin.
       Kokkos::fence();      
       PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
    }
 
    // ~~~~~~~~~~~~~~~
@@ -159,7 +160,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Finish the in-flight scatter and only then read from the receive buffer.
    if (mpi)
    {
-      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
          PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));

@@ -196,6 +196,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Ensure the root buffer is no longer being written before Begin.
          Kokkos::fence();
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // Complete the in-flight forward scatter before reading the receive buffer.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));         
       }
 
 
@@ -261,9 +263,6 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       // Now go through and do the non-local part of the matrix
       // ~~~~~~~~
       if (mpi) {
-
-         // Complete the in-flight forward scatter before reading the receive buffer.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
 
          // Convert PetscScalar → int after End, when the receive buffer is complete.
          {
@@ -383,6 +382,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         // Complete reverse scatter before reading reduced root buffer.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));         
 
          // While reverse scatter is in-flight, do local-only updates in cf_markers_temp_d.
          // This must not touch scatter_root_vec/scatter_leaf_vec.
@@ -410,9 +411,6 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                   });
                }
          });
-
-         // Complete reverse scatter before reading reduced root buffer.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
 
          // Convert PetscScalar → int back to cf_markers_d after End.
          {

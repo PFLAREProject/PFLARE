@@ -2282,6 +2282,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();         
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+         // x scatter completed: mat_mpi->lvec is now safe to read.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));         
 
          // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
          {
@@ -2305,13 +2307,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          auto is_col_o_match_d = PetscIntKokkosView("is_col_o_match_d", cols_ao+1);
          Kokkos::deep_copy(exec, is_col_o_match_d, 0);
 
-         // x scatter completed: mat_mpi->lvec is now safe to read.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
-
          // Start cmap scatter only after finishing x scatter on the same Mvctx.
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();         
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // cmap scatter completed: lcmap_vec is now safe to read.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));         
 
          if (cols_ao > 0)
          {
@@ -2349,9 +2350,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // the cmap_d given it has isstart
          is_col_o_d = PetscIntKokkosView("is_col_o_d", col_ao_output);
          garray_output_d = PetscIntKokkosView("garray_output_d", col_ao_output);
-
-         // cmap scatter completed: lcmap_vec is now safe to read.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
 
          // Loop over all the cols in the input matrix
          {
