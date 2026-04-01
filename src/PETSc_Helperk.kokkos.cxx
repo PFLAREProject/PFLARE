@@ -47,6 +47,7 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
 
          // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
          auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
+         Kokkos::fence();
          auto begin_it = Kokkos::Experimental::begin(colmap_output_d);
          count_ptr_arith = unique_end_it - begin_it;
       }
