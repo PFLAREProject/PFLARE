@@ -491,6 +491,7 @@ int main(int argc, char **argv)
   PetscLogStage setup, gpu_copy;
   KSPConvergedReason reason;
   KSP ksp;
+  Vec F;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &argv, NULL, help));
@@ -547,7 +548,14 @@ int main(int argc, char **argv)
   if (second_solve)
   {
    PetscCall(VecSet(u, 1.0));
-   PetscCall(SNESSolve(snes, NULL, u));
+   // This gets snes->vec_func which is the rhs built by
+   // the previous snessolve 
+   PetscCall(SNESGetFunction(snes, &F, NULL, NULL));
+   // On GPUs, calling a second SNESSolve was triggering a rebuild 
+   // of parts of the matrix/rhs (which I think is because of BCs)
+   // but only on certain MPI ranks (corresponding to those with BCs),
+   // so we were seeing a massive imbalance. Instead we just call KSPSolve directly 
+   PetscCall(KSPSolve(ksp, F, u));
   }
   
   PetscCall(KSPGetConvergedReason(ksp,&reason));  
