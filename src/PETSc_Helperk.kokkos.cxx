@@ -1726,6 +1726,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    // ~~~~~~~~~~~~~~~
    // Let's go and add the local components together
    // ~~~~~~~~~~~~~~~
+   Kokkos::fence(); 
 
    Mat_SeqAIJKokkos *xkok_local, *ykok_local;
    ykok_local = static_cast<Mat_SeqAIJKokkos *>(mat_local_y->spptr);
