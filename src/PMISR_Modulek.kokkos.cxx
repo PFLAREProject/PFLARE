@@ -258,12 +258,16 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          PetscCallVoid(VecRestoreKokkosViewWrite(measure_root_vec, &root_scalar_d));
       }
       // Ensure send/receive buffers are stable before Begin.
-      Kokkos::fence();      
+      Kokkos::fence();
+      fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0: after line-261 fence, before VecScatterBegin\n", rank_cp); fflush(stderr);
       PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, measure_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
       PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, measure_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre1: after VecScatterEnd, before VecGetKokkosView\n", rank_cp); fflush(stderr);
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
          PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre2: lvec_scalar_d.extent=%zu measure_nonlocal_d.extent=%zu\n",
+                 rank_cp, lvec_scalar_d.extent(0), measure_nonlocal_d.extent(0)); fflush(stderr);
          Kokkos::deep_copy(exec, measure_nonlocal_d, lvec_scalar_d);
          PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
       }
