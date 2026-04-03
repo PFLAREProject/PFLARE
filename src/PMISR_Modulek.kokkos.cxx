@@ -270,6 +270,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       Kokkos::fence();
       fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0c: after fence between Begin and End\n", rank_cp); fflush(stderr);
       PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, measure_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      Kokkos::fence();
+      fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0d: after fence post VecScatterEnd\n", rank_cp); fflush(stderr);
       fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre1: after VecScatterEnd, before VecGetKokkosView\n", rank_cp); fflush(stderr);
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
