@@ -16,6 +16,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
 {
    PetscInt local_rows, local_cols;
 
+   mat_sync(input_mat);   
+
    // Are we in parallel?
    MatType mat_type;
    MPI_Comm MPI_COMM_MATRIX;

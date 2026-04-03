@@ -34,6 +34,7 @@ using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::Me
 using ViewPetscIntPtr = std::shared_ptr<PetscIntKokkosView>;
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
+PETSC_INTERN void mat_sync(Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d);
 PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int);

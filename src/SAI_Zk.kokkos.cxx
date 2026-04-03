@@ -24,6 +24,9 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    PetscInt one = 1;
    bool deallocate_submatrices = false;
 
+   mat_sync(A_ff); 
+   mat_sync(A_cf);     
+
    PetscCallVoid(MatGetType(*A_ff, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;

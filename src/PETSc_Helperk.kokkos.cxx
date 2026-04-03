@@ -25,6 +25,44 @@ static PetscErrorCode check_exact_petscint_to_scalar_encoding(PetscInt max_encod
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Sync the kokkos parts of the matrix to make sure they're up to date
+PETSC_INTERN void mat_sync(Mat *X)
+{
+   MatType mat_type;
+   PetscCallVoid(MatGetType(*X, &mat_type));
+   // Are we in parallel?
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
+   Mat mat_local_x = NULL, mat_nonlocal_x = NULL;
+
+   const PetscInt *colmap_x;
+   if (mpi)
+   {
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*X, &mat_local_x, &mat_nonlocal_x, &colmap_x));
+   }
+   else
+   {
+      mat_local_x = *X;
+   }
+
+    Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
+    if (mat_local_xkok->a_dual.need_sync_device()) {
+      mat_local_xkok->a_dual.sync_device();
+      mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_local_xkok->hermitian_updated = PETSC_FALSE;
+    }    
+    if (mpi) 
+    {       
+      Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
+      if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
+         mat_nonlocal_xkok->a_dual.sync_device();
+         mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+         mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
+      }  
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Remap each entry in j_d from a global index to its local index via binary search into garray_d.
 // garray_d must be a sorted array of unique global indices.
 // Fences internally.
@@ -118,6 +156,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -841,6 +882,9 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    PetscInt rows_ao_input, cols_ao_input, rows_ao_output, cols_ao_output;
    MatType mat_type;
 
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
+
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
@@ -1262,6 +1306,9 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
 
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
+
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
@@ -1667,33 +1714,10 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    PetscCallVoid(MatMPIAIJGetSeqAIJ(*Y, &mat_local_y, &mat_nonlocal_y, &colmap_y));
    PetscCallVoid(MatMPIAIJGetSeqAIJ(*X, &mat_local_x, &mat_nonlocal_x, &colmap_x));
 
-   Mat_SeqAIJKokkos *mat_local_ykok = static_cast<Mat_SeqAIJKokkos *>(mat_local_y->spptr);
-   Mat_SeqAIJKokkos *mat_nonlocal_ykok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_y->spptr);
-   Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
-   Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
-
    // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
-   // We have to make sure the device data is up to date before we do the axpy
-   if (mat_local_ykok->a_dual.need_sync_device()) {
-      mat_local_ykok->a_dual.sync_device();
-      mat_local_ykok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_local_ykok->hermitian_updated = PETSC_FALSE;
-    }  
-    if (mat_nonlocal_ykok->a_dual.need_sync_device()) {
-      mat_nonlocal_ykok->a_dual.sync_device();
-      mat_nonlocal_ykok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_nonlocal_ykok->hermitian_updated = PETSC_FALSE;
-    } 
-    if (mat_local_xkok->a_dual.need_sync_device()) {
-      mat_local_xkok->a_dual.sync_device();
-      mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_local_xkok->hermitian_updated = PETSC_FALSE;
-    }           
-    if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
-      mat_nonlocal_xkok->a_dual.sync_device();
-      mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
-    }  
+   // We have to make sure the device data is up to date before we do the axpy   
+   mat_sync(X);
+   mat_sync(Y);
 
    PetscInt rows_ao_y, cols_ao_y, rows_ao_x, cols_ao_x;
    auto exec = PetscGetKokkosExecutionSpace();
@@ -2530,7 +2554,10 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one)); 
    PetscInt global_rows_row, global_cols_col;
    PetscCallVoid(ISGetSize(*is_row, &global_rows_row));
-   PetscCallVoid(ISGetSize(*is_col, &global_cols_col));    
+   PetscCallVoid(ISGetSize(*is_col, &global_cols_col));   
+   
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
    
    PetscIntKokkosView is_row_d_d, is_col_d_d;
    const int level_idx = our_level - 1;

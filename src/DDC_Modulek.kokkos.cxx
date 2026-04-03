@@ -20,6 +20,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
    intKokkosView cf_markers_d = cf_markers_local_d;  
    PetscScalarKokkosView diag_dom_ratio_d = diag_dom_ratio_local_d;
    PetscIntKokkosView is_fine_local_d;
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
 
    const int match_cf = -1; // F_POINT == -1
    create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);

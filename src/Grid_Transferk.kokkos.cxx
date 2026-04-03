@@ -16,6 +16,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
 
+   mat_sync(input_mat);   
+
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
@@ -315,6 +317,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   mat_sync(input_mat);   
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -741,6 +745,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   mat_sync(input_mat);   
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?

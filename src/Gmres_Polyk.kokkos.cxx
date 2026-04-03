@@ -18,6 +18,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscInt one = 1;
    bool deallocate_submatrices = false;
 
+   mat_sync(input_mat);
+
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
    const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
