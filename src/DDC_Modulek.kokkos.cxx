@@ -15,7 +15,8 @@
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, Mat *aff, PetscReal *random_numbers)
 {
-   // Can't use the global directly within the parallel 
+   PflareKokkosTrace _trace("ddc_kokkos");
+   // Can't use the global directly within the parallel
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
    PetscScalarKokkosView diag_dom_ratio_d = diag_dom_ratio_local_d;

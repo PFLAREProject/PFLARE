@@ -13,6 +13,7 @@
 PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sparsity_mat_cf,
                const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *z_mat)
 {
+   PflareKokkosTrace _trace("calculate_and_build_sai_z_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows_cf, local_cols_cf;
    PetscInt local_rows_ff, local_cols_ff;

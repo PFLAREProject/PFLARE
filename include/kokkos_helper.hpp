@@ -14,6 +14,23 @@
 #include <KokkosSparse_spadd.hpp>
 #include <Kokkos_NestedSort.hpp>
 #include <KokkosBatched_Gesv.hpp>
+#include <cstdio>
+
+struct PflareKokkosTrace {
+   const char *name;
+   PflareKokkosTrace(const char *n) : name(n) {
+      int rank = 0;
+      MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+      printf("[PFLARE kokkos rank=%d] Entering %s\n", rank, name);
+      fflush(stdout);
+   }
+   ~PflareKokkosTrace() {
+      int rank = 0;
+      MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+      printf("[PFLARE kokkos rank=%d] Leaving %s\n", rank, name);
+      fflush(stdout);
+   }
+};
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
 using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;
