@@ -259,8 +259,14 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       }
       // Ensure send/receive buffers are stable before Begin.
       Kokkos::fence();
-      fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0: after line-261 fence, before VecScatterBegin\n", rank_cp); fflush(stderr);
+      {
+         VecType lvec_type; PetscCallVoid(VecGetType(mat_mpi->lvec, &lvec_type));
+         PetscInt lvec_sz; PetscCallVoid(VecGetLocalSize(mat_mpi->lvec, &lvec_sz));
+         fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0: lvec_type=%s lvec_sz=%d cols_ao=%d\n",
+                 rank_cp, lvec_type, (int)lvec_sz, (int)cols_ao); fflush(stderr);
+      }
       PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, measure_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0b: after VecScatterBegin\n", rank_cp); fflush(stderr);
       PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, measure_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
       fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre1: after VecScatterEnd, before VecGetKokkosView\n", rank_cp); fflush(stderr);
       {
