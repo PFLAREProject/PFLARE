@@ -262,8 +262,11 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       {
          VecType lvec_type; PetscCallVoid(VecGetType(mat_mpi->lvec, &lvec_type));
          PetscInt lvec_sz; PetscCallVoid(VecGetLocalSize(mat_mpi->lvec, &lvec_sz));
-         fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0: lvec_type=%s lvec_sz=%d cols_ao=%d\n",
-                 rank_cp, lvec_type, (int)lvec_sz, (int)cols_ao); fflush(stderr);
+         PetscInt root_sz; PetscCallVoid(VecGetLocalSize(measure_root_vec, &root_sz));
+         PetscInt sf_nroots, sf_nleaves;
+         PetscCallVoid(PetscSFGetGraph(mat_mpi->Mvctx, &sf_nroots, &sf_nleaves, NULL, NULL));
+         fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0: lvec_type=%s lvec_sz=%d cols_ao=%d root_sz=%d sf_nroots=%d sf_nleaves=%d\n",
+                 rank_cp, lvec_type, (int)lvec_sz, (int)cols_ao, (int)root_sz, (int)sf_nroots, (int)sf_nleaves); fflush(stderr);
       }
       PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, measure_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
       fprintf(stderr, "[PFLARE pmisr cp rank=%d] A-pre0b: after VecScatterBegin\n", rank_cp); fflush(stderr);
