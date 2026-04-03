@@ -156,10 +156,9 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    // ~~~~~~~~~~~~
 
    // Create reusable Vecs for VecScatter inside the loop (cf_markers int → PetscScalar)
-   Vec scatter_root_vec = NULL, scatter_leaf_vec = NULL;
+   Vec scatter_root_vec = NULL;
    if (mpi) {
       PetscCallVoid(MatCreateVecs(*strength_mat, &scatter_root_vec, NULL));
-      PetscCallVoid(VecDuplicate(mat_mpi->lvec, &scatter_leaf_vec));
    }
 
    // Let's keep track of how many times we go through the loops
@@ -195,9 +194,9 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          }
          // Ensure the root buffer is no longer being written before Begin.
          Kokkos::fence();
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
          // Complete the in-flight forward scatter before reading the receive buffer.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));         
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
       }
 
 
@@ -267,12 +266,12 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Convert PetscScalar → int after End, when the receive buffer is complete.
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                   cf_markers_nonlocal_d(i) = (int)leaf_scalar_d(i);
             });
-            PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &leaf_scalar_d));
          }
 
          Kokkos::parallel_for(
@@ -362,12 +361,12 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Convert int → PetscScalar for the leaf (nonlocal) data
          {
             PetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecGetKokkosViewWrite(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                   leaf_scalar_d(i) = (PetscScalar)cf_markers_nonlocal_d(i);
             });
-            PetscCallVoid(VecRestoreKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecRestoreKokkosViewWrite(mat_mpi->lvec, &leaf_scalar_d));
          }
          // Convert int → PetscScalar for the root (local) data
          {
@@ -381,12 +380,12 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          }
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
          // Complete reverse scatter before reading reduced root buffer.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));         
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
 
          // While reverse scatter is in-flight, do local-only updates in cf_markers_temp_d.
-         // This must not touch scatter_root_vec/scatter_leaf_vec.
+         // This must not touch scatter_root_vec/mat_mpi->lvec.
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -484,7 +483,6 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 
    // Cleanup loop Vecs
    PetscCallVoid(VecDestroy(&scatter_root_vec));
-   PetscCallVoid(VecDestroy(&scatter_leaf_vec));
 
    // ~~~~~~~~~
    // Now assign our final cf markers
@@ -716,10 +714,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // ~~~~~~~~~~~~
 
    // Create reusable Vecs for VecScatter inside the loop
-   Vec scatter_root_vec = NULL, scatter_leaf_vec = NULL;
+   Vec scatter_root_vec = NULL;
    if (mpi) {
       PetscCallVoid(MatCreateVecs(*strength_mat, &scatter_root_vec, NULL));
-      PetscCallVoid(VecDuplicate(mat_mpi->lvec, &scatter_leaf_vec));
    }
 
    // Let's keep track of how many times we go through the loops
@@ -754,17 +751,17 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          }
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();         
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
          // Convert PetscScalar → int
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                   cf_markers_nonlocal_d(i) = (int)leaf_scalar_d(i);
             });
-            PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &leaf_scalar_d));
          }
       }
 
@@ -886,12 +883,12 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // (LOR is equivalent to sum when values are 0/1 bools)
          {
             PetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecGetKokkosViewWrite(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                   leaf_scalar_d(i) = veto_nonlocal_d(i) ? 1.0 : 0.0;
             });
-            PetscCallVoid(VecRestoreKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecRestoreKokkosViewWrite(mat_mpi->lvec, &leaf_scalar_d));
          }
          {
             PetscScalarKokkosView root_scalar_d;
@@ -903,9 +900,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         Kokkos::fence();
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
          {
             ConstPetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_root_vec, &root_scalar_d));
@@ -1022,16 +1019,16 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          }
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();         
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                   cf_markers_nonlocal_d(i) = (int)leaf_scalar_d(i);
             });
-            PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &leaf_scalar_d));
          }
 
          // We use the veto arrays here to do this comms
@@ -1066,12 +1063,12 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // Any local node with veto set to true is not in the set
          {
             PetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecGetKokkosViewWrite(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                   leaf_scalar_d(i) = veto_nonlocal_d(i) ? 1.0 : 0.0;
             });
-            PetscCallVoid(VecRestoreKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
+            PetscCallVoid(VecRestoreKokkosViewWrite(mat_mpi->lvec, &leaf_scalar_d));
          }
          {
             PetscScalarKokkosView root_scalar_d;
@@ -1083,9 +1080,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         Kokkos::fence();
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
          {
             ConstPetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_root_vec, &root_scalar_d));
@@ -1194,7 +1191,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
    // Cleanup loop Vecs
    PetscCallVoid(VecDestroy(&scatter_root_vec));
-   PetscCallVoid(VecDestroy(&scatter_leaf_vec));
 
    // Cleanup the local transposes
    if (destroy_spst) PetscCallVoid(MatDestroy(&mat_local_spst));
