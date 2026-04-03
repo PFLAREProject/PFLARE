@@ -222,6 +222,15 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    }
    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+   // Checkpoint helper: fence then print location to stderr so the last printed
+   // line before a GPU fault tells us exactly which kernel caused it.
+   int rank_cp; MPI_Comm_rank(MPI_COMM_MATRIX, &rank_cp);
+   // loops_through is declared here (not inside the do-while) so PMISR_CP can use it pre-loop.
+   int loops_through = -1;
+#define PMISR_CP(label) do { Kokkos::fence(); \
+      fprintf(stderr, "[PFLARE pmisr cp rank=%d iter=%d] " label "\n", rank_cp, loops_through); \
+      fflush(stderr); } while(0)
+
    intKokkosView cf_markers_nonlocal_d;
    // Scratch buffer used for local update bookkeeping during overlap with reverse scatter.
    intKokkosView cf_markers_temp_d;
@@ -264,6 +273,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 
    // Initialise the set
    PetscInt counter_in_set_start = 0;
+   PMISR_CP("A: before initial parallel_reduce");
    // Count how many in the set to begin with and set their CF markers
    Kokkos::parallel_reduce ("Reduction", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA (const PetscInt i, PetscInt& update) {
       // If already assigned by the input
@@ -298,6 +308,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          update++;
       }
    }, counter_in_set_start);
+   PMISR_CP("B: after initial parallel_reduce");
 
    // Check the total number of undecided in parallel
    PetscInt counter_undecided, counter_parallel;
@@ -327,7 +338,6 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    }
 
    // Let's keep track of how many times we go through the loops
-   int loops_through = -1;
    do
    {
       // Match the fortran version and include a pre-test on the do-while
@@ -350,6 +360,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // We write directly from cf_markers_d; no extra send staging is needed.
          {
             PetscScalarKokkosView root_scalar_d;
+      PMISR_CP("C: before fwd scatter kernel");
             PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
@@ -372,6 +383,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
       // ~~~~~~~~
       // Go and do the local component
       // ~~~~~~~~
+      PMISR_CP("D: before local TeamPolicy kernel");
       Kokkos::parallel_for(
          Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
          KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -431,6 +443,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Convert PetscScalar → int after End, when the receive buffer is complete.
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
+         PMISR_CP("E: before nonlocal convert kernel");
             PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &leaf_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
@@ -439,6 +452,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
             PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &leaf_scalar_d));
          }
 
+         PMISR_CP("F: before nonlocal TeamPolicy kernel");
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
             KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
@@ -488,6 +502,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 
       if (mpi)
       {
+         PMISR_CP("G: before reverse scatter setup");
          // We're going to do an add reverse scatter, so set them to zero
          Kokkos::deep_copy(exec, cf_markers_nonlocal_d, 0);
 
@@ -522,6 +537,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
+         PMISR_CP("H: before rev scatter convert kernels");
          // Reduce with a sum via VecScatter with ADD_VALUES, SCATTER_REVERSE
          // Convert int → PetscScalar for the leaf (nonlocal) data
          {
@@ -545,11 +561,13 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          }
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();
+         fprintf(stderr, "[PFLARE pmisr cp rank=%d iter=%d] I: before rev VecScatterBegin\n", rank_cp, loops_through); fflush(stderr);
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
          // Complete reverse scatter before reading reduced root buffer.
          PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, mat_mpi->lvec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
 
          // While reverse scatter is in-flight, do local-only updates in cf_markers_temp_d.
+         PMISR_CP("J: before overlap TeamPolicy kernel");
          // This must not touch scatter_root_vec/mat_mpi->lvec.
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -577,6 +595,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          });
 
          // Convert PetscScalar → int back to cf_markers_d after End.
+         PMISR_CP("K: before root->cf_markers_d convert");
          {
             ConstPetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_root_vec, &root_scalar_d));
@@ -588,6 +607,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          }
 
          // Merge the local updates after the VecScatter reduction has completed.
+         PMISR_CP("L: before merge kernel");
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
 
