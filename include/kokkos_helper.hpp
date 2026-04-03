@@ -21,14 +21,14 @@ struct PflareKokkosTrace {
    PflareKokkosTrace(const char *n) : name(n) {
       int rank = 0;
       MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-      printf("[PFLARE kokkos rank=%d] Entering %s\n", rank, name);
-      fflush(stdout);
+      fprintf(stderr, "[PFLARE kokkos rank=%d] Entering %s\n", rank, name);
+      fflush(stderr);
    }
    ~PflareKokkosTrace() {
       int rank = 0;
       MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-      printf("[PFLARE kokkos rank=%d] Leaving %s\n", rank, name);
-      fflush(stdout);
+      fprintf(stderr, "[PFLARE kokkos rank=%d] Leaving %s\n", rank, name);
+      fflush(stderr);
    }
 };
 
