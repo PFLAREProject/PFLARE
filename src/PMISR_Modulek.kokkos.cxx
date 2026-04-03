@@ -227,8 +227,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    int rank_cp; MPI_Comm_rank(MPI_COMM_MATRIX, &rank_cp);
    // loops_through is declared here (not inside the do-while) so PMISR_CP can use it pre-loop.
    int loops_through = -1;
-#define PMISR_CP(label) do { Kokkos::fence(); \
-      fprintf(stderr, "[PFLARE pmisr cp rank=%d iter=%d] " label "\n", rank_cp, loops_through); \
+#define PMISR_CP(label) do { fprintf(stderr, "[PFLARE pmisr cp rank=%d iter=%d] " label "\n", rank_cp, loops_through); \
       fflush(stderr); } while(0)
 
    intKokkosView cf_markers_nonlocal_d;
