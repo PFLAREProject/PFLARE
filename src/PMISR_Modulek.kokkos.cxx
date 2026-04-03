@@ -58,6 +58,170 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
 
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   // Validation checks (run once before main algorithm loops)
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   {
+      int rank_check;
+      MPI_Comm_rank(MPI_COMM_MATRIX, &rank_check);
+      bool found_error = false;
+
+      // -- Host-side view extent checks --
+      if ((PetscInt)measure_local_d.extent(0) < local_rows) {
+         fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: measure_local_d extent %zu < local_rows %d\n",
+                 rank_check, measure_local_d.extent(0), (int)local_rows);
+         found_error = true;
+      }
+      if ((PetscInt)cf_markers_d.extent(0) < local_rows) {
+         fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: cf_markers_d extent %zu < local_rows %d\n",
+                 rank_check, cf_markers_d.extent(0), (int)local_rows);
+         found_error = true;
+      }
+
+      if (mpi) {
+         // lvec size must match cols_ao
+         PetscInt lvec_size;
+         PetscCallVoid(VecGetLocalSize(mat_mpi->lvec, &lvec_size));
+         if (lvec_size != cols_ao) {
+            fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: lvec_size %d != cols_ao %d\n",
+                    rank_check, (int)lvec_size, (int)cols_ao);
+            found_error = true;
+         }
+
+         // garray: each entry must be in [0, global_cols) and outside local ownership
+         const PetscInt *garray;
+         PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, NULL, NULL, &garray));
+         for (PetscInt k = 0; k < cols_ao; k++) {
+            if (garray[k] < 0 || garray[k] >= global_cols) {
+               fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: garray[%d]=%d out of [0, %d)\n",
+                       rank_check, (int)k, (int)garray[k], (int)global_cols);
+               found_error = true;
+            } else if (garray[k] >= global_row_start && garray[k] < global_row_end_plus_one) {
+               fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: garray[%d]=%d is in local ownership [%d, %d)\n",
+                       rank_check, (int)k, (int)garray[k], (int)global_row_start, (int)global_row_end_plus_one);
+               found_error = true;
+            }
+         }
+      }
+
+      // -- Device-side CSR checks via Kokkos parallel_reduce --
+      auto exec_check = PetscGetKokkosExecutionSpace();
+
+      // Read device_local_i[local_rows] (nnz) to host via a 1-element reduce
+      PetscInt nnz_local_check = 0;
+      if (local_rows > 0) {
+         Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, 1),
+            KOKKOS_LAMBDA(PetscInt, PetscInt& v) { v = device_local_i[local_rows]; },
+            Kokkos::Max<PetscInt>(nnz_local_check));
+      }
+
+      // Check device_local_i[0] == 0
+      if (local_rows > 0) {
+         PetscInt local_i_zero;
+         Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, 1),
+            KOKKOS_LAMBDA(PetscInt, PetscInt& v) { v = device_local_i[0]; },
+            Kokkos::Max<PetscInt>(local_i_zero));
+         if (local_i_zero != 0) {
+            fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: device_local_i[0]=%d != 0\n",
+                    rank_check, (int)local_i_zero);
+            found_error = true;
+         }
+      }
+
+      // Check device_local_i is non-decreasing
+      if (local_rows > 0) {
+         PetscInt mono_err_local = 0;
+         Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, local_rows),
+            KOKKOS_LAMBDA(PetscInt i, PetscInt& err) {
+               if (device_local_i[i + 1] < device_local_i[i]) err++;
+            }, mono_err_local);
+         if (mono_err_local > 0) {
+            fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: device_local_i is non-monotone (%d violations)\n",
+                    rank_check, (int)mono_err_local);
+            found_error = true;
+         }
+      }
+
+      // Check device_local_j values are in [0, local_cols)
+      if (nnz_local_check > 0) {
+         PetscInt j_min_local = local_cols;
+         PetscInt j_max_local = -1;
+         Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, nnz_local_check),
+            KOKKOS_LAMBDA(PetscInt k, PetscInt& lo) {
+               if (device_local_j[k] < lo) lo = device_local_j[k];
+            }, Kokkos::Min<PetscInt>(j_min_local));
+         Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, nnz_local_check),
+            KOKKOS_LAMBDA(PetscInt k, PetscInt& hi) {
+               if (device_local_j[k] > hi) hi = device_local_j[k];
+            }, Kokkos::Max<PetscInt>(j_max_local));
+         if (j_min_local < 0 || j_max_local >= local_cols) {
+            fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: device_local_j range [%d, %d] not in [0, %d)\n",
+                    rank_check, (int)j_min_local, (int)j_max_local, (int)local_cols);
+            found_error = true;
+         }
+      }
+
+      if (mpi) {
+         // Read device_nonlocal_i[local_rows] (nnz) to host
+         PetscInt nnz_nonlocal_check = 0;
+         if (local_rows > 0) {
+            Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, 1),
+               KOKKOS_LAMBDA(PetscInt, PetscInt& v) { v = device_nonlocal_i[local_rows]; },
+               Kokkos::Max<PetscInt>(nnz_nonlocal_check));
+         }
+
+         // Check device_nonlocal_i[0] == 0
+         if (local_rows > 0) {
+            PetscInt nonlocal_i_zero;
+            Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, 1),
+               KOKKOS_LAMBDA(PetscInt, PetscInt& v) { v = device_nonlocal_i[0]; },
+               Kokkos::Max<PetscInt>(nonlocal_i_zero));
+            if (nonlocal_i_zero != 0) {
+               fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: device_nonlocal_i[0]=%d != 0\n",
+                       rank_check, (int)nonlocal_i_zero);
+               found_error = true;
+            }
+         }
+
+         // Check device_nonlocal_i is non-decreasing
+         if (local_rows > 0) {
+            PetscInt mono_err_nonlocal = 0;
+            Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, local_rows),
+               KOKKOS_LAMBDA(PetscInt i, PetscInt& err) {
+                  if (device_nonlocal_i[i + 1] < device_nonlocal_i[i]) err++;
+               }, mono_err_nonlocal);
+            if (mono_err_nonlocal > 0) {
+               fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: device_nonlocal_i is non-monotone (%d violations)\n",
+                       rank_check, (int)mono_err_nonlocal);
+               found_error = true;
+            }
+         }
+
+         // Check device_nonlocal_j values are in [0, cols_ao)
+         if (nnz_nonlocal_check > 0) {
+            PetscInt j_min_nonlocal = cols_ao;
+            PetscInt j_max_nonlocal = -1;
+            Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, nnz_nonlocal_check),
+               KOKKOS_LAMBDA(PetscInt k, PetscInt& lo) {
+                  if (device_nonlocal_j[k] < lo) lo = device_nonlocal_j[k];
+               }, Kokkos::Min<PetscInt>(j_min_nonlocal));
+            Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec_check, 0, nnz_nonlocal_check),
+               KOKKOS_LAMBDA(PetscInt k, PetscInt& hi) {
+                  if (device_nonlocal_j[k] > hi) hi = device_nonlocal_j[k];
+               }, Kokkos::Max<PetscInt>(j_max_nonlocal));
+            if (j_min_nonlocal < 0 || j_max_nonlocal >= cols_ao) {
+               fprintf(stderr, "[PFLARE pmisr check rank=%d] INVALID: device_nonlocal_j range [%d, %d] not in [0, %d)\n",
+                       rank_check, (int)j_min_nonlocal, (int)j_max_nonlocal, (int)cols_ao);
+               found_error = true;
+            }
+         }
+      }
+
+      fflush(stderr);
+      if (found_error) PETSCABORT(MPI_COMM_MATRIX, PETSC_ERR_ARG_WRONG);
+   }
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
    intKokkosView cf_markers_nonlocal_d;
    // Scratch buffer used for local update bookkeeping during overlap with reverse scatter.
    intKokkosView cf_markers_temp_d;
