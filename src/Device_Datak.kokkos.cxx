@@ -19,9 +19,12 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
    // Host wrapper for cf_markers_local
    intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
 
+   auto exec = PetscGetKokkosExecutionSpace();   
+
    // Now copy device cf_markers_local_d back to host
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
+   Kokkos::deep_copy(exec, cf_markers_local_h, cf_markers_local_d);
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes = cf_markers_local_d.extent(0) * sizeof(int);
    PetscCallVoid(PetscLogGpuToCpu(bytes));
@@ -38,9 +41,12 @@ PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
    // Host wrapper for diag_dom_ratio_local
    PetscScalarKokkosViewHost diag_dom_ratio_h(diag_dom_ratio_local, diag_dom_ratio_local_d.extent(0));
 
+   auto exec = PetscGetKokkosExecutionSpace();   
+
    // Copy device diag_dom_ratio_local_d back to host
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(diag_dom_ratio_h, diag_dom_ratio_local_d);
+   Kokkos::deep_copy(exec, diag_dom_ratio_h, diag_dom_ratio_local_d);
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes = diag_dom_ratio_local_d.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogGpuToCpu(bytes));
@@ -114,7 +120,8 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // The last entry in point_offsets_d is the total number of points that match match_cf
    PetscInt local_rows_row = 0;
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
+   Kokkos::deep_copy(exec, local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
+   Kokkos::fence();
 
    // This will be equivalent to is_fine - global_row_start, ie the local indices
    is_local_d = PetscIntKokkosView("is_local_d", local_rows_row);
@@ -183,8 +190,9 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
 
    // Copy over the indices to the host
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(is_fine_h, is_fine_local_d);
-   Kokkos::deep_copy(is_coarse_h, is_coarse_local_d);
+   Kokkos::deep_copy(exec, is_fine_h, is_fine_local_d);
+   Kokkos::deep_copy(exec, is_coarse_h, is_coarse_local_d);
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes_fine = is_fine_local_d.extent(0) * sizeof(PetscInt);
    size_t bytes_coarse = is_coarse_local_d.extent(0) * sizeof(PetscInt);

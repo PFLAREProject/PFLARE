@@ -139,7 +139,8 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
    {
       PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(*garray_host, col_ao_output);
       // Device to host so don't need to specify exec space
-      Kokkos::deep_copy(colmap_output_h, garray_d);
+      Kokkos::deep_copy(exec, colmap_output_h, garray_d);
+      Kokkos::fence();
       // Log copy with petsc
       size_t bytes = col_ao_output * sizeof(PetscInt);
       PetscCallVoid(PetscLogGpuToCpu(bytes));
@@ -855,7 +856,8 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       {
          PetscIntKokkosViewHost garray_h(garray_host, col_ao_output);
          // Device to host so don't need to specify exec space
-         Kokkos::deep_copy(garray_h, garray_d);
+         Kokkos::deep_copy(exec, garray_h, garray_d);
+         Kokkos::fence();
          size_t bytes = col_ao_output * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
       }
@@ -1920,7 +1922,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       {
          PetscIntKokkosViewHost garray_h(garray_host, col_ao_output);
          // Device to host so don't need to specify exec space
-         Kokkos::deep_copy(garray_h, garray_d);
+         Kokkos::deep_copy(exec, garray_h, garray_d);
+         Kokkos::fence();
          size_t bytes = col_ao_output * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
       }
@@ -2515,7 +2518,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscMalloc1(garray_output_d.extent(0), &garray_host));
          PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, garray_output_d.extent(0));
          // Copy the garray output to the host
-         Kokkos::deep_copy(colmap_output_h, garray_output_d);
+         Kokkos::deep_copy(exec, colmap_output_h, garray_output_d);
+         Kokkos::fence();
          bytes = colmap_output_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
          
@@ -2531,7 +2535,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscMalloc1(is_col_o_d.extent(0), &is_col_o_host));
          PetscIntKokkosViewHost is_col_o_h = PetscIntKokkosViewHost(is_col_o_host, is_col_o_d.extent(0));
          // Copy the is_col_o_d output to the host
-         Kokkos::deep_copy(is_col_o_h, is_col_o_d);
+         Kokkos::deep_copy(exec, is_col_o_h, is_col_o_d);
+         Kokkos::fence();
          bytes = is_col_o_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
          // Now create an IS
