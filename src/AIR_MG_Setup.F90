@@ -155,7 +155,9 @@ module air_mg_setup
          ! We already know how many coarse levels we have if we are re-using
          if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. &
                      our_level .ge. air_data%options%auto_truncate_start_level .AND. &
-                     air_data%options%auto_truncate_start_level /= -1) then         
+                     air_data%options%auto_truncate_start_level /= -1) then       
+                        
+            print *, "starting auto truncate check on level ", our_level
 
             call timer_start(TIMER_ID_AIR_TRUNCATE)   
 
@@ -167,6 +169,8 @@ module air_mg_setup
                      air_data%options%coarsest_subcomm, &
                      proc_stride, &
                      air_data%inv_coarsest_poly_data)  
+
+            print *, "starting approx inverse ", our_level
 
             ! Start the approximate inverse we'll use on this level
             call start_approximate_inverse(air_data%coarse_matrix(our_level), &
@@ -189,6 +193,8 @@ module air_mg_setup
             call VecDuplicate(rand_vec, sol_vec, ierr)
             call VecDuplicate(rand_vec, temp_vec, ierr)
 
+            print *, "starting finish approx inverse ", our_level
+
             ! Finish our approximate inverse
             call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
                   air_data%inv_coarsest_poly_data%inverse_type, &
@@ -209,6 +215,8 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
                   air_data%options%coarsest_matrix_free_polys) then
 
+            print *, "starting matvecs residual ", our_level
+
                if (air_data%options%coarsest_diag_scale_polys) then
                   call petsc_matvec_right_scale_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
                else
@@ -224,6 +232,8 @@ module air_mg_setup
                ! Now A * sol_vec - rand_vec
                call VecAXPY(temp_vec, -1d0, rand_vec, ierr)  
             end if 
+
+            print *, "computing norms ", our_level
 
             ! Get the achieved norm
             call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
@@ -252,6 +262,8 @@ module air_mg_setup
 
             call timer_finish(TIMER_ID_AIR_TRUNCATE)   
          end if
+
+            print *, "starting cf splitting ", our_level
 
          ! ~~~~~~~~~~~~
          ! Compute the coarsening
