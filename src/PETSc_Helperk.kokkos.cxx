@@ -2375,11 +2375,13 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          /* (2) Scatter x and cmap using Mvctx to get their off-process portions */
          // Keep at most one active communication on Mvctx at a time.
          // While Begin/End is in flight, do not touch the corresponding send/recv buffers.
+         Vec x_leaf_vec;
+         PetscCallVoid(VecDuplicate(mat_mpi->lvec, &x_leaf_vec));
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
-         // x scatter completed: mat_mpi->lvec is now safe to read.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));         
+         Kokkos::fence();
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, x_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // x scatter completed: x_leaf_vec is now safe to read.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, x_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
 
          // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
          {
@@ -2413,7 +2415,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          if (cols_ao > 0)
          {
             ConstPetscScalarKokkosView lvec_scalar_d;
-            PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+            PetscCallVoid(VecGetKokkosView(x_leaf_vec, &lvec_scalar_d));
 
             Kokkos::parallel_reduce("FindMatches", Kokkos::RangePolicy<>(exec, 0, cols_ao),
                KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
@@ -2427,7 +2429,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                Kokkos::Sum<PetscInt>(col_ao_output)
             );
 
-            PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+            PetscCallVoid(VecRestoreKokkosView(x_leaf_vec, &lvec_scalar_d));
          }
 
          // Need to do an exclusive scan on is_col_o_match_d to get the new local indices
@@ -2471,6 +2473,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
          // Cleanup Vecs
          PetscCallVoid(VecDestroy(&x_vec));
+         PetscCallVoid(VecDestroy(&x_leaf_vec));
          PetscCallVoid(VecDestroy(&cmap_vec));
          PetscCallVoid(VecDestroy(&lcmap_vec));
       }

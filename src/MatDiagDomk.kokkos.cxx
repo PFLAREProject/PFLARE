@@ -48,6 +48,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    intKokkosView cf_markers_d = cf_markers_local_d;   
    intKokkosView cf_markers_nonlocal_d;
    Vec scatter_root_vec = NULL;
+   Vec scatter_leaf_vec = NULL;
    PetscIntKokkosView is_fine_local_d;
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -75,6 +76,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
 
       // Scatter cf_markers via VecScatter (int -> PetscScalar conversion required)
       PetscCallVoid(MatCreateVecs(*input_mat, &scatter_root_vec, NULL));
+      PetscCallVoid(VecDuplicate(mat_mpi->lvec, &scatter_leaf_vec));
       {
          PetscScalarKokkosView root_scalar_d;
          PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
@@ -88,9 +90,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // Start comms, then overlap with local-only work below.
       // Mvctx must have only one active comm at a time.
       // Ensure send/receive buffers are stable before Begin.
-      Kokkos::fence();      
-      PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
-      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      Kokkos::fence();
+      PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
    }
 
    // ~~~~~~~~~~~~~~~
@@ -165,14 +167,15 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    {
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
-         PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &lvec_scalar_d));
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
          });
-         PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &lvec_scalar_d));
       }
       PetscCallVoid(VecDestroy(&scatter_root_vec));
+      PetscCallVoid(VecDestroy(&scatter_leaf_vec));
       Kokkos::fence();
    }
 
