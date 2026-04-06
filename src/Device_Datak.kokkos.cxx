@@ -151,6 +151,9 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
 
+   PetscInt local_rows_check, local_cols_check;
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows_check, &local_cols_check));
+
    // Create the local f point indices
    const int match_fine = -1; // F_POINT == -1
    create_cf_is_device_kokkos(input_mat, match_fine, is_fine_local_d);
@@ -158,6 +161,10 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    // Create the local C point indices
    const int match_coarse = 1; // C_POINT == 1
    create_cf_is_device_kokkos(input_mat, match_coarse, is_coarse_local_d);
+
+   // Sanity check: fine + coarse must cover every local point exactly once
+   // (check before global-index conversion while entries are still [0, local_rows-1])
+   check_cf_is_all_local_kokkos(is_fine_local_d, is_coarse_local_d, local_rows_check, MPI_COMM_MATRIX);
 
    // Now convert them back to global indices
    PetscInt global_row_start, global_row_end_plus_one;

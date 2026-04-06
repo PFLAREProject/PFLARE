@@ -23,6 +23,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
    PetscIntKokkosView is_fine_local_d;
    // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
    mat_sync(input_mat);   
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));   
 
    const int match_cf = -1; // F_POINT == -1
    create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
@@ -106,6 +108,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
          pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);
 
+         check_cf_markers_all_marked_kokkos(cf_markers_aff_d, cf_markers_aff_d.extent(0), MPI_COMM_MATRIX);
+
          // Swap F-tagged points back into cf_markers_d
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
@@ -115,6 +119,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
                }
          });
          Kokkos::fence();
+
+         check_cf_markers_all_marked_kokkos(cf_markers_d, cf_markers_d.extent(0), MPI_COMM_MATRIX);
       }
       return;
    }

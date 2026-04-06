@@ -164,4 +164,103 @@ PetscInt binary_search_sorted(const ViewType &sorted_view, const PetscInt size, 
    return -1;
 }
 
+// Check that every entry in cf_markers_d is either -1 (F) or 1 (C).
+// Calls MPI_Abort if any local point is not marked.
+inline void check_cf_markers_all_marked_kokkos(
+   const intKokkosView &cf_markers_d,
+   const PetscInt local_rows,
+   MPI_Comm MPI_COMM_MATRIX)
+{
+   auto exec = PetscGetKokkosExecutionSpace();
+   PetscInt bad_count = 0;
+   Kokkos::parallel_reduce(
+      "check_cf_markers",
+      Kokkos::RangePolicy<>(exec, 0, local_rows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &count) {
+         if (cf_markers_d(i) != -1 && cf_markers_d(i) != 1) count++;
+      }, bad_count);
+   Kokkos::fence();
+   int rank = 0;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+   if (bad_count > 0) {
+      fprintf(stderr,
+         "[PFLARE kokkos rank=%d] ERROR check_cf_markers_all_marked_kokkos: "
+         "%d / %d local points are NOT marked F or C\n",
+         rank, (int)bad_count, (int)local_rows);
+      fflush(stderr);
+      MPI_Abort(MPI_COMM_MATRIX, 1);
+   } else {
+      fprintf(stderr,
+         "[PFLARE kokkos rank=%d] check_cf_markers_all_marked_kokkos: "
+         "all %d local points marked F or C OK\n",
+         rank, (int)local_rows);
+      fflush(stderr);
+   }
+}
+
+// Check that is_fine_local_d and is_coarse_local_d together cover every local
+// point [0, local_rows-1] exactly once (no missing, no duplicates).
+// Call before global-index conversion (entries are local offsets [0, local_rows-1]).
+// Calls MPI_Abort if any point is missing or duplicated.
+inline void check_cf_is_all_local_kokkos(
+   const PetscIntKokkosView &is_fine_local_d,
+   const PetscIntKokkosView &is_coarse_local_d,
+   const PetscInt local_rows,
+   MPI_Comm MPI_COMM_MATRIX)
+{
+   auto exec = PetscGetKokkosExecutionSpace();
+   int rank = 0;
+   MPI_Comm_rank(MPI_COMM_MATRIX, &rank);
+
+   // Allocate hit-count array, initialised to 0
+   intKokkosView hit_count("hit_count", local_rows);
+   Kokkos::deep_copy(exec, hit_count, 0);
+
+   // Mark each fine index (atomic to catch duplicates within the fine set)
+   Kokkos::parallel_for(
+      "check_cf_is_mark_fine",
+      Kokkos::RangePolicy<>(exec, 0, (PetscInt)is_fine_local_d.extent(0)),
+      KOKKOS_LAMBDA(const PetscInt i) {
+         const PetscInt idx = is_fine_local_d(i);
+         if (idx >= 0 && idx < local_rows)
+            Kokkos::atomic_add(&hit_count(idx), 1);
+      });
+
+   // Mark each coarse index
+   Kokkos::parallel_for(
+      "check_cf_is_mark_coarse",
+      Kokkos::RangePolicy<>(exec, 0, (PetscInt)is_coarse_local_d.extent(0)),
+      KOKKOS_LAMBDA(const PetscInt i) {
+         const PetscInt idx = is_coarse_local_d(i);
+         if (idx >= 0 && idx < local_rows)
+            Kokkos::atomic_add(&hit_count(idx), 1);
+      });
+
+   // Count any point not hit exactly once
+   PetscInt bad_count = 0;
+   Kokkos::parallel_reduce(
+      "check_cf_is_count_bad",
+      Kokkos::RangePolicy<>(exec, 0, local_rows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &count) {
+         if (hit_count(i) != 1) count++;
+      }, bad_count);
+
+   Kokkos::fence();
+
+   if (bad_count > 0) {
+      fprintf(stderr,
+         "[PFLARE kokkos rank=%d] ERROR check_cf_is_all_local_kokkos: "
+         "%d / %d local points are not covered exactly once by fine+coarse IS\n",
+         rank, (int)bad_count, (int)local_rows);
+      fflush(stderr);
+      MPI_Abort(MPI_COMM_MATRIX, 1);
+   } else {
+      fprintf(stderr,
+         "[PFLARE kokkos rank=%d] check_cf_is_all_local_kokkos: "
+         "fine=%d coarse=%d, all %d local points covered exactly once OK\n",
+         rank, (int)is_fine_local_d.extent(0), (int)is_coarse_local_d.extent(0), (int)local_rows);
+      fflush(stderr);
+   }
+}
+
 #endif
