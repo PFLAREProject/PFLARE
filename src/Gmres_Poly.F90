@@ -477,14 +477,20 @@ module gmres_poly
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
+      print *, "about to muller"
+
       ! ~~~~~~~~~~
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
       ! ~~~~~~~~~~ 
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
+
+      print *, "done muller"
       
       ! Create an extra vector for storage
       call VecDuplicate(V_n(1), w_j, ierr)         
+
+      print *, "about to arnoldi"
 
       ! Do the Arnoldi and compute H_n and C_n
       ! We only compute H_n until we hit a relative residual of 1e-14 against the random rhs
@@ -493,6 +499,8 @@ module gmres_poly
       if (present(user_rel_tol)) rel_tol = user_rel_tol
       call arnoldi(matrix, poly_order, 1d-30, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
       if (present(user_rel_tol)) user_rel_tol = rel_tol
+
+      print *, "done arnoldi"
 
       ! ~~~~~~~~~~~~~
       ! Compute the polynomial coefficients, this is C_n(1:m, 1:m) y
