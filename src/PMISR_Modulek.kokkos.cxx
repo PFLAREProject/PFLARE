@@ -1017,31 +1017,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                }
          });
 
-         // Now for the influences, we need to broadcast the cf_markers so that
-         // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
-         {
-            PetscScalarKokkosView root_scalar_d;
-            PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
-            Kokkos::parallel_for(
-               Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-                  root_scalar_d(i) = (PetscScalar)cf_markers_d(i);
-            });
-            PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
-         }
-         // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-         {
-            ConstPetscScalarKokkosView leaf_scalar_d;
-            PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));
-            Kokkos::parallel_for(
-               Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
-                  cf_markers_nonlocal_d(i) = (int)leaf_scalar_d(i);
-            });
-            PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
-         }
-
          // We use the veto arrays here to do this comms
          Kokkos::deep_copy(exec, veto_nonlocal_d, false);
          Kokkos::deep_copy(exec, veto_local_d, false);
@@ -1112,6 +1087,33 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                   cf_markers_d(i) = 1;
                }
          });
+
+         // Now that non-local dependencies are marked, broadcast the cf_markers so that
+         // on other ranks we know which nodes have cf_markers_nonlocal_d(i) == loops_through
+         // (i.e. which nonlocal nodes were assigned to the IS this iteration).
+         // This matches the Fortran ordering: reverse scatter first, then forward scatter.
+         {
+            PetscScalarKokkosView root_scalar_d;
+            PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
+            Kokkos::parallel_for(
+               Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+                  root_scalar_d(i) = (PetscScalar)cf_markers_d(i);
+            });
+            PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
+         }
+         // Ensure send/receive buffers are stable before Begin.
+         Kokkos::fence();
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         {
+            ConstPetscScalarKokkosView leaf_scalar_d;
+            PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+            Kokkos::parallel_for(
+               Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
+                  cf_markers_nonlocal_d(i) = (int)leaf_scalar_d(i);
+            });
+            PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
+         }
 
          // And now we have the information we need to set any of the non-local influences
          if (mat_nonlocal_transpose != NULL)
