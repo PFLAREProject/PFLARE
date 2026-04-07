@@ -2358,6 +2358,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Uses VecScatter with PetscScalar Vecs (matching PETSc's own pattern)
          // instead of direct PetscSFBcast with MPIU_INT on temporary views.
 
+         std::cerr << "one " << std::endl;
+
          /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
          Vec x_vec, cmap_vec;
          PetscCallVoid(MatCreateVecs(*input_mat, &x_vec, NULL));
@@ -2374,6 +2376,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
             });
             PetscCallVoid(VecRestoreKokkosViewWrite(x_vec, &x_scalar_d));
          
+
+                     std::cerr << "two " << std::endl;
 
          /* (2) Scatter x and cmap using Mvctx to get their off-process portions */
          // Keep at most one active communication on Mvctx at a time.
@@ -2397,6 +2401,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
             });
             PetscCallVoid(VecRestoreKokkosViewWrite(cmap_vec, &cmap_scalar_d));
          
+         std::cerr << "three " << std::endl;
 
          Vec lcmap_vec;
          PetscCallVoid(VecDuplicate(mat_mpi->lvec, &lcmap_vec));
@@ -2434,6 +2439,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
             PetscCallVoid(VecRestoreKokkosView(x_leaf_vec, &lvec_scalar_d));
          //}
+
+         std::cerr << "four " << std::endl;
+
 
          // Need to do an exclusive scan on is_col_o_match_d to get the new local indices
          // Have to remember to go up to cols_ao+1
@@ -2474,6 +2482,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
             PetscCallVoid(VecRestoreKokkosView(lcmap_vec, &lcmap_scalar_d));
          //}
 
+                  std::cerr << "five " << std::endl;
+
+
          // Cleanup Vecs
          PetscCallVoid(VecDestroy(&x_vec));
          PetscCallVoid(VecDestroy(&x_leaf_vec));
@@ -2513,6 +2524,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       // If it's our first time through we have to create our output matrix
       if (!reuse_int)
       {
+                  std::cerr << "six " << std::endl;
+
          // Copy the garray output to the host
          PetscInt *garray_host = NULL; 
          PetscCallVoid(PetscMalloc1(garray_output_d.extent(0), &garray_host));
@@ -2522,9 +2535,14 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          Kokkos::fence();
          bytes = colmap_output_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
+
+                  std::cerr << "seven " << std::endl;
+
          
          // We can now create our MPI matrix
          PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_row, global_cols_col, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+
+                  std::cerr << "eight " << std::endl;
 
          // ~~~~~~~~~~~~~~
          // If this is the first time through, we need to store the iscol_o in the output_mat
@@ -2546,6 +2564,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscObjectCompose((PetscObject)(*output_mat), "iscol_o", (PetscObject)iscol_o));
          // The ref counter is incremented by the compose
          PetscCallVoid(ISDestroy(&iscol_o));
+
+         std::cerr << "nine " << std::endl;
+
       }
    }
    else
