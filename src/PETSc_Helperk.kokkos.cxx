@@ -2386,9 +2386,13 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(VecDuplicate(mat_mpi->lvec, &x_leaf_vec));
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();
+                     std::cerr << "two a " << std::endl;
+
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, x_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
          // x scatter completed: x_leaf_vec is now safe to read.
          PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, x_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+
+                     std::cerr << "two b" << std::endl;
 
          // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
          
