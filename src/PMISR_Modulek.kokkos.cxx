@@ -99,6 +99,9 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          Kokkos::deep_copy(exec, measure_nonlocal_d, leaf_scalar_d);
          PetscCallVoid(VecRestoreKokkosView(measure_leaf_vec, &leaf_scalar_d));
       }
+      // Ensure the async deep_copy reading measure_leaf_vec's device memory has completed
+      // before VecDestroy frees it.
+      Kokkos::fence();
       PetscCallVoid(VecDestroy(&measure_root_vec));
       PetscCallVoid(VecDestroy(&measure_leaf_vec));
    }
@@ -659,6 +662,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          Kokkos::deep_copy(exec, measure_nonlocal_d, lvec_scalar_d);
          PetscCallVoid(VecRestoreKokkosView(measure_leaf_vec, &lvec_scalar_d));
       }
+      // Ensure the async deep_copy reading measure_leaf_vec's device memory has completed
+      // before VecDestroy frees it.
+      Kokkos::fence();
       PetscCallVoid(VecDestroy(&measure_root_vec));
       PetscCallVoid(VecDestroy(&measure_leaf_vec));
    }

@@ -174,9 +174,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
          });
          PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &lvec_scalar_d));
       }
+      // Ensure the async parallel_for reading scatter_leaf_vec's device memory has completed
+      // before VecDestroy frees it.
+      Kokkos::fence();
       PetscCallVoid(VecDestroy(&scatter_root_vec));
       PetscCallVoid(VecDestroy(&scatter_leaf_vec));
-      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~~~~
