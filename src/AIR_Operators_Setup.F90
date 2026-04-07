@@ -191,7 +191,9 @@ module air_operators_setup
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       ! Pull out the rest of the sub-matrices
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~     
-      call timer_start(TIMER_ID_AIR_EXTRACT)             
+      call timer_start(TIMER_ID_AIR_EXTRACT)       
+      
+      print *, "extract afc acf start"
                         
       ! Only reuse when coarse matrix structure is stable (amount>=2 stores MAT_RAP_DROP)
       if (air_data%allocated_matrices_A_ff(our_level) .AND. &
@@ -215,6 +217,8 @@ module air_operators_setup
                air_data%A_cf(our_level), &
                our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)
       end if
+
+      print *, "extract afc acf done"
 
       call timer_finish(TIMER_ID_AIR_EXTRACT)   
 
