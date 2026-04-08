@@ -2464,7 +2464,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 // diag Seq_kokkos kernel chain. Reuse path is unchanged (crashes are
 // first-call only). Toggle off (set to 0) to restore the original path.
 #ifndef PFLARE_ABLATE_DIAG_SUBMAT
-#define PFLARE_ABLATE_DIAG_SUBMAT 1
+#define PFLARE_ABLATE_DIAG_SUBMAT 0
 #endif
 
    // The diagonal component
@@ -2515,8 +2515,59 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 
    // The off-diagonal component requires some comms
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
+
+// Off-diagonal ablation toggle (step 2a of plan): when non-zero, the entire
+// off-diag VecScatter + Seq_kokkos-nonlocal + MatCreateMPIAIJWithSeqAIJ path
+// is replaced by PETSc's CPU MatCreateSubMatrix on the full MPIAIJ input,
+// converted back to MATMPIAIJKOKKOS.  Combine with PFLARE_ABLATE_DIAG_SUBMAT=0
+// so that only the off-diag section is ablated while diag uses our Kokkos kernel.
+// Only the first-call (non-reuse) path is ablated, matching the observed failure mode.
+#ifndef PFLARE_ABLATE_OFFDIAG_SUBMAT
+#define PFLARE_ABLATE_OFFDIAG_SUBMAT 1
+#endif
+
    if (mpi)
    {
+#if PFLARE_ABLATE_OFFDIAG_SUBMAT
+      if (!reuse_int)
+      {
+         // We need global IS indices (is_row/is_col on device are already LOCAL,
+         // i.e. row_global - global_row_start; add back the offset before calling
+         // PETSc's CPU MatCreateSubMatrix which expects global indices).
+         PetscInt global_row_start_abl = 0, global_row_end_abl = 0;
+         PetscInt global_col_start_abl = 0, global_col_end_abl = 0;
+         PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_abl, &global_row_end_abl));
+         PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_abl, &global_col_end_abl));
+
+         const PetscInt n_row_abl = (PetscInt)is_row_d_d.extent(0);
+         const PetscInt n_col_abl = (PetscInt)is_col_d_d.extent(0);
+         PetscInt *is_row_g_arr = NULL, *is_col_g_arr = NULL;
+         PetscCallVoid(PetscMalloc1(n_row_abl > 0 ? n_row_abl : 1, &is_row_g_arr));
+         PetscCallVoid(PetscMalloc1(n_col_abl > 0 ? n_col_abl : 1, &is_col_g_arr));
+
+         // Copy local device indices to host then shift back to global.
+         PetscIntKokkosViewHost is_row_g_h(is_row_g_arr, n_row_abl);
+         PetscIntKokkosViewHost is_col_g_h(is_col_g_arr, n_col_abl);
+         Kokkos::deep_copy(exec, is_row_g_h, is_row_d_d);
+         Kokkos::deep_copy(exec, is_col_g_h, is_col_d_d);
+         Kokkos::fence();
+         for (PetscInt ii = 0; ii < n_row_abl; ii++) is_row_g_arr[ii] += global_row_start_abl;
+         for (PetscInt ii = 0; ii < n_col_abl; ii++) is_col_g_arr[ii] += global_col_start_abl;
+
+         IS is_row_g_abl = NULL, is_col_g_abl = NULL;
+         PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_row_abl, is_row_g_arr, PETSC_OWN_POINTER, &is_row_g_abl));
+         PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_col_abl, is_col_g_arr, PETSC_OWN_POINTER, &is_col_g_abl));
+
+         Mat tmp_abl = NULL;
+         PetscCallVoid(MatCreateSubMatrix(*input_mat, is_row_g_abl, is_col_g_abl, MAT_INITIAL_MATRIX, output_mat));
+         //PetscCallVoid(MatConvert(tmp_abl, MATMPIAIJKOKKOS, MAT_INITIAL_MATRIX, output_mat));
+         //PetscCallVoid(MatDestroy(&tmp_abl));
+         PetscCallVoid(MatDestroy(&output_mat_local));   // diag mat no longer needed
+         PetscCallVoid(ISDestroy(&is_row_g_abl));
+         PetscCallVoid(ISDestroy(&is_col_g_abl));
+         return;
+      }
+#endif
       PetscIntKokkosView is_col_o_d, garray_output_d;
 
       if (!reuse_int)
