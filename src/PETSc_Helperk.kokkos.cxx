@@ -2152,11 +2152,61 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       // Create i indices
       // ~~~~~~~~~~~~~~~
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {      
+         Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {
 
             // The start of our row index comes from the scan
-            i_local_d(i_idx_is_row + 1) = nnz_match_local_row_d(i_idx_is_row);   
-      });    
+            i_local_d(i_idx_is_row + 1) = nnz_match_local_row_d(i_idx_is_row);
+      });
+
+      // ~~~~~~~~~~~~
+      // DIAGNOSTIC (Step 1b of plan): verify i_local_d's final value equals
+      // nnzs_match_local, and that device_local_j entries for the rows we touch
+      // are all inside [0, local_cols). Either inconsistency would cause the
+      // team kernel below to write j_local_d / a_local_d outside their bounds.
+      // ~~~~~~~~~~~~
+      if (local_rows_row > 0) {
+         PetscInt i_local_last_h = 0;
+         auto i_local_tail = Kokkos::subview(i_local_d, local_rows_row);
+         Kokkos::View<PetscInt, Kokkos::HostSpace> i_local_tail_h("PFLARE_DBG_i_local_tail");
+         Kokkos::deep_copy(exec, i_local_tail_h, i_local_tail);
+         Kokkos::fence();
+         i_local_last_h = i_local_tail_h();
+         PetscCheckAbort(i_local_last_h == nnzs_match_local, PETSC_COMM_SELF,
+            PETSC_ERR_PLIB,
+            "MatCreateSubMatrix_Seq_kokkos: i_local_d tail (%" PetscInt_FMT ") != nnzs_match_local (%" PetscInt_FMT "), local_rows_row=%" PetscInt_FMT,
+            i_local_last_h, nnzs_match_local, local_rows_row);
+
+         PetscInt jmin = 0, jmax = -1;
+         Kokkos::parallel_reduce("PFLARE_DBG_dev_j_min",
+            Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+            KOKKOS_LAMBDA(const PetscInt ir, PetscInt &lmin) {
+               const PetscInt i = is_row_d_d(ir);
+               const PetscInt s = device_local_i[i];
+               const PetscInt e = device_local_i[i + 1];
+               for (PetscInt k = s; k < e; ++k) {
+                  const PetscInt v = device_local_j[k];
+                  if (v < lmin) lmin = v;
+               }
+            }, Kokkos::Min<PetscInt>(jmin));
+         Kokkos::parallel_reduce("PFLARE_DBG_dev_j_max",
+            Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+            KOKKOS_LAMBDA(const PetscInt ir, PetscInt &lmax) {
+               const PetscInt i = is_row_d_d(ir);
+               const PetscInt s = device_local_i[i];
+               const PetscInt e = device_local_i[i + 1];
+               for (PetscInt k = s; k < e; ++k) {
+                  const PetscInt v = device_local_j[k];
+                  if (v > lmax) lmax = v;
+               }
+            }, Kokkos::Max<PetscInt>(jmax));
+         Kokkos::fence();
+         if (jmax >= 0) {
+            PetscCheckAbort(jmin >= 0 && jmax < local_cols, PETSC_COMM_SELF,
+               PETSC_ERR_PLIB,
+               "MatCreateSubMatrix_Seq_kokkos: device_local_j out of [0,%" PetscInt_FMT ") got [%" PetscInt_FMT ",%" PetscInt_FMT "]",
+               local_cols, jmin, jmax);
+         }
+      }
 
       // Execute with scratch memory
       Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
