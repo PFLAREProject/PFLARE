@@ -2517,6 +2517,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Log copy with petsc
          bytes = iscol_o_view_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogCpuToGpu(bytes));
+         Kokkos::fence();
 
          PetscCallVoid(ISRestoreIndices(iscol_o, &iscol_o_indices_ptr));
       }
@@ -2629,6 +2630,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       // Copy indices to the device
       Kokkos::deep_copy(exec, is_row_d_d, is_row_view_h);
       Kokkos::deep_copy(exec, is_col_d_d, is_col_view_h);
+      // The source pointers come from ISGetIndices; ensure async copies complete
+      // before restoring those host buffers.
+      Kokkos::fence();
       // Log copy with petsc
       size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));        

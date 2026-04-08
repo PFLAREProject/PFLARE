@@ -366,6 +366,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscCallVoid(PetscLogCpuToGpu(bytes));        
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));      
+   Kokkos::fence();
 
    local_cols_coarse = local_rows_coarse;
    local_cols = local_rows_coarse + local_rows_fine;
