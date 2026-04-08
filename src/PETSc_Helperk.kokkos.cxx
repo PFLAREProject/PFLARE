@@ -2210,22 +2210,29 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 
       // Execute with scratch memory
       Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-         
+
          // i_idx_is_row is the row index into the output
          const PetscInt i_idx_is_row = t.league_rank();
          // i is the row index into the input
-         const PetscInt i = is_row_d_d(i_idx_is_row);       
+         const PetscInt i = is_row_d_d(i_idx_is_row);
 
          // number of columns
          PetscInt ncols_local;
          ncols_local = device_local_i[i + 1] - device_local_i[i];
          ScratchIntView scratch_indices;
 
+         // DIAGNOSTIC: ncols_local must not exceed max_nnz_local.
+         // If it does the scratch allocation below overruns the per-team
+         // budget and silently corrupts adjacent device memory.
+         // Use Kokkos::abort (not KOKKOS_ASSERT) so this fires unconditionally
+         // regardless of NDEBUG / KOKKOS_ENABLE_DEBUG build flags.
+         if (ncols_local > max_nnz_local) Kokkos::abort("PFLARE: ncols_local > max_nnz_local in MatCreateSubMatrix_Seq_kokkos — scratch pool overflow");
+
          // Allocate views directly on scratch memory
          // Have to use views here given alignment issues
          // We have of size ncols+1 to account for the exclusive scan
-         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);  
-         
+         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);
+
          // Initialize scratch
          Kokkos::parallel_for(Kokkos::TeamVectorRange(t, ncols_local+1), [&](const PetscInt j) {
             scratch_indices(j) = 0;
@@ -2318,22 +2325,25 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 
       // Execute with scratch memory
       Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-            
+
          // i_idx_is_row is the row index into the output
          const PetscInt i_idx_is_row = t.league_rank();
          // i is the row index into the input
-         const PetscInt i = is_row_d_d(i_idx_is_row);     
+         const PetscInt i = is_row_d_d(i_idx_is_row);
 
          // number of columns
          PetscInt ncols_local;
          ncols_local = device_local_i[i + 1] - device_local_i[i];
          ScratchIntView scratch_indices;
 
+         // DIAGNOSTIC: same scratch-overflow guard as in the non-reuse kernel above.
+         KOKKOS_ASSERT(ncols_local <= max_nnz_local);
+
          // Allocate views directly on scratch memory
          // Have to use views here given alignment issues
          // We have of size ncols+1 to account for the exclusive scan
-         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);  
-         
+         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);
+
          // Initialize scratch
          Kokkos::parallel_for(Kokkos::TeamVectorRange(t, ncols_local+1), [&](const PetscInt j) {
             scratch_indices(j) = 0;
@@ -2464,7 +2474,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 // diag Seq_kokkos kernel chain. Reuse path is unchanged (crashes are
 // first-call only). Toggle off (set to 0) to restore the original path.
 #ifndef PFLARE_ABLATE_DIAG_SUBMAT
-#define PFLARE_ABLATE_DIAG_SUBMAT 1
+#define PFLARE_ABLATE_DIAG_SUBMAT 0
 #endif
 
 //    // The diagonal component
@@ -2523,7 +2533,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 // so that only the off-diag section is ablated while diag uses our Kokkos kernel.
 // Only the first-call (non-reuse) path is ablated, matching the observed failure mode.
 #ifndef PFLARE_ABLATE_OFFDIAG_SUBMAT
-#define PFLARE_ABLATE_OFFDIAG_SUBMAT 1
+#define PFLARE_ABLATE_OFFDIAG_SUBMAT 0
 #endif
 
    if (mpi)
