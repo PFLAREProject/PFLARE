@@ -1970,7 +1970,57 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    PetscInt local_rows_row = is_row_d_d.extent(0), local_cols_col = is_col_d_d.extent(0);
-   
+
+   // ~~~~~~~~~~~~
+   // DIAGNOSTIC (Step 1 of plan): verify is_row_d_d / is_col_d_d are in-bounds.
+   // If a caller supplies out-of-range indices, smap_d / device_local_i accesses
+   // below would silently clobber adjacent device allocations.
+   // ~~~~~~~~~~~~
+   {
+      PetscInt row_min = 0, row_max = -1, col_min = 0, col_max = -1;
+      if (local_rows_row > 0) {
+         Kokkos::parallel_reduce("PFLARE_DBG_is_row_minmax",
+            Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt &lmin) {
+               const PetscInt v = is_row_d_d(i);
+               if (v < lmin) lmin = v;
+            }, Kokkos::Min<PetscInt>(row_min));
+         Kokkos::parallel_reduce("PFLARE_DBG_is_row_max",
+            Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt &lmax) {
+               const PetscInt v = is_row_d_d(i);
+               if (v > lmax) lmax = v;
+            }, Kokkos::Max<PetscInt>(row_max));
+      }
+      if (local_cols_col > 0) {
+         Kokkos::parallel_reduce("PFLARE_DBG_is_col_minmax",
+            Kokkos::RangePolicy<>(exec, 0, local_cols_col),
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt &lmin) {
+               const PetscInt v = is_col_d_d(i);
+               if (v < lmin) lmin = v;
+            }, Kokkos::Min<PetscInt>(col_min));
+         Kokkos::parallel_reduce("PFLARE_DBG_is_col_max",
+            Kokkos::RangePolicy<>(exec, 0, local_cols_col),
+            KOKKOS_LAMBDA(const PetscInt i, PetscInt &lmax) {
+               const PetscInt v = is_col_d_d(i);
+               if (v > lmax) lmax = v;
+            }, Kokkos::Max<PetscInt>(col_max));
+      }
+      Kokkos::fence();
+      if (local_rows_row > 0) {
+         PetscCheckAbort(row_min >= 0 && row_max < local_rows, PETSC_COMM_SELF,
+            PETSC_ERR_ARG_OUTOFRANGE,
+            "MatCreateSubMatrix_Seq_kokkos: is_row out of range [0,%" PetscInt_FMT ") got [%" PetscInt_FMT ",%" PetscInt_FMT "]",
+            local_rows, row_min, row_max);
+      }
+      if (local_cols_col > 0) {
+         PetscCheckAbort(col_min >= 0 && col_max < local_cols, PETSC_COMM_SELF,
+            PETSC_ERR_ARG_OUTOFRANGE,
+            "MatCreateSubMatrix_Seq_kokkos: is_col out of range [0,%" PetscInt_FMT ") got [%" PetscInt_FMT ",%" PetscInt_FMT "]",
+            local_cols, col_min, col_max);
+      }
+   }
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
@@ -2456,6 +2506,30 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                }
                partial_sum += input_value;  // Update running total
          });
+
+         // ~~~~~~~~~~~~
+         // DIAGNOSTIC (Step 1 of plan): the parallel_reduce above produced
+         // col_ao_output on the host while the scan produced the per-index
+         // prefix sum on device. They must agree on the total count; if they
+         // don't, the size of is_col_o_d / garray_output_d below is wrong and
+         // the subsequent scatter kernel will write out of bounds.
+         // ~~~~~~~~~~~~
+         {
+            PetscInt scan_total_h = 0;
+            auto tail_sv = Kokkos::subview(is_col_o_match_d, cols_ao);
+            Kokkos::View<PetscInt, Kokkos::HostSpace> tail_h("PFLARE_DBG_scan_tail");
+            Kokkos::deep_copy(exec, tail_h, tail_sv);
+            Kokkos::fence();
+            scan_total_h = tail_h();
+            PetscCheckAbort(scan_total_h == col_ao_output, MPI_COMM_MATRIX,
+               PETSC_ERR_PLIB,
+               "MatCreateSubMatrix_kokkos_view: parallel_reduce count (%" PetscInt_FMT ") disagrees with scan total (%" PetscInt_FMT "), cols_ao=%" PetscInt_FMT,
+               col_ao_output, scan_total_h, cols_ao);
+            PetscCheckAbort(col_ao_output >= 0 && col_ao_output <= cols_ao, MPI_COMM_MATRIX,
+               PETSC_ERR_PLIB,
+               "MatCreateSubMatrix_kokkos_view: col_ao_output=%" PetscInt_FMT " outside [0,%" PetscInt_FMT "]",
+               col_ao_output, cols_ao);
+         }
 
          // Local indices into input garray of the columns we want to keep
          // but remember this doesn't mean garray_output = garray_input(is_col_o_d)
