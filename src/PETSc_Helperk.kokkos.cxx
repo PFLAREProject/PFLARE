@@ -2430,41 +2430,42 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
-   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));
+   // PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));
    PetscInt local_cols_col = is_col_d_d.extent(0);
    auto exec = PetscGetKokkosExecutionSpace();
 
-   // Are we in parallel?
-   MatType mat_type;
+   // // Are we in parallel?
+   // MatType mat_type;
    MPI_Comm MPI_COMM_MATRIX;
-   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   // PetscCallVoid(MatGetType(*input_mat, &mat_type));
 
-   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
-   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   // const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
+   const bool mpi = true;
+   // PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   // PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
+   // PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
 
    Mat_MPIAIJ *mat_mpi = nullptr;
    Mat mat_local = NULL, mat_nonlocal = NULL;   
    Mat output_mat_local, output_mat_nonlocal;
   
    PetscInt rows_ao, cols_ao;
-   if (mpi)
-   {
-      mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao)); 
+   // if (mpi)
+   // {
+   //    mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
+   //    PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
+   //    PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao)); 
       
-      if (reuse_int)
-      {
-         PetscCallVoid(MatMPIAIJGetSeqAIJ(*output_mat, &output_mat_local, &output_mat_nonlocal, NULL));
-      }
-   }
-   else
-   {
-      mat_local = *input_mat;
-      if (reuse_int) output_mat_local = *output_mat;
-   }
+   //    if (reuse_int)
+   //    {
+   //       PetscCallVoid(MatMPIAIJGetSeqAIJ(*output_mat, &output_mat_local, &output_mat_nonlocal, NULL));
+   //    }
+   // }
+   // else
+   // {
+   //    mat_local = *input_mat;
+   //    if (reuse_int) output_mat_local = *output_mat;
+   // }
    size_t bytes = 0;
 
 // Ablation toggle (Step 2 of plan): when defined non-zero, the diagonal
