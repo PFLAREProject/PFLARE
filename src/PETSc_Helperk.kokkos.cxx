@@ -2424,7 +2424,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 // is_col must be sorted
 // This one uses the views is_row_d_d and is_col_d_d directly, rewritten to be the local indices
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
-         PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
+         PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat, IS *rows_rows, IS *cols_cols)
 {
    PflareKokkosTrace _trace("MatCreateSubMatrix_kokkos_view");
    PetscInt local_rows, local_cols;
@@ -2477,51 +2477,51 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 #define PFLARE_ABLATE_DIAG_SUBMAT 0
 #endif
 
-   // The diagonal component
-#if PFLARE_ABLATE_DIAG_SUBMAT
-   if (!reuse_int)
-   {
-      // Pull the (already-local) is_row / is_col indices back to the host so
-      // PETSc's CPU MatCreateSubMatrix can consume them. mat_local is a
-      // SeqAIJKokkos but PETSc's MatCreateSubMatrix dispatches to the host
-      // SeqAIJ implementation, producing a SeqAIJ result that we then convert
-      // back to SeqAIJKokkos for the downstream MatCreateMPIAIJWithSeqAIJ.
-      const PetscInt n_row_h = is_row_d_d.extent(0);
-      const PetscInt n_col_h = is_col_d_d.extent(0);
-      PetscInt *is_row_host_arr = NULL, *is_col_host_arr = NULL;
-      PetscCallVoid(PetscMalloc1(n_row_h > 0 ? n_row_h : 1, &is_row_host_arr));
-      PetscCallVoid(PetscMalloc1(n_col_h > 0 ? n_col_h : 1, &is_col_host_arr));
-      PetscIntKokkosViewHost is_row_h_view(is_row_host_arr, n_row_h);
-      PetscIntKokkosViewHost is_col_h_view(is_col_host_arr, n_col_h);
-      Kokkos::deep_copy(exec, is_row_h_view, is_row_d_d);
-      Kokkos::deep_copy(exec, is_col_h_view, is_col_d_d);
-      Kokkos::fence();
+//    // The diagonal component
+// #if PFLARE_ABLATE_DIAG_SUBMAT
+//    if (!reuse_int)
+//    {
+//       // Pull the (already-local) is_row / is_col indices back to the host so
+//       // PETSc's CPU MatCreateSubMatrix can consume them. mat_local is a
+//       // SeqAIJKokkos but PETSc's MatCreateSubMatrix dispatches to the host
+//       // SeqAIJ implementation, producing a SeqAIJ result that we then convert
+//       // back to SeqAIJKokkos for the downstream MatCreateMPIAIJWithSeqAIJ.
+//       const PetscInt n_row_h = is_row_d_d.extent(0);
+//       const PetscInt n_col_h = is_col_d_d.extent(0);
+//       PetscInt *is_row_host_arr = NULL, *is_col_host_arr = NULL;
+//       PetscCallVoid(PetscMalloc1(n_row_h > 0 ? n_row_h : 1, &is_row_host_arr));
+//       PetscCallVoid(PetscMalloc1(n_col_h > 0 ? n_col_h : 1, &is_col_host_arr));
+//       PetscIntKokkosViewHost is_row_h_view(is_row_host_arr, n_row_h);
+//       PetscIntKokkosViewHost is_col_h_view(is_col_host_arr, n_col_h);
+//       Kokkos::deep_copy(exec, is_row_h_view, is_row_d_d);
+//       Kokkos::deep_copy(exec, is_col_h_view, is_col_d_d);
+//       Kokkos::fence();
 
-      IS is_row_temp = NULL, is_col_temp = NULL;
-      PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, n_row_h, is_row_host_arr, PETSC_COPY_VALUES, &is_row_temp));
-      PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, n_col_h, is_col_host_arr, PETSC_COPY_VALUES, &is_col_temp));
+//       IS is_row_temp = NULL, is_col_temp = NULL;
+//       PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, n_row_h, is_row_host_arr, PETSC_COPY_VALUES, &is_row_temp));
+//       PetscCallVoid(ISCreateGeneral(PETSC_COMM_SELF, n_col_h, is_col_host_arr, PETSC_COPY_VALUES, &is_col_temp));
 
-      Mat tmp_host_mat = NULL;
-      PetscCallVoid(MatCreateSubMatrix(mat_local, is_row_temp, is_col_temp, MAT_INITIAL_MATRIX, &output_mat_local));
-      // Convert the SeqAIJ host result to SeqAIJKokkos so the downstream
-      // MatCreateMPIAIJWithSeqAIJ + reuse storage hand-off still get a Kokkos
-      // seq block (matches what MatCreateSubMatrix_Seq_kokkos would have
-      // produced).
-      //PetscCallVoid(MatConvert(tmp_host_mat, MATSEQAIJKOKKOS, MAT_INITIAL_MATRIX, &output_mat_local));
+//       Mat tmp_host_mat = NULL;
+//       PetscCallVoid(MatCreateSubMatrix(mat_local, is_row_temp, is_col_temp, MAT_INITIAL_MATRIX, &output_mat_local));
+//       // Convert the SeqAIJ host result to SeqAIJKokkos so the downstream
+//       // MatCreateMPIAIJWithSeqAIJ + reuse storage hand-off still get a Kokkos
+//       // seq block (matches what MatCreateSubMatrix_Seq_kokkos would have
+//       // produced).
+//       //PetscCallVoid(MatConvert(tmp_host_mat, MATSEQAIJKOKKOS, MAT_INITIAL_MATRIX, &output_mat_local));
 
-      //PetscCallVoid(MatDestroy(&tmp_host_mat));
-      PetscCallVoid(ISDestroy(&is_row_temp));
-      PetscCallVoid(ISDestroy(&is_col_temp));
-      PetscCallVoid(PetscFree(is_row_host_arr));
-      PetscCallVoid(PetscFree(is_col_host_arr));
-   }
-   else
-   {
-      MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
-   }
-#else
-   MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
-#endif
+//       //PetscCallVoid(MatDestroy(&tmp_host_mat));
+//       PetscCallVoid(ISDestroy(&is_row_temp));
+//       PetscCallVoid(ISDestroy(&is_col_temp));
+//       PetscCallVoid(PetscFree(is_row_host_arr));
+//       PetscCallVoid(PetscFree(is_col_host_arr));
+//    }
+//    else
+//    {
+//       MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
+//    }
+// #else
+//    MatCreateSubMatrix_Seq_kokkos(&mat_local, is_row_d_d, is_col_d_d, reuse_int, &output_mat_local);
+// #endif
 
    // The off-diagonal component requires some comms
    // Basically a copy of MatCreateSubMatrix_MPIAIJ_SameRowColDist
@@ -2533,7 +2533,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 // so that only the off-diag section is ablated while diag uses our Kokkos kernel.
 // Only the first-call (non-reuse) path is ablated, matching the observed failure mode.
 #ifndef PFLARE_ABLATE_OFFDIAG_SUBMAT
-#define PFLARE_ABLATE_OFFDIAG_SUBMAT 0
+#define PFLARE_ABLATE_OFFDIAG_SUBMAT 1
 #endif
 
    if (mpi)
@@ -2567,6 +2567,19 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          IS is_row_g_abl = NULL, is_col_g_abl = NULL;
          PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_row_abl, is_row_g_arr, PETSC_OWN_POINTER, &is_row_g_abl));
          PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_col_abl, is_col_g_arr, PETSC_OWN_POINTER, &is_col_g_abl));
+
+         PetscBool equal_flag;
+         PetscCallVoid(ISEqualUnsorted(is_row_g_abl, *rows_rows, &equal_flag));
+
+PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
+               PETSC_ERR_PLIB,
+               "rows not equal");       
+               
+         PetscCallVoid(ISEqualUnsorted(is_col_g_abl, *cols_cols, &equal_flag));
+
+PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
+               PETSC_ERR_PLIB,
+               "cols not equal");                
 
          Mat tmp_abl = NULL;
          PetscCallVoid(MatCreateSubMatrix(*input_mat, is_row_g_abl, is_col_g_abl, MAT_INITIAL_MATRIX, output_mat));
@@ -2861,8 +2874,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 {
    PflareKokkosTrace _trace("MatCreateSubMatrix_kokkos");
 
-   PetscCallVoid(MatCreateSubMatrix(*input_mat, *is_row, *is_col, MAT_INITIAL_MATRIX, output_mat));
-   return;
+   // PetscCallVoid(MatCreateSubMatrix(*input_mat, *is_row, *is_col, MAT_INITIAL_MATRIX, output_mat));
+   // return;
 
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
@@ -2949,7 +2962,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       }        
    }  
 
-   MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat);
+   MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat, is_row, is_col);
 
    return;
 }
