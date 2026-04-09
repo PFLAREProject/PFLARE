@@ -2874,9 +2874,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 {
    PflareKokkosTrace _trace("MatCreateSubMatrix_kokkos");
 
-   // PetscCallVoid(MatCreateSubMatrix(*input_mat, *is_row, *is_col, MAT_INITIAL_MATRIX, output_mat));
-   // return;
-
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));  
@@ -2961,6 +2958,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
          is_col_d_d = *IS_coarse_views_local[level_idx];
       }        
    }  
+
+   PetscCallVoid(MatCreateSubMatrix(*input_mat, *is_row, *is_col, MAT_INITIAL_MATRIX, output_mat));
+   return;   
 
    MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat, is_row, is_col);
 
