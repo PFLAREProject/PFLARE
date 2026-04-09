@@ -2541,54 +2541,54 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 #if PFLARE_ABLATE_OFFDIAG_SUBMAT
       if (!reuse_int)
       {
-         // We need global IS indices (is_row/is_col on device are already LOCAL,
-         // i.e. row_global - global_row_start; add back the offset before calling
-         // PETSc's CPU MatCreateSubMatrix which expects global indices).
-         PetscInt global_row_start_abl = 0, global_row_end_abl = 0;
-         PetscInt global_col_start_abl = 0, global_col_end_abl = 0;
-         PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_abl, &global_row_end_abl));
-         PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_abl, &global_col_end_abl));
+//          // We need global IS indices (is_row/is_col on device are already LOCAL,
+//          // i.e. row_global - global_row_start; add back the offset before calling
+//          // PETSc's CPU MatCreateSubMatrix which expects global indices).
+//          PetscInt global_row_start_abl = 0, global_row_end_abl = 0;
+//          PetscInt global_col_start_abl = 0, global_col_end_abl = 0;
+//          PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_abl, &global_row_end_abl));
+//          PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_abl, &global_col_end_abl));
 
-         const PetscInt n_row_abl = (PetscInt)is_row_d_d.extent(0);
-         const PetscInt n_col_abl = (PetscInt)is_col_d_d.extent(0);
-         PetscInt *is_row_g_arr = NULL, *is_col_g_arr = NULL;
-         PetscCallVoid(PetscMalloc1(n_row_abl > 0 ? n_row_abl : 1, &is_row_g_arr));
-         PetscCallVoid(PetscMalloc1(n_col_abl > 0 ? n_col_abl : 1, &is_col_g_arr));
+//          const PetscInt n_row_abl = (PetscInt)is_row_d_d.extent(0);
+//          const PetscInt n_col_abl = (PetscInt)is_col_d_d.extent(0);
+//          PetscInt *is_row_g_arr = NULL, *is_col_g_arr = NULL;
+//          PetscCallVoid(PetscMalloc1(n_row_abl > 0 ? n_row_abl : 1, &is_row_g_arr));
+//          PetscCallVoid(PetscMalloc1(n_col_abl > 0 ? n_col_abl : 1, &is_col_g_arr));
 
-         // Copy local device indices to host then shift back to global.
-         PetscIntKokkosViewHost is_row_g_h(is_row_g_arr, n_row_abl);
-         PetscIntKokkosViewHost is_col_g_h(is_col_g_arr, n_col_abl);
-         Kokkos::deep_copy(exec, is_row_g_h, is_row_d_d);
-         Kokkos::deep_copy(exec, is_col_g_h, is_col_d_d);
-         Kokkos::fence();
-         for (PetscInt ii = 0; ii < n_row_abl; ii++) is_row_g_arr[ii] += global_row_start_abl;
-         for (PetscInt ii = 0; ii < n_col_abl; ii++) is_col_g_arr[ii] += global_col_start_abl;
+//          // Copy local device indices to host then shift back to global.
+//          PetscIntKokkosViewHost is_row_g_h(is_row_g_arr, n_row_abl);
+//          PetscIntKokkosViewHost is_col_g_h(is_col_g_arr, n_col_abl);
+//          Kokkos::deep_copy(exec, is_row_g_h, is_row_d_d);
+//          Kokkos::deep_copy(exec, is_col_g_h, is_col_d_d);
+//          Kokkos::fence();
+//          for (PetscInt ii = 0; ii < n_row_abl; ii++) is_row_g_arr[ii] += global_row_start_abl;
+//          for (PetscInt ii = 0; ii < n_col_abl; ii++) is_col_g_arr[ii] += global_col_start_abl;
 
-         IS is_row_g_abl = NULL, is_col_g_abl = NULL;
-         PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_row_abl, is_row_g_arr, PETSC_OWN_POINTER, &is_row_g_abl));
-         PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_col_abl, is_col_g_arr, PETSC_OWN_POINTER, &is_col_g_abl));
+//          IS is_row_g_abl = NULL, is_col_g_abl = NULL;
+//          PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_row_abl, is_row_g_arr, PETSC_OWN_POINTER, &is_row_g_abl));
+//          PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, n_col_abl, is_col_g_arr, PETSC_OWN_POINTER, &is_col_g_abl));
 
-         PetscBool equal_flag;
-         PetscCallVoid(ISEqualUnsorted(is_row_g_abl, *rows_rows, &equal_flag));
+//          PetscBool equal_flag;
+//          PetscCallVoid(ISEqualUnsorted(is_row_g_abl, *rows_rows, &equal_flag));
 
-PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
-               PETSC_ERR_PLIB,
-               "rows not equal");       
+// PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
+//                PETSC_ERR_PLIB,
+//                "rows not equal");       
                
-         PetscCallVoid(ISEqualUnsorted(is_col_g_abl, *cols_cols, &equal_flag));
+//          PetscCallVoid(ISEqualUnsorted(is_col_g_abl, *cols_cols, &equal_flag));
 
-PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
-               PETSC_ERR_PLIB,
-               "cols not equal");                
+// PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
+//                PETSC_ERR_PLIB,
+//                "cols not equal");                
 
-         Mat tmp_abl = NULL;
+//          Mat tmp_abl = NULL;
          //PetscCallVoid(MatCreateSubMatrix(*input_mat, is_row_g_abl, is_col_g_abl, MAT_INITIAL_MATRIX, output_mat));
          PetscCallVoid(MatCreateSubMatrix(*input_mat, *rows_rows, *cols_cols, MAT_INITIAL_MATRIX, output_mat));
          //PetscCallVoid(MatConvert(tmp_abl, MATMPIAIJKOKKOS, MAT_INITIAL_MATRIX, output_mat));
          //PetscCallVoid(MatDestroy(&tmp_abl));
          //PetscCallVoid(MatDestroy(&output_mat_local));   // diag mat no longer needed
-         PetscCallVoid(ISDestroy(&is_row_g_abl));
-         PetscCallVoid(ISDestroy(&is_col_g_abl));
+         //PetscCallVoid(ISDestroy(&is_row_g_abl));
+         //PetscCallVoid(ISDestroy(&is_col_g_abl));
          return;
       }
 #endif
