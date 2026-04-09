@@ -2582,7 +2582,8 @@ PetscCheckAbort(equal_flag, MPI_COMM_MATRIX,
                "cols not equal");                
 
          Mat tmp_abl = NULL;
-         PetscCallVoid(MatCreateSubMatrix(*input_mat, is_row_g_abl, is_col_g_abl, MAT_INITIAL_MATRIX, output_mat));
+         //PetscCallVoid(MatCreateSubMatrix(*input_mat, is_row_g_abl, is_col_g_abl, MAT_INITIAL_MATRIX, output_mat));
+         PetscCallVoid(MatCreateSubMatrix(*input_mat, *rows_rows, *cols_cols, MAT_INITIAL_MATRIX, output_mat));
          //PetscCallVoid(MatConvert(tmp_abl, MATMPIAIJKOKKOS, MAT_INITIAL_MATRIX, output_mat));
          //PetscCallVoid(MatDestroy(&tmp_abl));
          //PetscCallVoid(MatDestroy(&output_mat_local));   // diag mat no longer needed
@@ -2959,8 +2960,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       }        
    }  
 
-   PetscCallVoid(MatCreateSubMatrix(*input_mat, *is_row, *is_col, MAT_INITIAL_MATRIX, output_mat));
-   return;   
+   // PetscCallVoid(MatCreateSubMatrix(*input_mat, *is_row, *is_col, MAT_INITIAL_MATRIX, output_mat));
+   // return;   
 
    MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat, is_row, is_col);
 
