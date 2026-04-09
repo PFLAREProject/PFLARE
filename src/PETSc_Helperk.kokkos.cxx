@@ -2423,8 +2423,8 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 // as the matrices, ie equivalent to MatCreateSubMatrix_MPIAIJ_SameRowDist
 // is_col must be sorted
 // This one uses the views is_row_d_d and is_col_d_d directly, rewritten to be the local indices
-PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
-         PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat, IS *rows_rows, IS *cols_cols)
+PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView is_row_d_d, PetscInt global_rows_row, \
+         PetscIntKokkosView is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat, IS *rows_rows, IS *cols_cols)
 {
 //    PflareKokkosTrace _trace("MatCreateSubMatrix_kokkos_view");
 //    PetscInt local_rows, local_cols;
