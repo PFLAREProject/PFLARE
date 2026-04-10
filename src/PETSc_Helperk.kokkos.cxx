@@ -2884,12 +2884,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    PetscCallVoid(ISGetSize(*is_row, &global_rows_row));
    PetscCallVoid(ISGetSize(*is_col, &global_cols_col));   
    
-   // // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
-   // mat_sync(input_mat);   
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
    
-   // PetscIntKokkosView is_row_d_d, is_col_d_d;
-   // const int level_idx = our_level - 1;
-   // auto exec = PetscGetKokkosExecutionSpace();
+   PetscIntKokkosView is_row_d_d, is_col_d_d;
+   const int level_idx = our_level - 1;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    // // If we want the input is_row and is_col to be used
    // if (our_level == -1)
