@@ -2891,54 +2891,54 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    const int level_idx = our_level - 1;
    auto exec = PetscGetKokkosExecutionSpace();
 
-   // // If we want the input is_row and is_col to be used
-   // if (our_level == -1)
-   // {
-   //    // Get pointers to the indices on the host
-   //    const PetscInt *is_row_indices_ptr, *is_col_indices_ptr;
-   //    PetscCallVoid(ISGetIndices(*is_row, &is_row_indices_ptr));   
-   //    PetscCallVoid(ISGetIndices(*is_col, &is_col_indices_ptr)); 
+   // If we want the input is_row and is_col to be used
+   if (our_level == -1)
+   {
+      // Get pointers to the indices on the host
+      const PetscInt *is_row_indices_ptr, *is_col_indices_ptr;
+      PetscCallVoid(ISGetIndices(*is_row, &is_row_indices_ptr));   
+      PetscCallVoid(ISGetIndices(*is_col, &is_col_indices_ptr)); 
 
-   //    PetscInt local_rows_row, local_cols_col;
-   //    PetscCallVoid(ISGetLocalSize(*is_row, &local_rows_row));   
-   //    PetscCallVoid(ISGetLocalSize(*is_col, &local_cols_col));
+      PetscInt local_rows_row, local_cols_col;
+      PetscCallVoid(ISGetLocalSize(*is_row, &local_rows_row));   
+      PetscCallVoid(ISGetLocalSize(*is_col, &local_cols_col));
 
-   //    // Create a host view of the existing indices
-   //    auto is_row_view_h = PetscIntConstKokkosViewHost(is_row_indices_ptr, local_rows_row);    
-   //    is_row_d_d = PetscIntKokkosView("is_row_d_d", local_rows_row);   
-   //    auto is_col_view_h = PetscIntConstKokkosViewHost(is_col_indices_ptr, local_cols_col);    
-   //    is_col_d_d = PetscIntKokkosView("is_col_d_d", local_cols_col);      
-   //    // Copy indices to the device
-   //    Kokkos::deep_copy(exec, is_row_d_d, is_row_view_h);
-   //    Kokkos::deep_copy(exec, is_col_d_d, is_col_view_h);
-   //    // The source pointers come from ISGetIndices; ensure async copies complete
-   //    // before restoring those host buffers.
-   //    Kokkos::fence();
-   //    // Log copy with petsc
-   //    size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
-   //    PetscCallVoid(PetscLogCpuToGpu(bytes));        
-   //    bytes = is_col_view_h.extent(0) * sizeof(PetscInt);
-   //    PetscCallVoid(PetscLogCpuToGpu(bytes));  
+      // Create a host view of the existing indices
+      auto is_row_view_h = PetscIntConstKokkosViewHost(is_row_indices_ptr, local_rows_row);    
+      is_row_d_d = PetscIntKokkosView("is_row_d_d", local_rows_row);   
+      auto is_col_view_h = PetscIntConstKokkosViewHost(is_col_indices_ptr, local_cols_col);    
+      is_col_d_d = PetscIntKokkosView("is_col_d_d", local_cols_col);      
+      // Copy indices to the device
+      Kokkos::deep_copy(exec, is_row_d_d, is_row_view_h);
+      Kokkos::deep_copy(exec, is_col_d_d, is_col_view_h);
+      // The source pointers come from ISGetIndices; ensure async copies complete
+      // before restoring those host buffers.
+      Kokkos::fence();
+      // Log copy with petsc
+      size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
+      PetscCallVoid(PetscLogCpuToGpu(bytes));        
+      bytes = is_col_view_h.extent(0) * sizeof(PetscInt);
+      PetscCallVoid(PetscLogCpuToGpu(bytes));  
 
-   //    PetscCallVoid(ISRestoreIndices(*is_row, &is_row_indices_ptr));   
-   //    PetscCallVoid(ISRestoreIndices(*is_col, &is_col_indices_ptr));   
+      PetscCallVoid(ISRestoreIndices(*is_row, &is_row_indices_ptr));   
+      PetscCallVoid(ISRestoreIndices(*is_col, &is_col_indices_ptr));   
 
-   //    // ~~~~~~~~~~~~
-   //    // Rewrite to local indices
-   //    // ~~~~~~~~~~~~     
-   //    Kokkos::parallel_for(
-   //       Kokkos::RangePolicy<>(exec, 0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
+      // ~~~~~~~~~~~~
+      // Rewrite to local indices
+      // ~~~~~~~~~~~~     
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(exec, 0, is_row_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {      
 
-   //          is_row_d_d(i) -= global_row_start; // Make local
-   //    });
+            is_row_d_d(i) -= global_row_start; // Make local
+      });
 
-   //    Kokkos::parallel_for(
-   //       Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(exec, 0, is_col_d_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
 
-   //          is_col_d_d(i) -= global_col_start; // Make local
-   //    });
-   //    Kokkos::fence(); 
-   // }
+            is_col_d_d(i) -= global_col_start; // Make local
+      });
+      Kokkos::fence(); 
+   }
    // // Instead if we tell the routine that the is_row and is_col are fine/coarse local indices
    // // that already are on the device
    // else
