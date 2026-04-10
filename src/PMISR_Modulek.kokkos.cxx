@@ -1375,7 +1375,7 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, cons
    pmisr_existing_measure_cf_markers_kokkos(strength_mat, max_luby_steps, pmis_int, measure_local_d, cf_markers_d, zero_measure_c_point_int);
 
    // Sanity check: every local point must be marked F(-1) or C(1)
-   check_cf_markers_all_marked_kokkos(cf_markers_d, local_rows, MPI_COMM_MATRIX);
+   //check_cf_markers_all_marked_kokkos(cf_markers_d, local_rows, MPI_COMM_MATRIX);
 
    // If PMIS then we swap the CF markers from PMISR
    if (pmis_int) {

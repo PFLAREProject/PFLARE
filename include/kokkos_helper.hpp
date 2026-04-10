@@ -189,13 +189,14 @@ inline void check_cf_markers_all_marked_kokkos(
          rank, (int)bad_count, (int)local_rows);
       fflush(stderr);
       MPI_Abort(MPI_COMM_MATRIX, 1);
-   } else {
-      fprintf(stderr,
-         "[PFLARE kokkos rank=%d] check_cf_markers_all_marked_kokkos: "
-         "all %d local points marked F or C OK\n",
-         rank, (int)local_rows);
-      fflush(stderr);
-   }
+   } 
+   // else {
+   //    fprintf(stderr,
+   //       "[PFLARE kokkos rank=%d] check_cf_markers_all_marked_kokkos: "
+   //       "all %d local points marked F or C OK\n",
+   //       rank, (int)local_rows);
+   //    fflush(stderr);
+   // }
 }
 
 // Check that is_fine_local_d and is_coarse_local_d together cover every local

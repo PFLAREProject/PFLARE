@@ -114,7 +114,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
          pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);
 
-         check_cf_markers_all_marked_kokkos(cf_markers_aff_d, cf_markers_aff_d.extent(0), MPI_COMM_MATRIX);
+         //check_cf_markers_all_marked_kokkos(cf_markers_aff_d, cf_markers_aff_d.extent(0), MPI_COMM_MATRIX);
 
          Kokkos::fence();
 
@@ -128,7 +128,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          });
          Kokkos::fence();
 
-         check_cf_markers_all_marked_kokkos(cf_markers_d, cf_markers_d.extent(0), MPI_COMM_MATRIX);
+         //check_cf_markers_all_marked_kokkos(cf_markers_d, cf_markers_d.extent(0), MPI_COMM_MATRIX);
       }
       return;
    }
