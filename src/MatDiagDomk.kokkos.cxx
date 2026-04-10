@@ -17,6 +17,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    PflareKokkosTrace _trace("MatDiagDomRatio_kokkos");
    PetscInt local_rows, local_cols;
 
+   Kokkos::fence();
+
    mat_sync(input_mat);   
 
    // Are we in parallel?
@@ -64,6 +66,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    diag_dom_ratio_local_d = PetscScalarKokkosView("diag_dom_ratio_local_d", local_rows_row);
    PetscScalarKokkosView diag_dom_ratio_d = diag_dom_ratio_local_d;
 
+   Kokkos::fence();
+
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
@@ -110,6 +114,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Have to store the diagonal entry
    PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
    Kokkos::deep_copy(exec, diag_entry_d, 0);
+
+   Kokkos::fence();
 
    // Scoping to reduce peak memory
    {
@@ -160,11 +166,13 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                diag_dom_ratio_d(i_idx_is_row) = sum_val;
             });
       });  
+      Kokkos::fence();
    }
 
    // Finish the in-flight scatter and only then read from the receive buffer.
    if (mpi)
    {
+      Kokkos::fence();
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
          PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &lvec_scalar_d));
@@ -234,8 +242,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                   diag_dom_ratio_d(i_idx_is_row) += sum_val;
                });
          });  
+         Kokkos::fence();
       }       
    }
+
+   Kokkos::fence();
 
    // ~~~~~~~~~~~~~
    // Compute the diag dominance ratio
@@ -263,6 +274,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       },
       Kokkos::Max<PetscReal>(max_dd_ratio_local)
    );
+
+   Kokkos::fence();
 
    PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX));
 
