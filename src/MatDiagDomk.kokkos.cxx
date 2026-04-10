@@ -14,7 +14,7 @@
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
 {
-   PflareKokkosTrace _trace("MatDiagDomRatio_kokkos");
+   //PflareKokkosTrace _trace("MatDiagDomRatio_kokkos");
    PetscInt local_rows, local_cols;
 
    Kokkos::fence();

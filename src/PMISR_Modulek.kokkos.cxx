@@ -15,7 +15,7 @@
 // This mirrors the CPU version pmisr_existing_measure_cf_markers in PMISR_Module.F90
 PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int)
 {
-   PflareKokkosTrace _trace("pmisr_existing_measure_cf_markers_kokkos");
+   //PflareKokkosTrace _trace("pmisr_existing_measure_cf_markers_kokkos");
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -529,7 +529,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 // See the full comments in the CPU version pmisr_existing_measure_implicit_transpose
 PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int)
 {
-   PflareKokkosTrace _trace("pmisr_existing_measure_implicit_transpose_kokkos");
+   //PflareKokkosTrace _trace("pmisr_existing_measure_implicit_transpose_kokkos");
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -1287,7 +1287,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
 {
-   PflareKokkosTrace _trace("pmisr_kokkos");
+   //PflareKokkosTrace _trace("pmisr_kokkos");
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;

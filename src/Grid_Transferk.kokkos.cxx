@@ -7,7 +7,7 @@
 // Generate one point classical prolongator but with kokkos - keeping everything on the device
 PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *input_mat, Mat *output_mat)
 {
-   PflareKokkosTrace _trace("generate_one_point_with_one_entry_from_sparse_kokkos");
+   //PflareKokkosTrace _trace("generate_one_point_with_one_entry_from_sparse_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -309,7 +309,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_start, IS *is_fine, \
                   IS *is_coarse, int identity_int, int reuse_int, Mat *output_mat)
 {
-   PflareKokkosTrace _trace("compute_P_from_W_kokkos");
+   //PflareKokkosTrace _trace("compute_P_from_W_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_W, global_row_end_plus_one_W;
    PetscInt global_col_start_W, global_col_end_plus_one_W;
@@ -737,7 +737,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
                   IS *is_coarse, IS *orig_fine_col_indices, int identity_int, int reuse_int, int reuse_indices_int, \
                   Mat *output_mat)
 {
-   PflareKokkosTrace _trace("compute_R_from_Z_kokkos");
+   //PflareKokkosTrace _trace("compute_R_from_Z_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_Z, global_row_end_plus_one_Z;
    PetscInt global_col_start_Z, global_col_end_plus_one_Z;

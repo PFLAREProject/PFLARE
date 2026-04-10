@@ -15,7 +15,7 @@ PetscScalarKokkosView diag_dom_ratio_local_d;
 // Copy the global cf_markers_local_d back to the host
 PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 {
-   PflareKokkosTrace _trace("copy_cf_markers_d2h");
+   //PflareKokkosTrace _trace("copy_cf_markers_d2h");
    // Host wrapper for cf_markers_local
    intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
 
@@ -37,7 +37,7 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 // Copy the global diag_dom_ratio_local_d back to the host
 PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
 {
-   PflareKokkosTrace _trace("copy_diag_dom_ratio_d2h");
+   //PflareKokkosTrace _trace("copy_diag_dom_ratio_d2h");
    // Host wrapper for diag_dom_ratio_local
    PetscScalarKokkosViewHost diag_dom_ratio_h(diag_dom_ratio_local, diag_dom_ratio_local_d.extent(0));
 
@@ -59,7 +59,7 @@ PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
 // Delete the global cf_markers_local_d
 PETSC_INTERN void delete_device_cf_markers()
 {
-   PflareKokkosTrace _trace("delete_device_cf_markers");
+   //PflareKokkosTrace _trace("delete_device_cf_markers");
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    cf_markers_local_d = intKokkosView();
@@ -72,7 +72,7 @@ PETSC_INTERN void delete_device_cf_markers()
 // Delete the global diag_dom_ratio_local_d
 PETSC_INTERN void delete_device_diag_dom_ratio()
 {
-   PflareKokkosTrace _trace("delete_device_diag_dom_ratio");
+   //PflareKokkosTrace _trace("delete_device_diag_dom_ratio");
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    diag_dom_ratio_local_d = PetscScalarKokkosView();
@@ -85,7 +85,7 @@ PETSC_INTERN void delete_device_diag_dom_ratio()
 // Creates the device local indices for F or C points based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d)
 {
-   PflareKokkosTrace _trace("create_cf_is_device_kokkos");
+   //PflareKokkosTrace _trace("create_cf_is_device_kokkos");
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    auto exec = PetscGetKokkosExecutionSpace();
@@ -146,7 +146,7 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 // Creates the host IS is_fine and is_coarse based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse)
 {
-   PflareKokkosTrace _trace("create_cf_is_kokkos");
+   //PflareKokkosTrace _trace("create_cf_is_kokkos");
    PetscIntKokkosView is_fine_local_d, is_coarse_local_d;
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
