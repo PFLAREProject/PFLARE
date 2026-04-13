@@ -223,8 +223,9 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
    ----------------------------------------------------------------------- */
 static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,
                                  double width, double height,
+                                 int final_smooths, 
                                  PetscBool integrity_check, PetscBool print_stats,
-                                 int final_smooths, AppCtx *opt, DM *dm)
+                                 AppCtx *opt, DM *dm)
 {
   PetscFunctionBeginUser;
   // Generate the mesh stored in a parallel DM 
