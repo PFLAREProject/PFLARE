@@ -100,7 +100,7 @@ static char help[] = "Solves steady advection with upwinded DG FEM.\n\n";
 #include <math.h>
 
 #include "pflare.h"
-#include "box_2D_gen_unstruc_mesh.h"
+#include "BoxMeshDM.h"
 
 /* -----------------------------------------------------------------------
    Application context
