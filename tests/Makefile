@@ -280,8 +280,9 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity"
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity
+#	 
 	@echo "Test backward-Euler TS with upwind DG FEM in 2D with quads"
-	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_diag_scale_polys \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
 #	 
@@ -699,7 +700,7 @@ run_tests_no_load_short_parallel:
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity
 	@echo "Test backward-Euler TS with upwind DG FEM in 2D with quads in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_diag_scale_polys \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
 #	 
@@ -1134,7 +1135,12 @@ run_tests_medium_serial:
 	@echo "Test poorly scaled matrix with ISAI"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
-	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type isai -ksp_max_it 8								
+	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type isai -ksp_max_it 8	
+#	
+	@echo "Verify long time solution with backward-Euler TS with upwind DG FEM in 2D"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -pc_air_diag_scale_polys \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 2.5 -bottom_only_inflow_one	-verify_solution								
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
