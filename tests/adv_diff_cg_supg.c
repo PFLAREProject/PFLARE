@@ -38,7 +38,7 @@ static char help[] = "Solves steady advection-diffusion FEM problem with SUPG st
 #include <math.h>
 
 #include "pflare.h"
-#include "box_2D_gen_unstruc_mesh.h"
+#include "BoxMeshDM.h"
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
