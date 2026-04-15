@@ -279,7 +279,11 @@ run_tests_no_load_short_serial:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity"
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity	
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity
+	@echo "Test backward-Euler TS with upwind DG FEM in 2D with quads"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
@@ -693,7 +697,11 @@ run_tests_no_load_short_parallel:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test AIRG with upwind DG FEM in 2D with quads with curved velocity in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
-	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity		 
+	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -curved_velocity
+	@echo "Test backward-Euler TS with upwind DG FEM in 2D with quads in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"

@@ -15,6 +15,26 @@
       Can specify basis function order   -adv_diff_petscspace_degree
       Specify inflow of 1 on bottom face -bottom_only_inflow_one
       Can write out vtk solution with    -write_vtk
+      Time dependent solve               -time_depend
+
+      The time dependent solve does backward-Euler TS integration
+        instead of the steady KSP solve
+        Integrates   M du/dt + A_stiff u = b_stiff
+        rewritten as du/dt + (M^-1 A_stiff) u = M^-1 b_stiff
+        using a PETSc TS with backward Euler.  Swaps the
+        diag_scale preconditioner from the stiffness block-
+        diagonal to the DG mass-matrix block-diagonal and skips the
+        steady KSPSolve entirely.  Requires -diag_scale true.
+        Should run with -bottom_only_inflow_one otherwise 
+        the solution is zero at all time.
+        Timestep / step count / final time / inner solver are
+        all controlled by the standard PETSc TS options:
+          -ts_dt <dt>            -ts_max_steps <n>
+          -ts_max_time <T>       -ts_type <type>
+          -ts_monitor            -ts_view
+          -ts_ksp_... / -ts_snes_...
+        When -write_vtk is also set, one VTU is written per
+        TS step (basename dg_solution_ts_XXXX).
 
     ./adv_dg_upwind -dm_refine 2
             : pure advection in 2D with linear FEM with u = v = 1, normalised (theta=pi/4)
@@ -72,6 +92,7 @@ static char help[] = "Solves steady advection with upwinded DG FEM.\n\n";
 
 #include <petscdmplex.h>
 #include <petscksp.h>
+#include <petscts.h>
 #include <petscds.h>
 #include <petscfe.h>
 #include <petscdt.h>
@@ -90,6 +111,7 @@ typedef struct {
   PetscBool bottom_only_inflow_one;
   PetscBool diag_scale;
   PetscBool second_solve;
+  PetscBool time_depend;
   PetscBool write_vtk;
   PetscBool verify_solution;
 } AppCtx;
@@ -149,6 +171,9 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
 
   opt->second_solve = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &opt->second_solve, NULL));
+
+  opt->time_depend = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-time_depend", &opt->time_depend, NULL));
 
   opt->write_vtk = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-write_vtk", &opt->write_vtk, NULL));
@@ -597,6 +622,47 @@ static PetscErrorCode AssembleVolumeCell(DM dm, PetscFE fe, PetscInt c,
     /* RHS: f=0 so b_loc stays zero */
   }
 
+  PetscCall(PetscTabulationDestroy(&T));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* -----------------------------------------------------------------------
+   Per-cell DG mass-matrix block
+     M_ij = integral_K  phi_i(x) phi_j(x) dx
+          = sum_q  w_q * |detJ| * phi_i(xi_q) * phi_j(xi_q)
+   M is block-diagonal cell-by-cell in DG because the basis is broken.
+   Inverted per cell this is the correct left-preconditioner for the
+   time-dependent system   M du/dt + A_stiff u = b_stiff.
+   ----------------------------------------------------------------------- */
+static PetscErrorCode AssembleCellMassBlock(DM dm, PetscFE fe, PetscInt c,
+                                            PetscInt Nb,
+                                            PetscScalar *M_loc /* Nb*Nb */)
+{
+  PetscTabulation   T;
+  PetscQuadrature   quad;
+  const PetscReal  *qpoints, *qweights;
+  PetscInt          Nqp;
+  PetscReal         v0[3], J[9], invJ[9], detJ;
+
+  PetscFunctionBeginUser;
+  PetscCall(DMPlexComputeCellGeometryFEM(dm, c, NULL, v0, J, invJ, &detJ));
+  detJ = PetscAbsReal(detJ);
+
+  PetscCall(PetscFEGetQuadrature(fe, &quad));
+  PetscCall(PetscQuadratureGetData(quad, NULL, NULL, &Nqp, &qpoints, &qweights));
+  PetscCall(PetscFECreateTabulation(fe, 1, Nqp, qpoints, 0, &T));
+
+  PetscCall(PetscArrayzero(M_loc, Nb * Nb));
+  for (PetscInt q = 0; q < Nqp; q++) {
+    const PetscReal wdetJ = qweights[q] * detJ;
+    for (PetscInt i = 0; i < Nb; i++) {
+      const PetscReal phi_i = T->T[0][(q * Nb + i) * 1 + 0];
+      for (PetscInt j = 0; j < Nb; j++) {
+        const PetscReal phi_j = T->T[0][(q * Nb + j) * 1 + 0];
+        M_loc[i * Nb + j] += phi_i * phi_j * wdetJ;
+      }
+    }
+  }
   PetscCall(PetscTabulationDestroy(&T));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1514,6 +1580,74 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
 }
 
 /* -----------------------------------------------------------------------
+   PETSc TS callbacks for the -time_depend path
+
+   Equation integrated:   du/dt + A u = b_rhs
+   where A = M^{-1} A_stiff and b_rhs = M^{-1} b_stiff after the
+   diag_scale step has applied the block-diagonal DG mass-matrix inverse
+   (see AssembleCellMassBlock).  The effective mass matrix is therefore
+   the identity, so the implicit form reduces to
+     F(t, u, udot) = udot + A u - b_rhs
+     J            = shift * I + A         (shift = 1/dt)
+   ----------------------------------------------------------------------- */
+typedef struct {
+  Mat          A;
+  Vec          b_rhs;
+  DM           dm;
+  PetscFE      fe;
+  PetscSection sec;
+  PetscBool    write_vtk;
+} TSAdvCtx;
+
+static PetscErrorCode IFunctionAdv(TS ts, PetscReal t, Vec u, Vec udot, Vec F, void *ctx_void)
+{
+  TSAdvCtx *c = (TSAdvCtx *)ctx_void;
+
+  PetscFunctionBeginUser;
+  (void)ts; (void)t;
+  PetscCall(MatMult(c->A, u, F));
+  PetscCall(VecAXPY(F, 1.0, udot));
+  PetscCall(VecAXPY(F, -1.0, c->b_rhs));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* First call copies A into the freshly-allocated J (one host->device
+   transfer on GPU builds), and the inner KSP builds its PC on J.  With a
+   constant dt, shift is constant, so on subsequent calls J is numerically
+   unchanged; the PC is reused and every subsequent step runs on-device. */
+static PetscErrorCode IJacobianAdv(TS ts, PetscReal t, Vec u, Vec udot, PetscReal shift,
+                                   Mat J, Mat Jpre, void *ctx_void)
+{
+  TSAdvCtx *c = (TSAdvCtx *)ctx_void;
+
+  PetscFunctionBeginUser;
+  (void)ts; (void)t; (void)u; (void)udot;
+  PetscCall(MatCopy(c->A, Jpre, SAME_NONZERO_PATTERN));
+  PetscCall(MatShift(Jpre, shift));
+  if (J != Jpre) {
+    PetscCall(MatCopy(c->A, J, SAME_NONZERO_PATTERN));
+    PetscCall(MatShift(J, shift));
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* TSMonitor that writes one VTU per step (including the IC at step 0)
+   when -write_vtk is also set. */
+static PetscErrorCode TSMonitorWriteVTK(TS ts, PetscInt step, PetscReal time, Vec u, void *ctx_void)
+{
+  TSAdvCtx *c = (TSAdvCtx *)ctx_void;
+  char      basename[64];
+
+  PetscFunctionBeginUser;
+  (void)ts; (void)time;
+  if (!c->write_vtk) PetscFunctionReturn(PETSC_SUCCESS);
+  PetscCall(PetscSNPrintf(basename, sizeof(basename),
+                          "dg_solution_ts_%04" PetscInt_FMT, step));
+  PetscCall(WriteDGFieldVTU(c->dm, c->fe, c->sec, u, basename));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* -----------------------------------------------------------------------
    main
    ----------------------------------------------------------------------- */
 int main(int argc, char **argv)
@@ -1523,7 +1657,7 @@ int main(int argc, char **argv)
   PetscSection sec;
   Mat         A;
   Vec         x, b_rhs;
-  KSP         ksp;
+  KSP         ksp = NULL;
   AppCtx      ctx;
   PetscInt    dim, cStart, cEnd, Nb, Nq, nrows;
   DMPolytopeType ct;
@@ -1681,8 +1815,14 @@ int main(int argc, char **argv)
       if (goff < 0) continue; /* skip ghost cells */
       for (PetscInt i = 0; i < Nb; i++) dof_idx[i] = goff + i;
 
-      /* Extract the local element block from A */
-      PetscCall(MatGetValues(A, Nb, dof_idx, Nb, dof_idx, block));
+      if (ctx.time_depend) {
+        /* Physically-correct preconditioner for M du/dt + A_stiff u = b:
+           use the DG mass-matrix block M_K (block-diagonal in DG). */
+        PetscCall(AssembleCellMassBlock(dm, fe, c, Nb, block));
+      } else {
+        /* Block-Jacobi on the steady stiffness. */
+        PetscCall(MatGetValues(A, Nb, dof_idx, Nb, dof_idx, block));
+      }
 
       /* Invert in-place via LAPACK: getrf (LU factor) then getri (invert) */
       LAPACKgetrf_(&nb_blas, &nb_blas, block, &nb_blas, ipiv, &info_blas);
@@ -1823,28 +1963,98 @@ int main(int argc, char **argv)
 
   PetscCall(PetscLogStagePop());
 
-  /* ---- KSP solve ---- */
-  PetscCall(PetscLogStagePush(gpu_copy_stage));
-  PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp));
-  PetscCall(KSPSetOperators(ksp, A, A));
-  PetscCall(KSPSetFromOptions(ksp));
-  PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
-  PetscCall(KSPSolve(ksp, b_rhs, x));
-  PetscCall(PetscLogStagePop());
+  if (ctx.time_depend) {
 
-  KSPConvergedReason reason;
-  PetscCall(KSPGetConvergedReason(ksp, &reason));
-  if (reason < 0) {
-    return 1;
-  }
+    /* -time_depend: no KSPSolve is performed here. The TS below is the
+       only linear-solve driver. The first TS step's inner KSP builds its
+       PC on J = shift*I + A (one host->device transfer on GPU builds);
+       subsequent steps reuse the PC and run entirely on-device. */
+    PetscCheck(ctx.diag_scale, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE,
+               "-time_depend requires -diag_scale true");
 
-  /* ---- Optional second solve (e.g. to time the solve without setup) ---- */
-  if (ctx.second_solve) {
-    PetscCall(VecSet(x, 1.0));
+    TS       ts;
+    Mat      J;
+    TSAdvCtx tsctx;
+
+    tsctx.A         = A;
+    tsctx.b_rhs     = b_rhs;
+    tsctx.dm        = dm;
+    tsctx.fe        = fe;
+    tsctx.sec       = sec;
+    tsctx.write_vtk = ctx.write_vtk;
+
+    // Set solution to zero at t=0
+    PetscCall(VecSet(x, 0.0));
+
+    PetscCall(PetscLogStagePush(gpu_copy_stage));
+    PetscCall(MatDuplicate(A, MAT_DO_NOT_COPY_VALUES, &J));
+
+    PetscCall(TSCreate(PETSC_COMM_WORLD, &ts));
+    PetscCall(TSSetType(ts, TSBEULER));
+    PetscCall(TSSetEquationType(ts, TS_EQ_IMPLICIT));
+    /* Linear problem: SNES reduces to KSPONLY (one linear solve per step,
+       no Newton iteration).  Combined with the lag settings below this
+       gives exactly one PC setup across the whole TS loop. */
+    PetscCall(TSSetProblemType(ts, TS_LINEAR));
+    PetscCall(TSSetIFunction(ts, NULL, IFunctionAdv, &tsctx));
+    PetscCall(TSSetIJacobian(ts, J, J, IJacobianAdv, &tsctx));
+
+    /* Defaults; user overrides via -ts_dt / -ts_max_steps / -ts_max_time /
+       -ts_type / -ts_monitor / -ts_view / -ts_ksp_... / -ts_snes_... */
+    PetscCall(TSSetTimeStep(ts, 0.01));
+    PetscCall(TSSetMaxTime(ts, 0.1));
+    PetscCall(TSSetExactFinalTime(ts, TS_EXACTFINALTIME_STEPOVER));
+
+    PetscCall(TSMonitorSet(ts, TSMonitorWriteVTK, &tsctx, NULL));
+    PetscCall(TSSetSolution(ts, x));
+    PetscCall(TSSetFromOptions(ts));
+
+    /* Constant dt => shift = 1/dt is constant => J = shift*I + A is
+       unchanged across steps.  Build J and its PC once and reuse. */
+    {
+      SNES snes;
+      PetscCall(TSGetSNES(ts, &snes));
+      PetscCall(SNESSetLagJacobian(snes, -2));
+      PetscCall(SNESSetLagJacobianPersists(snes, PETSC_TRUE));
+      PetscCall(SNESSetLagPreconditioner(snes, -2));
+      PetscCall(SNESSetLagPreconditionerPersists(snes, PETSC_TRUE));
+    }
+
+    // Start the time stepping
+    PetscCall(TSSolve(ts, x));
+    PetscCall(PetscLogStagePop());
+
+    TSConvergedReason ts_reason;
+    PetscCall(TSGetConvergedReason(ts, &ts_reason));
+    PetscCall(TSDestroy(&ts));
+    PetscCall(MatDestroy(&J));
+    if (ts_reason < 0) return 1;
+
+  } else {
+
+    /* ---- KSP solve ---- */
+    PetscCall(PetscLogStagePush(gpu_copy_stage));
+    PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp));
+    PetscCall(KSPSetOperators(ksp, A, A));
+    PetscCall(KSPSetFromOptions(ksp));
+    PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
     PetscCall(KSPSolve(ksp, b_rhs, x));
+    PetscCall(PetscLogStagePop());
+
+    KSPConvergedReason reason;
     PetscCall(KSPGetConvergedReason(ksp, &reason));
     if (reason < 0) {
       return 1;
+    }
+
+    /* ---- Optional second solve (e.g. to time the solve without setup) ---- */
+    if (ctx.second_solve) {
+      PetscCall(VecSet(x, 1.0));
+      PetscCall(KSPSolve(ksp, b_rhs, x));
+      PetscCall(KSPGetConvergedReason(ksp, &reason));
+      if (reason < 0) {
+        return 1;
+      }
     }
   }
 
@@ -1867,7 +2077,7 @@ int main(int argc, char **argv)
   }
 
   /* ---- Cleanup ---- */
-  PetscCall(KSPDestroy(&ksp));
+  if (!ctx.time_depend) PetscCall(KSPDestroy(&ksp));
   PetscCall(MatDestroy(&A));
   PetscCall(VecDestroy(&x));
   PetscCall(VecDestroy(&b_rhs));
