@@ -2032,6 +2032,21 @@ int main(int argc, char **argv)
       PetscCall(SNESSetLagPreconditionerPersists(snes, PETSC_TRUE));
     }
 
+    // Do the setup
+    PetscCall(TSSetUp(ts));
+
+    // Force the PC setup before TSSolve so we can time them separately.
+    // TSSetUp does not propagate down to KSP/PC setup, so we do it manually.
+    {
+      SNES snes;
+      KSP  ksp_ts;
+      PetscCall(TSGetSNES(ts, &snes));
+      PetscCall(SNESSetUp(snes));
+      PetscCall(SNESGetKSP(snes, &ksp_ts));
+      PetscCall(KSPSetOperators(ksp_ts, A, A));
+      PetscCall(KSPSetUp(ksp_ts));
+    }
+
     // Start the time stepping
     PetscCall(TSSolve(ts, x));
     PetscCall(PetscLogStagePop());
