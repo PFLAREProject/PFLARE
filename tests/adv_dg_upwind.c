@@ -1589,14 +1589,22 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
    the identity, so the implicit form reduces to
      F(t, u, udot) = udot + A u - b_rhs
      J            = shift * I + A         (shift = 1/dt)
+
+   Memory note: A is pre-shifted in place (A := A + shift_pre*I) before
+   TSSolve so it is *itself* the implicit Jacobian.  This avoids a separate
+   copy of J. IFunctionAdv
+   subtracts the pre-shift contribution back out so the residual is
+   unchanged, and IJacobianAdv just verifies the shift PETSc passes in
+   matches our pre-applied value (it must, since dt is constant).
    ----------------------------------------------------------------------- */
 typedef struct {
-  Mat          A;
+  Mat          A;           /* pre-shifted: holds shift_pre*I + A_orig    */
   Vec          b_rhs;
   DM           dm;
   PetscFE      fe;
   PetscSection sec;
   PetscBool    write_vtk;
+  PetscReal    shift_pre;   /* the shift baked into A (= 1/dt for BEULER) */
 } TSAdvCtx;
 
 static PetscErrorCode IFunctionAdv(TS ts, PetscReal t, Vec u, Vec udot, Vec F, void *ctx_void)
@@ -1605,29 +1613,27 @@ static PetscErrorCode IFunctionAdv(TS ts, PetscReal t, Vec u, Vec udot, Vec F, v
 
   PetscFunctionBeginUser;
   (void)ts; (void)t;
+  /* MatMult gives (A_orig + shift_pre*I)*u; subtract shift_pre*u to recover A_orig*u. */
   PetscCall(MatMult(c->A, u, F));
+  PetscCall(VecAXPY(F, -c->shift_pre, u));
   PetscCall(VecAXPY(F, 1.0, udot));
   PetscCall(VecAXPY(F, -1.0, c->b_rhs));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* First call copies A into the freshly-allocated J (one host->device
-   transfer on GPU builds), and the inner KSP builds its PC on J.  With a
-   constant dt, shift is constant, so on subsequent calls J is numerically
-   unchanged; the PC is reused and every subsequent step runs on-device. */
+/* A is already shift_pre*I + A_orig, so the implicit Jacobian is A itself.
+   We just check that the shift PETSc requests is the one we baked in. */
 static PetscErrorCode IJacobianAdv(TS ts, PetscReal t, Vec u, Vec udot, PetscReal shift,
                                    Mat J, Mat Jpre, void *ctx_void)
 {
   TSAdvCtx *c = (TSAdvCtx *)ctx_void;
 
   PetscFunctionBeginUser;
-  (void)ts; (void)t; (void)u; (void)udot;
-  PetscCall(MatCopy(c->A, Jpre, SAME_NONZERO_PATTERN));
-  PetscCall(MatShift(Jpre, shift));
-  if (J != Jpre) {
-    PetscCall(MatCopy(c->A, J, SAME_NONZERO_PATTERN));
-    PetscCall(MatShift(J, shift));
-  }
+  (void)ts; (void)t; (void)u; (void)udot; (void)J; (void)Jpre;
+  PetscCheck(PetscAbsReal(shift - c->shift_pre) <= 1e-12 * PetscAbsReal(c->shift_pre),
+             PetscObjectComm((PetscObject)ts), PETSC_ERR_ARG_WRONGSTATE,
+             "TS shift %g != pre-applied shift %g; -time_depend assumes constant dt",
+             (double)shift, (double)c->shift_pre);
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1972,9 +1978,9 @@ int main(int argc, char **argv)
     PetscCheck(ctx.diag_scale, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE,
                "-time_depend requires -diag_scale true");
 
-    TS       ts;
-    Mat      J;
-    TSAdvCtx tsctx;
+    TS        ts;
+    TSAdvCtx  tsctx;
+    PetscReal dt;
 
     tsctx.A         = A;
     tsctx.b_rhs     = b_rhs;
@@ -1987,7 +1993,6 @@ int main(int argc, char **argv)
     PetscCall(VecSet(x, 0.0));
 
     PetscCall(PetscLogStagePush(gpu_copy_stage));
-    PetscCall(MatDuplicate(A, MAT_DO_NOT_COPY_VALUES, &J));
 
     PetscCall(TSCreate(PETSC_COMM_WORLD, &ts));
     PetscCall(TSSetType(ts, TSBEULER));
@@ -1997,7 +2002,6 @@ int main(int argc, char **argv)
        gives exactly one PC setup across the whole TS loop. */
     PetscCall(TSSetProblemType(ts, TS_LINEAR));
     PetscCall(TSSetIFunction(ts, NULL, IFunctionAdv, &tsctx));
-    PetscCall(TSSetIJacobian(ts, J, J, IJacobianAdv, &tsctx));
 
     /* Defaults; user overrides via -ts_dt / -ts_max_steps / -ts_max_time /
        -ts_type / -ts_monitor / -ts_view / -ts_ksp_... / -ts_snes_... */
@@ -2009,8 +2013,16 @@ int main(int argc, char **argv)
     PetscCall(TSSetSolution(ts, x));
     PetscCall(TSSetFromOptions(ts));
 
-    /* Constant dt => shift = 1/dt is constant => J = shift*I + A is
-       unchanged across steps.  Build J and its PC once and reuse. */
+    /* Pre-shift A in place so it serves as the implicit Jacobian without
+       a separate matrix. IFunctionAdv subtracts the
+       pre-shift contribution back out so the residual is unchanged. */
+    PetscCall(TSGetTimeStep(ts, &dt));
+    tsctx.shift_pre = 1.0 / dt;
+    PetscCall(MatShift(A, tsctx.shift_pre));
+    PetscCall(TSSetIJacobian(ts, A, A, IJacobianAdv, &tsctx));
+
+    /* Constant dt => shift = 1/dt is constant => the pre-shifted A is
+       the correct Jacobian for every step.  Build the PC once and reuse. */
     {
       SNES snes;
       PetscCall(TSGetSNES(ts, &snes));
@@ -2027,7 +2039,6 @@ int main(int argc, char **argv)
     TSConvergedReason ts_reason;
     PetscCall(TSGetConvergedReason(ts, &ts_reason));
     PetscCall(TSDestroy(&ts));
-    PetscCall(MatDestroy(&J));
     if (ts_reason < 0) return 1;
 
   } else {
