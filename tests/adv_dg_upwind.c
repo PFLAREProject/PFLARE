@@ -1989,10 +1989,9 @@ int main(int argc, char **argv)
     tsctx.sec       = sec;
     tsctx.write_vtk = ctx.write_vtk;
 
+    PetscCall(PetscLogStagePush(gpu_copy_stage));
     // Set solution to zero at t=0
     PetscCall(VecSet(x, 0.0));
-
-    PetscCall(PetscLogStagePush(gpu_copy_stage));
 
     PetscCall(TSCreate(PETSC_COMM_WORLD, &ts));
     PetscCall(TSSetType(ts, TSBEULER));
@@ -2037,19 +2036,23 @@ int main(int argc, char **argv)
 
     // Force the PC setup before TSSolve so we can time them separately.
     // TSSetUp does not propagate down to KSP/PC setup, so we do it manually.
-    {
-      SNES snes;
-      KSP  ksp_ts;
-      PetscCall(TSGetSNES(ts, &snes));
-      PetscCall(SNESSetUp(snes));
-      PetscCall(SNESGetKSP(snes, &ksp_ts));
-      PetscCall(KSPSetOperators(ksp_ts, A, A));
-      PetscCall(KSPSetUp(ksp_ts));
+    SNES snes;
+    KSP  ksp_ts;
+    PetscCall(TSGetSNES(ts, &snes));
+    PetscCall(SNESSetUp(snes));
+    PetscCall(SNESGetKSP(snes, &ksp_ts));
+    PetscCall(KSPSetOperators(ksp_ts, A, A));
+    PetscCall(KSPSetUp(ksp_ts));
+    if (ctx.second_solve) {
+      // We do an initial KSPSolve here to trigger the GPU copy 
+      PetscCall(KSPSolve(ksp_ts, b_rhs, x));
+      // Reset the initial condition
+      PetscCall(VecSet(x, 0.0));
     }
+    PetscCall(PetscLogStagePop());
 
     // Start the time stepping
     PetscCall(TSSolve(ts, x));
-    PetscCall(PetscLogStagePop());
 
     TSConvergedReason ts_reason;
     PetscCall(TSGetConvergedReason(ts, &ts_reason));
