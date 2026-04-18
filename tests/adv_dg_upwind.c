@@ -232,19 +232,28 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,
   *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
                            final_smooths, integrity_check, print_stats);
 
-  // Explicitly add 1-cell ghost layer needed for DG cross-rank flux assembly.
-  DM dmOverlap = NULL;
-  PetscInt field = 1;
-  PetscCall(DMPlexDistributeOverlap(*dm, field, NULL, &dmOverlap));
-  if (dmOverlap) {
-    PetscCall(DMDestroy(dm));
-    *dm = dmOverlap;
-  }
+  // Doing overlap then any -dm_refine (triggered by DMSetFromOptions)
+  // means we build the overlap on the unrefined dm which is cheap
+  // but it does mean our halo is 1 layer on the unrefined mesh, and then
+  // it gets bigger as we refine. But we only use the overlap to do assembly
+  // of our matrix and that loop only happens over owned elements.
+  // If we did it the other way around the halo on the refined dm would be 
+  // only 1 layer thick, but the overlap creation would be much more expensive
+  // as there would be many more elements/points to comm.
+
   // This sets the adjacency so that only elements that share faces are neighbours
   // rather than elements that share vertices - ie tells the DM 
   // that we are doing DG - this just reduces the number of halo elements
   // that the dm_distribute_overlap sets 
-  PetscCall(DMSetAdjacency(*dm, PETSC_DEFAULT, PETSC_TRUE, PETSC_FALSE));
+  PetscCall(DMSetAdjacency(*dm, PETSC_DEFAULT, PETSC_TRUE, PETSC_FALSE));                           
+  // Explicitly add 1-cell ghost layer needed for DG cross-rank flux assembly.
+  DM dmOverlap = NULL;
+  PetscInt overlap = 1;
+  PetscCall(DMPlexDistributeOverlap(*dm, overlap, NULL, &dmOverlap));
+  if (dmOverlap) {
+    PetscCall(DMDestroy(dm));
+    *dm = dmOverlap;
+  }
   PetscCall(DMSetFromOptions(*dm));
   PetscCall(DMGetCoordinatesLocalSetUp(*dm));
   PetscCall(DMSetApplicationContext(*dm, opt));
