@@ -234,6 +234,11 @@ static PetscErrorCode CreateMesh(MPI_Comm comm, AppCtx *opt, DM *dm)
     if (!overlap_set)
       PetscCall(PetscOptionsSetValue(NULL, "-dm_distribute_overlap", "1"));
   }
+  // This sets the adjacency so that only elements that share faces are neighbours
+  // rather than elements that share vertices - ie tells the DM 
+  // that we are doing DG - this just reduces the number of halo elements
+  // that the dm_distribute_overlap sets 
+  PetscCall(DMSetAdjacency(*dm, PETSC_DEFAULT, PETSC_TRUE, PETSC_FALSE));
   PetscCall(DMSetFromOptions(*dm));
   PetscCall(DMGetCoordinatesLocalSetUp(*dm));
   PetscCall(DMSetApplicationContext(*dm, opt));
