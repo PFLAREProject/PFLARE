@@ -261,6 +261,20 @@ tests_medium_serial: build_tests
 tests_medium_parallel: build_tests
 	$(MAKE) -C tests run_tests_medium_parallel		
 
+# Default target groups scanned by tests_search.
+# Keep load tests only when PETSc uses 32-bit indices.
+ifeq ($(PETSC_USE_64BIT_INDICES),0)
+FILTER_RUN_TARGETS_DEFAULT := run_tests_load_serial run_tests_load_parallel run_tests_no_load_short_serial run_tests_no_load_short_parallel run_tests_no_load_serial run_tests_no_load_parallel run_tests_medium_serial run_tests_medium_parallel
+else
+FILTER_RUN_TARGETS_DEFAULT := run_tests_no_load_short_serial run_tests_no_load_short_parallel run_tests_no_load_serial run_tests_no_load_parallel run_tests_medium_serial run_tests_medium_parallel
+endif
+
+# Run only tests whose command lines contain TEST_MATCH.
+# Example: make tests_search TEST_MATCH="-curved_velocity"
+.PHONY: tests_search
+tests_search: build_tests
+	$(MAKE) -C tests run_tests_search TEST_MATCH="$(TEST_MATCH)" FILTER_RUN_TARGETS="$(if $(strip $(FILTER_RUN_TARGETS)),$(FILTER_RUN_TARGETS),$(FILTER_RUN_TARGETS_DEFAULT))"
+
 # Very quick tests
 .PHONY: tests_short
 tests_short: build_tests

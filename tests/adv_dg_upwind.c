@@ -122,9 +122,19 @@ typedef struct {
 static inline void GetVelocity(PetscInt dim, const AppCtx *ctx, const PetscReal x[], PetscReal v[])
 {
   if (ctx->curved_velocity) {
-    v[0] = x[1];
-    v[1] = 1.0 - x[0];
-    v[2] = 0.0;
+    if (dim == 2) {
+      v[0] = x[1];
+      v[1] = 1.0 - x[0];
+      v[2] = 0.0;
+    } else {
+      // 3D curved field, symmetric under x<->y:
+      //   u = z
+      //   v = z
+      //   w = 2 - x - y
+      v[0] = x[2];               // u
+      v[1] = x[2];               // v
+      v[2] = 2.0 - x[0] - x[1];  // w
+    }
   } else {
     v[0] = ctx->advection_velocity[0];
     v[1] = ctx->advection_velocity[1];

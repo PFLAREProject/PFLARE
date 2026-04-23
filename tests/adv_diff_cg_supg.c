@@ -55,9 +55,19 @@ static inline void GetVelocity(PetscInt dim, const PetscScalar constants[], cons
   if (constants[4] == 1.0) {
     // Spatially-varying velocity field: top-left quadrant of a rotating circle (center at 1,0)
     // u(x,y) = y, v(x,y) = 1-x
-    v[0] = x[1];         // u(x,y)
-    v[1] = 1.0 - x[0];   // v(x,y)
-    v[2] = 0.0;          // w (unused in 2D)
+    if (dim == 2) {
+      v[0] = x[1];         // u(x,y)
+      v[1] = 1.0 - x[0];   // v(x,y)
+      v[2] = 0.0;          // w (unused in 2D)
+    } else {
+      // 3D curved field, symmetric under x<->y:
+      //   u = z
+      //   v = z
+      //   w = 2 - x - y
+      v[0] = x[2];               // u
+      v[1] = x[2];               // v
+      v[2] = 2.0 - x[0] - x[1];  // w
+    }
   } else {
     // Constant velocity field
     v[0] = constants[1];
