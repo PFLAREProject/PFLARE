@@ -1222,3 +1222,35 @@ else
 	@echo "KOKKOS check skipped (PETSc has not been configured with KOKKOS)"	
 
 endif	
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+
+# Run only test commands containing TEST_MATCH.
+.PHONY: run_tests_search
+run_tests_search:
+	@if [ -z "$(strip $(TEST_MATCH))" ]; then \
+		echo "ERROR: TEST_MATCH is empty. Example: TEST_MATCH='-curved_velocity'"; \
+		exit 2; \
+	fi
+	@if [ -z "$(strip $(FILTER_RUN_TARGETS))" ]; then \
+		echo "ERROR: FILTER_RUN_TARGETS is empty. Use top-level: make tests_with_arg TEST_MATCH='-curved_velocity'"; \
+		exit 2; \
+	fi
+	@echo "Filtering tests for substring: $(TEST_MATCH)"
+	@echo "Scanning targets: $(FILTER_RUN_TARGETS)"
+	@set -e; \
+	commands="$$( $(MAKE) --no-print-directory -n $(FILTER_RUN_TARGETS) | \
+		sed -e ':join' -e '/\\$$/N' -e 's/\\\n[[:space:]]*/ /' -e 't join' -e 's/^[[:space:]]*[@+-][[:space:]]*//' )"; \
+	matches="$$( printf '%s\n' "$$commands" | grep -F -- "$(TEST_MATCH)" | grep -E '(^\./)|([[:space:]]\./)' || true )"; \
+	count="$$(printf '%s\n' "$$matches" | sed '/^[[:space:]]*$$/d' | wc -l | tr -d '[:space:]')"; \
+	if [ "$$count" = "0" ]; then \
+		echo "No matching test commands found."; \
+		exit 0; \
+	fi; \
+	echo "Found $$count matching test command(s):"; \
+	echo "Running matching tests..."; \
+	printf '%s\n' "$$matches" | sed '/^[[:space:]]*$$/d' | while IFS= read -r cmd; do \
+		echo "$$cmd"; \
+		eval "$$cmd" < /dev/null; \
+	done
