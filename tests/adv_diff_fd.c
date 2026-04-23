@@ -35,7 +35,8 @@
        in 2D: bottom (j=0) face; in 3D: bottom (k=0, z=0) face
        all other inflow faces are set to u=0
      Can change default velocity from straight line to curved with -curved_velocity (default false)
-       curved velocity field: u(x,y) = y, v(x,y) = 1-x, w=0 (rotating, always >= 0 on [0,1]^2)
+       2D curved field: u(x,y) = y, v(x,y) = 1-x, w = 0 (rotation about (1,0),
+       3D curved field: u = z, v = z, w = 2-x-y 
      Can normalise velocity with -unit_velocity (default true) so that we have a unit velocity.
        If any of u,v,w are set explicitly then unit velocity will be disabled
      Can control domain size in each direction with -L_x, -L_y, -L_z (default 1.0)
@@ -65,11 +66,21 @@ static inline void GetVelocity(PetscInt dim, PetscReal u_const, PetscReal v_cons
                                PetscReal vel[])
 {
   if (curved_velocity) {
-    // Spatially-varying velocity field: top-left quadrant of a rotating circle (center at 1,0)
-    // u(x,y) = y, v(x,y) = 1-x, w = 0
-    vel[0] = x[1];        // u(x,y) = y
-    vel[1] = 1.0 - x[0]; // v(x,y) = 1-x
-    vel[2] = 0.0;         // w = 0 (curved field defined in 2D plane only)
+    if (dim == 2) {
+      // 2D rotating field around centre (1, 0), always >= 0 on [0,1]^2
+      // Enters through bottom and left, exits through right and top
+      vel[0] = x[1];         // u(x,y) = y
+      vel[1] = 1.0 - x[0];   // v(x,y) = 1-x
+      vel[2] = 0.0;
+    } else {
+      // 3D curved field, symmetric under x<->y:
+      //   u = z
+      //   v = z
+      //   w = (2-x-y)
+      vel[0] = x[2];                               // u
+      vel[1] = x[2];                               // v
+      vel[2] = (2.0 - x[0] - x[1]); // w
+    }
   } else {
     // Constant velocity field
     vel[0] = u_const;
