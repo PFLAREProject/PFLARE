@@ -13,6 +13,7 @@ int max_levels = -1;
 // Destroys the data
 PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 {
+   //PflareKokkosTrace _trace("destroy_VecISCopyLocal_kokkos");
    if (IS_fine_views_local) {
       // Will automatically call the destructor on each element
       delete[] IS_fine_views_local;
@@ -31,6 +32,7 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos()
 // Creates the data we need to do the equivalent of veciscopy on local data in kokkos
 PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 {
+   //PflareKokkosTrace _trace("create_VecISCopyLocal_kokkos");
    // If not built
    if (!IS_fine_views_local)
    {
@@ -65,6 +67,7 @@ PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input)
 // Copy the input IS's to the device for our_level
 PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt global_row_start, IS *index_fine, IS *index_coarse)
 {
+   //PflareKokkosTrace _trace("set_VecISCopyLocal_kokkos_our_level");
    auto exec = PetscGetKokkosExecutionSpace();
    const int level_idx = our_level - 1;
 
@@ -83,6 +86,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    IS_fine_views_local[level_idx] = std::make_shared<PetscIntKokkosView>("IS_fine_view_" + std::to_string(our_level), fine_local_size);
    // Copy the indices over to the device
    Kokkos::deep_copy(exec, *IS_fine_views_local[level_idx], fine_view_h);
+   // The source pointer is owned by ISGetIndices; make sure copy completed
+   // before restoring that host buffer.
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
@@ -102,6 +108,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
    IS_coarse_views_local[level_idx] = std::make_shared<PetscIntKokkosView>("IS_coarse_view_" + std::to_string(our_level), coarse_local_size);
    // Copy the indices over to the device
    Kokkos::deep_copy(exec, *IS_coarse_views_local[level_idx], coarse_view_h);
+   // The source pointer is owned by ISGetIndices; make sure copy completed
+   // before restoring that host buffer.
+   Kokkos::fence();
    // Log copy with petsc
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));   
@@ -124,6 +133,8 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(int our_level, PetscInt gl
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
+   //PflareKokkosTrace _trace("VecISCopyLocal_kokkos");
+   Kokkos::fence();
    const int level_idx = our_level - 1;
 
    // Can't use the shared pointer directly within the parallel 

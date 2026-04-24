@@ -13,6 +13,7 @@
 PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sparsity_mat_cf,
                const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *z_mat)
 {
+   //PflareKokkosTrace _trace("calculate_and_build_sai_z_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows_cf, local_cols_cf;
    PetscInt local_rows_ff, local_cols_ff;
@@ -23,6 +24,9 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    MatType mat_type;
    PetscInt one = 1;
    bool deallocate_submatrices = false;
+
+   mat_sync(A_ff); 
+   mat_sync(A_cf);     
 
    PetscCallVoid(MatGetType(*A_ff, &mat_type));
    // Are we in parallel?
@@ -207,6 +211,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    // ~~~~~~~~~~~~~~
    // Get device CSR pointers for all matrices
    // ~~~~~~~~~~~~~~
+   Kokkos::fence();
    PetscMemType mtype;
 
    // Submatrix (non-local rows of A_ff)
