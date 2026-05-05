@@ -8,7 +8,7 @@ Please choose one of the build methods below. If you wish to contribute to PFLAR
 
 ### PETSc configure build
 
-PFLARE has now been added to the PETSc configure as an external package (currently on the PETSc `main` branch, which will be included in the PETSc 3.25 release). PFLARE can be built by adding ``--download-pflare`` to the PETSc configure. 
+PFLARE has now been added to the PETSc configure as an external package, as of the PETSc 3.25 release. PFLARE can be built by adding ``--download-pflare`` to the PETSc configure. 
 
 The PC types added by PFLARE can then be used as native PETSc PC types through command line arguments without any changes to existing code. The [Linking to PFLARE](#linking-to-pflare) and [Modifying existing code](#modifying-existing-code) sections below can therefore be skipped. 
 
