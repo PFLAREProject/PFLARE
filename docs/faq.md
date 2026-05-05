@@ -6,7 +6,7 @@ Listed below are some answers to frequently asked questions when using PFLARE. T
 
 Below are some of the factors to consider when trying to improve convergence with `PCAIR`. This is not an exhaustive list, but covers the most common improvements.
 
-Reduction multigrid methods like AIR can become direct solvers as the approximation to $A_{ff}^{-1}$ improves; this means there is almost always a route to better convergence. In practice, of course, this limit is not the most performant or memory efficient, especially in parallel. The goal is typically to strike a balance between convergence, memory usage and parallel performance.
+Reduction multigrid methods like AIR can become direct solvers as the approximation to $\mathbf{A}_\textrm{ff}^{-1}$ improves; this means there is almost always a route to better convergence. In practice, of course, this limit is not the most performant or memory efficient, especially in parallel. The goal is typically to strike a balance between convergence, memory usage and parallel performance.
 
 ### Quick fix
 
@@ -20,7 +20,7 @@ If that did not work or for further understanding of these parameters, please se
 
 AIR methods work best when the rows of the matrix are all scaled roughly the same. Applying a diagonal scaling before solving with `PCAIR` can help improve convergence.
 
-If it is difficult to manually apply a diagonal scaling (e.g., inside a non-linear or time-stepping loop), the options `-pc_air_diag_scale_polys` and `-pc_air_coarsest_diag_scale_polys` can be used to scale the diagonals of $A_{ff}$ on each level during the multigrid setup. This can often restore good convergence when poor scaling is the issue.
+If it is difficult to manually apply a diagonal scaling (e.g., inside a non-linear or time-stepping loop), the options `-pc_air_diag_scale_polys` and `-pc_air_coarsest_diag_scale_polys` can be used to scale the diagonals of $\mathbf{A}_\textrm{ff}$ on each level during the multigrid setup. This can often restore good convergence when poor scaling is the issue.
 
 For DG FEM discretisations, a block diagonal scaling is typically required, where each block is the inverse of the element matrix. This is particularly important when using high-order basis functions and must be applied prior to solving with `PCAIR`.
 
@@ -34,17 +34,17 @@ Most discretisations benefit from lumping dropped entries to the diagonal instea
 
 ### 3) Coarsening rate
 
-Slowing the coarsening rate improves the diagonal dominance of $A_{ff}$ and hence improves the quality of the approximate inverses used to build the hierarchy. The quality of the CF splitting is central to how well reduction multigrids work: the goal is to find a large $A_{ff}$ submatrix whose inverse can be well approximated by a sparse (or low-order polynomial) approximation.
+Slowing the coarsening rate improves the diagonal dominance of $A_{ff}$ and hence improves the quality of the approximate inverses used to build the hierarchy. The quality of the CF splitting is central to how well reduction multigrids work: the goal is to find a large $\mathbf{A}_\textrm{ff}$ submatrix whose inverse can be well approximated by a sparse (or low-order polynomial) approximation.
 
 Several parameters control how fast the default CF splitting (PMISR DDC) coarsens.
 
 **Strong threshold:** The most impactful parameter is the strong threshold, set with `-pc_air_strong_threshold` (default 0.5). This determines which connections between unknowns are considered "strong". Decreasing it slows the coarsening and should improve convergence.
 
-Internally, PMISR computes a maximal independent set in the symmetrized strong connections ($S + S^T$). This ensures that no two F-points are strongly connected, keeping large off-diagonal entries out of $A_{ff}$.
+Internally, PMISR computes a maximal independent set in the symmetrized strong connections ($S + S^T$). This ensures that no two F-points are strongly connected, keeping large off-diagonal entries out of $\mathbf{A}_\textrm{ff}$.
 
 **DDC parameters:** The second pass of PMISR DDC performs a diagonal dominance cleanup (DDC), which converts the least diagonally dominant F-points to C-points. The number of DDC iterations can be increased with `-pc_air_ddc_its` (default 1) and the fraction of local F-points changed per iteration can be modified with `-pc_air_ddc_fraction` (default 0.1, i.e., 10% of F-points per iteration). It is often helpful to do more iterations but change fewer F-points per iteration (e.g., `-pc_air_ddc_its 3 -pc_air_ddc_fraction 0.01`).
 
-**Direct diagonal dominance control:** Modifying and balancing the strong threshold, DDC iterations and DDC fraction to get optimal performance can be difficult. The easiest way to automate this is to control the diagonal dominance ratio of $A_{ff}$ directly.
+**Direct diagonal dominance control:** Modifying and balancing the strong threshold, DDC iterations and DDC fraction to get optimal performance can be difficult. The easiest way to automate this is to control the diagonal dominance ratio of $\mathbf{A}_\textrm{ff}$ directly.
 
 Setting `-pc_air_cf_splitting_type diag_dom` switches to a CF splitting that directly enforces a maximum row-wise diagonal dominance ratio. With this splitting, `-pc_air_strong_threshold` controls the maximum allowed dominance ratio in every row. Decreasing this value from the default 0.5 will slow the coarsening and improve convergence, e.g., test 0.4, 0.3, 0.2, 0.1.
 
@@ -65,7 +65,7 @@ Decreasing both of these values improves convergence but requires more memory. D
 In rough order of importance, additional options that can improve convergence include:
 
 - Add C-point smoothing with `-pc_air_smooth_type fc`, or multiple iterations of smoothing, e.g., FCF smoothing with `-pc_air_smooth_type fcf`. Note that C-point smoothing requires storing more matrices on each level and hence uses more memory.
-- Increase the non-zeros retained in the assembled approximate inverse with `-pc_air_inverse_sparsity_order 2` (default 1). The sparsity order controls how much fill-in is allowed. Higher orders give a better approximation to $A_{ff}^{-1}$ but use more memory and have a more expensive setup.
+- Increase the non-zeros retained in the assembled approximate inverse with `-pc_air_inverse_sparsity_order 2` (default 1). The sparsity order controls how much fill-in is allowed. Higher orders give a better approximation to $\mathbf{A}_\textrm{ff}^{-1}$ but use more memory and have a more expensive setup.
 - Use an approximate ideal prolongator instead of the default classical one-point prolongator with `-pc_air_one_point_classical_prolong false`.
 - Improve the approximate ideal operators with Richardson iterations, e.g., `-pc_air_improve_z_its 1 -pc_air_improve_w_its 1`.
 
@@ -127,7 +127,7 @@ GPU throughput improves significantly with many unknowns per MPI rank (e.g., ten
 
 ### 2) Matrix-free smoothing
 
-GPUs are well suited to repeatedly applying the same matrix-vector product. Turning on the option `-pc_air_matrix_free_polys` applies the GMRES polynomial smoother matrix-free. This uses no extra memory (only the polynomial coefficients are stored) and gives a better approximation to $A_{ff}^{-1}$ than the assembled fixed-sparsity version, at the cost of more SpMVs per smooth.
+GPUs are well suited to repeatedly applying the same matrix-vector product. Turning on the option `-pc_air_matrix_free_polys` applies the GMRES polynomial smoother matrix-free. This uses less memory (only the polynomial coefficients are stored) and gives a better approximation to $\mathbf{A}_\textrm{ff}^{-1}$ than the assembled fixed-sparsity version, at the cost of more SpMVs per smooth.
 
 In practice, the extra SpMVs are memory-bandwidth bound rather than FLOP bound, so GPUs handle them well. For example, with 6th-order polynomials applied matrix-free, the per V-cycle time is only about 20% more than using the assembled approximation (which requires only one SpMV), despite requiring six SpMVs. The iteration count also typically improves.
 
@@ -149,7 +149,7 @@ Using `-pc_air_matrix_free_polys` avoids assembling and storing the approximate 
 
 ### 2) F-point only smoothing
 
-The default F-point only smoothing (`-pc_air_smooth_type f`) avoids storing $A_{cc}$ and $A_{cf}$ on each level. Switching to FC or FCF smoothing can nearly double the storage complexity, so only use it if the convergence improvement justifies the memory cost.
+The default F-point only smoothing (`-pc_air_smooth_type f`) avoids storing $A_{cc}$ and $\mathbf{A}_\textrm{cf}$ on each level. Switching to FC or FCF smoothing can nearly double the storage complexity, so only use it if the convergence improvement justifies the memory cost.
 
 ### 3) Truncating the hierarchy
 
