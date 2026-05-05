@@ -128,7 +128,7 @@ or in Python with petsc4py:
            ddc_its, \
            ddc_fraction)
 
-To enforce a fixed diagonal dominance ratio, set `-pc_air_cf_splitting_type diag_dom` (or `algorithm = CF_DIAG_DOM`) and use `-pc_air_strong_threshold` as the target row-wise ratio in $\mathbf{A}_{ff}$; the section below details a convenience wrapper provided for this purpose.
+To enforce a fixed diagonal dominance ratio, set `-pc_air_cf_splitting_type diag_dom` (or `algorithm = CF_DIAG_DOM`) and use `-pc_air_strong_threshold` as the target row-wise ratio in $\mathbf{A}_\textrm{ff}$; the section below details a convenience wrapper provided for this purpose.
 
 ### Diagonally dominant submatrix extraction
 
