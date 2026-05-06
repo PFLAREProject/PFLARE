@@ -589,20 +589,12 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
       if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
 
-      // Annoying we can't just call MatSeqAIJGetKokkosView
-      a_local_d = aijkok_local_output->a_dual.view_device();
-      if (mpi) a_nonlocal_d = aijkok_nonlocal_output->a_dual.view_device();
-
-      // Annoyingly there isn't currently the ability to get views for i (or j)
-      const PetscInt *device_local_i_output = nullptr, *device_nonlocal_i_ouput = nullptr;
+      // Get device pointers for the existing i and a arrays
+      const PetscInt *device_local_i_output = nullptr, *device_nonlocal_i_output = nullptr;
+      PetscScalar *device_local_a_output = nullptr, *device_nonlocal_a_output = nullptr;
       PetscMemType mtype;
-      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, NULL, NULL, &mtype));  
-      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype));  
-
-      // Have these point at the existing i pointers - we don't need j if we're reusing
-      ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows+1);
-      ConstMatRowMapKokkosView i_nonlocal_const_d;
-      if (mpi) i_nonlocal_const_d = ConstMatRowMapKokkosView(device_nonlocal_i_ouput, local_rows+1);        
+      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, NULL, &device_local_a_output, &mtype));
+      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, NULL, &device_nonlocal_a_output, &mtype));
 
       // Only have to write W as the identity block cannot change
       // Loop over the rows of W - annoying we have const views as this is just the same loop as above
@@ -616,31 +608,31 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
             // Convert to global fine index into a local index in the full matrix
             PetscInt row_index = fine_view_d(i) - global_row_start;
             // Still using i here (the local index into W)
-            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
             // For over local columns - copy in W
             Kokkos::parallel_for(
                Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
-               a_local_d(i_local_const_d(row_index) + j) = device_local_vals[device_local_i[i] + j];
-                     
-            });     
+               device_local_a_output[device_local_i_output[row_index] + j] = device_local_vals[device_local_i[i] + j];
+
+            });
 
             // For over nonlocal columns - copy in W
             if (mpi)
             {
-               PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];         
+               PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                Kokkos::parallel_for(
                   Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                   // We keep the existing local indices in the off-diagonal blocl here
                   // we have all the same columns as W and hence the same garray
-                  a_nonlocal_d(i_nonlocal_const_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
-                        
-               });          
+                  device_nonlocal_a_output[device_nonlocal_i_output[row_index] + j] = device_nonlocal_vals[device_nonlocal_i[i] + j];
+
+               });
             }
-      });   
+      });
 
       Kokkos::fence();
 
@@ -1063,23 +1055,14 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
       if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);
 
-      // Annoying we can't just call MatSeqAIJGetKokkosView
-      a_local_d = aijkok_local_output->a_dual.view_device();
-      if (mpi) a_nonlocal_d = aijkok_nonlocal_output->a_dual.view_device();
-
-      // Annoyingly there isn't currently the ability to get views for i (or j)
-      const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_ouput = nullptr;
+      // Get device pointers for the existing i, j, and a arrays
+      const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_output = nullptr;
+      PetscScalar *device_local_a_output = nullptr, *device_nonlocal_a_output = nullptr;
       PetscMemType mtype;
-      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));  
-      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_ouput, NULL, NULL, &mtype));  
+      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_a_output, &mtype));
+      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, NULL, &device_nonlocal_a_output, &mtype));
 
-      // Have these point at the existing i pointers - we only need the local j
-      ConstMatRowMapKokkosView i_local_const_d = ConstMatRowMapKokkosView(device_local_i_output, local_rows_z+1);
-      ConstMatRowMapKokkosView j_local_const_d = ConstMatRowMapKokkosView(device_local_j_output, aijkok_local_output->csrmat.nnz());
-      ConstMatRowMapKokkosView i_nonlocal_const_d;
-      if (mpi) i_nonlocal_const_d = ConstMatRowMapKokkosView(device_nonlocal_i_ouput, local_rows_z+1);        
-
-      // Only have to write Z but have to be careful as we have the identity mixed 
+      // Only have to write Z but have to be careful as we have the identity mixed
       // in there
       // Loop over the rows of Z - annoying we have const views as this is just the same loop as above
       Kokkos::parallel_for(
@@ -1092,7 +1075,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
             // Simple row index
             PetscInt row_index = i;
             // Still using i here (the local index into Z)
-            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];         
+            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
             // For over local columns - copy in Z
             // We have to skip over the identity entries, which we know are always C points
@@ -1103,25 +1086,25 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
                // If we're at or after the C point identity, our index into R gets a +1
                // so we skip over writing to that index in R
-               if (j_local_const_d(i_local_const_d(row_index) + j) >= coarse_view_d(i) - global_row_start) offset = 1;
-               a_local_d(i_local_const_d(row_index) + j + offset) = device_local_vals[device_local_i[i] + j];
-            });     
+               if (device_local_j_output[device_local_i_output[row_index] + j] >= coarse_view_d(i) - global_row_start) offset = 1;
+               device_local_a_output[device_local_i_output[row_index] + j + offset] = device_local_vals[device_local_i[i] + j];
+            });
 
             // For over nonlocal columns - copy in Z - identical structure in the off-diag block
             if (mpi)
             {
-               PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];         
+               PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
                Kokkos::parallel_for(
                   Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
                   // We keep the existing local indices in the off-diagonal block here
                   // we have all the same columns as Z and hence the same garray
-                  a_nonlocal_d(i_nonlocal_const_d(row_index) + j) = device_nonlocal_vals[device_nonlocal_i[i] + j];
-                        
-               });          
+                  device_nonlocal_a_output[device_nonlocal_i_output[row_index] + j] = device_nonlocal_vals[device_nonlocal_i[i] + j];
+
+               });
             }
-      });   
+      });
 
       Kokkos::fence();
 
