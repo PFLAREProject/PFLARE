@@ -3,7 +3,7 @@ module constrain_z_or_w
    use iso_c_binding
    use petscksp
    use c_petsc_interfaces, only: vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
-   use petsc_helper, only: pseudo_inv
+   use petsc_helper, only: pseudo_inv, build_aij_nonlocal_sf_and_leaf
 
 #include "petsc/finclude/petscksp.h"
 
@@ -240,7 +240,10 @@ module constrain_z_or_w
       type(tMat) :: new_z_or_w
       type(c_ptr) :: b_c_nonlocal_c_ptr
       integer(c_long_long) :: A_array, vec_long
+      integer(c_long_long) :: sf_array, leaf_vec_array
       type(tMat) :: Ad, Ao
+      type(tVec) :: leaf_vec
+      type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: colmap
       real(c_double), pointer :: b_c_nonlocal(:)
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
@@ -333,16 +336,21 @@ module constrain_z_or_w
          deallocate(b_c_nonlocal_alloc)
          allocate(b_c_nonlocal_alloc(cols_ao, size(null_vecs_c)))
 
+         ! Build the PetscSF + leaf Vec once for row_mat and reuse across every
+         ! null-vec iteration: every null_vecs_c(i) shares the column layout of
+         ! row_mat, so a single SF drives all the scatters.
+         call build_aij_nonlocal_sf_and_leaf(row_mat, sf, leaf_vec)
+         sf_array = sf%v
+         leaf_vec_array = leaf_vec%v
+
          ! Loop over all the near nullspace vectors and get the nonlocal components
          do null_vec = 1, size(null_vecs_c)
-         
+
             ! We want the nonlocal values in B_c
             vec_long = null_vecs_c(null_vec)%v
 
-            ! Do the comms
-            ! Have to call restore after we're done with lvec (ie null_vecs_c(null_vec))
-            call vecscatter_mat_begin_c(A_array, vec_long, b_c_nonlocal_c_ptr)
-            call vecscatter_mat_end_c(A_array, vec_long, b_c_nonlocal_c_ptr)
+            call vecscatter_mat_begin_c(sf_array, vec_long, leaf_vec_array)
+            call vecscatter_mat_end_c(sf_array, vec_long, leaf_vec_array, b_c_nonlocal_c_ptr)
             ! Nonlocal vals only pointer
             ! b_c_nonlocal now contains all the nonlocal values of B_c we need for all the nonlocal columns
             ! in every local row
@@ -351,10 +359,13 @@ module constrain_z_or_w
             ! Copy the values
             b_c_nonlocal_alloc(:, null_vec) = b_c_nonlocal
             ! Make sure to restore as soon as we're done with it
-            call vecscatter_mat_restore_c(A_array, b_c_nonlocal_c_ptr)
+            call vecscatter_mat_restore_c(leaf_vec_array, b_c_nonlocal_c_ptr)
 
          end do
-         
+
+         call PetscSFDestroy(sf, ierr)
+         call VecDestroy(leaf_vec, ierr)
+
       ! In serial this is simple
       else
 

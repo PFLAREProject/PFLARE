@@ -17,15 +17,16 @@ module c_petsc_interfaces
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
-   interface   
-      
+   interface
+
       subroutine ShellSetVecType_c(A_array, B_array) &
          bind(c, name="ShellSetVecType_c")
          use iso_c_binding
          integer(c_long_long) :: A_array, B_array
-      end subroutine ShellSetVecType_c         
- 
-   end interface     
+      end subroutine ShellSetVecType_c
+
+   end interface
+
 
    interface   
        
@@ -39,109 +40,86 @@ module c_petsc_interfaces
 
    end interface
 
-   interface   
-      
-      subroutine vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal) &
+   interface
+
+      subroutine vecscatter_mat_begin_c(sf_array, vec_long, leaf_vec_array) &
          bind(c, name="vecscatter_mat_begin_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long
-         type(c_ptr) :: cf_markers_nonlocal
+         integer(c_long_long) :: sf_array, vec_long, leaf_vec_array
 
-      end subroutine vecscatter_mat_begin_c         
- 
-   end interface   
-   
-   interface   
-      
-      subroutine vecscatter_mat_end_c(A_array, vec_long, cf_markers_nonlocal) &
+      end subroutine vecscatter_mat_begin_c
+
+   end interface
+
+   interface
+
+      subroutine vecscatter_mat_end_c(sf_array, vec_long, leaf_vec_array, cf_markers_nonlocal) &
          bind(c, name="vecscatter_mat_end_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long
+         integer(c_long_long) :: sf_array, vec_long, leaf_vec_array
          type(c_ptr) :: cf_markers_nonlocal
 
-      end subroutine vecscatter_mat_end_c         
- 
-   end interface     
+      end subroutine vecscatter_mat_end_c
 
-   interface   
-      
-      subroutine boolscatter_mat_begin_c(A_array, assigned_local, assigned_nonlocal) &
+   end interface
+
+   interface
+
+      subroutine boolscatter_mat_begin_c(sf_array, assigned_local, assigned_nonlocal) &
          bind(c, name="boolscatter_mat_begin_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: sf_array
          type(c_ptr), value :: assigned_local, assigned_nonlocal
 
-      end subroutine boolscatter_mat_begin_c         
- 
-   end interface   
-   
-   interface   
-      
-      subroutine boolscatter_mat_end_c(A_array, assigned_local, assigned_nonlocal) &
+      end subroutine boolscatter_mat_begin_c
+
+   end interface
+
+   interface
+
+      subroutine boolscatter_mat_end_c(sf_array, assigned_local, assigned_nonlocal) &
          bind(c, name="boolscatter_mat_end_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: sf_array
          type(c_ptr), value :: assigned_local, assigned_nonlocal
-      end subroutine boolscatter_mat_end_c         
- 
-   end interface     
+      end subroutine boolscatter_mat_end_c
 
-   interface   
-      
-      subroutine boolscatter_mat_reverse_begin_c(A_array, assigned_local, assigned_nonlocal) &
+   end interface
+
+   interface
+
+      subroutine boolscatter_mat_reverse_begin_c(sf_array, assigned_local, assigned_nonlocal) &
          bind(c, name="boolscatter_mat_reverse_begin_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: sf_array
          type(c_ptr), value :: assigned_local, assigned_nonlocal
 
-      end subroutine boolscatter_mat_reverse_begin_c         
- 
-   end interface   
-   
-   interface   
-      
-      subroutine boolscatter_mat_reverse_end_c(A_array, assigned_local, assigned_nonlocal) &
+      end subroutine boolscatter_mat_reverse_begin_c
+
+   end interface
+
+   interface
+
+      subroutine boolscatter_mat_reverse_end_c(sf_array, assigned_local, assigned_nonlocal) &
          bind(c, name="boolscatter_mat_reverse_end_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: sf_array
          type(c_ptr), value :: assigned_local, assigned_nonlocal
-      end subroutine boolscatter_mat_reverse_end_c         
- 
-   end interface      
+      end subroutine boolscatter_mat_reverse_end_c
 
-   interface      
-      
-      subroutine vecscatter_mat_restore_c(A_array, cf_markers_nonlocal) &
+   end interface
+
+   interface
+
+      subroutine vecscatter_mat_restore_c(leaf_vec_array, cf_markers_nonlocal) &
          bind(c, name="vecscatter_mat_restore_c")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: leaf_vec_array
          type(c_ptr) :: cf_markers_nonlocal
 
-      end subroutine vecscatter_mat_restore_c         
- 
-   end interface  
-   
-   interface   
-      
-      subroutine vecscatter_mat_reverse_begin_c(A_array, vec_long) &
-         bind(c, name="vecscatter_mat_reverse_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long
+      end subroutine vecscatter_mat_restore_c
 
-      end subroutine vecscatter_mat_reverse_begin_c         
- 
-   end interface   
-   
-   interface   
-      
-      subroutine vecscatter_mat_reverse_end_c(A_array, vec_long) &
-         bind(c, name="vecscatter_mat_reverse_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long
-
-      end subroutine vecscatter_mat_reverse_end_c         
- 
-   end interface    
+   end interface
    
    interface   
       
@@ -393,22 +371,22 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, zero_meaure_c_point_int) &
+      subroutine pmisr_kokkos(A_array, sf_array, leaf_vec_array, max_luby_steps, pmis_int, measure_local, zero_meaure_c_point_int) &
          bind(c, name="pmisr_kokkos")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: A_array, sf_array, leaf_vec_array
          type(c_ptr), value :: measure_local
          integer(c_int), value :: max_luby_steps, pmis_int, zero_meaure_c_point_int
-      end subroutine pmisr_kokkos         
+      end subroutine pmisr_kokkos
  
    end interface     
 
    interface   
       
-      subroutine MatDiagDomRatio_kokkos(A_array, max_dd_ratio_achieved, local_rows_aff) &
+      subroutine MatDiagDomRatio_kokkos(A_array, sf_array, leaf_vec_array, max_dd_ratio_achieved, local_rows_aff) &
          bind(c, name="MatDiagDomRatio_kokkos")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: A_array, sf_array, leaf_vec_array
          real(PFLARE_PETSCREAL_C_KIND) :: max_dd_ratio_achieved
          integer(PFLARE_PETSCINT_C_KIND) :: local_rows_aff
       end subroutine MatDiagDomRatio_kokkos
@@ -418,7 +396,7 @@ module c_petsc_interfaces
    interface   
       
       subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
-            random_numbers_ptr) &
+            aff_sf_array, aff_leaf_vec_array, random_numbers_ptr) &
          bind(c, name="ddc_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
@@ -426,8 +404,9 @@ module c_petsc_interfaces
          real(PFLARE_PETSCREAL_C_KIND), value :: max_dd_ratio
          real(PFLARE_PETSCREAL_C_KIND), value :: max_dd_ratio_achieved
          integer(c_long_long) :: Aff_array
+         integer(c_long_long) :: aff_sf_array, aff_leaf_vec_array
          type(c_ptr), value :: random_numbers_ptr
-      end subroutine ddc_kokkos         
+      end subroutine ddc_kokkos
  
    end interface 
    
@@ -592,12 +571,12 @@ module c_petsc_interfaces
    
    interface   
       
-      subroutine MatCreateSubMatrix_kokkos(A_array, is_row, is_col, &
+      subroutine MatCreateSubMatrix_kokkos(A_array, sf_array, leaf_vec_array, is_row, is_col, &
                      reuse_int, B_array, &
                      our_level, is_row_fine_int, is_col_fine_int) &
          bind(c, name="MatCreateSubMatrix_kokkos")
          use iso_c_binding
-         integer(c_long_long) :: A_array
+         integer(c_long_long) :: A_array, sf_array, leaf_vec_array
          integer(c_long_long) :: B_array
          integer(c_long_long) :: is_row, is_col
          integer(c_int), value :: our_level, is_row_fine_int, is_col_fine_int, reuse_int

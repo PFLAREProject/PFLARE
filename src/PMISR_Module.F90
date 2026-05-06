@@ -2,7 +2,7 @@ module pmisr_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug
+   use petsc_helper, only: kokkos_debug, build_aij_nonlocal_sf_and_leaf
    use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, &
          allreducesum_petscint_mine, boolscatter_mat_begin_c, boolscatter_mat_end_c, &
@@ -32,30 +32,48 @@ module pmisr_module
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
       logical, optional, intent(in)       :: zero_measure_c_point
 
-#if defined(PETSC_HAVE_KOKKOS)                     
-      integer(c_long_long) :: A_array
+      ! Build the PetscSF + leaf Vec once for strength_mat and pass them into
+      ! whichever path runs (Kokkos or CPU). Both consumers thread them down
+      ! through pmisr_kokkos / pmisr_cpu -> pmisr_existing_measure_cf_markers.
       PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errcode
+      integer(c_long_long) :: sf_array, leaf_vec_array
+      type(tPetscSF) :: sf
+      type(tVec) :: leaf_vec
+
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
       MatType :: mat_type
       integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank, errorcode
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable, target :: measure_local
       PetscInt :: local_rows, local_cols
-      MPIU_Comm :: MPI_COMM_MATRIX    
       type(c_ptr)  :: measure_local_ptr, cf_markers_local_ptr
       integer, dimension(:), allocatable :: cf_markers_local_two
-#endif        
+#endif
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+      call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errcode)
+
+      sf_array = 0
+      leaf_vec_array = 0
+      if (comm_size /= 1) then
+         call build_aij_nonlocal_sf_and_leaf(strength_mat, sf, leaf_vec)
+         sf_array = sf%v
+         leaf_vec_array = leaf_vec%v
+      end if
+
+#if defined(PETSC_HAVE_KOKKOS)
 
       call MatGetType(strength_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then  
+            mat_type == MATAIJKOKKOS) then
 
-         call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
-         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)                  
+         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
 
-         A_array = strength_mat%v  
+         A_array = strength_mat%v
          pmis_int = 0
          if (pmis) pmis_int = 1
          zero_measure_c_point_int = 0
@@ -66,73 +84,81 @@ module pmisr_module
          ! Let's generate the random values on the host for now so they match
          ! for comparisons with pmisr_cpu
          call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
-         allocate(measure_local(local_rows))   
+         allocate(measure_local(local_rows))
          call random_seed(size=seed_size)
          allocate(seed(seed_size))
          do kfree = 1, seed_size
             seed(kfree) = comm_rank + 1 + kfree
-         end do   
-         call random_seed(put=seed) 
+         end do
+         call random_seed(put=seed)
          ! Fill the measure with random numbers
          call random_number(measure_local)
-         deallocate(seed)   
-         
+         deallocate(seed)
+
          measure_local_ptr = c_loc(measure_local)
 
-         allocate(cf_markers_local(local_rows))  
+         allocate(cf_markers_local(local_rows))
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
          ! Creates a cf_markers on the device
-         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
+         call pmisr_kokkos(A_array, sf_array, leaf_vec_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
 
          ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then         
+         if (kokkos_debug()) then
 
-            ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls 
+            ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls
             ! use the device data
             call copy_cf_markers_d2h(cf_markers_local_ptr)
-            call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local_two, zero_measure_c_point)  
-            
-            if (any(cf_markers_local /= cf_markers_local_two)) then
+            call pmisr_cpu(strength_mat, sf_array, leaf_vec_array, max_luby_steps, pmis, &
+                           cf_markers_local_two, zero_measure_c_point)
 
-               ! do kfree = 1, local_rows
-               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
-               !       print *, kfree, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
-               !    end if
-               ! end do
+            if (any(cf_markers_local /= cf_markers_local_two)) then
                print *, "Kokkos and CPU versions of pmisr do not match"
-               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
             end if
             deallocate(cf_markers_local_two)
          end if
 
       else
-         call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)       
+         call pmisr_cpu(strength_mat, sf_array, leaf_vec_array, max_luby_steps, pmis, &
+                        cf_markers_local, zero_measure_c_point)
       end if
 #else
-      call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
-#endif        
+      call pmisr_cpu(strength_mat, sf_array, leaf_vec_array, max_luby_steps, pmis, &
+                     cf_markers_local, zero_measure_c_point)
+#endif
 
-      ! ~~~~~~ 
+      if (comm_size /= 1) then
+         call PetscSFDestroy(sf, ierr)
+         call VecDestroy(leaf_vec, ierr)
+      end if
+
+      ! ~~~~~~
 
    end subroutine pmisr
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
+   subroutine pmisr_cpu(strength_mat, sf_array, leaf_vec_array, max_luby_steps, pmis, &
+                        cf_markers_local, zero_measure_c_point)
 
       ! Let's do our own independent set with a Luby algorithm
       ! If PMIS is true, this is a traditional PMIS algorithm
       ! If PMIS is false, this is a PMISR
-      ! PMISR swaps the C-F definition compared to a PMIS and 
+      ! PMISR swaps the C-F definition compared to a PMIS and
       ! also checks the measure from smallest, rather than the largest
-      ! PMISR should give an Aff with no off-diagonal strong connections 
+      ! PMISR should give an Aff with no off-diagonal strong connections
       ! If you set positive max_luby_steps, it will avoid all parallel reductions
       ! by taking a fixed number of times in the Luby top loop
+      !
+      ! sf_array / leaf_vec_array are the PetscSF + leaf Vec built once by the
+      ! caller (Fortran pmisr wrapper) and shared with the kokkos path. Both
+      ! are zero in serial.
 
       ! ~~~~~~
 
       type(tMat), target, intent(in)      :: strength_mat
+      integer(c_long_long), intent(in)    :: sf_array, leaf_vec_array
       integer, intent(in)                 :: max_luby_steps
       logical, intent(in)                 :: pmis
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
@@ -254,7 +280,8 @@ module pmisr_module
       ! in our Luby below
       if (pmis) measure_local = measure_local * (-1)
       
-      call pmisr_existing_measure_cf_markers(strength_mat, max_luby_steps, pmis, &
+      call pmisr_existing_measure_cf_markers(strength_mat, sf_array, leaf_vec_array, &
+               max_luby_steps, pmis, &
                measure_local, cf_markers_local, zero_measure_c_point)
 
       deallocate(measure_local)
@@ -267,15 +294,21 @@ module pmisr_module
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pmisr_existing_measure_cf_markers(strength_mat, max_luby_steps, pmis, &
+   subroutine pmisr_existing_measure_cf_markers(strength_mat, sf_array, leaf_vec_array, &
+                  max_luby_steps, pmis, &
                   measure_local, cf_markers_local, zero_measure_c_point)
 
-      ! PMISR implementation that takes an existing measure_local and cf_markers_local 
+      ! PMISR implementation that takes an existing measure_local and cf_markers_local
       ! and then does the Luby algorithm to assign the rest of the CF markers
+      !
+      ! sf_array / leaf_vec_array are the PetscSF + leaf Vec built once by the
+      ! caller (Fortran pmisr/pmisr_cpu wrapper) and shared with the kokkos
+      ! path. Both are zero in serial.
 
       ! ~~~~~~
 
       type(tMat), target, intent(in)       :: strength_mat
+      integer(c_long_long), intent(in)     :: sf_array, leaf_vec_array
       integer, intent(in)                  :: max_luby_steps
       logical, intent(in)                  :: pmis
       PetscReal, dimension(:), allocatable :: measure_local
@@ -289,9 +322,9 @@ module pmisr_module
       PetscInt :: rows_ao, cols_ao, n_ad, n_ao
       PetscInt :: counter_undecided, counter_in_set_start, counter_parallel
       integer :: comm_size, loops_through
-      integer :: comm_rank, errorcode       
+      integer :: comm_rank, errorcode
       PetscErrorCode :: ierr
-      MPIU_Comm :: MPI_COMM_MATRIX      
+      MPIU_Comm :: MPI_COMM_MATRIX
       PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable :: in_set_this_loop
       PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
       type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
@@ -299,34 +332,35 @@ module pmisr_module
       type(tMat) :: Ad, Ao
       type(tVec) :: measure_vec
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: A_array, vec_long
+      integer(c_long_long) :: vec_long
+      integer(c_long_long) :: A_array
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
-      logical :: zero_measure_c = .FALSE.  
+      logical :: zero_measure_c = .FALSE.
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
 
-      ! ~~~~~~           
+      ! ~~~~~~
 
       if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
 
-      ! Get the comm size 
-      call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)    
+      ! Get the comm size
+      call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
-      ! Get the comm rank 
-      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)      
+      ! Get the comm rank
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
 
       ! Get the local sizes
       call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
-      call MatGetSize(strength_mat, global_rows, global_cols, ierr)      
-      call MatGetOwnershipRange(strength_mat, global_row_start, global_row_end_plus_one, ierr)   
+      call MatGetSize(strength_mat, global_rows, global_cols, ierr)
+      call MatGetOwnershipRange(strength_mat, global_row_start, global_row_end_plus_one, ierr)
 
       if (comm_size /= 1) then
-         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
+         call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr)
          ! We know the col size of Ao is the size of colmap, the number of non-zero offprocessor columns
-         call MatGetSize(Ao, rows_ao, cols_ao, ierr)    
+         call MatGetSize(Ao, rows_ao, cols_ao, ierr)
       else
-         Ad = strength_mat    
+         Ad = strength_mat
       end if
 
       ! ~~~~~~~~
@@ -351,7 +385,7 @@ module pmisr_module
       allocate(assigned_local(local_rows))
         
       ! ~~~~~~~~~~~~
-      ! Create parallel vec and scatter the measure
+      ! Create parallel vec and scatter the measure using the caller-supplied SF/leaf
       ! ~~~~~~~~~~~~
       if (comm_size/=1) then
 
@@ -359,14 +393,10 @@ module pmisr_module
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, &
             local_rows, global_rows, measure_local, measure_vec, ierr)
 
-         A_array = strength_mat%v
          vec_long = measure_vec%v
-         ! We're just going to use the existing lvec to scatter the measure
-         ! Have to call restore after we're done with lvec (ie measure_nonlocal_ptr)
-         call vecscatter_mat_begin_c(A_array, vec_long, measure_nonlocal_ptr)
-         call vecscatter_mat_end_c(A_array, vec_long, measure_nonlocal_ptr)
-         ! This is the lvec so we have to make sure we don't do a matvec anywhere 
-         ! before calling restore
+         A_array = strength_mat%v
+         call vecscatter_mat_begin_c(sf_array, vec_long, leaf_vec_array)
+         call vecscatter_mat_end_c(sf_array, vec_long, leaf_vec_array, measure_nonlocal_ptr)
          call c_f_pointer(measure_nonlocal_ptr, measure_nonlocal, shape=[cols_ao])
 
          allocate(assigned_nonlocal(cols_ao))
@@ -471,7 +501,7 @@ module pmisr_module
          ! Start the async broadcast of assigned_local to assigned_nonlocal
          ! ~~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call boolscatter_mat_begin_c(sf_array, assigned_local_ptr, assigned_nonlocal_ptr)
          end if
 
          ! Reset in_set_this_loop, which keeps track of which nodes are added to the set this loop
@@ -521,12 +551,12 @@ module pmisr_module
          ! Finish the async broadcast, assigned_nonlocal is now correct
          ! ~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
-         end if     
-                 
+            call boolscatter_mat_end_c(sf_array, assigned_local_ptr, assigned_nonlocal_ptr)
+         end if
+
          ! ~~~~~~~~
          ! Now go through and do the non-local part of the matrix
-         ! ~~~~~~~~            
+         ! ~~~~~~~~
          if (comm_size /= 1) then
 
             node_loop: do ifree = 1, local_rows   
@@ -584,7 +614,7 @@ module pmisr_module
             ! After this comms finishes any local node in another processors halo 
             ! that has been assigned on another process will be correctly marked in assigned_local
             ! ~~~~~~~~~~~    
-            call boolscatter_mat_reverse_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)       
+            call boolscatter_mat_reverse_begin_c(sf_array, assigned_local_ptr, assigned_nonlocal_ptr)
 
          end if
 
@@ -609,7 +639,7 @@ module pmisr_module
          ! ~~~~~~~~~
          if (comm_size /= 1) then
             ! Finishes the reduce LOR, assigned_local will now be correct
-            call boolscatter_mat_reverse_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)       
+            call boolscatter_mat_reverse_end_c(sf_array, assigned_local_ptr, assigned_nonlocal_ptr)
          end if
 
          ! ~~~~~~~~~~~~
@@ -650,17 +680,17 @@ module pmisr_module
       ! ~~~~~~~~~      
       deallocate(in_set_this_loop, assigned_local)
       if (comm_size/=1) then
-         call VecDestroy(measure_vec, ierr)    
-         ! Don't forget to restore on lvec from our matrix
-         call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)             
+         call vecscatter_mat_restore_c(leaf_vec_array, measure_nonlocal_ptr)
+         call VecDestroy(measure_vec, ierr)
       end if
-      deallocate(assigned_nonlocal)    
+      deallocate(assigned_nonlocal)
 
-   end subroutine pmisr_existing_measure_cf_markers  
+   end subroutine pmisr_existing_measure_cf_markers
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pmisr_existing_measure_implicit_transpose(strength_mat, max_luby_steps, pmis, &
+   subroutine pmisr_existing_measure_implicit_transpose(strength_mat, sf_array, leaf_vec_array, &
+                  max_luby_steps, pmis, &
                   measure_local, cf_markers_local, zero_measure_c_point)
 
       ! ~~~~~~~~~~~~~~~~~~~~~
@@ -694,6 +724,7 @@ module pmisr_module
       ! ~~~~~~
 
       type(tMat), target, intent(in)       :: strength_mat
+      integer(c_long_long), intent(in)     :: sf_array, leaf_vec_array
       integer, intent(in)                  :: max_luby_steps
       logical, intent(in)                  :: pmis
       PetscReal, dimension(:), allocatable :: measure_local
@@ -719,7 +750,8 @@ module pmisr_module
       type(tMat) :: Ad, Ao, Ad_spst, Ao_transpose
       type(tVec) :: measure_vec
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: A_array, vec_long
+      integer(c_long_long) :: vec_long
+      integer(c_long_long) :: A_array
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt, dimension(:), pointer :: spst_ia, spst_ja, aot_ia, aot_ja
       PetscInt :: shift = 0
@@ -819,7 +851,7 @@ module pmisr_module
       allocate(veto_local(local_rows))
 
       ! ~~~~~~~~~~~~
-      ! Create parallel vec and scatter the measure
+      ! Create parallel vec and scatter the measure using the caller-supplied SF/leaf
       ! ~~~~~~~~~~~~
       if (comm_size/=1) then
 
@@ -827,14 +859,10 @@ module pmisr_module
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, &
             local_rows, global_rows, measure_local, measure_vec, ierr)
 
-         A_array = strength_mat%v
          vec_long = measure_vec%v
-         ! We're just going to use the existing lvec to scatter the measure
-         ! Have to call restore after we're done with lvec (ie measure_nonlocal_ptr)
-         call vecscatter_mat_begin_c(A_array, vec_long, measure_nonlocal_ptr)
-         call vecscatter_mat_end_c(A_array, vec_long, measure_nonlocal_ptr)
-         ! This is the lvec so we have to make sure we don't do a matvec anywhere
-         ! before calling restore
+         A_array = strength_mat%v
+         call vecscatter_mat_begin_c(sf_array, vec_long, leaf_vec_array)
+         call vecscatter_mat_end_c(sf_array, vec_long, leaf_vec_array, measure_nonlocal_ptr)
          call c_f_pointer(measure_nonlocal_ptr, measure_nonlocal, shape=[cols_ao])
 
          allocate(assigned_nonlocal(cols_ao))
@@ -953,7 +981,7 @@ module pmisr_module
          ! and the non-local influence veto
          ! ~~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call boolscatter_mat_begin_c(sf_array, assigned_local_ptr, assigned_nonlocal_ptr)
          end if
 
          ! ~~~~~~~~
@@ -998,7 +1026,7 @@ module pmisr_module
          ! Finish the async broadcast, assigned_nonlocal is now correct
          ! ~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call boolscatter_mat_end_c(sf_array, assigned_local_ptr, assigned_nonlocal_ptr)
          end if
 
          ! ~~~~~~~~
@@ -1041,9 +1069,9 @@ module pmisr_module
             ! After this, veto_local(i) is TRUE if any non-local transpose neighbour
             ! vetoes local node i
             ! ~~~~~~~~
-            call boolscatter_mat_reverse_begin_c(A_array, veto_local_ptr, veto_nonlocal_ptr)
+            call boolscatter_mat_reverse_begin_c(sf_array, veto_local_ptr, veto_nonlocal_ptr)
             ! Not sure we have any chance to overlap this with anything else
-            call boolscatter_mat_reverse_end_c(A_array, veto_local_ptr, veto_nonlocal_ptr)
+            call boolscatter_mat_reverse_end_c(sf_array, veto_local_ptr, veto_nonlocal_ptr)
 
             ! ~~~~~~~~
             ! Now the comms have finished, we know exactly which local nodes on this rank have no
@@ -1146,8 +1174,8 @@ module pmisr_module
             ! After this comms finishes any local node in another processors halo
             ! that has been assigned on another process will be correctly marked in assigned_local
             ! ~~~~~~~~~~~
-            call boolscatter_mat_reverse_begin_c(A_array, assigned_local_ptr, veto_nonlocal_ptr)
-            call boolscatter_mat_reverse_end_c(A_array, assigned_local_ptr, veto_nonlocal_ptr)
+            call boolscatter_mat_reverse_begin_c(sf_array, assigned_local_ptr, veto_nonlocal_ptr)
+            call boolscatter_mat_reverse_end_c(sf_array, assigned_local_ptr, veto_nonlocal_ptr)
 
             ! ~~~~~~~~~~~~~~
             ! 3. Non-local influences: we need to know which nonlocal nodes were just
@@ -1158,8 +1186,8 @@ module pmisr_module
 
             ! Reuse veto_nonlocal to receive the forward scatter result
             veto_nonlocal = .FALSE.
-            call boolscatter_mat_begin_c(A_array, in_set_ptr, veto_nonlocal_ptr)
-            call boolscatter_mat_end_c(A_array, in_set_ptr, veto_nonlocal_ptr)
+            call boolscatter_mat_begin_c(sf_array, in_set_ptr, veto_nonlocal_ptr)
+            call boolscatter_mat_end_c(sf_array, in_set_ptr, veto_nonlocal_ptr)
 
             ! Now veto_nonlocal(k) = TRUE means the remote node at nonlocal column k
             ! was just assigned this loop on its owning processor
@@ -1222,9 +1250,8 @@ module pmisr_module
 
       deallocate(in_set_this_loop, assigned_local, veto_local)
       if (comm_size/=1) then
+         call vecscatter_mat_restore_c(leaf_vec_array, measure_nonlocal_ptr)
          call VecDestroy(measure_vec, ierr)
-         ! Don't forget to restore on lvec from our matrix
-         call vecscatter_mat_restore_c(A_array, measure_nonlocal_ptr)
       end if
       deallocate(assigned_nonlocal, veto_nonlocal)
 

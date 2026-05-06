@@ -2,7 +2,6 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 #include <../src/mat/impls/aij/seq/aij.h>
-#include <../src/mat/impls/aij/mpi/mpiaij.h>
 
 // The definition of the device copy of the cf markers on a given level 
 // is stored in Device_Datak.kokkos.cxx and imported as extern from 
@@ -12,7 +11,7 @@
 
 // Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
 // This code is very similar to MatCreateSubMatrix_kokkos
-PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
+PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscSF *sf, Vec *leaf_vec, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
 {
    PetscInt local_rows, local_cols;
 
@@ -25,20 +24,18 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols)); 
 
-   Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local = NULL, mat_nonlocal = NULL;   
+   Mat mat_local = NULL, mat_nonlocal = NULL;
 
    PetscInt rows_ao, cols_ao;
    if (mpi)
    {
-      mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));      
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
    }
    else
    {
       mat_local = *input_mat;
-   }   
+   }
 
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -83,10 +80,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       }
 
       // Start comms, then overlap with local-only work below.
-      // Mvctx must have only one active comm at a time.
+      // The SF must have only one active comm at a time.
       // Ensure send/receive buffers are stable before Begin.
-      Kokkos::fence();      
-      PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      Kokkos::fence();
+      PetscCallVoid(VecScatterBegin(*sf, scatter_root_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
    }
 
    // ~~~~~~~~~~~~~~~
@@ -158,15 +155,15 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Finish the in-flight scatter and only then read from the receive buffer.
    if (mpi)
    {
-      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
-         PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         PetscCallVoid(VecGetKokkosView(*leaf_vec, &lvec_scalar_d));
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
          });
-         PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         PetscCallVoid(VecRestoreKokkosView(*leaf_vec, &lvec_scalar_d));
       }
       PetscCallVoid(VecDestroy(&scatter_root_vec));
       Kokkos::fence();

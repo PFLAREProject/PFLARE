@@ -2,7 +2,8 @@ module ddc_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
+   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper, &
+         build_aij_nonlocal_sf_and_leaf
       use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
          MatDiagDomRatio_kokkos, create_cf_is_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
@@ -44,11 +45,17 @@ module ddc_module
       PetscInt :: local_rows, local_cols
       PetscReal :: max_dd_ratio_achieved
       integer :: seed_size_ddc, comm_rank_ddc, errorcode_ddc, i_loc
+      integer :: comm_size
       integer, dimension(:), allocatable :: seed_ddc
       PetscReal, dimension(:), allocatable :: diag_dom_ratio
       PetscReal, dimension(:), allocatable, target :: diag_dom_ratio_random
       type(c_ptr) :: random_numbers_ptr
       MPIU_Comm :: MPI_COMM_MATRIX
+      ! Aff PetscSF + leaf Vec built once when trigger_dd_ratio_compute_local
+      ! is true; shared by ddc_kokkos and ddc_cpu (-> pmisr_existing_measure_implicit_transpose).
+      integer(c_long_long) :: aff_sf_array, aff_leaf_vec_array
+      type(tPetscSF) :: aff_sf
+      type(tVec) :: aff_leaf_vec
 
 #if defined(PETSC_HAVE_KOKKOS)
       integer(c_long_long) :: A_array, Aff_array, is_fine_array, is_coarse_array
@@ -68,6 +75,10 @@ module ddc_module
          return
       end if
 
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank_ddc, errorcode_ddc)      
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode_ddc)
+
       ! Compute the diagonal dominance ratio - either returned in diag_dom_ratio
       ! or stored in a device copy for kokkos
       ! max_dd_ratio_achieved is always returned and is the max diag dom ratio across
@@ -86,8 +97,6 @@ module ddc_module
       random_numbers_ptr = c_null_ptr
       if (trigger_dd_ratio_compute_local) then
          
-         call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
-         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank_ddc, errorcode_ddc)
          call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
          ! We allocate randoms here to be the size of input, rather than 
          ! just F points as if we are on the device the is_fine won't be allocated
@@ -141,9 +150,22 @@ module ddc_module
             cf_markers_local_two = cf_markers_local
          end if
 
+         ! Build the PetscSF + leaf Vec for Aff_ddc once before ddc_kokkos.
+         ! Both ddc_kokkos and (in the kokkos_debug fall-through) ddc_cpu
+         ! reuse this SF, which then propagates down through
+         ! pmisr_existing_measure_implicit_transpose so the SF is never
+         ! re-created at lower call levels.
+         aff_sf_array = 0
+         aff_leaf_vec_array = 0
+         if (trigger_dd_ratio_compute_local .AND. comm_size /= 1) then
+            call build_aij_nonlocal_sf_and_leaf(Aff_ddc, aff_sf, aff_leaf_vec)
+            aff_sf_array = aff_sf%v
+            aff_leaf_vec_array = aff_leaf_vec%v
+         end if
+
          ! Modifies the existing device cf_markers created by the pmisr
          call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
-            random_numbers_ptr)
+            aff_sf_array, aff_leaf_vec_array, random_numbers_ptr)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
@@ -153,7 +175,9 @@ module ddc_module
             call copy_cf_markers_d2h(cf_markers_local_ptr)
             if (trigger_dd_ratio_compute_local) then
                call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-                  diag_dom_ratio, cf_markers_local_two, Aff=Aff_ddc, &
+                  diag_dom_ratio, cf_markers_local_two, &
+                  aff_sf_array=aff_sf_array, aff_leaf_vec_array=aff_leaf_vec_array, &
+                  Aff=Aff_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
             else
                call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
@@ -175,6 +199,10 @@ module ddc_module
 
          ! Cleanup
          if (trigger_dd_ratio_compute_local) then
+            if (comm_size /= 1) then
+               call PetscSFDestroy(aff_sf, ierr)
+               call VecDestroy(aff_leaf_vec, ierr)
+            end if
             call MatDestroy(Aff_ddc, ierr)
          end if
 
@@ -184,10 +212,22 @@ module ddc_module
             call MatCreateSubMatrix(input_mat, &
                   is_fine, is_fine, MAT_INITIAL_MATRIX, &
                   Aff_ddc, ierr)
+            aff_sf_array = 0
+            aff_leaf_vec_array = 0
+            if (comm_size /= 1) then
+               call build_aij_nonlocal_sf_and_leaf(Aff_ddc, aff_sf, aff_leaf_vec)
+               aff_sf_array = aff_sf%v
+               aff_leaf_vec_array = aff_leaf_vec%v
+            end if
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local, &
+                  aff_sf_array=aff_sf_array, aff_leaf_vec_array=aff_leaf_vec_array, &
                   Aff=Aff_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
+            if (comm_size /= 1) then
+               call PetscSFDestroy(aff_sf, ierr)
+               call VecDestroy(aff_leaf_vec, ierr)
+            end if
             call MatDestroy(Aff_ddc, ierr)
          else
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
@@ -200,10 +240,22 @@ module ddc_module
          call MatCreateSubMatrix(input_mat, &
                is_fine, is_fine, MAT_INITIAL_MATRIX, &
                Aff_ddc, ierr)
+         aff_sf_array = 0
+         aff_leaf_vec_array = 0
+         if (comm_size /= 1) then
+            call build_aij_nonlocal_sf_and_leaf(Aff_ddc, aff_sf, aff_leaf_vec)
+            aff_sf_array = aff_sf%v
+            aff_leaf_vec_array = aff_leaf_vec%v
+         end if
          call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local, &
+               aff_sf_array=aff_sf_array, aff_leaf_vec_array=aff_leaf_vec_array, &
                Aff=Aff_ddc, &
                diag_dom_ratio_random=diag_dom_ratio_random)
+         if (comm_size /= 1) then
+            call PetscSFDestroy(aff_sf, ierr)
+            call VecDestroy(aff_leaf_vec, ierr)
+         end if
          call MatDestroy(Aff_ddc, ierr)
       else
             call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
@@ -219,7 +271,7 @@ module ddc_module
 ! -------------------------------------------------------------------------------------------------------------------------------
 
       subroutine ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, diag_dom_ratio, &
-         cf_markers_local, Aff, diag_dom_ratio_random)
+         cf_markers_local, aff_sf_array, aff_leaf_vec_array, Aff, diag_dom_ratio_random)
 
       ! Second pass diagonal dominance cleanup
       ! Flips the F definitions to C based on least diagonally dominant local rows
@@ -228,6 +280,11 @@ module ddc_module
       !  for swapping C to F based on row-wise diagonal dominance (ie alpha_diag)
       ! If fraction_swap > 0 it uses fraction_swap as the local fraction of worst C points to swap to F
       !  though it won't hit that fraction exactly as we bin the diag dom ratios for speed, it will be close to the fraction
+      !
+      ! aff_sf_array / aff_leaf_vec_array are the PetscSF + leaf Vec built once
+      ! by the caller (ddc dispatcher) for Aff and forwarded to
+      ! pmisr_existing_measure_implicit_transpose. Required when Aff is present
+      ! and the trigger path runs in parallel.
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
@@ -237,6 +294,7 @@ module ddc_module
       PetscReal, intent(in)               :: max_dd_ratio_achieved
       PetscReal, dimension(:), intent(in) :: diag_dom_ratio
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
+      integer(c_long_long), intent(in), optional :: aff_sf_array, aff_leaf_vec_array
       type(tMat), intent(in), optional    :: Aff
       PetscReal, dimension(:), intent(in), optional :: diag_dom_ratio_random
 
@@ -382,7 +440,8 @@ module ddc_module
          ! Uses the implicit transpose version which takes Aff directly
          ! and handles Aff+Aff^T internally without forming the explicit sum
          max_luby_steps = -1
-         call pmisr_existing_measure_implicit_transpose(Aff, max_luby_steps, .FALSE., &
+         call pmisr_existing_measure_implicit_transpose(Aff, aff_sf_array, aff_leaf_vec_array, &
+                  max_luby_steps, .FALSE., &
                   diag_dom_ratio_measure, cf_markers_local_aff)
 
          ! Let's go and swap the badly diagonally dominant rows to F points

@@ -2,7 +2,7 @@ module matdiagdom
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug
+   use petsc_helper, only: kokkos_debug, build_aij_nonlocal_sf_and_leaf
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
    use pflare_parameters, only: C_POINT, F_POINT
@@ -35,6 +35,10 @@ module matdiagdom
 
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errcode
+      integer(c_long_long) :: sf_array, leaf_vec_array
+      type(tPetscSF) :: sf
+      type(tVec) :: leaf_vec
 
 #if defined(PETSC_HAVE_KOKKOS)
       integer :: errorcode, ifree
@@ -48,6 +52,17 @@ module matdiagdom
 #endif
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errcode)
+
+      ! Build the PetscSF + leaf Vec once (replacing Mat_MPIAIJ::Mvctx/lvec)
+      ! and share across both the Kokkos and CPU implementations below.
+      sf_array = 0
+      leaf_vec_array = 0
+      if (comm_size /= 1) then
+         call build_aij_nonlocal_sf_and_leaf(input_mat, sf, leaf_vec)
+         sf_array = sf%v
+         leaf_vec_array = leaf_vec%v
+      end if
 
 #if defined(PETSC_HAVE_KOKKOS)
       call MatGetType(input_mat, mat_type, ierr)
@@ -57,7 +72,8 @@ module matdiagdom
          A_array = input_mat%v
          local_rows_aff_kokkos = 0
          max_dd_ratio_achieved = 0d0
-         call MatDiagDomRatio_kokkos(A_array, max_dd_ratio_achieved, local_rows_aff_kokkos)
+
+         call MatDiagDomRatio_kokkos(A_array, sf_array, leaf_vec_array, max_dd_ratio_achieved, local_rows_aff_kokkos)
 
          if (kokkos_debug()) then
             allocate(diag_dom_ratio(local_rows_aff_kokkos))
@@ -66,7 +82,8 @@ module matdiagdom
                call copy_diag_dom_ratio_d2h(diag_dom_ratio_ptr)
             end if
 
-            call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio_cpu, max_dd_ratio_cpu)
+            call MatDiagDomRatio_cpu(input_mat, sf_array, leaf_vec_array, is_fine, cf_markers_local, &
+                                     diag_dom_ratio_cpu, max_dd_ratio_cpu)
 
             tol = dd_ratio_abs_tol + dd_ratio_rel_tol * max(abs(max_dd_ratio_cpu), abs(max_dd_ratio_achieved))
             if (abs(max_dd_ratio_cpu - max_dd_ratio_achieved) > tol) then
@@ -86,26 +103,39 @@ module matdiagdom
             deallocate(diag_dom_ratio_cpu)
          end if
       else
-         call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+         call MatDiagDomRatio_cpu(input_mat, sf_array, leaf_vec_array, is_fine, cf_markers_local, &
+                                  diag_dom_ratio, max_dd_ratio_achieved)
       end if
 #else
-      call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+      call MatDiagDomRatio_cpu(input_mat, sf_array, leaf_vec_array, is_fine, cf_markers_local, &
+                               diag_dom_ratio, max_dd_ratio_achieved)
 #endif
+
+      if (comm_size /= 1) then
+         call PetscSFDestroy(sf, ierr)
+         call VecDestroy(leaf_vec, ierr)
+      end if
 
    end subroutine MatDiagDomRatio
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+   subroutine MatDiagDomRatio_cpu(input_mat, sf_array, leaf_vec_array, is_fine, cf_markers_local, &
+                                  diag_dom_ratio, max_dd_ratio_achieved)
 
       ! Compute diagonal dominance ratio over local fine rows of input_mat
       ! without extracting Aff. This mirrors the Kokkos MatDiagDomRatio path:
       ! sum abs(F-neighbour off-diagonals) / abs(F-diagonal), with nonlocal
       ! F markers obtained from the matrix halo scatter.
+      !
+      ! sf_array / leaf_vec_array are the PetscSF + leaf Vec built once by the
+      ! caller (MatDiagDomRatio dispatcher) and shared with the kokkos path.
+      ! Both are zero in serial.
 
       ! ~~~~~~
 
       type(tMat), target, intent(in)      :: input_mat
+      integer(c_long_long), intent(in)    :: sf_array, leaf_vec_array
       type(tIS), intent(in)               :: is_fine
       integer, dimension(:), intent(in)   :: cf_markers_local
       PetscReal, dimension(:), allocatable, intent(out) :: diag_dom_ratio
@@ -120,7 +150,7 @@ module matdiagdom
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer(c_long_long) :: A_array, vec_long, Ad_array, Ao_array
+      integer(c_long_long) :: vec_long, Ad_array, Ao_array
       type(tMat) :: Ad, Ao
       type(tVec) :: cf_markers_vec
       PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
@@ -189,10 +219,11 @@ module matdiagdom
 
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, local_rows, global_rows, &
                cf_markers_local_real, cf_markers_vec, ierr)
-         A_array = input_mat%v
          vec_long = cf_markers_vec%v
-         call vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal_ptr)
-         call vecscatter_mat_end_c(A_array, vec_long, cf_markers_nonlocal_ptr)
+
+         ! Use the caller-supplied SF + leaf Vec for the single halo scatter.
+         call vecscatter_mat_begin_c(sf_array, vec_long, leaf_vec_array)
+         call vecscatter_mat_end_c(sf_array, vec_long, leaf_vec_array, cf_markers_nonlocal_ptr)
          call c_f_pointer(cf_markers_nonlocal_ptr, cf_markers_nonlocal, shape=[cols_ao])
       end if
 
@@ -235,7 +266,7 @@ module matdiagdom
 
       ! Cleanup for halo scatter resources.
       if (mpi) then
-         call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)
+         call vecscatter_mat_restore_c(leaf_vec_array, cf_markers_nonlocal_ptr)
          call VecDestroy(cf_markers_vec, ierr)
          deallocate(cf_markers_local_real)
       end if

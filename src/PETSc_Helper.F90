@@ -1,5 +1,6 @@
 module petsc_helper
 
+   use iso_c_binding
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
@@ -24,7 +25,57 @@ logical, protected :: kokkos_debug_global = .FALSE.
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
-   contains 
+   contains
+
+   !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   subroutine build_aij_nonlocal_sf_and_leaf(matrix, sf, leaf_vec)
+
+      ! Build a PetscSF + matching leaf Vec that scatter from a global vec
+      ! with the matrix's domain layout into a local "leaf" buffer indexed
+      ! the same way a Mat_MPIAIJ's lvec is. Caller owns and must destroy
+      ! both objects with PetscSFDestroy / VecDestroy.
+
+      ! Input
+      type(tMat), intent(in)        :: matrix
+
+      ! Output
+      type(tPetscSF), intent(out)   :: sf
+      type(tVec),     intent(out)   :: leaf_vec
+
+      ! Local
+      type(tMat) :: Ad, Ao
+      type(tPetscLayout) :: col_layout
+      PetscInt, dimension(:), pointer :: colmap => null()
+      PetscInt :: rows_ao, cols_ao
+      MPIU_Comm :: comm
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~
+
+      ! Off-diagonal block + colmap give us the leaf-side numbering
+      call MatMPIAIJGetSeqAIJ(matrix, Ad, Ao, colmap, ierr)
+      call MatGetSize(Ao, rows_ao, cols_ao, ierr)
+
+      ! Leaf Vec sized/typed to match the off-diagonal block (this gives
+      ! VECSEQKOKKOS automatically for Kokkos matrices).
+      call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
+
+      ! Star forest mirroring the matvec halo: roots = global vec, leaves
+      ! = colmap entries. We use the column layout because for non-square
+      ! mats (e.g. row_mat in constrain_grid_transfer) the source vec has
+      ! the column/domain layout, not the row layout.
+      call PetscObjectGetComm(matrix, comm, ierr)
+      call PetscSFCreate(comm, sf, ierr)
+      call MatGetLayouts(matrix, PETSC_NULL_LAYOUT, col_layout, ierr)
+      ! PETSC_NULL_INTEGER_ARRAY for ilocal selects natural ordering.
+      ! Note: PETSc's Fortran wrapper recognises this sentinel only after
+      ! PetscInitializeFortran() has run; PFLARE C entry points that hand
+      ! off to Fortran (PCAIRInit, compute_cf_splitting, ...) all call it.
+      call PetscSFSetGraphLayout(sf, col_layout, cols_ao, &
+                                 PETSC_NULL_INTEGER_ARRAY, PETSC_COPY_VALUES, colmap, ierr)
+
+   end subroutine build_aij_nonlocal_sf_and_leaf
 
    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1084,26 +1135,29 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(inout)     :: output_mat
 
       PetscErrorCode :: ierr
-#if defined(PETSC_HAVE_KOKKOS)                     
+#if defined(PETSC_HAVE_KOKKOS)
       MPIU_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
+      integer(c_long_long) :: sf_array, leaf_vec_array
       integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
       logical :: reuse_logical
       MatType :: mat_type
       Mat :: temp_mat
       PetscScalar :: normy
       type(tVec) :: max_vec
-      PetscInt :: row_loc      
-#endif      
+      type(tVec) :: leaf_vec
+      type(tPetscSF) :: sf
+      PetscInt :: row_loc
+#endif
       ! ~~~~~~~~~~
 
-#if defined(PETSC_HAVE_KOKKOS)    
+#if defined(PETSC_HAVE_KOKKOS)
 
       call MatGetType(input_mat, mat_type, ierr)
-      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
-      ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      ! Get the comm size
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
 
       ! If doing parallel Kokkos
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
@@ -1114,10 +1168,21 @@ logical, protected :: kokkos_debug_global = .FALSE.
          reuse_int = 0
          if (reuse_logical) reuse_int = 1
 
-         A_array = input_mat%v   
-         B_array = output_mat%v      
+         A_array = input_mat%v
+         B_array = output_mat%v
          is_row_ptr = is_row%v
          is_col_ptr = is_col%v
+
+         ! Build the SF + leaf Vec replacing Mat_MPIAIJ::Mvctx/lvec for the
+         ! single MatCreateSubMatrix_kokkos call below. In serial we still
+         ! pass these in; the kokkos routine ignores them on the serial path.
+         sf_array = 0
+         leaf_vec_array = 0
+         if (comm_size /= 1) then
+            call build_aij_nonlocal_sf_and_leaf(input_mat, sf, leaf_vec)
+            sf_array = sf%v
+            leaf_vec_array = leaf_vec%v
+         end if
 
          our_level_int = -1
          is_row_fine_int = 0
@@ -1133,9 +1198,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
             if (is_col_fine) is_col_fine_int = 1
          end if
 
-         call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
+         call MatCreateSubMatrix_kokkos(A_array, sf_array, leaf_vec_array, is_row_ptr, is_col_ptr, &
                   reuse_int, B_array, &
                   our_level_int, is_row_fine_int, is_col_fine_int)
+
+         if (comm_size /= 1) then
+            call PetscSFDestroy(sf, ierr)
+            call VecDestroy(leaf_vec, ierr)
+         end if
 
          output_mat%v = B_array
 

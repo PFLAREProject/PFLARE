@@ -2,7 +2,6 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 #include <../src/mat/impls/aij/seq/aij.h>
-#include <../src/mat/impls/aij/mpi/mpiaij.h>
 
 // The definition of the device copy of the cf markers on a given level 
 // is stored in Device_Datak.kokkos.cxx and imported as extern from 
@@ -13,7 +12,7 @@
 // ddc cleanup but on the device - uses the global variable cf_markers_local_d
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, Mat *aff, PetscReal *random_numbers)
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, Mat *aff, PetscSF *aff_sf, Vec *aff_leaf_vec, PetscReal *random_numbers)
 {
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -101,7 +100,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
          // Call PMISR with implicit transpose - takes Aff directly, handles Aff+Aff^T internally
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
-         pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);
+         pmisr_existing_measure_implicit_transpose_kokkos(aff, aff_sf, aff_leaf_vec, -1, 0, measure_d, cf_markers_aff_d, 0);  // aff_sf and aff_leaf_vec are already PetscSF* and Vec* from the caller
 
          // Swap F-tagged points back into cf_markers_d
          Kokkos::parallel_for(
