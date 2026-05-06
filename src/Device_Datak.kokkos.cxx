@@ -1,7 +1,6 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
 #include <iostream>
-#include <../src/mat/impls/aij/seq/aij.h>
 
 // This is a device copy of the cf markers on a given level
 // to save having to copy it to/from the host between pmisr and ddc calls

@@ -1,7 +1,6 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
 #include <iostream>
-#include <../src/mat/impls/aij/seq/aij.h>
 
 // The definition of the device copy of the cf markers on a given level
 // is stored in Device_Datak.kokkos.cxx and imported as extern from

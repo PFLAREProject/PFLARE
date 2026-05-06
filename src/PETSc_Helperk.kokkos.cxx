@@ -3,7 +3,6 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
-#include <../src/mat/impls/aij/seq/aij.h>
 
 //------------------------------------------------------------------------------------------------------------------------
 
