@@ -547,8 +547,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // for the non-local components)
    // ~~~~~~~~~~~~~~~~~~~~~
 
-   Mat_SeqAIJKokkos *mat_nonlocal_kok, *mat_local_kok;
-   PetscInt zero = 0;
    bool destroy_nonlocal_transpose = false;
    bool destroy_spst = false;
 
@@ -556,9 +554,15 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    {
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, NULL));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
-      mat_nonlocal_kok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal->spptr);
+      // Read the nnz from the host i pointer
+      PetscInt n;
+      PetscBool symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done;
+      const PetscInt *ao_ia;
+      PetscCallVoid(MatGetRowIJ(mat_nonlocal, 0, symmetric, inodecompressed, &n, &ao_ia, NULL, &done));
+      const PetscInt nonlocal_nnz = ao_ia[n];
+      PetscCallVoid(MatRestoreRowIJ(mat_nonlocal, 0, symmetric, inodecompressed, &n, &ao_ia, NULL, &done));
       // The transpose can crash if mat_nonlocal is empty
-      if (mat_nonlocal_kok->csrmat.nnz() > zero)
+      if (nonlocal_nnz > 0)
       {
          PetscCallVoid(MatTranspose(mat_nonlocal, MAT_INITIAL_MATRIX, &mat_nonlocal_transpose));
          destroy_nonlocal_transpose = true;
@@ -568,7 +572,6 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    {
       mat_local = *strength_mat;
    }
-   mat_local_kok = static_cast<Mat_SeqAIJKokkos *>(mat_local->spptr);
 
    // Get the comm
    PetscCallVoid(PetscObjectGetComm((PetscObject)*strength_mat, &MPI_COMM_MATRIX));
@@ -577,13 +580,24 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // This returns the global index of the local portion of the matrix
    PetscCallVoid(MatGetOwnershipRange(*strength_mat, &global_row_start, &global_row_end_plus_one));
 
+   // Read the nnz from the host i pointer of the local block
+   PetscInt local_nnz;
+   {
+      PetscInt n;
+      PetscBool symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done;
+      const PetscInt *ad_ia;
+      PetscCallVoid(MatGetRowIJ(mat_local, 0, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));
+      local_nnz = ad_ia[n];
+      PetscCallVoid(MatRestoreRowIJ(mat_local, 0, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));
+   }
+
    // ~~~~~~~~~~~~
    // Form the local S+S^T and get CSR pointers
    // We explicitly compute the local part of S+S^T so we don't have to
    // match the row/column indices - could do this as a symbolic as we don't need the values
    // ~~~~~~~~~~~~
    PetscScalar one = 1.0;
-   if (mat_local_kok->csrmat.nnz() > zero)
+   if (local_nnz > 0)
    {
       PetscCallVoid(MatTranspose(mat_local, MAT_INITIAL_MATRIX, &mat_local_spst));
       PetscCallVoid(MatAXPY(mat_local_spst, one, mat_local, DIFFERENT_NONZERO_PATTERN));
