@@ -22,7 +22,6 @@ using PetscIntConstKokkosViewHost = Kokkos::View<const PetscInt *, HostMirrorMem
 using intKokkosViewHost = Kokkos::View<int *, HostMirrorMemorySpace>;
 using intKokkosView = Kokkos::View<int *, Kokkos::DefaultExecutionSpace>;
 using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
-using ConstMatRowMapKokkosView = KokkosCsrGraph::row_map_type::const_type;
 
 // Create views using scratch memory space
 typedef Kokkos::DefaultExecutionSpace::scratch_memory_space
