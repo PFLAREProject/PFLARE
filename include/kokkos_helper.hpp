@@ -7,7 +7,6 @@
 #include "petsc.h"
 #include <../src/mat/impls/aij/seq/kokkos/aijkok.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
-#include <../src/vec/vec/impls/seq/kokkos/veckokkosimpl.hpp>
 #include <Kokkos_Random.hpp>
 #include <Kokkos_Core.hpp>
 #include <Kokkos_DualView.hpp>
