@@ -44,13 +44,12 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
    PetscCallVoid(MatGetOwnershipRange(*strength_mat, &global_row_start, &global_row_end_plus_one));
 
    // ~~~~~~~~~~~~
-   // Get pointers to the i,j,vals on the device
+   // Get pointers to the i,j on the device
    // ~~~~~~~~~~~~
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
 
    intKokkosView cf_markers_nonlocal_d;
    // Scratch buffer used for local update bookkeeping during overlap with reverse scatter.
@@ -1267,13 +1266,12 @@ PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, PetscSF *sf, Vec *leaf_vec, co
    PetscCallVoid(MatGetSize(*strength_mat, &global_rows, &global_cols));
 
    // ~~~~~~~~~~~~
-   // Get pointers to the i,j,vals on the device
+   // Get pointers to the i,j on the device
    // ~~~~~~~~~~~~
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
 
    // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
    cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);

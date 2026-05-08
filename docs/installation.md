@@ -8,7 +8,7 @@ Please choose one of the build methods below. If you wish to contribute to PFLAR
 
 ### PETSc configure build
 
-PFLARE has now been added to the PETSc configure as an external package, as of the PETSc 3.25 release. PFLARE can be built by adding ``--download-pflare`` to the PETSc configure. 
+PFLARE is available through the PETSc configure as an external package, since the PETSc 3.25 release. PFLARE can be built by adding ``--download-pflare`` to the PETSc configure. 
 
 The PC types added by PFLARE can then be used as native PETSc PC types through command line arguments without any changes to existing code. The [Linking to PFLARE](#linking-to-pflare) and [Modifying existing code](#modifying-existing-code) sections below can therefore be skipped. 
 
@@ -39,9 +39,7 @@ The full set of tests can be run with:
 
 6) ``make tests`` in the top level directory.
 
-Please use the `main` branch of PETSc and compile PETSc directly from the source code, as PFLARE requires access to some of the PETSc types only available in the source. If PETSc was installed out of place, you should add the `/include` directory from the PETSc source location to `CFLAGS, CXXFLAGS, CPPFLAGS` before calling `make` for PFLARE. 
-
-If you wish to use an older version of PETSc, please see the [PFLARE Spack](https://github.com/PFLAREProject/PFLARE_spack) `package.py` where a list of compatible PFLARE release versions is maintained.
+Please use the `main` branch of PETSc. If you wish to use an older version of PETSc, please see the [PFLARE Spack](https://github.com/PFLAREProject/PFLARE_spack) `package.py` where a list of compatible PFLARE release versions is maintained.
 
 ### Docker
 
