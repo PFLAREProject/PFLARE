@@ -178,9 +178,6 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // ~~~~~~~~~~~~~~~~~~~~~~~
    // We need the relative row tolerance, let's create some device memory to store it
    PetscScalarKokkosView rel_row_tol_d("rel_row_tol_d", local_rows);
-   // Log copy with petsc
-   size_t bytes = sizeof(PetscReal);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));
 
    // We need to know how many entries are in each row after our dropping
    PetscIntKokkosView nnz_match_local_row_d("nnz_match_local_row_d", local_rows);
@@ -1174,48 +1171,19 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    {
       mat_local = *input_mat;
    }
-   PetscInt local_rows, local_cols;
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
 
    auto exec = PetscGetKokkosExecutionSpace();
 
-   // ~~~~~~~~~~~~
-   // Get pointers to the i,j on the device and write-only Kokkos views to the values
-   // ~~~~~~~~~~~~
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-   PetscMemType mtype;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
    Kokkos::View<PetscScalar *> device_local_vals;
    Kokkos::View<PetscScalar *> device_nonlocal_vals;
    PetscCallVoid(MatSeqAIJGetKokkosViewWrite(mat_local, &device_local_vals));
    if (mpi) PetscCallVoid(MatSeqAIJGetKokkosViewWrite(mat_nonlocal, &device_nonlocal_vals));
 
-   // Set all values to val by looping over rows
-   Kokkos::parallel_for(
-      Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
-      KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-         const PetscInt i = t.league_rank();
-         const PetscInt ncols = device_local_i[i + 1] - device_local_i[i];
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
-            device_local_vals(device_local_i[i] + j) = val;
-         });
-   });
-   // Log copy with petsc
-   size_t bytes = sizeof(PetscReal);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));
+   // Set all values to val
+   Kokkos::deep_copy(exec, device_local_vals, val);
    if (mpi)
    {
-      Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
-         KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-            const PetscInt i = t.league_rank();
-            const PetscInt ncols = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
-               device_nonlocal_vals(device_nonlocal_i[i] + j) = val;
-            });
-      });
-      PetscCallVoid(PetscLogCpuToGpu(bytes));
+      Kokkos::deep_copy(exec, device_nonlocal_vals, val);
    }
 
    // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
@@ -1512,15 +1480,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
 
       // Because we might be missing diagonals and we're going to skip some of them
       // in the writing loop below
-      Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
-         KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-            const PetscInt i = t.league_rank();
-            const PetscInt ncols = device_local_i_output[i + 1] - device_local_i_output[i];
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols), [&](const PetscInt j) {
-               device_local_a_output(device_local_i_output[i] + j) = 0.0;
-            });
-      });
+      Kokkos::deep_copy(exec, device_local_a_output, 0.0);
 
       // Only have to write a but have to be careful as we may not have diagonals in some rows
       // in the input, but they are in the output
