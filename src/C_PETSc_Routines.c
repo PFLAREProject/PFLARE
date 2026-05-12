@@ -533,7 +533,7 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-extern PetscErrorCode MatGetDiagonalMarkers_SeqAIJ(Mat, const PetscInt **, PetscBool *);
+PETSC_EXTERN PetscErrorCode MatGetDiagonalMarkers_SeqAIJ(Mat, const PetscInt **, PetscBool *);
 // Returns true if a matrix is only the diagonal
 PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 {
