@@ -15,12 +15,16 @@ PetscScalarKokkosView diag_dom_ratio_local_d;
 // Copy the global cf_markers_local_d back to the host
 PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 {
+   //PflareKokkosTrace _trace("copy_cf_markers_d2h");
    // Host wrapper for cf_markers_local
    intKokkosViewHost cf_markers_local_h(cf_markers_local, cf_markers_local_d.extent(0));
 
+   auto exec = PetscGetKokkosExecutionSpace();   
+
    // Now copy device cf_markers_local_d back to host
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(cf_markers_local_h, cf_markers_local_d);
+   Kokkos::deep_copy(exec, cf_markers_local_h, cf_markers_local_d);
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes = cf_markers_local_d.extent(0) * sizeof(int);
    PetscCallVoid(PetscLogGpuToCpu(bytes));
@@ -33,12 +37,16 @@ PETSC_INTERN void copy_cf_markers_d2h(int *cf_markers_local)
 // Copy the global diag_dom_ratio_local_d back to the host
 PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
 {
+   //PflareKokkosTrace _trace("copy_diag_dom_ratio_d2h");
    // Host wrapper for diag_dom_ratio_local
    PetscScalarKokkosViewHost diag_dom_ratio_h(diag_dom_ratio_local, diag_dom_ratio_local_d.extent(0));
 
+   auto exec = PetscGetKokkosExecutionSpace();   
+
    // Copy device diag_dom_ratio_local_d back to host
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(diag_dom_ratio_h, diag_dom_ratio_local_d);
+   Kokkos::deep_copy(exec, diag_dom_ratio_h, diag_dom_ratio_local_d);
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes = diag_dom_ratio_local_d.extent(0) * sizeof(PetscReal);
    PetscCallVoid(PetscLogGpuToCpu(bytes));
@@ -51,6 +59,7 @@ PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local)
 // Delete the global cf_markers_local_d
 PETSC_INTERN void delete_device_cf_markers()
 {
+   //PflareKokkosTrace _trace("delete_device_cf_markers");
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    cf_markers_local_d = intKokkosView();
@@ -63,6 +72,7 @@ PETSC_INTERN void delete_device_cf_markers()
 // Delete the global diag_dom_ratio_local_d
 PETSC_INTERN void delete_device_diag_dom_ratio()
 {
+   //PflareKokkosTrace _trace("delete_device_diag_dom_ratio");
    // Delete the device view - this assigns an empty view
    // and hence the old view has its ref counter decremented
    diag_dom_ratio_local_d = PetscScalarKokkosView();
@@ -75,6 +85,7 @@ PETSC_INTERN void delete_device_diag_dom_ratio()
 // Creates the device local indices for F or C points based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d)
 {
+   //PflareKokkosTrace _trace("create_cf_is_device_kokkos");
    PetscInt local_rows, local_cols;
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
    auto exec = PetscGetKokkosExecutionSpace();
@@ -109,7 +120,8 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
    // The last entry in point_offsets_d is the total number of points that match match_cf
    PetscInt local_rows_row = 0;
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
+   Kokkos::deep_copy(exec, local_rows_row, Kokkos::subview(point_offsets_d, local_rows));
+   Kokkos::fence();
 
    // This will be equivalent to is_fine - global_row_start, ie the local indices
    is_local_d = PetscIntKokkosView("is_local_d", local_rows_row);
@@ -134,9 +146,13 @@ PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf,
 // Creates the host IS is_fine and is_coarse based on the global cf_markers_local_d
 PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse)
 {
+   //PflareKokkosTrace _trace("create_cf_is_kokkos");
    PetscIntKokkosView is_fine_local_d, is_coarse_local_d;
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+
+   PetscInt local_rows_check, local_cols_check;
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows_check, &local_cols_check));
 
    // Create the local f point indices
    const int match_fine = -1; // F_POINT == -1
@@ -145,6 +161,10 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    // Create the local C point indices
    const int match_coarse = 1; // C_POINT == 1
    create_cf_is_device_kokkos(input_mat, match_coarse, is_coarse_local_d);
+
+   // Sanity check: fine + coarse must cover every local point exactly once
+   // (check before global-index conversion while entries are still [0, local_rows-1])
+   //check_cf_is_all_local_kokkos(is_fine_local_d, is_coarse_local_d, local_rows_check, MPI_COMM_MATRIX);
 
    // Now convert them back to global indices
    PetscInt global_row_start, global_row_end_plus_one;
@@ -173,10 +193,13 @@ PETSC_INTERN void create_cf_is_kokkos(Mat *input_mat, IS *is_fine, IS *is_coarse
    PetscCallVoid(PetscMalloc1(n_coarse, &is_coarse_array));
    PetscIntKokkosViewHost is_coarse_h = PetscIntKokkosViewHost(is_coarse_array, n_coarse);
 
+   Kokkos::fence();
+
    // Copy over the indices to the host
    // Device to host so don't need to specify exec space
-   Kokkos::deep_copy(is_fine_h, is_fine_local_d);
-   Kokkos::deep_copy(is_coarse_h, is_coarse_local_d);
+   Kokkos::deep_copy(exec, is_fine_h, is_fine_local_d);
+   Kokkos::deep_copy(exec, is_coarse_h, is_coarse_local_d);
+   Kokkos::fence();
    // Log copy with petsc
    size_t bytes_fine = is_fine_local_d.extent(0) * sizeof(PetscInt);
    size_t bytes_coarse = is_coarse_local_d.extent(0) * sizeof(PetscInt);

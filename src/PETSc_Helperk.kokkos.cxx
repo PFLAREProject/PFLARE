@@ -11,6 +11,7 @@
 static PetscErrorCode check_exact_petscint_to_scalar_encoding(PetscInt max_encoded_value, MPI_Comm comm)
 {
    PetscFunctionBegin;
+   PflareKokkosTrace _trace("check_exact_petscint_to_scalar_encoding");
    if (max_encoded_value <= 0) PetscFunctionReturn(PETSC_SUCCESS);
 
    const int digits = std::numeric_limits<PetscScalar>::digits;
@@ -25,80 +26,124 @@ static PetscErrorCode check_exact_petscint_to_scalar_encoding(PetscInt max_encod
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Generate the colmap and rewrite input global j indices to local given the calculated colmap
-PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscInt **garray_host)
+// Sync the kokkos parts of the matrix to make sure they're up to date
+PETSC_INTERN void mat_sync(Mat *X)
 {
+   //PflareKokkosTrace _trace("mat_sync");
+   MatType mat_type;
+   PetscCallVoid(MatGetType(*X, &mat_type));
+   // Are we in parallel?
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
+   Mat mat_local_x = NULL, mat_nonlocal_x = NULL;
+
+   const PetscInt *colmap_x;
+   if (mpi)
+   {
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*X, &mat_local_x, &mat_nonlocal_x, &colmap_x));
+   }
+   else
+   {
+      mat_local_x = *X;
+   }
+
+    Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
+    if (mat_local_xkok->a_dual.need_sync_device()) {
+      mat_local_xkok->a_dual.sync_device();
+      mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+      mat_local_xkok->hermitian_updated = PETSC_FALSE;
+    }    
+    if (mpi) 
+    {       
+      Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
+      if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
+         mat_nonlocal_xkok->a_dual.sync_device();
+         mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
+         mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
+      }  
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Remap each entry in j_d from a global index to its local index via binary search into garray_d.
+// garray_d must be a sorted array of unique global indices.
+// Fences internally.
+static void remap_j_to_local_device(PetscIntKokkosView j_d, PetscIntKokkosView garray_d, PetscInt col_ao_output)
+{
+   //PflareKokkosTrace _trace("remap_j_to_local_device");
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   if (j_d.extent(0) == 0) return;
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, j_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) {
+         j_d(i) = binary_search_sorted(garray_d, col_ao_output, j_d(i));
+   });
+   Kokkos::fence();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Build garray on device from global indices in j_nonlocal_d and remap j_nonlocal_d to local in-place.
+// garray_d (out) is a device view of the sorted unique global column indices (size col_ao_output).
+static void rewrite_j_global_to_local_device(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscIntKokkosView &garray_d)
+{
+   //PflareKokkosTrace _trace("rewrite_j_global_to_local_device");
    auto exec = PetscGetKokkosExecutionSpace();
 
    // Need to preallocate to the max size
-   PetscIntKokkosView colmap_output_d("colmap_output_d", colmap_max_size);   
+   PetscIntKokkosView colmap_output_d("colmap_output_d", colmap_max_size);
    col_ao_output = 0;
 
-   // Take a copy of j and sort it and then build garray
    if (j_nonlocal_d.extent(0) > 0)
    {
       ptrdiff_t count_ptr_arith = -1;
-      // Scoped so we don't keep the copy of j around very long
+      // Scoped so we don't keep the sorted copy of j around very long
       {
          PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
          Kokkos::deep_copy(exec, j_nonlocal_d_sorted, j_nonlocal_d);
-         Kokkos::sort(j_nonlocal_d_sorted);
+         Kokkos::sort(exec, j_nonlocal_d_sorted);
+         Kokkos::fence();
 
          // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
          auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
+         Kokkos::fence();
          auto begin_it = Kokkos::Experimental::begin(colmap_output_d);
          count_ptr_arith = unique_end_it - begin_it;
       }
       col_ao_output = static_cast<PetscInt>(count_ptr_arith);
 
-      // Create some host space for the output garray (that stays in scope) and copy it
-      PetscCallVoid(PetscMalloc1(col_ao_output, garray_host));
-      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(*garray_host, col_ao_output);
       PetscInt zero = 0;
+      garray_d = Kokkos::subview(colmap_output_d, Kokkos::make_pair(zero, col_ao_output));
+
+      // Remap j_nonlocal_d to local indices using binary search into garray_d
+      // This fences internally
+      remap_j_to_local_device(j_nonlocal_d, garray_d, col_ao_output);
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Generate the colmap and rewrite input global j indices to local given the calculated colmap
+PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscInt **garray_host)
+{
+   //PflareKokkosTrace _trace("rewrite_j_global_to_local");
+   auto exec = PetscGetKokkosExecutionSpace();
+   PetscIntKokkosView garray_d;
+
+   // This fences internally
+   rewrite_j_global_to_local_device(colmap_max_size, col_ao_output, j_nonlocal_d, garray_d);
+
+   // Always allocate host array (even zero-size)
+   PetscCallVoid(PetscMalloc1(col_ao_output, garray_host));
+   if (col_ao_output > 0)
+   {
+      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(*garray_host, col_ao_output);
       // Device to host so don't need to specify exec space
-      Kokkos::deep_copy(colmap_output_h, Kokkos::subview(colmap_output_d, Kokkos::make_pair(zero, col_ao_output)));
+      Kokkos::deep_copy(exec, colmap_output_h, garray_d);
+      Kokkos::fence();
       // Log copy with petsc
       size_t bytes = col_ao_output * sizeof(PetscInt);
-      PetscCallVoid(PetscLogGpuToCpu(bytes));         
-   }
-   
-   // ~~~~~~~~~~
-   // Now we can go and overwrite the global indices in j with the local equivalents
-   // ~~~~~~~~~~
-   // Do we have any nonlocal columns
-   if (col_ao_output == 0)
-   {
-      // Silly but depending on the compiler this may return a non-null pointer
-      col_ao_output = 0;
-      PetscCallVoid(PetscMalloc1(col_ao_output, garray_host));
-   }
-   else
-   {
-      // Binary search sorted colmap to find our local index
-      // Originally used Kokkos::UnorderedMap here but it only handles up to uint32_t
-      // entries
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(exec, 0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
-
-            PetscInt low = 0;
-            PetscInt count = col_ao_output; // Number of elements in colmap_output_d
-            PetscInt step = -1;
-            PetscInt mid_idx = -1;
-            
-            while (count > 0) {
-               step = count / 2;
-               mid_idx = low + step;
-               if (colmap_output_d(mid_idx) < j_nonlocal_d(i)) {
-                  low = mid_idx + 1;
-                  count -= (step + 1);
-               } else {
-                  count = step;
-               }
-            }
-            j_nonlocal_d(i) = low;
-      });
-      // Ensure the rewrite is finished before we return
-      Kokkos::fence();         
+      PetscCallVoid(PetscLogGpuToCpu(bytes));
    }
 }
 
@@ -109,6 +154,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                   const int relative_max_row_tolerance_int, const int lump_int, \
                   const int allow_drop_diagonal_int, const int allow_diag_strength_int)
 {
+   //PflareKokkosTrace _trace("remove_small_from_sparse_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
@@ -117,6 +163,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -160,6 +209,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
@@ -749,9 +799,19 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Let's make sure everything on the device is finished
    Kokkos::fence();
 
+   // Convert j_nonlocal_d from global to local indices now, before any sort below.
+   // All global indices (including any diagonals added in the loop above) are finalised.
+   // garray_d holds the sorted unique global column indices on device.
+   PetscIntKokkosView garray_d;
+   PetscInt col_ao_output = 0;
+   if (mpi) {
+      // This fences internally
+      rewrite_j_global_to_local_device(cols_ao, col_ao_output, j_nonlocal_d, garray_d);
+   }
+
    // Now we may have to sort the column indices
    if (lump_int)
-   {  
+   {
       // Reduce to see if we ever added a diagonal
       bool added_any_diagonal = false;
       Kokkos::parallel_reduce(
@@ -761,21 +821,22 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
             if (!existing_diag_d(i)) thread_result = true;
          },
          Kokkos::LOr<bool>(added_any_diagonal)
-      ); 
+      );
 
       // If we did add a diagonal, it got added to the end of the columns on each row, so will have to sort
       // It also could have been added to either the local or nonlocal components given not square
-      if (added_any_diagonal) 
+      if (added_any_diagonal)
       {
-         KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
-         KokkosSparse::sort_crs_matrix(csrmat_local); 
-         
+         KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);
+         Kokkos::fence();
+         KokkosSparse::sort_crs_matrix(csrmat_local);
+
          if (mpi)
          {
-            // The column size is not right here (it will be <= cols_ao)
-            // but it shouldn't matter as we are only construting an explicit kokkos csr matrix here so it can sort
-            KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, cols_ao, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);  
-            KokkosSparse::sort_crs_matrix(csrmat_nonlocal);         
+            // j_nonlocal_d now contains local indices; use col_ao_output as numCols
+            KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, col_ao_output, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);
+            Kokkos::fence();
+            KokkosSparse::sort_crs_matrix(csrmat_nonlocal);
          }
       }
    }
@@ -786,23 +847,28 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
-   if (mpi) 
+   if (mpi)
    {
-      // Now we need to build garray on the host and rewrite the j_nonlocal_d indices so they are local
-      // The default values here are for the case where we 
-      // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
+      // Copy device garray to host
       PetscInt *garray_host = NULL;
-      PetscInt col_ao_output = 0;
-      // This fences internally
-      rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
+      PetscCallVoid(PetscMalloc1(col_ao_output, &garray_host));
+      if (col_ao_output > 0)
+      {
+         PetscIntKokkosViewHost garray_h(garray_host, col_ao_output);
+         // Device to host so don't need to specify exec space
+         Kokkos::deep_copy(exec, garray_h, garray_d);
+         Kokkos::fence();
+         size_t bytes = col_ao_output * sizeof(PetscInt);
+         PetscCallVoid(PetscLogGpuToCpu(bytes));
+      }
 
       // We can create our nonlocal diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
 
       // We can now create our MPI matrix
       PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
-   }     
-   // If in serial 
+   }
+   // If in serial
    else
    {
       *output_mat = output_mat_local;
@@ -817,12 +883,16 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 // Drop according to a existing sparsity in output_mat but with kokkos - keeping everything on the device
 PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int, const int alpha_int, const PetscReal alpha)
 {
+   //PflareKokkosTrace _trace("remove_from_sparse_match_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
    PetscInt global_col_start_temp, global_col_end_plus_one_temp;
    PetscInt rows_ao_input, cols_ao_input, rows_ao_output, cols_ao_output;
    MatType mat_type;
+
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -882,6 +952,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
@@ -1160,6 +1231,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
 // Set all the values of the matrix to val
 PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 {
+   //PflareKokkosTrace _trace("MatSetAllValues_kokkos");
    MatType mat_type;
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
@@ -1186,6 +1258,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;
@@ -1205,6 +1278,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
       Kokkos::deep_copy(exec, a_nonlocal_d, val); 
       PetscCallVoid(PetscLogCpuToGpu(bytes));   
    }
+   Kokkos::fence();
 
    // Have to specify we've modifed data on the device
    // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
@@ -1232,6 +1306,7 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
 // Duplicate and copy a matrix ensuring it always has a diagonal but with kokkos - keeping everything on the device
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int reuse_int, Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("mat_duplicate_copy_plus_diag_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
    PetscInt global_col_start_temp, global_col_end_plus_one_temp;
@@ -1241,6 +1316,9 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -1273,6 +1351,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr, *device_nonlocal_vals = nullptr;  
@@ -1508,6 +1587,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       Kokkos::deep_copy(exec, a_local_d, 0.0);
 
       // Annoyingly there isn't currently the ability to get views for i (or j)
+      Kokkos::fence();
       const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_ouput = nullptr;
       PetscMemType mtype;
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));  
@@ -1596,6 +1676,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
       KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+      Kokkos::fence();
       KokkosSparse::sort_crs_matrix(csrmat_local);       
 
       // Let's make sure everything on the device is finished
@@ -1637,6 +1718,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
 // Does a MatAXPY for a MPIAIJ Kokkos matrix - the petsc version currently uses the host making it very slow
 PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 {
+   //PflareKokkosTrace _trace("MatAXPY_kokkos");
    Mat mat_local_y = NULL, mat_nonlocal_y = NULL;
    Mat mat_local_x = NULL, mat_nonlocal_x = NULL;
 
@@ -1644,33 +1726,10 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    PetscCallVoid(MatMPIAIJGetSeqAIJ(*Y, &mat_local_y, &mat_nonlocal_y, &colmap_y));
    PetscCallVoid(MatMPIAIJGetSeqAIJ(*X, &mat_local_x, &mat_nonlocal_x, &colmap_x));
 
-   Mat_SeqAIJKokkos *mat_local_ykok = static_cast<Mat_SeqAIJKokkos *>(mat_local_y->spptr);
-   Mat_SeqAIJKokkos *mat_nonlocal_ykok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_y->spptr);
-   Mat_SeqAIJKokkos *mat_local_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_local_x->spptr);
-   Mat_SeqAIJKokkos *mat_nonlocal_xkok = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_x->spptr);
-
    // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
-   // We have to make sure the device data is up to date before we do the axpy
-   if (mat_local_ykok->a_dual.need_sync_device()) {
-      mat_local_ykok->a_dual.sync_device();
-      mat_local_ykok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_local_ykok->hermitian_updated = PETSC_FALSE;
-    }  
-    if (mat_nonlocal_ykok->a_dual.need_sync_device()) {
-      mat_nonlocal_ykok->a_dual.sync_device();
-      mat_nonlocal_ykok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_nonlocal_ykok->hermitian_updated = PETSC_FALSE;
-    } 
-    if (mat_local_xkok->a_dual.need_sync_device()) {
-      mat_local_xkok->a_dual.sync_device();
-      mat_local_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_local_xkok->hermitian_updated = PETSC_FALSE;
-    }           
-    if (mat_nonlocal_xkok->a_dual.need_sync_device()) {
-      mat_nonlocal_xkok->a_dual.sync_device();
-      mat_nonlocal_xkok->transpose_updated = PETSC_FALSE; /* values of the transpose is out-of-date */
-      mat_nonlocal_xkok->hermitian_updated = PETSC_FALSE;
-    }  
+   // We have to make sure the device data is up to date before we do the axpy   
+   mat_sync(X);
+   mat_sync(Y);
 
    PetscInt rows_ao_y, cols_ao_y, rows_ao_x, cols_ao_x;
    auto exec = PetscGetKokkosExecutionSpace();
@@ -1703,6 +1762,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    // ~~~~~~~~~~~~~~~
    // Let's go and add the local components together
    // ~~~~~~~~~~~~~~~
+   Kokkos::fence(); 
 
    Mat_SeqAIJKokkos *xkok_local, *ykok_local;
    ykok_local = static_cast<Mat_SeqAIJKokkos *>(mat_local_y->spptr);
@@ -1716,8 +1776,8 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       KernelHandle    kh_local;      
       kh_local.create_spadd_handle(true); // X, Y are sorted
 
-      KokkosSparse::spadd_symbolic(&kh_local, xkok_local->csrmat, ykok_local->csrmat, zcsr_local);
-      KokkosSparse::spadd_numeric(&kh_local, alpha, xkok_local->csrmat, (PetscScalar)1.0, ykok_local->csrmat, zcsr_local);
+      KokkosSparse::spadd_symbolic(exec, &kh_local, xkok_local->csrmat, ykok_local->csrmat, zcsr_local);
+      KokkosSparse::spadd_numeric(exec, &kh_local, alpha, xkok_local->csrmat, (PetscScalar)1.0, ykok_local->csrmat, zcsr_local);
 
       kh_local.destroy_spadd_handle();
       
@@ -1731,10 +1791,14 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       i_local_d_copy = Kokkos::View<PetscInt *>("i_local_d_copy", i_local_d_z.extent(0));
       j_local_d_copy = Kokkos::View<PetscInt *>("j_local_d_copy", j_local_d_z.extent(0));   
 
+      // Let's make sure everything on the device is finished
+      Kokkos::fence();      
+
       Kokkos::deep_copy(exec, a_local_d_copy, a_local_d_z);
       Kokkos::deep_copy(exec, i_local_d_copy, i_local_d_z);
       Kokkos::deep_copy(exec, j_local_d_copy, j_local_d_z);
    }
+   Kokkos::fence();
 
    // We can create our local diagonal block matrix directly on the device
    Mat Z_local;
@@ -1776,24 +1840,72 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
    Kokkos::fence();
 
    // ~~~~~~~~~
+   // Build merged garray from the union of X and Y global nonlocal column indices.
+   // Then remap both to local indices so spadd sees correct column numbering.
+   // ~~~~~~~~~
+
+   PetscInt nnz_x = xkok_nonlocal->csrmat.nnz();
+   PetscInt nnz_y = ykok_nonlocal->csrmat.nnz();
+   PetscInt total_nnz_xy = nnz_x + nnz_y;
+
+   // Non-owning views over the raw j data (already holds global indices at this point)
+   PetscIntKokkosView j_x_view(device_nonlocal_x_j, nnz_x);
+   PetscIntKokkosView j_y_view(device_nonlocal_y_j, nnz_y);
+
+   PetscIntKokkosView garray_d;
+   PetscInt col_ao_output = 0;
+
+   if (total_nnz_xy > 0)
+   {
+      // Concatenate all global j indices into one array, sort, unique → merged garray
+      PetscIntKokkosView combined_j_d("combined_j_d", total_nnz_xy);
+      Kokkos::deep_copy(exec, Kokkos::subview(combined_j_d, Kokkos::make_pair((PetscInt)0, nnz_x)), j_x_view);
+      Kokkos::deep_copy(exec, Kokkos::subview(combined_j_d, Kokkos::make_pair(nnz_x, total_nnz_xy)), j_y_view);
+      Kokkos::sort(exec, combined_j_d);
+      Kokkos::fence();
+
+      PetscIntKokkosView garray_full_d("garray_full_d", total_nnz_xy);
+      auto unique_end_it = Kokkos::Experimental::unique_copy(exec, combined_j_d, garray_full_d);
+      Kokkos::fence();
+      col_ao_output = static_cast<PetscInt>(unique_end_it - Kokkos::Experimental::begin(garray_full_d));
+      PetscInt zero = 0;
+      garray_d = Kokkos::subview(garray_full_d, Kokkos::make_pair(zero, col_ao_output));
+
+      // Remap j_y and j_x from global to local indices into the merged garray
+      // These fence internally
+      remap_j_to_local_device(j_y_view, garray_d, col_ao_output);
+      remap_j_to_local_device(j_x_view, garray_d, col_ao_output);
+   }
+
+   // ~~~~~~~~~
 
    Kokkos::View<PetscScalar *> a_nonlocal_d_copy;
    Kokkos::View<PetscInt *> i_nonlocal_d_copy, j_nonlocal_d_copy;
    PetscInt *garray_host = NULL;
-   PetscInt col_ao_output = 0;
 
-   // Scope so the zcsr_nonlocal is destroyed once we copy 
+   // Scope so the zcsr_nonlocal is destroyed once we copy
    {
-      // Now we can add the non-local components together
-      KokkosCsrMatrix zcsr_nonlocal;
-      // Global indices are sorted
-      KernelHandle    kh_nonlocal;      
-      kh_nonlocal.create_spadd_handle(true); 
+      // Create csrmat wrappers for X and Y with the correct merged numCols
+      KokkosCsrMatrix xcsrmat("x_nonlocal_remapped", local_rows, col_ao_output,
+         nnz_x, xkok_nonlocal->csrmat.values,
+         xkok_nonlocal->csrmat.graph.row_map, xkok_nonlocal->csrmat.graph.entries);
+      KokkosCsrMatrix ycsrmat("y_nonlocal_remapped", local_rows, col_ao_output,
+         nnz_y, ykok_nonlocal->csrmat.values,
+         ykok_nonlocal->csrmat.graph.row_map, ykok_nonlocal->csrmat.graph.entries);
 
-      KokkosSparse::spadd_symbolic(&kh_nonlocal, xkok_nonlocal->csrmat, ykok_nonlocal->csrmat, zcsr_nonlocal);
-      KokkosSparse::spadd_numeric(&kh_nonlocal, alpha, xkok_nonlocal->csrmat, (PetscScalar)1.0, ykok_nonlocal->csrmat, zcsr_nonlocal);
+      Kokkos::fence();
+      // Now we can add the non-local components together.
+      // Local indices into the merged sorted garray preserve row-sort order.
+      KokkosCsrMatrix zcsr_nonlocal;
+      KernelHandle    kh_nonlocal;
+      kh_nonlocal.create_spadd_handle(true);
+
+      KokkosSparse::spadd_symbolic(exec, &kh_nonlocal, xcsrmat, ycsrmat, zcsr_nonlocal);
+      KokkosSparse::spadd_numeric(exec, &kh_nonlocal, alpha, xcsrmat, (PetscScalar)1.0, ycsrmat, zcsr_nonlocal);
 
       kh_nonlocal.destroy_spadd_handle();
+
+      Kokkos::fence();
 
       // Can now destroy the copy
       PetscCallVoid(MatDestroy(&mat_nonlocal_x_copy));
@@ -1804,27 +1916,31 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
       auto i_nonlocal_d_z = zcsr_nonlocal.graph.row_map;
       auto j_nonlocal_d_z = zcsr_nonlocal.graph.entries;
 
-      // We know the most nonlocal indices we can have are the addition of x and y
-      // (some might be the same)
-      PetscInt cols_ao = cols_ao_x + cols_ao_y;
-
-      // ~~~~~~~~~
+      // j_nonlocal_d_z already contains local indices; copy garray_d to host
+      PetscCallVoid(PetscMalloc1(col_ao_output, &garray_host));
+      if (col_ao_output > 0)
+      {
+         PetscIntKokkosViewHost garray_h(garray_host, col_ao_output);
+         // Device to host so don't need to specify exec space
+         Kokkos::deep_copy(exec, garray_h, garray_d);
+         Kokkos::fence();
+         size_t bytes = col_ao_output * sizeof(PetscInt);
+         PetscCallVoid(PetscLogGpuToCpu(bytes));
+      }
 
       // Let's make sure everything on the device is finished
-      Kokkos::fence();   
-
-      // Now we need to build garray on the host and rewrite the j_nonlocal_d_z indices so they are local
-      // This fences internally
-      rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d_z, &garray_host);  
+      Kokkos::fence();
 
       a_nonlocal_d_copy = Kokkos::View<PetscScalar *>("a_local_d_copy", a_nonlocal_d_z.extent(0));
       i_nonlocal_d_copy = Kokkos::View<PetscInt *>("i_local_d_copy", i_nonlocal_d_z.extent(0));
-      j_nonlocal_d_copy = Kokkos::View<PetscInt *>("j_local_d_copy", j_nonlocal_d_z.extent(0));   
+      j_nonlocal_d_copy = Kokkos::View<PetscInt *>("j_local_d_copy", j_nonlocal_d_z.extent(0));
 
       Kokkos::deep_copy(exec, a_nonlocal_d_copy, a_nonlocal_d_z);
       Kokkos::deep_copy(exec, i_nonlocal_d_copy, i_nonlocal_d_z);
       Kokkos::deep_copy(exec, j_nonlocal_d_copy, j_nonlocal_d_z);
    }
+
+   Kokkos::fence();
 
    // We can create our nonlocal diagonal block matrix directly on the device
    Mat Z_nonlocal;
@@ -1847,6 +1963,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 // is_col must be sorted
 PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("MatCreateSubMatrix_Seq_kokkos");
    PetscInt local_rows, local_cols;
    PetscInt nnzs_match_local;
    auto exec = PetscGetKokkosExecutionSpace();   
@@ -1857,6 +1974,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    // ~~~~~~~~~~~~
    // Get pointers to the i,j,vals on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_local_vals = nullptr;
@@ -2063,6 +2181,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
       a_local_d = aijkok_local_output->a_dual.view_device();
 
       // Annoyingly there isn't currently the ability to get views for i (or j)
+      Kokkos::fence();
       const PetscInt *device_local_i_output = nullptr;
       PetscMemType mtype;
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(*output_mat, &device_local_i_output, NULL, NULL, &mtype));
@@ -2170,6 +2289,7 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
 PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscInt global_rows_row, \
          PetscIntKokkosView &is_col_d_d, PetscInt global_cols_col, const int reuse_int, Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("MatCreateSubMatrix_kokkos_view");
    PetscInt local_rows, local_cols;
    PetscInt global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -2232,11 +2352,13 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          // Can't rely on PetscSFBcast with MPIU_INT as that was intermittently breaking
          // on gpus so want to avoid
          PetscInt max_encoded_value = global_cols_col > 0 ? global_cols_col - 1 : 0;
-         PetscCallVoid(check_exact_petscint_to_scalar_encoding(max_encoded_value, MPI_COMM_MATRIX));
+         //PetscCallVoid(check_exact_petscint_to_scalar_encoding(max_encoded_value, MPI_COMM_MATRIX));
 
          // Kokkos version of ISGetSeqIS_SameColDist_Private (mpiaij.c)
          // Uses VecScatter with PetscScalar Vecs (matching PETSc's own pattern)
          // instead of direct PetscSFBcast with MPIU_INT on temporary views.
+
+         //std::cerr << "one " << std::endl;
 
          /* (1) iscol is a sub-column vector of mat, pad it with '-1.' to form a full vector x */
          Vec x_vec, cmap_vec;
@@ -2244,7 +2366,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(VecDuplicate(x_vec, &cmap_vec));
 
          // Fill x_vec on device: x[is_col(i)] = is_col(i), rest = -1
-         {
+         
             PetscScalarKokkosView x_scalar_d;
             PetscCallVoid(VecGetKokkosViewWrite(x_vec, &x_scalar_d));
             Kokkos::deep_copy(exec, x_scalar_d, -1.0);
@@ -2253,17 +2375,27 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                   x_scalar_d(is_col_d_d(i)) = (PetscScalar)is_col_d_d(i);
             });
             PetscCallVoid(VecRestoreKokkosViewWrite(x_vec, &x_scalar_d));
-         }
+         
+
+                     //std::cerr << "two " << std::endl;
 
          /* (2) Scatter x and cmap using Mvctx to get their off-process portions */
          // Keep at most one active communication on Mvctx at a time.
          // While Begin/End is in flight, do not touch the corresponding send/recv buffers.
+         Vec x_leaf_vec;
+         PetscCallVoid(VecDuplicate(mat_mpi->lvec, &x_leaf_vec));
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
-         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+         Kokkos::fence();
+                     //std::cerr << "two a " << std::endl;
+
+         PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, x_vec, x_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // x scatter completed: x_leaf_vec is now safe to read.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, x_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+
+                     //std::cerr << "two b" << std::endl;
 
          // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
-         {
+         
             PetscScalarKokkosView cmap_scalar_d;
             PetscCallVoid(VecGetKokkosViewWrite(cmap_vec, &cmap_scalar_d));
             Kokkos::deep_copy(exec, cmap_scalar_d, -1.0);
@@ -2272,7 +2404,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                   cmap_scalar_d(is_col_d_d(i)) = (PetscScalar)(i + isstart);
             });
             PetscCallVoid(VecRestoreKokkosViewWrite(cmap_vec, &cmap_scalar_d));
-         }         
+         
+         //std::cerr << "three " << std::endl;
 
          Vec lcmap_vec;
          PetscCallVoid(VecDuplicate(mat_mpi->lvec, &lcmap_vec));
@@ -2284,18 +2417,17 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          auto is_col_o_match_d = PetscIntKokkosView("is_col_o_match_d", cols_ao+1);
          Kokkos::deep_copy(exec, is_col_o_match_d, 0);
 
-         // x scatter completed: mat_mpi->lvec is now safe to read.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, x_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
-
          // Start cmap scatter only after finishing x scatter on the same Mvctx.
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();         
          PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // cmap scatter completed: lcmap_vec is now safe to read.
+         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));         
 
-         if (cols_ao > 0)
-         {
+         //if (cols_ao > 0)
+         //{
             ConstPetscScalarKokkosView lvec_scalar_d;
-            PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+            PetscCallVoid(VecGetKokkosView(x_leaf_vec, &lvec_scalar_d));
 
             Kokkos::parallel_reduce("FindMatches", Kokkos::RangePolicy<>(exec, 0, cols_ao),
                KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_sum) {
@@ -2309,8 +2441,11 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
                Kokkos::Sum<PetscInt>(col_ao_output)
             );
 
-            PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
-         }
+            PetscCallVoid(VecRestoreKokkosView(x_leaf_vec, &lvec_scalar_d));
+         //}
+
+         //std::cerr << "four " << std::endl;
+
 
          // Need to do an exclusive scan on is_col_o_match_d to get the new local indices
          // Have to remember to go up to cols_ao+1
@@ -2329,11 +2464,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          is_col_o_d = PetscIntKokkosView("is_col_o_d", col_ao_output);
          garray_output_d = PetscIntKokkosView("garray_output_d", col_ao_output);
 
-         // cmap scatter completed: lcmap_vec is now safe to read.
-         PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
-
          // Loop over all the cols in the input matrix
-         {
+         //{
             ConstPetscScalarKokkosView lcmap_scalar_d;
             PetscCallVoid(VecGetKokkosView(lcmap_vec, &lcmap_scalar_d));
 
@@ -2352,10 +2484,14 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
             Kokkos::fence();
 
             PetscCallVoid(VecRestoreKokkosView(lcmap_vec, &lcmap_scalar_d));
-         }
+         //}
+
+                  //std::cerr << "five " << std::endl;
+
 
          // Cleanup Vecs
          PetscCallVoid(VecDestroy(&x_vec));
+         PetscCallVoid(VecDestroy(&x_leaf_vec));
          PetscCallVoid(VecDestroy(&cmap_vec));
          PetscCallVoid(VecDestroy(&lcmap_vec));
       }
@@ -2386,22 +2522,31 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
       }
 
       // We can now create the off-diagonal component
+      Kokkos::fence();
       MatCreateSubMatrix_Seq_kokkos(&mat_nonlocal, is_row_d_d, is_col_o_d, reuse_int, &output_mat_nonlocal);
 
       // If it's our first time through we have to create our output matrix
       if (!reuse_int)
       {
+                  //std::cerr << "six " << std::endl;
+
          // Copy the garray output to the host
          PetscInt *garray_host = NULL; 
          PetscCallVoid(PetscMalloc1(garray_output_d.extent(0), &garray_host));
          PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(garray_host, garray_output_d.extent(0));
          // Copy the garray output to the host
-         Kokkos::deep_copy(colmap_output_h, garray_output_d);
+         Kokkos::deep_copy(exec, colmap_output_h, garray_output_d);
+         Kokkos::fence();
          bytes = colmap_output_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
+
+                  //std::cerr << "seven " << std::endl;
+
          
          // We can now create our MPI matrix
          PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_row, global_cols_col, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+
+                  //std::cerr << "eight " << std::endl;
 
          // ~~~~~~~~~~~~~~
          // If this is the first time through, we need to store the iscol_o in the output_mat
@@ -2412,7 +2557,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscMalloc1(is_col_o_d.extent(0), &is_col_o_host));
          PetscIntKokkosViewHost is_col_o_h = PetscIntKokkosViewHost(is_col_o_host, is_col_o_d.extent(0));
          // Copy the is_col_o_d output to the host
-         Kokkos::deep_copy(is_col_o_h, is_col_o_d);
+         Kokkos::deep_copy(exec, is_col_o_h, is_col_o_d);
+         Kokkos::fence();
          bytes = is_col_o_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogGpuToCpu(bytes));
          // Now create an IS
@@ -2422,6 +2568,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
          PetscCallVoid(PetscObjectCompose((PetscObject)(*output_mat), "iscol_o", (PetscObject)iscol_o));
          // The ref counter is incremented by the compose
          PetscCallVoid(ISDestroy(&iscol_o));
+
+         //std::cerr << "nine " << std::endl;
+
       }
    }
    else
@@ -2444,13 +2593,17 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
                      const int reuse_int, Mat *output_mat, \
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
+   //PflareKokkosTrace _trace("MatCreateSubMatrix_kokkos");
    PetscInt global_row_start, global_row_end_plus_one;
    PetscInt global_col_start, global_col_end_plus_one;   
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start, &global_row_end_plus_one));  
    PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start, &global_col_end_plus_one)); 
    PetscInt global_rows_row, global_cols_col;
    PetscCallVoid(ISGetSize(*is_row, &global_rows_row));
-   PetscCallVoid(ISGetSize(*is_col, &global_cols_col));    
+   PetscCallVoid(ISGetSize(*is_col, &global_cols_col));   
+   
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
    
    PetscIntKokkosView is_row_d_d, is_col_d_d;
    const int level_idx = our_level - 1;

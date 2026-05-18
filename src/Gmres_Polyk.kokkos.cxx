@@ -8,6 +8,7 @@
 PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
                const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("mat_mult_powers_share_sparsity_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
@@ -17,6 +18,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    Mat *matrix_powers, *mat_sparsity_match;
    PetscInt one = 1;
    bool deallocate_submatrices = false;
+
+   mat_sync(input_mat);
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -162,6 +165,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // Get pointers to the i,j,vals on the device
    // This should happen after all the (potentially) host matscale, mataxpy and matshift above
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
    PetscScalar *device_submat_vals = nullptr;  

@@ -15,11 +15,16 @@
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, Mat *aff, PetscReal *random_numbers)
 {
-   // Can't use the global directly within the parallel 
+   //PflareKokkosTrace _trace("ddc_kokkos");
+   // Can't use the global directly within the parallel
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;  
    PetscScalarKokkosView diag_dom_ratio_d = diag_dom_ratio_local_d;
    PetscIntKokkosView is_fine_local_d;
+   // Equivalent to calling MatSeqAIJKokkosSyncDevice which is petsc intern
+   mat_sync(input_mat);   
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));   
 
    const int match_cf = -1; // F_POINT == -1
    create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
@@ -64,10 +69,14 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
       // recompute
       // ~~~~~~~~~~~~~~~
       {
+         Kokkos::fence();
+
          // Create measure and cf_markers for Aff
          PetscScalarKokkosView measure_d("measure_d", local_rows_aff);
          intKokkosView cf_markers_aff_d("cf_markers_aff_d", local_rows_aff);
          Kokkos::deep_copy(exec, cf_markers_aff_d, 0);
+
+         Kokkos::fence();
 
          // Copy the random numbers from host to device
          // These are generated in the Fortran wrapper so CPU and Kokkos use the same randoms
@@ -78,6 +87,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
          const PetscReal max_scale = std::max(10.0, max_dd_ratio_achieved * 2.0);
          const PetscReal target_ratio = max_dd_ratio;
+
+         Kokkos::fence();
 
          // Build the measure:
          // pmisr_existing_measure_cf_markers tags the smallest measure as F points
@@ -103,6 +114,10 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
          pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);
 
+         //check_cf_markers_all_marked_kokkos(cf_markers_aff_d, cf_markers_aff_d.extent(0), MPI_COMM_MATRIX);
+
+         Kokkos::fence();
+
          // Swap F-tagged points back into cf_markers_d
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
@@ -112,6 +127,8 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
                }
          });
          Kokkos::fence();
+
+         //check_cf_markers_all_marked_kokkos(cf_markers_d, cf_markers_d.extent(0), MPI_COMM_MATRIX);
       }
       return;
    }
