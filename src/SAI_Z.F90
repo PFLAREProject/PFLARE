@@ -654,6 +654,7 @@ module sai_z
 #if defined(PETSC_HAVE_KOKKOS)
       integer(c_long_long) :: A_ff_arr, A_cf_arr, sparsity_arr, reuse_arr, z_arr
       integer :: errorcode, reuse_int
+      integer(c_int) :: no_approx_solve_int
       PetscErrorCode :: ierr
       MatType :: mat_type
       logical :: reuse_triggered
@@ -694,9 +695,15 @@ module sai_z
          reuse_int = 0
          if (reuse_triggered) reuse_int = 1
 
+         ! In debug mode force every row through the direct solve so the
+         ! CPU/Kokkos comparison below stays exact (CPU is forced to direct
+         ! via no_approx_solve=.TRUE. a few lines down).
+         no_approx_solve_int = 0
+         if (kokkos_debug()) no_approx_solve_int = 1
+
          ! Call the Kokkos implementation
          call calculate_and_build_sai_z_kokkos(A_ff_arr, A_cf_arr, sparsity_arr, &
-                  reuse_int, reuse_arr, z_arr)
+                  reuse_int, reuse_arr, z_arr, no_approx_solve_int)
 
          ! Copy back the opaque pointers
          reuse_mat%v = reuse_arr
