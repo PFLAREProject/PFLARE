@@ -1,5 +1,6 @@
 Explore
 1. If you need the petsc source: `$PETSC_DIR/$PETSC_ARCH`
+2. If you need the Kokkos source: `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos` and `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos-kernels`
 
 Build
 1. In top repo directory: `make -j3 build_tests`
