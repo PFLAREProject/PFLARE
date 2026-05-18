@@ -530,6 +530,10 @@ run_tests_no_load_short_serial:
 	./mat_diag -pc_pflareinv_type power -ksp_max_it 1
 #
 	@echo ""
+	@echo "Test PCMatApply on PCPFLAREINV (assembled + matrix-free, POWER + ARNOLDI)"
+	./ex6f_pcmatapply
+#
+	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
 	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
@@ -656,6 +660,10 @@ run_tests_no_load_serial:
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_short_parallel:
+#
+	@echo ""
+	@echo "Test PCMatApply on PCPFLAREINV (assembled + matrix-free, POWER + ARNOLDI) in parallel"
+	$(MPIEXEC) -n 2 ./ex6f_pcmatapply
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"

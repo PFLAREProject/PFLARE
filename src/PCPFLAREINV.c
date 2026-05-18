@@ -383,6 +383,43 @@ static PetscErrorCode PCApply_PFLAREINV_c(PC pc, Vec x, Vec y)
 
 // ~~~~~~~~~~
 
+// Multi-RHS apply: Y = mat_inverse * X for dense X, Y.
+// Lets KSPMatSolve / PCMatApply hit a real SpMM (cuSPARSE/hipSPARSE/CPU AIJxDense)
+// instead of PETSc's default column-by-column PCApply fallback.
+static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
+{
+   PC_PFLAREINV *inv_data;
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+
+   if (inv_data->matrix_free) {
+      // mat_inverse is a MatShell with only MATOP_MULT registered,
+      // so MatMatMult on it would fail. Apply column-by-column.
+      PetscInt n_cols, j;
+      Vec cx, cy;
+      PetscCall(MatGetSize(X, NULL, &n_cols));
+      for (j = 0; j < n_cols; j++) {
+         PetscCall(MatDenseGetColumnVecRead(X, j, &cx));
+         PetscCall(MatDenseGetColumnVecWrite(Y, j, &cy));
+         PetscCall(MatMult(inv_data->mat_inverse, cx, cy));
+         PetscCall(MatDenseRestoreColumnVecWrite(Y, j, &cy));
+         PetscCall(MatDenseRestoreColumnVecRead(X, j, &cx));
+      }
+   } else {
+      // Assembled inverse: real SpMM via MatProduct.
+      PetscCall(MatProductCreateWithMat(inv_data->mat_inverse, X, NULL, Y));
+      PetscCall(MatProductSetType(Y, MATPRODUCT_AB));
+      PetscCall(MatProductSetFromOptions(Y));
+      PetscCall(MatProductSymbolic(Y));
+      PetscCall(MatProductNumeric(Y));
+      // Drop product bookkeeping so Y doesn't retain refs to mat_inverse, X.
+      PetscCall(MatProductClear(Y));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
 static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
 {
    PC_PFLAREINV *inv_data;
@@ -656,6 +693,7 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
 
    // Set the method functions
    pc->ops->apply               = PCApply_PFLAREINV_c;
+   pc->ops->matapply            = PCMatApply_PFLAREINV_c;
    pc->ops->setup               = PCSetUp_PFLAREINV_c;
    pc->ops->destroy             = PCDestroy_PFLAREINV_c;
    pc->ops->view                = PCView_PFLAREINV_c;  

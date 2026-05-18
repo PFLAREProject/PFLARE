@@ -161,6 +161,7 @@ export TEST_TARGETS = ex12f \
 		  matrandom_check_reset \
 		  ex12f_gmres_poly \
 		  mat_diag \
+		  ex6f_pcmatapply \
 		  adv_dg_upwind
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
