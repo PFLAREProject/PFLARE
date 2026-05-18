@@ -719,13 +719,6 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       });
    }
 
-   // ~~~~~~~~~~~~~~
-   // Mark Z's device data as modified
-   // ~~~~~~~~~~~~~~
-   Mat_SeqAIJKokkos *aijkok_local_z = static_cast<Mat_SeqAIJKokkos *>(mat_local_z->spptr);
-   Mat_SeqAIJKokkos *aijkok_nonlocal_z = NULL;
-   if (mpi) aijkok_nonlocal_z = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_z->spptr);
-
    Kokkos::fence();
 
    // Restore the read-only input views
