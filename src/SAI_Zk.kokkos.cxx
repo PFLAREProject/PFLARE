@@ -302,9 +302,6 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    using team_policy_t = Kokkos::TeamPolicy<>;
    using member_type = team_policy_t::member_type;
 
-   // std::cout << "sparsity_max_nnz_direct = " << sparsity_max_nnz_direct << ", sparsity_max_nnz_iter = " << sparsity_max_nnz_iter
-   //           << ", count_iter = " << count_iter << std::endl;
-
    // Direct kernel scratch is sized to the largest row it actually handles.
    // When iter_enabled is false, every row goes through the direct kernel.
    const PetscInt j_max = sparsity_max_nnz_direct;
@@ -668,35 +665,34 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
 
          if (r0_sq > abs_floor_sq) {
             const PetscScalar stop_sq = rtol_sq * r0_sq;
-
             PetscScalar rnorm_sq = 0.0;
-            int it_final;
+
             for (int it = 0; it < max_iter; ++it) {
+               // r = -dense_mat * sol  (dense_mat already stores A_ff(J,J)^T)
+               KokkosBlas::TeamGemv<member_type,
+                                    KokkosBlas::Trans::NoTranspose,
+                                    KokkosBlas::Algo::Gemv::Default>
+                  ::invoke(member, -1.0, dense_mat, sol, 0.0, r);
+               member.team_barrier();
+
+               // r += rhs ; accumulate ||r||^2
+               rnorm_sq = 0.0;
                Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, j_size),
-                  [&](const PetscInt row, PetscScalar &acc) {
-                     rnorm_sq = 0.0;
-                     PetscScalar s = 0.0;
-                     for (PetscInt col = 0; col < j_size; ++col)
-                        s += dense_mat(row, col) * sol(col);
-                     PetscScalar ri = rhs(row) - s;
-                     r(row) = ri;
-                     acc += ri * ri;
+                  [&](const PetscInt k, PetscScalar &acc) {
+                     r(k) += rhs(k);
+                     acc  += r(k) * r(k);
                   }, rnorm_sq);
                member.team_barrier();
 
-               if (rnorm_sq < stop_sq) {
-                  it_final = it;
-                  break;
-               }
+               if (rnorm_sq < stop_sq) break;
 
+               // Jacobi update: sol += r / diag(dense_mat). diag(A^T) == diag(A).
                Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
                   [&](const PetscInt k) {
                      sol(k) += r(k) / dense_mat(k, k);
                   });
                member.team_barrier();
             }
-            // std::cout << "Row " << i << ": Jacobi iterated to rtol = " << std::sqrt(rtol_sq) << " in " << it_final
-            //           << " iterations, final rtol = " << std::sqrt(rnorm_sq / r0_sq) << std::endl;
          }
 
          // ~~~~~~~~
