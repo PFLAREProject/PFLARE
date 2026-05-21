@@ -195,8 +195,11 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
          // Ensure the root buffer is no longer being written before Begin.
+         // Run synchronously so scatter_leaf_vec is safe to read once we
+         // reach the non-local block below.
          Kokkos::fence();
          PetscCallVoid(VecScatterBegin(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
       }
 
 
@@ -265,11 +268,9 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
       // ~~~~~~~~
       if (mpi) {
 
-         // Complete the in-flight forward scatter before reading the receive buffer.
-         PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
          Kokkos::fence();
 
-         // Convert PetscScalar → int after End, when the receive buffer is complete.
+         // Convert PetscScalar → int now that the receive buffer is complete.
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));

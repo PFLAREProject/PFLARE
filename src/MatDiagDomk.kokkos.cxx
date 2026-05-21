@@ -85,11 +85,12 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscSF *sf, Vec *leaf_
          PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
       }
 
-      // Start comms, then overlap with local-only work below.
-      // The SF must have only one active comm at a time.
+      // Run the scatter synchronously so the leaf buffer is safe to read
+      // before any later local work touches it.
       // Ensure send/receive buffers are stable before Begin.
       Kokkos::fence();
       PetscCallVoid(VecScatterBegin(*sf, scatter_root_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
    }
 
    // ~~~~~~~~~~~~~~~
@@ -162,10 +163,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscSF *sf, Vec *leaf_
       Kokkos::fence();
    }
 
-   // Finish the in-flight scatter and only then read from the receive buffer.
+   // Now read from the receive buffer; the scatter above already completed.
    if (mpi)
    {
-      PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
       Kokkos::fence();
       {
          ConstPetscScalarKokkosView lvec_scalar_d;

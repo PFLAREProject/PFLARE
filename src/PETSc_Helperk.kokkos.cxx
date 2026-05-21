@@ -2206,12 +2206,14 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscSF *sf, Ve
          }
 
          /* (2) Scatter x and cmap using the caller-supplied SF/leaf to get their
-            off-process portions. Same single SF drives both scatters. */
-         // Keep at most one active communication on the SF at a time.
-         // While Begin/End is in flight, do not touch the corresponding send/recv buffers.
+            off-process portions. Same single SF drives both scatters, run
+            synchronously so the leaf buffers are safe to read by the time
+            later kernels touch them. */
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();
          PetscCallVoid(VecScatterBegin(*sf, x_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // x scatter completed: *leaf_vec is now safe to read.
+         PetscCallVoid(VecScatterEnd(*sf, x_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
 
          // Fill cmap_vec on device: cmap[is_col(i)] = i + isstart, rest = -1
          {
@@ -2235,14 +2237,14 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscSF *sf, Ve
          auto is_col_o_match_d = PetscIntKokkosView("is_col_o_match_d", cols_ao+1);
          Kokkos::deep_copy(exec, is_col_o_match_d, 0);
 
-         // x scatter completed: *leaf_vec is now safe to read.
-         PetscCallVoid(VecScatterEnd(*sf, x_vec, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
          Kokkos::fence();
 
          // Start cmap scatter only after finishing x scatter on the same SF.
          // Ensure send/receive buffers are stable before Begin.
          Kokkos::fence();
          PetscCallVoid(VecScatterBegin(*sf, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
+         // cmap scatter completed: lcmap_vec is now safe to read.
+         PetscCallVoid(VecScatterEnd(*sf, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
 
          if (cols_ao > 0)
          {
@@ -2281,8 +2283,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscSF *sf, Ve
          is_col_o_d = PetscIntKokkosView("is_col_o_d", col_ao_output);
          garray_output_d = PetscIntKokkosView("garray_output_d", col_ao_output);
 
-         // cmap scatter completed: lcmap_vec is now safe to read.
-         PetscCallVoid(VecScatterEnd(*sf, cmap_vec, lcmap_vec, INSERT_VALUES, SCATTER_FORWARD));
          Kokkos::fence();
 
          // Loop over all the cols in the input matrix
@@ -2335,6 +2335,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscSF *sf, Ve
          bytes = iscol_o_view_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogCpuToGpu(bytes));
 
+         Kokkos::fence();
          PetscCallVoid(ISRestoreIndices(iscol_o, &iscol_o_indices_ptr));
       }
 
