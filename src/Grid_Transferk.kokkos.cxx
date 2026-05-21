@@ -7,6 +7,7 @@
 // Generate one point classical prolongator but with kokkos - keeping everything on the device
 PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *input_mat, Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("generate_one_point_with_one_entry_from_sparse_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscInt global_row_start, global_row_end_plus_one;
@@ -15,6 +16,8 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   mat_sync(input_mat);
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -56,6 +59,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos views to the values
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
@@ -311,6 +315,7 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
 PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_start, IS *is_fine, \
                   IS *is_coarse, int identity_int, int reuse_int, Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("compute_P_from_W_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_W, global_row_end_plus_one_W;
    PetscInt global_col_start_W, global_col_end_plus_one_W;
@@ -320,6 +325,8 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   mat_sync(input_mat);
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -362,9 +369,10 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    Kokkos::deep_copy(exec, coarse_view_d, coarse_view_h);
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));        
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
-   PetscCallVoid(PetscLogCpuToGpu(bytes));      
+   PetscCallVoid(PetscLogCpuToGpu(bytes));
+   Kokkos::fence();
 
    local_cols_coarse = local_rows_coarse;
    local_cols = local_rows_coarse + local_rows_fine;
@@ -381,6 +389,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos views to the values
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
@@ -597,6 +606,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
       // Get device pointers for the existing i array
       const PetscInt *device_local_i_output = nullptr, *device_nonlocal_i_output = nullptr;
       PetscMemType mtype;
+      Kokkos::fence();
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, NULL, NULL, &mtype));
       if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, NULL, NULL, &mtype));
 
@@ -721,6 +731,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
                   IS *is_coarse, IS *orig_fine_col_indices, int identity_int, int reuse_int, int reuse_indices_int, \
                   Mat *output_mat)
 {
+   //PflareKokkosTrace _trace("compute_R_from_Z_kokkos");
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_Z, global_row_end_plus_one_Z;
    PetscInt global_col_start_Z, global_col_end_plus_one_Z;
@@ -732,6 +743,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    MatType mat_type;
    PetscInt nnzs_match_local, nnzs_match_nonlocal;
    Mat output_mat_local, output_mat_nonlocal;
+
+   mat_sync(input_mat);
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    // Are we in parallel?
@@ -857,6 +870,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos views to the values
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
@@ -1059,6 +1073,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // Get device pointers for the existing i and j arrays
       const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_output = nullptr;
       PetscMemType mtype;
+      Kokkos::fence();
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));
       if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, NULL, NULL, &mtype));
 
@@ -1131,7 +1146,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
-      KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows_z, local_full_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
+      KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows_z, local_full_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);
+      Kokkos::fence();
       KokkosSparse::sort_crs_matrix(csrmat_local);
       
       // Let's make sure everything on the device is finished

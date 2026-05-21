@@ -13,6 +13,9 @@
 // This mirrors the CPU version pmisr_existing_measure_cf_markers in PMISR_Module.F90
 PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, PetscSF *sf, Vec *leaf_vec, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int)
 {
+   //PflareKokkosTrace _trace("pmisr_existing_measure_cf_markers_kokkos");
+
+   mat_sync(strength_mat);
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -46,6 +49,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    PetscMemType mtype;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
@@ -88,6 +92,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
          Kokkos::deep_copy(exec, measure_nonlocal_d, lvec_scalar_d);
          PetscCallVoid(VecRestoreKokkosView(*leaf_vec, &lvec_scalar_d));
       }
+      // Ensure async deep_copy from leaf_vec completes before VecDestroy frees the source.
+      Kokkos::fence();
       PetscCallVoid(VecDestroy(&measure_root_vec));
    }
 
@@ -252,6 +258,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
             }
       });
 
+      Kokkos::fence();
+
       // ~~~~~~~~
       // Now go through and do the non-local part of the matrix
       // ~~~~~~~~
@@ -259,6 +267,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
 
          // Complete the in-flight forward scatter before reading the receive buffer.
          PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         Kokkos::fence();
 
          // Convert PetscScalar → int after End, when the receive buffer is complete.
          {
@@ -305,6 +314,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
                   });
                }
          });
+
+         Kokkos::fence();
       }
       // This cf_markers_d(i) = loops_through happens above in the case of mpi, saves a kernel launch
       else
@@ -316,12 +327,16 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
 
                if (mark_d(i)) cf_markers_d(i) = loops_through;
          });
+
+         Kokkos::fence();
       }
 
       if (mpi)
       {
          // We're going to do an add reverse scatter, so set them to zero
          Kokkos::deep_copy(exec, cf_markers_nonlocal_d, 0);
+
+         Kokkos::fence();
 
          Kokkos::parallel_for(
             Kokkos::TeamPolicy<>(exec, local_rows, Kokkos::AUTO()),
@@ -337,7 +352,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
                cf_markers_temp_d(i) = 0;
 
                // Check if this node has been assigned during this top loop
-               if (cf_markers_d(i) == loops_through)
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   cf_markers_temp_d(i) = 2;
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
@@ -391,7 +406,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
                // Check if this node was assigned during this top loop.
                // We read the temporary buffer here so we do not race with the
                // reduction into cf_markers_d.
-               if (cf_markers_temp_d(i) == 2)
+               if (Kokkos::atomic_load(&cf_markers_temp_d(i)) == 2)
                {
                   const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
@@ -408,6 +423,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
 
          // Complete reverse scatter before reading reduced root buffer.
          PetscCallVoid(VecScatterEnd(*sf, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         Kokkos::fence();
 
          // Convert PetscScalar → int back to cf_markers_d after End.
          {
@@ -428,6 +444,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
             // Entries left at 2 were already selected into the set earlier.
             if (cf_markers_temp_d(i) == 1 && cf_markers_d(i) == 0) cf_markers_d(i) = 1;
          });
+
+         Kokkos::fence();
       }
       // In serial we can just update cf_markers_d directly without needing the send buffer
       else
@@ -441,7 +459,7 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
 
                // In serial there is no reduction, so we can
                // update cf_markers_d directly as before.
-               if (cf_markers_d(i) == loops_through)
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
@@ -452,6 +470,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
                   });
                }
          });
+
+         Kokkos::fence();
       }
 
       // We've done another top level loop
@@ -517,6 +537,9 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, Pe
 // See the full comments in the CPU version pmisr_existing_measure_implicit_transpose
 PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength_mat, PetscSF *sf, Vec *leaf_vec, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int)
 {
+   //PflareKokkosTrace _trace("pmisr_existing_measure_implicit_transpose_kokkos");
+
+   mat_sync(strength_mat);
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -610,6 +633,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device for all the matrices we need
    // ~~~~~~~~~~~~
+   Kokkos::fence();
    const PetscInt *device_local_i_spst = nullptr, *device_local_j_spst = nullptr;
    const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
    const PetscInt *device_nonlocal_i_transpose = nullptr, *device_nonlocal_j_transpose = nullptr;
@@ -617,6 +641,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_spst, &device_local_i_spst, &device_local_j_spst, NULL, &mtype));
    if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
    if (mpi && mat_nonlocal_transpose != NULL) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_transpose, &device_nonlocal_i_transpose, &device_nonlocal_j_transpose, NULL, &mtype));
+
+   Kokkos::fence();
 
    intKokkosView cf_markers_nonlocal_d;
    PetscScalarKokkosView measure_nonlocal_d;
@@ -659,6 +685,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          Kokkos::deep_copy(exec, measure_nonlocal_d, lvec_scalar_d);
          PetscCallVoid(VecRestoreKokkosView(*leaf_vec, &lvec_scalar_d));
       }
+      // Ensure async deep_copy from leaf_vec completes before VecDestroy frees the source.
+      Kokkos::fence();
       PetscCallVoid(VecDestroy(&measure_root_vec));
    }
 
@@ -701,6 +729,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       }
    }, counter_in_set_start);
 
+   Kokkos::fence();
+
    // Check the total number of undecided in parallel
    PetscInt counter_undecided, counter_parallel;
    if (max_luby_steps < 0) {
@@ -729,6 +759,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
    if (mpi) {
       PetscCallVoid(MatCreateVecs(*strength_mat, &scatter_root_vec, NULL));
    }
+
+   Kokkos::fence();
 
    // Let's keep track of how many times we go through the loops
    int loops_through = -1;
@@ -761,9 +793,10 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
+         Kokkos::fence();
          PetscCallVoid(VecScatterBegin(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
          PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         Kokkos::fence();
          // Convert PetscScalar → int
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
@@ -775,6 +808,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
          }
       }
+
+      Kokkos::fence();
 
       // ~~~~~~~~
       // Now we use veto to keep track of which candidates can be in the set
@@ -838,6 +873,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             }
       });
 
+      Kokkos::fence();
+
       // ~~~~~~~~
       // Now let's go through and veto candidates which have strong influences on this rank
       // ie non-local nodes that influence local nodes through S^T
@@ -890,6 +927,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             });
          }
 
+         Kokkos::fence();
+
          // Reduce the vetos with a lor via VecScatter ADD_VALUES SCATTER_REVERSE
          // (LOR is equivalent to sum when values are 0/1 bools)
          {
@@ -911,9 +950,10 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
+         Kokkos::fence();
          PetscCallVoid(VecScatterBegin(*sf, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
          PetscCallVoid(VecScatterEnd(*sf, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         Kokkos::fence();
          {
             ConstPetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_root_vec, &root_scalar_d));
@@ -923,6 +963,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             });
             PetscCallVoid(VecRestoreKokkosView(scatter_root_vec, &root_scalar_d));
          }
+
+         Kokkos::fence();
 
          // Now the comms have finished, we know exactly which local nodes on this rank have no
          // local strong dependencies, influences, non-local influences but not yet non-local dependencies
@@ -964,6 +1006,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                   });
                }
          });
+
+         Kokkos::fence();
       }
       // This cf_markers_d(i) = loops_through happens above in the case of mpi, saves a kernel launch
       else
@@ -975,6 +1019,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
                if (!veto_local_d(i)) cf_markers_d(i) = loops_through;
          });
+
+         Kokkos::fence();
       }
 
       // ~~~~~~~~~~~~~
@@ -997,7 +1043,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                const PetscInt i = t.league_rank();
 
                // Check if this node has been assigned during this top loop
-               if (cf_markers_d(i) == loops_through)
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   // Do the strong dependencies and influences
                   PetscInt ncols_local = device_local_i_spst[i + 1] - device_local_i_spst[i];
@@ -1032,6 +1078,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          Kokkos::fence();         
          PetscCallVoid(VecScatterBegin(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
          PetscCallVoid(VecScatterEnd(*sf, scatter_root_vec, scatter_leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+         Kokkos::fence();
          {
             ConstPetscScalarKokkosView leaf_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_leaf_vec, &leaf_scalar_d));
@@ -1042,9 +1089,13 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosView(scatter_leaf_vec, &leaf_scalar_d));
          }
 
+         Kokkos::fence();
+
          // We use the veto arrays here to do this comms
          Kokkos::deep_copy(exec, veto_nonlocal_d, false);
          Kokkos::deep_copy(exec, veto_local_d, false);
+
+         Kokkos::fence();
 
          // Set non-local strong dependencies
          Kokkos::parallel_for(
@@ -1055,7 +1106,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                const PetscInt i = t.league_rank();
 
                // Check if this node has been assigned during this top loop
-               if (cf_markers_d(i) == loops_through)
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
 
@@ -1069,6 +1120,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                   });
                }
          });
+
+         Kokkos::fence();
 
          // Reduce the veto_nonlocal_d with a lor via VecScatter ADD_VALUES SCATTER_REVERSE
          // Any local node with veto set to true is not in the set
@@ -1091,9 +1144,10 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
          // Ensure send/receive buffers are stable before Begin.
-         Kokkos::fence();         
+         Kokkos::fence();
          PetscCallVoid(VecScatterBegin(*sf, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
          PetscCallVoid(VecScatterEnd(*sf, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
+         Kokkos::fence();
          {
             ConstPetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_root_vec, &root_scalar_d));
@@ -1103,6 +1157,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
             });
             PetscCallVoid(VecRestoreKokkosView(scatter_root_vec, &root_scalar_d));
          }
+
+         Kokkos::fence();
 
          // Let's finish the non-local dependencies
          // If this node has been veto'd, then set it to not in the set
@@ -1141,6 +1197,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                   }
             });
          }
+
+         Kokkos::fence();
       }
       else
       {
@@ -1154,7 +1212,7 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                const PetscInt i = t.league_rank();
 
                // Check if this node has been assigned during this top loop
-               if (cf_markers_d(i) == loops_through)
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   // Do the strong dependencies and influences
                   PetscInt ncols_local = device_local_i_spst[i + 1] - device_local_i_spst[i];
@@ -1240,6 +1298,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
 PETSC_INTERN void pmisr_kokkos(Mat *strength_mat, PetscSF *sf, Vec *leaf_vec, const int max_luby_steps, const int pmis_int, PetscReal *measure_local, const int zero_measure_c_point_int)
 {
+   //PflareKokkosTrace _trace("pmisr_kokkos");
+
+   mat_sync(strength_mat);
 
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;

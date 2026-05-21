@@ -14,6 +14,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *z_mat,
                const int no_approx_solve_int)
 {
+   //PflareKokkosTrace _trace("calculate_and_build_sai_z_kokkos");
    // Threshold above which we switch a row from dense direct solve (TeamGesv)
    // to dense Jacobi iteration. Mirrors the CPU code in src/SAI_Z.F90 which
    // switches at j_size > 40 (see calculate_and_build_sai_z_cpu).
@@ -28,6 +29,9 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    MatType mat_type;
    PetscInt one = 1;
    bool deallocate_submatrices = false;
+
+   mat_sync(A_ff); 
+   mat_sync(A_cf);     
 
    PetscCallVoid(MatGetType(*A_ff, &mat_type));
    // Are we in parallel?
@@ -212,6 +216,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    // ~~~~~~~~~~~~~~
    // Get device CSR pointers for i,j and Kokkos views to the values
    // ~~~~~~~~~~~~~~
+   Kokkos::fence();
    PetscMemType mtype;
 
    // Submatrix (non-local rows of A_ff)
