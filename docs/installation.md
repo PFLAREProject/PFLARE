@@ -18,8 +18,15 @@ Note: static builds with PFLARE are not available when building through the PETS
 
 ### Spack package manager build
 
-If you use Spack, an up to date PFLARE package is available at:
-https://github.com/PFLAREProject/PFLARE_spack
+PFLARE is available in the Spack package repository and can be installed with:
+
+      spack install pflare
+
+This package is currently available in the development branch of the Spack package repository and will be included in the next official Spack release. If you are using a released version of Spack, the package may not yet be available by default. In that case, update your package repository with:
+
+      spack repo update
+
+You can also use the PFLARE Spack repository at: https://github.com/PFLAREProject/PFLARE_spack
 
 ### Source build
 
