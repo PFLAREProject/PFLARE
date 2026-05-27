@@ -2435,13 +2435,16 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, PetscIntKokkosV
 //------------------------------------------------------------------------------------------------------------------------
 
 // Does a MatGetSubMatrix for a Kokkos matrix - the petsc version currently uses the host making it very slow
-// This version only works  works if the input IS have the same parallel row/column distribution 
+// This version only works  works if the input IS have the same parallel row/column distribution
 // as the matrices, ie equivalent to MatCreateSubMatrix_MPIAIJ_SameRowDist
 // is_col must be sorted
-// If you pass in our_level != -1 then it uses the fine/coarse indices stored in IS_fine_views_local
-// and IS_coarse_views_local - they should match the passed in is_row and is_col though!
+// If you pass in our_level != -1 then it uses the fine/coarse indices stored in
+// the per-PCAIR handle (built by set_VecISCopyLocal_kokkos_our_level) - they
+// should match the passed in is_row and is_col though! Pass NULL for handle if
+// our_level == -1.
 PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_col, \
                      const int reuse_int, Mat *output_mat, \
+                     void *kokkos_is_views_handle, \
                      const int our_level, const int is_row_fine_int, const int is_col_fine_int)
 {
    PetscInt global_row_start, global_row_end_plus_one;
@@ -2453,7 +2456,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    PetscCallVoid(ISGetSize(*is_col, &global_cols_col));    
    
    PetscIntKokkosView is_row_d_d, is_col_d_d;
-   const int level_idx = our_level - 1;
    auto exec = PetscGetKokkosExecutionSpace();
 
    // If we want the input is_row and is_col to be used
@@ -2505,23 +2507,9 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
    // that already are on the device
    else
    {
-      if (is_row_fine_int)
-      {
-         is_row_d_d = *IS_fine_views_local[level_idx];
-      }
-      else
-      {
-         is_row_d_d = *IS_coarse_views_local[level_idx];
-      }       
-      if (is_col_fine_int)
-      {
-         is_col_d_d = *IS_fine_views_local[level_idx];
-      }
-      else
-      {
-         is_col_d_d = *IS_coarse_views_local[level_idx];
-      }        
-   }  
+      is_row_d_d = VecISCopyLocal_kokkos_get_view(kokkos_is_views_handle, our_level, is_row_fine_int);
+      is_col_d_d = VecISCopyLocal_kokkos_get_view(kokkos_is_views_handle, our_level, is_col_fine_int);
+   }
 
    MatCreateSubMatrix_kokkos_view(input_mat, is_row_d_d, global_rows_row, is_col_d_d, global_cols_col, reuse_int, output_mat);
 

@@ -337,8 +337,15 @@ module air_data_type
       type(gmres_poly_data) :: inv_coarsest_poly_data       
 
       ! Temporary storage
-      type(petsc_vec_array), dimension(4) :: temp_vecs_fine, temp_vecs_coarse 
+      type(petsc_vec_array), dimension(4) :: temp_vecs_fine, temp_vecs_coarse
       type(petsc_vec_array), dimension(1) :: temp_vecs
+
+      ! Per-PCAIR opaque handle to the kokkos-side IS view storage. Set up by
+      ! create_VecISCopyLocal_kokkos, torn down by destroy_VecISCopyLocal_kokkos.
+      ! Stored here (instead of as a file-scope global in
+      ! src/VecISCopyLocalk.kokkos.cxx) so concurrent PCAIR instances do not
+      ! overwrite each other's per-level IS views.
+      type(c_ptr) :: kokkos_is_views_handle = c_null_ptr
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse

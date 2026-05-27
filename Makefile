@@ -161,7 +161,8 @@ export TEST_TARGETS = ex12f \
 		  matrandom_check_reset \
 		  ex12f_gmres_poly \
 		  mat_diag \
-		  adv_dg_upwind
+		  adv_dg_upwind \
+		  ex6_two_airg
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
