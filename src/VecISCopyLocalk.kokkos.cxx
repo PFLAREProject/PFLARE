@@ -195,7 +195,7 @@ PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_in
 // Accessor used by MatCreateSubMatrix_kokkos to read the per-PCAIR IS view
 // for a given level/fine-or-coarse. Returns a copy of the shared view (cheap;
 // just bumps the underlying refcount of the kokkos View handle).
-PETSC_INTERN PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int)
+PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int)
 {
    auto *ctx = static_cast<VecISCopyLocalKokkosCtx *>(handle);
    const int level_idx = our_level - 1;

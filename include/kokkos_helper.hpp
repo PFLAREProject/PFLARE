@@ -45,7 +45,9 @@ PETSC_INTERN void delete_device_diag_dom_ratio();
 // Per-PCAIR IS views (fine/coarse per multigrid level) live behind an opaque
 // handle owned by the air_data on the Fortran side; see VecISCopyLocalk for
 // the definition of the storage struct and accessors.
-PETSC_INTERN PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int);
+// Not PETSC_INTERN: that forces extern "C" linkage, which is incompatible with
+// returning a C++ Kokkos View. Callers are all C++ (.kokkos.cxx).
+PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int);
 
 extern intKokkosView cf_markers_local_d;
 extern PetscScalarKokkosView diag_dom_ratio_local_d;
