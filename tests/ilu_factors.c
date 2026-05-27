@@ -140,6 +140,9 @@ int main(int argc, char **args)
   Mat         A, A_diff_type;
   Mat         L = NULL, U = NULL, A_L_strict = NULL, A_U = NULL, R_L = NULL, R_U = NULL, M = NULL;
   Vec         inv_dU, b_rand, x_sol;
+#if defined(PETSC_USE_LOG)
+  PetscLogStage stage_parilu, stage_L_solve, stage_U_solve, stage_A_shell, stage_A_pcilu;
+#endif
   PetscRandom rnd;
   PetscViewer fd;
   char        file[PETSC_MAX_PATH_LEN];
@@ -155,6 +158,16 @@ int main(int argc, char **args)
 
   /* Register the pflare PC types so PCAIR is available. */
   PCRegister_PFLARE();
+
+  /* One log stage per phase that has user-meaningful timing — visible in
+     -log_view as separate sections. The KSP solves below each call an
+     explicit KSPSetUp before KSPSolve so the per-stage breakdown also splits
+     setup vs solve via the standard KSPSetUp / KSPSolve events. */
+  PetscCall(PetscLogStageRegister("ParILU sweeps",                  &stage_parilu));
+  PetscCall(PetscLogStageRegister("L solve (Richardson+PCAIR)",     &stage_L_solve));
+  PetscCall(PetscLogStageRegister("U solve (Richardson+PCAIR)",     &stage_U_solve));
+  PetscCall(PetscLogStageRegister("A solve (GMRES+LU shell PC)",    &stage_A_shell));
+  PetscCall(PetscLogStageRegister("A solve (GMRES+PCBJACOBI/ILU)",  &stage_A_pcilu));
 
   PetscCall(PetscOptionsGetString(NULL, NULL, "-f", file, sizeof(file), &flg));
   if (!flg) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER_INPUT, "Must indicate binary file with the -f option");
@@ -305,6 +318,7 @@ int main(int argc, char **args)
        L     += R_L (subset pattern)
        U     += R_U (same pattern)
   */
+  PetscCall(PetscLogStagePush(stage_parilu));
   for (sweep = 0; sweep < max_sweeps; sweep++) {
     if (sweep == 0) PetscCall(MatMatMult(L, U, MAT_INITIAL_MATRIX, PETSC_DEFAULT, &M));
     else            PetscCall(MatMatMult(L, U, MAT_REUSE_MATRIX,   PETSC_DEFAULT, &M));
@@ -332,6 +346,7 @@ int main(int argc, char **args)
     PetscCall(MatAXPY(L, 1.0, R_L, SUBSET_NONZERO_PATTERN));
     PetscCall(MatAXPY(U, 1.0, R_U, SAME_NONZERO_PATTERN));
   }
+  PetscCall(PetscLogStagePop());
   if (converged) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD, "ParILU converged in %" PetscInt_FMT " sweeps\n", sweep));
   } else {
@@ -360,6 +375,7 @@ int main(int argc, char **args)
   PetscCall(MatCreateVecs(A, &b_rand, &x_sol));
 
   /* 1. Standalone L y = b ---------------------------------------------------- */
+  PetscCall(PetscLogStagePush(stage_L_solve));
   {
     KSP ksp_L;
     PC  pc_L;
@@ -374,12 +390,16 @@ int main(int argc, char **args)
     PetscCall(ApplyPythonAIRDefaults(pc_L));
     PetscCall(KSPSetOptionsPrefix(ksp_L, "L_"));
     PetscCall(KSPSetFromOptions(ksp_L));
+    /* Explicit setup so -log_view times KSPSetUp separately from KSPSolve. */
+    PetscCall(KSPSetUp(ksp_L));
     PetscCall(KSPSolve(ksp_L, b_rand, x_sol));
     PetscCall(ReportSolve("L solve (richardson + PCAIR)", ksp_L, L, b_rand, x_sol));
     PetscCall(KSPDestroy(&ksp_L));
   }
+  PetscCall(PetscLogStagePop());
 
   /* 2. Standalone U x = b ---------------------------------------------------- */
+  PetscCall(PetscLogStagePush(stage_U_solve));
   {
     KSP ksp_U;
     PC  pc_U;
@@ -394,16 +414,21 @@ int main(int argc, char **args)
     PetscCall(ApplyPythonAIRDefaults(pc_U));
     PetscCall(KSPSetOptionsPrefix(ksp_U, "U_"));
     PetscCall(KSPSetFromOptions(ksp_U));
+    PetscCall(KSPSetUp(ksp_U));
     PetscCall(KSPSolve(ksp_U, b_rand, x_sol));
     PetscCall(ReportSolve("U solve (richardson + PCAIR)", ksp_U, U, b_rand, x_sol));
     PetscCall(KSPDestroy(&ksp_U));
   }
+  PetscCall(PetscLogStagePop());
 
   /* 3. A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 ------------- */
+  PetscCall(PetscLogStagePush(stage_A_shell));
   {
     KSP         ksp_A;
     PC          pc_A;
     LUShellCtx *shell_ctx;
+    /* Build the inner KSPs inside this stage so their PCAIR setup (the bulk
+       of the shell PC's "setup" cost) is timed here too. */
     PetscCall(PetscNew(&shell_ctx));
     PetscCall(CreateInnerAIRKSP(PETSC_COMM_WORLD, L, "A_pc_L_", &shell_ctx->ksp_L));
     PetscCall(CreateInnerAIRKSP(PETSC_COMM_WORLD, U, "A_pc_U_", &shell_ctx->ksp_U));
@@ -424,12 +449,14 @@ int main(int argc, char **args)
     PetscCall(PCShellSetName(pc_A, "LU_AIR_shell"));
     PetscCall(KSPSetOptionsPrefix(ksp_A, "A_"));
     PetscCall(KSPSetFromOptions(ksp_A));
+    PetscCall(KSPSetUp(ksp_A));
     PetscCall(KSPSolve(ksp_A, b_rand, x_sol));
     PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC)", ksp_A, A, b_rand, x_sol));
     /* KSPDestroy triggers the PCSHELL destroy callback which tears down
        shell_ctx (its inner KSPs and tmp vec). */
     PetscCall(KSPDestroy(&ksp_A));
   }
+  PetscCall(PetscLogStagePop());
 
   /* L and U are only used by the three LU-based solves above; release before
      the PCILU comparison to free memory. */
@@ -437,6 +464,7 @@ int main(int argc, char **args)
   PetscCall(MatDestroy(&U));
 
   /* 4. A x = b with GMRES(30) and PETSc's built-in PCBJACOBI/ILU ------------ */
+  PetscCall(PetscLogStagePush(stage_A_pcilu));
   {
     KSP ksp_Apc;
     PC  pc_Apc;
@@ -454,10 +482,12 @@ int main(int argc, char **args)
     PetscCall(PCSetType(pc_Apc, PCBJACOBI));
     PetscCall(KSPSetOptionsPrefix(ksp_Apc, "Apc_"));
     PetscCall(KSPSetFromOptions(ksp_Apc));
+    PetscCall(KSPSetUp(ksp_Apc));
     PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
     PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol));
     PetscCall(KSPDestroy(&ksp_Apc));
   }
+  PetscCall(PetscLogStagePop());
 
   int exit_code = converged ? 0 : 1;
 
