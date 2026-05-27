@@ -45,6 +45,12 @@ PETSC_EXTERN void PCRegister_PFLARE();
 PETSC_EXTERN void compute_cf_splitting(Mat, int, double, int, int, int, double, IS*, IS*);
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat, double, Mat*);
 
+/* Restrict input_mat onto output_mat's sparsity pattern (Kokkos path).
+   With alpha_int = 1, performs output_mat += alpha * input_mat on output_mat's
+   pattern; with alpha_int = 0, performs output_mat = input_mat on output's pattern.
+   lump_int = 1 adds dropped entries to the diagonal. Requires Kokkos AIJ matrices. */
+PETSC_EXTERN void remove_from_sparse_match_kokkos(Mat*, Mat*, int, int, PetscReal);
+
 /* Define PCPFLAREINV get routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetSparsityOrder(PC, PetscInt *);
