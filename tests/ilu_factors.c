@@ -69,12 +69,15 @@ static PetscErrorCode CreateInnerAIRKSP(MPI_Comm comm, Mat factor, const char *p
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* PCShell context: applies y = U^-1 L^-1 x via inner KSPs wrapping PCAIR.
-   Mirrors _LUAirShellPC from test_ilu.py with the default LU_PC_INNER. */
+/* PCShell context: applies y = U_raw^-1 L^-1 x via inner KSPs wrapping PCAIR.
+   If inv_diag_U_raw is provided, the intermediate vector is element-wise multiplied
+   by it between the L and U solves to recover U_raw^-1 from U_scaled^-1
+   (where U_scaled = diag(1/diag(U_raw)) * U_raw is what the inner KSP sees). */
 typedef struct {
   KSP ksp_L;
   KSP ksp_U;
   Vec tmp;
+  Vec inv_diag_U_raw;   /* may be NULL */
 } LUShellCtx;
 
 static PetscErrorCode LUShellApply(PC pc, Vec x, Vec y)
@@ -83,6 +86,7 @@ static PetscErrorCode LUShellApply(PC pc, Vec x, Vec y)
   PetscFunctionBeginUser;
   PetscCall(PCShellGetContext(pc, &ctx));
   PetscCall(KSPSolve(ctx->ksp_L, x, ctx->tmp));
+  if (ctx->inv_diag_U_raw) PetscCall(VecPointwiseMult(ctx->tmp, ctx->inv_diag_U_raw, ctx->tmp));
   PetscCall(KSPSolve(ctx->ksp_U, ctx->tmp, y));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -95,6 +99,7 @@ static PetscErrorCode LUShellDestroy(PC pc)
   PetscCall(KSPDestroy(&ctx->ksp_L));
   PetscCall(KSPDestroy(&ctx->ksp_U));
   PetscCall(VecDestroy(&ctx->tmp));
+  PetscCall(VecDestroy(&ctx->inv_diag_U_raw));
   PetscCall(PetscFree(ctx));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -216,6 +221,18 @@ int main(int argc, char **args)
   PetscCall(MatGetType(A, &mtype));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-parilu_max_sweeps", &max_sweeps, NULL));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-parilu_tol", &parilu_tol, NULL));
+
+  /* Left-scale A by 1/diag(A) before ParILU (mirrors test_ilu.py scale_mode=1).
+     Reduces non-normality of the input and produces a unit-diagonal A which is
+     the ParILU starting point seen by all downstream solves. */
+  {
+    Vec inv_dA;
+    PetscCall(MatCreateVecs(A, &inv_dA, NULL));
+    PetscCall(MatGetDiagonal(A, inv_dA));
+    PetscCall(VecReciprocal(inv_dA));
+    PetscCall(MatDiagonalScale(A, inv_dA, NULL));
+    PetscCall(VecDestroy(&inv_dA));
+  }
 
   PetscInt rstart, rend, cstart, cend;
   PetscCall(MatGetOwnershipRange(A, &rstart, &rend));
@@ -361,6 +378,18 @@ int main(int argc, char **args)
   PetscCall(MatDestroy(&A_U));
   PetscCall(VecDestroy(&inv_dU));
 
+  /* Capture 1/diag(U_raw) and left-scale U by it (mirrors test_ilu.py).
+     U becomes unit-diagonal, which reduces non-normality and helps the inner
+     AIR solves on the U factor. L is already unit-diagonal so left-scaling by
+     its inverse diagonal is a no-op and is skipped. The shell PC for the
+     Ax=b solve later multiplies by inv_diag_U_raw between the L and U inner solves
+     to recover U_raw^-1 = U_scaled^-1 * diag(1/diag(U_raw)). */
+  Vec inv_diag_U_raw;
+  PetscCall(MatCreateVecs(U, &inv_diag_U_raw, NULL));
+  PetscCall(MatGetDiagonal(U, inv_diag_U_raw));
+  PetscCall(VecReciprocal(inv_diag_U_raw));
+  PetscCall(MatDiagonalScale(U, inv_diag_U_raw, NULL));
+
   /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   /*  Solves                                                                  */
   /*    1. L y = b      Richardson + PCAIR                                    */
@@ -433,6 +462,9 @@ int main(int argc, char **args)
     PetscCall(CreateInnerAIRKSP(PETSC_COMM_WORLD, L, "A_pc_L_", &shell_ctx->ksp_L));
     PetscCall(CreateInnerAIRKSP(PETSC_COMM_WORLD, U, "A_pc_U_", &shell_ctx->ksp_U));
     PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
+    /* Hand inv_diag_U_raw to the shell — LUShellDestroy will free it. */
+    shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
+    inv_diag_U_raw            = NULL;
 
     PetscCall(VecSetRandom(b_rand, rnd));
     PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_A));
