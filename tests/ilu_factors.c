@@ -8,7 +8,7 @@ or Richardson with the unpreconditioned norm to rtol 1e-6:\n\
   - A x = b   with GMRES(30)  + PETSc's built-in PCBJACOBI/ILU (a fair comparison\n\
                                 to our ParILU(0))\n\
 Iteration counts (and the final ||b-Op*x||/||b|| if we hit max iterations) are\n\
-reported for each. Requires -mat_type aijkokkos -vec_type kokkos.\n\
+reported for each. Works on either CPU AIJ or Kokkos AIJ matrices.\n\
 Input arguments are:\n\
   -f <input_file>           : binary matrix file to load\n\
   -parilu_tol <real>        : ParILU stencil-residual tolerance (default 1e-4)\n\
@@ -200,18 +200,7 @@ int main(int argc, char **args)
     PetscCall(MatDestroy(&A_diff_type));
   }
 
-  /* Require kokkos matrix type since the ParILU pattern restriction routine
-     we call only handles kokkos AIJ. The serial backend of Kokkos covers CPU. */
   PetscCall(MatGetType(A, &mtype));
-  {
-    PetscBool ok_seq = PETSC_FALSE, ok_mpi = PETSC_FALSE, ok_any = PETSC_FALSE;
-    PetscCall(PetscStrcmp(mtype, MATSEQAIJKOKKOS, &ok_seq));
-    PetscCall(PetscStrcmp(mtype, MATMPIAIJKOKKOS, &ok_mpi));
-    PetscCall(PetscStrcmp(mtype, MATAIJKOKKOS,    &ok_any));
-    PetscCheck(ok_seq || ok_mpi || ok_any, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG,
-               "ilu_factors requires a kokkos AIJ matrix; invoke with -mat_type aijkokkos -vec_type kokkos (got %s)", mtype);
-  }
-
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-parilu_max_sweeps", &max_sweeps, NULL));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-parilu_tol", &parilu_tol, NULL));
 
@@ -305,8 +294,8 @@ int main(int argc, char **args)
   PetscCall(MatCreateVecs(U, &inv_dU, NULL));
 
   /* ParILU sweep:
-    This won't necessary converge as well as a true asynchronous (ie Gauss-Seidel) ParILU
-    but the benefit is this works with MPI parallel and in Kokkos automatically
+    This won't necessarily converge as well as a true asynchronous (ie Gauss-Seidel) ParILU
+    but the benefit of this is it works with MPI parallel and in Kokkos automatically
        M     = L * U
        R_L   = A_L_strict - M  restricted to pat(L_strict)
        R_U   = A_U        - M  restricted to pat(U)
@@ -321,10 +310,11 @@ int main(int argc, char **args)
     else            PetscCall(MatMatMult(L, U, MAT_REUSE_MATRIX,   PETSC_DEFAULT, &M));
 
     PetscCall(MatCopy(A_L_strict, R_L, SAME_NONZERO_PATTERN));
-    remove_from_sparse_match_kokkos(&M, &R_L, 0, 1, -1.0);
+    // PFLARE function that drops entries outside of a given matrix sparsity
+    remove_from_sparse_match(M, R_L, 0, 1, -1.0);
 
     PetscCall(MatCopy(A_U, R_U, SAME_NONZERO_PATTERN));
-    remove_from_sparse_match_kokkos(&M, &R_U, 0, 1, -1.0);
+    remove_from_sparse_match(M, R_U, 0, 1, -1.0);
 
     PetscReal rl_norm, ru_norm;
     PetscCall(MatNorm(R_L, NORM_FROBENIUS, &rl_norm));

@@ -815,7 +815,7 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a existing sparsity in output_mat but with kokkos - keeping everything on the device
-PETSC_EXTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int, const int alpha_int, const PetscReal alpha)
+PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_mat, const int lump_int, const int alpha_int, const PetscReal alpha)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
