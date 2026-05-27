@@ -1,5 +1,6 @@
 module petsc_helper
 
+   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
@@ -1067,24 +1068,28 @@ logical, protected :: kokkos_debug_global = .FALSE.
    
    subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, &
                   reuse, output_mat, &
-                  our_level, is_row_fine, is_col_fine)
+                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle)
 
       ! Wrapper around MatCreateSubMatrix_kokkos
-      ! Only works if the input IS have the same parallel row/column distribution 
+      ! Only works if the input IS have the same parallel row/column distribution
       ! as the matrices
       ! is_col must be sorted
-   
+      ! When our_level is supplied (i.e. the kokkos path uses precomputed per-level
+      ! fine/coarse IS views), kokkos_is_views_handle MUST also be supplied; it
+      ! is the per-PCAIR handle stored on air_multigrid_data.
+
       ! ~~~~~~~~~~
-      ! Input 
+      ! Input
       type(tMat), intent(in)        :: input_mat
       IS, intent(in)                :: is_row, is_col
       integer, intent(in), optional :: our_level
       logical, intent(in), optional :: is_row_fine, is_col_fine
+      type(c_ptr), intent(in), optional :: kokkos_is_views_handle
       MatReuse, intent(in)          :: reuse
       type(tMat), intent(inout)     :: output_mat
 
       PetscErrorCode :: ierr
-#if defined(PETSC_HAVE_KOKKOS)                     
+#if defined(PETSC_HAVE_KOKKOS)
       MPIU_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
@@ -1094,8 +1099,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       Mat :: temp_mat
       PetscScalar :: normy
       type(tVec) :: max_vec
-      PetscInt :: row_loc      
-#endif      
+      PetscInt :: row_loc
+      type(c_ptr) :: handle_local
+#endif
       ! ~~~~~~~~~~
 
 #if defined(PETSC_HAVE_KOKKOS)    
@@ -1122,6 +1128,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          our_level_int = -1
          is_row_fine_int = 0
          is_col_fine_int = 0
+         handle_local = c_null_ptr
 
          if (present(our_level)) then
             our_level_int = our_level
@@ -1132,9 +1139,17 @@ logical, protected :: kokkos_debug_global = .FALSE.
          if (present(is_col_fine)) then
             if (is_col_fine) is_col_fine_int = 1
          end if
+         if (present(kokkos_is_views_handle)) then
+            handle_local = kokkos_is_views_handle
+         end if
+         if (our_level_int /= -1 .AND. .NOT. c_associated(handle_local)) then
+            print *, "MatCreateSubMatrixWrapper: our_level set but kokkos_is_views_handle is null"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
 
          call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
                   reuse_int, B_array, &
+                  handle_local, &
                   our_level_int, is_row_fine_int, is_col_fine_int)
 
          output_mat%v = B_array

@@ -42,11 +42,11 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local);
 PETSC_INTERN void delete_device_diag_dom_ratio();
 
-// Define array of shared pointers representing fine and coarse IS's 
-// on each level on the device
-extern ViewPetscIntPtr* IS_fine_views_local;
-extern ViewPetscIntPtr* IS_coarse_views_local;
-extern int max_levels;
+// Per-PCAIR IS views (fine/coarse per multigrid level) live behind an opaque
+// handle owned by the air_data on the Fortran side; see VecISCopyLocalk for
+// the definition of the storage struct and accessors.
+PETSC_INTERN PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int);
+
 extern intKokkosView cf_markers_local_d;
 extern PetscScalarKokkosView diag_dom_ratio_local_d;
 

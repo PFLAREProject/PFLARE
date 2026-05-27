@@ -83,6 +83,10 @@ run_tests_load_serial:
 	./ex6 -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 5
 #
 	@echo ""
+	@echo "Test two concurrent AIRG solves don't corrupt per-level IS state"
+	./ex6_two_airg -f data/mat_stream_2364
+#
+	@echo ""
 	@echo "Test lAIR with GMRES polynomial smoothing for hyperbolic streaming problem"
 	./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_z_type lair -ksp_max_it 5
 	@echo "Test lAIR with strong R tolerance with GMRES polynomial smoothing for hyperbolic streaming problem"
@@ -181,6 +185,9 @@ run_tests_load_parallel:
 #
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_matrix_free_polys -ksp_max_it 5
+#
+	@echo "Test two concurrent AIRG solves don't corrupt per-level IS state in parallel"
+	$(MPIEXEC) -n 2 ./ex6_two_airg -f data/mat_stream_2364
 #
 	@echo "Test single level GMRES polynomial preconditioning for hyperbolic streaming problem in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364	-pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 21

@@ -82,13 +82,14 @@ module fc_smooth
                mat_type == MATAIJKOKKOS) then
 
             ! Build in case not built yet
-            call create_VecISCopyLocal_kokkos(air_data%options%max_levels)
+            call create_VecISCopyLocal_kokkos(air_data%options%max_levels, air_data%kokkos_is_views_handle)
             call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)
 
             ! Copy the IS's over to the device
             is_fine_array = air_data%IS_fine_index(our_level)%v
             is_coarse_array = air_data%IS_coarse_index(our_level)%v
-            call set_VecISCopyLocal_kokkos_our_level(our_level, global_row_start, is_fine_array, is_coarse_array)
+            call set_VecISCopyLocal_kokkos_our_level(air_data%kokkos_is_views_handle, our_level, &
+                     global_row_start, is_fine_array, is_coarse_array)
 
          end if
 #endif
@@ -122,8 +123,8 @@ module fc_smooth
          end if 
 
       else
-#if defined(PETSC_HAVE_KOKKOS) 
-         call destroy_VecISCopyLocal_kokkos()
+#if defined(PETSC_HAVE_KOKKOS)
+         call destroy_VecISCopyLocal_kokkos(air_data%kokkos_is_views_handle)
 #endif
       end if
          
@@ -181,7 +182,7 @@ module fc_smooth
                   if (fine) fine_int = 1
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
-                  call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
+                  call VecISCopyLocal_kokkos(air_data%kokkos_is_views_handle, our_level, fine_int, vfull_array, &
                            mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
@@ -245,7 +246,7 @@ module fc_smooth
                   if (fine) fine_int = 1
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
-                  call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
+                  call VecISCopyLocal_kokkos(air_data%kokkos_is_views_handle, our_level, fine_int, vfull_array, &
                            mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
@@ -293,7 +294,7 @@ module fc_smooth
                   if (fine) fine_int = 1
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
-                  call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
+                  call VecISCopyLocal_kokkos(air_data%kokkos_is_views_handle, our_level, fine_int, vfull_array, &
                            mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results
@@ -357,7 +358,7 @@ module fc_smooth
                   if (fine) fine_int = 1
                   vfull_array = vfull%v
                   vreduced_array = vreduced%v
-                  call VecISCopyLocal_kokkos(our_level, fine_int, vfull_array, &
+                  call VecISCopyLocal_kokkos(air_data%kokkos_is_views_handle, our_level, fine_int, vfull_array, &
                            mode_int, vreduced_array)
 
                   ! If debugging do a comparison between CPU and Kokkos results

@@ -92,12 +92,14 @@ module air_operators_setup
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
-                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)              
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
+                        kokkos_is_views_handle = air_data%kokkos_is_views_handle)              
          else
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
-                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE.)                              
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
+                        kokkos_is_views_handle = air_data%kokkos_is_views_handle)                              
          end if
                      
          call timer_finish(TIMER_ID_AIR_EXTRACT)                             
@@ -162,12 +164,14 @@ module air_operators_setup
             call MatCreateSubMatrixWrapper(input_mat, &
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
                   air_data%A_cc(our_level), &
-                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE.)
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE., &
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
          else
             call MatCreateSubMatrixWrapper(input_mat, &
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_cc(our_level), &
-                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE.)
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE., &
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
          end if
 
          call timer_start(TIMER_ID_AIR_INVERSE)    
@@ -200,20 +204,24 @@ module air_operators_setup
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
                air_data%A_fc(our_level), &
-               our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)
+               our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
+               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
                air_data%A_cf(our_level), &
-               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)
+               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
       else
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                air_data%A_fc(our_level), &
-               our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)
+               our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
+               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
          call MatCreateSubMatrixWrapper(input_mat, &
                air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                air_data%A_cf(our_level), &
-               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)
+               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
       end if
 
       call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -241,12 +249,14 @@ module air_operators_setup
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_REUSE_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
-                        our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)               
+                        our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+                        kokkos_is_views_handle = air_data%kokkos_is_views_handle)               
          else
             call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), &
-                        our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE.)             
+                        our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+                        kokkos_is_views_handle = air_data%kokkos_is_views_handle)             
          end if
 
          if (.NOT. air_data%options%one_point_classical_prolong) then
@@ -256,12 +266,14 @@ module air_operators_setup
                call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_REUSE_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
-                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
+                        kokkos_is_views_handle = air_data%kokkos_is_views_handle)
             else
                call MatCreateSubMatrixWrapper(air_data%reuse(our_level)%reuse_mat(MAT_A_DROP), &
                         air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                         air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
-                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE.)
+                        our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
+                        kokkos_is_views_handle = air_data%kokkos_is_views_handle)
             end if
          end if                  
          
