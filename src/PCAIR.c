@@ -18,6 +18,8 @@ PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int symmetric_int,
    int ddc_its, double fraction_swap,
    IS *is_fine, IS *is_coarse);
 PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, double max_dd_ratio, Mat *output_mat);
+PETSC_EXTERN void remove_from_sparse_match_c(Mat *input_mat, Mat *output_mat,
+   int lump_int, int alpha_int, PetscReal alpha);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
 // External users should use the get/set routines without _c which have 
 // PetscErrorCode defined as return type, those routines are defined below this
@@ -206,6 +208,15 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, double max_dd_ratio, Mat *output_mat)
 {
    compute_diag_dom_submatrix_c(&input_mat, max_dd_ratio, output_mat);
+}
+
+// Restrict input_mat onto output_mat's existing sparsity pattern.
+// Auto-dispatches between the CPU and Kokkos implementations based on the
+// matrix type, so callers can mix kokkos and non-kokkos matrices freely.
+PETSC_EXTERN void remove_from_sparse_match(Mat input_mat, Mat output_mat,
+   int lump_int, int alpha_int, PetscReal alpha)
+{
+   remove_from_sparse_match_c(&input_mat, &output_mat, lump_int, alpha_int, alpha);
 }
 
 // Get routines
