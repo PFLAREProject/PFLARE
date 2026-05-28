@@ -89,6 +89,8 @@ run_tests_load_serial:
 	@echo ""
 	@echo "Test AIRG can solve triangle factors from ILU factorisations"
 	./ilu_factors -f data/mat_stream_2364
+	@echo "Test AIRG can solve triangle factors from ILU factorisations with local reordering"
+	./ilu_factors -f data/mat_stream_2364 -mat_ordering_type rcm
 #
 	@echo ""
 	@echo "Test lAIR with GMRES polynomial smoothing for hyperbolic streaming problem"
@@ -195,6 +197,8 @@ run_tests_load_parallel:
 #
 	@echo "Test AIRG can solve triangle factors from ILU factorisations in parallel"
 	$(MPIEXEC) -n 2 ./ilu_factors -f data/mat_stream_2364
+	@echo "Test AIRG can solve triangle factors from ILU factorisations with local reordering in parallel"
+	$(MPIEXEC) -n 2 ./ilu_factors -f data/mat_stream_2364 -mat_ordering_type rcm	
 #
 	@echo "Test single level GMRES polynomial preconditioning for hyperbolic streaming problem in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364	-pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 21

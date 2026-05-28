@@ -309,6 +309,21 @@ int main(int argc, char **args)
     A = A_partitioned;
   }
 
+  /* Reorder A for better ILU quality; default is natural (no-op).
+     Override with -mat_ordering_type rcm|nd|qmd|... on the command line. */
+  {
+    char ordering[64] = MATORDERINGNATURAL;
+    IS   row_perm, col_perm;
+    Mat  A_reordered;
+    PetscCall(PetscOptionsGetString(NULL, NULL, "-mat_ordering_type", ordering, sizeof(ordering), NULL));
+    PetscCall(MatGetOrdering(A, ordering, &row_perm, &col_perm));
+    PetscCall(MatPermute(A, row_perm, col_perm, &A_reordered));
+    PetscCall(MatDestroy(&A));
+    A = A_reordered;
+    PetscCall(ISDestroy(&row_perm));
+    PetscCall(ISDestroy(&col_perm));
+  }
+
   /* Convert to the user-requested matrix type (e.g. aijkokkos) */
   PetscCall(MatGetLocalSize(A, &m, &n));
   PetscCall(MatGetSize(A, &M_size, &N_size));
