@@ -118,6 +118,11 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC, PetscInt, int, PetscReal **, PetscInt *, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC, PetscReal *);
+PETSC_EXTERN PetscErrorCode PCAIRGetOperatorComplexity(PC, PetscReal *);
+PETSC_EXTERN PetscErrorCode PCAIRGetCycleComplexity(PC, PetscReal *);
+PETSC_EXTERN PetscErrorCode PCAIRGetStorageComplexity(PC, PetscReal *);
+PETSC_EXTERN PetscErrorCode PCAIRGetReuseStorageComplexity(PC, PetscReal *);
 /* Define PCAIR set routines */
 PETSC_EXTERN PetscErrorCode PCAIRSetPrintStatsTimings(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLevels(PC, PetscInt);

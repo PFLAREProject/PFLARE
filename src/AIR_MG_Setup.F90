@@ -593,11 +593,11 @@ module air_mg_setup
          ! If so we build a shell as a placeholder
          ! ~~~~~~~~~~~
          
-         ! Get the nnzs for these matrices here, in case we destroy them below
-         if (air_data%options%print_stats_timings) then
-            call get_nnzs_petsc_sparse(air_data%coarse_matrix(our_level), &
-                     air_data%coarse_matrix_nnzs(our_level))
-         end if
+         ! Always save the nnzs before potential destruction below so that the
+         ! complexity getters (PCAIRGetCycleComplexity etc.) work on demand
+         ! without requiring print_stats_timings to be enabled.
+         call get_nnzs_petsc_sparse(air_data%coarse_matrix(our_level), &
+                  air_data%coarse_matrix_nnzs(our_level))
 
          ! On every level but the top we can destroy the full operator matrix
          if (our_level /= 1) then

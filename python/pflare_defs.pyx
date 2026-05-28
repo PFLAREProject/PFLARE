@@ -77,6 +77,11 @@ cdef extern:
 	# The Python wrapper copies the data before returning.
 	void PCAIRGetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
+	void PCAIRGetGridComplexity_c(PetscPC *pc, PetscReal *complexity)
+	void PCAIRGetOperatorComplexity_c(PetscPC *pc, PetscReal *complexity)
+	void PCAIRGetCycleComplexity_c(PetscPC *pc, PetscReal *complexity)
+	void PCAIRGetStorageComplexity_c(PetscPC *pc, PetscReal *complexity)
+	void PCAIRGetReuseStorageComplexity_c(PetscPC *pc, PetscReal *complexity)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Set routines
@@ -390,6 +395,31 @@ cpdef double pcair_get_r_drop(PC pc):
 cpdef double pcair_get_a_drop(PC pc):
 	cdef PetscReal result = 0.0
 	PCAIRGetADrop_c(&(pc.pc), &result)
+	return <double>result
+
+cpdef double pcair_get_grid_complexity(PC pc):
+	cdef PetscReal result = 0.0
+	PCAIRGetGridComplexity_c(&(pc.pc), &result)
+	return <double>result
+
+cpdef double pcair_get_operator_complexity(PC pc):
+	cdef PetscReal result = 0.0
+	PCAIRGetOperatorComplexity_c(&(pc.pc), &result)
+	return <double>result
+
+cpdef double pcair_get_cycle_complexity(PC pc):
+	cdef PetscReal result = 0.0
+	PCAIRGetCycleComplexity_c(&(pc.pc), &result)
+	return <double>result
+
+cpdef double pcair_get_storage_complexity(PC pc):
+	cdef PetscReal result = 0.0
+	PCAIRGetStorageComplexity_c(&(pc.pc), &result)
+	return <double>result
+
+cpdef double pcair_get_reuse_storage_complexity(PC pc):
+	cdef PetscReal result = 0.0
+	PCAIRGetReuseStorageComplexity_c(&(pc.pc), &result)
 	return <double>result
 
 cpdef bint pcair_get_a_lump(PC pc):

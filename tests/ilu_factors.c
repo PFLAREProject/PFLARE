@@ -10,7 +10,7 @@ For each inner-PC kind in {AIRG, GMRES poly (matrix-free), Neumann poly\n\
 \n\
 It also runs A x = b twice via the LU shell PC applying U^-1 L^-1:\n\
   - GMRES(30) + shell PC with PCAIR inner solves (one apply per factor)\n\
-  - GMRES(30) + shell PC with PCJACOBI inner solves (one Jacobi sweep per factor)\n\
+  - GMRES(30) + shell PC with PCJACOBI inner solves (sweeps = ceil(max AIR cycle complexity of L,U))\n\
 \n\
 And a baseline:\n\
   - A x = b   with GMRES(30) + PETSc's built-in PCBJACOBI/ILU\n\
@@ -140,17 +140,25 @@ static PetscErrorCode ConfigureInnerPC(PC pc, InnerPCKind kind)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* Build an inner preonly+<kind> KSP for a triangular factor, matching the
-   python _LUAirShellPC with LU_PC_INNER max_it=1 (single PC application,
-   no residual norm work). */
+/* Build an inner KSP for a triangular factor.
+   max_it == 1: preonly (single PC application, no residual norm work), matching
+                python _LUAirShellPC with LU_PC_INNER max_it=1.
+   max_it  > 1: Richardson with unpreconditioned norm, rtol=1e-6, atol=1e-50,
+                matching python LU_PC_INNER with max_it>1. */
 static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *prefix,
-                                     InnerPCKind kind, KSP *ksp)
+                                     InnerPCKind kind, PetscInt max_it, KSP *ksp)
 {
   PC pc;
   PetscFunctionBeginUser;
   PetscCall(KSPCreate(comm, ksp));
-  PetscCall(KSPSetType(*ksp, KSPPREONLY));
-  PetscCall(KSPSetNormType(*ksp, KSP_NORM_NONE));
+  if (max_it == 1) {
+    PetscCall(KSPSetType(*ksp, KSPPREONLY));
+    PetscCall(KSPSetNormType(*ksp, KSP_NORM_NONE));
+  } else {
+    PetscCall(KSPSetType(*ksp, KSPRICHARDSON));
+    PetscCall(KSPSetNormType(*ksp, KSP_NORM_UNPRECONDITIONED));
+    PetscCall(KSPSetTolerances(*ksp, 1e-6, 1e-50, PETSC_DEFAULT, max_it));
+  }
   PetscCall(KSPSetOperators(*ksp, factor, factor));
   PetscCall(KSPSetInitialGuessNonzero(*ksp, PETSC_FALSE));
   PetscCall(KSPGetPC(*ksp, &pc));
@@ -248,6 +256,7 @@ int main(int argc, char **args)
   PetscReal   parilu_tol = 1e-4;
   PetscBool   converged = PETSC_FALSE;
   PetscBool   solves_converged = PETSC_TRUE;
+  PetscInt    jac_max_it = 1; /* Jacobi inner iterations, derived from AIR cycle complexity */
 
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
@@ -569,13 +578,30 @@ int main(int argc, char **args)
   PetscCall(PetscLogStagePush(stage_A_shell));
   {
     KSP         ksp_A;
-    PC          pc_A;
+    PC          pc_A, pcL_inner, pcU_inner;
     LUShellCtx *shell_ctx;
+    PetscReal   cL = -1.0, cU = -1.0;
     /* Build the inner KSPs inside this stage so their PCAIR setup (the bulk
        of the shell PC's "setup" cost) is timed here too. */
     PetscCall(PetscNew(&shell_ctx));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_pc_L_", INNER_PC_AIR, &shell_ctx->ksp_L));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_pc_U_", INNER_PC_AIR, &shell_ctx->ksp_U));
+    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_pc_L_", INNER_PC_AIR, 1, &shell_ctx->ksp_L));
+    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_pc_U_", INNER_PC_AIR, 1, &shell_ctx->ksp_U));
+    /* Fetch cycle complexity from the two AIR hierarchies (PCSetUp was called
+       inside CreateInnerKSP above) to derive the Jacobi inner iteration count
+       used in the subsequent stage_A_shell_jac solve, mirroring
+       _jac_inner_from_cycle in test_ilu.py. */
+    PetscCall(KSPGetPC(shell_ctx->ksp_L, &pcL_inner));
+    PetscCall(KSPGetPC(shell_ctx->ksp_U, &pcU_inner));
+    PetscCall(PCAIRGetCycleComplexity(pcL_inner, &cL));
+    PetscCall(PCAIRGetCycleComplexity(pcU_inner, &cU));
+    {
+      PetscReal cmax = (cL > 0.0 && cU > 0.0) ? PetscMax(cL, cU) :
+                       (cL > 0.0) ? cL : (cU > 0.0) ? cU : 1.0;
+      jac_max_it = PetscMax((PetscInt)1, (PetscInt)PetscCeilReal(cmax));
+    }
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                          "AIR cycle complexities: L=%.3f U=%.3f -> Jacobi inner max_it=%"
+                          PetscInt_FMT "\n", (double)cL, (double)cU, jac_max_it));
     PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
     /* Hand inv_diag_U_raw to the shell — LUShellDestroy will free it. */
     shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
@@ -604,16 +630,17 @@ int main(int argc, char **args)
   }
   PetscCall(PetscLogStagePop());
 
-  /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via one PCJACOBI
-     sweep per factor (preonly + PCJACOBI inner). */
+  /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
+     The number of Jacobi sweeps per factor apply equals jac_max_it, derived from
+     the AIR cycle complexities of the L and U PCAIR hierarchies above */
   PetscCall(PetscLogStagePush(stage_A_shell_jac));
   {
     KSP         ksp_Ajac;
     PC          pc_Ajac;
     LUShellCtx *shell_ctx;
     PetscCall(PetscNew(&shell_ctx));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_jac_pc_L_", INNER_PC_JACOBI, &shell_ctx->ksp_L));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_jac_pc_U_", INNER_PC_JACOBI, &shell_ctx->ksp_U));
+    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_jac_pc_L_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_L));
+    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_jac_pc_U_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_U));
     PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
     shell_ctx->inv_diag_U_raw = inv_diag_U_raw_for_jac;
     inv_diag_U_raw_for_jac    = NULL;
