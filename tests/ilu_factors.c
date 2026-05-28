@@ -402,13 +402,14 @@ int main(int argc, char **args)
   PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rnd));
   PetscCall(PetscRandomSetFromOptions(rnd));
   PetscCall(MatCreateVecs(A, &b_rand, &x_sol));
+  /* Single random rhs reused across all solves. */
+  PetscCall(VecSetRandom(b_rand, rnd));
 
   /* 1. Standalone L y = b ---------------------------------------------------- */
   PetscCall(PetscLogStagePush(stage_L_solve));
   {
     KSP ksp_L;
     PC  pc_L;
-    PetscCall(VecSetRandom(b_rand, rnd));
     PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_L));
     PetscCall(KSPSetType(ksp_L, KSPRICHARDSON));
     PetscCall(KSPSetNormType(ksp_L, KSP_NORM_UNPRECONDITIONED));
@@ -432,7 +433,6 @@ int main(int argc, char **args)
   {
     KSP ksp_U;
     PC  pc_U;
-    PetscCall(VecSetRandom(b_rand, rnd));
     PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_U));
     PetscCall(KSPSetType(ksp_U, KSPRICHARDSON));
     PetscCall(KSPSetNormType(ksp_U, KSP_NORM_UNPRECONDITIONED));
@@ -466,7 +466,6 @@ int main(int argc, char **args)
     shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
     inv_diag_U_raw            = NULL;
 
-    PetscCall(VecSetRandom(b_rand, rnd));
     PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_A));
     PetscCall(KSPSetType(ksp_A, KSPGMRES));
     PetscCall(KSPGMRESSetRestart(ksp_A, 30));
@@ -500,7 +499,6 @@ int main(int argc, char **args)
   {
     KSP ksp_Apc;
     PC  pc_Apc;
-    PetscCall(VecSetRandom(b_rand, rnd));
     PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Apc));
     PetscCall(KSPSetType(ksp_Apc, KSPGMRES));
     PetscCall(KSPGMRESSetRestart(ksp_Apc, 30));
