@@ -21,10 +21,15 @@ All options can be set either through command line arguments or programmatically
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
    | ``-pc_air_print_stats_timings``  |  PCAIRGetPrintStatsTimings  PCAIRSetPrintStatsTimings  | Print out statistics about the multigrid hierarchy and timings | false |       
+   | N/A  |  PCAIRGetGridComplexity  | Grid complexity of the hierarchy after PCSetUp; returns -1 if not yet set up | N/A |
+   | N/A  |  PCAIRGetOperatorComplexity  | Operator complexity of the hierarchy after PCSetUp; returns -1 if not yet set up | N/A |
+   | N/A  |  PCAIRGetCycleComplexity  | Cycle complexity of the hierarchy after PCSetUp; returns -1 if not yet set up | N/A |
+   | N/A  |  PCAIRGetStorageComplexity  | Storage complexity of the hierarchy after PCSetUp; returns -1 if not yet set up | N/A |
+   | N/A  |  PCAIRGetReuseStorageComplexity  | Reuse storage complexity of the hierarchy after PCSetUp (0 when reuse is disabled); returns -1 if not yet set up | N/A |   
    | ``-pc_air_max_levels``  |  PCAIRGetMaxLevels  PCAIRSetMaxLevels  | Maximum number of levels in the hierarchy | 300 |
    | ``-pc_air_coarse_eq_limit``  |  PCAIRGetCoarseEqLimit  PCAIRSetCoarseEqLimit  | Minimum number of global unknowns on the coarse grid | 6 |   
    | ``-pc_air_auto_truncate_start_level``  |  PCAIRGetAutoTruncateStartLevel  PCAIRSetAutoTruncateStartLevel  | Build a coarse solver on each level from this one and use it to determine if we can truncate the hierarchy | -1 |
-   | ``-pc_air_auto_truncate_tol``  |  PCAIRGetAutoTruncateTol  PCAIRSetAutoTruncateTol  | Tolerance used to determine if the coarse solver is good enough to truncate at a given level | 1e-14 | 
+   | ``-pc_air_auto_truncate_tol``  |  PCAIRGetAutoTruncateTol  PCAIRSetAutoTruncateTol  | Tolerance used to determine if the coarse solver is good enough to truncate at a given level | 1e-14 |
    | ``-pc_air_r_drop``  |  PCAIRGetRDrop  PCAIRSetRDrop  | Drop tolerance applied to R on each level after it is built | 0.01 |
    | ``-pc_air_a_drop``  |  PCAIRGetADrop  PCAIRSetADrop  | Drop tolerance applied to the coarse matrix on each level after it is built | 0.0001 |
    | ``-pc_air_a_lump``  |  PCAIRSetALump  PCAIRSetALump  | Lump to the diagonal rather than drop for the coarse matrix | false |         

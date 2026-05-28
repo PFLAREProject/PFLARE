@@ -65,6 +65,11 @@ run_tests:
 		echo "Test PCAIR direct option set/get API with Python in parallel"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_options.py && echo "OK"; \
 		echo ""; \
+		echo "Test PCAIR complexity getter API with Python"; \
+		$(PYTHON) ex_pcair_complexities.py && echo "OK"; \
+		echo "Test PCAIR complexity getter API with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_complexities.py && echo "OK"; \
+		echo ""; \
 		echo "Test PCPFLAREINV direct option set/get API with Python"; \
 		$(PYTHON) ex_pcpflareinv_options.py && echo "OK"; \
 		echo "Test PCPFLAREINV direct option set/get API with Python in parallel"; \

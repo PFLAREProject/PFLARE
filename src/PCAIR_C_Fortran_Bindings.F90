@@ -772,8 +772,93 @@ module pcair_c_fortran_bindings
       pc%v = pc_ptr
       call PCAIRGetADrop(pc, adrop, ierr)
 
-   end subroutine PCAIRGetADrop_c 
-   
+   end subroutine PCAIRGetADrop_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetGridComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetGridComplexity_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+
+      type(tPC)      :: pc
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetGridComplexity(pc, complexity, ierr)
+
+   end subroutine PCAIRGetGridComplexity_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOperatorComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetOperatorComplexity_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+
+      type(tPC)      :: pc
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetOperatorComplexity(pc, complexity, ierr)
+
+   end subroutine PCAIRGetOperatorComplexity_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCycleComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetCycleComplexity_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+
+      type(tPC)      :: pc
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetCycleComplexity(pc, complexity, ierr)
+
+   end subroutine PCAIRGetCycleComplexity_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetStorageComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetStorageComplexity_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+
+      type(tPC)      :: pc
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetStorageComplexity(pc, complexity, ierr)
+
+   end subroutine PCAIRGetStorageComplexity_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseStorageComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetReuseStorageComplexity_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+
+      type(tPC)      :: pc
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetReuseStorageComplexity(pc, complexity, ierr)
+
+   end subroutine PCAIRGetReuseStorageComplexity_c
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine PCAIRGetALump_c(pc_ptr, lump) bind(C, name='PCAIRGetALump_c')

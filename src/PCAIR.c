@@ -72,6 +72,11 @@ PETSC_EXTERN void PCAIRGetReuseSparsity_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
+PETSC_EXTERN void PCAIRGetGridComplexity_c(PC *pc, PetscReal *complexity);
+PETSC_EXTERN void PCAIRGetOperatorComplexity_c(PC *pc, PetscReal *complexity);
+PETSC_EXTERN void PCAIRGetCycleComplexity_c(PC *pc, PetscReal *complexity);
+PETSC_EXTERN void PCAIRGetStorageComplexity_c(PC *pc, PetscReal *complexity);
+PETSC_EXTERN void PCAIRGetReuseStorageComplexity_c(PC *pc, PetscReal *complexity);
 
 // Setters
 PETSC_EXTERN void PCAIRSetPrintStatsTimings_c(PC *pc, PetscBool input_bool);
@@ -510,6 +515,36 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int 
    PetscFunctionBegin;
    PCAIRGetPolyCoeffs_c(&pc,petsc_level, which_inverse, \
       coeffs_ptr, row_size, col_size);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC pc, PetscReal *complexity)
+{
+   PetscFunctionBegin;
+   PCAIRGetGridComplexity_c(&pc, complexity);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetOperatorComplexity(PC pc, PetscReal *complexity)
+{
+   PetscFunctionBegin;
+   PCAIRGetOperatorComplexity_c(&pc, complexity);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetCycleComplexity(PC pc, PetscReal *complexity)
+{
+   PetscFunctionBegin;
+   PCAIRGetCycleComplexity_c(&pc, complexity);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetStorageComplexity(PC pc, PetscReal *complexity)
+{
+   PetscFunctionBegin;
+   PCAIRGetStorageComplexity_c(&pc, complexity);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+PETSC_EXTERN PetscErrorCode PCAIRGetReuseStorageComplexity(PC pc, PetscReal *complexity)
+{
+   PetscFunctionBegin;
+   PCAIRGetReuseStorageComplexity_c(&pc, complexity);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

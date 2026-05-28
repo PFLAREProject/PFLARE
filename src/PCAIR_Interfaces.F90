@@ -3,6 +3,7 @@ module pcair_interfaces
    use iso_c_binding
    use petscksp
    use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
+   use air_mg_stats, only: compute_stats
    use pflare_parameters, only: PFLAREINV_NEUMANN, &
          COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 
@@ -235,10 +236,135 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetNumLevels
-   
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr) 
+   subroutine PCAIRGetComplexitiesInternal(pc, grid_complx, op_complx, cycle_complx, &
+                                            storage_complx, reuse_storage_complx, ierr)
+
+      ! Retrieve all 5 AIR multigrid complexities for a PCAIR preconditioner.
+      ! Returns -1.0 for all values if PCSetUp has not yet been called (detected
+      ! via no_levels == -1).  Otherwise calls compute_stats, which performs the
+      ! necessary parallel reductions.
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: grid_complx, op_complx, cycle_complx
+      PetscReal, intent(out)        :: storage_complx, reuse_storage_complx
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      ! ~~~~~~~~
+
+      call PCAIRGetPCShell(pc, pc_shell)
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+
+      if (pc_air_data%air_data%no_levels == -1) then
+         grid_complx          = -1.0d0
+         op_complx            = -1.0d0
+         cycle_complx         = -1.0d0
+         storage_complx       = -1.0d0
+         reuse_storage_complx = -1.0d0
+         ierr = 0
+         return
+      end if
+
+      call compute_stats(pc_air_data%air_data, pc_air_data%pcmg, &
+                         grid_complx, op_complx, cycle_complx, &
+                         storage_complx, reuse_storage_complx)
+      ierr = 0
+
+   end subroutine PCAIRGetComplexitiesInternal
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetGridComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = grid_c
+
+   end subroutine PCAIRGetGridComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOperatorComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = op_c
+
+   end subroutine PCAIRGetOperatorComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCycleComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = cycle_c
+
+   end subroutine PCAIRGetCycleComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetStorageComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = storage_c
+
+   end subroutine PCAIRGetStorageComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseStorageComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = reuse_c
+
+   end subroutine PCAIRGetReuseStorageComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr)
 
       ! This routine returns a copy of the polynomial coefficients stored in the PC.
       ! coeffs is allocated/reallocated as needed; it is safe to keep and use after
