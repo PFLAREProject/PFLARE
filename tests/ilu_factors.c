@@ -614,6 +614,8 @@ int main(int argc, char **args)
                        (cL > 0.0) ? cL : (cU > 0.0) ? cU : 1.0;
       jac_max_it = PetscMax((PetscInt)1, (PetscInt)PetscCeilReal(cmax));
     }
+    // Allow user to override the inner jacobi iterations
+    PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
                           "AIR cycle complexities: L=%.3f U=%.3f -> Jacobi inner max_it=%"
                           PetscInt_FMT "\n", (double)cL, (double)cU, jac_max_it));
