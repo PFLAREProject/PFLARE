@@ -595,7 +595,7 @@ int main(int argc, char **args)
     KSP         ksp_A;
     PC          pc_A, pcL_inner, pcU_inner;
     LUShellCtx *shell_ctx;
-    PetscReal   cL = -1.0, cU = -1.0;
+    PetscReal   cL = -1.0, cU = -1.0, sL = -1.0, sU = -1.0, gL = -1.0, gU = -1.0;
     /* Build the inner KSPs inside this stage so their PCAIR setup (the bulk
        of the shell PC's "setup" cost) is timed here too. */
     PetscCall(PetscNew(&shell_ctx));
@@ -609,6 +609,10 @@ int main(int argc, char **args)
     PetscCall(KSPGetPC(shell_ctx->ksp_U, &pcU_inner));
     PetscCall(PCAIRGetCycleComplexity(pcL_inner, &cL));
     PetscCall(PCAIRGetCycleComplexity(pcU_inner, &cU));
+    PetscCall(PCAIRGetStorageComplexity(pcL_inner, &sL));
+    PetscCall(PCAIRGetStorageComplexity(pcU_inner, &sU));
+    PetscCall(PCAIRGetGridComplexity(pcL_inner, &gL));
+    PetscCall(PCAIRGetGridComplexity(pcU_inner, &gU));
     {
       PetscReal cmax = (cL > 0.0 && cU > 0.0) ? PetscMax(cL, cU) :
                        (cL > 0.0) ? cL : (cU > 0.0) ? cU : 1.0;
@@ -617,8 +621,8 @@ int main(int argc, char **args)
     // Allow user to override the inner jacobi iterations
     PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "AIR cycle complexities: L=%.3f U=%.3f -> Jacobi inner max_it=%"
-                          PetscInt_FMT "\n", (double)cL, (double)cU, jac_max_it));
+                          "AIR complexities: cycle L=%.3f U=%.3f, storage L=%.3f U=%.3f, grid L=%.3f U=%.3f\n",
+                          (double)cL, (double)cU, (double)sL, (double)sU, (double)gL, (double)gU));
     PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
     /* Hand inv_diag_U_raw to the shell — LUShellDestroy will free it. */
     shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
@@ -640,7 +644,7 @@ int main(int argc, char **args)
     PetscCall(KSPSetFromOptions(ksp_A));
     PetscCall(KSPSetUp(ksp_A));
     PetscCall(KSPSolve(ksp_A, b_rand, x_sol));
-    PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC)", ksp_A, A, b_rand, x_sol, &solves_converged));
+    PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, AIRG inner)", ksp_A, A, b_rand, x_sol, &solves_converged));
     /* KSPDestroy triggers the PCSHELL destroy callback which tears down
        shell_ctx (its inner KSPs and tmp vec). */
     PetscCall(KSPDestroy(&ksp_A));
@@ -655,6 +659,7 @@ int main(int argc, char **args)
     KSP         ksp_Ajac;
     PC          pc_Ajac;
     LUShellCtx *shell_ctx;
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Jacobi inner max_it=%" PetscInt_FMT "\n", jac_max_it));
     PetscCall(PetscNew(&shell_ctx));
     PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_jac_pc_L_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_L));
     PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_jac_pc_U_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_U));
