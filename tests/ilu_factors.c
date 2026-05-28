@@ -66,13 +66,15 @@ static PetscErrorCode ApplyPythonAIRDefaults(PC pc)
 /* Report the outcome of a KSP solve. If the solver hit max iterations
    (KSP_DIVERGED_ITS) print the actual relative residual ||b - Op*x||_2/||b||_2
    so we can see how close it got. */
-static PetscErrorCode ReportSolve(const char *label, KSP ksp, Mat op, Vec b, Vec x)
+static PetscErrorCode ReportSolve(const char *label, KSP ksp, Mat op, Vec b, Vec x,
+                                  PetscBool *all_converged)
 {
   PetscInt           its;
   KSPConvergedReason reason;
   PetscFunctionBeginUser;
   PetscCall(KSPGetIterationNumber(ksp, &its));
   PetscCall(KSPGetConvergedReason(ksp, &reason));
+  if (all_converged && reason <= 0) *all_converged = PETSC_FALSE;
   if (reason == KSP_DIVERGED_ITS) {
     Vec       r;
     PetscReal rn, bn;
@@ -164,7 +166,7 @@ static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *pref
    solve separately. Reports iteration count via ReportSolve. */
 static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
                                      InnerPCKind kind, const char *label,
-                                     const char *opts_prefix)
+                                     const char *opts_prefix, PetscBool *all_converged)
 {
   KSP ksp;
   PC  pc;
@@ -180,7 +182,7 @@ static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
   PetscCall(KSPSetFromOptions(ksp));
   PetscCall(KSPSetUp(ksp));
   PetscCall(KSPSolve(ksp, b, x));
-  PetscCall(ReportSolve(label, ksp, factor, b, x));
+  PetscCall(ReportSolve(label, ksp, factor, b, x, all_converged));
   PetscCall(KSPDestroy(&ksp));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -245,6 +247,7 @@ int main(int argc, char **args)
   PetscInt    max_sweeps = 100, sweep;
   PetscReal   parilu_tol = 1e-4;
   PetscBool   converged = PETSC_FALSE;
+  PetscBool   solves_converged = PETSC_TRUE;
 
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
@@ -514,52 +517,52 @@ int main(int argc, char **args)
   /* L and U standalone solves: Richardson + each inner PC. */
   PetscCall(PetscLogStagePush(stage_L_solve));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_AIR,
-                           "L solve (richardson + PCAIR)", "L_"));
+                           "L solve (richardson + PCAIR)", "L_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_solve));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_AIR,
-                           "U solve (richardson + PCAIR)", "U_"));
+                           "U solve (richardson + PCAIR)", "U_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_gmres));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "L solve (richardson + GMRES poly)", "L_gmres_"));
+                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_gmres));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "U solve (richardson + GMRES poly)", "U_gmres_"));
+                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_neumann));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "L solve (richardson + Neumann poly)", "L_neumann_"));
+                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_neumann));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "U solve (richardson + Neumann poly)", "U_neumann_"));
+                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_isai));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_ISAI,
-                           "L solve (richardson + ISAI)", "L_isai_"));
+                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_isai));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_ISAI,
-                           "U solve (richardson + ISAI)", "U_isai_"));
+                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_jac));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_JACOBI,
-                           "L solve (richardson + PCJACOBI)", "L_jac_"));
+                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_jac));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_JACOBI,
-                           "U solve (richardson + PCJACOBI)", "U_jac_"));
+                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged));
   PetscCall(PetscLogStagePop());
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner. */
@@ -594,7 +597,7 @@ int main(int argc, char **args)
     PetscCall(KSPSetFromOptions(ksp_A));
     PetscCall(KSPSetUp(ksp_A));
     PetscCall(KSPSolve(ksp_A, b_rand, x_sol));
-    PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC)", ksp_A, A, b_rand, x_sol));
+    PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC)", ksp_A, A, b_rand, x_sol, &solves_converged));
     /* KSPDestroy triggers the PCSHELL destroy callback which tears down
        shell_ctx (its inner KSPs and tmp vec). */
     PetscCall(KSPDestroy(&ksp_A));
@@ -632,7 +635,7 @@ int main(int argc, char **args)
     PetscCall(KSPSetUp(ksp_Ajac));
     PetscCall(KSPSolve(ksp_Ajac, b_rand, x_sol));
     PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
-                          ksp_Ajac, A, b_rand, x_sol));
+                          ksp_Ajac, A, b_rand, x_sol, &solves_converged));
     PetscCall(KSPDestroy(&ksp_Ajac));
   }
   PetscCall(PetscLogStagePop());
@@ -662,12 +665,12 @@ int main(int argc, char **args)
     PetscCall(KSPSetFromOptions(ksp_Apc));
     PetscCall(KSPSetUp(ksp_Apc));
     PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
-    PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol));
+    PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
     PetscCall(KSPDestroy(&ksp_Apc));
   }
   PetscCall(PetscLogStagePop());
 
-  int exit_code = converged ? 0 : 1;
+  int exit_code = (converged && solves_converged) ? 0 : 1;
 
   /* Final cleanup */
   PetscCall(VecDestroy(&b_rand));
