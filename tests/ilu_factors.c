@@ -255,6 +255,7 @@ int main(int argc, char **args)
   PetscInt    max_sweeps = 100, sweep;
   PetscReal   parilu_tol = 1e-4;
   PetscBool   converged = PETSC_FALSE;
+  PetscBool   parilu_diverged = PETSC_FALSE;
   PetscBool   solves_converged = PETSC_TRUE;
   PetscInt    jac_max_it = 1; /* Jacobi inner iterations, derived from AIR cycle complexity */
 
@@ -446,6 +447,40 @@ int main(int argc, char **args)
 
   PetscCall(MatCreateVecs(U, &inv_dU, NULL));
 
+
+  PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rnd));
+  PetscCall(PetscRandomSetFromOptions(rnd));
+  PetscCall(MatCreateVecs(A, &b_rand, &x_sol));
+  /* Single random rhs reused across all solves. */
+  PetscCall(VecSetRandom(b_rand, rnd));
+
+  /* A x = b with GMRES(30) and PETSc's built-in PCBJACOBI/ILU baseline, run
+     before ParILU to establish whether the problem is solvable independently
+     of factor quality. */
+  PetscCall(PetscLogStagePush(stage_A_pcilu));
+  {
+    KSP ksp_Apc;
+    PC  pc_Apc;
+    PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Apc));
+    PetscCall(KSPSetType(ksp_Apc, KSPGMRES));
+    PetscCall(KSPGMRESSetRestart(ksp_Apc, 30));
+    PetscCall(KSPSetNormType(ksp_Apc, KSP_NORM_UNPRECONDITIONED));
+    PetscCall(KSPSetOperators(ksp_Apc, A, A));
+    PetscCall(KSPSetTolerances(ksp_Apc, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+    PetscCall(KSPGetPC(ksp_Apc, &pc_Apc));
+    /* PCBJACOBI's default sub-PC for AIJ blocks is PCILU(0). In serial that's
+       exactly PETSc's PCILU on the whole matrix; in MPI it's a per-rank ILU
+       inside block-Jacobi — the standard "parallel PCILU" pattern. */
+    PetscCall(PCSetType(pc_Apc, PCBJACOBI));
+    PetscCall(KSPSetOptionsPrefix(ksp_Apc, "Apc_"));
+    PetscCall(KSPSetFromOptions(ksp_Apc));
+    PetscCall(KSPSetUp(ksp_Apc));
+    PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
+    PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
+    PetscCall(KSPDestroy(&ksp_Apc));
+  }
+  PetscCall(PetscLogStagePop());
+
   /* ParILU sweep:
     This won't necessarily converge as well as a true asynchronous (ie Gauss-Seidel) ParILU
     but the benefit of this is it works with MPI parallel and in Kokkos automatically
@@ -457,7 +492,8 @@ int main(int argc, char **args)
        R_L   *= diag(U)^-1   (right scaling)
        L     += R_L (subset pattern)
        U     += R_U (same pattern)
-  */
+  */  
+  PetscReal res_initial = -1.0;
   PetscCall(PetscLogStagePush(stage_parilu));
   for (sweep = 0; sweep < max_sweeps; sweep++) {
     if (sweep == 0) PetscCall(MatMatMult(L, U, MAT_INITIAL_MATRIX, PETSC_DEFAULT, &M));
@@ -474,10 +510,19 @@ int main(int argc, char **args)
     PetscCall(MatNorm(R_L, NORM_FROBENIUS, &rl_norm));
     PetscCall(MatNorm(R_U, NORM_FROBENIUS, &ru_norm));
     PetscReal res = PetscSqrtReal(rl_norm * rl_norm + ru_norm * ru_norm);
+    if (sweep == 0) res_initial = res;
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
                           "  ParILU sweep %3" PetscInt_FMT "  stencil residual = %.6e\n",
                           sweep, (double)res));
     if (res < threshold) { converged = PETSC_TRUE; sweep++; break; }
+    if (PetscIsInfOrNanReal(res) || (res_initial > 0.0 && res > 1000.0 * res_initial)) {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                            "  ParILU diverged at sweep %" PetscInt_FMT
+                            ": residual %.6e exceeds 1000x initial %.6e or is non-finite\n",
+                            sweep, (double)res, (double)res_initial));
+      parilu_diverged = PETSC_TRUE;
+      break;
+    }
 
     PetscCall(MatGetDiagonal(U, inv_dU));
     PetscCall(VecReciprocal(inv_dU));
@@ -501,6 +546,14 @@ int main(int argc, char **args)
   PetscCall(MatDestroy(&A_U));
   PetscCall(VecDestroy(&inv_dU));
 
+  if (parilu_diverged) {
+    PetscCall(MatDestroy(&L));
+    PetscCall(MatDestroy(&U));
+    PetscCall(MatDestroy(&A));
+    PetscCall(PetscFinalize());
+    return 1;
+  }
+
   /* Capture 1/diag(U_raw) and left-scale U by it (mirrors test_ilu.py).
      U becomes unit-diagonal, which reduces non-normality and helps the inner
      AIR solves on the U factor. L is already unit-diagonal so left-scaling by
@@ -520,15 +573,8 @@ int main(int argc, char **args)
   /*    U x = b      same five inner PCs                                      */
   /*    A x = b      GMRES(30)  + shell PC = U^-1 L^-1 via PCAIR  inner       */
   /*    A x = b      GMRES(30)  + shell PC = U^-1 L^-1 via PCJACOBI inner     */
-  /*    A x = b      GMRES(30)  + PETSc's built-in PCBJACOBI/ILU              */
   /*  All factor solves use the unpreconditioned residual norm and rtol=1e-6. */
   /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-
-  PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rnd));
-  PetscCall(PetscRandomSetFromOptions(rnd));
-  PetscCall(MatCreateVecs(A, &b_rand, &x_sol));
-  /* Single random rhs reused across all solves. */
-  PetscCall(VecSetRandom(b_rand, rnd));
 
   /* The PCAIR Ax=b shell-PC solve below consumes inv_diag_U_raw (its destroy
      callback frees it). The PCJACOBI-inner Ax=b shell solve added later also
@@ -689,35 +735,8 @@ int main(int argc, char **args)
   }
   PetscCall(PetscLogStagePop());
 
-  /* L and U are no longer needed past the shell-PC solves; release before the
-     PCILU comparison to free memory. */
   PetscCall(MatDestroy(&L));
   PetscCall(MatDestroy(&U));
-
-  /* A x = b with GMRES(30) and PETSc's built-in PCBJACOBI/ILU baseline. */
-  PetscCall(PetscLogStagePush(stage_A_pcilu));
-  {
-    KSP ksp_Apc;
-    PC  pc_Apc;
-    PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Apc));
-    PetscCall(KSPSetType(ksp_Apc, KSPGMRES));
-    PetscCall(KSPGMRESSetRestart(ksp_Apc, 30));
-    PetscCall(KSPSetNormType(ksp_Apc, KSP_NORM_UNPRECONDITIONED));
-    PetscCall(KSPSetOperators(ksp_Apc, A, A));
-    PetscCall(KSPSetTolerances(ksp_Apc, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
-    PetscCall(KSPGetPC(ksp_Apc, &pc_Apc));
-    /* PCBJACOBI's default sub-PC for AIJ blocks is PCILU(0). In serial that's
-       exactly PETSc's PCILU on the whole matrix; in MPI it's a per-rank ILU
-       inside block-Jacobi — the standard "parallel PCILU" pattern. */
-    PetscCall(PCSetType(pc_Apc, PCBJACOBI));
-    PetscCall(KSPSetOptionsPrefix(ksp_Apc, "Apc_"));
-    PetscCall(KSPSetFromOptions(ksp_Apc));
-    PetscCall(KSPSetUp(ksp_Apc));
-    PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
-    PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
-    PetscCall(KSPDestroy(&ksp_Apc));
-  }
-  PetscCall(PetscLogStagePop());
 
   int exit_code = (converged && solves_converged) ? 0 : 1;
 
