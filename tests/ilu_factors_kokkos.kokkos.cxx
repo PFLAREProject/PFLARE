@@ -5,9 +5,11 @@ GMRES(30) or Richardson with the unpreconditioned norm to rtol 1e-6.\n\
 \n\
 This is a Kokkos C++ version of ilu_factors.c. It does exactly the same thing; the only\n\
 difference is the factorisation: instead of the matrix-form (block-Jacobi-like) Chow\n\
-ParILU, the L and U factors come from KokkosSparse::spiluk at fill level 0, and end up in\n\
-SeqAIJKokkos matrices built directly from the spiluk device views. spiluk is sequential,\n\
-so this only runs on a single MPI rank (a SeqAIJKokkos matrix); it errors out otherwise.\n\
+ParILU, the L and U factors come from a Kokkos Kernels incomplete-LU and end up in\n\
+SeqAIJKokkos matrices built directly from the algorithm's device views. The algorithm is\n\
+selected with -ilu_algorithm: 'spiluk' (level-based ILU(k), the default) or 'parilut'\n\
+(threshold-based parallel ILUT). Both are run single-rank on a SeqAIJKokkos matrix; it\n\
+errors out otherwise.\n\
 \n\
 For each inner-PC kind in {AIRG, GMRES poly (matrix-free), Neumann poly\n\
 (matrix-free), ISAI, Jacobi} the test runs:\n\
@@ -25,7 +27,11 @@ Iteration counts (and the final ||b-Op*x||/||b|| if we hit max iterations) are\n
 reported for each. Requires a single-rank Kokkos AIJ matrix.\n\
 Input arguments are:\n\
   -f <input_file>           : binary matrix file to load\n\
+  -ilu_algorithm <name>     : 'spiluk' (default) or 'parilut'\n\
   -fill_level <int>         : spiluk ILU fill level k (default 0)\n\
+  -parilut_max_iter <int>   : parilut max iterations (default 20)\n\
+  -parilut_fill_in_limit <r>: parilut nnz(L+U)/nnz(A) cap (default 0.75)\n\
+  -parilut_residual_delta <r>: parilut residual-change stop (default 1e-2)\n\
   -L_*,   -U_*              : AIRG  factor solves\n\
   -L_gmres_*,   -U_gmres_*  : GMRES-poly factor solves\n\
   -L_neumann_*, -U_neumann_*: Neumann-poly factor solves\n\
@@ -43,6 +49,8 @@ Input arguments are:\n\
 #include "pflare.h"
 #include <KokkosKernels_Handle.hpp>
 #include <KokkosSparse_spiluk.hpp>
+#include <KokkosSparse_par_ilut.hpp>
+#include <KokkosSparse_SortCrs.hpp>
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /*  Helpers                                                                    */
@@ -393,14 +401,16 @@ int main(int argc, char **args)
   }
   PetscCall(PetscLogStagePop());
 
-  /* ILU(0) factorisation via Kokkos Kernels spiluk.
-     A is unit-diagonal and its CSR is sorted, so spiluk(0) produces L and U
-     whose combined pattern equals A's pattern. The factors are built directly
-     into SeqAIJKokkos matrices from the spiluk device views:
+  /* Incomplete LU factorisation via Kokkos Kernels. Two algorithms, selected by
+     -ilu_algorithm:
+       spiluk  (default) : level-based ILU(k), exact for the chosen fill level
+       parilut           : threshold-based parallel ILUT (iterative, Anzt et al.)
+     Both produce, with A unit-diagonal and sorted,
        L = unit lower-triangular (1.0 stored on the diagonal)
        U = upper-triangular with the pivots on the diagonal
      which is exactly the convention the matrix-form ParILU produced just before
-     the post-scaling step below. */
+     the post-scaling step below. The factors are built directly into SeqAIJKokkos
+     matrices from the algorithm's device views. */
   PetscCall(PetscLogStagePush(stage_ilu));
   {
     PetscCall(MatGetLocalSize(A, &m, &n));
@@ -418,58 +428,113 @@ int main(int argc, char **args)
     PetscInt annz      = (PetscInt)A_values.extent(0);
 
     /* Handle templated on PetscInt offset/ordinal and PetscScalar values — all
-       index types are PetscInt so this is correct with 64-bit PetscInt. */
+       index types are PetscInt so this is correct with 64-bit PetscInt. The same
+       handle type drives both create_spiluk_handle and create_par_ilut_handle. */
     using KernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<
         PetscInt, PetscInt, PetscScalar,
         DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
-    KernelHandle   kh;
-    /* Fill level k for ILU(k); defaults to 0, overridable on the command line. */
-    PetscInt fill_lev = 0;
-    PetscCall(PetscOptionsGetInt(NULL, NULL, "-fill_level", &fill_lev, NULL));
-    /* Initial nnz estimate for the L/U entries views (symbolic computes the exact
-       count and we resize below). annz + m is the exact upper bound for ILU(0);
-       for higher fill levels use a generous over-estimate, as in the Kokkos
-       Kernels spiluk perf test (EXPAND_FACT * nnz * (fill_lev + 1)). */
-    const PetscInt EXPAND_FACT = 6;
-    PetscInt       nnz_est     = (fill_lev == 0) ? (annz + m) : EXPAND_FACT * annz * (fill_lev + 1);
-    kh.create_spiluk_handle(KokkosSparse::Experimental::SPILUKAlgorithm::SEQLVLSCHD_TP1,
-                            m, nnz_est, nnz_est);
-    auto h = kh.get_spiluk_handle();
+    KernelHandle kh;
 
-    /* Output views with the exact types MatCreateSeqAIJKokkosWithKokkosViews wants. */
+    /* L/U outputs filled by whichever algorithm; row maps are size m+1, the
+       entries/values are sized once the algorithm knows the nnz. */
     Kokkos::View<PetscInt *>    L_row_map("L_row_map", m + 1);
-    Kokkos::View<PetscInt *>    L_entries("L_entries", h->get_nnzL());
     Kokkos::View<PetscInt *>    U_row_map("U_row_map", m + 1);
-    Kokkos::View<PetscInt *>    U_entries("U_entries", h->get_nnzU());
+    Kokkos::View<PetscInt *>    L_entries, U_entries;
+    Kokkos::View<PetscScalar *> L_values,  U_values;
+    PetscInt nnzL = 0, nnzU = 0;
 
-    KokkosSparse::spiluk_symbolic(&kh, fill_lev, A_rowmap, A_entries,
-                                  L_row_map, L_entries, U_row_map, U_entries);
-    Kokkos::fence();
+    char algorithm[32] = "spiluk";
+    PetscCall(PetscOptionsGetString(NULL, NULL, "-ilu_algorithm", algorithm, sizeof(algorithm), NULL));
 
-    Kokkos::resize(L_entries, h->get_nnzL());
-    Kokkos::resize(U_entries, h->get_nnzU());
-    Kokkos::View<PetscScalar *> L_values("L_values", h->get_nnzL());
-    Kokkos::View<PetscScalar *> U_values("U_values", h->get_nnzU());
+    if (strcmp(algorithm, "parilut") == 0) {
+      /* Threshold-based parallel ILUT. Tunable via the command line; defaults
+         match KokkosKernelsHandle::create_par_ilut_handle. */
+      PetscInt  par_max_iter = 100;
+      PetscReal par_fill_in  = 1.0; /* nnz(L+U) capped at fill_in_limit x nnz(A) */
+      PetscReal par_res_delta = 1e-4; /* stop when the residual change drops below this */
+      PetscCall(PetscOptionsGetInt(NULL, NULL, "-parilut_max_iter", &par_max_iter, NULL));
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-parilut_fill_in_limit", &par_fill_in, NULL));
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-parilut_residual_delta", &par_res_delta, NULL));
+      kh.create_par_ilut_handle((PetscInt)par_max_iter, par_res_delta, par_fill_in, false, false);
+      auto h = kh.get_par_ilut_handle();
 
-    KokkosSparse::spiluk_numeric(&kh, fill_lev, A_rowmap, A_entries, A_values,
-                                 L_row_map, L_entries, L_values,
-                                 U_row_map, U_entries, U_values);
-    Kokkos::fence();
+      /* Symbolic sets the initial nnz(L)/nnz(U) on the handle. */
+      KokkosSparse::Experimental::par_ilut_symbolic(&kh, A_rowmap, A_entries, L_row_map, U_row_map);
+      Kokkos::fence();
+      L_entries = Kokkos::View<PetscInt *>("L_entries", h->get_nnzL());
+      L_values  = Kokkos::View<PetscScalar *>("L_values", h->get_nnzL());
+      U_entries = Kokkos::View<PetscInt *>("U_entries", h->get_nnzU());
+      U_values  = Kokkos::View<PetscScalar *>("U_values", h->get_nnzU());
 
-    PetscInt nnzL = (PetscInt)h->get_nnzL();
-    PetscInt nnzU = (PetscInt)h->get_nnzU();
-    kh.destroy_spiluk_handle();
+      /* Numeric iterates; its internal threshold filtering reallocates the L/U
+         entries/values views (passed by reference) to the final filtered nnz and
+         keeps them consistent with the row maps. Use those final views directly —
+         the handle's get_nnzL()/get_nnzU() still report the symbolic estimate, so
+         take the true nnz from the views' extents. */
+      KokkosSparse::Experimental::par_ilut_numeric(&kh, A_rowmap, A_entries, A_values,
+                                                   L_row_map, L_entries, L_values,
+                                                   U_row_map, U_entries, U_values);
+      Kokkos::fence();
+      kh.destroy_par_ilut_handle();
+      nnzL = (PetscInt)L_entries.extent(0);
+      nnzU = (PetscInt)U_entries.extent(0);
+
+      /* Sort each row ascending for the PETSc AIJ invariant (par_ilut sorts
+         internally, this is belt-and-braces). */
+      KokkosSparse::sort_crs_matrix(L_row_map, L_entries, L_values);
+      KokkosSparse::sort_crs_matrix(U_row_map, U_entries, U_values);
+      Kokkos::fence();
+    } else if (strcmp(algorithm, "spiluk") == 0) {
+      /* Level-based ILU(k); fill level k defaults to 0, overridable. */
+      PetscInt fill_lev = 0;
+      PetscCall(PetscOptionsGetInt(NULL, NULL, "-fill_level", &fill_lev, NULL));
+      /* Initial nnz estimate for the L/U entries views (symbolic computes the
+         exact count and we resize below). annz + m is the exact upper bound for
+         ILU(0); for higher fill levels use a generous over-estimate, as in the
+         Kokkos Kernels spiluk perf test (EXPAND_FACT * nnz * (fill_lev + 1)). */
+      const PetscInt EXPAND_FACT = 6;
+      PetscInt       nnz_est     = (fill_lev == 0) ? (annz + m) : EXPAND_FACT * annz * (fill_lev + 1);
+      kh.create_spiluk_handle(KokkosSparse::Experimental::SPILUKAlgorithm::SEQLVLSCHD_TP1,
+                              m, nnz_est, nnz_est);
+      auto h = kh.get_spiluk_handle();
+
+      L_entries = Kokkos::View<PetscInt *>("L_entries", h->get_nnzL());
+      U_entries = Kokkos::View<PetscInt *>("U_entries", h->get_nnzU());
+
+      KokkosSparse::spiluk_symbolic(&kh, fill_lev, A_rowmap, A_entries,
+                                    L_row_map, L_entries, U_row_map, U_entries);
+      Kokkos::fence();
+
+      Kokkos::resize(L_entries, h->get_nnzL());
+      Kokkos::resize(U_entries, h->get_nnzU());
+      L_values = Kokkos::View<PetscScalar *>("L_values", h->get_nnzL());
+      U_values = Kokkos::View<PetscScalar *>("U_values", h->get_nnzU());
+
+      KokkosSparse::spiluk_numeric(&kh, fill_lev, A_rowmap, A_entries, A_values,
+                                   L_row_map, L_entries, L_values,
+                                   U_row_map, U_entries, U_values);
+      Kokkos::fence();
+      nnzL = (PetscInt)h->get_nnzL();
+      nnzU = (PetscInt)h->get_nnzU();
+      kh.destroy_spiluk_handle();
+      /* spiluk_symbolic already sorts the L and U graphs internally. */
+    } else {
+      PetscCall(MatSeqAIJRestoreKokkosView(A, &A_values));
+      SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER_INPUT,
+              "Unknown -ilu_algorithm '%s'; use 'spiluk' or 'parilut'", algorithm);
+    }
+
     PetscCall(MatSeqAIJRestoreKokkosView(A, &A_values));
 
-    /* spiluk_symbolic sorts the L and U graphs internally, so the rows satisfy
-       the PETSc AIJ sorted-column invariant — wrap the device views directly. */
+    /* The L and U rows are sorted ascending, so the PETSc AIJ sorted-column
+       invariant holds — wrap the device views directly. */
     PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, m, n, L_row_map, L_entries, L_values, &L));
     PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, m, n, U_row_map, U_entries, U_values, &U));
 
     converged = PETSC_TRUE;
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "Computed ILU(%" PetscInt_FMT ") via Kokkos Kernels spiluk: nnz(L) = %"
-                          PetscInt_FMT ", nnz(U) = %" PetscInt_FMT "\n", fill_lev, nnzL, nnzU));
+                          "Computed ILU via Kokkos Kernels %s: nnz(L) = %" PetscInt_FMT
+                          ", nnz(U) = %" PetscInt_FMT "\n", algorithm, nnzL, nnzU));
   }
   PetscCall(PetscLogStagePop());
 
