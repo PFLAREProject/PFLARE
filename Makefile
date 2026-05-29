@@ -176,7 +176,7 @@ export TEST_TARGETS = ex12f \
 		  ilu_factors
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
-export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
+export TEST_TARGETS := $(TEST_TARGETS) adv_1dk ilu_factors_kokkos
 endif
 # Define a variable containing all the tests that the make check runs
 export CHECK_TARGETS = adv_diff_fd matrandom
