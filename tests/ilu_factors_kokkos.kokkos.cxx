@@ -287,6 +287,7 @@ int main(int argc, char **args)
 
   PetscCall(PetscOptionsGetString(NULL, NULL, "-f", file, sizeof(file), &flg));
   if (!flg) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER_INPUT, "Must indicate binary file with the -f option");
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Input matrix file (-f): %s\n", file));
   PetscCall(PetscViewerBinaryOpen(PETSC_COMM_WORLD, file, FILE_MODE_READ, &fd));
   PetscCall(MatCreate(PETSC_COMM_WORLD, &A));
   PetscCall(MatLoad(A, fd));
@@ -311,6 +312,7 @@ int main(int argc, char **args)
     IS   row_perm, col_perm;
     Mat  A_reordered;
     PetscCall(PetscOptionsGetString(NULL, NULL, "-mat_ordering_type", ordering, sizeof(ordering), NULL));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Reordering requested (-mat_ordering_type): %s\n", ordering));
     PetscCall(MatGetOrdering(A, ordering, &row_perm, &col_perm));
     PetscCall(MatPermute(A, row_perm, col_perm, &A_reordered));
     PetscCall(MatDestroy(&A));
