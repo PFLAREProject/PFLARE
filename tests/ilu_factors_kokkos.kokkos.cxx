@@ -25,6 +25,7 @@ Iteration counts (and the final ||b-Op*x||/||b|| if we hit max iterations) are\n
 reported for each. Requires a single-rank Kokkos AIJ matrix.\n\
 Input arguments are:\n\
   -f <input_file>           : binary matrix file to load\n\
+  -fill_level <int>         : spiluk ILU fill level k (default 0)\n\
   -L_*,   -U_*              : AIRG  factor solves\n\
   -L_gmres_*,   -U_gmres_*  : GMRES-poly factor solves\n\
   -L_neumann_*, -U_neumann_*: Neumann-poly factor solves\n\
@@ -422,10 +423,17 @@ int main(int argc, char **args)
         PetscInt, PetscInt, PetscScalar,
         DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
     KernelHandle   kh;
-    const PetscInt fill_lev = 0;
-    /* annz + m is a safe upper bound on nnz(L) and nnz(U) for ILU(0). */
+    /* Fill level k for ILU(k); defaults to 0, overridable on the command line. */
+    PetscInt fill_lev = 0;
+    PetscCall(PetscOptionsGetInt(NULL, NULL, "-fill_level", &fill_lev, NULL));
+    /* Initial nnz estimate for the L/U entries views (symbolic computes the exact
+       count and we resize below). annz + m is the exact upper bound for ILU(0);
+       for higher fill levels use a generous over-estimate, as in the Kokkos
+       Kernels spiluk perf test (EXPAND_FACT * nnz * (fill_lev + 1)). */
+    const PetscInt EXPAND_FACT = 6;
+    PetscInt       nnz_est     = (fill_lev == 0) ? (annz + m) : EXPAND_FACT * annz * (fill_lev + 1);
     kh.create_spiluk_handle(KokkosSparse::Experimental::SPILUKAlgorithm::SEQLVLSCHD_TP1,
-                            m, annz + m, annz + m);
+                            m, nnz_est, nnz_est);
     auto h = kh.get_spiluk_handle();
 
     /* Output views with the exact types MatCreateSeqAIJKokkosWithKokkosViews wants. */
@@ -460,8 +468,8 @@ int main(int argc, char **args)
 
     converged = PETSC_TRUE;
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "Computed ILU(0) via Kokkos Kernels spiluk: nnz(L) = %" PetscInt_FMT
-                          ", nnz(U) = %" PetscInt_FMT "\n", nnzL, nnzU));
+                          "Computed ILU(%" PetscInt_FMT ") via Kokkos Kernels spiluk: nnz(L) = %"
+                          PetscInt_FMT ", nnz(U) = %" PetscInt_FMT "\n", fill_lev, nnzL, nnzU));
   }
   PetscCall(PetscLogStagePop());
 
