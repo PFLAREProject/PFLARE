@@ -52,8 +52,12 @@ static char help[] = "Solves steady advection-diffusion with finite-difference o
 #include <petscksp.h>
 #include <petscsys.h>
 #include <petscvec.h>
+#include <string.h>
+#include <math.h>
 
 #include "pflare.h"
+
+#define MINE_TRANSPORT_N_REF 450
 
 // Helper function to compute velocity at a point.
 // dim: spatial dimension (2 or 3)
@@ -99,6 +103,165 @@ static inline void GetVelocity(PetscInt dim, PetscReal u_const, PetscReal v_cons
 
 extern PetscErrorCode ComputeMat(DM,Mat,PetscInt,PetscScalar,PetscScalar,PetscScalar,PetscScalar,PetscScalar,PetscScalar,PetscScalar,PetscBool,PetscBool,PetscBool);
 
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+/*  ILU helpers (used only when -ilu_test is active)                          */
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+
+static PetscErrorCode CreateMatLike(MPI_Comm comm, MatType mtype,
+                                    PetscInt m, PetscInt n, PetscInt M, PetscInt N,
+                                    const PetscInt *dnnz, const PetscInt *onnz,
+                                    Mat *out)
+{
+  PetscFunctionBeginUser;
+  PetscCall(MatCreate(comm, out));
+  PetscCall(MatSetSizes(*out, m, n, M, N));
+  PetscCall(MatSetType(*out, mtype));
+  PetscCall(MatXAIJSetPreallocation(*out, 1, dnnz, onnz, NULL, NULL));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode ApplyPythonAIRDefaults(PC pc)
+{
+  PetscFunctionBeginUser;
+  PetscCall(PCAIRSetDiagScalePolys(pc, PETSC_TRUE));
+  PetscCall(PCAIRSetADrop(pc, 1e-6));
+  PetscCall(PCAIRSetRDrop(pc, 1e-4));
+  PetscCall(PCAIRSetCoarsestDiagScalePolys(pc, PETSC_TRUE));
+  PetscCall(PCAIRSetCFSplittingType(pc, CF_DIAG_DOM));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode ReportSolve(const char *label, KSP ksp, Mat op, Vec b, Vec x,
+                                  PetscBool *all_converged)
+{
+  PetscInt           its;
+  KSPConvergedReason reason;
+  PetscFunctionBeginUser;
+  PetscCall(KSPGetIterationNumber(ksp, &its));
+  PetscCall(KSPGetConvergedReason(ksp, &reason));
+  if (all_converged && reason <= 0) *all_converged = PETSC_FALSE;
+  if (reason == KSP_DIVERGED_ITS) {
+    Vec       r;
+    PetscReal rn, bn;
+    PetscCall(VecDuplicate(b, &r));
+    PetscCall(MatMult(op, x, r));
+    PetscCall(VecAYPX(r, -1.0, b));
+    PetscCall(VecNorm(r, NORM_2, &rn));
+    PetscCall(VecNorm(b, NORM_2, &bn));
+    PetscCall(VecDestroy(&r));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                          "%s: %" PetscInt_FMT " iterations (reason %d, hit max iterations); "
+                          "final ||b-Op*x||/||b|| = %.6e\n",
+                          label, its, (int)reason,
+                          (double)(bn > 0.0 ? rn / bn : rn)));
+  } else {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                          "%s: %" PetscInt_FMT " iterations (reason %d)\n",
+                          label, its, (int)reason));
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+typedef enum {
+  INNER_PC_AIR,
+  INNER_PC_JACOBI,
+} InnerPCKind;
+
+static PetscErrorCode ConfigureInnerPC(PC pc, InnerPCKind kind)
+{
+  PetscFunctionBeginUser;
+  switch (kind) {
+  case INNER_PC_AIR:
+    PetscCall(PCSetType(pc, PCAIR));
+    PetscCall(ApplyPythonAIRDefaults(pc));
+    break;
+  case INNER_PC_JACOBI:
+    PetscCall(PCSetType(pc, PCJACOBI));
+    break;
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *prefix,
+                                     InnerPCKind kind, PetscInt max_it, KSP *ksp)
+{
+  PC pc;
+  PetscFunctionBeginUser;
+  PetscCall(KSPCreate(comm, ksp));
+  if (max_it == 1) {
+    PetscCall(KSPSetType(*ksp, KSPPREONLY));
+    PetscCall(KSPSetNormType(*ksp, KSP_NORM_NONE));
+  } else {
+    PetscCall(KSPSetType(*ksp, KSPRICHARDSON));
+    PetscCall(KSPSetNormType(*ksp, KSP_NORM_UNPRECONDITIONED));
+    PetscCall(KSPSetTolerances(*ksp, 1e-6, 1e-50, PETSC_DEFAULT, max_it));
+  }
+  PetscCall(KSPSetOperators(*ksp, factor, factor));
+  PetscCall(KSPSetInitialGuessNonzero(*ksp, PETSC_FALSE));
+  PetscCall(KSPGetPC(*ksp, &pc));
+  PetscCall(ConfigureInnerPC(pc, kind));
+  if (prefix) PetscCall(KSPSetOptionsPrefix(*ksp, prefix));
+  PetscCall(KSPSetFromOptions(*ksp));
+  PetscCall(KSPSetUp(*ksp));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
+                                     InnerPCKind kind, const char *label,
+                                     const char *opts_prefix, PetscBool *all_converged,
+                                     KSP *ksp_out)
+{
+  KSP ksp;
+  PC  pc;
+  PetscFunctionBeginUser;
+  PetscCall(KSPCreate(comm, &ksp));
+  PetscCall(KSPSetType(ksp, KSPRICHARDSON));
+  PetscCall(KSPSetNormType(ksp, KSP_NORM_UNPRECONDITIONED));
+  PetscCall(KSPSetOperators(ksp, factor, factor));
+  PetscCall(KSPSetTolerances(ksp, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+  PetscCall(KSPGetPC(ksp, &pc));
+  PetscCall(ConfigureInnerPC(pc, kind));
+  if (opts_prefix) PetscCall(KSPSetOptionsPrefix(ksp, opts_prefix));
+  PetscCall(KSPSetFromOptions(ksp));
+  PetscCall(KSPSetUp(ksp));
+  PetscCall(KSPSolve(ksp, b, x));
+  PetscCall(ReportSolve(label, ksp, factor, b, x, all_converged));
+  if (ksp_out) *ksp_out = ksp;
+  else PetscCall(KSPDestroy(&ksp));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+typedef struct {
+  KSP ksp_L;
+  KSP ksp_U;
+  Vec tmp;
+  Vec inv_diag_U_raw;
+} LUShellCtx;
+
+static PetscErrorCode LUShellApply(PC pc, Vec x, Vec y)
+{
+  LUShellCtx *ctx;
+  PetscFunctionBeginUser;
+  PetscCall(PCShellGetContext(pc, &ctx));
+  PetscCall(KSPSolve(ctx->ksp_L, x, ctx->tmp));
+  if (ctx->inv_diag_U_raw) PetscCall(VecPointwiseMult(ctx->tmp, ctx->inv_diag_U_raw, ctx->tmp));
+  PetscCall(KSPSolve(ctx->ksp_U, ctx->tmp, y));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode LUShellDestroy(PC pc)
+{
+  LUShellCtx *ctx;
+  PetscFunctionBeginUser;
+  PetscCall(PCShellGetContext(pc, &ctx));
+  PetscCall(KSPDestroy(&ctx->ksp_L));
+  PetscCall(KSPDestroy(&ctx->ksp_U));
+  PetscCall(VecDestroy(&ctx->tmp));
+  PetscCall(VecDestroy(&ctx->inv_diag_U_raw));
+  PetscCall(PetscFree(ctx));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc,char **argv)
 {
   KSP            ksp;
@@ -122,6 +285,470 @@ int main(int argc,char **argv)
 
   // Register the pflare types
   PCRegister_PFLARE();
+
+  /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+  /*  Mine-transport ILU test  (-ilu_test)                                       */
+  /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+  {
+    PetscBool ilu_test = PETSC_FALSE;
+    PetscCall(PetscOptionsGetBool(NULL, NULL, "-ilu_test", &ilu_test, NULL));
+
+    if (ilu_test) {
+      Mat         A_ilu = NULL, L = NULL, U = NULL;
+      Mat         A_L_strict = NULL, A_U = NULL, R_L = NULL, R_U = NULL, M = NULL;
+      Vec         inv_dU, inv_diag_U_raw, inv_diag_U_raw_for_jac, b_rand, x_sol;
+      PetscRandom rnd;
+      MatType     mtype;
+      PetscInt    mine_n = 100, max_sweeps = 100, sweep;
+      PetscReal   mine_beta = 1500.0, mine_alpha = 1.0, parilu_tol = 1e-4;
+      PetscBool   converged = PETSC_FALSE, parilu_diverged = PETSC_FALSE;
+      PetscBool   solves_converged = PETSC_TRUE;
+      PetscInt    jac_max_it = 1;
+      PetscInt    rstart, rend, m, Ntot, M_size;
+      int         npe;
+      KSP         ksp_L_air, ksp_U_air;
+#if defined(PETSC_USE_LOG)
+      PetscLogStage stage_parilu, stage_L_air, stage_U_air, stage_A_shell, stage_A_shell_jac;
+      PetscLogStage stage_A_pcilu, stage_A_air;
+#endif
+
+      PetscCall(PetscOptionsGetInt (NULL, NULL, "-mine_n",        &mine_n,      NULL));
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-mine_beta",     &mine_beta,   NULL));
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha",         &mine_alpha,  NULL));
+      PetscCall(PetscOptionsGetInt (NULL, NULL, "-parilu_max_sweeps", &max_sweeps, NULL));
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-parilu_tol",    &parilu_tol,  NULL));
+
+      PetscCall(PetscLogStageRegister("ILU A solve (PCBJACOBI/ILU)",    &stage_A_pcilu));
+      PetscCall(PetscLogStageRegister("ILU A solve (Richardson+PCAIR)", &stage_A_air));
+      PetscCall(PetscLogStageRegister("ILU ParILU sweeps",              &stage_parilu));
+      PetscCall(PetscLogStageRegister("ILU L solve (PCAIR)",            &stage_L_air));
+      PetscCall(PetscLogStageRegister("ILU U solve (PCAIR)",            &stage_U_air));
+      PetscCall(PetscLogStageRegister("ILU A solve (AIRG shell)",       &stage_A_shell));
+      PetscCall(PetscLogStageRegister("ILU A solve (Jacobi shell)",     &stage_A_shell_jac));
+
+      /* ── Build mine transport matrix (N²×N², interior unknowns only) ──────── */
+      Ntot   = mine_n * mine_n;
+      M_size = Ntot;
+
+      PetscCall(MatCreate(PETSC_COMM_WORLD, &A_ilu));
+      PetscCall(MatSetSizes(A_ilu, PETSC_DECIDE, PETSC_DECIDE, Ntot, Ntot));
+      PetscCall(MatSetFromOptions(A_ilu));
+      /* MatGetOwnershipRange triggers MatSetUp internally, establishing the
+         parallel row distribution before we compute preallocation counts. */
+      PetscCall(MatGetOwnershipRange(A_ilu, &rstart, &rend));
+      m = rend - rstart;
+
+      {
+        PetscInt *d_nnz_A, *o_nnz_A;
+        PetscCall(PetscMalloc2(m, &d_nnz_A, m, &o_nnz_A));
+        for (PetscInt k = rstart; k < rend; k++) {
+          PetscInt li = k - rstart;
+          PetscInt ci = k % mine_n, cj = k / mine_n;
+          d_nnz_A[li] = 1; o_nnz_A[li] = 0;
+          PetscInt nc[4]     = {k - 1, k + 1, k - mine_n, k + mine_n};
+          PetscBool ok[4]    = {ci > 0, ci < mine_n - 1, cj > 0, cj < mine_n - 1};
+          for (int q = 0; q < 4; q++) {
+            if (!ok[q]) continue;
+            if (nc[q] >= rstart && nc[q] < rend) d_nnz_A[li]++;
+            else                                  o_nnz_A[li]++;
+          }
+        }
+        PetscCall(MatXAIJSetPreallocation(A_ilu, 1, d_nnz_A, o_nnz_A, NULL, NULL));
+        PetscCall(PetscFree2(d_nnz_A, o_nnz_A));
+      }
+
+      /* Fill mine transport stencil.
+         Row k = j*N + i (0-indexed interior), coordinates x_i=(i+1)*h, y_j=(j+1)*h.
+         Central difference of -alpha*Laplacian + beta_eff*(d/dx(e^{xy}u) + d/dy(e^{-xy}u)). */
+      {
+        PetscReal h      = 1.0 / (mine_n + 1);
+        PetscReal h_ref  = 1.0 / (MINE_TRANSPORT_N_REF + 1);
+        PetscReal beff   = mine_beta * (h_ref / h);
+        PetscReal a_coef = beff / (2.0 * h);
+        PetscReal inv_h2 = mine_alpha / (h * h);
+        for (PetscInt k = rstart; k < rend; k++) {
+          PetscInt    ci = k % mine_n, cj = k / mine_n;
+          PetscReal   xi = (ci + 1) * h, yj = (cj + 1) * h;
+          PetscScalar diag = (PetscScalar)(4.0 * inv_h2);
+          PetscCall(MatSetValues(A_ilu, 1, &k, 1, &k, &diag, INSERT_VALUES));
+          if (ci < mine_n - 1) { /* East k+1 */
+            PetscInt c = k + 1;
+            PetscScalar v = (PetscScalar)(-inv_h2 + a_coef * exp((ci + 2) * h * yj));
+            PetscCall(MatSetValues(A_ilu, 1, &k, 1, &c, &v, INSERT_VALUES));
+          }
+          if (ci > 0) { /* West k-1 */
+            PetscInt c = k - 1;
+            PetscScalar v = (PetscScalar)(-inv_h2 - a_coef * exp(ci * h * yj));
+            PetscCall(MatSetValues(A_ilu, 1, &k, 1, &c, &v, INSERT_VALUES));
+          }
+          if (cj < mine_n - 1) { /* North k+N */
+            PetscInt c = k + mine_n;
+            PetscScalar v = (PetscScalar)(-inv_h2 + a_coef * exp(-xi * (cj + 2) * h));
+            PetscCall(MatSetValues(A_ilu, 1, &k, 1, &c, &v, INSERT_VALUES));
+          }
+          if (cj > 0) { /* South k-N */
+            PetscInt c = k - mine_n;
+            PetscScalar v = (PetscScalar)(-inv_h2 - a_coef * exp(-xi * cj * h));
+            PetscCall(MatSetValues(A_ilu, 1, &k, 1, &c, &v, INSERT_VALUES));
+          }
+        }
+        PetscCall(MatAssemblyBegin(A_ilu, MAT_FINAL_ASSEMBLY));
+        PetscCall(MatAssemblyEnd  (A_ilu, MAT_FINAL_ASSEMBLY));
+      }
+
+      /* ── Reorder A (default: natural = no-op; override with -mat_ordering_type) ── */
+      {
+        char ordering[64] = MATORDERINGNATURAL;
+        IS   row_perm, col_perm;
+        Mat  A_reordered;
+        PetscCall(PetscOptionsGetString(NULL, NULL, "-mat_ordering_type", ordering, sizeof(ordering), NULL));
+        PetscCall(MatGetOrdering(A_ilu, ordering, &row_perm, &col_perm));
+        PetscCall(MatPermute(A_ilu, row_perm, col_perm, &A_reordered));
+        PetscCall(MatDestroy(&A_ilu));
+        A_ilu = A_reordered;
+        PetscCall(ISDestroy(&row_perm));
+        PetscCall(ISDestroy(&col_perm));
+      }
+
+      /* ── Diagonal left-scale: A ← diag(A)^{-1} A  (mirrors test_ilu.py scale_mode=1) ── */
+      {
+        Vec inv_dA;
+        PetscCall(MatCreateVecs(A_ilu, &inv_dA, NULL));
+        PetscCall(MatGetDiagonal(A_ilu, inv_dA));
+        PetscCall(VecReciprocal(inv_dA));
+        PetscCall(MatDiagonalScale(A_ilu, inv_dA, NULL));
+        PetscCall(VecDestroy(&inv_dA));
+      }
+
+      PetscCall(MatGetOwnershipRange(A_ilu, &rstart, &rend));
+      PetscCall(MatGetLocalSize(A_ilu, &m, NULL));
+      PetscCall(MatGetSize(A_ilu, &M_size, NULL));
+      PetscCall(MatGetType(A_ilu, &mtype));
+
+      /* ── Preallocation pass for L, U, A_L_strict, A_U, R_L, R_U ─────────── */
+      PetscInt *L_d_nnz, *L_o_nnz, *Ls_d_nnz, *Ls_o_nnz, *U_d_nnz, *U_o_nnz;
+      PetscCall(PetscMalloc6(m, &L_d_nnz, m, &L_o_nnz,
+                              m, &Ls_d_nnz, m, &Ls_o_nnz,
+                              m, &U_d_nnz,  m, &U_o_nnz));
+
+      for (PetscInt i = 0; i < m; i++) {
+        PetscInt        gi = rstart + i;
+        PetscInt        ncols;
+        const PetscInt *cols;
+        PetscCall(MatGetRow(A_ilu, gi, &ncols, &cols, NULL));
+        PetscInt cstart, cend;
+        PetscCall(MatGetOwnershipRangeColumn(A_ilu, &cstart, &cend));
+        PetscInt ls_d = 0, ls_o = 0, u_d = 0, u_o = 0;
+        for (PetscInt j = 0; j < ncols; j++) {
+          PetscInt c = cols[j];
+          if (c < gi) {
+            if (c >= cstart && c < cend) ls_d++;
+            else                         ls_o++;
+          } else {
+            if (c >= cstart && c < cend) u_d++;
+            else                         u_o++;
+          }
+        }
+        PetscCall(MatRestoreRow(A_ilu, gi, &ncols, &cols, NULL));
+        Ls_d_nnz[i] = ls_d;   Ls_o_nnz[i] = ls_o;
+        U_d_nnz[i]  = u_d;    U_o_nnz[i]  = u_o;
+        L_d_nnz[i]  = ls_d + 1;  /* +1 for unit diagonal */
+        L_o_nnz[i]  = ls_o;
+      }
+
+      PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, m, M_size, M_size, L_d_nnz,  L_o_nnz,  &L));
+      PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, m, M_size, M_size, U_d_nnz,  U_o_nnz,  &U));
+      PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, m, M_size, M_size, Ls_d_nnz, Ls_o_nnz, &A_L_strict));
+      PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, m, M_size, M_size, U_d_nnz,  U_o_nnz,  &A_U));
+      PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, m, M_size, M_size, Ls_d_nnz, Ls_o_nnz, &R_L));
+      PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, m, M_size, M_size, U_d_nnz,  U_o_nnz,  &R_U));
+      PetscCall(PetscFree6(L_d_nnz, L_o_nnz, Ls_d_nnz, Ls_o_nnz, U_d_nnz, U_o_nnz));
+
+      /* ── Initialise L (unit diag + 0 on strict-lower) and U (A on upper) ─── */
+      for (PetscInt i = 0; i < m; i++) {
+        PetscInt           gi = rstart + i;
+        PetscInt           ncols;
+        const PetscInt    *cols;
+        const PetscScalar *vals;
+        PetscCall(MatGetRow(A_ilu, gi, &ncols, &cols, &vals));
+        PetscScalar one_val = 1.0, zero_val = 0.0;
+        PetscCall(MatSetValues(L, 1, &gi, 1, &gi, &one_val, INSERT_VALUES));
+        for (PetscInt j = 0; j < ncols; j++) {
+          PetscInt    c = cols[j];
+          PetscScalar v = vals[j];
+          if (c < gi) {
+            PetscCall(MatSetValues(L,          1, &gi, 1, &c, &zero_val, INSERT_VALUES));
+            PetscCall(MatSetValues(A_L_strict, 1, &gi, 1, &c, &v,        INSERT_VALUES));
+            PetscCall(MatSetValues(R_L,        1, &gi, 1, &c, &zero_val, INSERT_VALUES));
+          } else {
+            PetscCall(MatSetValues(U,   1, &gi, 1, &c, &v,        INSERT_VALUES));
+            PetscCall(MatSetValues(A_U, 1, &gi, 1, &c, &v,        INSERT_VALUES));
+            PetscCall(MatSetValues(R_U, 1, &gi, 1, &c, &zero_val, INSERT_VALUES));
+          }
+        }
+        PetscCall(MatRestoreRow(A_ilu, gi, &ncols, &cols, &vals));
+      }
+      {
+        Mat all[] = {L, U, A_L_strict, A_U, R_L, R_U};
+        for (int k = 0; k < 6; k++) PetscCall(MatAssemblyBegin(all[k], MAT_FINAL_ASSEMBLY));
+        for (int k = 0; k < 6; k++) PetscCall(MatAssemblyEnd  (all[k], MAT_FINAL_ASSEMBLY));
+      }
+
+      PetscReal A_norm;
+      PetscCall(MatNorm(A_ilu, NORM_FROBENIUS, &A_norm));
+      PetscReal threshold = parilu_tol * A_norm;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                            "||A||_F = %.6e, ParILU stencil-residual threshold = %.6e\n",
+                            (double)A_norm, (double)threshold));
+
+      PetscCall(MatCreateVecs(U, &inv_dU, NULL));
+
+      /* ── Random RHS (shared across all solves) ───────────────────────────── */
+      PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rnd));
+      PetscCall(PetscRandomSetFromOptions(rnd));
+      PetscCall(MatCreateVecs(A_ilu, &b_rand, &x_sol));
+      PetscCall(VecSetRandom(b_rand, rnd));
+
+      /* ── Baseline: A x = b  GMRES(30) + PCBJACOBI/ILU ──────────────────── */
+      PetscCall(PetscLogStagePush(stage_A_pcilu));
+      {
+        KSP ksp_Apc;
+        PC  pc_Apc;
+        PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Apc));
+        PetscCall(KSPSetType(ksp_Apc, KSPGMRES));
+        PetscCall(KSPGMRESSetRestart(ksp_Apc, 30));
+        PetscCall(KSPSetNormType(ksp_Apc, KSP_NORM_UNPRECONDITIONED));
+        PetscCall(KSPSetOperators(ksp_Apc, A_ilu, A_ilu));
+        PetscCall(KSPSetTolerances(ksp_Apc, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+        PetscCall(KSPGetPC(ksp_Apc, &pc_Apc));
+        PetscCall(PCSetType(pc_Apc, PCBJACOBI));
+        PetscCall(KSPSetOptionsPrefix(ksp_Apc, "Apc_"));
+        PetscCall(KSPSetFromOptions(ksp_Apc));
+        PetscCall(KSPSetUp(ksp_Apc));
+        PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
+        PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)",
+                              ksp_Apc, A_ilu, b_rand, x_sol, &solves_converged));
+        PetscCall(KSPDestroy(&ksp_Apc));
+      }
+      PetscCall(PetscLogStagePop());
+
+      /* ── Baseline: A x = b  Richardson + PCAIR ──────────────────────────── */
+      PetscCall(PetscLogStagePush(stage_A_air));
+      {
+        KSP ksp_Aair;
+        PC  pc_Aair;
+        PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Aair));
+        PetscCall(KSPSetType(ksp_Aair, KSPRICHARDSON));
+        PetscCall(KSPSetNormType(ksp_Aair, KSP_NORM_UNPRECONDITIONED));
+        PetscCall(KSPSetOperators(ksp_Aair, A_ilu, A_ilu));
+        PetscCall(KSPSetTolerances(ksp_Aair, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+        PetscCall(KSPGetPC(ksp_Aair, &pc_Aair));
+        PetscCall(ConfigureInnerPC(pc_Aair, INNER_PC_AIR));
+        PetscCall(KSPSetOptionsPrefix(ksp_Aair, "A_air_"));
+        PetscCall(KSPSetFromOptions(ksp_Aair));
+        PetscCall(KSPSetUp(ksp_Aair));
+        PetscCall(KSPSolve(ksp_Aair, b_rand, x_sol));
+        PetscCall(ReportSolve("A x = b solve (richardson + PCAIR)",
+                              ksp_Aair, A_ilu, b_rand, x_sol, &solves_converged));
+        PetscCall(KSPDestroy(&ksp_Aair));
+      }
+      PetscCall(PetscLogStagePop());
+
+      /* ── ParILU sweep loop ───────────────────────────────────────────────── */
+      PetscReal res_initial = -1.0;
+      PetscCall(PetscLogStagePush(stage_parilu));
+      for (sweep = 0; sweep < max_sweeps; sweep++) {
+        if (sweep == 0) PetscCall(MatMatMult(L, U, MAT_INITIAL_MATRIX, PETSC_DEFAULT, &M));
+        else            PetscCall(MatMatMult(L, U, MAT_REUSE_MATRIX,   PETSC_DEFAULT, &M));
+
+        PetscCall(MatCopy(A_L_strict, R_L, SAME_NONZERO_PATTERN));
+        remove_from_sparse_match(M, R_L, 0, 1, -1.0);
+
+        PetscCall(MatCopy(A_U, R_U, SAME_NONZERO_PATTERN));
+        remove_from_sparse_match(M, R_U, 0, 1, -1.0);
+
+        PetscReal rl_norm, ru_norm;
+        PetscCall(MatNorm(R_L, NORM_FROBENIUS, &rl_norm));
+        PetscCall(MatNorm(R_U, NORM_FROBENIUS, &ru_norm));
+        PetscReal res = PetscSqrtReal(rl_norm * rl_norm + ru_norm * ru_norm);
+        if (sweep == 0) res_initial = res;
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                              "  ParILU sweep %3" PetscInt_FMT "  stencil residual = %.6e\n",
+                              sweep, (double)res));
+        if (res < threshold) { converged = PETSC_TRUE; sweep++; break; }
+        if (PetscIsInfOrNanReal(res) || (res_initial > 0.0 && res > 1000.0 * res_initial)) {
+          PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                                "  ParILU diverged at sweep %" PetscInt_FMT
+                                ": residual %.6e exceeds 1000x initial %.6e or is non-finite\n",
+                                sweep, (double)res, (double)res_initial));
+          parilu_diverged = PETSC_TRUE;
+          break;
+        }
+
+        PetscCall(MatGetDiagonal(U, inv_dU));
+        PetscCall(VecReciprocal(inv_dU));
+        PetscCall(MatDiagonalScale(R_L, NULL, inv_dU));
+
+        PetscCall(MatAXPY(L, 1.0, R_L, SUBSET_NONZERO_PATTERN));
+        PetscCall(MatAXPY(U, 1.0, R_U, SAME_NONZERO_PATTERN));
+      }
+      PetscCall(PetscLogStagePop());
+      if (converged) {
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "ParILU converged in %" PetscInt_FMT " sweeps\n", sweep));
+      } else {
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "ParILU did NOT converge within %" PetscInt_FMT " sweeps\n", max_sweeps));
+      }
+
+      PetscCall(MatDestroy(&M));
+      PetscCall(MatDestroy(&R_L));
+      PetscCall(MatDestroy(&R_U));
+      PetscCall(MatDestroy(&A_L_strict));
+      PetscCall(MatDestroy(&A_U));
+      PetscCall(VecDestroy(&inv_dU));
+
+      if (parilu_diverged) {
+        PetscCall(MatDestroy(&L));
+        PetscCall(MatDestroy(&U));
+        PetscCall(VecDestroy(&b_rand));
+        PetscCall(VecDestroy(&x_sol));
+        PetscCall(PetscRandomDestroy(&rnd));
+        PetscCall(MatDestroy(&A_ilu));
+        PetscCall(PetscFinalize());
+        return 1;
+      }
+
+      /* ── Left-scale U by 1/diag(U_raw) ──────────────────────────────────── */
+      PetscCall(MatCreateVecs(U, &inv_diag_U_raw, NULL));
+      PetscCall(MatGetDiagonal(U, inv_diag_U_raw));
+      PetscCall(VecReciprocal(inv_diag_U_raw));
+      PetscCall(MatDiagonalScale(U, inv_diag_U_raw, NULL));
+
+      PetscCall(VecDuplicate(inv_diag_U_raw, &inv_diag_U_raw_for_jac));
+      PetscCall(VecCopy(inv_diag_U_raw, inv_diag_U_raw_for_jac));
+
+      /* ── L solve: Richardson + PCAIR ─────────────────────────────────────── */
+      PetscCall(PetscLogStagePush(stage_L_air));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_AIR,
+                               "L solve (richardson + PCAIR)", "ilu_L_",
+                               &solves_converged, &ksp_L_air));
+      PetscCall(PetscLogStagePop());
+
+      /* ── U solve: Richardson + PCAIR ─────────────────────────────────────── */
+      PetscCall(PetscLogStagePush(stage_U_air));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_AIR,
+                               "U solve (richardson + PCAIR)", "ilu_U_",
+                               &solves_converged, &ksp_U_air));
+      PetscCall(PetscLogStagePop());
+
+      /* ── Ax=b: GMRES(30) + LU shell PC with PCAIR inner ─────────────────── */
+      PetscCall(PetscLogStagePush(stage_A_shell));
+      {
+        KSP         ksp_A;
+        PC          pc_A, pcL_inner, pcU_inner;
+        LUShellCtx *shell_ctx;
+        PetscReal   cL = -1.0, cU = -1.0, sL = -1.0, sU = -1.0, gL = -1.0, gU = -1.0;
+        PetscCall(PetscNew(&shell_ctx));
+        shell_ctx->ksp_L = ksp_L_air;
+        shell_ctx->ksp_U = ksp_U_air;
+        PetscCall(KSPSetType(shell_ctx->ksp_L, KSPPREONLY));
+        PetscCall(KSPSetNormType(shell_ctx->ksp_L, KSP_NORM_NONE));
+        PetscCall(KSPSetType(shell_ctx->ksp_U, KSPPREONLY));
+        PetscCall(KSPSetNormType(shell_ctx->ksp_U, KSP_NORM_NONE));
+        PetscCall(KSPSetUp(shell_ctx->ksp_L));
+        PetscCall(KSPSetUp(shell_ctx->ksp_U));
+        PetscCall(KSPGetPC(shell_ctx->ksp_L, &pcL_inner));
+        PetscCall(KSPGetPC(shell_ctx->ksp_U, &pcU_inner));
+        PetscCall(PCAIRGetCycleComplexity(pcL_inner, &cL));
+        PetscCall(PCAIRGetCycleComplexity(pcU_inner, &cU));
+        PetscCall(PCAIRGetStorageComplexity(pcL_inner, &sL));
+        PetscCall(PCAIRGetStorageComplexity(pcU_inner, &sU));
+        PetscCall(PCAIRGetGridComplexity(pcL_inner, &gL));
+        PetscCall(PCAIRGetGridComplexity(pcU_inner, &gU));
+        {
+          PetscReal cmax = (cL > 0.0 && cU > 0.0) ? PetscMax(cL, cU) :
+                           (cL > 0.0) ? cL : (cU > 0.0) ? cU : 1.0;
+          jac_max_it = PetscMax((PetscInt)1, (PetscInt)PetscCeilReal(cmax));
+        }
+        PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                              "AIR complexities: cycle L=%.3f U=%.3f, storage L=%.3f U=%.3f, grid L=%.3f U=%.3f\n",
+                              (double)cL, (double)cU, (double)sL, (double)sU, (double)gL, (double)gU));
+        PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
+        shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
+        inv_diag_U_raw            = NULL;
+
+        PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_A));
+        PetscCall(KSPSetType(ksp_A, KSPGMRES));
+        PetscCall(KSPGMRESSetRestart(ksp_A, 30));
+        PetscCall(KSPSetNormType(ksp_A, KSP_NORM_UNPRECONDITIONED));
+        PetscCall(KSPSetOperators(ksp_A, A_ilu, A_ilu));
+        PetscCall(KSPSetTolerances(ksp_A, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+        PetscCall(KSPGetPC(ksp_A, &pc_A));
+        PetscCall(PCSetType(pc_A, PCSHELL));
+        PetscCall(PCShellSetContext(pc_A, shell_ctx));
+        PetscCall(PCShellSetApply(pc_A, LUShellApply));
+        PetscCall(PCShellSetDestroy(pc_A, LUShellDestroy));
+        PetscCall(PCShellSetName(pc_A, "LU_AIR_shell"));
+        PetscCall(KSPSetOptionsPrefix(ksp_A, "ilu_A_"));
+        PetscCall(KSPSetFromOptions(ksp_A));
+        PetscCall(KSPSetUp(ksp_A));
+        PetscCall(KSPSolve(ksp_A, b_rand, x_sol));
+        PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, AIRG inner)",
+                              ksp_A, A_ilu, b_rand, x_sol, &solves_converged));
+        PetscCall(KSPDestroy(&ksp_A));
+      }
+      PetscCall(PetscLogStagePop());
+
+      /* ── Ax=b: GMRES(30) + LU shell PC with Jacobi inner ─────────────────── */
+      PetscCall(PetscLogStagePush(stage_A_shell_jac));
+      {
+        KSP         ksp_Ajac;
+        PC          pc_Ajac;
+        LUShellCtx *shell_ctx;
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Jacobi inner max_it=%" PetscInt_FMT "\n", jac_max_it));
+        PetscCall(PetscNew(&shell_ctx));
+        PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "ilu_A_jac_pc_L_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_L));
+        PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "ilu_A_jac_pc_U_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_U));
+        PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
+        shell_ctx->inv_diag_U_raw = inv_diag_U_raw_for_jac;
+        inv_diag_U_raw_for_jac    = NULL;
+
+        PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Ajac));
+        PetscCall(KSPSetType(ksp_Ajac, KSPGMRES));
+        PetscCall(KSPGMRESSetRestart(ksp_Ajac, 30));
+        PetscCall(KSPSetNormType(ksp_Ajac, KSP_NORM_UNPRECONDITIONED));
+        PetscCall(KSPSetOperators(ksp_Ajac, A_ilu, A_ilu));
+        PetscCall(KSPSetTolerances(ksp_Ajac, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+        PetscCall(KSPGetPC(ksp_Ajac, &pc_Ajac));
+        PetscCall(PCSetType(pc_Ajac, PCSHELL));
+        PetscCall(PCShellSetContext(pc_Ajac, shell_ctx));
+        PetscCall(PCShellSetApply(pc_Ajac, LUShellApply));
+        PetscCall(PCShellSetDestroy(pc_Ajac, LUShellDestroy));
+        PetscCall(PCShellSetName(pc_Ajac, "LU_Jacobi_shell"));
+        PetscCall(KSPSetOptionsPrefix(ksp_Ajac, "ilu_A_jac_"));
+        PetscCall(KSPSetFromOptions(ksp_Ajac));
+        PetscCall(KSPSetUp(ksp_Ajac));
+        PetscCall(KSPSolve(ksp_Ajac, b_rand, x_sol));
+        PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
+                              ksp_Ajac, A_ilu, b_rand, x_sol, &solves_converged));
+        PetscCall(KSPDestroy(&ksp_Ajac));
+      }
+      PetscCall(PetscLogStagePop());
+
+      /* ── Cleanup ─────────────────────────────────────────────────────────── */
+      PetscCall(MatDestroy(&L));
+      PetscCall(MatDestroy(&U));
+      PetscCall(VecDestroy(&b_rand));
+      PetscCall(VecDestroy(&x_sol));
+      PetscCall(PetscRandomDestroy(&rnd));
+      PetscCall(MatDestroy(&A_ilu));
+      PetscCall(PetscFinalize());
+      return (converged && solves_converged) ? 0 : 1;
+
+      /* suppress unused-variable warnings when PETSC_USE_LOG is off */
+      (void)npe;
+    } /* end if (ilu_test) */
+  } /* end ilu_test scope */
 
   PetscCall(PetscLogStageRegister("Setup", &setup));
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
