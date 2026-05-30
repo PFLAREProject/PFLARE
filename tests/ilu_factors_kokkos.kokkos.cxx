@@ -3,13 +3,17 @@ Kokkos Kernels' spiluk (level-0 incomplete LU). The L and U factors are stored a
 separate PETSc Kokkos AIJ matrices, then a suite of iterative solves is run, all using\n\
 GMRES(30) or Richardson with the unpreconditioned norm to rtol 1e-6.\n\
 \n\
-This is a Kokkos C++ version of ilu_factors.c. It does exactly the same thing; the only\n\
-difference is the factorisation: instead of the matrix-form (block-Jacobi-like) Chow\n\
-ParILU, the L and U factors come from a Kokkos Kernels incomplete-LU and end up in\n\
-SeqAIJKokkos matrices built directly from the algorithm's device views. The algorithm is\n\
-selected with -ilu_algorithm: 'spiluk' (level-based ILU(k), the default) or 'parilut'\n\
-(threshold-based parallel ILUT). Both are run single-rank on a SeqAIJKokkos matrix; it\n\
-errors out otherwise.\n\
+This is a Kokkos C++ version of ilu_factors.c. The factorisation differs by rank count:\n\
+  Single rank (SeqAIJKokkos): the L and U factors come directly from a Kokkos Kernels\n\
+    incomplete-LU built from the algorithm's device views. The algorithm is selected with\n\
+    -ilu_algorithm: 'spiluk' (level-based ILU(k), the default) or 'parilut' (threshold-\n\
+    based parallel ILUT).\n\
+  Parallel (MPIAIJKokkos): the matrix-form (block-Jacobi-like) Chow ParILU sweep loop\n\
+    from ilu_factors.c is used over the whole distributed L/U, but the local diagonal\n\
+    block of L/U is *seeded* with an exact Kokkos Kernels spiluk(0) factorisation of that\n\
+    block. The outer Chow-Patel sweeps then converge the remaining non-local (off-process)\n\
+    coupling. In parallel only -ilu_algorithm spiluk with -fill_level 0 is supported;\n\
+    parilut and higher fill levels error out.\n\
 \n\
 For each inner-PC kind in {AIRG, GMRES poly (matrix-free), Neumann poly\n\
 (matrix-free), ISAI, Jacobi} the test runs:\n\
@@ -24,14 +28,16 @@ And a baseline:\n\
   - A x = b   with GMRES(30) + PETSc's built-in PCBJACOBI/ILU\n\
 \n\
 Iteration counts (and the final ||b-Op*x||/||b|| if we hit max iterations) are\n\
-reported for each. Requires a single-rank Kokkos AIJ matrix.\n\
+reported for each. Runs on a Kokkos AIJ matrix on one or more MPI ranks.\n\
 Input arguments are:\n\
   -f <input_file>           : binary matrix file to load\n\
-  -ilu_algorithm <name>     : 'spiluk' (default) or 'parilut'\n\
-  -fill_level <int>         : spiluk ILU fill level k (default 0)\n\
+  -ilu_algorithm <name>     : 'spiluk' (default) or 'parilut' (parilut single-rank only)\n\
+  -fill_level <int>         : spiluk ILU fill level k (default 0; parallel requires 0)\n\
   -parilut_max_iter <int>   : parilut max iterations (default 20)\n\
   -parilut_fill_in_limit <r>: parilut nnz(L+U)/nnz(A) cap (default 0.75)\n\
   -parilut_residual_delta <r>: parilut residual-change stop (default 1e-2)\n\
+  -parilu_tol <real>        : (parallel) ParILU stencil-residual tolerance (default 1e-4)\n\
+  -parilu_max_sweeps <int>  : (parallel) max ParILU sweeps (default 100)\n\
   -L_*,   -U_*              : AIRG  factor solves\n\
   -L_gmres_*,   -U_gmres_*  : GMRES-poly factor solves\n\
   -L_neumann_*, -U_neumann_*: Neumann-poly factor solves\n\
@@ -55,6 +61,22 @@ Input arguments are:\n\
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /*  Helpers                                                                    */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+
+/* Create an AIJ-like matrix of the requested type with per-row d/o nonzero
+   counts. Mirrors the helper of the same name in ilu_factors.c — used to
+   preallocate the distributed L/U and the ParILU scratch matrices. */
+static PetscErrorCode CreateMatLike(MPI_Comm comm, MatType mtype,
+                                    PetscInt m, PetscInt n, PetscInt M, PetscInt N,
+                                    const PetscInt *dnnz, const PetscInt *onnz,
+                                    Mat *out)
+{
+  PetscFunctionBeginUser;
+  PetscCall(MatCreate(comm, out));
+  PetscCall(MatSetSizes(*out, m, n, M, N));
+  PetscCall(MatSetType(*out, mtype));
+  PetscCall(MatXAIJSetPreallocation(*out, 1, dnnz, onnz, NULL, NULL));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 /* Apply the python-reference DEFAULT_AIR_OPTS to a PCAIR. */
 static PetscErrorCode ApplyPythonAIRDefaults(PC pc)
@@ -235,6 +257,78 @@ static PetscErrorCode LUShellDestroy(PC pc)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* Run Kokkos Kernels spiluk (level-based ILU(k)) on the SeqAIJKokkos matrix
+   A_seq and return the L (unit lower-triangular) and U (upper-triangular with
+   pivots on the diagonal) factors as SeqAIJKokkos matrices built directly from
+   the algorithm's device views. A_seq must be unit-diagonal and sorted (the
+   ParILU convention). Used both for the single-rank whole-matrix factorisation
+   and to seed the local diagonal block in the parallel path. */
+static PetscErrorCode ComputeSpilukFactors(MPI_Comm comm, Mat A_seq, PetscInt fill_lev,
+                                           Mat *L, Mat *U)
+{
+  PetscInt m, n;
+  PetscFunctionBeginUser;
+  PetscCall(MatGetLocalSize(A_seq, &m, &n));
+
+  /* A_seq's synced device values — MatSeqAIJGetKokkosView guarantees the device
+     side is up to date. */
+  Kokkos::View<const PetscScalar *> A_values;
+  PetscCall(MatSeqAIJGetKokkosView(A_seq, &A_values));
+
+  /* A_seq's CSR structure straight from the Kokkos CSR graph — already
+     PetscInt-typed device views (64-bit safe). */
+  Mat_SeqAIJKokkos *aijkok = static_cast<Mat_SeqAIJKokkos *>(A_seq->spptr);
+  auto     A_rowmap  = aijkok->csrmat.graph.row_map;   /* const PetscInt view, size m+1 */
+  auto     A_entries = aijkok->csrmat.graph.entries;   /* const PetscInt view, size nnz */
+  PetscInt annz      = (PetscInt)A_values.extent(0);
+
+  using KernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<
+      PetscInt, PetscInt, PetscScalar,
+      DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
+  KernelHandle kh;
+
+  Kokkos::View<PetscInt *>    L_row_map("L_row_map", m + 1);
+  Kokkos::View<PetscInt *>    U_row_map("U_row_map", m + 1);
+  Kokkos::View<PetscInt *>    L_entries, U_entries;
+  Kokkos::View<PetscScalar *> L_values,  U_values;
+
+  /* Initial nnz estimate for the L/U entries views (symbolic computes the exact
+     count and we resize below). annz + m is the exact upper bound for ILU(0);
+     for higher fill levels use a generous over-estimate, as in the Kokkos
+     Kernels spiluk perf test (EXPAND_FACT * nnz * (fill_lev + 1)). */
+  const PetscInt EXPAND_FACT = 6;
+  PetscInt       nnz_est     = (fill_lev == 0) ? (annz + m) : EXPAND_FACT * annz * (fill_lev + 1);
+  kh.create_spiluk_handle(KokkosSparse::Experimental::SPILUKAlgorithm::SEQLVLSCHD_TP1,
+                          m, nnz_est, nnz_est);
+  auto h = kh.get_spiluk_handle();
+
+  L_entries = Kokkos::View<PetscInt *>("L_entries", h->get_nnzL());
+  U_entries = Kokkos::View<PetscInt *>("U_entries", h->get_nnzU());
+
+  KokkosSparse::spiluk_symbolic(&kh, fill_lev, A_rowmap, A_entries,
+                                L_row_map, L_entries, U_row_map, U_entries);
+  Kokkos::fence();
+
+  Kokkos::resize(L_entries, h->get_nnzL());
+  Kokkos::resize(U_entries, h->get_nnzU());
+  L_values = Kokkos::View<PetscScalar *>("L_values", h->get_nnzL());
+  U_values = Kokkos::View<PetscScalar *>("U_values", h->get_nnzU());
+
+  KokkosSparse::spiluk_numeric(&kh, fill_lev, A_rowmap, A_entries, A_values,
+                               L_row_map, L_entries, L_values,
+                               U_row_map, U_entries, U_values);
+  Kokkos::fence();
+  kh.destroy_spiluk_handle();
+  /* spiluk_symbolic already sorts the L and U graphs internally, so the PETSc
+     AIJ sorted-column invariant holds — wrap the device views directly. */
+
+  PetscCall(MatSeqAIJRestoreKokkosView(A_seq, &A_values));
+
+  PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(comm, m, n, L_row_map, L_entries, L_values, L));
+  PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(comm, m, n, U_row_map, U_entries, U_values, U));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /*  Main                                                                       */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -274,7 +368,7 @@ int main(int argc, char **args)
      -log_view as separate sections. The KSP solves below each call an
      explicit KSPSetUp before KSPSolve so the per-stage breakdown also splits
      setup vs solve via the standard KSPSetUp / KSPSolve events. */
-  PetscCall(PetscLogStageRegister("ILU(0) factorisation (spiluk)",        &stage_ilu));
+  PetscCall(PetscLogStageRegister("ILU factorisation (spiluk / seeded ParILU)", &stage_ilu));
   PetscCall(PetscLogStageRegister("L solve (Richardson+PCAIR)",          &stage_L_solve));
   PetscCall(PetscLogStageRegister("U solve (Richardson+PCAIR)",          &stage_U_solve));
   PetscCall(PetscLogStageRegister("A solve (GMRES+LU shell PC)",         &stage_A_shell));
@@ -297,16 +391,24 @@ int main(int argc, char **args)
   PetscCall(MatLoad(A, fd));
   PetscCall(PetscViewerDestroy(&fd));
 
-  /* spiluk is sequential — this Kokkos version only supports a single MPI rank
-     (a SeqAIJKokkos matrix). Error out cleanly in parallel. */
+  /* Partition the loaded matrix when in parallel (same as ilu_factors.c). */
   PetscCallMPI(MPI_Comm_size(PETSC_COMM_WORLD, &npe));
   if (npe != 1) {
-    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "ilu_factors_kokkos requires a single MPI rank (spiluk is sequential); "
-                          "rerun with one rank.\n"));
+    MatPartitioning part;
+    IS              is, isrows;
+    Mat             A_partitioned;
+    PetscCall(MatPartitioningCreate(PETSC_COMM_WORLD, &part));
+    PetscCall(MatPartitioningSetAdjacency(part, A));
+    PetscCall(MatPartitioningSetNParts(part, npe));
+    PetscCall(MatPartitioningSetFromOptions(part));
+    PetscCall(MatPartitioningApply(part, &is));
+    PetscCall(ISBuildTwoSided(is, NULL, &isrows));
+    PetscCall(MatCreateSubMatrix(A, isrows, isrows, MAT_INITIAL_MATRIX, &A_partitioned));
     PetscCall(MatDestroy(&A));
-    PetscCall(PetscFinalize());
-    return 1;
+    PetscCall(MatPartitioningDestroy(&part));
+    PetscCall(ISDestroy(&is));
+    PetscCall(ISDestroy(&isrows));
+    A = A_partitioned;
   }
 
   /* Reorder A for better ILU quality; default is natural (no-op).
@@ -342,21 +444,30 @@ int main(int argc, char **args)
     PetscCall(MatDestroy(&A_diff_type));
   }
 
-  /* This Kokkos/spiluk path needs a SeqAIJKokkos matrix. Guard against an MPI
-     Kokkos matrix (unsupported here) and against a non-Kokkos type. */
+  /* This path needs a Kokkos AIJ matrix: SeqAIJKokkos (single rank) or
+     MPIAIJKokkos (parallel). Reject any non-Kokkos type. */
   PetscCall(MatGetType(A, &mtype));
-  if (strcmp(mtype, MATMPIAIJKOKKOS) == 0) {
+  if (strcmp(mtype, MATSEQAIJKOKKOS) != 0 && strcmp(mtype, MATMPIAIJKOKKOS) != 0) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "ilu_factors_kokkos does not support MPIAIJKOKKOS matrices (spiluk is "
-                          "sequential); use a single rank / SEQAIJKOKKOS.\n"));
+                          "ilu_factors_kokkos requires a Kokkos AIJ matrix; rerun with "
+                          "-mat_type aijkokkos -vec_type kokkos.\n"));
     PetscCall(MatDestroy(&A));
     PetscCall(PetscFinalize());
     return 1;
   }
-  if (strcmp(mtype, MATSEQAIJKOKKOS) != 0) {
+
+  /* Read the factorisation controls up front. The parallel path only supports an
+     exact spiluk(0) seed of the local diagonal block; parilut and higher fill
+     levels are single-rank only. */
+  char     algorithm[32] = "spiluk";
+  PetscInt fill_lev      = 0;
+  PetscCall(PetscOptionsGetString(NULL, NULL, "-ilu_algorithm", algorithm, sizeof(algorithm), NULL));
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-fill_level", &fill_lev, NULL));
+  if (npe != 1 && (strcmp(algorithm, "spiluk") != 0 || fill_lev != 0)) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "ilu_factors_kokkos requires a SEQAIJKOKKOS matrix; rerun with "
-                          "-mat_type aijkokkos -vec_type kokkos.\n"));
+                          "ilu_factors_kokkos in parallel only supports -ilu_algorithm spiluk with "
+                          "-fill_level 0 (the local diagonal block is seeded with an exact spiluk(0) "
+                          "factorisation); rerun single-rank for parilut / higher fill.\n"));
     PetscCall(MatDestroy(&A));
     PetscCall(PetscFinalize());
     return 1;
@@ -407,52 +518,42 @@ int main(int argc, char **args)
   }
   PetscCall(PetscLogStagePop());
 
-  /* Incomplete LU factorisation via Kokkos Kernels. Two algorithms, selected by
-     -ilu_algorithm:
-       spiluk  (default) : level-based ILU(k), exact for the chosen fill level
-       parilut           : threshold-based parallel ILUT (iterative, Anzt et al.)
-     Both produce, with A unit-diagonal and sorted,
+  /* Incomplete LU factorisation. With A unit-diagonal and sorted both paths
+     produce
        L = unit lower-triangular (1.0 stored on the diagonal)
        U = upper-triangular with the pivots on the diagonal
-     which is exactly the convention the matrix-form ParILU produced just before
-     the post-scaling step below. The factors are built directly into SeqAIJKokkos
-     matrices from the algorithm's device views. */
+     which is the convention the post-scaling step below expects.
+
+     Single rank: the factors come directly from a Kokkos Kernels incomplete-LU
+       (spiluk or parilut) built from the algorithm's device views.
+     Parallel:    the matrix-form (block-Jacobi-like) Chow ParILU sweep loop runs
+       over the whole distributed L/U, with the local diagonal block seeded by an
+       exact spiluk(0) factorisation so the sweeps only need to converge the
+       non-local (off-process) coupling. */
   PetscCall(PetscLogStagePush(stage_ilu));
-  {
-    PetscCall(MatGetLocalSize(A, &m, &n));
-
-    /* A's synced device values — MatSeqAIJGetKokkosView guarantees the device side
-       is up to date after the MatDiagonalScale above. */
-    Kokkos::View<const PetscScalar *> A_values;
-    PetscCall(MatSeqAIJGetKokkosView(A, &A_values));
-
-    /* A's CSR structure (static, sync-independent) straight from the Kokkos CSR
-       graph — already PetscInt-typed device views (64-bit safe). */
-    Mat_SeqAIJKokkos *aijkok = static_cast<Mat_SeqAIJKokkos *>(A->spptr);
-    auto     A_rowmap  = aijkok->csrmat.graph.row_map;   /* const PetscInt view, size m+1 */
-    auto     A_entries = aijkok->csrmat.graph.entries;   /* const PetscInt view, size nnz */
-    PetscInt annz      = (PetscInt)A_values.extent(0);
-
-    /* Handle templated on PetscInt offset/ordinal and PetscScalar values — all
-       index types are PetscInt so this is correct with 64-bit PetscInt. The same
-       handle type drives both create_spiluk_handle and create_par_ilut_handle. */
-    using KernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<
-        PetscInt, PetscInt, PetscScalar,
-        DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
-    KernelHandle kh;
-
-    /* L/U outputs filled by whichever algorithm; row maps are size m+1, the
-       entries/values are sized once the algorithm knows the nnz. */
-    Kokkos::View<PetscInt *>    L_row_map("L_row_map", m + 1);
-    Kokkos::View<PetscInt *>    U_row_map("U_row_map", m + 1);
-    Kokkos::View<PetscInt *>    L_entries, U_entries;
-    Kokkos::View<PetscScalar *> L_values,  U_values;
+  if (npe == 1) {
     PetscInt nnzL = 0, nnzU = 0;
 
-    char algorithm[32] = "spiluk";
-    PetscCall(PetscOptionsGetString(NULL, NULL, "-ilu_algorithm", algorithm, sizeof(algorithm), NULL));
-
     if (strcmp(algorithm, "parilut") == 0) {
+      PetscCall(MatGetLocalSize(A, &m, &n));
+
+      /* A's synced device values + CSR structure for the Kokkos kernel. */
+      Kokkos::View<const PetscScalar *> A_values;
+      PetscCall(MatSeqAIJGetKokkosView(A, &A_values));
+      Mat_SeqAIJKokkos *aijkok = static_cast<Mat_SeqAIJKokkos *>(A->spptr);
+      auto A_rowmap  = aijkok->csrmat.graph.row_map;
+      auto A_entries = aijkok->csrmat.graph.entries;
+
+      Kokkos::View<PetscInt *>    L_row_map("L_row_map", m + 1);
+      Kokkos::View<PetscInt *>    U_row_map("U_row_map", m + 1);
+      Kokkos::View<PetscInt *>    L_entries, U_entries;
+      Kokkos::View<PetscScalar *> L_values,  U_values;
+
+      using KernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<
+          PetscInt, PetscInt, PetscScalar,
+          DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
+      KernelHandle kh;
+
       /* Threshold-based parallel ILUT. Tunable via the command line; defaults
          match KokkosKernelsHandle::create_par_ilut_handle. */
       PetscInt  par_max_iter = 100;
@@ -490,57 +591,217 @@ int main(int argc, char **args)
       KokkosSparse::sort_crs_matrix(L_row_map, L_entries, L_values);
       KokkosSparse::sort_crs_matrix(U_row_map, U_entries, U_values);
       Kokkos::fence();
-    } else if (strcmp(algorithm, "spiluk") == 0) {
-      /* Level-based ILU(k); fill level k defaults to 0, overridable. */
-      PetscInt fill_lev = 0;
-      PetscCall(PetscOptionsGetInt(NULL, NULL, "-fill_level", &fill_lev, NULL));
-      /* Initial nnz estimate for the L/U entries views (symbolic computes the
-         exact count and we resize below). annz + m is the exact upper bound for
-         ILU(0); for higher fill levels use a generous over-estimate, as in the
-         Kokkos Kernels spiluk perf test (EXPAND_FACT * nnz * (fill_lev + 1)). */
-      const PetscInt EXPAND_FACT = 6;
-      PetscInt       nnz_est     = (fill_lev == 0) ? (annz + m) : EXPAND_FACT * annz * (fill_lev + 1);
-      kh.create_spiluk_handle(KokkosSparse::Experimental::SPILUKAlgorithm::SEQLVLSCHD_TP1,
-                              m, nnz_est, nnz_est);
-      auto h = kh.get_spiluk_handle();
-
-      L_entries = Kokkos::View<PetscInt *>("L_entries", h->get_nnzL());
-      U_entries = Kokkos::View<PetscInt *>("U_entries", h->get_nnzU());
-
-      KokkosSparse::spiluk_symbolic(&kh, fill_lev, A_rowmap, A_entries,
-                                    L_row_map, L_entries, U_row_map, U_entries);
-      Kokkos::fence();
-
-      Kokkos::resize(L_entries, h->get_nnzL());
-      Kokkos::resize(U_entries, h->get_nnzU());
-      L_values = Kokkos::View<PetscScalar *>("L_values", h->get_nnzL());
-      U_values = Kokkos::View<PetscScalar *>("U_values", h->get_nnzU());
-
-      KokkosSparse::spiluk_numeric(&kh, fill_lev, A_rowmap, A_entries, A_values,
-                                   L_row_map, L_entries, L_values,
-                                   U_row_map, U_entries, U_values);
-      Kokkos::fence();
-      nnzL = (PetscInt)h->get_nnzL();
-      nnzU = (PetscInt)h->get_nnzU();
-      kh.destroy_spiluk_handle();
-      /* spiluk_symbolic already sorts the L and U graphs internally. */
-    } else {
       PetscCall(MatSeqAIJRestoreKokkosView(A, &A_values));
+
+      PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, m, n, L_row_map, L_entries, L_values, &L));
+      PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, m, n, U_row_map, U_entries, U_values, &U));
+    } else if (strcmp(algorithm, "spiluk") == 0) {
+      /* Level-based ILU(k); fill level k from -fill_level (default 0). */
+      MatInfo infoL, infoU;
+      PetscCall(ComputeSpilukFactors(PETSC_COMM_SELF, A, fill_lev, &L, &U));
+      PetscCall(MatGetInfo(L, MAT_LOCAL, &infoL));
+      PetscCall(MatGetInfo(U, MAT_LOCAL, &infoU));
+      nnzL = (PetscInt)infoL.nz_used;
+      nnzU = (PetscInt)infoU.nz_used;
+    } else {
       SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER_INPUT,
               "Unknown -ilu_algorithm '%s'; use 'spiluk' or 'parilut'", algorithm);
     }
-
-    PetscCall(MatSeqAIJRestoreKokkosView(A, &A_values));
-
-    /* The L and U rows are sorted ascending, so the PETSc AIJ sorted-column
-       invariant holds — wrap the device views directly. */
-    PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, m, n, L_row_map, L_entries, L_values, &L));
-    PetscCall(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, m, n, U_row_map, U_entries, U_values, &U));
 
     converged = PETSC_TRUE;
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
                           "Computed ILU via Kokkos Kernels %s: nnz(L) = %" PetscInt_FMT
                           ", nnz(U) = %" PetscInt_FMT "\n", algorithm, nnzL, nnzU));
+  } else {
+    /* ~~~ Parallel: spiluk-seeded block-Jacobi Chow ParILU ~~~ */
+    Mat       Ad, L_dd, U_dd, A_L_strict, A_U, R_L, R_U, Mprod = NULL;
+    Vec       inv_dU;
+    PetscInt  rstart, rend, cstart, cend;
+    PetscInt  max_sweeps = 100, sweep;
+    PetscReal parilu_tol = 1e-4;
+    PetscBool parilu_diverged = PETSC_FALSE;
+
+    PetscCall(PetscOptionsGetInt(NULL, NULL, "-parilu_max_sweeps", &max_sweeps, NULL));
+    PetscCall(PetscOptionsGetReal(NULL, NULL, "-parilu_tol", &parilu_tol, NULL));
+
+    /* Exact spiluk(0) of the local diagonal block (owned by A — read only). */
+    PetscCall(MatGetDiagonalBlock(A, &Ad));
+    PetscCall(ComputeSpilukFactors(PETSC_COMM_SELF, Ad, 0, &L_dd, &U_dd));
+
+    PetscCall(MatGetOwnershipRange(A, &rstart, &rend));
+    PetscCall(MatGetOwnershipRangeColumn(A, &cstart, &cend));
+    PetscCall(MatGetLocalSize(A, &m, &n));
+    PetscCall(MatGetSize(A, &M_size, &N_size));
+
+    /* Pass 1: count strict-lower (no diag) and upper (with diag) entries per row,
+       split into diagonal-block (d) and off-diagonal-block (o) for MPI prealloc. */
+    PetscInt *L_d_nnz, *L_o_nnz, *Ls_d_nnz, *Ls_o_nnz, *U_d_nnz, *U_o_nnz;
+    PetscCall(PetscMalloc6(m, &L_d_nnz, m, &L_o_nnz, m, &Ls_d_nnz, m, &Ls_o_nnz, m, &U_d_nnz, m, &U_o_nnz));
+    for (PetscInt i = 0; i < m; i++) {
+      PetscInt        gi = rstart + i;
+      PetscInt        ncols;
+      const PetscInt *cols;
+      PetscCall(MatGetRow(A, gi, &ncols, &cols, NULL));
+      PetscInt ls_d = 0, ls_o = 0, u_d = 0, u_o = 0;
+      for (PetscInt j = 0; j < ncols; j++) {
+        PetscInt c = cols[j];
+        if (c < gi) {
+          if (c >= cstart && c < cend) ls_d++; else ls_o++;
+        } else {
+          if (c >= cstart && c < cend) u_d++; else u_o++;
+        }
+      }
+      PetscCall(MatRestoreRow(A, gi, &ncols, &cols, NULL));
+      Ls_d_nnz[i] = ls_d;  Ls_o_nnz[i] = ls_o;
+      U_d_nnz[i]  = u_d;   U_o_nnz[i]  = u_o;
+      L_d_nnz[i]  = ls_d + 1; /* +1 for the unit diagonal we add */
+      L_o_nnz[i]  = ls_o;
+    }
+    PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, n, M_size, N_size, L_d_nnz,  L_o_nnz,  &L));
+    PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, n, M_size, N_size, U_d_nnz,  U_o_nnz,  &U));
+    PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, n, M_size, N_size, Ls_d_nnz, Ls_o_nnz, &A_L_strict));
+    PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, n, M_size, N_size, U_d_nnz,  U_o_nnz,  &A_U));
+    PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, n, M_size, N_size, Ls_d_nnz, Ls_o_nnz, &R_L));
+    PetscCall(CreateMatLike(PETSC_COMM_WORLD, mtype, m, n, M_size, N_size, U_d_nnz,  U_o_nnz,  &R_U));
+    PetscCall(PetscFree6(L_d_nnz, L_o_nnz, Ls_d_nnz, Ls_o_nnz, U_d_nnz, U_o_nnz));
+
+    /* Pass 2: L gets 1.0 on the diagonal and 0.0 on the strict-lower pattern; U
+       gets A's upper values. A_L_strict / A_U cache A's restricted values (the
+       residual target); R_L / R_U are zero-initialised on their patterns. */
+    for (PetscInt i = 0; i < m; i++) {
+      PetscInt           gi = rstart + i;
+      PetscInt           ncols;
+      const PetscInt    *cols;
+      const PetscScalar *vals;
+      PetscCall(MatGetRow(A, gi, &ncols, &cols, &vals));
+      PetscScalar one_val = 1.0, zero_val = 0.0;
+      PetscCall(MatSetValues(L, 1, &gi, 1, &gi, &one_val, INSERT_VALUES));
+      for (PetscInt j = 0; j < ncols; j++) {
+        PetscInt    c = cols[j];
+        PetscScalar v = vals[j];
+        if (c < gi) {
+          PetscCall(MatSetValues(L,          1, &gi, 1, &c, &zero_val, INSERT_VALUES));
+          PetscCall(MatSetValues(A_L_strict, 1, &gi, 1, &c, &v,        INSERT_VALUES));
+          PetscCall(MatSetValues(R_L,        1, &gi, 1, &c, &zero_val, INSERT_VALUES));
+        } else {
+          PetscCall(MatSetValues(U,   1, &gi, 1, &c, &v,        INSERT_VALUES));
+          PetscCall(MatSetValues(A_U, 1, &gi, 1, &c, &v,        INSERT_VALUES));
+          PetscCall(MatSetValues(R_U, 1, &gi, 1, &c, &zero_val, INSERT_VALUES));
+        }
+      }
+      PetscCall(MatRestoreRow(A, gi, &ncols, &cols, &vals));
+    }
+    {
+      Mat all[] = {L, U, A_L_strict, A_U, R_L, R_U};
+      for (int k = 0; k < 6; k++) PetscCall(MatAssemblyBegin(all[k], MAT_FINAL_ASSEMBLY));
+      for (int k = 0; k < 6; k++) PetscCall(MatAssemblyEnd  (all[k], MAT_FINAL_ASSEMBLY));
+    }
+
+    /* Seed: overwrite the local diagonal-block entries of L/U with the exact
+       spiluk(0) factors of A's diagonal block. L_dd/U_dd are local (m x m) with
+       block-local column indices; the global column is cstart + jloc. The unit
+       diagonal of L is left untouched. Off-diagonal-block entries keep A's
+       values (a good starting guess); the sweeps below converge them. */
+    for (PetscInt i = 0; i < m; i++) {
+      PetscInt           gi = rstart + i, ncols;
+      const PetscInt    *cols;
+      const PetscScalar *vals;
+      PetscCall(MatGetRow(L_dd, i, &ncols, &cols, &vals));
+      for (PetscInt j = 0; j < ncols; j++) {
+        if (cols[j] >= i) continue;            /* strict-lower only (skip unit diag) */
+        PetscInt gc = cstart + cols[j];
+        PetscCall(MatSetValues(L, 1, &gi, 1, &gc, &vals[j], INSERT_VALUES));
+      }
+      PetscCall(MatRestoreRow(L_dd, i, &ncols, &cols, &vals));
+      PetscCall(MatGetRow(U_dd, i, &ncols, &cols, &vals));
+      for (PetscInt j = 0; j < ncols; j++) {
+        if (cols[j] < i) continue;             /* upper incl. diagonal pivot */
+        PetscInt gc = cstart + cols[j];
+        PetscCall(MatSetValues(U, 1, &gi, 1, &gc, &vals[j], INSERT_VALUES));
+      }
+      PetscCall(MatRestoreRow(U_dd, i, &ncols, &cols, &vals));
+    }
+    PetscCall(MatAssemblyBegin(L, MAT_FINAL_ASSEMBLY));
+    PetscCall(MatAssemblyEnd(L, MAT_FINAL_ASSEMBLY));
+    PetscCall(MatAssemblyBegin(U, MAT_FINAL_ASSEMBLY));
+    PetscCall(MatAssemblyEnd(U, MAT_FINAL_ASSEMBLY));
+    PetscCall(MatDestroy(&L_dd));
+    PetscCall(MatDestroy(&U_dd));
+
+    PetscReal A_norm;
+    PetscCall(MatNorm(A, NORM_FROBENIUS, &A_norm));
+    PetscReal threshold = parilu_tol * A_norm;
+    PetscCall(MatCreateVecs(U, &inv_dU, NULL));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                          "||A||_F = %.6e, ParILU stencil-residual threshold = %.6e\n",
+                          (double)A_norm, (double)threshold));
+
+    /* ParILU sweep (block-Jacobi style, MPI/Kokkos friendly):
+         M     = L * U
+         R_L   = A_L_strict - M  restricted to pat(L_strict)
+         R_U   = A_U        - M  restricted to pat(U)
+         res   = sqrt(||R_L||_F^2 + ||R_U||_F^2); stop if < threshold
+         R_L  *= diag(U)^-1  (right scaling); L += R_L; U += R_U
+       Seeded with the exact spiluk(0) of the diagonal block, the local-block
+       residual starts near zero so the sweeps converge the off-process coupling. */
+    PetscReal res_initial = -1.0;
+    for (sweep = 0; sweep < max_sweeps; sweep++) {
+      if (sweep == 0) PetscCall(MatMatMult(L, U, MAT_INITIAL_MATRIX, PETSC_DEFAULT, &Mprod));
+      else            PetscCall(MatMatMult(L, U, MAT_REUSE_MATRIX,   PETSC_DEFAULT, &Mprod));
+
+      PetscCall(MatCopy(A_L_strict, R_L, SAME_NONZERO_PATTERN));
+      remove_from_sparse_match(Mprod, R_L, 0, 1, -1.0);
+      PetscCall(MatCopy(A_U, R_U, SAME_NONZERO_PATTERN));
+      remove_from_sparse_match(Mprod, R_U, 0, 1, -1.0);
+
+      PetscReal rl_norm, ru_norm;
+      PetscCall(MatNorm(R_L, NORM_FROBENIUS, &rl_norm));
+      PetscCall(MatNorm(R_U, NORM_FROBENIUS, &ru_norm));
+      PetscReal res = PetscSqrtReal(rl_norm * rl_norm + ru_norm * ru_norm);
+      if (sweep == 0) res_initial = res;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                            "  ParILU sweep %3" PetscInt_FMT "  stencil residual = %.6e\n",
+                            sweep, (double)res));
+      if (res < threshold) { converged = PETSC_TRUE; sweep++; break; }
+      if (PetscIsInfOrNanReal(res) || (res_initial > 0.0 && res > 1000.0 * res_initial)) {
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                              "  ParILU diverged at sweep %" PetscInt_FMT
+                              ": residual %.6e exceeds 1000x initial %.6e or is non-finite\n",
+                              sweep, (double)res, (double)res_initial));
+        parilu_diverged = PETSC_TRUE;
+        break;
+      }
+
+      PetscCall(MatGetDiagonal(U, inv_dU));
+      PetscCall(VecReciprocal(inv_dU));
+      PetscCall(MatDiagonalScale(R_L, NULL, inv_dU));
+      PetscCall(MatAXPY(L, 1.0, R_L, SUBSET_NONZERO_PATTERN));
+      PetscCall(MatAXPY(U, 1.0, R_U, SAME_NONZERO_PATTERN));
+    }
+    if (converged) {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "ParILU converged in %" PetscInt_FMT " sweeps\n", sweep));
+    } else {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "ParILU did NOT converge within %" PetscInt_FMT " sweeps\n", max_sweeps));
+    }
+
+    PetscCall(MatDestroy(&Mprod));
+    PetscCall(MatDestroy(&R_L));
+    PetscCall(MatDestroy(&R_U));
+    PetscCall(MatDestroy(&A_L_strict));
+    PetscCall(MatDestroy(&A_U));
+    PetscCall(VecDestroy(&inv_dU));
+
+    if (parilu_diverged) {
+      PetscCall(PetscLogStagePop());
+      PetscCall(MatDestroy(&L));
+      PetscCall(MatDestroy(&U));
+      PetscCall(VecDestroy(&b_rand));
+      PetscCall(VecDestroy(&x_sol));
+      PetscCall(PetscRandomDestroy(&rnd));
+      PetscCall(MatDestroy(&A));
+      PetscCall(PetscFinalize());
+      return 1;
+    }
   }
   PetscCall(PetscLogStagePop());
 
