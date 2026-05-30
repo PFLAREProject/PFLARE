@@ -263,6 +263,10 @@ int main(int argc, char **args)
 
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
+  /* Abort with a stack trace at the point of any PETSc error (the API
+     equivalent of -on_error_abort) so every solve below fails loudly. */
+  PetscCall(PetscPushErrorHandler(PetscAbortErrorHandler, NULL));
+
   /* Register the pflare PC types so PCAIR is available. */
   PCRegister_PFLARE();
 
