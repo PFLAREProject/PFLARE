@@ -198,10 +198,14 @@ static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *pref
 
 /* Standalone Richardson + <kind> solve on `factor`. rtol=1e-6, max_it=2000,
    unpreconditioned residual norm, explicit setup so -log_view sees setup vs
-   solve separately. Reports iteration count via ReportSolve. */
+   solve separately. Reports iteration count via ReportSolve.
+   If ksp_out is non-NULL the set-up KSP is returned to the caller (who then
+   owns it and must destroy it) instead of being destroyed here — used to reuse
+   the L/U PCAIR hierarchies in the Ax=b shell PC without setting them up twice. */
 static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
                                      InnerPCKind kind, const char *label,
-                                     const char *opts_prefix, PetscBool *all_converged)
+                                     const char *opts_prefix, PetscBool *all_converged,
+                                     KSP *ksp_out)
 {
   KSP ksp;
   PC  pc;
@@ -218,7 +222,8 @@ static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
   PetscCall(KSPSetUp(ksp));
   PetscCall(KSPSolve(ksp, b, x));
   PetscCall(ReportSolve(label, ksp, factor, b, x, all_converged));
-  PetscCall(KSPDestroy(&ksp));
+  if (ksp_out) *ksp_out = ksp;
+  else PetscCall(KSPDestroy(&ksp));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -835,73 +840,45 @@ int main(int argc, char **args)
   PetscCall(VecDuplicate(inv_diag_U_raw, &inv_diag_U_raw_for_jac));
   PetscCall(VecCopy(inv_diag_U_raw, inv_diag_U_raw_for_jac));
 
-  /* L and U standalone solves: Richardson + each inner PC. */
+  /* L and U standalone solves: Richardson + each inner PC. The two PCAIR solves
+     keep their set-up KSPs (ksp_L_air / ksp_U_air) so the Ax=b shell PC below can
+     reuse those AIR hierarchies instead of building them a second time. */
+  KSP ksp_L_air, ksp_U_air;
+
   PetscCall(PetscLogStagePush(stage_L_solve));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_AIR,
-                           "L solve (richardson + PCAIR)", "L_", &solves_converged));
+                           "L solve (richardson + PCAIR)", "L_", &solves_converged, &ksp_L_air));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_solve));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_AIR,
-                           "U solve (richardson + PCAIR)", "U_", &solves_converged));
+                           "U solve (richardson + PCAIR)", "U_", &solves_converged, &ksp_U_air));
   PetscCall(PetscLogStagePop());
 
-  PetscCall(PetscLogStagePush(stage_L_gmres));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_gmres));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_L_neumann));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_neumann));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_L_isai));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_ISAI,
-                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_isai));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_ISAI,
-                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_L_jac));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_JACOBI,
-                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_jac));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_JACOBI,
-                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged));
-  PetscCall(PetscLogStagePop());
-
-  /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner. */
+  /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner.
+     Reuse the L/U PCAIR KSPs from the standalone solves above: their AIR
+     hierarchies are already set up, so we only reconfigure them from Richardson
+     to preonly (single PC application, no residual norm work) — no second setup
+     of L and U. The shell takes ownership; LUShellDestroy frees both inner KSPs. */
   PetscCall(PetscLogStagePush(stage_A_shell));
   {
     KSP         ksp_A;
     PC          pc_A, pcL_inner, pcU_inner;
     LUShellCtx *shell_ctx;
     PetscReal   cL = -1.0, cU = -1.0, sL = -1.0, sU = -1.0, gL = -1.0, gU = -1.0;
-    /* Build the inner KSPs inside this stage so their PCAIR setup (the bulk
-       of the shell PC's "setup" cost) is timed here too. */
     PetscCall(PetscNew(&shell_ctx));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_pc_L_", INNER_PC_AIR, 1, &shell_ctx->ksp_L));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_pc_U_", INNER_PC_AIR, 1, &shell_ctx->ksp_U));
-    /* Fetch cycle complexity from the two AIR hierarchies (PCSetUp was called
-       inside CreateInnerKSP above) to derive the Jacobi inner iteration count
-       used in the subsequent stage_A_shell_jac solve, mirroring
-       _jac_inner_from_cycle in test_ilu.py. */
+    shell_ctx->ksp_L = ksp_L_air;
+    shell_ctx->ksp_U = ksp_U_air;
+    PetscCall(KSPSetType(shell_ctx->ksp_L, KSPPREONLY));
+    PetscCall(KSPSetNormType(shell_ctx->ksp_L, KSP_NORM_NONE));
+    PetscCall(KSPSetType(shell_ctx->ksp_U, KSPPREONLY));
+    PetscCall(KSPSetNormType(shell_ctx->ksp_U, KSP_NORM_NONE));
+    PetscCall(KSPSetUp(shell_ctx->ksp_L));
+    PetscCall(KSPSetUp(shell_ctx->ksp_U));
+    /* Fetch cycle complexity from the two AIR hierarchies (set up during the L/U
+       standalone solves) to derive the Jacobi inner iteration count used in the
+       later stage_A_shell_jac solve, mirroring _jac_inner_from_cycle in
+       test_ilu.py. */
     PetscCall(KSPGetPC(shell_ctx->ksp_L, &pcL_inner));
     PetscCall(KSPGetPC(shell_ctx->ksp_U, &pcU_inner));
     PetscCall(PCAIRGetCycleComplexity(pcL_inner, &cL));
@@ -946,6 +923,46 @@ int main(int argc, char **args)
        shell_ctx (its inner KSPs and tmp vec). */
     PetscCall(KSPDestroy(&ksp_A));
   }
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_L_gmres));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_U_gmres));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_L_neumann));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
+                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_U_neumann));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
+                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_L_isai));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_ISAI,
+                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_U_isai));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_ISAI,
+                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_L_jac));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_JACOBI,
+                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL));
+  PetscCall(PetscLogStagePop());
+
+  PetscCall(PetscLogStagePush(stage_U_jac));
+  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_JACOBI,
+                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL));
   PetscCall(PetscLogStagePop());
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
