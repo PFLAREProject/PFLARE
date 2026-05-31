@@ -164,6 +164,9 @@ static PetscErrorCode ReportSolve(const char *label, KSP ksp, Mat op, Vec b, Vec
 
 typedef enum {
   INNER_PC_AIR,
+  INNER_PC_GMRES_POLY,
+  INNER_PC_NEUMANN_POLY,
+  INNER_PC_ISAI,
   INNER_PC_JACOBI,
 } InnerPCKind;
 
@@ -174,6 +177,20 @@ static PetscErrorCode ConfigureInnerPC(PC pc, InnerPCKind kind)
   case INNER_PC_AIR:
     PetscCall(PCSetType(pc, PCAIR));
     PetscCall(ApplyPythonAIRDefaults(pc));
+    break;
+  case INNER_PC_GMRES_POLY:
+    PetscCall(PCSetType(pc, PCPFLAREINV));
+    PetscCall(PCPFLAREINVSetType(pc, PFLAREINV_NEWTON));
+    PetscCall(PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE));
+    break;
+  case INNER_PC_NEUMANN_POLY:
+    PetscCall(PCSetType(pc, PCPFLAREINV));
+    PetscCall(PCPFLAREINVSetType(pc, PFLAREINV_NEUMANN));
+    PetscCall(PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE));
+    break;
+  case INNER_PC_ISAI:
+    PetscCall(PCSetType(pc, PCPFLAREINV));
+    PetscCall(PCPFLAREINVSetType(pc, PFLAREINV_ISAI));
     break;
   case INNER_PC_JACOBI:
     PetscCall(PCSetType(pc, PCJACOBI));
@@ -310,6 +327,8 @@ int main(int argc,char **argv)
 #if defined(PETSC_USE_LOG)
       PetscLogStage stage_parilu, stage_L_air, stage_U_air, stage_A_shell, stage_A_shell_jac;
       PetscLogStage stage_A_pcilu, stage_A_air;
+      PetscLogStage stage_L_gmres, stage_U_gmres, stage_L_neumann, stage_U_neumann;
+      PetscLogStage stage_L_isai, stage_U_isai, stage_L_jac, stage_U_jac;
 #endif
 
       PetscCall(PetscOptionsGetInt (NULL, NULL, "-mine_n",        &mine_n,      NULL));
@@ -325,6 +344,14 @@ int main(int argc,char **argv)
       PetscCall(PetscLogStageRegister("ILU U solve (PCAIR)",            &stage_U_air));
       PetscCall(PetscLogStageRegister("ILU A solve (AIRG shell)",       &stage_A_shell));
       PetscCall(PetscLogStageRegister("ILU A solve (Jacobi shell)",     &stage_A_shell_jac));
+      PetscCall(PetscLogStageRegister("ILU L solve (GMRES poly)",       &stage_L_gmres));
+      PetscCall(PetscLogStageRegister("ILU U solve (GMRES poly)",       &stage_U_gmres));
+      PetscCall(PetscLogStageRegister("ILU L solve (Neumann poly)",     &stage_L_neumann));
+      PetscCall(PetscLogStageRegister("ILU U solve (Neumann poly)",     &stage_U_neumann));
+      PetscCall(PetscLogStageRegister("ILU L solve (ISAI)",             &stage_L_isai));
+      PetscCall(PetscLogStageRegister("ILU U solve (ISAI)",             &stage_U_isai));
+      PetscCall(PetscLogStageRegister("ILU L solve (PCJACOBI)",         &stage_L_jac));
+      PetscCall(PetscLogStageRegister("ILU U solve (PCJACOBI)",         &stage_U_jac));
 
       /* ── Build mine transport matrix (N²×N², interior unknowns only) ──────── */
       Ntot   = mine_n * mine_n;
@@ -705,6 +732,56 @@ int main(int argc,char **argv)
                               ksp_A, A_ilu, b_rand, x_sol, &solves_converged));
         PetscCall(KSPDestroy(&ksp_A));
       }
+      PetscCall(PetscLogStagePop());
+
+      /* ── L/U standalone solves: Richardson + {GMRES poly, Neumann poly,
+            ISAI, Jacobi} inner PC, mirroring ilu_factors.c ─────────────────── */
+      PetscCall(PetscLogStagePush(stage_L_gmres));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                               "L solve (richardson + GMRES poly)", "ilu_L_gmres_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_U_gmres));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                               "U solve (richardson + GMRES poly)", "ilu_U_gmres_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_L_neumann));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
+                               "L solve (richardson + Neumann poly)", "ilu_L_neumann_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_U_neumann));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
+                               "U solve (richardson + Neumann poly)", "ilu_U_neumann_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_L_isai));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_ISAI,
+                               "L solve (richardson + ISAI)", "ilu_L_isai_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_U_isai));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_ISAI,
+                               "U solve (richardson + ISAI)", "ilu_U_isai_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_L_jac));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_JACOBI,
+                               "L solve (richardson + PCJACOBI)", "ilu_L_jac_",
+                               &solves_converged, NULL));
+      PetscCall(PetscLogStagePop());
+
+      PetscCall(PetscLogStagePush(stage_U_jac));
+      PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_JACOBI,
+                               "U solve (richardson + PCJACOBI)", "ilu_U_jac_",
+                               &solves_converged, NULL));
       PetscCall(PetscLogStagePop());
 
       /* ── Ax=b: GMRES(30) + LU shell PC with Jacobi inner ─────────────────── */
