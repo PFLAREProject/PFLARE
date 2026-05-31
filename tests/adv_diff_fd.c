@@ -400,9 +400,17 @@ int main(int argc,char **argv)
       {
         char ordering[64] = MATORDERINGNATURAL;
         IS   row_perm, col_perm;
-        Mat  A_reordered;
+        Mat  A_reordered, A_aij;
         PetscCall(PetscOptionsGetString(NULL, NULL, "-mat_ordering_type", ordering, sizeof(ordering), NULL));
-        PetscCall(MatGetOrdering(A_ilu, ordering, &row_perm, &col_perm));
+        /* MatGetOrdering only special-cases MATMPIAIJ for the parallel-aware path
+           that builds the permutation IS on the matrix's communicator. For
+           MATMPIAIJKOKKOS that branch is skipped and the IS is created on
+           PETSC_COMM_SELF, which then mismatches A_ilu's communicator inside
+           MatPermute. Compute the ordering from a plain-AIJ copy to stay on the
+           supported path; the permutation still applies to the kokkos matrix. */
+        PetscCall(MatConvert(A_ilu, MATAIJ, MAT_INITIAL_MATRIX, &A_aij));
+        PetscCall(MatGetOrdering(A_aij, ordering, &row_perm, &col_perm));
+        PetscCall(MatDestroy(&A_aij));
         PetscCall(MatPermute(A_ilu, row_perm, col_perm, &A_reordered));
         PetscCall(MatDestroy(&A_ilu));
         A_ilu = A_reordered;
