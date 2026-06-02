@@ -57,6 +57,9 @@ PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetSparsityOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetType(PC, PCPFLAREINVType *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetMatrixFree(PC, PetscBool *);
+/* Returns the underlying approximate-inverse matrix (borrowed reference - do not
+   destroy; only valid after PCSetUp and until the next setup/reset) */
+PETSC_EXTERN PetscErrorCode PCPFLAREINVGetInverseMat(PC, Mat *);
 /* Define PCPFLAREINV set routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetPolyOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetSparsityOrder(PC, PetscInt);

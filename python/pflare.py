@@ -158,6 +158,7 @@ pcpflareinv_get_type               = pflare_defs.pcpflareinv_get_type
 pcpflareinv_get_matrix_free        = pflare_defs.pcpflareinv_get_matrix_free
 pcpflareinv_get_reuse_poly_coeffs  = pflare_defs.pcpflareinv_get_reuse_poly_coeffs
 pcpflareinv_get_poly_coeffs        = pflare_defs.pcpflareinv_get_poly_coeffs
+pcpflareinv_get_inverse_mat        = pflare_defs.pcpflareinv_get_inverse_mat
 
 # -----------------------------------------------------------------------
 # PCPFLAREINV Set functions

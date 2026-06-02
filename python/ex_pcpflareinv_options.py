@@ -2,10 +2,15 @@
 Tests the direct Python API for PCPFLAREINV get/set option functions introduced in
 pflare.py (backed by PCPFLAREINV_Interfaces.F90).
 
-Two checks are performed:
+Checks performed:
   1. Round-trip: set a value via the direct API, get it back, verify it matches.
   2. Functional: configure a Newton matrix-free PCPFLAREINV via the direct API,
      run a solve, verify convergence.
+  3. PCPFLAREINVGetInverseMat: the accessor returns None before PCSetUp; after
+     setup it returns the underlying approximate-inverse matrix (assembled aij
+     or a matrix-free shell) which the user can operate on directly, and which
+     is a refcounted borrowed reference (deleting it must not free the PC's
+     matrix).
 '''
 
 import sys
@@ -120,6 +125,52 @@ check('reuse_poly_coeffs', pflare.pcpflareinv_get_reuse_poly_coeffs(pc), True)
 
 pflare.pcpflareinv_set_reuse_poly_coeffs(pc, False)
 check('reuse_poly_coeffs_false', pflare.pcpflareinv_get_reuse_poly_coeffs(pc), False)
+
+# -----------------------------------------------------------------------
+# PCPFLAREINVGetInverseMat: access the underlying approximate-inverse matrix
+# -----------------------------------------------------------------------
+
+# Assembled inverse on a fresh PC
+pc_inv = PETSc.PC().create(comm=comm)
+pc_inv.setType('pflareinv')
+pc_inv.setOperators(A, A)
+pflare.pcpflareinv_set_type(pc_inv, pflare.PFLAREINV_POWER)
+pflare.pcpflareinv_set_matrix_free(pc_inv, False)
+
+# Before PCSetUp the inverse matrix does not exist yet
+check('inverse_mat_pre_setup_none', pflare.pcpflareinv_get_inverse_mat(pc_inv), None)
+
+pc_inv.setUp()
+M = pflare.pcpflareinv_get_inverse_mat(pc_inv)
+check('inverse_mat_not_none', M is not None, True)
+if M is not None:
+    check('inverse_mat_is_aij', 'aij' in M.getType().lower(), True)
+    check('inverse_mat_size', M.getSize(), A.getSize())
+
+    # Use the returned matrix directly (Schur-complement-style matrix product)
+    M2 = M.matMult(M)
+    check('inverse_mat_matmult_size', M2.getSize(), A.getSize())
+    M2.destroy()
+pc_inv.destroy()
+
+# Matrix-free inverse returns a usable shell
+pc_inv_mf = PETSc.PC().create(comm=comm)
+pc_inv_mf.setType('pflareinv')
+pc_inv_mf.setOperators(A, A)
+pflare.pcpflareinv_set_type(pc_inv_mf, pflare.PFLAREINV_POWER)
+pflare.pcpflareinv_set_matrix_free(pc_inv_mf, True)
+pc_inv_mf.setUp()
+Mmf = pflare.pcpflareinv_get_inverse_mat(pc_inv_mf)
+check('inverse_mat_mf_not_none', Mmf is not None, True)
+if Mmf is not None:
+    check('inverse_mat_mf_is_shell', Mmf.getType(), 'shell')
+    xf, yf = A.createVecs()
+    xf.set(1.0)
+    Mmf.mult(xf, yf)           # shell MatMult must work
+    check('inverse_mat_mf_matmult', yf.norm() > 0.0, True)
+    xf.destroy()
+    yf.destroy()
+pc_inv_mf.destroy()
 
 if errors:
     if rank == 0:

@@ -12,6 +12,10 @@ from petsc4py.PETSc cimport IS, PetscIS
 cdef extern from "petsc.h":
 	ctypedef int    PetscInt  "PetscInt"
 	ctypedef double PetscReal "PetscReal"
+	# Increment a PETSc object's reference count (used to balance petsc4py's
+	# automatic destroy when wrapping a borrowed reference). Declared here (from
+	# petsc.h) so Cython does not emit a prototype that conflicts with PETSc's.
+	int PetscObjectReference(void *obj)
 
 cdef extern:
 	void PCRegister_PFLARE()
@@ -146,6 +150,9 @@ cdef extern:
 	int PCPFLAREINVGetType(PetscPC pc, int *pflare_type)
 	int PCPFLAREINVGetMatrixFree(PetscPC pc, int *flag)
 	int PCPFLAREINVGetReusePolyCoeffs(PetscPC pc, int *flag)
+
+	# PCPFLAREINV - underlying approximate-inverse matrix (borrowed reference)
+	int PCPFLAREINVGetInverseMat(PetscPC pc, PetscMat *mat)
 
 	# PCPFLAREINV - polynomial coefficients (PC passed by value, not pointer)
 	# Returns a pointer into internal PCPFLAREINV memory (valid until the next PCSetUp or PCReset).
@@ -734,6 +741,21 @@ cpdef bint pcpflareinv_get_reuse_poly_coeffs(PC pc):
 	cdef int result = 0
 	PCPFLAREINVGetReusePolyCoeffs(pc.pc, &result)
 	return bool(result)
+
+cpdef pcpflareinv_get_inverse_mat(PC pc):
+	"""Return the underlying approximate-inverse matrix of a PCPFLAREINV.
+
+	Borrowed reference into the PC; valid only after PCSetUp and until the next
+	setup/reset. Returns None if PCSetUp has not been called yet.
+	"""
+	cdef Mat mat = Mat()
+	PCPFLAREINVGetInverseMat(pc.pc, &(mat.mat))
+	if mat.mat == NULL:
+		return None
+	# Borrowed reference: petsc4py will MatDestroy on garbage collection, so
+	# increment the count to keep the PC's matrix valid
+	PetscObjectReference(<void*>mat.mat)
+	return mat
 
 cpdef pcpflareinv_set_poly_order(PC pc, int order):
 	PCPFLAREINVSetPolyOrder(pc.pc, <PetscInt>order)
