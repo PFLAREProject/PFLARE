@@ -582,6 +582,15 @@ int main(int argc,char **argv)
         PetscCall(KSPSetOptionsPrefix(ksp_Aair, "A_air_"));
         PetscCall(KSPSetFromOptions(ksp_Aair));
         PetscCall(KSPSetUp(ksp_Aair));
+        {
+          PetscReal cA = -1.0, sA = -1.0, gA = -1.0;
+          PetscCall(PCAIRGetCycleComplexity(pc_Aair, &cA));
+          PetscCall(PCAIRGetStorageComplexity(pc_Aair, &sA));
+          PetscCall(PCAIRGetGridComplexity(pc_Aair, &gA));
+          PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                                "AIR complexities (A): cycle=%.3f, storage=%.3f, grid=%.3f\n",
+                                (double)cA, (double)sA, (double)gA));
+        }
         PetscCall(KSPSolve(ksp_Aair, b_rand, x_sol));
         PetscCall(ReportSolve("A x = b solve (richardson + PCAIR)",
                               ksp_Aair, A_ilu, b_rand, x_sol, &solves_converged));
