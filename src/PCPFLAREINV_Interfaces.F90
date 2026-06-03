@@ -79,7 +79,7 @@ module pcpflareinv_interfaces
       end function PCPFLAREINVGetPolyCoeffs_mine
    end interface
 
-   interface 
+   interface
       function PCPFLAREINVGetReusePolyCoeffs_mine(A_array, b) &
          bind(c, name="PCPFLAREINVGetReusePolyCoeffs")
          use iso_c_binding
@@ -89,7 +89,18 @@ module pcpflareinv_interfaces
          integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetReusePolyCoeffs_mine
       end function PCPFLAREINVGetReusePolyCoeffs_mine
    end interface
-   
+
+   interface
+      function PCPFLAREINVGetInverseMat_mine(A_array, mat_array) &
+         bind(c, name="PCPFLAREINVGetInverseMat")
+         use iso_c_binding
+#include "finclude/pflare_types.h"
+         integer(c_long_long), value            :: A_array
+         integer(c_long_long), intent(out)      :: mat_array
+         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetInverseMat_mine
+      end function PCPFLAREINVGetInverseMat_mine
+   end interface
+
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! Set routines - interfaces to the C routines in PCPFLAREINV
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -313,9 +324,34 @@ module pcpflareinv_interfaces
 
    end subroutine PCPFLAREINVGetReusePolyCoeffs
 
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCPFLAREINVGetInverseMat(pc, mat, ierr)
+
+      ! Returns the underlying approximate-inverse matrix as a borrowed reference.
+      ! Do NOT destroy mat - it is owned by the PC. It is either an assembled
+      ! matrix or a matrix-free MATSHELL, and is only valid after PCSetUp and
+      ! until the next setup/reset. Before PCSetUp the returned handle is null.
+
+      ! ~~~~~~~~~~
+      type(tPC), intent(in)         :: pc
+      type(tMat), intent(inout)     :: mat
+      PetscErrorCode, intent(inout) :: ierr
+
+      integer(c_long_long) :: pc_ptr
+      integer(c_long_long) :: mat_ptr
+      ! ~~~~~~~~~~
+
+      pc_ptr  = pc%v
+      mat_ptr = 0
+      ierr    = PCPFLAREINVGetInverseMat_mine(pc_ptr, mat_ptr)
+      mat%v   = mat_ptr
+
+   end subroutine PCPFLAREINVGetInverseMat
+
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! Set routines - Fortran versions of the C routines in PCPFLAREINV
-   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

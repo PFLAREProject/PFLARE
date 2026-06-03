@@ -5,7 +5,8 @@ Explore
 
 Build
 1. In top repo directory: `make -j3 build_tests`
-2. Rule: fix all compile warnings.
+2. If Python code changed, in the top repo directory: `make python`
+3. Rule: fix all compile warnings.
 
 Tests
 1. Run the test targets below once. Trust `make`'s exit code: 0 means all tests passed; any failure breaks the run with a non-zero code and prints the error to the terminal. Don't re-run to grep the output.

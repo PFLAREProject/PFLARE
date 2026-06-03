@@ -164,6 +164,32 @@ static PetscErrorCode PCPFLAREINVGetMatrixFree_PFLAREINV(PC pc, PetscBool *flg)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// ~~~~~~~~~~
+
+// Get the underlying matrix that represents our approximate inverse
+// This is a borrowed reference into the PCPFLAREINV object - DO NOT destroy it
+// It is either an assembled matrix (e.g. MATAIJ/MATDIAGONAL) or a matrix-free
+// MATSHELL, depending on the inverse type and the matrix_free option
+// The returned matrix is only valid until the next PCSetUp/PCReset/PCDestroy
+// (a re-setup with a different non-zero pattern rebuilds it)
+// Before PCSetUp has been called it is NULL - call PCSetUp (or KSPSetUp) first
+PetscErrorCode PCPFLAREINVGetInverseMat(PC pc, Mat *mat)
+{
+   PetscFunctionBegin;
+   PetscUseMethod(pc, "PCPFLAREINVGetInverseMat_C", (PC, Mat *), (pc, mat));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVGetInverseMat_PFLAREINV(PC pc, Mat *mat)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   *mat = inv_data->mat_inverse;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // Set routines
 
 // This is the order of polynomial we use
@@ -408,6 +434,7 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyCoeffs_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetReusePolyCoeffs_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetReusePolyCoeffs_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetInverseMat_C", NULL));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -674,6 +701,7 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyCoeffs_C", PCPFLAREINVSetPolyCoeffs_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetReusePolyCoeffs_C", PCPFLAREINVGetReusePolyCoeffs_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetReusePolyCoeffs_C", PCPFLAREINVSetReusePolyCoeffs_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetInverseMat_C", PCPFLAREINVGetInverseMat_PFLAREINV));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
