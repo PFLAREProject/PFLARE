@@ -104,15 +104,6 @@ PETSC_INTERN void boolscatter_mat_reverse_end_c(Mat *matrix, bool *local_vals, b
    PetscCallVoid(PetscSFReduceEnd(a->Mvctx, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
 }
 
-// Annoying as the fortran pointer returned by MatSeqAIJGetArrayF90 seems to be 
-// the wrong size and that can break things sometimes
-PETSC_INTERN void MatSeqAIJGetArrayF90_mine(Mat *matrix, double **array)
-{
-   Mat_SeqAIJ *a = (Mat_SeqAIJ*)((*matrix)->data);
-   *array = a->a;
-   return;
-}
-
 // Annoying as MPIU_INTEGER is defined in fortran, but not if we call that fortran
 // routine from C - so we have to do the allreduce here
 PETSC_INTERN void allreducesum_petscint_mine(Mat *matrix, PetscInt first_int, PetscInt *return_int)

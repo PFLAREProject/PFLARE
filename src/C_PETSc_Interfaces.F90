@@ -142,20 +142,8 @@ module c_petsc_interfaces
  
    end interface    
    
-   interface   
-      
-      subroutine MatSeqAIJGetArrayF90_mine(A_array, array) &
-            bind(c, name="MatSeqAIJGetArrayF90_mine")
-            use iso_c_binding
-            integer(c_long_long) :: A_array
-            type(c_ptr) :: array
+   interface
 
-      end subroutine MatSeqAIJGetArrayF90_mine         
- 
-   end interface   
-   
-   interface   
-      
       subroutine allreducesum_petscint_mine(A_array, first_int, return_int) &
             bind(c, name="allreducesum_petscint_mine")
             use iso_c_binding

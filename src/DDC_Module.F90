@@ -5,7 +5,7 @@ module ddc_module
    use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
       use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
          MatDiagDomRatio_kokkos, create_cf_is_kokkos, &
-         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
+         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
    use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
    use pflare_parameters, only: C_POINT, F_POINT
    use matdiagdom, only: MatDiagDomRatio
