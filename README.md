@@ -31,9 +31,9 @@ PFLARE adds new methods to PETSc, including:
 
 You can get started with PFLARE in one of four ways:
 
-* PFLARE is now available directly through the PETSc configure with: `--download-pflare`, see [docs/installation.md](docs/installation.md)
+* PFLARE is available directly through the PETSc configure (from the PETSc 3.25 release) with: `--download-pflare`, see [docs/installation.md](docs/installation.md)
 * To run the Jupyter notebooks in `notebooks/` in your browser without requiring a local install, click the Binder badge above
-* To download a Docker image with PFLARE installed, run `docker run -it stevendargaville/pflare && make check`
+* To download a Docker image with PFLARE installed, run `docker run -it stevendargaville/pflare`, then `make check` inside the container
 * To build from source, see [docs/installation.md](docs/installation.md) 
 
 ## Documentation
