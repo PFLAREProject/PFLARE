@@ -6,7 +6,6 @@ module pcair_c_fortran_bindings
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
-#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 
@@ -26,7 +25,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)              :: print_stats
+      PetscBool, intent(out)              :: print_stats
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -46,7 +45,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)               :: max_levels
+      PetscInt, intent(out)               :: max_levels
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -63,7 +62,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)               :: coarse_eq_limit
+      PetscInt, intent(out)               :: coarse_eq_limit
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -80,7 +79,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)               :: start_level
+      PetscInt, intent(out)               :: start_level
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -97,7 +96,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: tol
+      PetscReal, intent(out)        :: tol
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -114,7 +113,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)               :: num_levels
+      PetscInt, intent(out)               :: num_levels
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -131,7 +130,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: processor_agglom
+      PetscBool, intent(out)        :: processor_agglom
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -151,7 +150,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: ratio
+      PetscReal, intent(out)        :: ratio
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -168,7 +167,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)        :: factor
+      PetscInt, intent(out)        :: factor
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -185,7 +184,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)        :: limit
+      PetscInt, intent(out)        :: limit
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -202,7 +201,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: subcomm
+      PetscBool, intent(out)        :: subcomm
       
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -222,7 +221,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: thresh
+      PetscReal, intent(out)        :: thresh
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -239,7 +238,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)               :: its
+      PetscInt, intent(out)               :: its
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -256,7 +255,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: frac
+      PetscReal, intent(out)        :: frac
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -290,7 +289,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: steps
+      PetscInt, intent(out)         :: steps
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -307,7 +306,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: scale
+      PetscBool, intent(out)        :: scale
 
 
       type(tPC)                  :: pc
@@ -328,7 +327,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: mf
+      PetscBool, intent(out)        :: mf
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -348,7 +347,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: onep
+      PetscBool, intent(out)        :: onep
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -368,7 +367,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: full
+      PetscBool, intent(out)        :: full
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -388,7 +387,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: sym
+      PetscBool, intent(out)        :: sym
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -408,7 +407,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: constrain
+      PetscBool, intent(out)        :: constrain
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -428,7 +427,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: constrain
+      PetscBool, intent(out)        :: constrain
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -448,7 +447,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: its
+      PetscInt, intent(out)         :: its
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -465,7 +464,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: its
+      PetscInt, intent(out)         :: its
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -482,7 +481,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: thresh
+      PetscReal, intent(out)        :: thresh
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -550,7 +549,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: distance
+      PetscInt, intent(out)         :: distance
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -567,7 +566,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: order
+      PetscInt, intent(out)         :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -584,7 +583,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: order
+      PetscInt, intent(out)         :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -601,7 +600,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: order
+      PetscInt, intent(out)         :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -618,7 +617,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: order
+      PetscInt, intent(out)         :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -652,7 +651,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: order
+      PetscInt, intent(out)         :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -669,7 +668,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)         :: order
+      PetscInt, intent(out)         :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -686,7 +685,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: mf
+      PetscBool, intent(out)        :: mf
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -706,7 +705,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: scale
+      PetscBool, intent(out)        :: scale
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -726,7 +725,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: subcomm
+      PetscBool, intent(out)        :: subcomm
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -746,7 +745,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: rdrop
+      PetscReal, intent(out)        :: rdrop
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -763,7 +762,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out)        :: adrop
+      PetscReal, intent(out)        :: adrop
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -780,7 +779,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+      PetscReal, intent(out) :: complexity
 
       type(tPC)      :: pc
       PetscErrorCode :: ierr
@@ -797,7 +796,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+      PetscReal, intent(out) :: complexity
 
       type(tPC)      :: pc
       PetscErrorCode :: ierr
@@ -814,7 +813,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+      PetscReal, intent(out) :: complexity
 
       type(tPC)      :: pc
       PetscErrorCode :: ierr
@@ -831,7 +830,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+      PetscReal, intent(out) :: complexity
 
       type(tPC)      :: pc
       PetscErrorCode :: ierr
@@ -848,7 +847,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), intent(out) :: complexity
+      PetscReal, intent(out) :: complexity
 
       type(tPC)      :: pc
       PetscErrorCode :: ierr
@@ -865,7 +864,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: lump
+      PetscBool, intent(out)        :: lump
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -885,7 +884,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: reuse
+      PetscBool, intent(out)        :: reuse
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -905,7 +904,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, intent(out)        :: reuse
+      PetscBool, intent(out)        :: reuse
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -930,15 +929,15 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)         :: petsc_level
+      PetscInt, value, intent(in)         :: petsc_level
       integer(c_int), value, intent(in)   :: which_inverse 
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)               :: row_size, col_size
+      PetscInt, intent(out)               :: row_size, col_size
       type(c_ptr), intent(out)            :: coeffs_ptr
 
       type(tPC)                              :: pc
       PetscErrorCode                         :: ierr
       integer                                :: our_level, errorcode
-      integer(PFLARE_PETSCINT_C_KIND)                               :: num_levels
+      PetscInt                               :: num_levels
       type(tPC)                              :: pc_shell
       type(pc_air_multigrid_data), pointer   :: pc_air_data=>null()      
 
@@ -1010,7 +1009,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: print_stats
+      PetscBool, value, intent(in)         :: print_stats
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1030,7 +1029,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: max_levels
+      PetscInt, value, intent(in)          :: max_levels
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1047,7 +1046,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: coarse_eq_limit
+      PetscInt, value, intent(in)          :: coarse_eq_limit
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1064,7 +1063,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: start_level
+      PetscInt, value, intent(in)          :: start_level
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1081,7 +1080,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: tol
+      PetscReal, value, intent(in)         :: tol
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1098,7 +1097,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: processor_agglom
+      PetscBool, value, intent(in)         :: processor_agglom
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1118,7 +1117,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: ratio
+      PetscReal, value, intent(in)         :: ratio
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1135,7 +1134,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)         :: factor
+      PetscInt, value, intent(in)         :: factor
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1152,7 +1151,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)         :: limit
+      PetscInt, value, intent(in)         :: limit
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1169,7 +1168,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: subcomm
+      PetscBool, value, intent(in)         :: subcomm
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1189,7 +1188,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: thresh
+      PetscReal, value, intent(in)         :: thresh
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1206,7 +1205,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)         :: its
+      PetscInt, value, intent(in)         :: its
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1223,7 +1222,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: frac
+      PetscReal, value, intent(in)         :: frac
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1257,7 +1256,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: steps
+      PetscInt, value, intent(in)          :: steps
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1340,7 +1339,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: scale
+      PetscBool, value, intent(in)         :: scale
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1360,7 +1359,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: mf
+      PetscBool, value, intent(in)         :: mf
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1380,7 +1379,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: onep
+      PetscBool, value, intent(in)         :: onep
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1400,7 +1399,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: full
+      PetscBool, value, intent(in)         :: full
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1420,7 +1419,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: sym
+      PetscBool, value, intent(in)         :: sym
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1440,7 +1439,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: constrain
+      PetscBool, value, intent(in)         :: constrain
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1460,7 +1459,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: constrain
+      PetscBool, value, intent(in)         :: constrain
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1480,7 +1479,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: its
+      PetscInt, value, intent(in)          :: its
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1497,7 +1496,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: its
+      PetscInt, value, intent(in)          :: its
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1514,7 +1513,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: thresh
+      PetscReal, value, intent(in)         :: thresh
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1582,7 +1581,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: distance
+      PetscInt, value, intent(in)          :: distance
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1599,7 +1598,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: order
+      PetscInt, value, intent(in)          :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1616,7 +1615,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: order
+      PetscInt, value, intent(in)          :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1633,7 +1632,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: order
+      PetscInt, value, intent(in)          :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1650,7 +1649,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: order
+      PetscInt, value, intent(in)          :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1684,7 +1683,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: order
+      PetscInt, value, intent(in)          :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1701,7 +1700,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)          :: order
+      PetscInt, value, intent(in)          :: order
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1718,7 +1717,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: mf
+      PetscBool, value, intent(in)         :: mf
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1738,7 +1737,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: scale
+      PetscBool, value, intent(in)         :: scale
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1758,7 +1757,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: subcomm
+      PetscBool, value, intent(in)         :: subcomm
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1778,7 +1777,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: rdrop
+      PetscReal, value, intent(in)         :: rdrop
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1795,7 +1794,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      real(PFLARE_PETSCREAL_C_KIND), value, intent(in)         :: adrop
+      PetscReal, value, intent(in)         :: adrop
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1812,7 +1811,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: lump
+      PetscBool, value, intent(in)         :: lump
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1832,7 +1831,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: reuse
+      PetscBool, value, intent(in)         :: reuse
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1852,7 +1851,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      PFLARE_PETSCBOOL_C_TYPE, value, intent(in)         :: reuse
+      PetscBool, value, intent(in)         :: reuse
 
       type(tPC)                  :: pc
       PetscErrorCode         :: ierr
@@ -1872,7 +1871,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout)              :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(out)     :: amount
+      PetscInt, intent(out)     :: amount
 
       type(tPC)          :: pc
       PetscErrorCode     :: ierr
@@ -1891,7 +1890,7 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout)                     :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)      :: amount
+      PetscInt, value, intent(in)      :: amount
 
       type(tPC)          :: pc
       PetscErrorCode     :: ierr
@@ -1909,18 +1908,18 @@ module pcair_c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)         :: petsc_level
+      PetscInt, value, intent(in)         :: petsc_level
       integer(c_int), value, intent(in)   :: which_inverse 
-      integer(PFLARE_PETSCINT_C_KIND), value, intent(in)         :: row_size, col_size
+      PetscInt, value, intent(in)         :: row_size, col_size
       type(c_ptr), value, intent(in)      :: coeffs_ptr
 
       type(tPC)                              :: pc
       PetscErrorCode                         :: ierr
       integer                                :: our_level, errorcode
-      integer(PFLARE_PETSCINT_C_KIND)                               :: num_levels, i_loc, j_loc
+      PetscInt                               :: num_levels, i_loc, j_loc
       type(tPC)                              :: pc_shell
       type(pc_air_multigrid_data), pointer   :: pc_air_data=>null()   
-      real(PFLARE_PETSCREAL_C_KIND), pointer :: coeffs_c(:,:)   
+      PetscReal, pointer :: coeffs_c(:,:)   
 
       ! ~~~~~~~~
 
