@@ -112,7 +112,6 @@ module c_fortran_bindings
       !     computation is skipped (see calculate_and_build_approximate_inverse).
       !     coeffs_ptr/row_size/col_size are unchanged on return.
 
-#include "finclude/PETSc_ISO_Types.h"
 
       ! Interface to C stdlib malloc
       interface
@@ -128,15 +127,15 @@ module c_fortran_bindings
       integer(c_int), value, intent(in)                  :: inverse_type, poly_order, poly_sparsity_order
       integer(c_int), value, intent(in)                  :: matrix_free_int, diag_scale_polys_int, subcomm_int
       type(c_ptr), intent(inout)                         :: coeffs_ptr
-      integer(PFLARE_PETSCINT_C_KIND), intent(inout)      :: row_size, col_size
+      PetscInt, intent(inout)      :: row_size, col_size
       integer(c_long_long), intent(inout)                :: inv_matrix_ptr
 
       type(tMat)  :: input_mat, inv_matrix
       logical     :: matrix_free, subcomm, diag_scale_polys
       PetscReal, dimension(:, :), contiguous, pointer :: coefficients
       type(c_ptr) :: c_buf
-      real(PFLARE_PETSCREAL_C_KIND), pointer :: c_view(:,:)
-      integer(PFLARE_PETSCINT_C_KIND) :: nr, nc
+      PetscReal, pointer :: c_view(:,:)
+      PetscInt :: nr, nc
       ! ~~~~~~~~
 
       input_mat%v = input_mat_ptr
@@ -178,9 +177,9 @@ module c_fortran_bindings
          ! Fresh path: Fortran allocate may use a compiler-specific allocator
          ! (e.g. _mm_malloc on Intel) that is incompatible with C free().
          ! Copy the data into a C-malloc'd buffer so the C side can safely free() it.
-         nr = int(size(coefficients, 1), PFLARE_PETSCINT_C_KIND)
-         nc = int(size(coefficients, 2), PFLARE_PETSCINT_C_KIND)
-         c_buf = c_malloc(int(nr, c_size_t) * int(nc, c_size_t) * int(PFLARE_PETSCREAL_C_KIND, c_size_t))
+         nr = int(size(coefficients, 1), PETSC_INT_KIND)
+         nc = int(size(coefficients, 2), PETSC_INT_KIND)
+         c_buf = c_malloc(int(nr, c_size_t) * int(nc, c_size_t) * int(PETSC_REAL_KIND, c_size_t))
          call c_f_pointer(c_buf, c_view, [int(nr), int(nc)])
          c_view = coefficients
          ! For non-matrix-free: the matshell does not exist, so the Fortran allocation

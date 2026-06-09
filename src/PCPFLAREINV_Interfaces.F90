@@ -5,7 +5,6 @@ module pcpflareinv_interfaces
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
-#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 
@@ -27,8 +26,8 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(PFLARE_PETSCINT_C_KIND)        :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetPolyOrder_mine
+         PetscInt        :: b
+         PetscErrorCode  :: PCPFLAREINVGetPolyOrder_mine
       end function PCPFLAREINVGetPolyOrder_mine 
    end interface
    
@@ -38,8 +37,8 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(PFLARE_PETSCINT_C_KIND)        :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetSparsityOrder_mine
+         PetscInt        :: b
+         PetscErrorCode  :: PCPFLAREINVGetSparsityOrder_mine
       end function PCPFLAREINVGetSparsityOrder_mine 
    end interface    
 
@@ -50,7 +49,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_int)                         :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetType_mine
+         PetscErrorCode  :: PCPFLAREINVGetType_mine
       end function PCPFLAREINVGetType_mine 
    end interface
 
@@ -61,7 +60,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_int)                         :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetMatrixFree_mine
+         PetscErrorCode  :: PCPFLAREINVGetMatrixFree_mine
       end function PCPFLAREINVGetMatrixFree_mine 
    end interface    
 
@@ -70,12 +69,11 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVGetPolyCoeffs")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-#include "finclude/PETSc_ISO_Types.h"
          integer(c_long_long), value               :: A_array
          type(c_ptr), intent(out)                  :: coeffs_ptr
-         integer(PFLARE_PETSCINT_C_KIND), intent(out) :: rows
-         integer(PFLARE_PETSCINT_C_KIND), intent(out) :: cols
-         integer(PFLARE_PETSCERRORCODE_C_KIND)     :: PCPFLAREINVGetPolyCoeffs_mine
+         PetscInt, intent(out) :: rows
+         PetscInt, intent(out) :: cols
+         PetscErrorCode     :: PCPFLAREINVGetPolyCoeffs_mine
       end function PCPFLAREINVGetPolyCoeffs_mine
    end interface
 
@@ -86,7 +84,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_int), intent(out)            :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetReusePolyCoeffs_mine
+         PetscErrorCode  :: PCPFLAREINVGetReusePolyCoeffs_mine
       end function PCPFLAREINVGetReusePolyCoeffs_mine
    end interface
 
@@ -97,7 +95,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_long_long), intent(out)      :: mat_array
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVGetInverseMat_mine
+         PetscErrorCode  :: PCPFLAREINVGetInverseMat_mine
       end function PCPFLAREINVGetInverseMat_mine
    end interface
 
@@ -111,8 +109,8 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(PFLARE_PETSCINT_C_KIND), value :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetPolyOrder_mine
+         PetscInt, value :: b
+         PetscErrorCode  :: PCPFLAREINVSetPolyOrder_mine
       end function PCPFLAREINVSetPolyOrder_mine 
    end interface
    
@@ -122,8 +120,8 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(PFLARE_PETSCINT_C_KIND), value :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetSparsityOrder_mine
+         PetscInt, value :: b
+         PetscErrorCode  :: PCPFLAREINVSetSparsityOrder_mine
       end function PCPFLAREINVSetSparsityOrder_mine 
    end interface    
 
@@ -134,7 +132,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_int), value                  :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetType_mine
+         PetscErrorCode  :: PCPFLAREINVSetType_mine
       end function PCPFLAREINVSetType_mine 
    end interface
 
@@ -145,7 +143,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_int), value                  :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetMatrixFree_mine
+         PetscErrorCode  :: PCPFLAREINVSetMatrixFree_mine
       end function PCPFLAREINVSetMatrixFree_mine 
    end interface  
 
@@ -154,12 +152,11 @@ module pcpflareinv_interfaces
          bind(c, name="PCPFLAREINVSetPolyCoeffs")
          use iso_c_binding
 #include "finclude/pflare_types.h"
-#include "finclude/PETSc_ISO_Types.h"
          integer(c_long_long), value               :: A_array
          type(c_ptr), value                        :: coeffs_ptr
-         integer(PFLARE_PETSCINT_C_KIND), value    :: rows
-         integer(PFLARE_PETSCINT_C_KIND), value    :: cols
-         integer(PFLARE_PETSCERRORCODE_C_KIND)     :: PCPFLAREINVSetPolyCoeffs_mine
+         PetscInt, value    :: rows
+         PetscInt, value    :: cols
+         PetscErrorCode     :: PCPFLAREINVSetPolyCoeffs_mine
       end function PCPFLAREINVSetPolyCoeffs_mine
    end interface
 
@@ -170,7 +167,7 @@ module pcpflareinv_interfaces
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
          integer(c_int), value                  :: b
-         integer(PFLARE_PETSCERRORCODE_C_KIND)  :: PCPFLAREINVSetReusePolyCoeffs_mine
+         PetscErrorCode  :: PCPFLAREINVSetReusePolyCoeffs_mine
       end function PCPFLAREINVSetReusePolyCoeffs_mine
    end interface
 
@@ -265,7 +262,6 @@ module pcpflareinv_interfaces
       ! coeffs(:,1) = real roots (or power/arnoldi coefficients)
       ! coeffs(:,2) = imaginary roots (Newton basis only)
 
-#include "finclude/PETSc_ISO_Types.h"
 
       ! ~~~~~~~~~~
       type(tPC), intent(in)                                :: pc
@@ -274,8 +270,8 @@ module pcpflareinv_interfaces
 
       integer(c_long_long) :: pc_ptr
       type(c_ptr) :: coeffs_c_ptr
-      integer(PFLARE_PETSCINT_C_KIND) :: rows, cols
-      real(PFLARE_PETSCREAL_C_KIND), pointer :: coeffs_f(:,:)
+      PetscInt :: rows, cols
+      PetscReal, pointer :: coeffs_f(:,:)
       ! ~~~~~~~~~~
 
       pc_ptr = pc%v
@@ -435,7 +431,6 @@ module pcpflareinv_interfaces
       ! PCPFLAREINVSetReusePolyCoeffs(pc, PETSC_TRUE) and then KSPSolve
       ! to apply them.
 
-#include "finclude/PETSc_ISO_Types.h"
 
       ! ~~~~~~~~~~
       type(tPC), intent(in)                                :: pc
@@ -443,12 +438,12 @@ module pcpflareinv_interfaces
       PetscErrorCode, intent(inout)                       :: ierr
 
       integer(c_long_long) :: pc_ptr
-      integer(PFLARE_PETSCINT_C_KIND) :: rows, cols
+      PetscInt :: rows, cols
       ! ~~~~~~~~~~
 
       pc_ptr = pc%v
-      rows   = int(size(coeffs, 1), PFLARE_PETSCINT_C_KIND)
-      cols   = int(size(coeffs, 2), PFLARE_PETSCINT_C_KIND)
+      rows   = int(size(coeffs, 1), PETSC_INT_KIND)
+      cols   = int(size(coeffs, 2), PETSC_INT_KIND)
       ierr   = PCPFLAREINVSetPolyCoeffs_mine(pc_ptr, c_loc(coeffs(1,1)), rows, cols)
 
    end subroutine PCPFLAREINVSetPolyCoeffs

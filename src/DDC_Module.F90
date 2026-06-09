@@ -11,7 +11,6 @@ module ddc_module
    use matdiagdom, only: MatDiagDomRatio
 
 #include "petsc/finclude/petscmat.h"
-#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 

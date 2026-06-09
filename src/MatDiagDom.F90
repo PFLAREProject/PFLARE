@@ -8,7 +8,6 @@ module matdiagdom
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
-#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 

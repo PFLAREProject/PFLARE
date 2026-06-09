@@ -10,7 +10,6 @@ module pmisr_module
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
-#include "finclude/PETSc_ISO_Types.h"
 
    implicit none
 
@@ -292,8 +291,8 @@ module pmisr_module
       integer :: comm_rank, errorcode       
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable :: in_set_this_loop
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
+      PetscBool, dimension(:), allocatable :: in_set_this_loop
+      PetscBool, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
       type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
       real(c_double), pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
@@ -710,9 +709,9 @@ module pmisr_module
       integer :: comm_rank, errorcode
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: in_set_this_loop
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
-      PFLARE_PETSCBOOL_C_TYPE, dimension(:), allocatable, target :: veto_local, veto_nonlocal
+      PetscBool, dimension(:), allocatable, target :: in_set_this_loop
+      PetscBool, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
+      PetscBool, dimension(:), allocatable, target :: veto_local, veto_nonlocal
       type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
       type(c_ptr) :: veto_local_ptr=c_null_ptr, veto_nonlocal_ptr=c_null_ptr, in_set_ptr=c_null_ptr
       real(c_double), pointer :: measure_nonlocal(:) => null()
