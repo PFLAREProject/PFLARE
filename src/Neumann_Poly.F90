@@ -56,8 +56,71 @@ module neumann_poly
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine petsc_matvec_jacobi_mf(mat, x, y)
+
+      ! Applies the matrix-free Neumann polynomial inverse as a sequence of
+      ! unweighted Jacobi iterations from a zero initial guess. With the input vector
+      ! x taken as the rhs b, m = size(coefficients) = poly_order + 1 sweeps of
+      !   x_{k+1} = x_k + D^-1 (b - A x_k),   x_0 = 0
+      ! produce exactly y = (sum_{k=0}^{m-1} (I - D^-1 A)^k) D^-1 x, which is the
+      ! same operator as petsc_matvec_right_scale_poly_mf applies via Horner for a
+      ! Neumann polynomial (coefficients all 1). This form avoids the explicit
+      ! identity term (the extra VecAXPBY in petsc_matvec_ida_neumann_poly_mf) and
+      ! the per-order Horner copy/add, so it does fewer vector operations.
+      ! y = A x
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      type(tVec) :: x
+      type(tVec) :: y
+
+      ! Local
+      integer :: m, k, errorcode
+      PetscErrorCode :: ierr
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatShellGetContext(mat, mat_ctx, ierr)
+      if (.NOT. associated(mat_ctx%coefficients)) then
+         print *, "Polynomial coefficients in context aren't found"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Number of Jacobi sweeps = number of Neumann terms = poly_order + 1
+      m = size(mat_ctx%coefficients)
+
+      ! ~~~~~~~~~~~~
+      ! p = D^-1 x is stored in MF_VEC_RHS - this is the first Jacobi iterate x_1
+      ! (one sweep from a zero guess)
+      ! ~~~~~~~~~~~~
+      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
+               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+      call VecCopy(mat_ctx%mf_temp_vec(MF_VEC_RHS), y, ierr)
+
+      ! ~~~~~~~~~~~~
+      ! Remaining m-1 iterations: y = y + D^-1 (x - A y) = p - D^-1 A y + y
+      ! ~~~~~~~~~~~~
+      do k = 2, m
+
+         ! t = A y
+         call MatMult(mat_ctx%mat, y, mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+         ! t = D^-1 A y
+         call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_TEMP), &
+                  mat_ctx%mf_temp_vec(MF_VEC_TEMP), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+         ! y = p - t + y in a single pass (z = alpha*x + beta*y + gamma*z)
+         call VecAXPBYPCZ(y, 1d0, -1d0, 1d0, mat_ctx%mf_temp_vec(MF_VEC_RHS), &
+                  mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+      end do
+
+   end subroutine petsc_matvec_jacobi_mf
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                  buffers, poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
+                  buffers, poly_sparsity_order, matrix_free, use_jacobi, reuse_mat, reuse_submatrices, inv_matrix)
 
 
       ! Builds an assembled neumann polynomial approximate inverse
@@ -71,6 +134,7 @@ module neumann_poly
       type(tsqr_buffers), intent(inout)   :: buffers
       integer, intent(in)                 :: poly_sparsity_order
       logical, intent(in)                 :: matrix_free
+      logical, intent(in)                 :: use_jacobi
       type(tMat), intent(inout)           :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
 
@@ -118,9 +182,17 @@ module neumann_poly
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
                         mat_ctx, inv_matrix, ierr)
             ! The subroutine petsc_matvec_right_scale_poly_mf applies
-            ! q(mat) D^-1
-            call MatShellSetOperation(inv_matrix, &
-                        MATOP_MULT, petsc_matvec_right_scale_poly_mf, ierr)
+            ! q(mat) D^-1 via a Horner iteration. petsc_matvec_jacobi_mf applies
+            ! the exact same operator as a sequence of Jacobi iterations, but with
+            ! fewer vector operations - we use it everywhere except the coarsest
+            ! grid (see use_jacobi)
+            if (use_jacobi) then
+               call MatShellSetOperation(inv_matrix, &
+                           MATOP_MULT, petsc_matvec_jacobi_mf, ierr)
+            else
+               call MatShellSetOperation(inv_matrix, &
+                           MATOP_MULT, petsc_matvec_right_scale_poly_mf, ierr)
+            end if
 
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)

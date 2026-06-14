@@ -384,7 +384,8 @@ module approx_inverse_setup
    subroutine finish_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   buffers, coefficients, &
-                  matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, inv_matrix)
+                  matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, inv_matrix, &
+                  coarsest)
 
       ! Finish the assembly of an approximate inverse
 
@@ -392,13 +393,17 @@ module approx_inverse_setup
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: inverse_type, poly_order
       integer, intent(in)                               :: inverse_sparsity_order
-      type(tsqr_buffers), intent(inout)                 :: buffers      
+      type(tsqr_buffers), intent(inout)                 :: buffers
       PetscReal, dimension(:, :), pointer, contiguous, intent(inout) :: coefficients
       logical, intent(in)                               :: matrix_free, diag_scale_polys
       type(tMat), intent(inout)                         :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
+      ! The coarsest grid applies the matrix-free Neumann inverse directly to the
+      ! rhs, so we leave it on the Horner path and only switch the other levels
+      ! (the smoother / grid-transfer inverses) to the cheaper Jacobi-sweep form
+      logical, intent(in), optional                     :: coarsest
 
-      logical :: incomplete
+      logical :: incomplete, coarsest_local, use_jacobi
       PetscErrorCode :: ierr
       integer :: errorcode
 #if defined(PETSC_USE_MPI_F08)
@@ -407,10 +412,16 @@ module approx_inverse_setup
       MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
 #endif
 
-      ! ~~~~~~    
+      ! ~~~~~~
+
+      coarsest_local = .FALSE.
+      if (present(coarsest)) coarsest_local = coarsest
+      ! Use the Jacobi-sweep form of the matrix-free Neumann inverse on every
+      ! level except the coarsest grid
+      use_jacobi = matrix_free .AND. .NOT. coarsest_local
 
       ! ~~~~~~~~~~~~
-      ! For any calculations started in start_approximate_inverse that happen on 
+      ! For any calculations started in start_approximate_inverse that happen on
       ! a subcomm, we need to finish the broadcasts
       ! ~~~~~~~~~~~~
       if (buffers%on_subcomm .AND. buffers%request /= MPI_REQUEST_NULL) then
@@ -449,7 +460,7 @@ module approx_inverse_setup
 
          coefficients = 1d0
          call calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                     buffers, inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)        
+                     buffers, inverse_sparsity_order, matrix_free, use_jacobi, reuse_mat, reuse_submatrices, inv_matrix)
                  
       ! Sparse approximate inverse
       else if (inverse_type == PFLAREINV_SAI .OR. inverse_type == PFLAREINV_ISAI) then
