@@ -2,7 +2,7 @@ module gmres_poly_newton
 
    use petscmat
    use gmres_poly
-   use c_petsc_interfaces, only: MatSeqAIJGetArrayF90_mine, mat_mult_powers_share_sparsity_kokkos
+   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
 
 #include "petsc/finclude/petscmat.h"   
 
@@ -1231,7 +1231,6 @@ end if
       type(tMat) :: Ad, Ao, mat_sparsity_match, mat_product_save
       PetscInt, dimension(:), pointer :: colmap
       logical :: deallocate_submatrices = .FALSE.
-      type(c_ptr) :: vals_c_ptr
       type(int_vec), dimension(:), allocatable :: symbolic_ones
       type(real_vec), dimension(:), allocatable :: symbolic_vals
       integer(c_long_long) A_array
@@ -1239,7 +1238,7 @@ end if
       PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp, temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
       PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
-      real(c_double), pointer :: submatrices_vals(:)
+      PetscScalar, pointer :: submatrices_vals(:)
       logical :: reuse_triggered
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       PetscInt, parameter :: one = 1, zero = 0
@@ -1454,14 +1453,10 @@ end if
          print *, "Pointers not set in call to MatGetRowIJF"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
-      ! Returns the wrong size pointer and can break if that size goes negative??
-      !call MatSeqAIJGetArrayF90(reuse_submatrices(1),submatrices_vals,ierr);
-      A_array = reuse_submatrices(1)%v
-      ! Now we must never overwrite the values in this pointer, and we must 
-      ! never call restore on it, see comment on top of the commented out
-      ! MatSeqAIJRestoreArray below
-      call MatSeqAIJGetArrayF90_mine(A_array, vals_c_ptr)
-      call c_f_pointer(vals_c_ptr, submatrices_vals, shape=[size(submatrices_ja)])
+      ! Read-only access to the value array - the read variant doesn't bump
+      ! the matrix object state, so passing in e.g. a pc->pmat won't trigger
+      ! a spurious pc re-setup on every iteration
+      call MatSeqAIJGetArrayRead(reuse_submatrices(1), submatrices_vals, ierr)
       
       ! ~~~~~~~~~~
       
@@ -1763,17 +1758,8 @@ end if
          deallocate(symbolic_vals, symbolic_ones)  
       end do
 
-      call MatRestoreRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr) 
-      ! We very deliberately don't call restorearray here!
-      ! There is no matseqaijgetarrayread or matseqaijrestorearrayread in Fortran
-      ! Those routines don't increment the PetscObjectStateGet which tells petsc
-      ! the mat has changed. Hence above we directly access the data pointer with 
-      ! a call to MatSeqAIJGetArrayF90_mine and then never write into it
-      ! If we call the restorearrayf90, that does increment the object state
-      ! even though we only read from the array
-      ! That would mean if we pass in a pc->pmat for example, just setting up a pc
-      ! would trigger petsc setting up the pc on every iteration of the pc
-      ! call MatSeqAIJRestoreArray(reuse_submatrices(1),submatrices_vals,ierr);
+      call MatRestoreRowIJ(reuse_submatrices(1),shift,symmetric,inodecompressed,n,submatrices_ia,submatrices_ja,done,ierr)
+      call MatSeqAIJRestoreArrayRead(reuse_submatrices(1), submatrices_vals, ierr)
 
       ! ~~~~~~~~~~~
 

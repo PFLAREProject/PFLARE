@@ -4,7 +4,7 @@ module matdiagdom
    use petscmat
    use petsc_helper, only: kokkos_debug
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos, &
-         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, MatSeqAIJGetArrayF90_mine
+         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
@@ -119,14 +119,15 @@ module matdiagdom
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer(c_long_long) :: A_array, vec_long, Ad_array, Ao_array
+      integer(c_long_long) :: A_array, vec_long
       type(tMat) :: Ad, Ao
       type(tVec) :: cf_markers_vec
       PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
       PetscInt, dimension(:), pointer :: ad_ia => null(), ad_ja => null(), ao_ia => null(), ao_ja => null()
-      PetscReal, dimension(:), pointer :: ad_vals => null(), ao_vals => null(), cf_markers_nonlocal => null()
+      PetscScalar, dimension(:), pointer :: ad_vals => null(), ao_vals => null()
+      PetscReal, dimension(:), pointer :: cf_markers_nonlocal => null()
       PetscReal, dimension(:), allocatable, target :: cf_markers_local_real
-      type(c_ptr) :: ad_vals_c_ptr, ao_vals_c_ptr, cf_markers_nonlocal_ptr
+      type(c_ptr) :: cf_markers_nonlocal_ptr
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       PetscReal :: diag_val, off_diag_sum
@@ -171,17 +172,13 @@ module matdiagdom
          end if
       end if
 
-      Ad_array = Ad%v
-      call MatSeqAIJGetArrayF90_mine(Ad_array, ad_vals_c_ptr)
-      call c_f_pointer(ad_vals_c_ptr, ad_vals, shape=[size(ad_ja)])
+      call MatSeqAIJGetArrayRead(Ad, ad_vals, ierr)
 
       ! Off-diagonal rows require a halo exchange of cf markers.
       ! Start and finish the scatter once, then reuse the received nonlocal markers
       ! while looping over all local fine rows.
       if (mpi) then
-         Ao_array = Ao%v
-         call MatSeqAIJGetArrayF90_mine(Ao_array, ao_vals_c_ptr)
-         call c_f_pointer(ao_vals_c_ptr, ao_vals, shape=[size(ao_ja)])
+         call MatSeqAIJGetArrayRead(Ao, ao_vals, ierr)
 
          allocate(cf_markers_local_real(local_rows))
          if (local_rows > 0) cf_markers_local_real = dble(cf_markers_local(1:local_rows))
@@ -240,8 +237,10 @@ module matdiagdom
       end if
 
       ! Restore CSR pointers before returning.
+      call MatSeqAIJRestoreArrayRead(Ad, ad_vals, ierr)
       call MatRestoreRowIJ(Ad, shift, symmetric, inodecompressed, n_ad, ad_ia, ad_ja, done, ierr)
       if (mpi) then
+         call MatSeqAIJRestoreArrayRead(Ao, ao_vals, ierr)
          call MatRestoreRowIJ(Ao, shift, symmetric, inodecompressed, n_ao, ao_ia, ao_ja, done, ierr)
       end if
 
