@@ -67,6 +67,9 @@ module ddc_module
          return
       end if
 
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank_ddc, errorcode_ddc)
+
       ! Compute the diagonal dominance ratio - either returned in diag_dom_ratio
       ! or stored in a device copy for kokkos
       ! max_dd_ratio_achieved is always returned and is the max diag dom ratio across
@@ -85,8 +88,6 @@ module ddc_module
       random_numbers_ptr = c_null_ptr
       if (trigger_dd_ratio_compute_local) then
          
-         call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
-         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank_ddc, errorcode_ddc)
          call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
          ! We allocate randoms here to be the size of input, rather than 
          ! just F points as if we are on the device the is_fine won't be allocated
@@ -152,7 +153,8 @@ module ddc_module
             call copy_cf_markers_d2h(cf_markers_local_ptr)
             if (trigger_dd_ratio_compute_local) then
                call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-                  diag_dom_ratio, cf_markers_local_two, Aff=Aff_ddc, &
+                  diag_dom_ratio, cf_markers_local_two, &
+                  Aff=Aff_ddc, &
                   diag_dom_ratio_random=diag_dom_ratio_random)
             else
                call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
@@ -227,6 +229,10 @@ module ddc_module
       !  for swapping C to F based on row-wise diagonal dominance (ie alpha_diag)
       ! If fraction_swap > 0 it uses fraction_swap as the local fraction of worst C points to swap to F
       !  though it won't hit that fraction exactly as we bin the diag dom ratios for speed, it will be close to the fraction
+      !
+      ! When Aff is present and the trigger path runs, the halo scatters inside
+      ! pmisr_existing_measure_implicit_transpose use Aff's own mult PetscSF
+      ! (obtained via MatGetMultPetscSF), so nothing needs to be forwarded here.
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
@@ -381,7 +387,8 @@ module ddc_module
          ! Uses the implicit transpose version which takes Aff directly
          ! and handles Aff+Aff^T internally without forming the explicit sum
          max_luby_steps = -1
-         call pmisr_existing_measure_implicit_transpose(Aff, max_luby_steps, .FALSE., &
+         call pmisr_existing_measure_implicit_transpose(Aff, &
+                  max_luby_steps, .FALSE., &
                   diag_dom_ratio_measure, cf_markers_local_aff)
 
          ! Let's go and swap the badly diagonally dominant rows to F points

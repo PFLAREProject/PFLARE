@@ -1,8 +1,6 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
 #include <iostream>
-#include <../src/mat/impls/aij/seq/aij.h>
-#include <../src/mat/impls/aij/mpi/mpiaij.h>
 
 // The definition of the device copy of the cf markers on a given level 
 // is stored in Device_Datak.kokkos.cxx and imported as extern from 
@@ -101,7 +99,7 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
 
          // Call PMISR with implicit transpose - takes Aff directly, handles Aff+Aff^T internally
          // pmis_int=0 means PMISR, zero_measure_c_point_int=0
-         pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);
+         pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);  // halo SF obtained from aff via MatGetMultPetscSF inside the callee
 
          // Swap F-tagged points back into cf_markers_d
          Kokkos::parallel_for(

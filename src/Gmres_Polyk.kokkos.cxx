@@ -159,28 +159,39 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscCallVoid(MatShift(*output_mat, coefficients[0]));
 
    // ~~~~~~~~~~~~
-   // Get pointers to the i,j,vals on the device
+   // Get pointers to the i,j on the device and Kokkos views to the values
    // This should happen after all the (potentially) host matscale, mataxpy and matshift above
    // ~~~~~~~~~~~~
    const PetscInt *device_submat_i = nullptr, *device_submat_j = nullptr;
    PetscMemType mtype;
-   PetscScalar *device_submat_vals = nullptr;  
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(submatrices[0], &device_submat_i, &device_submat_j, &device_submat_vals, &mtype));  
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(submatrices[0], &device_submat_i, &device_submat_j, NULL, &mtype));
+   Kokkos::View<const PetscScalar *> device_submat_vals;
+   PetscCallVoid(MatSeqAIJGetKokkosView(submatrices[0], &device_submat_vals));
 
    const PetscInt *device_local_i_input = nullptr, *device_local_j_input = nullptr, *device_nonlocal_i_input = nullptr, *device_nonlocal_j_input = nullptr;
-   PetscScalar *device_local_vals_input = nullptr, *device_nonlocal_vals_input = nullptr;  
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_input, &device_local_i_input, &device_local_j_input, &device_local_vals_input, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_input, &device_nonlocal_i_input, &device_nonlocal_j_input, &device_nonlocal_vals_input, &mtype));
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_input, &device_local_i_input, &device_local_j_input, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_input, &device_nonlocal_i_input, &device_nonlocal_j_input, NULL, &mtype));
+   Kokkos::View<const PetscScalar *> device_local_vals_input;
+   Kokkos::View<const PetscScalar *> device_nonlocal_vals_input;
+   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local_input, &device_local_vals_input));
+   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_input, &device_nonlocal_vals_input));
 
    const PetscInt *device_local_i_sparsity = nullptr, *device_local_j_sparsity = nullptr, *device_nonlocal_i_sparsity = nullptr, *device_nonlocal_j_sparsity = nullptr;
-   PetscScalar *device_local_vals_sparsity = nullptr, *device_nonlocal_vals_sparsity = nullptr;  
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_sparsity, &device_local_i_sparsity, &device_local_j_sparsity, &device_local_vals_sparsity, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_sparsity, &device_nonlocal_i_sparsity, &device_nonlocal_j_sparsity, &device_nonlocal_vals_sparsity, &mtype));
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_sparsity, &device_local_i_sparsity, &device_local_j_sparsity, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_sparsity, &device_nonlocal_i_sparsity, &device_nonlocal_j_sparsity, NULL, &mtype));
+   Kokkos::View<const PetscScalar *> device_local_vals_sparsity;
+   Kokkos::View<const PetscScalar *> device_nonlocal_vals_sparsity;
+   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local_sparsity, &device_local_vals_sparsity));
+   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_sparsity, &device_nonlocal_vals_sparsity));
 
    const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_output = nullptr, *device_nonlocal_j_output = nullptr;
-   PetscScalar *device_local_vals_output = nullptr, *device_nonlocal_vals_output = nullptr;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, &device_local_vals_output, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, &device_nonlocal_vals_output, &mtype));
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, NULL, &mtype));
+   // Output values are accumulated into via += so we need read-write access
+   Kokkos::View<PetscScalar *> device_local_vals_output;
+   Kokkos::View<PetscScalar *> device_nonlocal_vals_output;
+   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local_output, &device_local_vals_output));
+   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
 
    // ~~~~~~~~~~~~~~
    // Build a mapping from the input matrix's nonlocal column indices to the 
@@ -347,12 +358,12 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
          // Fill vals_prev
          if (j < local_cols_row_i)
          {
-            vals_prev[j] = device_local_vals_sparsity[device_local_i_sparsity[i] + j];
+            vals_prev[j] = device_local_vals_sparsity(device_local_i_sparsity[i] + j);
          }
          // Nonlocal part
          else
          {
-            vals_prev[j] = device_nonlocal_vals_sparsity[device_nonlocal_i_sparsity[i] + (j - local_cols_row_i)];
+            vals_prev[j] = device_nonlocal_vals_sparsity(device_nonlocal_i_sparsity[i] + (j - local_cols_row_i));
          }
       });
       
@@ -485,16 +496,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
                      {
                         if (idx_col_of_row_j < local_cols_row_of_col_j)
                         {
-                           val_target = device_local_vals_input[device_local_i_input[row_of_col_j] + idx_col_of_row_j];
+                           val_target = device_local_vals_input(device_local_i_input[row_of_col_j] + idx_col_of_row_j);
                         }
                         else
                         {
-                           val_target = device_nonlocal_vals_input[device_nonlocal_i_input[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j];
+                           val_target = device_nonlocal_vals_input(device_nonlocal_i_input[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j);
                         }
                      }
                      else
                      {
-                        val_target = device_submat_vals[device_submat_i[row_of_col_j] + idx_col_of_row_j];
+                        val_target = device_submat_vals(device_submat_i[row_of_col_j] + idx_col_of_row_j);
                      }
 
                      // Has to be atomic! Potentially lots of contention so maybe not 
@@ -534,12 +545,12 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
                   {
                      diag_increm = 1;
                   }
-                  device_local_vals_output[device_local_i_output[i] + j + diag_increm] += coeff_term * vals_temp[j];
+                  device_local_vals_output(device_local_i_output[i] + j + diag_increm) += coeff_term * vals_temp[j];
                }
                // Nonlocal part
                else
                {
-                  device_nonlocal_vals_output[device_nonlocal_i_output[i] + (j - local_cols_row_i)] += coeff_term * vals_temp[j];
+                  device_nonlocal_vals_output(device_nonlocal_i_output[i] + (j - local_cols_row_i)) += coeff_term * vals_temp[j];
                }
             }
 
@@ -552,27 +563,19 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       }
    });
     
-   Mat_SeqAIJKokkos *aijkok_local_output = static_cast<Mat_SeqAIJKokkos *>(mat_local_output->spptr);
-   Mat_SeqAIJKokkos *aijkok_nonlocal_output = NULL;
-   if (mpi) aijkok_nonlocal_output = static_cast<Mat_SeqAIJKokkos *>(mat_nonlocal_output->spptr);   
-
    Kokkos::fence();
 
-   // Have to specify we've modifed data on the device
-   // Want to call MatSeqAIJKokkosModifyDevice but its PETSC_INTERN
-   aijkok_local_output->a_dual.clear_sync_state();
-   aijkok_local_output->a_dual.modify_device();
-   aijkok_local_output->transpose_updated = PETSC_FALSE;
-   aijkok_local_output->hermitian_updated = PETSC_FALSE;
-   // Invalidate diagonals
-   if (mpi)
-   {
-      aijkok_nonlocal_output->a_dual.clear_sync_state();
-      aijkok_nonlocal_output->a_dual.modify_device();
-      aijkok_nonlocal_output->transpose_updated = PETSC_FALSE;
-      aijkok_nonlocal_output->hermitian_updated = PETSC_FALSE;
-   }      
-   PetscCallVoid(PetscObjectStateIncrease((PetscObject)(*output_mat)));   
+   // Restore the read-only input/sparsity/submat views
+   PetscCallVoid(MatSeqAIJRestoreKokkosView(submatrices[0], &device_submat_vals));
+   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local_input, &device_local_vals_input));
+   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_input, &device_nonlocal_vals_input));
+   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local_sparsity, &device_local_vals_sparsity));
+   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_sparsity, &device_nonlocal_vals_sparsity));
+
+   // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
+   // marks device modified, invalidates transpose/hermitian, bumps object state).
+   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local_output, &device_local_vals_output));
+   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
 
    for (int i = 1; i < poly_sparsity_order; i++)
    {

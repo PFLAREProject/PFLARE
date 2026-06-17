@@ -1,8 +1,6 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
 #include <iostream>
-#include <../src/mat/impls/aij/seq/aij.h>
-#include <../src/mat/impls/aij/mpi/mpiaij.h>
 
 // The definition of the device copy of the cf markers on a given level 
 // is stored in Device_Datak.kokkos.cxx and imported as extern from 
@@ -21,24 +19,26 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    MPI_Comm MPI_COMM_MATRIX;
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
 
-   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;   
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
    PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols)); 
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
 
-   Mat_MPIAIJ *mat_mpi = nullptr;
-   Mat mat_local = NULL, mat_nonlocal = NULL;   
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+   // The matrix's own mult SF (the borrowed mvctx) drives the halo scatter;
+   // we build a matching leaf Vec locally and destroy it once done.
+   PetscSF sf = NULL;
+   Vec leaf_vec = NULL;
 
    PetscInt rows_ao, cols_ao;
    if (mpi)
    {
-      mat_mpi = (Mat_MPIAIJ *)(*input_mat)->data;
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));      
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
    }
    else
    {
       mat_local = *input_mat;
-   }   
+   }
 
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -70,6 +70,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    {
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
 
+      // Borrowed mult SF + locally-built leaf Vec (sized/typed to match Ao)
+      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
+      PetscCallVoid(MatCreateVecs(mat_nonlocal, &leaf_vec, NULL));
+
       // Scatter cf_markers via VecScatter (int -> PetscScalar conversion required)
       PetscCallVoid(MatCreateVecs(*input_mat, &scatter_root_vec, NULL));
       {
@@ -83,10 +87,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       }
 
       // Start comms, then overlap with local-only work below.
-      // Mvctx must have only one active comm at a time.
+      // The SF must have only one active comm at a time.
       // Ensure send/receive buffers are stable before Begin.
-      Kokkos::fence();      
-      PetscCallVoid(VecScatterBegin(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      Kokkos::fence();
+      PetscCallVoid(VecScatterBegin(sf, scatter_root_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
    }
 
    // ~~~~~~~~~~~~~~~
@@ -158,17 +162,19 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Finish the in-flight scatter and only then read from the receive buffer.
    if (mpi)
    {
-      PetscCallVoid(VecScatterEnd(mat_mpi->Mvctx, scatter_root_vec, mat_mpi->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCallVoid(VecScatterEnd(sf, scatter_root_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
       {
          ConstPetscScalarKokkosView lvec_scalar_d;
-         PetscCallVoid(VecGetKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         PetscCallVoid(VecGetKokkosView(leaf_vec, &lvec_scalar_d));
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
                cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
          });
-         PetscCallVoid(VecRestoreKokkosView(mat_mpi->lvec, &lvec_scalar_d));
+         PetscCallVoid(VecRestoreKokkosView(leaf_vec, &lvec_scalar_d));
       }
       PetscCallVoid(VecDestroy(&scatter_root_vec));
+      PetscCallVoid(VecDestroy(&leaf_vec));
+      PetscCallVoid(MatRestoreMultPetscSF(*input_mat, &sf));
       Kokkos::fence();
    }
 
