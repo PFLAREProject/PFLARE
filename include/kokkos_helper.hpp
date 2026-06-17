@@ -4,17 +4,18 @@
 // petscvec_kokkos.hpp has to go first
 #include <petscvec_kokkos.hpp>
 #include <petscmat_kokkos.hpp>
+#include <petsc_kokkos.hpp>
 #include "petsc.h"
-#include <../src/mat/impls/aij/seq/kokkos/aijkok.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
-#include <../src/vec/vec/impls/seq/kokkos/veckokkosimpl.hpp>
 #include <Kokkos_Random.hpp>
 #include <Kokkos_Core.hpp>
 #include <Kokkos_DualView.hpp>
 #include <KokkosSparse_spadd.hpp>
+#include <KokkosSparse_CrsMatrix.hpp>
 #include <Kokkos_NestedSort.hpp>
 #include <KokkosBatched_Gesv.hpp>
 #include <KokkosBlas2_team_gemv.hpp>
+#include <petsc/private/kokkosimpl.hpp>
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;
 using DefaultMemorySpace    = Kokkos::DefaultExecutionSpace::memory_space;
@@ -23,7 +24,6 @@ using PetscIntConstKokkosViewHost = Kokkos::View<const PetscInt *, HostMirrorMem
 using intKokkosViewHost = Kokkos::View<int *, HostMirrorMemorySpace>;
 using intKokkosView = Kokkos::View<int *, Kokkos::DefaultExecutionSpace>;
 using boolKokkosView = Kokkos::View<bool *, Kokkos::DefaultExecutionSpace>;
-using ConstMatRowMapKokkosView = KokkosCsrGraph::row_map_type::const_type;
 
 // Create views using scratch memory space
 typedef Kokkos::DefaultExecutionSpace::scratch_memory_space
@@ -33,6 +33,8 @@ using ScratchScalarView = Kokkos::View<PetscScalar*, ScratchSpace, Kokkos::Memor
 using Scratch2DIntView = Kokkos::View<PetscInt**, ScratchSpace, Kokkos::MemoryUnmanaged>;
 using Scratch2DScalarView = Kokkos::View<PetscScalar**, ScratchSpace, Kokkos::MemoryUnmanaged>;
 using ViewPetscIntPtr = std::shared_ptr<PetscIntKokkosView>;
+using KokkosTeamMemberType = Kokkos::TeamPolicy<DefaultExecutionSpace>::member_type;
+using KokkosCsrMatrix = KokkosSparse::CrsMatrix<PetscScalar, PetscInt, DefaultMemorySpace, void, PetscInt>;
 
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);

@@ -240,7 +240,9 @@ module constrain_z_or_w
       type(tMat) :: new_z_or_w
       type(c_ptr) :: b_c_nonlocal_c_ptr
       integer(c_long_long) :: A_array, vec_long
+      integer(c_long_long) :: leaf_vec_array
       type(tMat) :: Ad, Ao
+      type(tVec) :: leaf_vec
       PetscInt, dimension(:), pointer :: colmap
       real(c_double), pointer :: b_c_nonlocal(:)
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
@@ -333,16 +335,21 @@ module constrain_z_or_w
          deallocate(b_c_nonlocal_alloc)
          allocate(b_c_nonlocal_alloc(cols_ao, size(null_vecs_c)))
 
+         ! Build a leaf Vec once (sized/typed to match Ao) and reuse it across
+         ! every null-vec iteration. The halo scatter itself uses the matrix's
+         ! own mult PetscSF (via MatGetMultPetscSF inside the C scatter routines),
+         ! and every null_vecs_c(i) shares the column layout of the matrix.
+         call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
+         leaf_vec_array = leaf_vec%v
+
          ! Loop over all the near nullspace vectors and get the nonlocal components
          do null_vec = 1, size(null_vecs_c)
-         
+
             ! We want the nonlocal values in B_c
             vec_long = null_vecs_c(null_vec)%v
 
-            ! Do the comms
-            ! Have to call restore after we're done with lvec (ie null_vecs_c(null_vec))
-            call vecscatter_mat_begin_c(A_array, vec_long, b_c_nonlocal_c_ptr)
-            call vecscatter_mat_end_c(A_array, vec_long, b_c_nonlocal_c_ptr)
+            call vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array)
+            call vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, b_c_nonlocal_c_ptr)
             ! Nonlocal vals only pointer
             ! b_c_nonlocal now contains all the nonlocal values of B_c we need for all the nonlocal columns
             ! in every local row
@@ -351,10 +358,12 @@ module constrain_z_or_w
             ! Copy the values
             b_c_nonlocal_alloc(:, null_vec) = b_c_nonlocal
             ! Make sure to restore as soon as we're done with it
-            call vecscatter_mat_restore_c(A_array, b_c_nonlocal_c_ptr)
+            call vecscatter_mat_restore_c(leaf_vec_array, b_c_nonlocal_c_ptr)
 
          end do
-         
+
+         call VecDestroy(leaf_vec, ierr)
+
       ! In serial this is simple
       else
 
