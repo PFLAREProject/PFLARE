@@ -6,59 +6,6 @@
 #include <petsc.h>
 #include <petsc/private/pcimpl.h>
 
-// Forward scatter using the matrix's own mult PetscSF (the borrowed mvctx) into
-// a caller-owned leaf Vec.
-PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec)
-{
-   PetscSF sf;
-   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
-   PetscCallVoid(VecScatterBegin(sf, *vec_long, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-}
-
-// End the scatter started in vecscatter_mat_begin_c and hand back a raw pointer
-// into leaf_vec for the Fortran caller. Pair with vecscatter_mat_restore_c.
-PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec, PetscScalar **nonlocal_vals)
-{
-   PetscSF sf;
-   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
-   PetscCallVoid(VecScatterEnd(sf, *vec_long, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-   PetscCallVoid(VecGetArray(*leaf_vec, nonlocal_vals));
-}
-
-PETSC_INTERN void vecscatter_mat_restore_c(Vec *leaf_vec, PetscScalar **nonlocal_vals)
-{
-   PetscCallVoid(VecRestoreArray(*leaf_vec, nonlocal_vals));
-}
-
-// Bool scatter / reduce on the matrix's own mult PetscSF (the borrowed mvctx).
-PETSC_INTERN void boolscatter_mat_begin_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
-{
-   PetscSF sf;
-   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
-   PetscCallVoid(PetscSFBcastBegin(sf, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
-}
-
-PETSC_INTERN void boolscatter_mat_end_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
-{
-   PetscSF sf;
-   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
-   PetscCallVoid(PetscSFBcastEnd(sf, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
-}
-
-PETSC_INTERN void boolscatter_mat_reverse_begin_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
-{
-   PetscSF sf;
-   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
-   PetscCallVoid(PetscSFReduceBegin(sf, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
-}
-
-PETSC_INTERN void boolscatter_mat_reverse_end_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
-{
-   PetscSF sf;
-   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
-   PetscCallVoid(PetscSFReduceEnd(sf, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
-}
-
 // Annoying as MPIU_INTEGER is defined in fortran, but not if we call that fortran
 // routine from C - so we have to do the allreduce here
 PETSC_INTERN void allreducesum_petscint_mine(Mat *matrix, PetscInt first_int, PetscInt *return_int)
