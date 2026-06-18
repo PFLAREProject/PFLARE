@@ -1,9 +1,9 @@
 module repartition
 
    use petscmat
-   use c_petsc_interfaces, only: MatGetNNZs_both_c, GenerateIS_ProcAgglomeration_c, &
+   use c_petsc_interfaces, only: GenerateIS_ProcAgglomeration_c, &
          MatPartitioning_c, MatMPICreateNonemptySubcomm_c
-   use petsc_helper, only: MatAXPYWrapper
+   use petsc_helper, only: MatAXPYWrapper, MatGetNNZs_both
    use pflare_parameters, only: PFLARE_ONE
 
 #include "petsc/finclude/petscmat.h"
@@ -40,7 +40,7 @@ module repartition
       ! ~~~~~~  
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)      
-      call MatGetNNZs_both_c(input_mat%v, local_nnzs, off_proc_nnzs)
+      call MatGetNNZs_both(input_mat, local_nnzs, off_proc_nnzs)
       
       ! ~~~~~~~~~~~
       ! Get the ratio of local to non-local nnzs
