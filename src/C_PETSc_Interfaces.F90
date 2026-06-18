@@ -29,19 +29,6 @@ module c_petsc_interfaces
    end interface
 
    interface
-
-      subroutine allreducesum_petscint_mine(A_array, first_int, return_int) &
-            bind(c, name="allreducesum_petscint_mine")
-            use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscInt, value :: first_int
-         PetscInt :: return_int
-
-      end subroutine allreducesum_petscint_mine         
- 
-   end interface      
-
-   interface   
       
       subroutine GenerateIS_ProcAgglomeration_c(proc_stride, global_size, local_size_reduced, start) &
          bind(c, name="GenerateIS_ProcAgglomeration_c")
@@ -79,28 +66,6 @@ module c_petsc_interfaces
  
    end interface
 
-   interface   
-      
-      subroutine MatGetNNZs_local_c(A_array, nnzs) &
-         bind(c, name="MatGetNNZs_local_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscInt :: nnzs
-      end subroutine MatGetNNZs_local_c
- 
-   end interface
-   
-   interface   
-      
-      subroutine MatGetNNZs_both_c(A_array, nnzs_local, nnzs_nonlocal) &
-         bind(c, name="MatGetNNZs_both_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscInt :: nnzs_local, nnzs_nonlocal
-      end subroutine MatGetNNZs_both_c
- 
-   end interface      
-   
    interface   
       
       subroutine c_PCGetStructureFlag(A_array, flag) &
@@ -196,17 +161,6 @@ module c_petsc_interfaces
       end subroutine MatSetAllValues_kokkos         
  
    end interface
-   
-   interface   
-      
-      subroutine MatSetAllValues_cpu(A_array, val) &
-         bind(c, name="MatSetAllValues_cpu")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscReal, value :: val
-      end subroutine MatSetAllValues_cpu
- 
-   end interface     
    
    interface   
       

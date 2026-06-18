@@ -4,10 +4,9 @@ module petsc_helper
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
-         MatSetAllValues_kokkos, MatSetAllValues_cpu, &
+         MatSetAllValues_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
-         MatAXPY_kokkos, MatCreateSubMatrix_kokkos, &
-         MatGetNNZs_both_c
+         MatAXPY_kokkos, MatCreateSubMatrix_kokkos
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -744,22 +743,19 @@ logical, protected :: kokkos_debug_global = .FALSE.
    subroutine MatSetAllValues(input_mat, val)
 
       ! Sets all the values in the matrix to be val
-      ! The fortran interface to MatSeqAIJGetArray is buggy
-      ! so we do this in C and call it from here
    
       ! ~~~~~~~~~~
       ! Input 
       type(tMat), intent(in)  :: input_mat
       PetscScalar, intent(in) :: val
 
-      integer(c_long_long) :: A_array
-#if defined(PETSC_HAVE_KOKKOS)                     
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array                     
       PetscErrorCode :: ierr
       MatType :: mat_type
 #endif        
       ! ~~~~~~~~~~
 
-      A_array = input_mat%v             
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
@@ -767,17 +763,61 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then  
 
-         call MatSetAllValues_kokkos(A_array, val) 
+         A_array = input_mat%v
+         call MatSetAllValues_kokkos(A_array, val)
 
       else
-         call MatSetAllValues_cpu(A_array, val)          
+         call MatSetAllValues_cpu(input_mat, val)          
       end if
 #else
-      call MatSetAllValues_cpu(A_array, val)    
+      call MatSetAllValues_cpu(input_mat, val)    
 #endif        
 
 
    end subroutine MatSetAllValues
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatSetAllValues_cpu(input_mat, val)
+
+      ! Sets all the values in the local and nonlocal parts of input_mat to be val
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)  :: input_mat
+      PetscScalar, intent(in) :: val
+
+      integer :: comm_size, errorcode
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      type(tMat) :: Ad, Ao
+      PetscInt, dimension(:), pointer :: colmap => null()
+      PetscScalar, dimension(:), pointer :: vals => null()
+      ! ~~~~~~~~~~
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+
+      if (comm_size /= 1) then
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr)
+      else
+         Ad = input_mat
+      end if
+
+      ! MatSeqAIJGetArrayWrite returns a pointer sized to exactly the nonzeros,
+      ! so a whole-array assignment sets all the values in the local part
+      call MatSeqAIJGetArrayWrite(Ad, vals, ierr)
+      vals = val
+      call MatSeqAIJRestoreArrayWrite(Ad, vals, ierr)
+
+      ! Now the non-local part
+      if (comm_size /= 1) then
+         call MatSeqAIJGetArrayWrite(Ao, vals, ierr)
+         vals = val
+         call MatSeqAIJRestoreArrayWrite(Ao, vals, ierr)
+      end if
+
+   end subroutine MatSetAllValues_cpu
 
   !------------------------------------------------------------------------------------------------------------------------
    
@@ -1423,7 +1463,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)      
 
       ! Get nnzs without using getrow
-      call MatGetNNZs_both_c(input_mat%v, local_nnzs_petsc, offdiag_nnzs_petsc)      
+      call MatGetNNZs_both(input_mat, local_nnzs_petsc, offdiag_nnzs_petsc)
       local_nnzs = local_nnzs_petsc + offdiag_nnzs_petsc
 
       ! Do an accumulate if in parallel
@@ -1434,6 +1474,57 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end if    
          
    end subroutine get_nnzs_petsc_sparse
+
+   !-------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatGetNNZs_both(input_mat, nnzs_local, nnzs_nonlocal)
+
+      ! Returns the number of nonzeros in the local and nonlocal parts of input_mat
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)  :: input_mat
+      PetscInt, intent(out)   :: nnzs_local, nnzs_nonlocal
+
+      integer :: comm_size, errorcode
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      MatType :: mat_type
+      type(tMat) :: Ad, Ao
+      PetscInt, dimension(:), pointer :: colmap => null(), ia => null(), ja => null()
+      PetscInt :: n, shift = 0
+      PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
+      ! ~~~~~~~~~~
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+      nnzs_nonlocal = 0
+
+      ! A diagonal matrix has one nonzero per row
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATDIAGONAL) then
+         call MatGetLocalSize(input_mat, nnzs_local, PETSC_NULL_INTEGER, ierr)
+         return
+      end if
+
+      if (comm_size /= 1) then
+         call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr)
+      else
+         Ad = input_mat
+      end if
+
+      ! The number of nonzeros is the last entry of the CSR row pointer
+      call MatGetRowIJ(Ad, shift, symmetric, inodecompressed, n, ia, ja, done, ierr)
+      nnzs_local = ia(n + 1)
+      call MatRestoreRowIJ(Ad, shift, symmetric, inodecompressed, n, ia, ja, done, ierr)
+
+      if (comm_size /= 1) then
+         call MatGetRowIJ(Ao, shift, symmetric, inodecompressed, n, ia, ja, done, ierr)
+         nnzs_nonlocal = ia(n + 1)
+         call MatRestoreRowIJ(Ao, shift, symmetric, inodecompressed, n, ia, ja, done, ierr)
+      end if
+
+   end subroutine MatGetNNZs_both
 
    !-------------------------------------------------------------------------------------------------------------------------------
 

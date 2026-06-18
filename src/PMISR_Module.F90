@@ -3,8 +3,7 @@ module pmisr_module
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug
-   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h, &
-         allreducesum_petscint_mine
+   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
@@ -300,7 +299,6 @@ module pmisr_module
       type(tVec) :: measure_vec, leaf_vec
       type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: A_array
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
@@ -437,8 +435,7 @@ module pmisr_module
          ! This is just an allreduce sum, but we can't use MPIU_INTEGER, as if we call the pmisr
          ! cf splitting from C it is not defined - also have to pass the matrix so we can get the comm
          ! given they're different in C and fortran
-         A_array = strength_mat%v
-         call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+         call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
          counter_undecided = counter_parallel
 
       ! If we're doing a fixed number of steps, then we don't care
@@ -624,8 +621,7 @@ module pmisr_module
             ! Count how many are undecided
             counter_undecided =  local_rows - count(assigned_local)
             ! Parallel reduction!
-            A_array = strength_mat%v
-            call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+            call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
             counter_undecided = counter_parallel            
          end if
       end do
@@ -720,7 +716,6 @@ module pmisr_module
       type(tVec) :: measure_vec, leaf_vec
       type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: A_array
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt, dimension(:), pointer :: spst_ia, spst_ja, aot_ia, aot_ja
       PetscInt :: shift = 0
@@ -907,8 +902,7 @@ module pmisr_module
          ! This is just an allreduce sum, but we can't use MPIU_INTEGER, as if we call the pmisr
          ! cf splitting from C it is not defined - also have to pass the matrix so we can get the comm
          ! given they're different in C and fortran
-         A_array = strength_mat%v
-         call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+         call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
          counter_undecided = counter_parallel
 
       ! If we're doing a fixed number of steps, then we don't care
@@ -1186,8 +1180,7 @@ module pmisr_module
             ! Count how many are undecided
             counter_undecided =  local_rows - count(assigned_local)
             ! Parallel reduction!
-            A_array = strength_mat%v
-            call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+            call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
             counter_undecided = counter_parallel
          end if
       end do
