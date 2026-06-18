@@ -2,7 +2,6 @@ module constrain_z_or_w
 
    use iso_c_binding
    use petscksp
-   use c_petsc_interfaces, only: vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
    use petsc_helper, only: pseudo_inv
 
 #include "petsc/finclude/petscksp.h"
@@ -238,13 +237,11 @@ module constrain_z_or_w
       PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: row_vals, diff
       type(tMat) :: new_z_or_w
-      type(c_ptr) :: b_c_nonlocal_c_ptr
-      integer(c_long_long) :: A_array, vec_long
-      integer(c_long_long) :: leaf_vec_array
-      type(tMat) :: Ad, Ao
+      type(tMat) :: Ad, Ao, scatter_mat
       type(tVec) :: leaf_vec
+      type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: colmap
-      real(c_double), pointer :: b_c_nonlocal(:)
+      real(c_double), pointer :: b_c_nonlocal(:) => null()
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0
@@ -316,16 +313,16 @@ module constrain_z_or_w
 
          ! Much more annoying in older petsc
          if (mat_type == "mpiaij") then
-            call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, colmap, ierr) 
-            A_array = row_mat%v
+            call MatMPIAIJGetSeqAIJ(row_mat, Ad, Ao, colmap, ierr)
+            scatter_mat = row_mat
 
          ! If on the gpu, just do a convert to mpiaij format first
-         ! This will be expensive but the best we can do for now without writing our 
-         ! own version of this subroutine in cuda/kokkos               
+         ! This will be expensive but the best we can do for now without writing our
+         ! own version of this subroutine in cuda/kokkos
          else
             call MatConvert(row_mat, MATMPIAIJ, MAT_INITIAL_MATRIX, temp_mat_aij, ierr)
-            call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, colmap, ierr) 
-            A_array = temp_mat_aij%v
+            call MatMPIAIJGetSeqAIJ(temp_mat_aij, Ad, Ao, colmap, ierr)
+            scatter_mat = temp_mat_aij
          end if
 
          call MatGetSize(Ad, rows_ad, cols_ad, ierr)             
@@ -336,32 +333,30 @@ module constrain_z_or_w
          allocate(b_c_nonlocal_alloc(cols_ao, size(null_vecs_c)))
 
          ! Build a leaf Vec once (sized/typed to match Ao) and reuse it across
-         ! every null-vec iteration. The halo scatter itself uses the matrix's
-         ! own mult PetscSF (via MatGetMultPetscSF inside the C scatter routines),
-         ! and every null_vecs_c(i) shares the column layout of the matrix.
+         ! every null-vec iteration. The halo scatter uses the matrix's own mult
+         ! PetscSF (MatGetMultPetscSF), and every null_vecs_c(i) shares the column
+         ! layout of the matrix. Check the SF out once and reuse it for every vec.
          call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
-         leaf_vec_array = leaf_vec%v
+         call MatGetMultPetscSF(scatter_mat, sf, ierr)
 
          ! Loop over all the near nullspace vectors and get the nonlocal components
          do null_vec = 1, size(null_vecs_c)
 
             ! We want the nonlocal values in B_c
-            vec_long = null_vecs_c(null_vec)%v
-
-            call vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array)
-            call vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, b_c_nonlocal_c_ptr)
-            ! Nonlocal vals only pointer
+            call VecScatterBegin(sf, null_vecs_c(null_vec), leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+            call VecScatterEnd(sf, null_vecs_c(null_vec), leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
             ! b_c_nonlocal now contains all the nonlocal values of B_c we need for all the nonlocal columns
             ! in every local row
-            call c_f_pointer(b_c_nonlocal_c_ptr, b_c_nonlocal, shape=[cols_ao])
+            call VecGetArrayRead(leaf_vec, b_c_nonlocal, ierr)
 
             ! Copy the values
             b_c_nonlocal_alloc(:, null_vec) = b_c_nonlocal
             ! Make sure to restore as soon as we're done with it
-            call vecscatter_mat_restore_c(leaf_vec_array, b_c_nonlocal_c_ptr)
+            call VecRestoreArrayRead(leaf_vec, b_c_nonlocal, ierr)
 
          end do
 
+         call MatRestoreMultPetscSF(scatter_mat, sf, ierr)
          call VecDestroy(leaf_vec, ierr)
 
       ! In serial this is simple

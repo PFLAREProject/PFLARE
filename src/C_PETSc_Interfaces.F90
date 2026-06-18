@@ -24,91 +24,10 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_long_long) :: C_array
-      end subroutine mat_mat_symbolic_c         
+      end subroutine mat_mat_symbolic_c
 
    end interface
 
-   interface
-
-      subroutine vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array) &
-         bind(c, name="vecscatter_mat_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long, leaf_vec_array
-
-      end subroutine vecscatter_mat_begin_c
-
-   end interface
-
-   interface
-
-      subroutine vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, cf_markers_nonlocal) &
-         bind(c, name="vecscatter_mat_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long, leaf_vec_array
-         type(c_ptr) :: cf_markers_nonlocal
-
-      end subroutine vecscatter_mat_end_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_begin_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-
-      end subroutine boolscatter_mat_begin_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_end_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-      end subroutine boolscatter_mat_end_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_reverse_begin_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_reverse_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-
-      end subroutine boolscatter_mat_reverse_begin_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_reverse_end_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_reverse_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-      end subroutine boolscatter_mat_reverse_end_c
-
-   end interface
-
-   interface
-
-      subroutine vecscatter_mat_restore_c(leaf_vec_array, cf_markers_nonlocal) &
-         bind(c, name="vecscatter_mat_restore_c")
-         use iso_c_binding
-         integer(c_long_long) :: leaf_vec_array
-         type(c_ptr) :: cf_markers_nonlocal
-
-      end subroutine vecscatter_mat_restore_c
-
-   end interface
-   
    interface
 
       subroutine allreducesum_petscint_mine(A_array, first_int, return_int) &
