@@ -7,16 +7,6 @@
 #include <../src/mat/impls/aij/mpi/mpiaij.h>
 #include <petsc/private/pcimpl.h>
 
-// Set shell vec type - need this for the r, b and rhs it creates during 
-// the mg setup
-PETSC_INTERN void ShellSetVecType_c(Mat *matrix, Mat *shellmatrix)
-{
-   VecType vtype;
-   PetscCallVoid(MatGetVecType(*matrix, &vtype));
-   PetscCallVoid(MatShellSetVecType(*shellmatrix, vtype));
-   return;
-}
-
 // Does a vecscatter according to the pattern in the given Mat
 // Have to do this in C as there is no fortran interface to MatGetCommunicationStructs
 PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, double **nonlocal_vals)

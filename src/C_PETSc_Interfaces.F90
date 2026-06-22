@@ -16,18 +16,8 @@ module c_petsc_interfaces
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
-   interface   
-      
-      subroutine ShellSetVecType_c(A_array, B_array) &
-         bind(c, name="ShellSetVecType_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, B_array
-      end subroutine ShellSetVecType_c         
- 
-   end interface     
+   interface
 
-   interface   
-       
       subroutine mat_mat_symbolic_c(A_array, B_array, C_array) &
          bind(c, name="mat_mat_symbolic_c")
          use iso_c_binding

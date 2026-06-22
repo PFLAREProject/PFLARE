@@ -18,7 +18,7 @@ module approx_inverse_setup
    use weighted_jacobi, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
    use repartition, only: MatMPICreateNonemptySubcomm
-   use petsc_helper, only: destroy_matrix_reuse, ShellSetVecType
+   use petsc_helper, only: destroy_matrix_reuse
    use matshell_data_type, only: mat_ctxtype
 
 #include "petsc/finclude/petscmat.h"
@@ -212,6 +212,7 @@ module approx_inverse_setup
 
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX, MPI_COMM_BUFFERS_MATRIX
+      VecType :: vtype
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       integer :: errorcode
       type(mat_ctxtype), pointer :: mat_ctx_da=>null()
@@ -286,7 +287,8 @@ module approx_inverse_setup
             call MatAssemblyBegin(mat_ctx_da%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(mat_ctx_da%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
             ! Have to make sure to set the type of vectors the shell creates
-            call ShellSetVecType(buffers%matrix, mat_ctx_da%mat_scaled)   
+            call MatGetVecType(buffers%matrix, vtype, ierr)
+            call MatShellSetVecType(mat_ctx_da%mat_scaled, vtype, ierr)
             
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            

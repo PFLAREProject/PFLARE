@@ -2,7 +2,6 @@ module neumann_poly
 
    use petscmat
    use gmres_poly, only: build_gmres_polynomial_inverse, petsc_matvec_right_scale_poly_mf
-   use petsc_helper, only: ShellSetVecType
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: tsqr_buffers
    use pflare_parameters, only: PFLAREINV_NEUMANN, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP
@@ -78,8 +77,9 @@ module neumann_poly
       PetscReal, dimension(:), pointer :: coefficients
       PetscReal, dimension(poly_order + 1), target :: coefficients_stack
       integer :: comm_size, errorcode
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vtype
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       type(tMat) :: temp_mat
       type(tVec) :: rhs_copy, diag_inverse_vec
@@ -125,7 +125,8 @@ module neumann_poly
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             ! Have to make sure to set the type of vectors the shell creates
-            call ShellSetVecType(matrix, inv_matrix)              
+            call MatGetVecType(matrix, vtype, ierr)
+            call MatShellSetVecType(inv_matrix, vtype, ierr)
             
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
@@ -150,7 +151,8 @@ module neumann_poly
             call MatAssemblyBegin(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
             ! Have to make sure to set the type of vectors the shell creates
-            call ShellSetVecType(matrix, mat_ctx%mat_scaled)   
+            call MatGetVecType(matrix, vtype, ierr)
+            call MatShellSetVecType(mat_ctx%mat_scaled, vtype, ierr)
             
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            

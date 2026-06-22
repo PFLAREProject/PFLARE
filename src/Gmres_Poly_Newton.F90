@@ -1807,8 +1807,9 @@ end if
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: comm_size, errorcode
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vtype
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       logical :: reuse_triggered
       type(tMat) :: diag_scaled_mat
@@ -1855,7 +1856,8 @@ end if
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             ! Have to make sure to set the type of vectors the shell creates
-            call ShellSetVecType(matrix, inv_matrix)          
+            call MatGetVecType(matrix, vtype, ierr)
+            call MatShellSetVecType(inv_matrix, vtype, ierr)
             
             ! Create temporary vectors we use during application
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)
@@ -1880,7 +1882,8 @@ end if
                call MatAssemblyBegin(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
                call MatAssemblyEnd(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
                ! Have to make sure to set the type of vectors the shell creates
-               call ShellSetVecType(matrix, mat_ctx%mat_scaled)
+               call MatGetVecType(matrix, vtype, ierr)
+               call MatShellSetVecType(mat_ctx%mat_scaled, vtype, ierr)
             end if            
 
          ! Reusing 
