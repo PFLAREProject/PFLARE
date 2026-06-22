@@ -7,7 +7,7 @@ module petsc_helper
          MatSetAllValues_kokkos, MatSetAllValues_cpu, &
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, &
-         MatGetNNZs_both_c, ShellSetVecType_c
+         MatGetNNZs_both_c
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -1512,24 +1512,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
       end if      
   
-    end subroutine pseudo_inv 
-    
-   !-------------------------------------------------------------------------------------------------------------------------------
-
-    subroutine ShellSetVecType(input_mat, input_mat_shell)
-
-      ! ~~~~~~~~~~~~~~~~
-      type(tMat), intent(in) :: input_mat, input_mat_shell
-
-      integer(c_long_long) :: A_array, B_array
-      ! ~~~~~~~~~~~~~~~~
-
-      A_array = input_mat%v
-      B_array = input_mat_shell%v
-
-      call ShellSetVecType_c(A_array, B_array) 
-  
-    end subroutine ShellSetVecType      
+    end subroutine pseudo_inv
 
    !-------------------------------------------------------------------------------------------------------------------------------
 

@@ -9,7 +9,7 @@ module gmres_poly
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
-   use petsc_helper, only: MatAXPYWrapper, ShellSetVecType, destroy_matrix_reuse, &
+   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
          kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
 
 #include "petsc/finclude/petscmat.h"   
@@ -1488,8 +1488,9 @@ end if
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: comm_size, errorcode, order
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vtype
       type(tMat) :: mat_power, temp_mat, diag_scaled_mat
       type(tVec) :: diag_inverse_vec
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
@@ -1538,7 +1539,8 @@ end if
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr) 
             ! Have to make sure to set the type of vectors the shell creates
-            call ShellSetVecType(matrix, inv_matrix)              
+            call MatGetVecType(matrix, vtype, ierr)
+            call MatShellSetVecType(inv_matrix, vtype, ierr)
 
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
@@ -1561,7 +1563,8 @@ end if
                call MatAssemblyBegin(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)
                call MatAssemblyEnd(mat_ctx%mat_scaled, MAT_FINAL_ASSEMBLY, ierr)   
                ! Have to make sure to set the type of vectors the shell creates
-               call ShellSetVecType(matrix, mat_ctx%mat_scaled)   
+               call MatGetVecType(matrix, vtype, ierr)
+               call MatShellSetVecType(mat_ctx%mat_scaled, vtype, ierr)
                
                ! Create temporary vector we use during horner
                ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
