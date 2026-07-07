@@ -260,6 +260,23 @@ jobs:
             OMP_NUM_THREADS=2
             ARCH=arch-linux-c-opt-omp
             
+  gnu_debug_no_mpi_kokkos:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image with PETSc configured without MPI and with Kokkos
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          push: false
+          context: .
+          file: ./dockerfiles/Dockerfile_no_mpi
+          build-args: |
+            ARCH=arch-linux-c-debug
+
   intel_opt:
     runs-on: ubuntu-22.04
     needs: [setup]

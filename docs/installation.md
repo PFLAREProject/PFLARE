@@ -1,8 +1,10 @@
 ## Installing PFLARE
 
-PFLARE depends on MPI, BLAS, LAPACK and PETSc configured with a graph partitioner (e.g., ParMETIS). PFLARE uses the same compilers and flags defined in the PETSc configure.
+PFLARE depends on BLAS, LAPACK and PETSc. PFLARE uses the same compilers and flags defined in the PETSc configure. PFLARE has been tested on Linux and MacOS, across a range of compilers, including GNU, Intel, LLVM and Cray. 
 
-If you wish to run PFLARE on GPUs you should configure PETSc with Kokkos and the relevant GPU backend. PFLARE has been tested with GNU, Intel, LLVM, NVIDIA and Cray compilers. 
+If you wish to run in parallel, configure PETSc with MPI. For good performance also configure PETSc with a graph partitioner (e.g., ParMETIS).
+
+If you wish to run PFLARE on GPUs, configure PETSc with Kokkos and the relevant GPU backend. 
 
 Please choose one of the build methods below. If you wish to contribute to PFLARE we would recommend building from the source.
 
@@ -22,7 +24,7 @@ PFLARE is available in the Spack package repository and can be installed with:
 
       spack install pflare
 
-This package is currently available in the development branch of the Spack package repository and will be included in a future Spack release. If the package is not yet available in your Spack installation, you can use the PFLARE Spack repository at: https://github.com/PFLAREProject/PFLARE_spack
+This package is available from the v2026.06.0 release of the ``spack-packages`` repository, corresponding to v1.2 of the ``spack`` repository. If the package is not yet available in your Spack installation, you can use the PFLARE Spack repository at: https://github.com/PFLAREProject/PFLARE_spack
 
 ### Source build
 

@@ -37,72 +37,90 @@ export PYTHONPATH := $(PETSCPYTHONPATH):$(CURDIR):$(if $(PYTHONPATH),$(PYTHONPAT
 python:
 	$(PYTHON) setup.py build_ext --inplace
 
-run_tests:
+# Run all the python tests (serial + parallel)
+run_tests: run_tests_serial run_tests_parallel
+
+run_tests_serial:
 	 @if $(PYTHON) -c "import pflare" >/dev/null 2>&1; then \
 		echo ""; \
 		echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python"; \
 		$(PYTHON) ex2.py; \
-		echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex2.py; \
-		echo ""; \
 		echo "Test lAIR with GMRES polynomials for 2D finite difference stencil with Python"; \
 		$(PYTHON) ex2.py -pc_air_z_type lair; \
-		echo "Test lAIR with GMRES polynomials for 2D finite difference stencil with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_air_z_type lair; \
-		echo ""; \
 		echo "Test single level GMRES polynomial preconditioning with Python"; \
 		$(PYTHON) ex2.py -pc_type pflareinv -pc_pflareinv_type power; \
-		echo "Test single level GMRES polynomial preconditioning with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_type pflareinv -pc_pflareinv_type power; \
-		echo ""; \
 		echo "Test PMISR DDC CF splitting and diagonal dominance extract with Python"; \
 		$(PYTHON) ex2_cf_splitting.py; \
-		echo "Test PMISR DDC CF splitting and diagonal dominance extract with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py; \
-		echo ""; \
 		echo "Test PCAIR direct option set/get API with Python"; \
 		$(PYTHON) ex_pcair_options.py && echo "OK"; \
-		echo "Test PCAIR direct option set/get API with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_options.py && echo "OK"; \
-		echo ""; \
 		echo "Test PCAIR complexity getter API with Python"; \
 		$(PYTHON) ex_pcair_complexities.py && echo "OK"; \
-		echo "Test PCAIR complexity getter API with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_complexities.py && echo "OK"; \
-		echo ""; \
 		echo "Test PCPFLAREINV direct option set/get API with Python"; \
 		$(PYTHON) ex_pcpflareinv_options.py && echo "OK"; \
-		echo "Test PCPFLAREINV direct option set/get API with Python in parallel"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex_pcpflareinv_options.py && echo "OK"; \
-		echo ""; \
 		echo "Test save/restore poly coefficients with PCAIR with Python"; \
 		$(PYTHON) ex6f_getcoeffs.py -pc_type air; \
-		echo "Test save/restore poly coefficients with PCAIR in parallel with Python"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type air; \
-		echo ""; \
 		echo "Test save/restore poly coefficients with PCPFLAREINV with Python"; \
 		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv; \
-		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel with Python"; \
-		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv; \
 		echo "Test save/restore poly coefficients with PCPFLAREINV with Python with Newton"; \
 		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type newton; \
+	 else \
+		echo 'Python tests skipped (PFLARE Python module not built or not found)'; \
+	 fi
+
+run_tests_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "Parallel python tests skipped (PETSc configured without MPI)"
+else
+	 @if $(PYTHON) -c "import pflare" >/dev/null 2>&1; then \
+		echo ""; \
+		echo "Test AIRG with GMRES polynomials for 2D finite difference stencil with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex2.py; \
+		echo "Test lAIR with GMRES polynomials for 2D finite difference stencil with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_air_z_type lair; \
+		echo "Test single level GMRES polynomial preconditioning with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex2.py -pc_type pflareinv -pc_pflareinv_type power; \
+		echo "Test PMISR DDC CF splitting and diagonal dominance extract with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex2_cf_splitting.py; \
+		echo "Test PCAIR direct option set/get API with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_options.py && echo "OK"; \
+		echo "Test PCAIR complexity getter API with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex_pcair_complexities.py && echo "OK"; \
+		echo "Test PCPFLAREINV direct option set/get API with Python in parallel"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex_pcpflareinv_options.py && echo "OK"; \
+		echo "Test save/restore poly coefficients with PCAIR in parallel with Python"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type air; \
+		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel with Python"; \
+		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv; \
 		echo "Test save/restore poly coefficients with PCPFLAREINV in parallel with Python with Newton"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type newton; \
 	 else \
 		echo 'Python tests skipped (PFLARE Python module not built or not found)'; \
 	 fi
+endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
-run_check:
+run_check: run_check_serial run_check_parallel
+
+run_check_serial:
 	 @if $(PYTHON) -c "import pflare" >/dev/null 2>&1; then \
 		echo "Python check"; \
 		$(PYTHON) ex2.py -ksp_max_it 5 -on_error_abort && echo "OK" || (echo "FAIL" && exit 1); \
+	 else \
+		echo 'Python check skipped (PFLARE Python module not built or not found)'; \
+	 fi
+
+run_check_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "Parallel Python check skipped (PETSc configured without MPI)"
+else
+	 @if $(PYTHON) -c "import pflare" >/dev/null 2>&1; then \
 		echo "Parallel Python check"; \
 		$(MPIEXEC) -n 2 $(PYTHON) ex2.py -ksp_max_it 5 -on_error_abort && echo "OK" || (echo "FAIL" && exit 1); \
 	 else \
 		echo 'Python check skipped (PFLARE Python module not built or not found)'; \
 	 fi
+endif
 
 # Cleanup
 clean::

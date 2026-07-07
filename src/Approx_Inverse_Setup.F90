@@ -367,16 +367,20 @@ module approx_inverse_setup
             ! Some of the ranks on MPI_COMM_MATRIX will already have the coefficients, but I'm not going 
             ! to bother creating an intercommunicator to send the coefficients from any rank on the comm of buffers%matrix
             ! to the comm of ranks which aren't in MPI_COMM_MATRIX but are in buffers%matrix
-            call MPI_IBcast(coefficients, size(coefficients, 1), MPI_DOUBLE, 0, &
+#if !defined(PETSC_HAVE_MPIUNI)
+            call MPI_IBcast(coefficients, size(coefficients, 1), MPI_DOUBLE_PRECISION, 0, &
                      MPI_COMM_MATRIX, buffers%request, errorcode)
+#endif
 
          ! Gmres polynomial with Newton basis - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
             ! Have to broadcast the 2D real and imaginary roots
-            call MPI_IBcast(coefficients, size(coefficients, 1) * size(coefficients, 2), MPI_DOUBLE, 0, &
+#if !defined(PETSC_HAVE_MPIUNI)
+            call MPI_IBcast(coefficients, size(coefficients, 1) * size(coefficients, 2), MPI_DOUBLE_PRECISION, 0, &
                      MPI_COMM_MATRIX, buffers%request, errorcode)
-         end if    
+#endif
+         end if
       end if  
 
    end subroutine start_approximate_inverse

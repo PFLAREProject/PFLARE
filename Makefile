@@ -65,6 +65,8 @@ endef
 export PETSC_USE_64BIT_INDICES := $(if $(call _have_conf,PETSC_USE_64BIT_INDICES),1,0)
 export PETSC_USE_SHARED_LIBRARIES := $(if $(call _have_conf,PETSC_USE_SHARED_LIBRARIES),1,0)
 export PETSC_HAVE_KOKKOS := $(if $(call _have_conf,PETSC_HAVE_KOKKOS),1,0)
+# Detect if PETSc was configured without MPI
+export PETSC_HAVE_MPIUNI := $(if $(call _have_conf,PETSC_HAVE_MPIUNI),1,0)
 
 # To prevent overlinking with conda builds, only explicitly link 
 # to the libraries we use in pflare

@@ -54,8 +54,13 @@ function wall_time()
    real(kind = c_double):: wall_time
    logical, save :: started=.false.
    real(kind = c_double), save :: wall_time0
+   PetscLogDouble :: current_time
+   PetscErrorCode :: ierr
 
-   wall_time = MPI_Wtime()
+   ! Use PetscTime rather than MPI_Wtime - MPIUNI (PETSc built without MPI) does not
+   ! provide a typed Fortran MPI_Wtime, whereas PetscTime works in serial and parallel
+   call PetscTime(current_time, ierr)
+   wall_time = current_time
    if(.not.started) then
       wall_time0 = wall_time
       wall_time = 0d0

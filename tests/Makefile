@@ -188,6 +188,9 @@ run_tests_load_serial:
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_load_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "Load parallel tests skipped (PETSc configured without MPI)"
+else
 #
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_matrix_free_polys -ksp_max_it 5
@@ -250,7 +253,8 @@ run_tests_load_parallel:
 	done
 #
 	@echo "Test Newton AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in parallel"
-	$(MPIEXEC) -n 2 ./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -pc_air_matrix_free_polys -ksp_max_it 5	
+	$(MPIEXEC) -n 2 ./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -pc_air_matrix_free_polys -ksp_max_it 5
+endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
@@ -674,6 +678,9 @@ run_tests_no_load_serial:
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_short_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "No-load short parallel tests skipped (PETSc configured without MPI)"
+else
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"
@@ -945,13 +952,17 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	@echo "Test AIRG on steady 1D advection in parallel KOKKOS"
 	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
-	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power	
+	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 
+endif
 endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
+else
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets in parallel"
@@ -1022,6 +1033,7 @@ run_tests_no_load_parallel:
 				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 		done; \
 	done
+endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
@@ -1163,6 +1175,9 @@ run_tests_medium_serial:
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_medium_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "Medium parallel tests skipped (PETSc configured without MPI)"
+else
 
 #
 	@echo ""
@@ -1216,7 +1231,8 @@ run_tests_medium_parallel:
 		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
-	done		
+	done
+endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
@@ -1228,15 +1244,23 @@ run_check:
 	@./matrandom -ksp_max_it 5 -on_error_abort  && echo "OK" || (echo "FAIL" && exit 1)	
 	@echo "Serial check"
 	@./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -on_error_abort  && echo "OK" || (echo "FAIL" && exit 1)
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "Parallel check skipped (PETSc configured without MPI)"
+else
 	@echo "Parallel check"
 	@$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -on_error_abort  && echo "OK" || (echo "FAIL" && exit 1)
+endif
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 # 
 	@echo "Serial KOKKOS check"
 	@./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -dm_vec_type kokkos -dm_mat_type aijkokkos -on_error_abort  && echo "OK" || (echo "FAIL" && exit 1)
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "Parallel KOKKOS check skipped (PETSc configured without MPI)"
+else
 	@echo "Parallel KOKKOS check"
 	@$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_max_it 5 -dm_vec_type kokkos -dm_mat_type aijkokkos -on_error_abort  && echo "OK" || (echo "FAIL" && exit 1)
-else	
+endif
+else
 	@echo "KOKKOS check skipped (PETSc has not been configured with KOKKOS)"	
 
 endif	

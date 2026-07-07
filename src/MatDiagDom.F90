@@ -251,7 +251,8 @@ module matdiagdom
       else
          max_dd_ratio_local = maxval(diag_dom_ratio)
       end if
-      call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_MATRIX, errorcode)
+      call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE_PRECISION, &
+                         MPI_MAX, MPI_COMM_MATRIX, errorcode)
 
    end subroutine MatDiagDomRatio_cpu
 

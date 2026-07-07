@@ -216,7 +216,14 @@ PETSC_INTERN void MatPartitioning_c(Mat *adj, PetscInt new_size, PetscInt *proc_
    PetscCallVoid(MatPartitioningCreate(comm, &mpart));
    PetscCallVoid(MatPartitioningSetAdjacency(mpart, *adj));
    // Uses parmetis by default but you can change via the command line options
+#if defined(PETSC_HAVE_PARMETIS)
    PetscCallVoid(MatPartitioningSetType(mpart, MATPARTITIONINGPARMETIS));
+#else
+   // ParMETIS is not available (e.g. PETSc built without MPI); fall back to a
+   // built-in partitioner that needs no external package. This path is only
+   // reached in parallel, so it never runs in a serial (MPIUNI) build anyway
+   PetscCallVoid(MatPartitioningSetType(mpart, MATPARTITIONINGAVERAGE));
+#endif
    PetscCallVoid(MatPartitioningSetFromOptions(mpart));
    PetscCallVoid(MatPartitioningSetNParts(mpart, new_size));
 
