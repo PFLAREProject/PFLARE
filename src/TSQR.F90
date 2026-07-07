@@ -41,17 +41,23 @@ module tsqr
       ! Creates our custom reduction
 
       ! ~~~~~~
+#if !defined(PETSC_HAVE_MPIUNI)
       integer :: errorcode
-      ! ~~~~~~    
+#endif
+      ! ~~~~~~
 
       ! Point at the custom reduction function
       if (.NOT. built_custom_op_tsqr) then
          ! We should be able to set commute as true, as the order doesn't matter for QRs
          ! But I have bumped into cases where due to rounding (typically in low-rank systems)
          ! the small entries in the resulting R can differ on different cores
-         ! When we use this as part of our gmres polynomials, this can give 10% difference in some of 
+         ! When we use this as part of our gmres polynomials, this can give 10% difference in some of
          ! the coefficients on different cores which is not acceptable
+         ! MPIUNI does not provide a Fortran MPI_Op_create; the custom reduction is only
+         ! ever used in the parallel (comm_size/=1) path in start_tsqr, so skip it in serial
+#if !defined(PETSC_HAVE_MPIUNI)
          call MPI_Op_create(custom_reduction_tsqr, .FALSE., reduction_op_tsqr, errorcode)
+#endif
          built_custom_op_tsqr = .true.
       end if
       
@@ -228,10 +234,13 @@ module tsqr
 
       ! ~~~~~~~~~~~
       ! This is where the parallel comms need to go on R, can ignore Q
-      ! ~~~~~~~~~~~  
-      if (comm_size/=1) then      
+      ! ~~~~~~~~~~~
+      ! MPIUNI provides no Fortran MPI_IAllreduce and comm_size is always 1 in serial,
+      ! so this non-blocking reduction only exists for the parallel (real MPI) build
+#if !defined(PETSC_HAVE_MPIUNI)
+      if (comm_size/=1) then
 
-         ! Only need a single all reduce, this is the only comms outside of the 
+         ! Only need a single all reduce, this is the only comms outside of the
          ! matvecs above
          buffers%request = MPI_REQUEST_NULL
          ! This is now a non-blocking allreduce, you have to finish this where needed
@@ -241,16 +250,17 @@ module tsqr
          if (errorcode /= MPI_SUCCESS) then
             print *, "MPI_IAllreduce failed"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if 
+         end if
 
          ! ~~~~~
          ! ~~~~~
-         ! This non-blocking is resolved in finish_tsqr_parallel, which you must call 
+         ! This non-blocking is resolved in finish_tsqr_parallel, which you must call
          ! outside this routine
          ! ~~~~~
          ! ~~~~~
 
       end if
+#endif
       
    end subroutine start_tsqr   
 

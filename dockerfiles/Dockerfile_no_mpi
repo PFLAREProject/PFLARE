@@ -1,0 +1,38 @@
+ARG BASE_IMAGE=stevendargaville/petsc_no_mpi
+
+FROM ${BASE_IMAGE}
+# Use the debug petsc build by default
+ARG ARCH=arch-linux-c-debug
+
+LABEL maintainer="Steven Dargaville"
+LABEL description="PFLARE built on a PETSc configured without MPI (MPIUNI)"
+
+ENV PETSC_ARCH=$ARCH
+# -on_error_abort ensures any test failures are caught and the build fails
+# fp trap turns on floating point exception trapping in petsc
+ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"
+
+WORKDIR /build
+
+COPY . /build/PFLARE
+
+# Ensure pipelines fail if any stage fails
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Build and test PFLARE against a PETSc configured without MPI (MPIUNI).
+# The parallel test targets are skipped automatically by the Makefiles when
+# PETSc has been built without MPI (PETSC_HAVE_MPIUNI), so only the serial
+# tests (Fortran, C and Python) run here.
+# Set the line length to 132 to check for truncation problems - the cray fortran
+# compiler was defaulting to 132 and we don't have a CI for that, so this will trigger it.
+# The base image is built with Kokkos, so enforce C++20 for Kokkos 5.0 compatibility.
+RUN set -euo pipefail; \
+    echo "Using PETSC_OPTIONS=${PETSC_OPTIONS}"; \
+    cd PFLARE && \
+    make -j2 FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall" && \
+    make python && \
+    make -j2 check FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall" && \
+    make -j2 tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall" && \
+    make tests_python
+
+WORKDIR /build/PFLARE
