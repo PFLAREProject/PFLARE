@@ -226,290 +226,996 @@ PETSC_EXTERN void remove_from_sparse_match(Mat input_mat, Mat output_mat,
 
 // Get routines
 
+/*@
+  PCAIRGetPrintStatsTimings - Returns whether `PCAIR` prints statistics about the multigrid hierarchy and timings
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if statistics about the multigrid hierarchy and timings are printed
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetPrintStatsTimings()`, `PCAIRGetNumLevels()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPrintStatsTimings(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetPrintStatsTimings_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetMaxLevels - Returns the maximum number of levels allowed in the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the maximum number of levels in the multigrid hierarchy
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetMaxLevels()`, `PCAIRGetCoarseEqLimit()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLevels(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetMaxLevels_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarseEqLimit - Returns the minimum number of global unknowns allowed on the coarsest grid of the `PCAIR` hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the minimum number of global unknowns allowed on the coarse grid
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarseEqLimit()`, `PCAIRGetMaxLevels()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarseEqLimit(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCoarseEqLimit_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetAutoTruncateStartLevel - Returns the level from which `PCAIR` builds and evaluates a coarse-grid solver to decide whether the hierarchy can be truncated there
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the level from which to build a coarse solver and test whether the hierarchy can be truncated
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetAutoTruncateStartLevel()`, `PCAIRGetAutoTruncateTol()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateStartLevel(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetAutoTruncateStartLevel_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetAutoTruncateTol - Returns the relative tolerance used by `PCAIR` to decide if a coarse-grid solver is good enough to truncate the hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the relative tolerance used to determine if a coarse-grid solver is good enough to truncate the hierarchy
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetAutoTruncateTol()`, `PCAIRGetAutoTruncateStartLevel()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateTol(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetAutoTruncateTol_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Returns the number of levels in the underlying PCMG
-// -1 if the mg is not setup yet
+/*@
+  PCAIRGetNumLevels - Returns the number of levels in the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of levels in the hierarchy, or -1 if `PCSetUp()` has not yet been called
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCSetUp()`, `PCAIRGetGridComplexity()`, `PCAIRGetOperatorComplexity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetNumLevels(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetNumLevels_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetProcessorAgglom - Returns whether `PCAIR` uses a graph partitioner to repartition coarse grids and reduce the number of active MPI ranks
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the coarse grids are repartitioned onto fewer MPI ranks as the hierarchy coarsens
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetProcessorAgglom()`, `PCAIRGetProcessorAgglomRatio()`, `PCAIRGetProcessorAgglomFactor()`, `PCAIRGetProcessEqLimit()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglom(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetProcessorAgglom_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetProcessorAgglomRatio - Returns the local to non-local nonzero ratio that triggers processor agglomeration in `PCAIR`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the local to non-local nonzero ratio that triggers processor agglomeration
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetProcessorAgglomRatio()`, `PCAIRGetProcessorAgglom()`, `PCAIRGetProcessorAgglomFactor()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomRatio(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetProcessorAgglomRatio_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetProcessorAgglomFactor - Returns the factor by which `PCAIR` reduces the number of active MPI ranks each time processor agglomeration occurs
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the factor by which the number of active MPI ranks is reduced
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetProcessorAgglomFactor()`, `PCAIRGetProcessorAgglom()`, `PCAIRGetProcessorAgglomRatio()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomFactor(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetProcessorAgglomFactor_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetProcessEqLimit - Returns the average number of equations per MPI rank below which `PCAIR` triggers processor agglomeration
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the average number of equations per rank below which processor agglomeration is triggered
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetProcessEqLimit()`, `PCAIRGetProcessorAgglom()`, `PCAIRGetProcessorAgglomRatio()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetProcessEqLimit_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetSubcomm - Returns whether `PCAIR` performs reductions for arnoldi or newton polynomial inverses on a subcommunicator that excludes empty MPI ranks
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the reductions are performed on a subcommunicator excluding empty ranks
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetSubcomm()`, `PCAIRGetProcessorAgglom()`, `PCAIRGetInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetSubcomm_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetStrongThreshold - Returns the strong threshold used in the `PCAIR` CF splitting
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the strong threshold used in the CF splitting
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetStrongThreshold()`, `PCAIRGetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetStrongThreshold_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetDDCFraction - Returns the fraction of local F points converted to C points by diagonal dominance in the `PCAIR` `CF_PMISR_DDC` CF splitting
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the local fraction of F points converted to C points, or (if negative) minus the diagonal-dominance ratio threshold
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDDCFraction()`, `PCAIRGetDDCIts()`, `PCAIRGetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetDDCFraction_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCFSplittingType - Returns the coarse/fine (CF) splitting algorithm used by `PCAIR`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCFSplittingType()`, `CFSplittingType`, `PCAIRGetStrongThreshold()`, `PCAIRGetMaxLubySteps()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCFSplittingType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetDDCIts - Returns the number of diagonal-dominance-conversion (DDC) iterations used by the `PCAIR` `CF_PMISR_DDC` CF splitting
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of DDC iterations
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDDCIts()`, `PCAIRGetDDCFraction()`, `PCAIRGetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetDDCIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetMaxLubySteps - Returns the maximum number of Luby steps used by the `PCAIR` CF splitting
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the maximum number of Luby steps; a negative value means as many steps as necessary
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetMaxLubySteps()`, `PCAIRGetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetMaxLubySteps_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@C
+  PCAIRGetSmoothType - Returns the type and number of smooths used by the `PCAIR` reduction multigrid
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_string - the smoothing pattern, a sequence of `f` and `c` characters giving the type and number of smooths (for example `ff`, `fc`, `fcf`, `ffc`, ...)
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetSmoothType()`, `PCAIRGetInverseType()`, `PCAIRGetFullSmoothingUpAndDown()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 {
    PetscFunctionBegin;
    PCAIRGetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetDiagScalePolys - Returns whether `PCAIR` diagonally scales before computing a polynomial approximate inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if diagonally scaling before computing a polynomial inverse
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagScalePolys()`, `PCAIRGetInverseType()`, `PCAIRGetMatrixFreePolys()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetMatrixFreePolys - Returns whether `PCAIR` applies polynomial smoothers matrix-free where possible
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if polynomial smoothers are applied matrix-free where possible
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetMatrixFreePolys()`, `PCAIRGetInverseType()`, `PCAIRGetDiagScalePolys()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetMatrixFreePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetOnePointClassicalProlong - Returns whether `PCAIR` uses a one-point classical prolongator instead of an approximate ideal prolongator
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if a one-point classical prolongator is used instead of an approximate ideal prolongator
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetOnePointClassicalProlong()`, `PCAIRGetSymmetric()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetOnePointClassicalProlong(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetOnePointClassicalProlong_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetFullSmoothingUpAndDown - Returns whether `PCAIR` smooths all points on the up and down sweeps, instead of the default down F and C smoothing
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if all points are smoothed on both the up and down sweeps
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetFullSmoothingUpAndDown()`, `PCAIRGetSmoothType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetFullSmoothingUpAndDown(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetFullSmoothingUpAndDown_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetSymmetric - Returns whether `PCAIR` defines the prolongator as the transpose of the restrictor
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if symmetric grid-transfer operators are used, defining the prolongator as R^T
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetSymmetric()`, `PCAIRGetOnePointClassicalProlong()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSymmetric(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetSymmetric_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetConstrainW - Returns whether `PCAIR` applies constraints to the prolongator
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if constraints are applied to the prolongator
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetConstrainW()`, `PCAIRGetConstrainZ()`, `MatSetNearNullSpace()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetConstrainW(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetConstrainW_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetConstrainZ - Returns whether `PCAIR` applies constraints to the restrictor
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if constraints are applied to the restrictor
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetConstrainZ()`, `PCAIRGetConstrainW()`, `MatSetNearNullSpace()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetConstrainZ(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetConstrainZ_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetImproveWIts - Returns the number of Richardson iterations used by `PCAIR` to improve the approximate prolongator
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of Richardson iterations
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetImproveWIts()`, `PCAIRGetImproveZIts()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetImproveWIts(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetImproveWIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetImproveZIts - Returns the number of Richardson iterations used by `PCAIR` to improve the approximate restrictor
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of Richardson iterations
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetImproveZIts()`, `PCAIRGetImproveWIts()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetImproveZIts(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetImproveZIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetStrongRThreshold - Returns the threshold used by `PCAIR` to drop entries when forming the grid-transfer operators
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the strong R threshold
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetStrongRThreshold()`, `PCAIRGetZType()`, `PCAIRGetStrongThreshold()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetStrongRThreshold_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetInverseType - Returns the type of approximate inverse used as the `PCAIR` F-point smoother
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetInverseType()`, `PCPFLAREINVType`, `PCAIRGetCInverseType()`, `PCAIRGetZType()`, `PCAIRGetPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetInverseType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCInverseType - Returns the type of approximate inverse used as the `PCAIR` C-point smoother
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCInverseType()`, `PCPFLAREINVType`, `PCAIRGetInverseType()`, `PCAIRGetCPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCInverseType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetZType - Returns the type of grid-transfer (restriction) operator used by `PCAIR`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the grid-transfer operator type, one of `AIR_Z_PRODUCT`, `AIR_Z_LAIR`, or `AIR_Z_LAIR_SAI`
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetZType()`, `PCAIRZType`, `PCAIRGetInverseType()`, `PCAIRGetLairDistance()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC pc, PCAIRZType *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetZType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetPolyOrder - Returns the polynomial order used by the `PCAIR` F-point smoother inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the polynomial order
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetPolyOrder()`, `PCAIRGetInverseType()`, `PCAIRGetCPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyOrder(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetLairDistance - Returns the distance of the grid-transfer operators used by `PCAIR` when the `PCAIRZType` is `AIR_Z_LAIR` or `AIR_Z_LAIR_SAI`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the lAIR distance
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetLairDistance()`, `PCAIRZType`, `PCAIRGetZType()`, `PCAIRGetInverseType()`, `PCAIRGetInverseSparsityOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetLairDistance(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetLairDistance_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetInverseSparsityOrder - Returns the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` approximate inverses
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the power of the operator matrix used as the sparsity of assembled inverses
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetInverseSparsityOrder()`, `PCAIRGetInverseType()`, `PCAIRGetCInverseSparsityOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseSparsityOrder(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCPolyOrder - Returns the polynomial order used by the `PCAIR` C-point smoother inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the polynomial order
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCPolyOrder()`, `PCAIRGetPolyOrder()`, `PCAIRGetCInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCPolyOrder(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCInverseSparsityOrder - Returns the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` C-point approximate inverses
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the power of the operator matrix used as the sparsity of assembled inverses for the C-point smooth
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCInverseSparsityOrder()`, `PCAIRGetInverseSparsityOrder()`, `PCAIRGetCInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarsestInverseType - Returns the type of approximate inverse used as the `PCAIR` coarse-grid solver
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestInverseType()`, `PCPFLAREINVType`, `PCAIRGetInverseType()`, `PCAIRGetCoarsestPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC pc, PCPFLAREINVType *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestInverseType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarsestPolyOrder - Returns the polynomial order used by the `PCAIR` coarse-grid solver
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the polynomial order
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestPolyOrder()`, `PCAIRGetPolyOrder()`, `PCAIRGetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestPolyOrder(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarsestInverseSparsityOrder - Returns the power of the operator matrix used as the sparsity pattern of the assembled `PCAIR` coarse-grid inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the power of the operator matrix used as the sparsity of the assembled coarse-grid inverse
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestInverseSparsityOrder()`, `PCAIRGetInverseSparsityOrder()`, `PCAIRGetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarsestMatrixFreePolys - Returns whether `PCAIR` applies the coarse-grid polynomial solver matrix-free
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the coarse-grid polynomial solver is applied matrix-free
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestMatrixFreePolys()`, `PCAIRGetMatrixFreePolys()`, `PCAIRGetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestMatrixFreePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarsestDiagScalePolys - Returns whether `PCAIR` diagonally scales before computing the coarse-grid polynomial approximate inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if diagonally scaling before computing the coarse-grid polynomial inverse
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestDiagScalePolys()`, `PCAIRGetDiagScalePolys()`, `PCAIRGetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCoarsestSubcomm - Returns whether `PCAIR` computes the coarse-grid polynomial coefficients on a subcommunicator
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the coarse-grid polynomial coefficients are computed on a subcommunicator
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestSubcomm()`, `PCAIRGetSubcomm()`, `PCAIRGetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestSubcomm(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetCoarsestSubcomm_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetRDrop - Returns the relative drop tolerance applied to R by `PCAIR` on each level after it is built
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the relative (inf norm) drop tolerance applied to R
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetRDrop()`, `PCAIRGetADrop()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetRDrop(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetRDrop_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetADrop - Returns the relative drop tolerance applied to the coarse matrix by `PCAIR` on each level after it is built
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_real - the relative (inf norm) drop tolerance applied to the coarse matrix
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetADrop()`, `PCAIRGetRDrop()`, `PCAIRGetALump()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetADrop(PC pc, PetscReal *input_real)
 {
    PetscFunctionBegin;
    PCAIRGetADrop_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetALump - Returns whether `PCAIR` lumps to the diagonal rather than drops when forming the coarse matrix
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if lumping to the diagonal rather than dropping when forming the coarse matrix
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetALump()`, `PCAIRGetADrop()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetALump(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetALump_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetReuseSparsity - Returns whether `PCAIR` reuses the sparsity of the multigrid hierarchy during setup
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the sparsity of the hierarchy is reused during setup
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetReuseSparsity()`, `PCAIRGetReusePolyCoeffs()`, `PCAIRGetReuseAmount()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetReuseSparsity_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetReusePolyCoeffs - Returns whether `PCAIR` also reuses the GMRES polynomial coefficients when reusing the sparsity of the hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the GMRES polynomial coefficients are also reused
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetReusePolyCoeffs()`, `PCAIRGetReuseSparsity()`, `PCAIRGetPolyCoeffs()`, `PCAIRSetPolyCoeffs()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool)
 {
    PetscFunctionBegin;
    PCAIRGetReusePolyCoeffs_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This routine returns a pointer to the coefficients in the PCAIR object
-// If you want to save/restore them later you will need to copy them yourself
-// The pointer is valid only until the next PCSetUp or PCReset call
-// The size of the coefficient array is also returned
-// This is different to the Fortran interface to this routine, which returns a copy
-// in an allocatable array (which knows its own size)
+/*@C
+  PCAIRGetPolyCoeffs - Returns the polynomial coefficients stored by `PCAIR` for a given level and inverse after the last `PCSetUp()`
+
+  Not Collective
+
+  Input Parameters:
++ pc            - the `PCAIR` preconditioner context
+. petsc_level   - the level in the hierarchy
+- which_inverse - which inverse's coefficients to return, one of `COEFFS_INV_AFF`, `COEFFS_INV_AFF_DROPPED`, `COEFFS_INV_ACC`, or `COEFFS_INV_COARSE`
+
+  Output Parameters:
++ coeffs_ptr - pointer to the array of polynomial coefficients
+. row_size   - the number of rows in the coefficient array
+- col_size   - the number of columns in the coefficient array
+
+  Level: advanced
+
+  Note:
+  This routine returns a pointer into the `PCAIR` object itself, valid only until the next `PCSetUp()` or
+  `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
+  the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetPolyCoeffs()`, `PCAIRGetReusePolyCoeffs()`, `WhichInverseType`, `PCSetUp()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 {
    PetscFunctionBegin;
@@ -517,30 +1223,120 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int 
       coeffs_ptr, row_size, col_size);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetGridComplexity - Returns the grid complexity of the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. complexity - the grid complexity of the hierarchy, or -1 if `PCSetUp()` has not yet been called
+
+  Level: advanced
+
+  Note:
+  Grid complexity is the total number of unknowns summed over all levels of the hierarchy, divided by the number of unknowns on the finest level.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCSetUp()`, `PCAIRGetNumLevels()`, `PCAIRGetOperatorComplexity()`, `PCAIRGetCycleComplexity()`, `PCAIRGetStorageComplexity()`, `PCAIRGetReuseStorageComplexity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC pc, PetscReal *complexity)
 {
    PetscFunctionBegin;
    PCAIRGetGridComplexity_c(&pc, complexity);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetOperatorComplexity - Returns the operator complexity of the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. complexity - the operator complexity of the hierarchy, or -1 if `PCSetUp()` has not yet been called
+
+  Level: advanced
+
+  Note:
+  Operator complexity is the total number of nonzeros summed over the coarse-grid matrices on all levels of the hierarchy, divided by the number of nonzeros in the finest-level matrix.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCSetUp()`, `PCAIRGetNumLevels()`, `PCAIRGetGridComplexity()`, `PCAIRGetCycleComplexity()`, `PCAIRGetStorageComplexity()`, `PCAIRGetReuseStorageComplexity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetOperatorComplexity(PC pc, PetscReal *complexity)
 {
    PetscFunctionBegin;
    PCAIRGetOperatorComplexity_c(&pc, complexity);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetCycleComplexity - Returns the cycle complexity of the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. complexity - the cycle complexity of the hierarchy, or -1 if `PCSetUp()` has not yet been called
+
+  Level: advanced
+
+  Note:
+  Cycle complexity is the total number of nonzeros touched while applying a single multigrid V-cycle, divided by the number of nonzeros in the finest-level matrix.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCSetUp()`, `PCAIRGetNumLevels()`, `PCAIRGetGridComplexity()`, `PCAIRGetOperatorComplexity()`, `PCAIRGetStorageComplexity()`, `PCAIRGetReuseStorageComplexity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCycleComplexity(PC pc, PetscReal *complexity)
 {
    PetscFunctionBegin;
    PCAIRGetCycleComplexity_c(&pc, complexity);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetStorageComplexity - Returns the storage complexity of the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. complexity - the storage complexity of the hierarchy, or -1 if `PCSetUp()` has not yet been called
+
+  Level: advanced
+
+  Note:
+  Storage complexity is the total number of nonzeros actually stored by the hierarchy (accounting for the reduced storage possible with F-point-only up smoothing), divided by the number of nonzeros in the finest-level matrix.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCSetUp()`, `PCAIRGetNumLevels()`, `PCAIRGetGridComplexity()`, `PCAIRGetOperatorComplexity()`, `PCAIRGetCycleComplexity()`, `PCAIRGetReuseStorageComplexity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetStorageComplexity(PC pc, PetscReal *complexity)
 {
    PetscFunctionBegin;
    PCAIRGetStorageComplexity_c(&pc, complexity);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetReuseStorageComplexity - Returns the reuse storage complexity of the `PCAIR` multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. complexity - the reuse storage complexity of the hierarchy (0 when reuse is disabled), or -1 if `PCSetUp()` has not yet been called
+
+  Level: advanced
+
+  Note:
+  Reuse storage complexity is the total number of nonzeros in the matrices and index sets kept in memory to accelerate a subsequent setup, divided by the number of nonzeros in the finest-level matrix.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCSetUp()`, `PCAIRGetNumLevels()`, `PCAIRGetGridComplexity()`, `PCAIRGetOperatorComplexity()`, `PCAIRGetCycleComplexity()`, `PCAIRGetStorageComplexity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseStorageComplexity(PC pc, PetscReal *complexity)
 {
    PetscFunctionBegin;
@@ -550,11 +1346,25 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseStorageComplexity(PC pc, PetscReal *com
 
 // Set routines
 
-// Print out stats and timings
-// These require some parallel reductions to compute
-// so they are off by default
-// Default: false
-// -pc_air_print_stats_timings
+/*@
+  PCAIRSetPrintStatsTimings - Sets whether `PCAIR` prints statistics about the multigrid hierarchy and timings
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to print statistics about the multigrid hierarchy and timings
+
+  Options Database Key:
+. -pc_air_print_stats_timings (true|false) - print statistics about the multigrid hierarchy and timings; defaults to false
+
+  Level: advanced
+
+  Note:
+  Computing these statistics requires some parallel reductions, so this is disabled by default.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPrintStatsTimings()`, `PCAIRGetNumLevels()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPrintStatsTimings(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
@@ -563,94 +1373,207 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPrintStatsTimings(PC pc, PetscBool input_boo
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Maximum number of levels in the multigrid hierarchy
-// Default: 300
-// -pc_air_max_levels
+/*@
+  PCAIRSetMaxLevels - Sets the maximum number of levels allowed in the `PCAIR` multigrid hierarchy
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the maximum number of levels in the multigrid hierarchy
+
+  Options Database Key:
+. -pc_air_max_levels input_int - the maximum number of levels in the multigrid hierarchy; defaults to 300
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetMaxLevels()`, `PCAIRSetCoarseEqLimit()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLevels(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetMaxLevels_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Minimum number of global unknowns on the coarse grid
-// Default: 6
-// -pc_air_coarse_eq_limit
+/*@
+  PCAIRSetCoarseEqLimit - Sets the minimum number of global unknowns allowed on the coarsest grid of the `PCAIR` hierarchy
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the minimum number of global unknowns allowed on the coarse grid
+
+  Options Database Key:
+. -pc_air_coarse_eq_limit input_int - the minimum number of global unknowns on the coarse grid; defaults to 6
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarseEqLimit()`, `PCAIRSetMaxLevels()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarseEqLimit(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCoarseEqLimit_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// From this level onwards, build and then evaluate if the coarse grid solver
-// is good enough and use that to determine if we should truncate on that level
-// Default: -1
-// -pc_air_auto_truncate_start_level
+/*@
+  PCAIRSetAutoTruncateStartLevel - Sets the level from which `PCAIR` builds and evaluates a coarse-grid solver to decide whether the hierarchy can be truncated there
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the level from which to build a coarse solver and test whether the hierarchy can be truncated
+
+  Options Database Key:
+. -pc_air_auto_truncate_start_level input_int - use auto truncation from this level onwards; defaults to -1
+
+  Level: advanced
+
+  Note:
+  A value of -1 disables auto truncation, so the hierarchy is always built down to `PCAIRSetCoarseEqLimit()`.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetAutoTruncateStartLevel()`, `PCAIRSetAutoTruncateTol()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetAutoTruncateStartLevel(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetAutoTruncateStartLevel_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// What relative tolerance to use to determine if a coarse grid solver is good enough
-// Default: 1e-14
-// -pc_air_auto_truncate_tol
+/*@
+  PCAIRSetAutoTruncateTol - Sets the relative tolerance used by `PCAIR` to decide if a coarse-grid solver is good enough to truncate the hierarchy
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the relative tolerance used to determine if a coarse-grid solver is good enough to truncate the hierarchy
+
+  Options Database Key:
+. -pc_air_auto_truncate_tol input_real - tolerance to use with auto truncation; defaults to 1e-14
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetAutoTruncateTol()`, `PCAIRSetAutoTruncateStartLevel()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetAutoTruncateTol(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PCAIRSetAutoTruncateTol_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Perform processor agglomeration throughout the hierarchy
-// This reduces the number of active MPI ranks as we coarsen
-// by a factor of processor_agglom_factor, whenever the 
-// local to non-local ratio of nnzs is processor_agglom_ratio
-// The entire hierarchy stays on comm_world however
-// Only happens where necessary, not on every level
-// Default: true
-// -pc_air_processor_agglom
+/*@
+  PCAIRSetProcessorAgglom - Sets whether `PCAIR` uses a graph partitioner to repartition coarse grids and reduce the number of active MPI ranks
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to repartition the coarse grids onto fewer MPI ranks as the hierarchy coarsens
+
+  Options Database Key:
+. -pc_air_processor_agglom (true|false) - use a graph partitioner to repartition coarse grids and reduce the number of active MPI ranks; defaults to true
+
+  Level: advanced
+
+  Note:
+  Processor agglomeration reduces the number of active MPI ranks by `PCAIRSetProcessorAgglomFactor()` whenever the local to non-local nonzero ratio drops below `PCAIRSetProcessorAgglomRatio()`, or the average number of equations per rank drops below `PCAIRSetProcessEqLimit()`; it is only performed where necessary, not on every level, and the entire hierarchy remains on the original communicator.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetProcessorAgglom()`, `PCAIRSetProcessorAgglomRatio()`, `PCAIRSetProcessorAgglomFactor()`, `PCAIRSetProcessEqLimit()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglom(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetProcessorAgglom_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// The local to nonlocal ratio of nnzs that is used to 
-// trigger processor agglomeration on all level
-// Default: 2.0
-// -pc_air_processor_agglom_ratio
+/*@
+  PCAIRSetProcessorAgglomRatio - Sets the local to non-local nonzero ratio that triggers processor agglomeration in `PCAIR`
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the local to non-local nonzero ratio that triggers processor agglomeration
+
+  Options Database Key:
+. -pc_air_processor_agglom_ratio ratio - the local to non-local nonzero ratio that triggers processor agglomeration; defaults to 2.0
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetProcessorAgglomRatio()`, `PCAIRSetProcessorAgglom()`, `PCAIRSetProcessorAgglomFactor()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomRatio(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PCAIRSetProcessorAgglomRatio_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// What factor to reduce the number of active MPI ranks by
-// each time when doing processor agglomeration
-// Default: 2
-// -pc_air_processor_agglom_factor
+/*@
+  PCAIRSetProcessorAgglomFactor - Sets the factor by which `PCAIR` reduces the number of active MPI ranks each time processor agglomeration occurs
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the factor by which to reduce the number of active MPI ranks
+
+  Options Database Key:
+. -pc_air_processor_agglom_factor factor - the factor by which to reduce the number of active MPI ranks; defaults to 2
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetProcessorAgglomFactor()`, `PCAIRSetProcessorAgglom()`, `PCAIRSetProcessorAgglomRatio()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomFactor(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetProcessorAgglomFactor_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// If on average there are fewer than this number of equations per rank
-// processor agglomeration will be triggered
-// Default: 50
-// -pc_air_process_eq_limit
+/*@
+  PCAIRSetProcessEqLimit - Sets the average number of equations per MPI rank below which `PCAIR` triggers processor agglomeration
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the average number of equations per rank below which processor agglomeration is triggered
+
+  Options Database Key:
+. -pc_air_process_eq_limit eq_limit - trigger processor agglomeration if the average number of equations per rank drops below this value; defaults to 50
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetProcessEqLimit()`, `PCAIRSetProcessorAgglom()`, `PCAIRSetProcessorAgglomRatio()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetProcessEqLimit_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// If we are doing processor agglomeration, then we have 
-// some ranks with no rows
-// If computing a gmres polynomial inverse 
-// with inverse_type arnoldi or newton, then we can have 
-// the reductions occur on a subcomm if we want to reduce the cost
-// Default: false
-// -pc_air_subcomm
+/*@
+  PCAIRSetSubcomm - Sets whether `PCAIR` performs reductions for arnoldi or newton polynomial inverses on a subcommunicator that excludes empty MPI ranks
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to perform the reductions on a subcommunicator excluding ranks with no rows
+
+  Options Database Key:
+. -pc_air_subcomm (true|false) - perform reductions for arnoldi/newton polynomial inverses on a subcommunicator excluding empty ranks; defaults to false
+
+  Level: advanced
+
+  Note:
+  Only relevant after processor agglomeration (see `PCAIRSetProcessorAgglom()`) has left some MPI ranks with no rows, and only affects the basis-building reductions of the `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, and `PFLAREINV_NEWTON_NO_EXTRA` polynomial inverse types (see `PCAIRSetInverseType()`). It does not apply to the `PFLAREINV_POWER` basis, which needs no such reductions; enabling it with the power basis is an error.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSubcomm()`, `PCAIRSetProcessorAgglom()`, `PCAIRSetInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
@@ -658,314 +1581,705 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC pc, PetscBool input_bool)
    PCAIRSetSubcomm_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This is used in the CF splitting to define strong dependencies/influences
-// Default: 0.5
-// -pc_air_strong_threshold
+/*@
+  PCAIRSetStrongThreshold - Sets the strong threshold used in the `PCAIR` CF splitting
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the strong threshold used in the CF splitting
+
+  Options Database Key:
+. -pc_air_strong_threshold strong_threshold - the strong threshold used in the CF splitting; defaults to 0.5
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetStrongThreshold()`, `PCAIRSetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PCAIRSetStrongThreshold_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// How many passes of DDC to do
-// Default: 1
-// -pc_air_ddc_its
+/*@
+  PCAIRSetDDCIts - Sets the number of diagonal-dominance-conversion (DDC) iterations used by the `PCAIR` `CF_PMISR_DDC` CF splitting
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the number of DDC iterations
+
+  Options Database Key:
+. -pc_air_ddc_its ddc_its - the number of DDC iterations; defaults to 1
+
+  Level: advanced
+
+  Note:
+  Only used by the `CF_PMISR_DDC` CF splitting type (see `PCAIRSetCFSplittingType()`).
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDDCIts()`, `PCAIRSetDDCFraction()`, `PCAIRSetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetDDCIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Second pass in the PMISR DDC CF splitting converts 
-// this fraction of local F points to C based on diagonal dominance
-// Default: 0.1
-// -pc_air_ddc_fraction
+/*@
+  PCAIRSetDDCFraction - Sets the fraction of local F points converted to C points by diagonal dominance in the `PCAIR` `CF_PMISR_DDC` CF splitting
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the local fraction of F points to convert to C points, or (if negative) minus the diagonal-dominance ratio threshold
+
+  Options Database Key:
+. -pc_air_ddc_fraction fraction - local fraction of F points converted to C by diagonal dominance; if negative, convert any row whose diagonal-dominance ratio is less than the absolute value; defaults to 0.1
+
+  Level: advanced
+
+  Note:
+  Only used by the `CF_PMISR_DDC` CF splitting type (see `PCAIRSetCFSplittingType()`).
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDDCFraction()`, `PCAIRSetDDCIts()`, `PCAIRSetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 {
-   PetscFunctionBegin;   
+   PetscFunctionBegin;
    PCAIRSetDDCFraction_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// What CF splitting algorithm to use
-// 0 - PMISR DDC
-// 1 - PMIS distance 1
-// 2 - PMIS distance 2 - uses S^T S + S 
-// Default: 0
-// -pc_air_cf_splitting_type
+/*@
+  PCAIRSetCFSplittingType - Sets the coarse/fine (CF) splitting algorithm used by `PCAIR`
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
+
+  Options Database Key:
+. -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg) - the CF splitting algorithm; defaults to pmisr_ddc
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCFSplittingType()`, `CFSplittingType`, `PCAIRSetStrongThreshold()`, `PCAIRSetMaxLubySteps()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType(PC pc, CFSplittingType input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCFSplittingType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Maximum number of Luby steps to do in CF splitting
-// Negative means do as many as needed (at the cost of a parallel
-// reduction everytime we finish a Luby step)
-// Default: -1
-// -pc_air_max_luby_steps
+/*@
+  PCAIRSetMaxLubySteps - Sets the maximum number of Luby steps used by the `PCAIR` CF splitting
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the maximum number of Luby steps
+
+  Options Database Key:
+. -pc_air_max_luby_steps max_luby_steps - the maximum number of Luby steps; a negative value uses as many steps as necessary; defaults to -1
+
+  Level: advanced
+
+  Note:
+  Only used by the `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, and `CF_PMIS_DIST2` CF splitting types (see `PCAIRSetCFSplittingType()`). A negative value performs as many Luby steps as necessary, at the cost of a parallel reduction after every step.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetMaxLubySteps()`, `PCAIRSetCFSplittingType()`, `CFSplittingType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetMaxLubySteps_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Set the type/its of the smoothing
-// Default: ff
-// -pc_air_smooth_type
+/*@C
+  PCAIRSetSmoothType - Sets the type and number of smooths used by the `PCAIR` reduction multigrid
+
+  Logically Collective
+
+  Input Parameters:
++ pc           - the `PCAIR` preconditioner context
+- input_string - the smoothing pattern, any sequence of `f` and `c` characters giving the type and number of smooths (for example `ff`, `fc`, `fcf`, `ffc`, ...)
+
+  Options Database Key:
+. -pc_air_smooth_type input_string - the type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf); defaults to ff
+
+  Level: intermediate
+
+  Note:
+  Each `f` performs a smooth on the F points and each `c` a smooth on the C points; the string may be any combination and length, not only `ff`, `fc`, or `fcf`.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSmoothType()`, `PCAIRSetInverseType()`, `PCAIRSetFullSmoothingUpAndDown()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 {
    PetscFunctionBegin;
    PCAIRSetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// If using a polynomial inverse type, diagonally scale before computing?
-// Default: false (if inverse type neumann this is always true and cannot be overridden)
-// -pc_air_diag_scale_polys
+/*@
+  PCAIRSetDiagScalePolys - Sets whether `PCAIR` diagonally scales before computing a polynomial approximate inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to diagonally scale before computing a polynomial inverse
+
+  Options Database Key:
+. -pc_air_diag_scale_polys (true|false) - diagonally scale before computing a polynomial inverse; defaults to false
+
+  Level: advanced
+
+  Note:
+  Only relevant if using a polynomial inverse type (see `PCAIRSetInverseType()`); if the inverse type is `PFLAREINV_NEUMANN` this is always forced true and cannot be overridden.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagScalePolys()`, `PCAIRSetInverseType()`, `PCAIRSetMatrixFreePolys()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDiagScalePolys(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Do we apply our polynomials matrix free when smoothing?
-// Default: false
-// -pc_air_matrix_free_polys
+/*@
+  PCAIRSetMatrixFreePolys - Sets whether `PCAIR` applies polynomial smoothers matrix-free where possible
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to apply polynomial smoothers matrix-free where possible
+
+  Options Database Key:
+. -pc_air_matrix_free_polys (true|false) - apply polynomial smoothers matrix-free where possible; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetMatrixFreePolys()`, `PCAIRSetInverseType()`, `PCAIRSetDiagScalePolys()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetMatrixFreePolys(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetMatrixFreePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Do we use a one point injection classical prolongator or an AIR-style prolongator
-// Default: true
-// -pc_air_one_point_classical_prolong
+/*@
+  PCAIRSetOnePointClassicalProlong - Sets whether `PCAIR` uses a one-point classical prolongator instead of an approximate ideal prolongator
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to use a one-point classical prolongator
+
+  Options Database Key:
+. -pc_air_one_point_classical_prolong (true|false) - use a one-point classical prolongator instead of an approximate ideal prolongator; defaults to true
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetOnePointClassicalProlong()`, `PCAIRSetSymmetric()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetOnePointClassicalProlong(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetOnePointClassicalProlong_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Do we do full smoothing up and down rather than FF or FFC
-// Default: false
-// -pc_air_full_smoothing_up_and_down
+/*@
+  PCAIRSetFullSmoothingUpAndDown - Sets whether `PCAIR` smooths all points on the up and down sweeps, instead of the default down F and C smoothing
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to smooth all points on both the up and down sweeps
+
+  Options Database Key:
+. -pc_air_full_smoothing_up_and_down (true|false) - smooth all points up and down, instead of the default down F and C smoothing; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetFullSmoothingUpAndDown()`, `PCAIRSetSmoothType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetFullSmoothingUpAndDown(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetFullSmoothingUpAndDown_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Do we define our prolongator as R^T?
-// Default: false
-// -pc_air_symmetric
+/*@
+  PCAIRSetSymmetric - Sets whether `PCAIR` defines the prolongator as the transpose of the restrictor
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to use symmetric grid-transfer operators, defining the prolongator as R^T
+
+  Options Database Key:
+. -pc_air_symmetric (true|false) - define the prolongator as R^T, giving symmetric grid-transfer operators; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSymmetric()`, `PCAIRSetOnePointClassicalProlong()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetSymmetric(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetSymmetric_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Use a smoothed version of the near-nullspace vectors when building 
-// the prolongator 
-// If the operator matrix doesn't have a near-nullspace attached to it
-// the constant will be used by default
-// You can set near-nullspace vectors with MatSetNearNullSpace
-// Default: false
-// -pc_air_constrain_w
+/*@
+  PCAIRSetConstrainW - Sets whether `PCAIR` applies constraints to the prolongator
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to apply constraints to the prolongator
+
+  Options Database Key:
+. -pc_air_constrain_w (true|false) - apply constraints to the prolongator; defaults to false
+
+  Level: advanced
+
+  Note:
+  By default this smooths the constant vector and forces the prolongator to interpolate it exactly. Use `MatSetNearNullSpace()` on the operator matrix to supply other vectors to constrain instead.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetConstrainW()`, `PCAIRSetConstrainZ()`, `MatSetNearNullSpace()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetConstrainW(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetConstrainW_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Use a smoothed version of the near-nullspace vectors when building 
-// the restrictor 
-// If the operator matrix doesn't have a near-nullspace attached to it
-// the constant will be used by default
-// You can set near-nullspace vectors with MatSetNearNullSpace
-// Default: false
-// -pc_air_constrain_z
+/*@
+  PCAIRSetConstrainZ - Sets whether `PCAIR` applies constraints to the restrictor
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to apply constraints to the restrictor
+
+  Options Database Key:
+. -pc_air_constrain_z (true|false) - apply constraints to the restrictor; defaults to false
+
+  Level: advanced
+
+  Note:
+  By default this smooths the constant vector and forces the restrictor to restrict it exactly. Use `MatSetNearNullSpace()` on the operator matrix to supply other vectors to constrain instead.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetConstrainZ()`, `PCAIRSetConstrainW()`, `MatSetNearNullSpace()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetConstrainZ(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetConstrainZ_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Maximum number of iterations to do when improving W
-// Uses a Richardson and Aff^-1 to precondition
-// Default: 0
-// -pc_air_improve_w_its
+/*@
+  PCAIRSetImproveWIts - Sets the number of Richardson iterations used by `PCAIR` to improve the approximate prolongator
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the number of Richardson iterations
+
+  Options Database Key:
+. -pc_air_improve_w_its its - number of Richardson iterations to improve the approximate prolongator, using the existing W as the initial guess; defaults to 0
+
+  Level: advanced
+
+  Note:
+  The Richardson iteration is preconditioned with the approximate inverse of Aff.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetImproveWIts()`, `PCAIRSetImproveZIts()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetImproveWIts(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetImproveWIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Maximum number of iterations to do when improving Z
-// Uses a Richardson and the diagonal of Aff^-1 to precondition
-// Default: 0
-// -pc_air_improve_z_its
+/*@
+  PCAIRSetImproveZIts - Sets the number of Richardson iterations used by `PCAIR` to improve the approximate restrictor
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the number of Richardson iterations
+
+  Options Database Key:
+. -pc_air_improve_z_its its - number of Richardson iterations to improve the approximate restrictor, using the existing Z as the initial guess; defaults to 0
+
+  Level: advanced
+
+  Note:
+  The Richardson iteration is preconditioned with the diagonal of the approximate inverse of Aff.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetImproveZIts()`, `PCAIRSetImproveWIts()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetImproveZIts(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetImproveZIts_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Strong R threshold to apply dropping prior to computing Z
-// This only applies when computing Z, ie if you build a GMRES polynomial approximation
-// to Aff^-1, it applies this dropping, then computes Z, then rebuilds 
-// an Aff^-1 approximation without the dropping for smoothing
-// Default: 0.0
-// -pc_air_strong_r_threshold
+/*@
+  PCAIRSetStrongRThreshold - Sets the threshold used by `PCAIR` to drop entries when forming the grid-transfer operators
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the strong R threshold
+
+  Options Database Key:
+. -pc_air_strong_r_threshold threshold - threshold to drop when forming the grid-transfer operators; defaults to 0.0
+
+  Level: advanced
+
+  Note:
+  This only applies when computing Z; for example, if a GMRES polynomial approximation to Aff^-1 is built, this dropping is applied, Z is computed, and then an Aff^-1 approximation without the dropping is rebuilt for smoothing.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetStrongRThreshold()`, `PCAIRSetZType()`, `PCAIRSetStrongThreshold()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PCAIRSetStrongRThreshold_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// What type of approximation do we use for Aff^-1 
-// This is used both for Z (if z_type == AIR_Z_PRODUCT, see below) and for F smoothing
-// These are defined by PCPFLAREINVType 
-// "power" - PFLAREINV_POWER - GMRES polynomial with the power basis 
-// "arnoldi" - PFLAREINV_ARNOLDI - GMRES polynomial with the arnoldi basis 
-// "newton" - PFLAREINV_NEWTON - GMRES polynomial with the newton basis with extra roots for stability - can only be used matrix-free atm   
-// "newton_no_extra" - PFLAREINV_NEWTON_NO_EXTRA - GMRES polynomial with the newton basis with no extra roots - can only be used matrix-free atm      
-// "neumann" - PFLAREINV_NEUMANN - Neumann polynomial
-// "sai" - PFLAREINV_SAI - SAI
-// "isai" - PFLAREINV_ISAI - Incomplete SAI (ie a restricted additive schwartz)
-// "wjacobi" - PFLAREINV_WJACOBI - Weighted Jacobi with weight 3 / ( 4 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
-// "jacobi" - PFLAREINV_JACOBI - Unweighted Jacobi
-// Default: power
-// -pc_air_inverse_type
+/*@
+  PCAIRSetInverseType - Sets the type of approximate inverse used as the `PCAIR` F-point smoother
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+
+  Options Database Key:
+. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
+
+  Level: intermediate
+
+  Note:
+  Together with `PCAIRSetZType()` this selects the reduction multigrid method, for example product + arnoldi gives AIRG and lair + wjacobi gives lAIR; see `PCPFLAREINVType` for what each value means.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetInverseType()`, `PCPFLAREINVType`, `PCAIRSetCInverseType()`, `PCAIRSetZType()`, `PCAIRSetPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType input_int)
 {
    PetscFunctionBegin;
    PCAIRSetInverseType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// What type of approximation do we use for Acc^-1 
-// If unset, this defaults to whatever the F point smoother is atm
-// Default: pc_air_inverse_type
-// -pc_air_c_inverse_type
+/*@
+  PCAIRSetCInverseType - Sets the type of approximate inverse used as the `PCAIR` C-point smoother
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+
+  Options Database Key:
+. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCInverseType()`, `PCPFLAREINVType`, `PCAIRSetInverseType()`, `PCAIRSetCPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCInverseType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// What type of approximation do we use for Z?
-// "product" - AIR_Z_PRODUCT - Aff^-1 approximation determined by inverse type (above) and then Z computed with matmatmult
-// "lair" - AIR_Z_LAIR - lAIR computes Z directly
-// "lair_sai" - AIR_Z_LAIR_SAI - SAI version of lAIR computes Z directly
-// Default: product
-// -pc_air_z_type
+/*@
+  PCAIRSetZType - Sets the type of grid-transfer (restriction) operator used by `PCAIR`
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the grid-transfer operator type, one of `AIR_Z_PRODUCT`, `AIR_Z_LAIR`, or `AIR_Z_LAIR_SAI`
+
+  Options Database Key:
+. -pc_air_z_type (product|lair|lair_sai) - the grid-transfer operator type; defaults to product
+
+  Level: intermediate
+
+  Note:
+  Together with `PCAIRSetInverseType()` this selects the reduction multigrid method, for example product + arnoldi gives AIRG and lair + wjacobi gives lAIR; see `PCAIRZType` for what each value means.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetZType()`, `PCAIRZType`, `PCAIRSetInverseType()`, `PCAIRSetLairDistance()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetZType(PC pc, PCAIRZType input_int)
 {
    PetscFunctionBegin;
    PCAIRSetZType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// If z_type == 1 or 2, this is the distance the grid-transfer operators go out to
-// This is so we can have lair out to some distance, and then a different sparsity 
-// for our smoothers
-// If z_type == 0 this is ignored, and the distance is determined by inverse_sparsity_order + 1
-// Default: 2
-// -pc_air_lair_distance 
+/*@
+  PCAIRSetLairDistance - Sets the distance of the grid-transfer operators used by `PCAIR` when the `PCAIRZType` is `AIR_Z_LAIR` or `AIR_Z_LAIR_SAI`
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the lAIR distance
+
+  Options Database Key:
+. -pc_air_lair_distance lair_distance - if the Z type is lair or lair_sai, the distance of the grid-transfer operators; defaults to 2
+
+  Level: intermediate
+
+  Note:
+  This allows lAIR to be computed out to a given distance while using a different sparsity for the smoothers. If the `PCAIRZType` is `AIR_Z_PRODUCT` this option is ignored, and the distance is instead determined by `-pc_air_inverse_sparsity_order` + 1.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetLairDistance()`, `PCAIRZType`, `PCAIRSetZType()`, `PCAIRSetInverseType()`, `PCAIRSetInverseSparsityOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetLairDistance(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetLairDistance_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This is the order of polynomial we use in air if inverse_type is 
-// power, arnoldi, newton or neumann
-// Default: 6
-// -pc_air_poly_order
+/*@
+  PCAIRSetPolyOrder - Sets the polynomial order used by the `PCAIR` F-point smoother inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the polynomial order
+
+  Options Database Key:
+. -pc_air_poly_order poly_order - the polynomial order if using a polynomial inverse type; defaults to 6
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyOrder()`, `PCAIRSetInverseType()`, `PCAIRSetCPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This is the order of sparsity we use if we assemble our approximate inverses
-// This (hence also) determines what distance our grid-transfer operators are
-// distance = inverse_sparsity_order + 1
-// Default: 1
-// -pc_air_inverse_sparsity_order
+/*@
+  PCAIRSetInverseSparsityOrder - Sets the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` approximate inverses
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the power of the operator matrix used as the sparsity of assembled inverses
+
+  Options Database Key:
+. -pc_air_inverse_sparsity_order sparsity_order - the power of the operator matrix used as the sparsity of assembled inverses; defaults to 1
+
+  Level: advanced
+
+  Note:
+  When `PCAIRSetZType()` is `AIR_Z_PRODUCT` this also sets the distance of the grid-transfer operators, since that distance is `-pc_air_inverse_sparsity_order` + 1.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetInverseSparsityOrder()`, `PCAIRSetInverseType()`, `PCAIRSetCInverseSparsityOrder()`, `PCAIRSetLairDistance()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetInverseSparsityOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This is the order of polynomial we use in air if inverse_type is 
-// power, arnoldi, newton or neumann but on the C points
-// If unset, this defaults to whatever the F point smoother is atm
-// Default: pc_air_poly_order
-// -pc_air_c_poly_order
+/*@
+  PCAIRSetCPolyOrder - Sets the polynomial order used by the `PCAIR` C-point smoother inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the polynomial order
+
+  Options Database Key:
+. -pc_air_c_poly_order poly_order - the polynomial order for the C-point smooth if using a polynomial inverse type; if unset, defaults to the same as `-pc_air_poly_order`
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCPolyOrder()`, `PCAIRSetPolyOrder()`, `PCAIRSetCInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This is the order of sparsity we use if we assemble our approximate inverses
-// but on the C points
-// If unset, this defaults to whatever the F point smoother is atm
-// Default: pc_air_inverse_sparsity_order
-// -pc_air_c_inverse_sparsity_order
+/*@
+  PCAIRSetCInverseSparsityOrder - Sets the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` C-point approximate inverses
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the power of the operator matrix used as the sparsity of assembled inverses for the C-point smooth
+
+  Options Database Key:
+. -pc_air_c_inverse_sparsity_order sparsity_order - the power of the operator matrix used as the sparsity of assembled inverses for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_sparsity_order`
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCInverseSparsityOrder()`, `PCAIRSetInverseSparsityOrder()`, `PCAIRSetCInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Coarse grid inverse type (see PCAIRSetInverseType)
-// Default: power
-// -pc_air_coarsest_inverse_type
+/*@
+  PCAIRSetCoarsestInverseType - Sets the type of approximate inverse used as the `PCAIR` coarse-grid solver
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+
+  Options Database Key:
+. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestInverseType()`, `PCPFLAREINVType`, `PCAIRSetInverseType()`, `PCAIRSetCoarsestPolyOrder()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseType(PC pc, PCPFLAREINVType input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCoarsestInverseType_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Coarse grid polynomial order (see PCAIRSetPolyOrder)
-// Default: 6
-// -pc_air_coarsest_poly_order
+/*@
+  PCAIRSetCoarsestPolyOrder - Sets the polynomial order used by the `PCAIR` coarse-grid solver
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the polynomial order
+
+  Options Database Key:
+. -pc_air_coarsest_poly_order poly_order - the polynomial order of the coarse-grid solver if using a polynomial inverse type; defaults to 6
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestPolyOrder()`, `PCAIRSetPolyOrder()`, `PCAIRSetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCoarsestPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Coarse grid polynomial sparsity order (see PCAIRSetInverseSparsityOrder)
-// Default: 1
-// -pc_air_coarsest_inverse_sparsity_order
+/*@
+  PCAIRSetCoarsestInverseSparsityOrder - Sets the power of the operator matrix used as the sparsity pattern of the assembled `PCAIR` coarse-grid inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the power of the operator matrix used as the sparsity of the assembled coarse-grid inverse
+
+  Options Database Key:
+. -pc_air_coarsest_inverse_sparsity_order sparsity_order - the power of the operator matrix used as the sparsity of the assembled coarse-grid inverse; defaults to 1
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestInverseSparsityOrder()`, `PCAIRSetInverseSparsityOrder()`, `PCAIRSetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetCoarsestInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Coarse grid matrix-free application (see PCAIRSetMatrixFreePolys)
-// Default: false
-// -pc_air_coarsest_matrix_free_polys
+/*@
+  PCAIRSetCoarsestMatrixFreePolys - Sets whether `PCAIR` applies the coarse-grid polynomial solver matrix-free
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to apply the coarse-grid polynomial solver matrix-free
+
+  Options Database Key:
+. -pc_air_coarsest_matrix_free_polys (true|false) - apply the coarse-grid polynomial solver matrix-free; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestMatrixFreePolys()`, `PCAIRSetMatrixFreePolys()`, `PCAIRSetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetCoarsestMatrixFreePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Coarse diagonal scaling polynomial application (see PCAIRSetDiagScalePolys)
-// Default: false
-// -pc_air_coarsest_diag_scale_polys
+/*@
+  PCAIRSetCoarsestDiagScalePolys - Sets whether `PCAIR` diagonally scales before computing the coarse-grid polynomial approximate inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to diagonally scale before computing the coarse-grid polynomial inverse
+
+  Options Database Key:
+. -pc_air_coarsest_diag_scale_polys (true|false) - diagonally scale before computing the coarse-grid polynomial inverse; defaults to false
+
+  Level: advanced
+
+  Note:
+  Only relevant if using a polynomial inverse type (see `PCAIRSetCoarsestInverseType()`); if the coarsest inverse type is `PFLAREINV_NEUMANN` this is always forced true and cannot be overridden.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestDiagScalePolys()`, `PCAIRSetDiagScalePolys()`, `PCAIRSetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetCoarsestDiagScalePolys_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Coarse grid subcomm (see PCAIRSetSubcomm)
-// Default: false
-// -pc_air_coarsest_subcomm
+/*@
+  PCAIRSetCoarsestSubcomm - Sets whether `PCAIR` computes the coarse-grid polynomial coefficients on a subcommunicator
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to compute the coarse-grid polynomial coefficients on a subcommunicator
+
+  Options Database Key:
+. -pc_air_coarsest_subcomm (true|false) - compute the coarse-grid polynomial coefficients on a subcommunicator; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestSubcomm()`, `PCAIRSetSubcomm()`, `PCAIRSetCoarsestInverseType()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestSubcomm(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
@@ -973,84 +2287,186 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestSubcomm(PC pc, PetscBool input_bool)
    PCAIRSetCoarsestSubcomm_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Relative drop tolerances (inf norm) on R 
-// Default: 0.01
-// -pc_air_r_drop
+/*@
+  PCAIRSetRDrop - Sets the relative drop tolerance applied to R by `PCAIR` on each level after it is built
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the relative (inf norm) drop tolerance applied to R
+
+  Options Database Key:
+. -pc_air_r_drop input_real - drop tolerance for R; defaults to 0.01
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetRDrop()`, `PCAIRSetADrop()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetRDrop(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PCAIRSetRDrop_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Relative drop tolerances (inf norm) on A 
-// Default: 0.001
-// -pc_air_a_drop
+/*@
+  PCAIRSetADrop - Sets the relative drop tolerance applied to the coarse matrix by `PCAIR` on each level after it is built
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_real - the relative (inf norm) drop tolerance applied to the coarse matrix
+
+  Options Database Key:
+. -pc_air_a_drop input_real - drop tolerance for the coarse matrix; defaults to 1e-4
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetADrop()`, `PCAIRSetRDrop()`, `PCAIRSetALump()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetADrop(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PCAIRSetADrop_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Whether to lump in A or drop
-// Default: false
-// -pc_air_a_lump
+/*@
+  PCAIRSetALump - Sets whether `PCAIR` lumps to the diagonal rather than drops when forming the coarse matrix
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to lump to the diagonal rather than drop when forming the coarse matrix
+
+  Options Database Key:
+. -pc_air_a_lump (true|false) - lump to the diagonal rather than drop for the coarse matrix; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetALump()`, `PCAIRSetADrop()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetALump_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Whether or not to re-use the existing sparsity when PCSetup is called
-// with SAME_NONZERO_PATTERN
-// This involves re-using the CF splitting, the symbolic mat-mat mults, 
-// the repartitioning, the structure of the matrices with drop tolerances applied, etc
-// This will take more memory but 
-// will make the setup much cheaper on subsequent calls. If the matrix has 
-// changed entries convergence may suffer if the matrix is sufficiently different
-// Default: false
-// -pc_air_reuse_sparsity
+/*@
+  PCAIRSetReuseSparsity - Sets whether `PCAIR` reuses the sparsity of the multigrid hierarchy during setup
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to reuse the sparsity of the hierarchy during setup
+
+  Options Database Key:
+. -pc_air_reuse_sparsity (true|false) - reuse the sparsity of the hierarchy (CF splitting, repartitioning, symbolic matrix-matrix products) during setup; defaults to false
+
+  Level: advanced
+
+  Note:
+  If the matrix has changed too much, convergence may suffer.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReuseSparsity()`, `PCAIRSetReusePolyCoeffs()`, `PCAIRSetReuseAmount()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
 {  
    PetscFunctionBegin; 
    PCAIRSetReuseSparsity_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS); 
 }
-// Whether or not to also re-use the gmres polynomial coefficients when 
-// reuse_sparsity is set to true
-// If the matrix has been changed the reused coefficients won't be correct, 
-// and the coefficients are very sensitive to changes in the matrix
-// This is really only a useful option if you are regenerating 
-// the hierarchy for the exact same matrix where you have stored 
-// the gmres polynomial coefficients externally and restore them
-// using PCAIRGetPolyCoeffs/PCAIRSetPolyCoeffs
-// Default: false
-// -pc_air_reuse_poly_coeffs
+/*@
+  PCAIRSetReusePolyCoeffs - Sets whether `PCAIR` also reuses the GMRES polynomial coefficients when reusing the sparsity of the hierarchy
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to also reuse the GMRES polynomial coefficients
+
+  Options Database Key:
+. -pc_air_reuse_poly_coeffs (true|false) - also reuse the GMRES polynomial coefficients when `-pc_air_reuse_sparsity` is set; defaults to false
+
+  Level: advanced
+
+  Note:
+  Only useful when regenerating the hierarchy for the same matrix, with coefficients stored and restored using `PCAIRGetPolyCoeffs()` and `PCAIRSetPolyCoeffs()`; the coefficients are very sensitive to changes in the matrix.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReusePolyCoeffs()`, `PCAIRSetReuseSparsity()`, `PCAIRGetPolyCoeffs()`, `PCAIRSetPolyCoeffs()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
 {
    PetscFunctionBegin;
    PCAIRSetReusePolyCoeffs_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// Controls how much data is stored when reuse_sparsity is enabled (1, 2, or 3).
-// 1 - store only CF splitting and parallel repartitioning
-// 2 - additionally store everything required to reuse sparsity in SpGEMMs
-// 3 - store everything (default, preserves previous behaviour)
-// -pc_air_reuse_amount
+/*@
+  PCAIRGetReuseAmount - Returns how much data `PCAIR` stores when reusing the sparsity of the multigrid hierarchy
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the amount of data stored when `-pc_air_reuse_sparsity` is enabled
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetReuseAmount()`, `PCAIRGetReuseSparsity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
 {
    PetscFunctionBegin;
    PCAIRGetReuseAmount_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRSetReuseAmount - Sets how much data `PCAIR` stores when reusing the sparsity of the multigrid hierarchy
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the amount of data to store when `-pc_air_reuse_sparsity` is enabled
+
+  Options Database Key:
+. -pc_air_reuse_amount amount - how much data to store when `-pc_air_reuse_sparsity` is enabled: 1 stores only the CF splitting and parallel repartitioning, 2 additionally stores everything needed to reuse sparsity in the SpGEMMs, and 3 stores everything; defaults to 3
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReuseAmount()`, `PCAIRSetReuseSparsity()`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PCAIRSetReuseAmount_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-// This routine sets the polynomial coefficients in the PCAIR object
-// row_size and col_size are the size of the coeffs_ptr array
-// The caller's array is not referenced after this call and can be freed or modified
+/*@C
+  PCAIRSetPolyCoeffs - Sets (copies in) the polynomial coefficients used by `PCAIR` for a given level and inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc            - the `PCAIR` preconditioner context
+. petsc_level   - the level in the hierarchy
+. which_inverse - which inverse's coefficients to set, one of `COEFFS_INV_AFF`, `COEFFS_INV_AFF_DROPPED`, `COEFFS_INV_ACC`, or `COEFFS_INV_COARSE`
+. coeffs_ptr    - the array of polynomial coefficients to copy in
+. row_size      - the number of rows in coeffs_ptr
+- col_size      - the number of columns in coeffs_ptr
+
+  Level: advanced
+
+  Note:
+  This routine copies the data from coeffs_ptr into the `PCAIR` object; the caller's array is not referenced after
+  this call and may be freed or modified.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
+@*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 {
    PetscFunctionBegin;
@@ -1834,6 +3250,38 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 }
 
 // ~~~~~~~~~~~~~~~~
+
+/*MC
+  PCAIR - Reduction-based algebraic multigrid using approximate ideal restriction (AIR),
+  providing the AIRG, nAIR and lAIR methods for nonsymmetric/asymmetric linear systems
+
+  Options Database Keys:
++ -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type
+. -pc_air_inverse_type      (power|arnoldi|newton|neumann|sai|isai|wjacobi|jacobi) - approximate inverse used for smoothing
+. -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type
+. -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf)
+. -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg) - CF splitting to use
+. -pc_air_strong_threshold  strong_threshold - strong threshold used in the CF splitting
+. -pc_air_r_drop            drop_tol - drop tolerance applied to R on each level after it is built
+. -pc_air_a_drop            drop_tol - drop tolerance applied to the coarse matrix on each level after it is built
+- -pc_air_print_stats_timings (true|false) - print statistics about the multigrid hierarchy and timings
+
+  Level: intermediate
+
+  Notes:
+  `PCAIR` requires configuring PETSc with `--download-pflare`.
+
+  The combination of `-pc_air_z_type` and `-pc_air_inverse_type` selects the reduction
+  multigrid: product + arnoldi gives AIRG, lair + wjacobi gives lAIR, and so on.
+
+  Only the most common options are listed here. See https://github.com/PFLAREProject/PFLARE
+  and its `docs/options.md` for the complete set, and the many `PCAIRSetXXX()` routines.
+
+  If you use `PCAIR` please cite S. Dargaville et al., "AIR multigrid with GMRES polynomials
+  (AIRG) and additive preconditioners for Boltzmann transport", J. Comput. Phys. 518 (2024) 113342.
+
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`
+M*/
 
 // Creates the structure we need for this PC
 PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)

@@ -90,6 +90,21 @@ static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
 
 // Get routines
 
+/*@
+  PCPFLAREINVGetPolyOrder - Returns the polynomial order used by `PCPFLAREINV`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. poly_order - the polynomial order
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetPolyOrder()`, `PCPFLAREINVSetType()`
+@*/
 PetscErrorCode PCPFLAREINVGetPolyOrder(PC pc, PetscInt *poly_order)
 {
    PetscFunctionBegin;
@@ -109,6 +124,21 @@ static PetscErrorCode PCPFLAREINVGetPolyOrder_PFLAREINV(PC pc, PetscInt *poly_or
 
 // ~~~~~~~~~~
 
+/*@
+  PCPFLAREINVGetSparsityOrder - Returns the sparsity order used when `PCPFLAREINV` assembles its approximate inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. inverse_sparsity_order - the power of the input matrix used as the sparsity pattern of the assembled inverse
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetSparsityOrder()`, `PCPFLAREINVSetMatrixFree()`
+@*/
 PetscErrorCode PCPFLAREINVGetSparsityOrder(PC pc, PetscInt *inverse_sparsity_order)
 {
    PetscFunctionBegin;
@@ -128,6 +158,21 @@ static PetscErrorCode PCPFLAREINVGetSparsityOrder_PFLAREINV(PC pc, PetscInt *inv
 
 // ~~~~~~~~~~
 
+/*@
+  PCPFLAREINVGetType - Returns the type of approximate inverse applied by `PCPFLAREINV`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. type - the approximate inverse type, one of the `PCPFLAREINVType` values
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetType()`, `PCPFLAREINVType`
+@*/
 PetscErrorCode PCPFLAREINVGetType(PC pc, PCPFLAREINVType *type)
 {
    PetscFunctionBegin;
@@ -147,6 +192,21 @@ static PetscErrorCode PCPFLAREINVGetType_PFLAREINV(PC pc, PCPFLAREINVType *type)
 
 // ~~~~~~~~~~
 
+/*@
+  PCPFLAREINVGetMatrixFree - Returns whether `PCPFLAREINV` applies its approximate inverse matrix-free
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. flg - `PETSC_TRUE` if the approximate inverse is applied matrix-free instead of being assembled
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetMatrixFree()`, `PCPFLAREINVGetInverseMat()`
+@*/
 PetscErrorCode PCPFLAREINVGetMatrixFree(PC pc, PetscBool *flg)
 {
    PetscFunctionBegin;
@@ -166,13 +226,27 @@ static PetscErrorCode PCPFLAREINVGetMatrixFree_PFLAREINV(PC pc, PetscBool *flg)
 
 // ~~~~~~~~~~
 
-// Get the underlying matrix that represents our approximate inverse
-// This is a borrowed reference into the PCPFLAREINV object - DO NOT destroy it
-// It is either an assembled matrix (e.g. MATAIJ/MATDIAGONAL) or a matrix-free
-// MATSHELL, depending on the inverse type and the matrix_free option
-// The returned matrix is only valid until the next PCSetUp/PCReset/PCDestroy
-// (a re-setup with a different non-zero pattern rebuilds it)
-// Before PCSetUp has been called it is NULL - call PCSetUp (or KSPSetUp) first
+/*@
+  PCPFLAREINVGetInverseMat - Returns the underlying matrix that represents the `PCPFLAREINV` approximate inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. mat - the approximate inverse matrix, either an assembled matrix (for example `MATAIJ` or `MATDIAGONAL`) or a
+        matrix-free `MATSHELL`, depending on the inverse type and the matrix-free setting
+
+  Level: advanced
+
+  Note:
+  This is a borrowed reference into the `PCPFLAREINV` object - do not destroy it. It is only valid until the
+  next `PCSetUp()`, `PCReset()`, or `PCDestroy()` (a re-setup with a different nonzero pattern rebuilds it), and
+  is `NULL` before `PCSetUp()` (or `KSPSetUp()`) has been called.
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetMatrixFree()`, `PCPFLAREINVGetType()`, `PCSetUp()`
+@*/
 PetscErrorCode PCPFLAREINVGetInverseMat(PC pc, Mat *mat)
 {
    PetscFunctionBegin;
@@ -192,9 +266,22 @@ static PetscErrorCode PCPFLAREINVGetInverseMat_PFLAREINV(PC pc, Mat *mat)
 
 // Set routines
 
-// This is the order of polynomial we use
-// Default: 6
-// -pc_pflareinv_poly_order 
+/*@
+  PCPFLAREINVSetPolyOrder - Sets the polynomial order used by `PCPFLAREINV`
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCPFLAREINV` preconditioner context
+- poly_order - the polynomial order
+
+  Options Database Key:
+. -pc_pflareinv_poly_order poly_order - the polynomial order if using a polynomial inverse type; defaults to 6
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyOrder()`, `PCPFLAREINVSetType()`
+@*/
 PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
 {
    PetscFunctionBegin;
@@ -219,9 +306,22 @@ PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
 
 // ~~~~~~~~~~
 
-// This is the order of sparsity we use if we assemble our approximate inverses
-// Default: 1
-// -pc_pflareinv_sparsity_order 
+/*@
+  PCPFLAREINVSetSparsityOrder - Sets the sparsity order used when `PCPFLAREINV` assembles its approximate inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc                     - the `PCPFLAREINV` preconditioner context
+- inverse_sparsity_order - the power of the input matrix used as the sparsity pattern of the assembled inverse
+
+  Options Database Key:
+. -pc_pflareinv_sparsity_order inverse_sparsity_order - power of the input matrix used as the sparsity pattern in assembled inverses; defaults to 1
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetSparsityOrder()`, `PCPFLAREINVSetMatrixFree()`
+@*/
 PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_order)
 {
    PetscFunctionBegin;
@@ -246,9 +346,22 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 
 // ~~~~~~~~~~
 
-// What type of approximation do we use for our inverse - see PCPFLAREINVType
-// Default: power
-// -pc_pflareinv_type
+/*@
+  PCPFLAREINVSetType - Sets the type of approximate inverse applied by `PCPFLAREINV`
+
+  Logically Collective
+
+  Input Parameters:
++ pc   - the `PCPFLAREINV` preconditioner context
+- type - the approximate inverse type, one of the `PCPFLAREINVType` values
+
+  Options Database Key:
+. -pc_pflareinv_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type; defaults to arnoldi
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetType()`, `PCPFLAREINVType`, `PCPFLAREINVSetPolyOrder()`
+@*/
 PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType type)
 {
    PetscFunctionBegin;
@@ -273,9 +386,22 @@ PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType type)
 
 // ~~~~~~~~~~
 
-// Do we apply our approximate inverse matrix-free?
-// Default: false
-// -pc_pflareinv_matrix_free
+/*@
+  PCPFLAREINVSetMatrixFree - Controls whether `PCPFLAREINV` applies its approximate inverse matrix-free
+
+  Logically Collective
+
+  Input Parameters:
++ pc  - the `PCPFLAREINV` preconditioner context
+- flg - `PETSC_TRUE` to apply the approximate inverse matrix-free instead of assembling it
+
+  Options Database Key:
+. -pc_pflareinv_matrix_free (true|false) - apply the approximate inverse matrix-free instead of assembling it; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetMatrixFree()`, `PCPFLAREINVGetInverseMat()`
+@*/
 PetscErrorCode PCPFLAREINVSetMatrixFree(PC pc, PetscBool flg)
 {
    PetscFunctionBegin;
@@ -301,12 +427,28 @@ static PetscErrorCode PCPFLAREINVSetMatrixFree_PFLAREINV(PC pc, PetscBool flg)
 
 // ~~~~~~~~~~
 
-// Get the stored polynomial coefficients and their dimensions
-// This routine returns a pointer to the coefficients in the PCPFLAREINV object
-// If you want to save/restore them later you will need to copy them yourself
-// The pointer is valid only until the next PCSetUp or PCReset call
-// This is different to the Fortran interface to this routine, which returns a copy
-// in an allocatable array (which knows its own size)
+/*@C
+  PCPFLAREINVGetPolyCoeffs - Returns the polynomial coefficients stored by `PCPFLAREINV` after the last `PCSetUp()`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameters:
++ coeffs - pointer to the column-major array of polynomial coefficients
+. rows   - the number of rows, equal to the polynomial order plus one
+- cols   - the number of columns, 1 for the power, Arnoldi, and Neumann inverse types, or 2 for the Newton types
+
+  Level: advanced
+
+  Note:
+  This routine returns a pointer into the `PCPFLAREINV` object itself, valid only until the next `PCSetUp()` or
+  `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
+  the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCSetUp()`
+@*/
 PetscErrorCode PCPFLAREINVGetPolyCoeffs(PC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
 {
    PetscFunctionBegin;
@@ -328,10 +470,26 @@ static PetscErrorCode PCPFLAREINVGetPolyCoeffs_PFLAREINV(PC pc, PetscReal **coef
 
 // ~~~~~~~~~~
 
-// Set (copy in) polynomial coefficients; does not trigger rebuild
-// This routine copies the data from coeffs_ptr into the PCPFLAREINV object
-// row_size == poly_order+1, col_size == 1 (power/arnoldi/neumann) or 2 (newton)
-// The caller's array is not referenced after this call and can be freed or modified
+/*@C
+  PCPFLAREINVSetPolyCoeffs - Sets (copies in) the polynomial coefficients used by `PCPFLAREINV`
+
+  Logically Collective
+
+  Input Parameters:
++ pc     - the `PCPFLAREINV` preconditioner context
+. coeffs - the column-major array of polynomial coefficients
+. rows   - the number of rows, equal to the polynomial order plus one
+- cols   - the number of columns, 1 for the power, Arnoldi, and Neumann inverse types, or 2 for the Newton types
+
+  Level: advanced
+
+  Note:
+  This routine copies the data from coeffs into the `PCPFLAREINV` object; the caller's array is not referenced
+  after this call and may be freed or modified. It does not itself trigger a rebuild of the approximate inverse -
+  combine with `PCPFLAREINVSetReusePolyCoeffs()` to have the next `PCSetUp()` reuse these coefficients.
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyCoeffs()`, `PCPFLAREINVSetReusePolyCoeffs()`
+@*/
 PetscErrorCode PCPFLAREINVSetPolyCoeffs(PC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
 {
    PetscFunctionBegin;
@@ -356,7 +514,21 @@ static PetscErrorCode PCPFLAREINVSetPolyCoeffs_PFLAREINV(PC pc, PetscReal *coeff
 
 // ~~~~~~~~~~
 
-// Get the flag that controls whether polynomial coefficients are reused on next setup
+/*@
+  PCPFLAREINVGetReusePolyCoeffs - Returns whether `PCPFLAREINV` reuses its stored polynomial coefficients on the next setup
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. flg - `PETSC_TRUE` if the stored polynomial coefficients are reused instead of being recomputed
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetReusePolyCoeffs()`, `PCPFLAREINVGetPolyCoeffs()`
+@*/
 PetscErrorCode PCPFLAREINVGetReusePolyCoeffs(PC pc, PetscBool *flg)
 {
    PetscFunctionBegin;
@@ -376,7 +548,22 @@ static PetscErrorCode PCPFLAREINVGetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool *
 
 // ~~~~~~~~~~
 
-// Set the flag that controls whether polynomial coefficients are reused on next setup
+/*@
+  PCPFLAREINVSetReusePolyCoeffs - Controls whether `PCPFLAREINV` reuses its stored polynomial coefficients on the next setup
+
+  Logically Collective
+
+  Input Parameters:
++ pc  - the `PCPFLAREINV` preconditioner context
+- flg - `PETSC_TRUE` to skip recomputing the polynomial coefficients on setup when the nonzero pattern is unchanged
+
+  Options Database Key:
+. -pc_pflareinv_reuse_poly_coeffs (true|false) - skip recomputing the polynomial coefficients during setup when the matrix has the same nonzero pattern; defaults to false
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetPolyCoeffs()`
+@*/
 PetscErrorCode PCPFLAREINVSetReusePolyCoeffs(PC pc, PetscBool flg)
 {
    PetscFunctionBegin;
@@ -639,6 +826,26 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
 }
 
 // ~~~~~~~~~~
+
+/*MC
+  PCPFLAREINV - Approximate-inverse preconditioner (GMRES/Neumann polynomials, sparse
+  approximate inverses, weighted Jacobi), applied assembled or matrix-free
+
+  Options Database Keys:
++ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - approximate inverse type
+. -pc_pflareinv_poly_order  poly_order - polynomial order if using a polynomial inverse type
+- -pc_pflareinv_matrix_free (true|false) - apply matrix-free instead of assembling the inverse
+
+  Level: intermediate
+
+  Notes:
+  `PCPFLAREINV` requires configuring PETSc with `--download-pflare`.
+
+  Only the most common options are listed here. See https://github.com/PFLAREProject/PFLARE
+  and its `docs/options.md` for the complete set, and the `PCPFLAREINVSetXXX()` routines.
+
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCAIR`, `PCGAMG`
+M*/
 
 // Creates the structure we need for this PC
 PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
