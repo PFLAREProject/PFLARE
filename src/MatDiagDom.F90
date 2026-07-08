@@ -32,10 +32,8 @@ module matdiagdom
       PetscReal, dimension(:), allocatable, target, intent(out) :: diag_dom_ratio
       PetscReal, intent(out)              :: max_dd_ratio_achieved
 
-      PetscErrorCode :: ierr
-      MPIU_Comm :: MPI_COMM_MATRIX
-
 #if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
       integer :: errorcode, ifree
       MatType :: mat_type
       PetscReal :: tol, diff
@@ -46,8 +44,6 @@ module matdiagdom
       PetscReal :: max_dd_ratio_cpu
 #endif
 
-      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
-
 #if defined(PETSC_HAVE_KOKKOS)
       call MatGetType(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
@@ -56,6 +52,7 @@ module matdiagdom
          A_array = input_mat%v
          local_rows_aff_kokkos = 0
          max_dd_ratio_achieved = 0d0
+
          call MatDiagDomRatio_kokkos(A_array, max_dd_ratio_achieved, local_rows_aff_kokkos)
 
          if (kokkos_debug()) then
@@ -65,7 +62,8 @@ module matdiagdom
                call copy_diag_dom_ratio_d2h(diag_dom_ratio_ptr)
             end if
 
-            call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio_cpu, max_dd_ratio_cpu)
+            call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, &
+                                     diag_dom_ratio_cpu, max_dd_ratio_cpu)
 
             tol = dd_ratio_abs_tol + dd_ratio_rel_tol * max(abs(max_dd_ratio_cpu), abs(max_dd_ratio_achieved))
             if (abs(max_dd_ratio_cpu - max_dd_ratio_achieved) > tol) then
@@ -85,22 +83,29 @@ module matdiagdom
             deallocate(diag_dom_ratio_cpu)
          end if
       else
-         call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+         call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, &
+                                  diag_dom_ratio, max_dd_ratio_achieved)
       end if
 #else
-      call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+      call MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, &
+                               diag_dom_ratio, max_dd_ratio_achieved)
 #endif
 
    end subroutine MatDiagDomRatio
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, diag_dom_ratio, max_dd_ratio_achieved)
+   subroutine MatDiagDomRatio_cpu(input_mat, is_fine, cf_markers_local, &
+                                  diag_dom_ratio, max_dd_ratio_achieved)
 
       ! Compute diagonal dominance ratio over local fine rows of input_mat
       ! without extracting Aff. This mirrors the Kokkos MatDiagDomRatio path:
       ! sum abs(F-neighbour off-diagonals) / abs(F-diagonal), with nonlocal
       ! F markers obtained from the matrix halo scatter.
+      !
+      ! The halo scatter uses input_mat's own mult PetscSF (via MatGetMultPetscSF
+      ! inside the C scatter routines); we build a matching leaf Vec locally and
+      ! destroy it at the end.
 
       ! ~~~~~~
 
@@ -119,9 +124,9 @@ module matdiagdom
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer(c_long_long) :: A_array, vec_long
+      integer(c_long_long) :: vec_long, A_array, leaf_vec_array
       type(tMat) :: Ad, Ao
-      type(tVec) :: cf_markers_vec
+      type(tVec) :: cf_markers_vec, leaf_vec
       PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
       PetscInt, dimension(:), pointer :: ad_ia => null(), ad_ja => null(), ao_ia => null(), ao_ja => null()
       PetscScalar, dimension(:), pointer :: ad_vals => null(), ao_vals => null()
@@ -185,10 +190,16 @@ module matdiagdom
 
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, local_rows, global_rows, &
                cf_markers_local_real, cf_markers_vec, ierr)
-         A_array = input_mat%v
          vec_long = cf_markers_vec%v
-         call vecscatter_mat_begin_c(A_array, vec_long, cf_markers_nonlocal_ptr)
-         call vecscatter_mat_end_c(A_array, vec_long, cf_markers_nonlocal_ptr)
+
+         ! Leaf Vec sized/typed to match the off-diagonal block
+         call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
+         leaf_vec_array = leaf_vec%v
+
+         ! Use input_mat's mult SF + the local leaf Vec for the single halo scatter.
+         A_array = input_mat%v
+         call vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array)
+         call vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, cf_markers_nonlocal_ptr)
          call c_f_pointer(cf_markers_nonlocal_ptr, cf_markers_nonlocal, shape=[cols_ao])
       end if
 
@@ -231,8 +242,9 @@ module matdiagdom
 
       ! Cleanup for halo scatter resources.
       if (mpi) then
-         call vecscatter_mat_restore_c(A_array, cf_markers_nonlocal_ptr)
+         call vecscatter_mat_restore_c(leaf_vec_array, cf_markers_nonlocal_ptr)
          call VecDestroy(cf_markers_vec, ierr)
+         call VecDestroy(leaf_vec, ierr)
          deallocate(cf_markers_local_real)
       end if
 

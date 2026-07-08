@@ -1,6 +1,7 @@
 ARG BASE_IMAGE=stevendargaville/petsc
 
 FROM ${BASE_IMAGE}
+ARG PETSC_DIR=/build/petsc
 # Use the optimised petsc build by default
 ARG ARCH=arch-linux-c-opt
 # Don't use malloc dump by default
@@ -10,6 +11,7 @@ LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE"
 
 ENV PETSC_ARCH=$ARCH
+ENV PETSC_DIR=$PETSC_DIR
 # -on_error_abort ensures any test failures are caught and the build fails
 # fp trap turns on floating point exception trapping in petsc
 ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"

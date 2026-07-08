@@ -4,94 +4,59 @@
 
 // Include the petsc header files
 #include <petsc.h>
-#include <../src/mat/impls/aij/mpi/mpiaij.h>
 #include <petsc/private/pcimpl.h>
 
-// Does a vecscatter according to the pattern in the given Mat
-// Have to do this in C as there is no fortran interface to MatGetCommunicationStructs
-PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, double **nonlocal_vals)
+// Forward scatter using the matrix's own mult PetscSF (the borrowed mvctx) into
+// a caller-owned leaf Vec.
+PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec)
 {
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-
-   // Do the scatter
-   PetscCallVoid(VecScatterBegin(a->Mvctx, *vec_long, a->lvec, INSERT_VALUES, SCATTER_FORWARD));
+   PetscSF sf;
+   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
+   PetscCallVoid(VecScatterBegin(sf, *vec_long, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
 }
 
-// End the scatter started in vecscatter_mat_begin_c and return a pointer
-// Have to call vecscatter_mat_restore_c on the pointer when done
-PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, double **nonlocal_vals)
+// End the scatter started in vecscatter_mat_begin_c and hand back a raw pointer
+// into leaf_vec for the Fortran caller. Pair with vecscatter_mat_restore_c.
+PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec, double **nonlocal_vals)
 {
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   PetscCallVoid(VecScatterEnd(a->Mvctx, *vec_long, a->lvec, INSERT_VALUES, SCATTER_FORWARD));
-
-   // lvec will now have the updated nonlocal values in it
-   // and so we will just return a pointer to the values in that vec
-   // these correspond to the numbering in Ao, with the local to global map for the columns
-   // in colmap
-   PetscCallVoid(VecGetArray(a->lvec, nonlocal_vals));
-   // Have to call a restore once you're done
+   PetscSF sf;
+   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
+   PetscCallVoid(VecScatterEnd(sf, *vec_long, *leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+   PetscCallVoid(VecGetArray(*leaf_vec, nonlocal_vals));
 }
 
-// Does a vecscatter according to the pattern in the given Mat
-// Have to do this in C as there is no fortran interface to MatGetCommunicationStructs
+PETSC_INTERN void vecscatter_mat_restore_c(Vec *leaf_vec, double **nonlocal_vals)
+{
+   PetscCallVoid(VecRestoreArray(*leaf_vec, nonlocal_vals));
+}
+
+// Bool scatter / reduce on the matrix's own mult PetscSF (the borrowed mvctx).
 PETSC_INTERN void boolscatter_mat_begin_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
 {
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-
-   // Do the scatter
-   PetscCallVoid(PetscSFBcastBegin(a->Mvctx, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
+   PetscSF sf;
+   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
+   PetscCallVoid(PetscSFBcastBegin(sf, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
 }
 
-// End the scatter started in boolscatter_mat_begin_c and return a pointer
 PETSC_INTERN void boolscatter_mat_end_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
 {
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   PetscCallVoid(PetscSFBcastEnd(a->Mvctx, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
-}
-
-PETSC_INTERN void vecscatter_mat_restore_c(Mat *matrix, double **nonlocal_vals)
-{
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   PetscCallVoid(VecRestoreArray(a->lvec, nonlocal_vals));
-}
-
-// Does a reverse scatter
-// Must have updated the values in lvec before calling this
-PETSC_INTERN void vecscatter_mat_reverse_begin_c(Mat *matrix, Vec *vec_long)
-{
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   // Could call this but can just access them directly
-   //MatGetCommunicationStructs(*matrix, &lvec, PetscInt *colmap[], &multScatter)
-
-   // Do the reverse scatter - has to be an add
-   PetscCallVoid(VecScatterBegin(a->Mvctx, a->lvec, *vec_long, ADD_VALUES, SCATTER_REVERSE));
-}
-
-PETSC_INTERN void vecscatter_mat_reverse_end_c(Mat *matrix, Vec *vec_long)
-{
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   PetscCallVoid(VecScatterEnd(a->Mvctx, a->lvec, *vec_long, ADD_VALUES, SCATTER_REVERSE));
+   PetscSF sf;
+   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
+   PetscCallVoid(PetscSFBcastEnd(sf, MPI_C_BOOL, local_vals, nonlocal_vals, MPI_REPLACE));
 }
 
 PETSC_INTERN void boolscatter_mat_reverse_begin_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
 {
-
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-
-   // Do the scatter
-   PetscCallVoid(PetscSFReduceBegin(a->Mvctx, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
+   PetscSF sf;
+   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
+   PetscCallVoid(PetscSFReduceBegin(sf, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
 }
 
 PETSC_INTERN void boolscatter_mat_reverse_end_c(Mat *matrix, bool *local_vals, bool *nonlocal_vals)
 {
-   Mat_MPIAIJ *a = (Mat_MPIAIJ *)((*matrix)->data);
-   PetscCallVoid(PetscSFReduceEnd(a->Mvctx, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
+   PetscSF sf;
+   PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
+   PetscCallVoid(PetscSFReduceEnd(sf, MPI_C_BOOL, nonlocal_vals, local_vals, MPI_LOR));
 }
 
 // Annoying as MPIU_INTEGER is defined in fortran, but not if we call that fortran
@@ -568,7 +533,7 @@ PETSC_INTERN PetscErrorCode MatGetNNZs_both_c(Mat *A, PetscInt *nnzs_local, Pets
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-extern PetscErrorCode MatGetDiagonalMarkers_SeqAIJ(Mat, const PetscInt **, PetscBool *);
+PETSC_EXTERN PetscErrorCode MatGetDiagonalMarkers_SeqAIJ(Mat, const PetscInt **, PetscBool *);
 // Returns true if a matrix is only the diagonal
 PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 {
@@ -594,18 +559,36 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
      mat_local = *A;
   } 
 
-  Mat_SeqAIJ *a = (Mat_SeqAIJ *)mat_local->data;
   PetscCall(MatGetLocalSize(*A, &local_rows, &local_cols));
   *diag_only = 0;
 
+  // Use MatGetRowIJ to read the SeqAIJ nnz count without touching the private struct.
+  PetscInt local_nnz = 0, nonlocal_nnz = 0;
+  {
+     PetscInt n;
+     PetscBool symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done;
+     const PetscInt *ad_ia;
+     PetscCall(MatGetRowIJ(mat_local, 0, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));
+     local_nnz = ad_ia[n];
+     PetscCall(MatRestoreRowIJ(mat_local, 0, symmetric, inodecompressed, &n, &ad_ia, NULL, &done));
+  }
+
   if (size != 1)
   {
-      Mat_SeqAIJ *b = (Mat_SeqAIJ *)mat_nonlocal->data;
       PetscBool diagDense;
+
+      {
+         PetscInt n;
+         PetscBool symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done;
+         const PetscInt *ao_ia;
+         PetscCall(MatGetRowIJ(mat_nonlocal, 0, symmetric, inodecompressed, &n, &ao_ia, NULL, &done));
+         nonlocal_nnz = ao_ia[n];
+         PetscCall(MatRestoreRowIJ(mat_nonlocal, 0, symmetric, inodecompressed, &n, &ao_ia, NULL, &done));
+      }
 
       // In parallel also have to check the nonlocal has nothing in it
       PetscCall(MatGetDiagonalMarkers_SeqAIJ(mat_local, NULL, &diagDense));
-      if (diagDense && local_rows == a->nz && b->nz == 0)
+      if (diagDense && local_rows == local_nnz && nonlocal_nnz == 0)
       {
          rank_diag_serial++;
       }
@@ -617,12 +600,12 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
   {
       PetscBool diagDense;
       PetscCall(MatGetDiagonalMarkers_SeqAIJ(*A, NULL, &diagDense));
-      // In serial easy 
-      if (diagDense && local_rows == a->nz)
+      // In serial easy
+      if (diagDense && local_rows == local_nnz)
       {
          rank_diag++;
       }
-  }   
+  }
 
   // If every rank is diagonal only, the entire matrix is diagonal
   if (rank_diag == size)

@@ -207,6 +207,10 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
    int ddc_its, double fraction_swap,
    IS *is_fine, IS *is_coarse)
 {
+   // Now we call petsc fortran routines in compute_cf_splitting_c from this C file
+   // so we have to have made sure this is called
+   // Otherwise things like PETSC_NULL_INTEGER_ARRAY aren't defined
+   PetscCallVoid(PetscInitializeFortran());
    compute_cf_splitting_c(&input_mat, symmetric_int, strong_threshold,
       max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
       is_fine, is_coarse);
@@ -214,6 +218,10 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
 
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, double max_dd_ratio, Mat *output_mat)
 {
+   // Now we call petsc fortran routines in compute_cf_splitting_c from this C file
+   // so we have to have made sure this is called
+   // Otherwise things like PETSC_NULL_INTEGER_ARRAY aren't defined
+   PetscCallVoid(PetscInitializeFortran());
    compute_diag_dom_submatrix_c(&input_mat, max_dd_ratio, output_mat);
 }
 
