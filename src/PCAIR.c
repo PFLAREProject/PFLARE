@@ -38,7 +38,7 @@ PETSC_EXTERN void PCAIRGetSubcomm_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetStrongThreshold_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetDDCIts_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *input_int);
+PETSC_EXTERN void PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *cf_splitting_type);
 PETSC_EXTERN void PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetSmoothType_c(PC *pc, char* input_string);
 PETSC_EXTERN void PCAIRGetDiagScalePolys_c(PC *pc, PetscBool *input_bool);
@@ -51,15 +51,15 @@ PETSC_EXTERN void PCAIRGetConstrainZ_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetImproveWIts_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetImproveZIts_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetStrongRThreshold_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetInverseType_c(PC *pc, PCPFLAREINVType *input_int);
-PETSC_EXTERN void PCAIRGetCInverseType_c(PC *pc, PCPFLAREINVType *input_int);
-PETSC_EXTERN void PCAIRGetZType_c(PC *pc, PCAIRZType *input_int);
+PETSC_EXTERN void PCAIRGetInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
+PETSC_EXTERN void PCAIRGetCInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
+PETSC_EXTERN void PCAIRGetZType_c(PC *pc, PCAIRZType *z_type);
 PETSC_EXTERN void PCAIRGetPolyOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetLairDistance_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCPolyOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCoarsestInverseType_c(PC *pc, PCPFLAREINVType *input_int);
+PETSC_EXTERN void PCAIRGetCoarsestInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
 PETSC_EXTERN void PCAIRGetCoarsestPolyOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
@@ -92,7 +92,7 @@ PETSC_EXTERN void PCAIRSetSubcomm_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetStrongThreshold_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetDDCIts_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType input_int);
+PETSC_EXTERN void PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType cf_splitting_type);
 PETSC_EXTERN void PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetSmoothType_c(PC *pc, const char* input_string);
 PETSC_EXTERN void PCAIRSetDiagScalePolys_c(PC *pc, PetscBool input_bool);
@@ -105,15 +105,15 @@ PETSC_EXTERN void PCAIRSetConstrainZ_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetImproveWIts_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetImproveZIts_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetStrongRThreshold_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetInverseType_c(PC *pc, PCPFLAREINVType input_int);
-PETSC_EXTERN void PCAIRSetZType_c(PC *pc, PCAIRZType input_int);
+PETSC_EXTERN void PCAIRSetInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
+PETSC_EXTERN void PCAIRSetZType_c(PC *pc, PCAIRZType z_type);
 PETSC_EXTERN void PCAIRSetLairDistance_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetPolyOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetInverseSparsityOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCInverseType_c(PC *pc, PCPFLAREINVType input_int);
+PETSC_EXTERN void PCAIRSetCInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
 PETSC_EXTERN void PCAIRSetCPolyOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCInverseSparsityOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCoarsestInverseType_c(PC *pc, PCPFLAREINVType input_int);
+PETSC_EXTERN void PCAIRSetCoarsestInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
 PETSC_EXTERN void PCAIRSetCoarsestPolyOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestMatrixFreePolys_c(PC *pc, PetscBool input_bool);
@@ -508,16 +508,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. input_int - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
+. cf_splitting_type - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
 
   Level: intermediate
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCFSplittingType()`, `CFSplittingType`, `PCAIRGetStrongThreshold()`, `PCAIRGetMaxLubySteps()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *input_int)
+PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *cf_splitting_type)
 {
    PetscFunctionBegin;
-   PCAIRGetCFSplittingType_c(&pc, input_int);
+   PCAIRGetCFSplittingType_c(&pc, cf_splitting_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -802,16 +802,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_rea
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
 
   Level: intermediate
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetInverseType()`, `PCPFLAREINVType`, `PCAIRGetCInverseType()`, `PCAIRGetZType()`, `PCAIRGetPolyOrder()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *input_int)
+PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_type)
 {
    PetscFunctionBegin;
-   PCAIRGetInverseType_c(&pc, input_int);
+   PCAIRGetInverseType_c(&pc, inverse_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -823,16 +823,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *input_in
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
 
   Level: advanced
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCInverseType()`, `PCPFLAREINVType`, `PCAIRGetInverseType()`, `PCAIRGetCPolyOrder()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *input_int)
+PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *inverse_type)
 {
    PetscFunctionBegin;
-   PCAIRGetCInverseType_c(&pc, input_int);
+   PCAIRGetCInverseType_c(&pc, inverse_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -844,16 +844,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *input_i
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. input_int - the grid-transfer operator type, one of `AIR_Z_PRODUCT`, `AIR_Z_LAIR`, or `AIR_Z_LAIR_SAI`
+. z_type - the grid-transfer operator type, one of `AIR_Z_PRODUCT`, `AIR_Z_LAIR`, or `AIR_Z_LAIR_SAI`
 
   Level: intermediate
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetZType()`, `PCAIRZType`, `PCAIRGetInverseType()`, `PCAIRGetLairDistance()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC pc, PCAIRZType *input_int)
+PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC pc, PCAIRZType *z_type)
 {
    PetscFunctionBegin;
-   PCAIRGetZType_c(&pc, input_int);
+   PCAIRGetZType_c(&pc, z_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -970,16 +970,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
 
   Level: intermediate
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestInverseType()`, `PCPFLAREINVType`, `PCAIRGetInverseType()`, `PCAIRGetCoarsestPolyOrder()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC pc, PCPFLAREINVType *input_int)
+PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC pc, PCPFLAREINVType *inverse_type)
 {
    PetscFunctionBegin;
-   PCAIRGetCoarsestInverseType_c(&pc, input_int);
+   PCAIRGetCoarsestInverseType_c(&pc, inverse_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1659,8 +1659,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
   Logically Collective
 
   Input Parameters:
-+ pc        - the `PCAIR` preconditioner context
-- input_int - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
++ pc                - the `PCAIR` preconditioner context
+- cf_splitting_type - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
 
   Options Database Key:
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg) - the CF splitting algorithm; defaults to pmisr_ddc
@@ -1669,10 +1669,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCFSplittingType()`, `CFSplittingType`, `PCAIRSetStrongThreshold()`, `PCAIRSetMaxLubySteps()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType(PC pc, CFSplittingType input_int)
+PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType(PC pc, CFSplittingType cf_splitting_type)
 {
    PetscFunctionBegin;
-   PCAIRSetCFSplittingType_c(&pc, input_int);
+   PCAIRSetCFSplittingType_c(&pc, cf_splitting_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1969,8 +1969,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real
   Logically Collective
 
   Input Parameters:
-+ pc        - the `PCAIR` preconditioner context
-- input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
++ pc           - the `PCAIR` preconditioner context
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
 
   Options Database Key:
 . -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
@@ -1982,10 +1982,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetInverseType()`, `PCPFLAREINVType`, `PCAIRSetCInverseType()`, `PCAIRSetZType()`, `PCAIRSetPolyOrder()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType input_int)
+PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType inverse_type)
 {
    PetscFunctionBegin;
-   PCAIRSetInverseType_c(&pc, input_int);
+   PCAIRSetInverseType_c(&pc, inverse_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1994,8 +1994,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType input_int
   Logically Collective
 
   Input Parameters:
-+ pc        - the `PCAIR` preconditioner context
-- input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
++ pc           - the `PCAIR` preconditioner context
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
 
   Options Database Key:
 . -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
@@ -2004,10 +2004,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType input_int
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCInverseType()`, `PCPFLAREINVType`, `PCAIRSetInverseType()`, `PCAIRSetCPolyOrder()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType input_int)
+PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType inverse_type)
 {
    PetscFunctionBegin;
-   PCAIRSetCInverseType_c(&pc, input_int);
+   PCAIRSetCInverseType_c(&pc, inverse_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2016,8 +2016,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType input_in
   Logically Collective
 
   Input Parameters:
-+ pc        - the `PCAIR` preconditioner context
-- input_int - the grid-transfer operator type, one of `AIR_Z_PRODUCT`, `AIR_Z_LAIR`, or `AIR_Z_LAIR_SAI`
++ pc     - the `PCAIR` preconditioner context
+- z_type - the grid-transfer operator type, one of `AIR_Z_PRODUCT`, `AIR_Z_LAIR`, or `AIR_Z_LAIR_SAI`
 
   Options Database Key:
 . -pc_air_z_type (product|lair|lair_sai) - the grid-transfer operator type; defaults to product
@@ -2029,10 +2029,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType input_in
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetZType()`, `PCAIRZType`, `PCAIRSetInverseType()`, `PCAIRSetLairDistance()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRSetZType(PC pc, PCAIRZType input_int)
+PETSC_EXTERN PetscErrorCode PCAIRSetZType(PC pc, PCAIRZType z_type)
 {
    PetscFunctionBegin;
-   PCAIRSetZType_c(&pc, input_int);
+   PCAIRSetZType_c(&pc, z_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2157,8 +2157,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
   Logically Collective
 
   Input Parameters:
-+ pc        - the `PCAIR` preconditioner context
-- input_int - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
++ pc           - the `PCAIR` preconditioner context
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
 
   Options Database Key:
 . -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
@@ -2167,10 +2167,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestInverseType()`, `PCPFLAREINVType`, `PCAIRSetInverseType()`, `PCAIRSetCoarsestPolyOrder()`
 @*/
-PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseType(PC pc, PCPFLAREINVType input_int)
+PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseType(PC pc, PCPFLAREINVType inverse_type)
 {
    PetscFunctionBegin;
-   PCAIRSetCoarsestInverseType_c(&pc, input_int);
+   PCAIRSetCoarsestInverseType_c(&pc, inverse_type);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@

@@ -167,26 +167,26 @@ static PetscErrorCode PCPFLAREINVGetSparsityOrder_PFLAREINV(PC pc, PetscInt *inv
 . pc - the `PCPFLAREINV` preconditioner context
 
   Output Parameter:
-. type - the approximate inverse type, one of the `PCPFLAREINVType` values
+. inverse_type - the approximate inverse type, one of the `PCPFLAREINVType` values
 
   Level: intermediate
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetType()`, `PCPFLAREINVType`
 @*/
-PetscErrorCode PCPFLAREINVGetType(PC pc, PCPFLAREINVType *type)
+PetscErrorCode PCPFLAREINVGetType(PC pc, PCPFLAREINVType *inverse_type)
 {
    PetscFunctionBegin;
-   PetscUseMethod(pc, "PCPFLAREINVGetType_C", (PC, PCPFLAREINVType *), (pc, type));
+   PetscUseMethod(pc, "PCPFLAREINVGetType_C", (PC, PCPFLAREINVType *), (pc, inverse_type));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode PCPFLAREINVGetType_PFLAREINV(PC pc, PCPFLAREINVType *type)
+static PetscErrorCode PCPFLAREINVGetType_PFLAREINV(PC pc, PCPFLAREINVType *inverse_type)
 {
    PC_PFLAREINV *inv_data;
 
    PetscFunctionBegin;
-   inv_data = (PC_PFLAREINV *)pc->data;    
-   *type = (PCPFLAREINVType)inv_data->inverse_type;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   *inverse_type = (PCPFLAREINVType)inv_data->inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -352,8 +352,8 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
   Logically Collective
 
   Input Parameters:
-+ pc   - the `PCPFLAREINV` preconditioner context
-- type - the approximate inverse type, one of the `PCPFLAREINVType` values
++ pc           - the `PCPFLAREINV` preconditioner context
+- inverse_type - the approximate inverse type, one of the `PCPFLAREINVType` values
 
   Options Database Key:
 . -pc_pflareinv_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type; defaults to arnoldi
@@ -362,14 +362,14 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetType()`, `PCPFLAREINVType`, `PCPFLAREINVSetPolyOrder()`
 @*/
-PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType type)
+PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType inverse_type)
 {
    PetscFunctionBegin;
-   PetscTryMethod(pc, "PCPFLAREINVSetType_C", (PC, PCPFLAREINVType), (pc, type));
+   PetscTryMethod(pc, "PCPFLAREINVSetType_C", (PC, PCPFLAREINVType), (pc, inverse_type));
    PetscFunctionReturn(PETSC_SUCCESS);
-} 
+}
 
- static PetscErrorCode PCPFLAREINVSetType_PFLAREINV(PC pc, PCPFLAREINVType type)
+ static PetscErrorCode PCPFLAREINVSetType_PFLAREINV(PC pc, PCPFLAREINVType inverse_type)
 {
    PC_PFLAREINV *inv_data;
    PCPFLAREINVType old_type;
@@ -377,9 +377,9 @@ PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType type)
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
    PetscCall(PCPFLAREINVGetType(pc, &old_type));
-   if (old_type == type) PetscFunctionReturn(PETSC_SUCCESS);
+   if (old_type == inverse_type) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
-   inv_data->inverse_type = type;  
+   inv_data->inverse_type = inverse_type;
    pc->setupcalled = PETSC_FALSE;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
