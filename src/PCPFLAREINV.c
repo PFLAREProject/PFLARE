@@ -8,6 +8,8 @@
 #include <petsc/private/pcimpl.h>
 #include "pflare.h"
 
+/* SUBMANSEC = PC */
+
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
 // coeffs_ptr/row_size/col_size are in/out:

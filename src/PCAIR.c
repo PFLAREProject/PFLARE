@@ -9,6 +9,8 @@
 #include "pflare.h"
 #include <string.h>
 
+/* SUBMANSEC = PC */
+
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
 PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
