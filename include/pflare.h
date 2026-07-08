@@ -3,6 +3,31 @@
 
 #include "petsc.h"
 
+/* SUBMANSEC = PC */
+
+/*E
+  PCPFLAREINVType - The type of approximate inverse applied by `PCPFLAREINV`, and used as the
+  smoother and coarse-grid solver by `PCAIR`
+
+  Values:
++ `PFLAREINV_POWER`           - GMRES polynomial with the power basis
+. `PFLAREINV_ARNOLDI`         - GMRES polynomial with the Arnoldi basis
+. `PFLAREINV_NEWTON`          - GMRES polynomial with the Newton basis, with extra roots added for stability
+. `PFLAREINV_NEWTON_NO_EXTRA` - GMRES polynomial with the Newton basis, without extra roots
+. `PFLAREINV_NEUMANN`         - Neumann polynomial
+. `PFLAREINV_SAI`             - sparse approximate inverse; cannot be applied matrix-free
+. `PFLAREINV_ISAI`            - incomplete sparse approximate inverse; cannot be applied matrix-free
+. `PFLAREINV_WJACOBI`         - weighted Jacobi
+- `PFLAREINV_JACOBI`          - unweighted Jacobi
+
+  Level: intermediate
+
+  Note:
+  The two Jacobi types exist mainly for use as smoothers in `PCAIR`; for a standalone Jacobi
+  preconditioner use PETSc's `PCJACOBI`.
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCAIR`, `PCPFLAREINVSetType()`, `PCPFLAREINVGetType()`, `PCAIRSetInverseType()`, `PCAIRGetInverseType()`
+E*/
 typedef enum {
    PFLAREINV_POWER,
    PFLAREINV_ARNOLDI,
@@ -14,11 +39,44 @@ typedef enum {
    PFLAREINV_WJACOBI,
    PFLAREINV_JACOBI,
 }  PCPFLAREINVType;
+
+/*E
+  PCAIRZType - The type of grid-transfer (restriction) operator built by `PCAIR`
+
+  Values:
++ `AIR_Z_PRODUCT`  - approximate ideal restriction built from a matrix product (gives AIRG when combined with a polynomial inverse type)
+. `AIR_Z_LAIR`     - local approximate ideal restriction (lAIR)
+- `AIR_Z_LAIR_SAI` - local approximate ideal restriction built with a sparse approximate inverse
+
+  Level: intermediate
+
+  Note:
+  Together with `PCAIRSetInverseType()` this selects the reduction multigrid method: for example
+  product + arnoldi gives AIRG, and lair + wjacobi gives lAIR.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetZType()`, `PCAIRGetZType()`, `PCAIRSetInverseType()`, `PCAIRSetLairDistance()`
+E*/
 typedef enum {
    AIR_Z_PRODUCT,
    AIR_Z_LAIR,
    AIR_Z_LAIR_SAI,
 }  PCAIRZType;
+
+/*E
+  CFSplittingType - The coarse/fine (CF) splitting algorithm used by `PCAIR`
+
+  Values:
++ `CF_PMISR_DDC`  - two-pass splitting giving a diagonally dominant fine-fine block (PMISR DDC)
+. `CF_DIAG_DOM`   - two-pass splitting enforcing a fixed diagonal dominance ratio (set by the strong threshold) in the fine-fine block
+. `CF_PMIS`       - PMIS with a symmetrised strength matrix
+. `CF_PMIS_DIST2` - distance-2 PMIS, with strength matrix formed from S'S + S and then symmetrised
+. `CF_AGG`        - aggregation with root-nodes as C points; processor-local aggregation in parallel
+- `CF_PMIS_AGG`   - PMIS on boundary nodes with a symmetrised strength matrix, then processor-local aggregation
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCFSplittingType()`, `PCAIRGetCFSplittingType()`, `PCAIRSetStrongThreshold()`
+E*/
 typedef enum {
    CF_PMISR_DDC,
    CF_DIAG_DOM,
