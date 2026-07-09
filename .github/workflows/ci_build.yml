@@ -326,8 +326,8 @@ jobs:
           build-args: |
             BASE_IMAGE=stevendargaville/pflare:latest
 
-  # Now pflare tracks petsc main, we check to see if this commit can still be built
-  # through the petsc configure
+  # Now pflare tracks petsc main, we check to see if this commit and the docs
+  # can still be built through the petsc configure
   # We do this by checking out petsc main and just replacing the hash it pulls down
   # for PFLARE to the hash from the merge commit for this branch
   gnu_petsc_config:
@@ -349,7 +349,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             autoconf automake bash-completion ca-certificates chrpath cmake curl \
-            g++ gcc gfortran git less libblis-serial-dev liblapack-dev libtool \
+            flex g++ gcc gfortran git less libblis-serial-dev libfl-dev liblapack-dev libtool \
             locales m4 make openssl pkg-config ripgrep zlib1g-dev python3-virtualenv \
             python3-venv python3-dev wget valgrind vim
 
@@ -389,7 +389,21 @@ jobs:
 
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}"
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}" check
-          
+
+          # Build the PETSc docs against the PFLARE commit under test. The gitcommit in
+          # PFLARE.py was already rewritten to ${COMMIT} above, so PETSc's docs clone-and-scan
+          # renders PFLARE's manual pages at this commit. --fail-on-warning (baked into the
+          # `docs` target) turns doctext warnings and unresolved `PCFOO` cross-references into
+          # hard failures. Unset PETSC_ARCH so output lands in doc/_build (the `docs` target
+          # otherwise copies doc -> ${PETSC_ARCH}-doc); PETSC_DIR must stay set so conf.py scans
+          # THIS tree.
+          unset PETSC_ARCH
+          make PETSC_DIR="${PETSC_DIR}" docs
+          # Confirm PFLARE's pages made it all the way through to rendered HTML (a dropped
+          # SUBMANSEC makes a page silently vanish rather than warn).
+          test -f doc/_build/html/manualpages/PC/PCAIR.html
+          test -f doc/_build/html/manualpages/PC/PCPFLAREINV.html
+
 #   # GPU testing - ubicloud have deprecated their gpu runners
 #   # Have to build the entirity of the stack given the petsc configure
 #   # needs to detect the gpu
