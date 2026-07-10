@@ -1,5 +1,7 @@
 import numpy as np
-from libc.string cimport memcpy, strlen
+from libc.string cimport strlen
+
+from petsc4py import PETSc
 
 from petsc4py.PETSc cimport Mat, PetscMat
 from petsc4py.PETSc cimport PC, PetscPC
@@ -9,6 +11,16 @@ from petsc4py.PETSc cimport IS, PetscIS
 # Bring PetscInt and PetscReal from petsc.h so the C compiler resolves the
 # correct widths regardless of whether PETSc was built with 32- or 64-bit
 # indices, or single/double precision.
+#
+# NOTE: `ctypedef double PetscReal` is a Cython-side alias only. For *scalar*
+# parameters and return values Cython emits the true C type `PetscReal` (so the
+# C compiler picks the correct width) and coerces through Python float, which is
+# always correct. The alias is a problem ONLY for bulk memory paths - a
+# `double[::1, :]` memoryview or a raw memcpy sized with sizeof(PetscReal) would
+# assume 8-byte elements and corrupt data under single precision. Those paths
+# (the poly-coeffs get/set below) size their numpy arrays from PETSc.RealType and
+# copy element-wise through the PetscReal* pointer instead. Do NOT "fix" this
+# ctypedef to float - scalar coercion depends on it staying double.
 cdef extern from "petsc.h":
 	ctypedef int    PetscInt  "PetscInt"
 	ctypedef double PetscReal "PetscReal"
@@ -479,11 +491,18 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 	"""
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt row_size = 0, col_size = 0
+	cdef PetscInt i, j
 	PCAIRGetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
 	                      &coeffs_ptr, &row_size, &col_size)
-	result = np.empty((row_size, col_size), dtype=np.float64, order='F')
-	cdef double[::1, :] result_view = result
-	memcpy(&result_view[0, 0], <void*>coeffs_ptr, row_size * col_size * sizeof(PetscReal))
+	# Match the numpy dtype to the build's PetscReal width (float32 single /
+	# float64 double) and copy element-wise through the PetscReal* pointer.
+	# A raw memcpy sized with sizeof(PetscReal) into a double[::1,:] view would
+	# misinterpret the buffer under single precision. The coefficients array is
+	# Fortran-ordered (column-major): element (i,j) sits at i + j*row_size.
+	result = np.empty((row_size, col_size), dtype=np.dtype(PETSc.RealType), order='F')
+	for j in range(col_size):
+		for i in range(row_size):
+			result[i, j] = coeffs_ptr[i + j * row_size]
 	return result
 
 # -----------------------------------------------------------------------
@@ -667,11 +686,15 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	    Coefficient array as returned by pcair_get_poly_coeffs.
 	    Must have shape (poly_order+1, 1_or_2).
 	"""
-	cdef double[::1, :] coeffs_f = np.asfortranarray(coeffs, dtype=np.float64)
-	cdef PetscInt row_size = <PetscInt>coeffs_f.shape[0]
-	cdef PetscInt col_size = <PetscInt>coeffs_f.shape[1]
+	# Stage in the build's PetscReal dtype (float32 single / float64 double) so the
+	# PetscReal* the C setter reads has the right element width. Casting a float64
+	# buffer to PetscReal* would stride wrongly under single precision.
+	staging = np.asfortranarray(coeffs, dtype=np.dtype(PETSc.RealType))
+	cdef PetscInt row_size = <PetscInt>staging.shape[0]
+	cdef PetscInt col_size = <PetscInt>staging.shape[1]
+	cdef PetscReal *sptr = <PetscReal*><size_t>staging.ctypes.data
 	PCAIRSetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
-	                      <PetscReal*>&coeffs_f[0, 0], row_size, col_size)
+	                      sptr, row_size, col_size)
 
 # -----------------------------------------------------------------------
 # PCPFLAREINV wrappers
@@ -688,10 +711,14 @@ cpdef pcpflareinv_get_poly_coeffs(PC pc):
 	"""
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt rows = 0, cols = 0
+	cdef PetscInt i, j
 	PCPFLAREINVGetPolyCoeffs(pc.pc, &coeffs_ptr, &rows, &cols)
-	result = np.empty((rows, cols), dtype=np.float64, order='F')
-	cdef double[::1, :] result_view = result
-	memcpy(&result_view[0, 0], <void*>coeffs_ptr, rows * cols * sizeof(PetscReal))
+	# See pcair_get_poly_coeffs: dtype must track the build's PetscReal width and
+	# the copy must go element-wise through the PetscReal* (Fortran/column-major).
+	result = np.empty((rows, cols), dtype=np.dtype(PETSc.RealType), order='F')
+	for j in range(cols):
+		for i in range(rows):
+			result[i, j] = coeffs_ptr[i + j * rows]
 	return result
 
 cpdef pcpflareinv_set_poly_coeffs(PC pc, coeffs):
@@ -705,10 +732,13 @@ cpdef pcpflareinv_set_poly_coeffs(PC pc, coeffs):
 	    Coefficient array as returned by pcpflareinv_get_poly_coeffs.
 	    Must have shape (poly_order+1, 1_or_2).
 	"""
-	cdef double[::1, :] coeffs_f = np.asfortranarray(coeffs, dtype=np.float64)
-	cdef PetscInt rows = <PetscInt>coeffs_f.shape[0]
-	cdef PetscInt cols = <PetscInt>coeffs_f.shape[1]
-	PCPFLAREINVSetPolyCoeffs(pc.pc, <PetscReal*>&coeffs_f[0, 0], rows, cols)
+	# See pcair_set_poly_coeffs: stage in the build's PetscReal dtype so the
+	# PetscReal* has the right element width under single precision.
+	staging = np.asfortranarray(coeffs, dtype=np.dtype(PETSc.RealType))
+	cdef PetscInt rows = <PetscInt>staging.shape[0]
+	cdef PetscInt cols = <PetscInt>staging.shape[1]
+	cdef PetscReal *sptr = <PetscReal*><size_t>staging.ctypes.data
+	PCPFLAREINVSetPolyCoeffs(pc.pc, sptr, rows, cols)
 
 cpdef pcpflareinv_set_reuse_poly_coeffs(PC pc, bint flag):
 	"""Tell PCPFLAREINV to reuse the current polynomial coefficients on the next setup.
