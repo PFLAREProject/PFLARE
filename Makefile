@@ -67,6 +67,13 @@ export PETSC_USE_SHARED_LIBRARIES := $(if $(call _have_conf,PETSC_USE_SHARED_LIB
 export PETSC_HAVE_KOKKOS := $(if $(call _have_conf,PETSC_HAVE_KOKKOS),1,0)
 # Detect if PETSc was configured without MPI
 export PETSC_HAVE_MPIUNI := $(if $(call _have_conf,PETSC_HAVE_MPIUNI),1,0)
+# Detect single-precision PETSc: the tests/data binary matrices are double-width
+# and cannot be loaded under PETSC_USE_REAL_SINGLE, so the load tests are gated off
+export PETSC_USE_REAL_SINGLE := $(if $(call _have_conf,PETSC_USE_REAL_SINGLE),1,0)
+
+# The load tests read the double-width binaries in tests/data, so they only run
+# when PETSc uses 32-bit indices AND double precision (both flags 0).
+RUN_LOAD_TESTS := $(if $(filter 00,$(PETSC_USE_64BIT_INDICES)$(PETSC_USE_REAL_SINGLE)),1,)
 
 # To prevent overlinking with conda builds, only explicitly link 
 # to the libraries we use in pflare
@@ -247,13 +254,13 @@ tests_short_parallel: build_tests
 # if PETSC has been configured without 64 bit integers
 .PHONY: tests_load_serial
 tests_load_serial: build_tests
-ifeq ($(PETSC_USE_64BIT_INDICES),0)
+ifeq ($(RUN_LOAD_TESTS),1)
 	$(MAKE) -C tests run_tests_load_serial
 endif
 
 .PHONY: tests_load_parallel
 tests_load_parallel: build_tests
-ifeq ($(PETSC_USE_64BIT_INDICES),0)
+ifeq ($(RUN_LOAD_TESTS),1)
 	$(MAKE) -C tests run_tests_load_parallel
 endif
 
@@ -266,8 +273,8 @@ tests_medium_parallel: build_tests
 	$(MAKE) -C tests run_tests_medium_parallel		
 
 # Default target groups scanned by tests_search.
-# Keep load tests only when PETSc uses 32-bit indices.
-ifeq ($(PETSC_USE_64BIT_INDICES),0)
+# Keep load tests only when PETSc uses 32-bit indices and double precision.
+ifeq ($(RUN_LOAD_TESTS),1)
 FILTER_RUN_TARGETS_DEFAULT := run_tests_load_serial run_tests_load_parallel run_tests_no_load_short_serial run_tests_no_load_short_parallel run_tests_no_load_serial run_tests_no_load_parallel run_tests_medium_serial run_tests_medium_parallel
 else
 FILTER_RUN_TARGETS_DEFAULT := run_tests_no_load_short_serial run_tests_no_load_short_parallel run_tests_no_load_serial run_tests_no_load_parallel run_tests_medium_serial run_tests_medium_parallel

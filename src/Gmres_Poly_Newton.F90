@@ -225,8 +225,8 @@ module gmres_poly_newton
 
          ! Compute cluster centroid (mean)
          n_unique = n_unique + 1
-         rtmp(n_unique) = sum_real / dble(cluster_size)
-         itmp(n_unique) = sum_imag / dble(cluster_size)
+         rtmp(n_unique) = sum_real / real(cluster_size, kind=kind(rtmp))
+         itmp(n_unique) = sum_imag / real(cluster_size, kind=kind(itmp))
 
       end do
 

@@ -11,7 +11,7 @@
       PetscInt, parameter :: one = 1, two = 2, three = 3, nine = 9
       ! d0 literals in PetscScalar/PetscReal params: bit-identical double, float-correct single
       PetscScalar, parameter :: s_zero = 0d0, s_two = 2d0
-      PetscReal, parameter :: strong_threshold_val = 0.4d0
+      PetscReal, parameter :: strong_threshold_val = real(0.4d0, kind=PFLARE_REAL_KIND)
       Vec :: x,b
       KSP :: ksp
       PC :: pc

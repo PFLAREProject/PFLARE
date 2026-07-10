@@ -367,7 +367,8 @@ module ddc_module
          ! we have to ensure abs(measure) .ge. 1 
          ! as the PMISR has a step where it sets anything with measure < 1 as F directly
          ! given PMISR is normally called with the measure being the number of strong neighbours
-         diag_dom_ratio_measure = max(10d0, max_dd_ratio_achieved*2d0) - (diag_dom_ratio - diag_dom_ratio_measure/1d10)
+         diag_dom_ratio_measure = real(max(10d0, max_dd_ratio_achieved*2d0) - &
+            (diag_dom_ratio - diag_dom_ratio_measure/1d10), kind=kind(diag_dom_ratio_measure))
 
          allocate(cf_markers_local_aff(local_rows))
          cf_markers_local_aff = 0         
@@ -457,7 +458,7 @@ module ddc_module
             ! Rather than do any type of sort, just swap everything above that bin boundary
             ! This will give a fraction_swap that is very close to that passed in as long as the 
             ! size of the bins is small
-            swap_dom_val = dble(bin_boundary-1)/dble(size(dom_bins))
+            swap_dom_val = real(bin_boundary-1, kind=kind(swap_dom_val))/real(size(dom_bins), kind=kind(swap_dom_val))
 
          end if
 

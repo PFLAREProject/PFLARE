@@ -75,7 +75,8 @@ function wall_time()
   subroutine timer_start(id)
     integer, intent(in) :: id
 
-    starttimers(id) = wall_time()
+    ! Explicit conversion: wall_time() is c_double, timer storage is PetscReal
+    starttimers(id) = real(wall_time(), kind=kind(starttimers))
 
   end subroutine timer_start
 
@@ -86,7 +87,8 @@ function wall_time()
 
     PetscReal :: finish_time
 
-    finish_time = wall_time()
+    ! Explicit conversion: wall_time() is c_double, timer storage is PetscReal
+    finish_time = real(wall_time(), kind=kind(finish_time))
     totaltimers(id) = totaltimers(id) + (finish_time - starttimers(id))
 
   end subroutine timer_finish

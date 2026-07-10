@@ -1516,7 +1516,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! So scale each column of U (given the transpose)
       do iloc = 1, size(input,1)
          if (abs(sigma(iloc)) > PFLARE_TOL_SIGMA_DROP) then
-            U(:, iloc) = U(:, iloc) * 1d0/sigma(iloc)
+            U(:, iloc) = U(:, iloc) / sigma(iloc)
          else
             U(:, iloc) = 0d0
          end if

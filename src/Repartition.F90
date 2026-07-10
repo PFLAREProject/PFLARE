@@ -53,14 +53,14 @@ module repartition
       if (off_proc_nnzs == 0) then
          ratio = 0
       else
-         ratio = dble(local_nnzs)/dble(off_proc_nnzs)
+         ratio = real(local_nnzs, kind=kind(ratio))/real(off_proc_nnzs, kind=kind(ratio))
       end if
 
       call MPI_Allreduce(ratio, ratio_parallel, 1, MPIU_REAL, MPI_SUM, MPI_COMM_MATRIX, errorcode)
 
       ratio = ratio_parallel  
       ! Only divide by the number of processors that are active
-      ratio = ratio / dble(no_active_cores)
+      ratio = ratio / real(no_active_cores, kind=kind(ratio))
 
    end subroutine      
    

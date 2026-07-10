@@ -117,6 +117,9 @@ module pflare_parameters
    ! Machine epsilon of the build's PetscReal (auto per precision - no branch needed)
    PetscReal, parameter, private :: PFLARE_ONE_REAL = 1.0
    PetscReal, parameter :: PFLARE_EPS = epsilon(PFLARE_ONE_REAL)
+   ! Kind of the build's PetscReal - use for kind-suffixed literals / real() casts
+   ! so double builds stay bit-identical while single builds avoid -Wconversion.
+   integer, parameter :: PFLARE_REAL_KIND = kind(PFLARE_ONE_REAL)
 
    ! Kind-correct 0/1/-1 for PETSc value arguments (MatAXPY/MatScale/VecSet/
    ! VecAXPY alpha, MatSetValue value, MatMatMult fill, ...). A bare d0 literal

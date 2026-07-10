@@ -189,7 +189,7 @@ module matdiagdom
          call MatSeqAIJGetArrayRead(Ao, ao_vals, ierr)
 
          allocate(cf_markers_local_real(local_rows))
-         if (local_rows > 0) cf_markers_local_real = dble(cf_markers_local(1:local_rows))
+         if (local_rows > 0) cf_markers_local_real = real(cf_markers_local(1:local_rows), kind=kind(cf_markers_local_real))
 
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, local_rows, global_rows, &
                cf_markers_local_real, cf_markers_vec, ierr)

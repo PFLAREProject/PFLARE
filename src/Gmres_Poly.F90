@@ -7,7 +7,8 @@ module gmres_poly
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
          PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
-         PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL
+         PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
+         PFLARE_REAL_KIND
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
@@ -20,9 +21,10 @@ module gmres_poly
    implicit none
 
    ! Just define pi
-   ! d0 suffix so the literal is parsed at double precision (previously truncated
-   ! to single even in double builds - the one intended double-numeric change)
-   PetscReal, parameter, private :: pi = 3.141592653589793d0
+   ! Kind-suffixed with the build's PetscReal kind: full double precision in double
+   ! builds (previously truncated to single even there - the one intended
+   ! double-numeric change) and no -Wconversion under single.
+   PetscReal, parameter, private :: pi = 3.141592653589793_PFLARE_REAL_KIND
    type int_vec
       integer, dimension(:), pointer :: ptr
    end type int_vec

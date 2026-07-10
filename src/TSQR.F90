@@ -200,7 +200,7 @@ module tsqr
       ! n_size is smuggled as a real in buffer element 1 and read back with int()
       ! (see Gmres_Poly finish path / line ~310 here). Exact in float up to 2^24,
       ! so this survives single precision. Kept PetscReal with the TSQR chain.
-      buffers%R_buffer_receive(1) = dble(n_size)
+      buffers%R_buffer_receive(1) = real(n_size, kind=kind(buffers%R_buffer_receive))
 
       ! If we are in parallel we need to copy the local QR into R_buffer_send so it can be 
       ! part of the mpi reduction, where R_buffer_receive is filled by the reduction
@@ -209,7 +209,7 @@ module tsqr
          allocate(buffers%R_buffer_send(n_size * n_size + 1))
          buffers%R_buffer_send = 0
          ! n_size smuggled as a real in element 1 - exact in float up to 2^24
-         buffers%R_buffer_send(1) = dble(n_size)
+         buffers%R_buffer_send(1) = real(n_size, kind=kind(buffers%R_buffer_send))
          ! Just have a pointer pointing to the R block specifically for ease
          R_pointer(1:n_size, 1:n_size) => buffers%R_buffer_send(2:n_size * n_size + 1)
       else
@@ -240,7 +240,7 @@ module tsqr
 
       ! Scale the rows, enforce uniqueness
       do i_loc = 1, n_size
-         if (scale_row(i_loc)) R_pointer(i_loc, :) = R_pointer(i_loc, :) * (-1d0)
+         if (scale_row(i_loc)) R_pointer(i_loc, :) = -R_pointer(i_loc, :)
       end do       
 
       ! ~~~~~~~~~~~
@@ -389,7 +389,7 @@ module tsqr
          ! of R by +- 1, and then the columns of Q by +- 1
          ! (but we don't actually need Q so we don't bother scaling them)      
          do j_loc = 1, n_size
-            if (R_stacked(j_loc, j_loc) < 0d0) R_stacked(j_loc, :) = R_stacked(j_loc, :) * (-1d0)
+            if (R_stacked(j_loc, j_loc) < 0) R_stacked(j_loc, :) = -R_stacked(j_loc, :)
          end do   
          
          ! Now copy back the result which has been done in place in R_stacked into inoutvec
