@@ -9,6 +9,7 @@ Two checks are performed:
 '''
 
 import sys
+import math
 import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
@@ -90,7 +91,15 @@ if reason <= 0:
 errors = []
 
 def check(name, got, expected):
-    if got != expected:
+    # PetscReal options round-trip through the build's real precision (float32
+    # under single), so floats are compared with a relative tolerance rather than
+    # for exact equality (double round-trips exactly, so this is a no-op there).
+    # Non-float values (ints, enums, strings, bools) are compared exactly.
+    if isinstance(expected, float):
+        ok = math.isclose(got, expected, rel_tol=1e-6, abs_tol=1e-12)
+    else:
+        ok = got == expected
+    if not ok:
         errors.append(f'{name}: expected {expected!r}, got {got!r}')
 
 # Verify settings from the solve above were actually applied
