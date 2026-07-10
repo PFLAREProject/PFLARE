@@ -8,6 +8,8 @@ module petsc_helper
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, &
          MatGetNNZs_both_c
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
+         PFLARE_TOL_SIGMA_DROP
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -178,7 +180,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU remove_small_from_sparse", normy, "row", row_loc
@@ -552,7 +554,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU remove_from_sparse_match", normy, "row", row_loc
@@ -853,7 +855,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
@@ -1052,7 +1054,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU MatAXPY", normy, "row", row_loc
@@ -1176,7 +1178,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU MatCreateSubMatrix", normy, "row", row_loc
@@ -1512,7 +1514,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! and sigma is diagonal 
       ! So scale each column of U (given the transpose)
       do iloc = 1, size(input,1)
-         if (abs(sigma(iloc)) > 1e-13) then
+         if (abs(sigma(iloc)) > PFLARE_TOL_SIGMA_DROP) then
             U(:, iloc) = U(:, iloc) * 1d0/sigma(iloc)
          else
             U(:, iloc) = 0d0

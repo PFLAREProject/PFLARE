@@ -3,6 +3,8 @@ module gmres_poly_newton
    use petscmat
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
+   use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
+         PFLARE_TOL_CONSISTENCY, PFLARE_EPS
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -280,8 +282,8 @@ module gmres_poly_newton
          if (b < 0) cycle
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(a) < 1e-12) cycle
-         if (a**2 + b**2 < 1e-12) cycle
+         if (abs(a) < PFLARE_TOL_ZERO) cycle
+         if (a**2 + b**2 < PFLARE_TOL_ZERO) cycle
 
          ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
          do i_loc = 1, n_roots
@@ -293,8 +295,8 @@ module gmres_poly_newton
             d = imag_roots(i_loc)
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(c) < 1e-12) cycle
-            if (c**2 + d**2 < 1e-12) cycle
+            if (abs(c) < PFLARE_TOL_ZERO) cycle
+            if (c**2 + d**2 < PFLARE_TOL_ZERO) cycle
 
             ! theta_k/theta_i
             div_real = (a * c + b * d)/(c**2 + d**2)
@@ -414,7 +416,7 @@ module gmres_poly_newton
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = 1e-12, rel_tol, abs_tol, H_norm
+      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm
 
       ! ~~~~~~    
 
@@ -570,8 +572,8 @@ module gmres_poly_newton
 
       ! These are the tolerances that control the clustering
       H_norm = norm2(H_n(1:m,1:m))
-      rel_tol = 1.0d0 * sqrt(epsilon(1.0d0))
-      abs_tol = epsilon(1.0d0) * max(H_norm, beta)
+      rel_tol = sqrt(PFLARE_EPS)
+      abs_tol = PFLARE_EPS * max(H_norm, beta)
 
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
@@ -795,7 +797,7 @@ module gmres_poly_newton
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(real_roots(i)) < 1e-12) then
+            if (abs(real_roots(i)) < PFLARE_TOL_ZERO) then
                i = i + 1
                cycle
             end if
@@ -820,7 +822,7 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (real_roots(i)**2 + imag_roots(i)**2 < 1e-12) then
+            if (real_roots(i)**2 + imag_roots(i)**2 < PFLARE_TOL_ZERO) then
                i = i + 2
                cycle
             end if            
@@ -858,7 +860,7 @@ module gmres_poly_newton
       if (imag_roots(size(real_roots)) == 0d0) then
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(real_roots(size(real_roots))) > 1e-12) then
+         if (abs(real_roots(size(real_roots))) > PFLARE_TOL_ZERO) then
 
             ! y = y + theta_i * temp_vec
             call VecAXPBY(y, &
@@ -1035,7 +1037,7 @@ module gmres_poly_newton
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(real_roots(order)) < 1e-12) then
+            if (abs(real_roots(order)) < PFLARE_TOL_ZERO) then
                order = order + 1
                cycle
             end if
@@ -1056,7 +1058,7 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (real_roots(order)**2 + imag_roots(order)**2 < 1e-12) then
+            if (real_roots(order)**2 + imag_roots(order)**2 < PFLARE_TOL_ZERO) then
                order = order + 2
                cycle
             end if           
@@ -1615,7 +1617,7 @@ end if
 
                ! Skips eigenvalues that are numerically zero - see 
                ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (abs(coefficients(term,1)) < 1e-12) then
+               if (abs(coefficients(term,1)) < PFLARE_TOL_ZERO) then
                   term = term + 1
                   cycle
                end if
@@ -1650,7 +1652,7 @@ end if
 
                ! Skips eigenvalues that are numerically zero - see 
                ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (coefficients(term,1)**2 + coefficients(term,2)**2 < 1e-12) then
+               if (coefficients(term,1)**2 + coefficients(term,2)**2 < PFLARE_TOL_ZERO) then
                   term = term + 2
                   cycle
                end if
@@ -1763,7 +1765,7 @@ end if
 
          ! Final step if last root is real
          if (coefficients(size(coefficients, 1),2) == 0d0) then
-            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > 1e-12) then
+            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
                      1d0/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
             end if             
@@ -2136,7 +2138,7 @@ end if
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(coefficients(i,1)) < 1e-12) then
+            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
                i = i + 1
                cycle
             end if        
@@ -2157,7 +2159,7 @@ end if
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
+            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
                i = i + 2
                cycle
             end if
@@ -2191,7 +2193,7 @@ end if
          ! Add in the final term multiplied by 1/theta_poly_order
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(coefficients(size(coefficients, 1),1)) > 1e-12) then      
+         if (abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then      
             call VecAXPY(inv_vec, 1d0/coefficients(size(coefficients, 1),1), product_vec, ierr)  
          end if       
       end if
@@ -2260,7 +2262,7 @@ end if
          ! solve we don't have a zero coefficient but in the second solve we do
          ! So the mat type needs to remain consistent
          ! This can't happen in the complex case
-         if (abs(coefficients(2,1)) < 1e-12) then
+         if (abs(coefficients(2,1)) < PFLARE_TOL_ZERO) then
 
             ! Set to zero
             call MatScale(inv_matrix, 0d0, ierr)
@@ -2437,8 +2439,8 @@ end if
 
                   ! Check if the distance between the fixed sparsity root and the one before
                   ! If > zero then they are not complex conjugates and hence we are on the first of the pair         
-                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > 1e-14 .OR. &
-                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > 1e-14) then
+                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > PFLARE_TOL_CONSISTENCY .OR. &
+                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > PFLARE_TOL_CONSISTENCY) then
                      output_first_complex = .TRUE.
                      i_sparse = i_sparse + 1
                   end if            
@@ -2472,7 +2474,7 @@ end if
             ! Skips eigenvalues that are numerically zero
             ! We still compute the entries as as zero because we need the sparsity
             ! to be correct for the next iteration
-            if (abs(coefficients(i,1)) < 1e-12) then
+            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
                square_sum = 0
             else
                square_sum = 1d0/coefficients(i,1)
@@ -2522,7 +2524,7 @@ end if
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
+            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
                square_sum = 0
                a_coeff = 0
              else  
@@ -2642,7 +2644,7 @@ end if
             ! Add in the final term multiplied by 1/theta_poly_order
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(coefficients(i_sparse,1)) > 1e-12) then     
+            if (abs(coefficients(i_sparse,1)) > PFLARE_TOL_ZERO) then     
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset

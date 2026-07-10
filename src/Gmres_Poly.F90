@@ -5,7 +5,8 @@ module gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
-         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE
+         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
+         PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
@@ -104,10 +105,10 @@ module gmres_poly
             if (coefficients(i_loc,2) == 0d0) then
                ! The size of the zero check here has to match that in 
                ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
-               if (abs(coefficients(i_loc,1)) < 1e-12) zero_root = .TRUE.
+               if (abs(coefficients(i_loc,1)) < PFLARE_TOL_ZERO) zero_root = .TRUE.
             else
                if (coefficients(i_loc,1)**2 + &
-                        coefficients(i_loc,2)**2 < 1e-12) zero_root = .TRUE.
+                        coefficients(i_loc,2)**2 < PFLARE_TOL_ZERO) zero_root = .TRUE.
             end if
 
             if (zero_root) then
@@ -515,7 +516,7 @@ module gmres_poly
       ! Do the Arnoldi and compute H_n and C_n
       ! We only compute H_n until we hit a relative residual of 1e-14 against the random rhs
       ! or we hit the given poly_order
-      rel_tol = 1e-14
+      rel_tol = PFLARE_TOL_ARNOLDI
       if (present(user_rel_tol)) rel_tol = user_rel_tol
       call arnoldi(matrix, poly_order, 1d-30, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
       if (present(user_rel_tol)) user_rel_tol = rel_tol
@@ -878,7 +879,7 @@ end if
 
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
-            if (normy .gt. 4d-11 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc

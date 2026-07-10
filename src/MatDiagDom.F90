@@ -5,14 +5,15 @@ module matdiagdom
    use petsc_helper, only: kokkos_debug
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
-   use pflare_parameters, only: C_POINT, F_POINT
+   use pflare_parameters, only: C_POINT, F_POINT, &
+         PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL
 
 #include "petsc/finclude/petscmat.h"
 
    implicit none
 
-   PetscReal, parameter :: dd_ratio_abs_tol = 1d-12
-   PetscReal, parameter :: dd_ratio_rel_tol = 1d-10
+   PetscReal, parameter :: dd_ratio_abs_tol = PFLARE_DD_RATIO_ABS_TOL
+   PetscReal, parameter :: dd_ratio_rel_tol = PFLARE_DD_RATIO_REL_TOL
 
    public   
    

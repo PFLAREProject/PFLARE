@@ -7,6 +7,7 @@ module fc_smooth
    use air_data_type, only: air_multigrid_data
    use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
    use matshell_data_type, only: mat_ctxtype
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13
 
 #include "petsc/finclude/petscksp.h"
 #include "petscconf.h"
@@ -193,7 +194,7 @@ module fc_smooth
                               temp_vec, ierr)
                      call VecAXPY(temp_vec, -1d0, vreduced, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
-                     if (normy .gt. 1d-13) then
+                     if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper REV FINE do not match"
                         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
                      end if
@@ -256,7 +257,7 @@ module fc_smooth
                               vreduced, ierr)  
                      call VecAXPY(temp_vec, -1d0, vfull, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
-                     if (normy .gt. 1d-13) then
+                     if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper FORW FINE do not match"
                         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
                      end if
@@ -305,7 +306,7 @@ module fc_smooth
                            temp_vec, ierr) 
                      call VecAXPY(temp_vec, -1d0, vreduced, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
-                     if (normy .gt. 1d-13) then
+                     if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper REV COARSE do not match"
                         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
                      end if
@@ -368,7 +369,7 @@ module fc_smooth
                            vreduced, ierr)
                      call VecAXPY(temp_vec, -1d0, vfull, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
-                     if (normy .gt. 1d-13) then
+                     if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper FORW COARSE do not match"
                         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
                      end if

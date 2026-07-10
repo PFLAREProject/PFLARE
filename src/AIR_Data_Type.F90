@@ -1,7 +1,8 @@
 module air_data_type
 
    use gmres_poly_data_type, only: gmres_poly_data
-   
+   use pflare_parameters, only: PFLARE_TOL_AUTO_TRUNCATE
+
    ! PETSc
    use petscmat
 
@@ -50,7 +51,7 @@ module air_data_type
       integer :: auto_truncate_start_level = -1
       ! What relative tolerance to use to determine if a coarse grid solver is good enough
       ! -pc_air_auto_truncate_tol
-      PetscReal :: auto_truncate_tol = 1e-14
+      PetscReal :: auto_truncate_tol = PFLARE_TOL_AUTO_TRUNCATE
 
       ! Perform processor agglomeration throughout the hierarchy
       ! This reduces the number of active MPI ranks as we coarsen

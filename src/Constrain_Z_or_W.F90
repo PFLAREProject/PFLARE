@@ -4,6 +4,7 @@ module constrain_z_or_w
    use petscksp
    use c_petsc_interfaces, only: vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
    use petsc_helper, only: pseudo_inv
+   use pflare_parameters, only: PFLARE_KSP_RTOL_CONSTRAIN
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -166,7 +167,7 @@ module constrain_z_or_w
       !call PCJacobiSetType(pc, 1, ierr)   
 
       ! Do 15 iterations
-      call KSPSetTolerances(ksp, 1d-14, &
+      call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_CONSTRAIN, &
                & 1d-50, &
                & PETSC_DEFAULT_REAL, &
                & maxits, ierr) 

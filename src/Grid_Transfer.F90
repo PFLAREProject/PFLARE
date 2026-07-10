@@ -4,6 +4,7 @@ module grid_transfer
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos
    use petsc_helper, only: kokkos_debug
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -67,7 +68,7 @@ module grid_transfer
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
             
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU generate_one_point_with_one_entry_from_sparse", normy, "row", row_loc
@@ -291,7 +292,7 @@ module grid_transfer
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU compute_P_from_W", normy, "row", row_loc
@@ -545,7 +546,7 @@ module grid_transfer
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
