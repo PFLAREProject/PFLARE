@@ -149,6 +149,8 @@ module gmres_poly
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
+      ! Kept PetscReal: the intrinsic random_number requires a real array. Its use
+      ! in VecSetValuesCOO below is an identity conversion in all real builds.
       PetscReal, dimension(:, :), allocatable, target   :: random_data
       type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
@@ -711,6 +713,10 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       end if
 
       ! Point directly at the R block
+      ! NOTE: this raw pointer remap ties R_pointer (PetscReal) to the TSQR
+      ! R_buffer_receive. The whole TSQR -> coefficients chain is deliberately kept
+      ! PetscReal (see docs/plan); any future PetscScalar retype must treat TSQR.F90
+      ! and this finish path as one atomic unit.
       R_pointer(1:n_size, 1:n_size) => buffers%R_buffer_receive(2:n_size * n_size + 1)
       g0 = 0      
       ! We know beta is in the top left of R
@@ -930,7 +936,8 @@ end if
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
-      PetscReal, dimension(:), allocatable :: vals
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), allocatable :: vals
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
@@ -943,7 +950,8 @@ end if
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
-      PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
+      ! Matrix entries filled by MatSeqAIJGetArray/MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals_two_ptr, vals_ptr
       PetscScalar, pointer :: submatrices_vals(:)
       logical :: reuse_triggered
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done

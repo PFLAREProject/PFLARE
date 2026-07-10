@@ -236,8 +236,10 @@ module constrain_z_or_w
       type(tMat) :: row_mat, temp_mat_aij
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
-      PetscReal, dimension(:), allocatable :: row_vals, diff
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
+      ! Dense near-nullspace work arrays (fed to dgemv/dgemm then MatSetValues)
+      PetscScalar, dimension(:), allocatable :: row_vals, diff
       type(tMat) :: new_z_or_w
       type(c_ptr) :: b_c_nonlocal_c_ptr
       integer(c_long_long) :: A_array, vec_long
@@ -249,7 +251,7 @@ module constrain_z_or_w
       ! vecscatter_mat_end_c - must match the true Vec value type
       PetscScalar, pointer :: b_c_nonlocal(:)
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
-      PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
+      PetscScalar, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0
       ! Kind-correct BLAS integer/real arguments for the dgemv/dgemm calls
       PetscBLASInt :: m_bl, n_bl, k_bl, lda_bl, ldb_bl, ldc_bl, one_bl

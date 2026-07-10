@@ -1246,7 +1246,8 @@ end if
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
-      PetscReal, dimension(:), allocatable :: vals
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), allocatable :: vals
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao, mat_sparsity_match, mat_product_save
       PetscInt, dimension(:), pointer :: colmap
@@ -1257,7 +1258,8 @@ end if
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp, temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
-      PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
+      ! Matrix entries filled by MatSeqAIJGetArray/MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals_two_ptr, vals_ptr
       PetscScalar, pointer :: submatrices_vals(:)
       logical :: reuse_triggered
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done

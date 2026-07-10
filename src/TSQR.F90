@@ -197,6 +197,9 @@ module tsqr
       ! which doesn't matter
       allocate(buffers%R_buffer_receive(n_size * n_size + 1))
       buffers%R_buffer_receive = 0
+      ! n_size is smuggled as a real in buffer element 1 and read back with int()
+      ! (see Gmres_Poly finish path / line ~310 here). Exact in float up to 2^24,
+      ! so this survives single precision. Kept PetscReal with the TSQR chain.
       buffers%R_buffer_receive(1) = dble(n_size)
 
       ! If we are in parallel we need to copy the local QR into R_buffer_send so it can be 
@@ -204,7 +207,8 @@ module tsqr
       ! In serial we can copy it directly to R_buffer_receive
       if (comm_size/=1) then
          allocate(buffers%R_buffer_send(n_size * n_size + 1))
-         buffers%R_buffer_send = 0      
+         buffers%R_buffer_send = 0
+         ! n_size smuggled as a real in element 1 - exact in float up to 2^24
          buffers%R_buffer_send(1) = dble(n_size)
          ! Just have a pointer pointing to the R block specifically for ease
          R_pointer(1:n_size, 1:n_size) => buffers%R_buffer_send(2:n_size * n_size + 1)

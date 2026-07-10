@@ -107,10 +107,12 @@ module grid_transfer
       PetscInt :: max_local_col, max_nonlocal_col
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       integer :: max_loc(1)
       integer :: comm_size, errorcode
@@ -118,6 +120,7 @@ module grid_transfer
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: colmap
       type(tMat) :: Ad, Ao
+      ! Derived magnitudes stay PetscReal
       PetscReal :: max_local_val, max_nonlocal_val
       
       ! ~~~~~~~~~~
@@ -342,9 +345,11 @@ module grid_transfer
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       PetscInt, dimension(:), pointer :: is_pointer_coarse, is_pointer_fine
       MatType:: mat_type
@@ -605,9 +610,11 @@ module grid_transfer
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices_coo, col_indices_coo
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, dimension(:), pointer :: colmap
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       type(tMat) :: Ad, Ao

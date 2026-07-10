@@ -56,9 +56,11 @@ module sai_z
       ! LAPACK pivots must be PetscBLASInt
       PetscBLASInt, dimension(:), allocatable :: pivots
       PetscInt, dimension(:), pointer :: cols => null(), j_rows_ptr => null()
-      PetscReal, dimension(:), pointer :: vals => null()
-      PetscReal, dimension(:), allocatable :: e_row, j_vals
-      PetscReal, dimension(:,:), allocatable :: submat_vals
+      ! Matrix entries (filled by MatGetRow / fed to MatSetValues and the dense
+      ! solves) are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
+      PetscScalar, dimension(:), allocatable :: e_row, j_vals
+      PetscScalar, dimension(:,:), allocatable :: submat_vals
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs, diag_vec

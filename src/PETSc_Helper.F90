@@ -225,12 +225,15 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscCount :: counter
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v          
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries
       integer :: drop_diag_int, diag_stren_int, errorcode, rel_max_row_tol_int
+      ! Derived magnitude/tolerance stays PetscReal
       PetscReal :: rel_row_tol
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
@@ -423,9 +426,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      
+
       ! ~~~~~~~~~~
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
@@ -593,9 +597,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null(), cols_mod
-      PetscReal, dimension(:), pointer :: vals => null(), vals_copy
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null(), vals_copy
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v        
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries, alpha_present
       PetscReal :: lump_sum
@@ -896,9 +902,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v         
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
@@ -1205,7 +1213,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: indices
-      PetscReal, allocatable, dimension(:) :: v
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -1268,7 +1277,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: local_indices_size
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -1348,7 +1358,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: local_indices_size
       PetscCount :: counter
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -1442,13 +1453,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! ~~~~~~~~~~~~~~~~
 
-      PetscReal, dimension(:, :), intent(in) :: input
-      PetscReal, dimension(size(input, 1), size(input, 1)), intent(out) :: U
+      ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
+      PetscScalar, dimension(:, :), intent(in) :: input
+      PetscScalar, dimension(size(input, 1), size(input, 1)), intent(out) :: U
       PetscReal, dimension(min(size(input, 1), size(input, 2))), intent(out) :: sigma
-      PetscReal, dimension(size(input, 2), size(input, 2)), intent(out) :: VT
-  
-      PetscReal, dimension(size(input, 1), size(input, 2)) :: tmp_input
-      PetscReal, dimension(:), allocatable :: WORK
+      PetscScalar, dimension(size(input, 2), size(input, 2)), intent(out) :: VT
+
+      PetscScalar, dimension(size(input, 1), size(input, 2)) :: tmp_input
+      PetscScalar, dimension(:), allocatable :: WORK
       ! BLAS/LAPACK integer arguments must be PetscBLASInt
       PetscBLASInt :: LWORK, M, N, info
       integer :: errorcode
@@ -1478,12 +1490,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! ~~~~~~~~~~~~~~~~
 
-      PetscReal, dimension(:, :), intent(in) :: input
-      PetscReal, dimension(min(size(input, 1), size(input, 2))), intent(out) :: output
+      ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
+      PetscScalar, dimension(:, :), intent(in) :: input
+      PetscScalar, dimension(min(size(input, 1), size(input, 2))), intent(out) :: output
 
-      PetscReal, dimension(size(input, 1), size(input, 1)) :: U
+      PetscScalar, dimension(size(input, 1), size(input, 1)) :: U
       PetscReal, dimension(min(size(input, 1), size(input, 2))) :: sigma
-      PetscReal, dimension(size(input, 2), size(input, 2)) :: VT
+      PetscScalar, dimension(size(input, 2), size(input, 2)) :: VT
 
       integer :: iloc, errorcode
       ! Kind-correct BLAS integer/real arguments for the dgemm call
