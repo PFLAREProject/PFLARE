@@ -173,11 +173,18 @@ module constrain_z_or_w
                & PETSC_DEFAULT_REAL, &
                & maxits, ierr) 
 
-      call KSPSetOperators(ksp, input_mat, input_mat, ierr)             
-      !call KSPSetFromOptions(ksp_coarse_solver, ierr)    
+      call KSPSetOperators(ksp, input_mat, input_mat, ierr)
+      !call KSPSetFromOptions(ksp_coarse_solver, ierr)
       call KSPSetInitialGuessNonzero(ksp, PETSC_TRUE, ierr)
+      ! In double we skip the residual norm (fixed maxits smoothing sweeps). In
+      ! single precision the self-scale Richardson divides by (Ap,Ap), which
+      ! underflows to zero once the near-nullspace residual gets small (Ap ~ 1e-20
+      ! squared underflows float tiny ~1e-38), giving Inf/NaN. Keep the residual
+      ! norm on so the solve halts at the relative tolerance before that happens.
+#if !defined(PETSC_USE_REAL_SINGLE)
       call KSPSetNormType(ksp, KSP_NORM_NONE, ierr)
-      call KSPSetUp(ksp, ierr)    
+#endif
+      call KSPSetUp(ksp, ierr)
       
       ! ~~~~~~~
       ! Compute the left near nullspace vec
