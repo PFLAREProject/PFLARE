@@ -298,7 +298,9 @@ module pmisr_module
       PetscBool, dimension(:), allocatable :: in_set_this_loop
       PetscBool, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
       type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
-      real(c_double), pointer :: measure_nonlocal(:) => null()
+      ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
+      ! vecscatter_mat_end_c - must match the true Vec value type
+      PetscScalar, pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
       type(tVec) :: measure_vec, leaf_vec
       PetscInt, dimension(:), pointer :: colmap
@@ -721,7 +723,9 @@ module pmisr_module
       PetscBool, dimension(:), allocatable, target :: veto_local, veto_nonlocal
       type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
       type(c_ptr) :: veto_local_ptr=c_null_ptr, veto_nonlocal_ptr=c_null_ptr, in_set_ptr=c_null_ptr
-      real(c_double), pointer :: measure_nonlocal(:) => null()
+      ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
+      ! vecscatter_mat_end_c - must match the true Vec value type
+      PetscScalar, pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao, Ad_spst, Ao_transpose
       type(tVec) :: measure_vec, leaf_vec
       PetscInt, dimension(:), pointer :: colmap

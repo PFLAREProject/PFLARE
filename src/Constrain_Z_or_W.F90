@@ -245,7 +245,9 @@ module constrain_z_or_w
       type(tMat) :: Ad, Ao
       type(tVec) :: leaf_vec
       PetscInt, dimension(:), pointer :: colmap
-      real(c_double), pointer :: b_c_nonlocal(:)
+      ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
+      ! vecscatter_mat_end_c - must match the true Vec value type
+      PetscScalar, pointer :: b_c_nonlocal(:)
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0

@@ -130,7 +130,9 @@ module matdiagdom
       PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
       PetscInt, dimension(:), pointer :: ad_ia => null(), ad_ja => null(), ao_ia => null(), ao_ja => null()
       PetscScalar, dimension(:), pointer :: ad_vals => null(), ao_vals => null()
-      PetscReal, dimension(:), pointer :: cf_markers_nonlocal => null()
+      ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
+      ! vecscatter_mat_end_c - must match the true Vec value type
+      PetscScalar, dimension(:), pointer :: cf_markers_nonlocal => null()
       PetscReal, dimension(:), allocatable, target :: cf_markers_local_real
       type(c_ptr) :: cf_markers_nonlocal_ptr
       PetscInt :: shift = 0

@@ -17,7 +17,7 @@ PETSC_INTERN void vecscatter_mat_begin_c(Mat *matrix, Vec *vec_long, Vec *leaf_v
 
 // End the scatter started in vecscatter_mat_begin_c and hand back a raw pointer
 // into leaf_vec for the Fortran caller. Pair with vecscatter_mat_restore_c.
-PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec, double **nonlocal_vals)
+PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec, PetscScalar **nonlocal_vals)
 {
    PetscSF sf;
    PetscCallVoid(MatGetMultPetscSF(*matrix, &sf));
@@ -25,7 +25,7 @@ PETSC_INTERN void vecscatter_mat_end_c(Mat *matrix, Vec *vec_long, Vec *leaf_vec
    PetscCallVoid(VecGetArray(*leaf_vec, nonlocal_vals));
 }
 
-PETSC_INTERN void vecscatter_mat_restore_c(Vec *leaf_vec, double **nonlocal_vals)
+PETSC_INTERN void vecscatter_mat_restore_c(Vec *leaf_vec, PetscScalar **nonlocal_vals)
 {
    PetscCallVoid(VecRestoreArray(*leaf_vec, nonlocal_vals));
 }
