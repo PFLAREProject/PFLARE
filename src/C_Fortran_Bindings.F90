@@ -294,7 +294,8 @@ module c_fortran_bindings
       integer(c_long_long), intent(inout) :: output_mat_ptr
       integer(c_int), value, intent(in)   :: lump_int
       integer(c_int), value, intent(in)   :: alpha_int
-      real(c_double), value, intent(in)   :: alpha
+      ! PetscReal by public-API contract (pflare.h / PCAIR.c already commit to it)
+      PetscReal, value, intent(in)         :: alpha
 
       type(tMat) :: input_mat, output_mat
       logical    :: lump

@@ -256,7 +256,7 @@ module ddc_module
       PetscReal, dimension(:), allocatable :: diag_dom_ratio_measure
       integer, dimension(:), allocatable :: cf_markers_local_aff
       PetscInt, dimension(:), pointer :: is_pointer
-      real(c_double) :: swap_dom_val
+      PetscReal :: swap_dom_val
       integer, dimension(1000) :: dom_bins
       MPIU_Comm :: MPI_COMM_MATRIX
       logical :: trigger_dd_ratio_compute

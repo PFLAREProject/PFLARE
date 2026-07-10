@@ -262,8 +262,9 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_int), value :: lump_int, alpha_int
+         ! PetscReal by public-API contract (kept coherent with remove_from_sparse_match)
          PetscReal, value :: alpha
-      end subroutine remove_from_sparse_match_kokkos         
+      end subroutine remove_from_sparse_match_kokkos
  
    end interface   
 
