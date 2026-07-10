@@ -9,7 +9,7 @@ module petsc_helper
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, &
          MatGetNNZs_both_c
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
-         PFLARE_TOL_SIGMA_DROP
+         PFLARE_TOL_SIGMA_DROP, PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -173,7 +173,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tol_int, &
                      lump, drop_diagonal_int, diag_strength_int)       
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -363,8 +363,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
                      rel_row_tol = tol * abs(vals(diag_index))
                   end if                  
                else
-                  ! Be careful here to use huge(0d0) rather than huge(0)!
-                  abs_biggest_entry = -huge(0d0)
+                  ! Be careful to take huge() of the typed target (not 0d0) so
+                  ! single builds get the representable -huge, not -Inf
+                  abs_biggest_entry = -huge(abs_biggest_entry)
                   ! Find the biggest entry in the row thats not the diagonal
                   do col = 1, ncols
                      if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
@@ -547,7 +548,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             ! Debug check if the CPU and Kokkos versions are the same
             call remove_from_sparse_match_cpu(input_mat, temp_mat, lump, alpha)      
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -848,7 +849,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -1047,7 +1048,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
 
-            call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -1171,7 +1172,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call MatCreateSubMatrix(input_mat, is_row, is_col, &
                   MAT_INITIAL_MATRIX, temp_mat, ierr)    
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)

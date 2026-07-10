@@ -7,7 +7,8 @@ module sai_z
          merge_pre_sorted, sorted_binary_search
    use c_petsc_interfaces, only: mat_mat_symbolic_c, calculate_and_build_sai_z_kokkos
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper
-   use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI
+   use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
+         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -249,8 +250,8 @@ module sai_z
          call KSPCreate(PETSC_COMM_SELF, ksp, ierr)
          call KSPSetType(ksp, KSPGMRES, ierr)
          ! Solve to relative 1e-3
-         call KSPSetTolerances(ksp, 1d-3, &
-                  & 1d-50, &
+         call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_COARSE, &
+                  & PFLARE_KSP_ATOL_OFF, &
                   & PETSC_DEFAULT_REAL, &
                   & maxits, ierr) 
          call KSPGetPC(ksp,pc,ierr)
@@ -265,8 +266,8 @@ module sai_z
          call KSPSetType(ksp, KSPLSQR, ierr)
 
          ! Solve to relative 1e-3
-         call KSPSetTolerances(ksp, 1d-3, &
-                  & 1d-50, &
+         call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_COARSE, &
+                  & PFLARE_KSP_ATOL_OFF, &
                   & PETSC_DEFAULT_REAL, &
                   & maxits, ierr)      
                   
@@ -753,7 +754,7 @@ module sai_z
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)
 
-            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -821,7 +822,7 @@ module sai_z
       ! ~~~~~~~~~~~
 
       call generate_identity(matrix, minus_I)
-      call MatScale(minus_I, -1d0, ierr)
+      call MatScale(minus_I, PFLARE_MINUS_ONE, ierr)
       
       ! Calculate our approximate inverse
       ! Now given we are using the same code as SAI Z

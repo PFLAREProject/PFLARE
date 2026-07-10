@@ -7,7 +7,8 @@ module fc_smooth
    use air_data_type, only: air_multigrid_data
    use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
    use matshell_data_type, only: mat_ctxtype
-   use pflare_parameters, only: PFLARE_TOL_MATFREE_13
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO, &
+         PFLARE_ONE
 
 #include "petsc/finclude/petscksp.h"
 #include "petscconf.h"
@@ -192,7 +193,7 @@ module fc_smooth
                      call VecDuplicate(vreduced, temp_vec, ierr)
                      call VecISCopy(vfull, air_data%is_fine_index(our_level), mode, &
                               temp_vec, ierr)
-                     call VecAXPY(temp_vec, -1d0, vreduced, ierr)
+                     call VecAXPY(temp_vec, PFLARE_MINUS_ONE, vreduced, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
                      if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper REV FINE do not match"
@@ -224,7 +225,7 @@ module fc_smooth
                ! If we're just doing F point smoothing, don't change the coarse points 
                ! Not sure why we need the vecset, but on the gpu x is twice the size it should be if we don't
                ! x should be overwritten by the MatMultTransposeAdd
-               call VecSet(vfull, 0d0, ierr)
+               call VecSet(vfull, PFLARE_ZERO, ierr)
                call MatMultTransposeAdd(air_data%i_fine_full(our_level), &
                      vreduced, &
                      v_temp_mat, &
@@ -255,7 +256,7 @@ module fc_smooth
                      
                      call VecISCopy(temp_vec, air_data%is_fine_index(our_level), mode, &
                               vreduced, ierr)  
-                     call VecAXPY(temp_vec, -1d0, vfull, ierr)
+                     call VecAXPY(temp_vec, PFLARE_MINUS_ONE, vfull, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
                      if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper FORW FINE do not match"
@@ -304,7 +305,7 @@ module fc_smooth
                      call VecDuplicate(vreduced, temp_vec, ierr)
                      call VecISCopy(vfull, air_data%is_coarse_index(our_level), mode, &
                            temp_vec, ierr) 
-                     call VecAXPY(temp_vec, -1d0, vreduced, ierr)
+                     call VecAXPY(temp_vec, PFLARE_MINUS_ONE, vreduced, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
                      if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper REV COARSE do not match"
@@ -336,7 +337,7 @@ module fc_smooth
 
                ! Not sure why we need the vecset, but on the gpu x is twice the size it should be if we don't
                ! x should be overwritten by the MatMultTransposeAdd
-               call VecSet(vfull, 0d0, ierr)
+               call VecSet(vfull, PFLARE_ZERO, ierr)
                call MatMultTransposeAdd(air_data%i_coarse_full(our_level), &
                      vreduced, &
                      v_temp_mat, &
@@ -367,7 +368,7 @@ module fc_smooth
                      
                      call VecISCopy(temp_vec, air_data%is_coarse_index(our_level), mode, &
                            vreduced, ierr)
-                     call VecAXPY(temp_vec, -1d0, vfull, ierr)
+                     call VecAXPY(temp_vec, PFLARE_MINUS_ONE, vfull, ierr)
                      call VecNorm(temp_vec, NORM_2, normy, ierr)
                      if (normy .gt. PFLARE_TOL_MATFREE_13) then
                         print *, "Kokkos and CPU versions of VecISCopyLocalWrapper FORW COARSE do not match"
@@ -509,7 +510,7 @@ module fc_smooth
                air_data%temp_vecs_fine(2)%array(our_level), ierr)               
       
       ! This is b_f - A_fc * x_c^0 - this never changes
-      call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), -1d0, &
+      call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), PFLARE_MINUS_ONE, &
                air_data%temp_vecs_fine(2)%array(our_level), ierr)                      
 
       ! Do all the consecutive F smooths
@@ -520,7 +521,7 @@ module fc_smooth
                      air_data%temp_vecs_fine(3)%array(our_level), ierr)          
 
          ! This is b_f - A_fc * x_c - A_ff * x_f^n
-         call VecAYPX(air_data%temp_vecs_fine(3)%array(our_level), -1d0, &
+         call VecAYPX(air_data%temp_vecs_fine(3)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%temp_vecs_fine(4)%array(our_level), ierr)           
 
          ! ! Compute A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
@@ -528,7 +529,7 @@ module fc_smooth
                      air_data%temp_vecs_fine(2)%array(our_level), ierr)    
 
          ! Compute x_f^n + A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
-         call VecAXPY(air_data%temp_vecs_fine(1)%array(our_level), 1d0, &
+         call VecAXPY(air_data%temp_vecs_fine(1)%array(our_level), PFLARE_ONE, &
                   air_data%temp_vecs_fine(2)%array(our_level), ierr)                      
 
       end do
@@ -581,7 +582,7 @@ module fc_smooth
       call MatMult(air_data%A_cf(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
                   air_data%temp_vecs_coarse(2)%array(our_level), ierr)
       ! This is b_c - A_cf * x_f^0 - this never changes
-      call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), -1d0, &
+      call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), PFLARE_MINUS_ONE, &
                air_data%temp_vecs_coarse(2)%array(our_level), ierr)  
 
       ! Do all the consecutive C smooths
@@ -592,7 +593,7 @@ module fc_smooth
                      air_data%temp_vecs_coarse(3)%array(our_level), ierr)       
 
          ! This is b_c - A_cf * x_f^0 - A_cc * x_c^n
-         call VecAYPX(air_data%temp_vecs_coarse(3)%array(our_level), -1d0, &
+         call VecAYPX(air_data%temp_vecs_coarse(3)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%temp_vecs_coarse(4)%array(our_level), ierr)          
 
          ! ! Compute A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
@@ -600,7 +601,7 @@ module fc_smooth
                      air_data%temp_vecs_coarse(2)%array(our_level), ierr)    
 
          ! Compute x_c^n + A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
-         call VecAXPY(air_data%temp_vecs_coarse(1)%array(our_level), 1d0, &
+         call VecAXPY(air_data%temp_vecs_coarse(1)%array(our_level), PFLARE_ONE, &
                      air_data%temp_vecs_coarse(2)%array(our_level), ierr)    
                      
       end do

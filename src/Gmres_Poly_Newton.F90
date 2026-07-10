@@ -4,7 +4,8 @@ module gmres_poly_newton
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
    use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
-         PFLARE_TOL_CONSISTENCY, PFLARE_EPS
+         PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
+         PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -70,7 +71,7 @@ module gmres_poly_newton
       ! Do while we still have some sorting to do
       do while (counter-1 < size(real_roots))
 
-         max_mag = -huge(0d0)
+         max_mag = -huge(max_mag)
 
          ! For each value compute a product of differences
          do i_loc = 1, size(real_roots)
@@ -210,7 +211,7 @@ module gmres_poly_newton
                         (imag_roots(j) - imag_roots(i))**2)
 
             ! Use the larger magnitude for relative scaling
-            scale = max(mag_i, mag_j, 1.0d0)
+            scale = max(mag_i, mag_j, PFLARE_ONE)
 
             ! Check if within tolerance
             if (dist <= abs_tol + rel_tol * scale) then
@@ -450,7 +451,7 @@ module gmres_poly_newton
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      call arnoldi(matrix, poly_order, 1d-30, V_n, w_j, beta, H_n, m)
+      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
 
       ! ~~~~~~~~~~~
       ! Now the Ritz values are just the eigenvalues of the square part of H_n
@@ -784,7 +785,7 @@ module gmres_poly_newton
       ! temp_vec = x
       call VecCopy(x, temp_vec, ierr)
       ! y = 0
-      call VecSet(y, 0d0, ierr)
+      call VecSet(y, PFLARE_ZERO, ierr)
 
       ! ~~~~~~~~~~~~
       ! Iterate over the i
@@ -804,14 +805,14 @@ module gmres_poly_newton
 
             ! y = y + theta_i * temp_vec
             call VecAXPY(y, &
-                     1d0/real_roots(i), &
+                     PFLARE_ONE/real_roots(i), &
                      temp_vec, ierr)   
                                           
             ! temp_vec_two = A * temp_vec
             call MatMult(mat, temp_vec, temp_vec_two, ierr)
             ! temp_vec = temp_vec - theta_i * temp_vec_two
             call VecAXPY(temp_vec, &
-                     -1d0/real_roots(i), &
+                     PFLARE_MINUS_ONE/real_roots(i), &
                      temp_vec_two, ierr) 
 
             i = i + 1
@@ -832,12 +833,12 @@ module gmres_poly_newton
             ! temp_vec_two = 2 * Re(theta_i) * temp_vec - temp_vec_two
             call VecAXPBY(temp_vec_two, &
                   2 * real_roots(i), &
-                  -1d0, &
+                  PFLARE_MINUS_ONE, &
                   temp_vec, ierr)
 
             ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec_two
             call VecAXPY(y, &
-                     1d0/(real_roots(i)**2 + imag_roots(i)**2), &
+                     PFLARE_ONE/(real_roots(i)**2 + imag_roots(i)**2), &
                      temp_vec_two, ierr)  
                      
             if (i .le. size(real_roots) - 2) then
@@ -846,7 +847,7 @@ module gmres_poly_newton
 
                ! temp_vec = temp_vec - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec_three
                call VecAXPY(temp_vec, &
-                        -1d0/(real_roots(i)**2 + imag_roots(i)**2), &
+                        PFLARE_MINUS_ONE/(real_roots(i)**2 + imag_roots(i)**2), &
                         temp_vec_three, ierr)               
             end if
 
@@ -864,8 +865,8 @@ module gmres_poly_newton
 
             ! y = y + theta_i * temp_vec
             call VecAXPBY(y, &
-                     1d0/real_roots(size(real_roots)), &
-                     1d0, &
+                     PFLARE_ONE/real_roots(size(real_roots)), &
+                     PFLARE_ONE, &
                      temp_vec, ierr) 
          end if
       end if
@@ -1047,7 +1048,7 @@ module gmres_poly_newton
 
             ! y = y - theta_i * temp_vec_two
             call VecAXPY(y, &
-                     -1d0/real_roots(order), &
+                     PFLARE_MINUS_ONE/real_roots(order), &
                      temp_vec_two, ierr)
 
             order = order + 1
@@ -1076,7 +1077,7 @@ module gmres_poly_newton
 
             ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec
             call VecAXPY(y, &
-                     1d0/(real_roots(order)**2 + imag_roots(order)**2), &
+                     PFLARE_ONE/(real_roots(order)**2 + imag_roots(order)**2), &
                      temp_vec, ierr)
 
             ! Skip two evals
@@ -1184,7 +1185,7 @@ end if
 !             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
 !                         temp_mat_reuse, ierr)                        
 
-!             call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+!             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
 !             ! Find the biggest entry in the difference
 !             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
 !             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -1627,7 +1628,7 @@ end if
                ! ~~~~~~~~~~~               
                if (ncols /= 0 .AND. status_output(term, 1) /= 1) then
                   call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                        1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
+                        PFLARE_ONE/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
                end if          
                
                ! Initialize with previous product before the A*prod subtraction
@@ -1641,7 +1642,7 @@ end if
 
                   ! symbolic_vals(j_loc)%ptr has the matching values of A in it
                   vals_power_temp(symbolic_ones(j_loc)%ptr) = vals_power_temp(symbolic_ones(j_loc)%ptr) - &
-                           1d0/coefficients(term, 1) * &
+                           PFLARE_ONE/coefficients(term, 1) * &
                            symbolic_vals(j_loc)%ptr * vals_previous_power_temp(j_loc)
                end do
 
@@ -1657,7 +1658,7 @@ end if
                   cycle
                end if
 
-               square_sum = 1d0/(coefficients(term,1)**2 + coefficients(term,2)**2)
+               square_sum = PFLARE_ONE/(coefficients(term,1)**2 + coefficients(term,2)**2)
 
                ! If our fixed sparsity order falls on the first of a complex conjugate pair
                if (.NOT. skip_add) then
@@ -1692,7 +1693,7 @@ end if
                   ! do the next product 
                   if (status_output(term, 2) == 1) then
                      if (output_first_complex) then
-                        temp(1:ncols) = temp(1:ncols) + 2d0 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
+                        temp(1:ncols) = temp(1:ncols) + PFLARE_TWO * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
                      end if                     
                   end if                  
 
@@ -1767,7 +1768,7 @@ end if
          if (coefficients(size(coefficients, 1),2) == 0d0) then
             if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                     1d0/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
+                     PFLARE_ONE/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
             end if             
          end if
 
@@ -2072,7 +2073,7 @@ end if
       end if
 
       ! Must be real as we only have one coefficient
-      call VecSet(diag_vec, 1d0/coefficients(1, 1), ierr)
+      call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
@@ -2122,10 +2123,10 @@ end if
       call VecDuplicate(diag_vec, temp_vec_two, ierr)
       
       ! Set to zero as we add to it
-      call VecSet(inv_vec, 0d0, ierr) 
+      call VecSet(inv_vec, PFLARE_ZERO, ierr) 
       ! We start with an identity in product_vec    
-      call VecSet(product_vec, 1d0, ierr)
-      call VecSet(one_vec, 1d0, ierr)
+      call VecSet(product_vec, PFLARE_ONE, ierr)
+      call VecSet(one_vec, PFLARE_ONE, ierr)
 
       i = 1
       do while (i .le. size(coefficients, 1) - 1)
@@ -2143,12 +2144,12 @@ end if
                cycle
             end if        
 
-            call VecAXPY(inv_vec, 1d0/coefficients(i,1), product_vec, ierr)
+            call VecAXPY(inv_vec, PFLARE_ONE/coefficients(i,1), product_vec, ierr)
 
             ! temp_vec_A = A_ff/theta_k       
-            call VecScale(temp_vec_A, -1d0/coefficients(i,1), ierr)
+            call VecScale(temp_vec_A, PFLARE_MINUS_ONE/coefficients(i,1), ierr)
             ! temp_vec_A = I - A_ff/theta_k
-            call VecAXPY(temp_vec_A, 1d0, one_vec, ierr)
+            call VecAXPY(temp_vec_A, PFLARE_ONE, one_vec, ierr)
             
             ! product_vec = product_vec * temp_vec_A
             call VecPointwiseMult(product_vec, product_vec, temp_vec_A, ierr)   
@@ -2166,20 +2167,20 @@ end if
 
             ! Compute 2a I - A
             ! temp_vec_A = -A    
-            call VecScale(temp_vec_A, -1d0, ierr)
+            call VecScale(temp_vec_A, PFLARE_MINUS_ONE, ierr)
             ! temp_vec_A = 2a I - A_ff
-            call VecAXPY(temp_vec_A, 2d0 * coefficients(i,1), one_vec, ierr) 
+            call VecAXPY(temp_vec_A, PFLARE_TWO * coefficients(i,1), one_vec, ierr) 
             ! temp_vec_A = (2a I - A_ff)/(a^2 + b^2)
-            call VecScale(temp_vec_A, 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2), ierr) 
+            call VecScale(temp_vec_A, PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2), ierr) 
 
             ! temp_vec_two = temp_vec_A * product_vec
             call VecPointwiseMult(temp_vec_two, temp_vec_A, product_vec, ierr)   
-            call VecAXPY(inv_vec, 1d0, temp_vec_two, ierr)         
+            call VecAXPY(inv_vec, PFLARE_ONE, temp_vec_two, ierr)         
 
             if (i .le. size(coefficients, 1) - 2) then
                ! temp_vec_two = A * temp_vec_two
                call VecPointwiseMult(temp_vec_two, diag_vec, temp_vec_two, ierr) 
-               call VecAXPY(product_vec, -1d0, temp_vec_two, ierr)
+               call VecAXPY(product_vec, PFLARE_MINUS_ONE, temp_vec_two, ierr)
             end if
 
             ! Skip two evals
@@ -2194,7 +2195,7 @@ end if
 
          ! Skips eigenvalues that are numerically zero
          if (abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then      
-            call VecAXPY(inv_vec, 1d0/coefficients(size(coefficients, 1),1), product_vec, ierr)  
+            call VecAXPY(inv_vec, PFLARE_ONE/coefficients(size(coefficients, 1),1), product_vec, ierr)  
          end if       
       end if
 
@@ -2265,18 +2266,18 @@ end if
          if (abs(coefficients(2,1)) < PFLARE_TOL_ZERO) then
 
             ! Set to zero
-            call MatScale(inv_matrix, 0d0, ierr)
+            call MatScale(inv_matrix, PFLARE_ZERO, ierr)
 
             ! Tricky case here as we want to pass out the identity with the 
             ! sparsity of A
             if (output_product) then
                call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
-               call MatShift(mat_prod_or_temp, 1d0, ierr)
+               call MatShift(mat_prod_or_temp, PFLARE_ONE, ierr)
                status_output(1:2, 1) = 1
             end if                
 
             ! Then add in the 0th order inverse
-            call MatShift(inv_matrix, 1d0/coefficients(1,1), ierr)       
+            call MatShift(inv_matrix, PFLARE_ONE/coefficients(1,1), ierr)       
             
             ! Then just return
             return  
@@ -2287,9 +2288,9 @@ end if
          ! theta_1 * theta_2 that would result
 
          ! result = -A_ff/theta_1
-         call MatScale(inv_matrix, -1d0/(coefficients(1, 1)), ierr)
+         call MatScale(inv_matrix, PFLARE_MINUS_ONE/(coefficients(1, 1)), ierr)
          ! result = I -A_ff/theta_1
-         call MatShift(inv_matrix, 1d0, ierr) 
+         call MatShift(inv_matrix, PFLARE_ONE, ierr) 
          ! If we're doing this as part of fixed sparsity multiply, 
          ! we need to return mat_prod_or_temp
          if (output_product) then
@@ -2297,11 +2298,11 @@ end if
          end if
 
          ! result = 1/theta_2 * (I -A_ff/theta_1)
-         call MatScale(inv_matrix, 1d0/(coefficients(2, 1)), ierr)      
+         call MatScale(inv_matrix, PFLARE_ONE/(coefficients(2, 1)), ierr)      
 
          ! result = 1/theta_1 + 1/theta_2 * (I -A_ff/theta_1)
          ! Don't need an assemble as there is one called in this
-         call MatShift(inv_matrix, 1d0/(coefficients(1, 1)), ierr)     
+         call MatShift(inv_matrix, PFLARE_ONE/(coefficients(1, 1)), ierr)     
          
          if (output_product) then
             status_output(1:2, 1) = 1
@@ -2314,17 +2315,17 @@ end if
 
          ! Complex conjugate roots
          ! result = -A_ff
-         call MatScale(inv_matrix, -1d0, ierr)
+         call MatScale(inv_matrix, PFLARE_MINUS_ONE, ierr)
          ! result = 2a I - A_ff
          ! Don't need an assemble as there is one called in this
-         call MatShift(inv_matrix, 2d0 * coefficients(1,1), ierr)      
+         call MatShift(inv_matrix, PFLARE_TWO * coefficients(1,1), ierr)      
          ! If we're doing this as part of fixed sparsity multiply, 
          ! we need to return mat_prod_or_temp         
          if (output_product) then
             call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
          end if      
          ! result = 2a I - A_ff/(a^2 + b^2)
-         call MatScale(inv_matrix, 1d0/square_sum, ierr)
+         call MatScale(inv_matrix, PFLARE_ONE/square_sum, ierr)
 
          if (output_product) then
             status_output(1:2, 2) = 1
@@ -2374,7 +2375,7 @@ end if
       end if      
 
       ! Set to zero as we add in each product of terms
-      call MatScale(inv_matrix, 0d0, ierr)
+      call MatScale(inv_matrix, PFLARE_ZERO, ierr)
 
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(inv_matrix, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)  
@@ -2477,13 +2478,13 @@ end if
             if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
                square_sum = 0
             else
-               square_sum = 1d0/coefficients(i,1)
+               square_sum = PFLARE_ONE/coefficients(i,1)
             end if        
 
             ! Then add the scaled version of each product
             if (i == 1) then
                ! If i == 1 then we know mat_product is identity so we can do it directly
-               call MatShift(inv_matrix, 1d0/coefficients(i,1), ierr)  
+               call MatShift(inv_matrix, PFLARE_ONE/coefficients(i,1), ierr)  
             else
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
@@ -2498,7 +2499,7 @@ end if
             ! temp_mat_A = A_ff/theta_k       
             call MatScale(temp_mat_A, -square_sum, ierr)
             ! temp_mat_A = I - A_ff/theta_k
-            call MatShift(temp_mat_A, 1d0, ierr)    
+            call MatShift(temp_mat_A, PFLARE_ONE, ierr)    
             
             ! mat_product_k_plus_1 = mat_product * temp_mat_A
             if (i == 1) then
@@ -2507,7 +2508,7 @@ end if
                call MatConvert(temp_mat_A, MATSAME, MAT_INITIAL_MATRIX, mat_product, ierr)  
             else
                call MatMatMult(temp_mat_A, mat_product, &
-                     MAT_INITIAL_MATRIX, 1.5d0, mat_product_k_plus_1, ierr)      
+                     MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, mat_product_k_plus_1, ierr)      
                call MatDestroy(mat_product, ierr)  
                mat_product = mat_product_k_plus_1  
             end if
@@ -2528,8 +2529,8 @@ end if
                square_sum = 0
                a_coeff = 0
              else  
-               square_sum = 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2)
-               a_coeff = 2d0 * coefficients(i,1)
+               square_sum = PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2)
+               a_coeff = PFLARE_TWO * coefficients(i,1)
             end if
 
             ! If our fixed sparsity root is the first of a complex conjugate pair
@@ -2556,7 +2557,7 @@ end if
             else
 
                ! temp_mat_A = -A    
-               call MatScale(temp_mat_A, -1d0, ierr)
+               call MatScale(temp_mat_A, PFLARE_MINUS_ONE, ierr)
                ! temp_mat_A = 2a I - A_ff
                call MatShift(temp_mat_A, a_coeff, ierr)   
                if (output_product) then
@@ -2570,7 +2571,7 @@ end if
                else
                   ! temp_mat_two = temp_mat_A * mat_product
                   call MatMatMult(temp_mat_A, mat_product, &
-                        MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)     
+                        MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat_two, ierr)     
                end if    
                
                ! We copy out the last part of the old product if we're doing this as part of a fixed sparsity multiply
@@ -2605,7 +2606,7 @@ end if
 
                ! temp_mat_three = matrix * temp_mat_two
                call MatMatMult(matrix, temp_mat_two, &
-                     MAT_INITIAL_MATRIX, 1.5d0, temp_mat_three, ierr)     
+                     MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat_three, ierr)     
                call MatDestroy(temp_mat_two, ierr)   
                if (output_product) then               
                   status_output(i, 2) = 1
@@ -2648,10 +2649,10 @@ end if
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
-                  call MatAXPY(inv_matrix, 1d0/coefficients(i_sparse,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
+                  call MatAXPY(inv_matrix, PFLARE_ONE/coefficients(i_sparse,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
                else
                   ! Have to use the DIFFERENT_NONZERO_PATTERN here
-                  call MatAXPYWrapper(inv_matrix, 1d0/coefficients(i_sparse,1), mat_product)
+                  call MatAXPYWrapper(inv_matrix, PFLARE_ONE/coefficients(i_sparse,1), mat_product)
                end if     
                if (output_product) status_output(i_sparse, 1) = 1
             end if       

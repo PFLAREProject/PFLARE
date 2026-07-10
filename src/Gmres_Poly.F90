@@ -6,7 +6,8 @@ module gmres_poly
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
-         PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11
+         PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
+         PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
@@ -19,7 +20,9 @@ module gmres_poly
    implicit none
 
    ! Just define pi
-   PetscReal, parameter, private :: pi = 3.141592653589793
+   ! d0 suffix so the literal is parsed at double precision (previously truncated
+   ! to single even in double builds - the one intended double-numeric change)
+   PetscReal, parameter, private :: pi = 3.141592653589793d0
    type int_vec
       integer, dimension(:), pointer :: ptr
    end type int_vec
@@ -358,7 +361,7 @@ module gmres_poly
       ! The first entry in C_n - As V_n = K_n C_n
       ! the first orthogonalised vector in V_n is just r0/beta, 
       ! and we know r0 is the first vector in our krylov subspace
-      if (compute_cn) C_n(1,1) = 1d0/beta
+      if (compute_cn) C_n(1,1) = PFLARE_ONE/beta
 
       ! Now loop through and do the iterations up to the max order of the polynomial
       ! we want to build
@@ -406,8 +409,8 @@ module gmres_poly
 
          ! v_j+1 = w_j / h_j+1,j
          call VecAXPBY(V_n(m + 1), &
-                  1d0/H_n(m+1, m), &
-                  0d0, &
+                  PFLARE_ONE/H_n(m+1, m), &
+                  PFLARE_ZERO, &
                   w_j, ierr)           
 
          ! Now we've taken out the H_n(m+1, m) factor from above
@@ -518,7 +521,7 @@ module gmres_poly
       ! or we hit the given poly_order
       rel_tol = PFLARE_TOL_ARNOLDI
       if (present(user_rel_tol)) rel_tol = user_rel_tol
-      call arnoldi(matrix, poly_order, 1d-30, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
+      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
       if (present(user_rel_tol)) user_rel_tol = rel_tol
 
       ! ~~~~~~~~~~~~~
@@ -870,7 +873,7 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
 
-            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -996,7 +999,7 @@ end if
          ! as the highest (unconstrained) power and do the mataxpy with a subset of entries
          ! Takes more memory to do this but is faster
          call MatMatMult(matrix, matrix_powers(order-1), &
-               MAT_INITIAL_MATRIX, 1.5d0, matrix_powers(order), ierr)        
+               MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, matrix_powers(order), ierr)        
       end do  
       
       ! mat_sparsity_match now contains the sparsity of the power of A we want to match
@@ -1450,7 +1453,7 @@ end if
       ! Let's do the first y = alpha_n-1 r_0 (ie the highest order term first)
       call VecAXPBY(y, &
                coefficients(size(coefficients)), &
-               0d0, &
+               PFLARE_ZERO, &
                x, ierr)
 
       ! If we are doing a first order polynomial or above, we have to do an extra matvec per order
@@ -1471,7 +1474,7 @@ end if
             ! Compute y = A * temp_vec + alpha_n-i-1 r_0
             call VecAXPBY(y, &
                      coefficients(order), &
-                     1d0, &
+                     PFLARE_ONE, &
                      x, ierr)
          end do
       end if
@@ -1772,10 +1775,10 @@ end if
          ! TODO - these can be reused
          if (order == 2) then
             call MatMatMult(diag_scaled_mat, diag_scaled_mat, &
-                  MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)     
+                  MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat, ierr)     
          else
             call MatMatMult(diag_scaled_mat, mat_power, &
-                  MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)      
+                  MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat, ierr)      
             call MatDestroy(mat_power, ierr)
          end if       
 

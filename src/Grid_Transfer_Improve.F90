@@ -2,7 +2,7 @@ module grid_transfer_improve
 
    use petscmat
    use timers, only: timer_start, timer_finish
-   use pflare_parameters, only: TIMER_ID_AIR_DROP
+   use pflare_parameters, only: TIMER_ID_AIR_DROP, PFLARE_ONE, PFLARE_MINUS_ONE
    use petsc_helper, only: MatAXPYWrapper, remove_from_sparse_match
 
 #include "petsc/finclude/petscmat.h"
@@ -110,7 +110,7 @@ module grid_transfer_improve
             ! for reuse in kokkos  
             ! But if we are only doing a max of 1 iteration and not doing external reuse            
             if (PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(A_ff, W, MAT_INITIAL_MATRIX, 1d0, &
+               call MatMatMult(A_ff, W, MAT_INITIAL_MATRIX, PFLARE_ONE, &
                      reuse_mat, ierr)
                temp_mat_axpy = reuse_mat
 
@@ -125,7 +125,7 @@ module grid_transfer_improve
                end if               
 
             else
-               call MatMatMult(A_ff, W, MAT_REUSE_MATRIX, 1d0, &
+               call MatMatMult(A_ff, W, MAT_REUSE_MATRIX, PFLARE_ONE, &
                      reuse_mat, ierr)      
                if (i == 1) then
                   call MatDuplicate(reuse_mat, &
@@ -145,7 +145,7 @@ module grid_transfer_improve
          ! Afc should have a subset of the sparsity of W if Aff 
          ! has a diagonal, but just to be safe lets 
          ! say its different
-         call MatAXPYWrapper(temp_mat_axpy, 1d0, A_fc)
+         call MatAXPYWrapper(temp_mat_axpy, PFLARE_ONE, A_fc)
 
          ! If you want to print the residual
          ! call MatNorm(temp_mat_axpy, NORM_FROBENIUS, residual, ierr)
@@ -168,10 +168,10 @@ module grid_transfer_improve
 
             temp_mat = reuse_mat_two
             if (PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(A_ff_inv, temp_mat_axpy, MAT_INITIAL_MATRIX, 1d0, &
+               call MatMatMult(A_ff_inv, temp_mat_axpy, MAT_INITIAL_MATRIX, PFLARE_ONE, &
                      reuse_mat_two, ierr)
             else
-               call MatMatMult(A_ff_inv, temp_mat_axpy, MAT_REUSE_MATRIX, 1d0, &
+               call MatMatMult(A_ff_inv, temp_mat_axpy, MAT_REUSE_MATRIX, PFLARE_ONE, &
                      reuse_mat_two, ierr)            
             end if
             temp_mat_sparsity = reuse_mat_two
@@ -181,7 +181,7 @@ module grid_transfer_improve
          ! Compute
          ! W^n+1 = W^n - Aff_inv * (Aff W^n + Afc)
          ! and drop any non-zeros outside of the sparsity pattern of W
-         call remove_from_sparse_match(temp_mat_sparsity, W, alpha=-1d0)
+         call remove_from_sparse_match(temp_mat_sparsity, W, alpha=PFLARE_MINUS_ONE)
          call timer_finish(TIMER_ID_AIR_DROP)
 
       end do
@@ -283,7 +283,7 @@ module grid_transfer_improve
             ! for reuse in kokkos  
             ! But if we are only doing a max of 1 iteration and not doing external reuse
             if (PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(Z, A_ff, MAT_INITIAL_MATRIX, 1d0, &
+               call MatMatMult(Z, A_ff, MAT_INITIAL_MATRIX, PFLARE_ONE, &
                      reuse_mat, ierr)
                temp_mat_axpy = reuse_mat
 
@@ -298,7 +298,7 @@ module grid_transfer_improve
                end if
 
             else
-               call MatMatMult(Z, A_ff, MAT_REUSE_MATRIX, 1d0, &
+               call MatMatMult(Z, A_ff, MAT_REUSE_MATRIX, PFLARE_ONE, &
                      reuse_mat, ierr)      
                if (i == 1) then
                   call MatDuplicate(reuse_mat, &
@@ -318,7 +318,7 @@ module grid_transfer_improve
          ! Acf should have a subset of the sparsity of Z if Aff 
          ! has a diagonal, but just to be safe lets 
          ! say its different
-         call MatAXPYWrapper(temp_mat_axpy, 1d0, A_cf)
+         call MatAXPYWrapper(temp_mat_axpy, PFLARE_ONE, A_cf)
 
          ! If you want to print the residual
          ! call MatNorm(temp_mat_axpy, NORM_FROBENIUS, residual, ierr)
@@ -341,10 +341,10 @@ module grid_transfer_improve
 
             temp_mat = reuse_mat_two
             if (PetscObjectIsNull(temp_mat)) then
-               call MatMatMult(temp_mat_axpy, A_ff_inv, MAT_INITIAL_MATRIX, 1d0, &
+               call MatMatMult(temp_mat_axpy, A_ff_inv, MAT_INITIAL_MATRIX, PFLARE_ONE, &
                      reuse_mat_two, ierr)
             else
-               call MatMatMult(temp_mat_axpy, A_ff_inv, MAT_REUSE_MATRIX, 1d0, &
+               call MatMatMult(temp_mat_axpy, A_ff_inv, MAT_REUSE_MATRIX, PFLARE_ONE, &
                      reuse_mat_two, ierr)            
             end if
             temp_mat_sparsity = reuse_mat_two
@@ -354,7 +354,7 @@ module grid_transfer_improve
          ! Compute 
          ! Z^n+1 = Z^n - (Z^n Aff + Acf) * Aff_inv
          ! and drop any non-zeros outside of the sparsity pattern of Z
-         call remove_from_sparse_match(temp_mat_sparsity, Z, alpha=-1d0)
+         call remove_from_sparse_match(temp_mat_sparsity, Z, alpha=PFLARE_MINUS_ONE)
          call timer_finish(TIMER_ID_AIR_DROP) 
 
       end do

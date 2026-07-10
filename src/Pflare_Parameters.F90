@@ -118,6 +118,20 @@ module pflare_parameters
    PetscReal, parameter, private :: PFLARE_ONE_REAL = 1.0
    PetscReal, parameter :: PFLARE_EPS = epsilon(PFLARE_ONE_REAL)
 
+   ! Kind-correct 0/1/-1 for PETSc value arguments (MatAXPY/MatScale/VecSet/
+   ! VecAXPY alpha, MatSetValue value, MatMatMult fill, ...). A bare d0 literal
+   ! actual is REAL(8) and mismatches a PetscScalar/PetscReal REAL(4) dummy under
+   ! single precision. Typed as PetscScalar, which shares PetscReal's kind in all
+   ! real builds, so these are valid actuals for both PetscScalar and PetscReal
+   ! dummies. Bit-identical to 0d0/1d0/-1d0 in double builds.
+   PetscScalar, parameter :: PFLARE_ZERO      = 0.0
+   PetscScalar, parameter :: PFLARE_ONE       = 1.0
+   PetscScalar, parameter :: PFLARE_MINUS_ONE = -1.0
+   PetscScalar, parameter :: PFLARE_TWO       = 2.0
+   ! MatMatMult / MatPtAP fill-ratio estimates (PetscReal args; separate values)
+   PetscReal, parameter :: PFLARE_MATMULT_FILL = 1.5
+   PetscReal, parameter :: PFLARE_PTAP_FILL    = 1.58
+
 #if defined(PETSC_USE_REAL_SINGLE)
    ! Coefficient/root "is effectively zero" tests (Gmres_Poly/Gmres_Poly_Newton)
    PetscReal, parameter :: PFLARE_TOL_ZERO           = 1e-6
@@ -143,6 +157,10 @@ module pflare_parameters
    ! Smoother / coarse-solver KSP tolerances
    PetscReal, parameter :: PFLARE_KSP_ATOL_SMOOTH    = 1e-6
    PetscReal, parameter :: PFLARE_KSP_ATOL_COARSE    = 1e-6
+   ! Coarse KSPPREONLY rtol (value irrelevant for preonly; kept for kind-correctness)
+   PetscReal, parameter :: PFLARE_KSP_RTOL_COARSE    = 1e-3
+   ! "atol effectively off" sentinel (1d-50 underflows single)
+   PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = 1e-30
    ! Arnoldi "lucky breakdown" tolerance (was below double norms; sub-tiny in single)
    PetscReal, parameter :: PFLARE_TOL_LUCKY          = 1e-20
    ! remove_small "drop essentially nothing" sentinel (1d-100 underflows single)
@@ -163,6 +181,8 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_DD_RATIO_REL_TOL   = 1d-10
    PetscReal, parameter :: PFLARE_KSP_ATOL_SMOOTH    = 1d-10
    PetscReal, parameter :: PFLARE_KSP_ATOL_COARSE    = 1d-13
+   PetscReal, parameter :: PFLARE_KSP_RTOL_COARSE    = 1d-3
+   PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = 1d-50
    PetscReal, parameter :: PFLARE_TOL_LUCKY          = 1d-30
    PetscReal, parameter :: PFLARE_SENTINEL_DROP      = 1d-100
 #endif

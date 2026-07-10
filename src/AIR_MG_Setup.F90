@@ -12,7 +12,8 @@ module air_mg_setup
          TIMER_ID_AIR_IDENTITY, TIMER_ID_AIR_TRUNCATE, &
          MAT_INV_AFF, MAT_RAP_DROP, IS_REPARTITION, MAT_COARSE_REPARTITIONED, &
          MAT_P_REPARTITIONED, MAT_R_REPARTITIONED, &
-         PFLARE_KSP_ATOL_SMOOTH, PFLARE_KSP_ATOL_COARSE
+         PFLARE_KSP_ATOL_SMOOTH, PFLARE_KSP_ATOL_COARSE, &
+         PFLARE_KSP_RTOL_COARSE, PFLARE_MINUS_ONE
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
          destroy_matrix_reuse
@@ -223,7 +224,7 @@ module air_mg_setup
                ! A * sol_vec
                call MatMult(air_data%coarse_matrix(our_level), sol_vec, temp_vec, ierr)
                ! Now A * sol_vec - rand_vec
-               call VecAXPY(temp_vec, -1d0, rand_vec, ierr)  
+               call VecAXPY(temp_vec, PFLARE_MINUS_ONE, rand_vec, ierr)  
             end if 
 
             ! Get the achieved norm
@@ -1085,7 +1086,7 @@ module air_mg_setup
          ! a richardson (can do via command line -mg_coarse_ksp_type richardson)
          call KSPSetType(ksp_coarse_solver, KSPPREONLY, ierr)
          ! Apply one iteration of the coarse solver by default
-         call KSPSetTolerances(ksp_coarse_solver, 1d-3, PFLARE_KSP_ATOL_COARSE, PETSC_DEFAULT_REAL, one, ierr)
+         call KSPSetTolerances(ksp_coarse_solver, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_COARSE, PETSC_DEFAULT_REAL, one, ierr)
 
          ! Set no norm
          call KSPSetNormType(ksp_coarse_solver, KSP_NORM_NONE, ierr)

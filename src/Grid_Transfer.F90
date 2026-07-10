@@ -4,7 +4,7 @@ module grid_transfer
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos
    use petsc_helper, only: kokkos_debug
-   use pflare_parameters, only: PFLARE_TOL_MATFREE_13
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -61,7 +61,7 @@ module grid_transfer
             ! Debug check if the CPU and Kokkos versions are the same
             call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, temp_mat)      
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -170,8 +170,10 @@ module grid_transfer
       counter = 1
       do ifree = global_row_start, global_row_end_plus_one-1             
          
-         max_local_val = -huge(0d0)
-         max_nonlocal_val = -huge(0d0)
+         ! huge() of the PetscReal target (not 0d0) so single builds get the
+         ! representable -huge, not -Inf (which traps under -ffpe-trap=overflow)
+         max_local_val = -huge(max_local_val)
+         max_nonlocal_val = -huge(max_nonlocal_val)
          max_local_col = -1
          max_nonlocal_col = -1
 
@@ -285,7 +287,7 @@ module grid_transfer
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -539,7 +541,7 @@ module grid_transfer
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)

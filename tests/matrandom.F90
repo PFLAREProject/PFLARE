@@ -9,6 +9,9 @@
       Mat :: A
       PetscInt :: m, n, nnzs
       PetscInt, parameter :: one = 1, two = 2, three = 3
+      ! d0 literals assigned to PetscScalar params: bit-identical in double,
+      ! kind-correct (float) under single precision
+      PetscScalar, parameter :: s_zero = 0d0, s_two = 2d0
       Vec :: x,b
       KSP :: ksp
       PC :: pc
@@ -34,8 +37,8 @@
       call MatSetUp(A,ierr)
 
       call MatCreateVecs(A,b,x,ierr)
-      call VecSet(x, 0d0, ierr)
-      call VecSet(b, 2d0, ierr)      
+      call VecSet(x, s_zero, ierr)
+      call VecSet(b, s_two, ierr)
 
       ! Set random values in matrix
       call MatSetRandom(A, PETSC_NULL_RANDOM, ierr)

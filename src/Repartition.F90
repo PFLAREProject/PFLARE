@@ -4,6 +4,7 @@ module repartition
    use c_petsc_interfaces, only: MatGetNNZs_both_c, GenerateIS_ProcAgglomeration_c, &
          MatPartitioning_c, MatMPICreateNonemptySubcomm_c
    use petsc_helper, only: MatAXPYWrapper
+   use pflare_parameters, only: PFLARE_ONE
 
 #include "petsc/finclude/petscmat.h"
                 
@@ -116,7 +117,7 @@ module repartition
          ! Have to symmetrize the input matrix or it won't work in parmetis
          ! as it expects a symmetric graph
          call MatTranspose(input_mat, MAT_INITIAL_MATRIX, input_transpose, ierr)
-         call MatAXPYWrapper(input_transpose, 1d0, input_mat)
+         call MatAXPYWrapper(input_transpose, PFLARE_ONE, input_mat)
 
          ! Compute the adjancency graph of the symmetrized input matrix
          call MatConvert(input_transpose, MATMPIADJ, MAT_INITIAL_MATRIX, adj, ierr)

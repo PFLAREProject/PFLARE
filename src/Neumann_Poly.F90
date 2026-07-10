@@ -4,7 +4,8 @@ module neumann_poly
    use gmres_poly, only: build_gmres_polynomial_inverse, petsc_matvec_right_scale_poly_mf
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: tsqr_buffers
-   use pflare_parameters, only: PFLAREINV_NEUMANN, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP
+   use pflare_parameters, only: PFLAREINV_NEUMANN, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
+         PFLARE_ONE, PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscmat.h"
 
@@ -47,9 +48,9 @@ module neumann_poly
 
       ! Now do x - D^-1 A x
       call VecAXPBY(y, &
-               1d0, &
-               -1d0, &
-               x, ierr)      
+               PFLARE_ONE, &
+               PFLARE_MINUS_ONE, &
+               x, ierr)
 
    end subroutine petsc_matvec_ida_neumann_poly_mf
 
@@ -188,8 +189,8 @@ module neumann_poly
          call MatDiagonalScale(temp_mat, diag_inverse_vec, PETSC_NULL_VEC, ierr) 
    
          ! Computes: I - D^-1 A
-         call MatScale(temp_mat, -1d0, ierr)
-         call MatShift(temp_mat, 1d0, ierr)
+         call MatScale(temp_mat, PFLARE_MINUS_ONE, ierr)
+         call MatShift(temp_mat, PFLARE_ONE, ierr)
          
          ! If we feed in coefficients=1 and leave buffers%R_buffer_receive unallocated as it will just skip 
          ! the "gmres" coefficient calculation and just calculate the sum of (potentailly fixed sparsity) matrix powers

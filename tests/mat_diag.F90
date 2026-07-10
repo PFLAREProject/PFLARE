@@ -13,6 +13,8 @@
       Mat :: A
       PetscInt :: m, n, nnzs
       PetscInt, parameter :: one = 1, two = 2, three = 3, zero = 0
+      ! d0 literals in PetscScalar params: bit-identical double, float-correct single
+      PetscScalar, parameter :: s_zero = 0d0, s_one = 1d0, s_half = 0.5d0, s_two_half = 2.5d0
       Vec :: x,b
       KSP :: ksp
       PC :: pc
@@ -42,7 +44,7 @@
       call MatSetOption(A, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE, ierr)
 
       call MatCreateVecs(A,b,x,ierr)
-      call VecSet(x, 0d0, ierr)
+      call VecSet(x, s_zero, ierr)
 
       ! Random rhs
       call PetscRandomCreate(PETSC_COMM_WORLD, rctx, ierr)
@@ -56,7 +58,7 @@
       ! (ie a 0th order polynomial) for an exact solve
       ! Starting with the identity, the inverse should also be the identity
       ! ~~~~~~~~~~~~~~
-      call MatShift(A, 1d0, ierr)
+      call MatShift(A, s_one, ierr)
 
       call KSPCreate(PETSC_COMM_WORLD,ksp,ierr)
       call KSPSetOperators(ksp,A,A,ierr)
@@ -79,10 +81,10 @@
       ! Instead now set the diagonal to 1.5
       ! In Newton form should only need a single root 
       ! ~~~~~~~~~~~~~~
-      call MatShift(A, 0.5d0, ierr)
+      call MatShift(A, s_half, ierr)
       call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
       call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)      
-      call VecSet(x, 0d0, ierr)    
+      call VecSet(x, s_zero, ierr)    
 
       ! Do another solve - this will automatically trigger the setup as the matrix
       ! has changed
@@ -98,10 +100,10 @@
       ! (ie a 1st order polynomial) for an exact solve
       ! ~~~~~~~~~~~~~~
       ! Set one of the values to 2.5
-      call MatSetValue(A, zero, zero, 2.5d0, INSERT_VALUES, ierr)
+      call MatSetValue(A, zero, zero, s_two_half, INSERT_VALUES, ierr)
       call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
       call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)      
-      call VecSet(x, 0d0, ierr)    
+      call VecSet(x, s_zero, ierr)    
 
       ! Do another solve - this will automatically trigger the setup as the matrix
       ! has changed

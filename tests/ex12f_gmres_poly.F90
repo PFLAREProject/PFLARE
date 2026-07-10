@@ -20,6 +20,8 @@
       PC               pc
       KSPConvergedReason reason
       PetscInt, parameter :: one=1
+      ! d0 literals in PetscScalar params: bit-identical double, float-correct single
+      PetscScalar, parameter :: s_zero = 0d0, s_minus_one = -1d0
       MatType :: mtype, mtype_input
 
       call PetscInitialize(PETSC_NULL_CHARACTER,ierr)
@@ -100,7 +102,7 @@
       call PCAIRSetInverseType(pc, PFLAREINV_ARNOLDI, ierr)
       call KSPSetPC(ksp, pc, ierr)
       call KSPSetFromOptions(ksp,ierr)
-      call VecSet(x, 0d0, ierr)
+      call VecSet(x, s_zero, ierr)
       call KSPSolve(ksp,b,x,ierr)
       call KSPGetConvergedReason(ksp,reason,ierr)      
       if (reason%v < 0) then
@@ -108,7 +110,7 @@
       end if
       ! Compute the residual
       call MatMult(A,x,u,ierr)
-      call VecAXPY(u,-1d0,b,ierr)
+      call VecAXPY(u,s_minus_one,b,ierr)
       call VecNorm(u,NORM_2,norm_arnoldi,ierr)
       norm_arnoldi = norm_arnoldi/norm_rhs
 
@@ -118,7 +120,7 @@
       if (.NOT. no_power) then
          call PCAIRSetInverseType(pc, PFLAREINV_POWER, ierr)
 
-         call VecSet(x, 0d0, ierr)
+         call VecSet(x, s_zero, ierr)
          call KSPSolve(ksp,b,x,ierr)
          call KSPGetConvergedReason(ksp,reason,ierr)      
          if (reason%v < 0) then
@@ -126,7 +128,7 @@
          end if
          ! Compute the residual
          call MatMult(A,x,u,ierr)
-         call VecAXPY(u,-1d0,b,ierr)
+         call VecAXPY(u,s_minus_one,b,ierr)
          call VecNorm(u,NORM_2,norm_power,ierr)
          norm_power = norm_power/norm_rhs
       end if
@@ -136,7 +138,7 @@
       ! ~~~~~~~~~~~~~         
       call PCAIRSetInverseType(pc, PFLAREINV_NEWTON, ierr)   
 
-      call VecSet(x, 0d0, ierr)
+      call VecSet(x, s_zero, ierr)
       call KSPSolve(ksp,b,x,ierr)
       call KSPGetConvergedReason(ksp,reason,ierr)      
       if (reason%v < 0) then
@@ -144,7 +146,7 @@
       end if
       ! Compute the residual
       call MatMult(A,x,u,ierr)
-      call VecAXPY(u,-1d0,b,ierr)
+      call VecAXPY(u,s_minus_one,b,ierr)
       call VecNorm(u,NORM_2,norm_newton,ierr)
       norm_newton = norm_newton/norm_rhs
       call KSPDestroy(ksp,ierr)

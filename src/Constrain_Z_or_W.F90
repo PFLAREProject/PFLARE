@@ -4,7 +4,8 @@ module constrain_z_or_w
    use petscksp
    use c_petsc_interfaces, only: vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
    use petsc_helper, only: pseudo_inv
-   use pflare_parameters, only: PFLARE_KSP_RTOL_CONSTRAIN
+   use pflare_parameters, only: PFLARE_KSP_RTOL_CONSTRAIN, PFLARE_ZERO, PFLARE_KSP_ATOL_OFF, &
+         PFLARE_ONE
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -97,13 +98,13 @@ module constrain_z_or_w
          if (left) then
             call MatCreateVecs(input_mat, left_null_vecs(no_nullspace_vecs), PETSC_NULL_VEC, ierr)
             ! Set to the constant     
-            call VecSet(left_null_vecs(no_nullspace_vecs), 1d0, ierr)
+            call VecSet(left_null_vecs(no_nullspace_vecs), PFLARE_ONE, ierr)
          end if
 
          if (right) then
             call MatCreateVecs(input_mat, right_null_vecs(no_nullspace_vecs), PETSC_NULL_VEC, ierr)
             ! Set to the constant
-            call VecSet(right_null_vecs(no_nullspace_vecs), 1d0, ierr)
+            call VecSet(right_null_vecs(no_nullspace_vecs), PFLARE_ONE, ierr)
          end if         
       end if   
       
@@ -153,7 +154,7 @@ module constrain_z_or_w
       ! ~~~~~~~~~~~~
 
       ! We want the nullspace so solve homog problem
-      call VecSet(vec_rhs, 0d0, ierr)     
+      call VecSet(vec_rhs, PFLARE_ZERO, ierr)     
 
       call KSPCreate(MPI_COMM_MATRIX, ksp, ierr)
       !call KSPSetType(ksp, KSPGMRES, ierr)
@@ -168,7 +169,7 @@ module constrain_z_or_w
 
       ! Do 15 iterations
       call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_CONSTRAIN, &
-               & 1d-50, &
+               & PFLARE_KSP_ATOL_OFF, &
                & PETSC_DEFAULT_REAL, &
                & maxits, ierr) 
 
