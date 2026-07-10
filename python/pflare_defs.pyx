@@ -19,8 +19,8 @@ cdef extern from "petsc.h":
 
 cdef extern:
 	void PCRegister_PFLARE()
-	void compute_cf_splitting_c(PetscMat *A, int symmetric_int, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
-	void compute_diag_dom_submatrix_c(PetscMat *A, double max_dd_ratio, PetscMat *output_mat)
+	void compute_cf_splitting_c(PetscMat *A, int symmetric_int, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
+	void compute_diag_dom_submatrix_c(PetscMat *A, PetscReal max_dd_ratio, PetscMat *output_mat)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Get routines
@@ -175,7 +175,7 @@ cdef extern:
 cpdef py_PCRegister_PFLARE():
 	PCRegister_PFLARE()
 
-cpdef compute_cf_splitting(Mat A, bint symmetric, double strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, double fraction_swap):
+cpdef compute_cf_splitting(Mat A, bint symmetric, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap):
 	cdef IS is_fine
 	cdef IS is_coarse
 	is_fine = IS()
@@ -183,7 +183,7 @@ cpdef compute_cf_splitting(Mat A, bint symmetric, double strong_threshold, int m
 	compute_cf_splitting_c(&(A.mat), symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, &(is_fine.iset), &(is_coarse.iset))
 	return is_fine, is_coarse
 
-cpdef compute_diag_dom_submatrix(Mat A, double max_dd_ratio):
+cpdef compute_diag_dom_submatrix(Mat A, PetscReal max_dd_ratio):
 	cdef Mat output_mat
 	output_mat = Mat()
 	compute_diag_dom_submatrix_c(&(A.mat), max_dd_ratio, &(output_mat.mat))

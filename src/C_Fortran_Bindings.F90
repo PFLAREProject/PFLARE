@@ -229,7 +229,7 @@ module c_fortran_bindings
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
       integer(c_int), value, intent(in)      :: symmetric_int, max_luby_steps, cf_splitting_type, ddc_its
-      real(c_double), value, intent(in)      :: strong_threshold, fraction_swap
+      PetscReal, value, intent(in)           :: strong_threshold, fraction_swap
       integer(c_long_long), intent(inout)    :: is_fine_ptr, is_coarse_ptr
 
       type(tMat)  :: input_mat
@@ -263,7 +263,7 @@ module c_fortran_bindings
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
-      real(c_double), value, intent(in)      :: max_dd_ratio
+      PetscReal, value, intent(in)           :: max_dd_ratio
       integer(c_long_long), intent(inout)    :: output_mat_ptr
 
       type(tMat)  :: input_mat, output_mat
