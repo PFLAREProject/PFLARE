@@ -252,7 +252,7 @@ module tsqr
          buffers%request = MPI_REQUEST_NULL
          ! This is now a non-blocking allreduce, you have to finish this where needed
          call MPI_IAllreduce(buffers%R_buffer_send, buffers%R_buffer_receive, &
-                  n_size * n_size + 1, MPI_DOUBLE_PRECISION, &
+                  n_size * n_size + 1, MPIU_REAL, &
                   reduction_op_tsqr, MPI_COMM_MATRIX, buffers%request, errorcode)
          if (errorcode /= MPI_SUCCESS) then
             print *, "MPI_IAllreduce failed"

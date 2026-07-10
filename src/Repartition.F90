@@ -55,7 +55,7 @@ module repartition
          ratio = dble(local_nnzs)/dble(off_proc_nnzs)
       end if
 
-      call MPI_Allreduce(ratio, ratio_parallel, 1, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_MATRIX, errorcode)
+      call MPI_Allreduce(ratio, ratio_parallel, 1, MPIU_REAL, MPI_SUM, MPI_COMM_MATRIX, errorcode)
 
       ratio = ratio_parallel  
       ! Only divide by the number of processors that are active

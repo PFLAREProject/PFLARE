@@ -368,7 +368,7 @@ module approx_inverse_setup
             ! to bother creating an intercommunicator to send the coefficients from any rank on the comm of buffers%matrix
             ! to the comm of ranks which aren't in MPI_COMM_MATRIX but are in buffers%matrix
 #if !defined(PETSC_HAVE_MPIUNI)
-            call MPI_IBcast(coefficients, size(coefficients, 1), MPI_DOUBLE_PRECISION, 0, &
+            call MPI_IBcast(coefficients, size(coefficients, 1), MPIU_REAL, 0, &
                      MPI_COMM_MATRIX, buffers%request, errorcode)
 #endif
 
@@ -377,7 +377,7 @@ module approx_inverse_setup
 
             ! Have to broadcast the 2D real and imaginary roots
 #if !defined(PETSC_HAVE_MPIUNI)
-            call MPI_IBcast(coefficients, size(coefficients, 1) * size(coefficients, 2), MPI_DOUBLE_PRECISION, 0, &
+            call MPI_IBcast(coefficients, size(coefficients, 1) * size(coefficients, 2), MPIU_REAL, 0, &
                      MPI_COMM_MATRIX, buffers%request, errorcode)
 #endif
          end if
