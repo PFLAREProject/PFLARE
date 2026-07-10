@@ -6,9 +6,10 @@ module constrain_z_or_w
    use petsc_helper, only: pseudo_inv
 
 #include "petsc/finclude/petscksp.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
-   public     
+   public
    
    contains
 
@@ -248,6 +249,9 @@ module constrain_z_or_w
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0
+      ! Kind-correct BLAS integer/real arguments for the dgemv/dgemm calls
+      PetscBLASInt :: m_bl, n_bl, k_bl, lda_bl, ldb_bl, ldc_bl, one_bl
+      PetscScalar :: blas_one, blas_zero, blas_minus_one
       MatType:: mat_type
 
       ! ~~~~~~
@@ -459,10 +463,17 @@ module constrain_z_or_w
          ! ie W B_c^R - B_f^R      
          ! ~~~~~~~~~
          ! W B_c^R can be done as (B_c^R)^T W
-         call dgemv("T", size(b_c_vals, 1), size(b_c_vals,2), &
-                  1d0, b_c_vals, size(b_c_vals,1), &
-                  row_vals, 1, &
-                  0d0, diff, 1)    
+         one_bl = 1
+         blas_one = 1d0
+         blas_zero = 0d0
+         blas_minus_one = -1d0
+         m_bl = size(b_c_vals, 1)
+         n_bl = size(b_c_vals, 2)
+         lda_bl = size(b_c_vals, 1)
+         call PFLAREgemv("T", m_bl, n_bl, &
+                  blas_one, b_c_vals, lda_bl, &
+                  row_vals, one_bl, &
+                  blas_zero, diff, one_bl)
 
          ! Compute W * B_c^R - B_f^R
          ! Loop over near-nullspace vecs
@@ -475,26 +486,39 @@ module constrain_z_or_w
          end do                  
                
          ! Compute (B_c^R)^T * B_c^R
-         call dgemm("T", "N", size(b_c_vals, 2), size(b_c_vals,2), size(b_c_vals, 1), &
-                  1d0, b_c_vals, size(b_c_vals,1), &
-                  b_c_vals, size(b_c_vals,1), &
-                  0d0, bctbc, size(bctbc,1)) 
+         n_bl = size(b_c_vals, 2)
+         k_bl = size(b_c_vals, 1)
+         lda_bl = size(b_c_vals, 1)
+         ldc_bl = size(bctbc, 1)
+         call PFLAREgemm("T", "N", n_bl, n_bl, k_bl, &
+                  blas_one, b_c_vals, lda_bl, &
+                  b_c_vals, lda_bl, &
+                  blas_zero, bctbc, ldc_bl)
                   
          ! Compute the pseudo inverse of (B_c^R)^T * B_c^R
          call pseudo_inv(bctbc, pseudo)
 
          ! Compute inv((B_c^R)^T * B_c^R) * (B_c^R)^T
-         call dgemm("N", "T", size(pseudo, 1), size(b_c_vals,1), size(pseudo, 2), &
-                  1d0, pseudo, size(pseudo,1), &
-                  b_c_vals, size(b_c_vals,1), &
-                  0d0, temp_mat, size(temp_mat,1))          
+         m_bl = size(pseudo, 1)
+         n_bl = size(b_c_vals, 1)
+         k_bl = size(pseudo, 2)
+         lda_bl = size(pseudo, 1)
+         ldb_bl = size(b_c_vals, 1)
+         ldc_bl = size(temp_mat, 1)
+         call PFLAREgemm("N", "T", m_bl, n_bl, k_bl, &
+                  blas_one, pseudo, lda_bl, &
+                  b_c_vals, ldb_bl, &
+                  blas_zero, temp_mat, ldc_bl)
 
          ! Now compute -(W * B_c^R - B_f^R ) * inv((B_c^R)^T * B_c^R) * (B_c^R)^T
          ! Again we're doing the left vec mat mult with a transpose
-         call dgemv("T", size(temp_mat, 1), size(temp_mat,2), &
-                  -1d0, temp_mat, size(temp_mat,1), &
-                  diff, 1, &
-                  0d0, b_c_vals, 1) 
+         m_bl = size(temp_mat, 1)
+         n_bl = size(temp_mat, 2)
+         lda_bl = size(temp_mat, 1)
+         call PFLAREgemv("T", m_bl, n_bl, &
+                  blas_minus_one, temp_mat, lda_bl, &
+                  diff, one_bl, &
+                  blas_zero, b_c_vals, one_bl)
 
          ! ~~~~~~~~~~~~~
          ! Set all the row values, same sparsity pattern

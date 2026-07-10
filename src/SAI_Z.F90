@@ -10,6 +10,7 @@ module sai_z
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI
 
 #include "petsc/finclude/petscksp.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
    public
@@ -39,8 +40,10 @@ module sai_z
       PetscInt :: i_loc, j_loc, cols_ad, rows_ad
       PetscInt :: rows_ao, cols_ao, ifree, row_size, i_size, j_size
       PetscInt :: global_row_start_aff, global_row_end_plus_one_aff
-      integer :: lwork, intersect_count
+      integer :: intersect_count
       integer :: errorcode, comm_size
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, info, m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: transpose_mat, A_ff
@@ -49,7 +52,9 @@ module sai_z
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
       PetscInt, dimension(:), allocatable, target :: j_rows
       PetscInt, dimension(:), allocatable :: i_rows, ad_indices
-      integer, dimension(:), allocatable :: pivots, j_indices, i_indices
+      integer, dimension(:), allocatable :: j_indices, i_indices
+      ! LAPACK pivots must be PetscBLASInt
+      PetscBLASInt, dimension(:), allocatable :: pivots
       PetscInt, dimension(:), pointer :: cols => null(), j_rows_ptr => null()
       PetscReal, dimension(:), pointer :: vals => null()
       PetscReal, dimension(:), allocatable :: e_row, j_vals
@@ -540,7 +545,12 @@ module sai_z
             else
 
                allocate(pivots(size(i_rows)))
-               call dgesv(size(i_rows), 1, submat_vals, size(i_rows), pivots, e_row, size(i_rows), errorcode)
+               ! Kind-correct BLAS integer dimensions
+               n_bl = size(i_rows)
+               nrhs_bl = 1
+               lda_bl = size(i_rows)
+               ldb_bl = size(i_rows)
+               call PFLAREgesv(n_bl, nrhs_bl, submat_vals, lda_bl, pivots, e_row, ldb_bl, info)
                ! Rearrange given the row permutations done by the LU
                e_row(pivots) = e_row
                deallocate(pivots)
@@ -592,13 +602,20 @@ module sai_z
 
                allocate(work(1))
                lwork = -1
-               call dgels('N', i_size, j_size, 1, submat_vals, i_size, &
-                           e_row, i_size, work, lwork, errorcode)
+               ! Kind-correct BLAS integer dimensions
+               m_bl = i_size
+               n_bl = j_size
+               nrhs_bl = 1
+               lda_bl = i_size
+               ldb_bl = i_size
+               call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                           e_row, ldb_bl, work, lwork, info)
+               ! int() is exact for all plausible sizes < 2^24 even when work is single precision
                lwork = int(work(1))
                deallocate(work)
                allocate(work(lwork))
-               call dgels('N', i_size, j_size, 1, submat_vals, i_size, &
-                           e_row, i_size, work, lwork, errorcode)
+               call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                           e_row, ldb_bl, work, lwork, info)
                deallocate(work)
 
             end if

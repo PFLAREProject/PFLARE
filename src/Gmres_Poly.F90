@@ -12,7 +12,8 @@ module gmres_poly
    use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
          kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
 
-#include "petsc/finclude/petscmat.h"   
+#include "petsc/finclude/petscmat.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
 
@@ -244,33 +245,44 @@ module gmres_poly
       PetscReal, dimension(:), intent(inout)    :: y
 
       ! Local variables
-      integer :: errorcode, lwork
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: errorcode, lwork
+      PetscBLASInt :: m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
       PetscReal, dimension(size(H_n,1), size(H_n,2)) :: H_n_copy
       PetscReal, dimension(m+1) :: g0
       PetscReal, dimension(:), allocatable :: work
 
-      ! ~~~~~~   
-            
+      ! ~~~~~~
+
       ! This is the vector we will use as rhs in the least square solve
       g0 = 0d0
-      g0(1) = beta 
+      g0(1) = beta
 
       ! Let's solve our least squares system
       allocate(work(1))
-      lwork = -1      
+      lwork = -1
 
       ! Make a copy as we do a least-squares solve in place
       H_n_copy(1:m+1, 1:m) = H_n(1:m+1, 1:m)
 
+      ! Kind-correct BLAS integer dimensions
+      m_bl = m+1
+      n_bl = m
+      nrhs_bl = 1
+      lda_bl = size(H_n_copy, 1)
+      ldb_bl = size(g0)
+
       lwork = -1
       ! Overwrite y
       errorcode = 0
-      call dgels('N', m+1, m, 1, H_n_copy(1,1), size(H_n_copy, 1), g0, size(g0), work, lwork, errorcode)
+      call PFLAREgels('N', m_bl, n_bl, nrhs_bl, H_n_copy(1,1), lda_bl, g0, ldb_bl, work, lwork, errorcode)
+      ! Workspace query returns optimal lwork in work(1); int() is exact for all
+      ! plausible sizes < 2^24 even when work is single precision
       lwork = int(work(1))
       deallocate(work)
-      allocate(work(lwork))  
-      call dgels('N', m+1, m, 1, H_n_copy(1,1), size(H_n_copy, 1), g0, size(g0), work, lwork, errorcode)
-      deallocate(work)            
+      allocate(work(lwork))
+      call PFLAREgels('N', m_bl, n_bl, nrhs_bl, H_n_copy(1,1), lda_bl, g0, ldb_bl, work, lwork, errorcode)
+      deallocate(work)
 
       if (errorcode /= 0) then
          print *, "LS solve failed"
@@ -305,12 +317,15 @@ module gmres_poly
 
       ! Local variables
       integer :: i_loc, subspace_size
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       PetscReal, dimension(poly_order+2) :: c_j, g0
       PetscReal, dimension(poly_order+1) :: neg_h
       logical :: compute_cn
       PetscReal :: rel_tol
-      PetscInt :: m_petscint 
+      PetscInt :: m_petscint
+      ! Kind-correct BLAS integer/real arguments for the dgemv call
+      PetscBLASInt :: m_bl, n_bl, lda_bl, one_bl
+      PetscReal :: blas_one, blas_zero
 
       ! ~~~~~~   
             
@@ -404,12 +419,18 @@ module gmres_poly
          if (rel_tol > 0) then
 
             call ls_solve_arnoldi(beta, m, H_n, y)
-            
+
             ! Compute H_n y
-            call dgemv("N", m+1, m, &
-                  1d0, H_n, size(H_n,1), &
-                  y, 1, &
-                  0d0, g0(1), 1) 
+            m_bl = m+1
+            n_bl = m
+            lda_bl = size(H_n,1)
+            one_bl = 1
+            blas_one = 1d0
+            blas_zero = 0d0
+            call PFLAREgemv("N", m_bl, n_bl, &
+                  blas_one, H_n, lda_bl, &
+                  y, one_bl, &
+                  blas_zero, g0(1), one_bl)
 
             ! Minus away e1 beta
             g0(1) = g0(1) - beta
@@ -448,7 +469,7 @@ module gmres_poly
       PetscInt :: global_rows, global_cols, vecs_needed
       integer :: subspace_size, m
       integer :: errorcode
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       PetscReal, dimension(poly_order+2,poly_order+2) :: C_n
       PetscReal, dimension(poly_order+1) :: y
@@ -456,6 +477,9 @@ module gmres_poly
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       PetscReal :: rel_tol
+      ! Kind-correct BLAS integer/real arguments for the dgemv call
+      PetscBLASInt :: m_bl, lda_bl, one_bl
+      PetscReal :: blas_one, blas_zero
 
       ! ~~~~~~    
 
@@ -499,10 +523,15 @@ module gmres_poly
       ! ~~~~~~~~~~~~~
       ! Set to zero is necessary as m may be less than the subspace_size
       coefficients = 0
-      call dgemv("N", m, m, &
-               1d0, C_n, size(C_n,1), &
-               y, 1, &
-               0d0, coefficients(1), 1) 
+      m_bl = m
+      lda_bl = size(C_n,1)
+      one_bl = 1
+      blas_one = 1d0
+      blas_zero = 0d0
+      call PFLAREgemv("N", m_bl, m_bl, &
+               blas_one, C_n, lda_bl, &
+               y, one_bl, &
+               blas_zero, coefficients(1), one_bl)
 
       vecs_needed = subspace_size + 1
       call VecDestroyVecs(vecs_needed, V_n, ierr)
@@ -651,9 +680,12 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tsqr_buffers), target, intent(inout)                :: buffers
       PetscReal, dimension(:), intent(inout)                        :: coefficients
  
-      integer :: lwork, subspace_size, n_size, rank, iwork_size
+      integer :: subspace_size, n_size, iwork_size
       integer :: errorcode
-      integer, dimension(:), allocatable :: iwork
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, rank, info
+      PetscBLASInt :: m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
+      PetscBLASInt, dimension(:), allocatable :: iwork
       PetscReal, dimension(poly_order+2) :: g0, s
       PetscReal, dimension(:), allocatable :: work
       PetscReal, dimension(:,:), pointer :: R_pointer
@@ -694,20 +726,28 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! will be very close (given the random rhs)
       ! to orthogonal and dgels fails without full rank
       ! Start from the second column in R_pointer
-      call dgelsd(subspace_size+1, subspace_size, 1, R_pointer(1, 2), subspace_size+1, &
-                     g0, size(g0), s, rcond, rank, &
-                     work, lwork, iwork, errorcode)
+      ! Kind-correct BLAS integer dimensions
+      m_bl = subspace_size+1
+      n_bl = subspace_size
+      nrhs_bl = 1
+      lda_bl = subspace_size+1
+      ldb_bl = size(g0)
+      call PFLAREgelsd(m_bl, n_bl, nrhs_bl, R_pointer(1, 2), lda_bl, &
+                     g0, ldb_bl, s, rcond, rank, &
+                     work, lwork, iwork, info)
+      ! Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
+      ! for all plausible sizes < 2^24 even when work is single precision
       lwork = int(work(1))
       iwork_size = iwork(1)
       deallocate(work, iwork)
-      allocate(work(lwork)) 
+      allocate(work(lwork))
       allocate(iwork(iwork_size))
-      call dgelsd(subspace_size+1, subspace_size, 1, R_pointer(1, 2), subspace_size+1, &
-                     g0, size(g0), s, rcond, rank, &
-                     work, lwork, iwork, errorcode)
+      call PFLAREgelsd(m_bl, n_bl, nrhs_bl, R_pointer(1, 2), lda_bl, &
+                     g0, ldb_bl, s, rcond, rank, &
+                     work, lwork, iwork, info)
       deallocate(work, iwork)
 
-      if (errorcode /= 0) then
+      if (info /= 0) then
          print *, "LS solve failed"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if  

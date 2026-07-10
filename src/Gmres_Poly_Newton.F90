@@ -4,10 +4,11 @@ module gmres_poly_newton
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
 
-#include "petsc/finclude/petscmat.h"   
+#include "petsc/finclude/petscmat.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
-   public 
+   public
    
    contains
 
@@ -393,14 +394,18 @@ module gmres_poly_newton
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols, vecs_needed
-      integer :: lwork, subspace_size, rank, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
+      integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
       integer :: total_extra, counter, k_loc, m, numerical_order
-      PetscErrorCode :: ierr      
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, rank, info
+      PetscBLASInt :: np1_bl, nrhs_bl, lda_hnt_bl, ldb_bl, lda_hn_bl, one_bl
+      PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
       PetscReal, dimension(poly_order+1) :: e_d, solution, s
-      integer, dimension(:), allocatable :: iwork_allocated, indices
+      PetscBLASInt, dimension(:), allocatable :: iwork_allocated
+      integer, dimension(:), allocatable :: indices
       PetscReal, dimension(:), allocatable :: work, real_roots_added, imag_roots_added
       PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
       PetscReal, dimension(:,:), allocatable :: VL, VR
@@ -488,23 +493,30 @@ module gmres_poly_newton
 
          ! We have rcond = 1e-12 which is used to decide what singular values to drop
          ! Matlab uses max(size(A))*eps(norm(A)) in their pinv
-         call dgelsd(poly_order + 1, poly_order + 1, 1, H_n_T, size(H_n_T, 1), &
-                        e_d, size(e_d), s, rcond, rank, &
-                        work, lwork, iwork_allocated, errorcode)
+         ! Kind-correct BLAS integer dimensions
+         np1_bl = poly_order + 1
+         nrhs_bl = 1
+         lda_hnt_bl = size(H_n_T, 1)
+         ldb_bl = size(e_d)
+         call PFLAREgelsd(np1_bl, np1_bl, nrhs_bl, H_n_T, lda_hnt_bl, &
+                        e_d, ldb_bl, s, rcond, rank, &
+                        work, lwork, iwork_allocated, info)
+         ! Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
+         ! for all plausible sizes < 2^24 even when work is single precision
          lwork = int(work(1))
          iwork_size = iwork_allocated(1)
          deallocate(work, iwork_allocated)
-         allocate(work(lwork)) 
+         allocate(work(lwork))
          allocate(iwork_allocated(iwork_size))
-         call dgelsd(poly_order + 1, poly_order + 1, 1, H_n_T, size(H_n_T, 1), &
-                        e_d, size(e_d), s, rcond, rank, &
-                        work, lwork, iwork_allocated, errorcode)
-         deallocate(work, iwork_allocated)        
-         
+         call PFLAREgelsd(np1_bl, np1_bl, nrhs_bl, H_n_T, lda_hnt_bl, &
+                        e_d, ldb_bl, s, rcond, rank, &
+                        work, lwork, iwork_allocated, info)
+         deallocate(work, iwork_allocated)
+
          ! Copy in the solution
          solution = e_d
 
-         if (errorcode /= 0) then
+         if (info /= 0) then
             print *, "Harmonic Ritz solve failed"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
          end if
@@ -528,21 +540,29 @@ module gmres_poly_newton
       lwork = -1      
 
       ! Compute the eigenvalues
-      call dgeev('N', 'N', poly_order + 1, H_n, size(H_n, 1), &
-                     coefficients(1, 1), coefficients(1, 2), VL, 1, VR, 1, &
-                     work, lwork, errorcode)
+      ! Kind-correct BLAS integer dimensions
+      np1_bl = poly_order + 1
+      lda_hn_bl = size(H_n, 1)
+      one_bl = 1
+      ! DEFERRED (complex-prep): coefficients kept PetscReal by design; see docs/plan.
+      ! PFLAREgeev writes the strictly-real eigenvalue parts wr/wi directly into
+      ! coefficients(:,1)/(:,2) - these are LAPACK real arrays, so PetscReal is correct.
+      call PFLAREgeev('N', 'N', np1_bl, H_n, lda_hn_bl, &
+                     coefficients(1, 1), coefficients(1, 2), VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
+      ! int() is exact for all plausible sizes < 2^24 even when work is single precision
       lwork = int(work(1))
       deallocate(work)
-      allocate(work(lwork)) 
-      call dgeev('N', 'N', poly_order + 1, H_n, size(H_n, 1), &
-                     coefficients(1, 1), coefficients(1, 2), VL, 1, VR, 1, &
-                     work, lwork, errorcode)
+      allocate(work(lwork))
+      call PFLAREgeev('N', 'N', np1_bl, H_n, lda_hn_bl, &
+                     coefficients(1, 1), coefficients(1, 2), VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
       deallocate(work, VL, VR)
 
-      if (errorcode /= 0) then
+      if (info /= 0) then
          print *, "Eig decomposition failed"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if  
+      end if
 
       ! ~~~~~~~~~~~~~~
       ! Now we have to check the output eigenvalues

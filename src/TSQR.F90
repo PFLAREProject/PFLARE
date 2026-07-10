@@ -4,7 +4,8 @@ module tsqr
    use petscmat
 
 #include "petsc/finclude/petscmat.h"
-   
+#include "finclude/pflare_blaslapack.h"
+
    implicit none
 
    ! ~~~~~~~~~
@@ -84,7 +85,8 @@ module tsqr
       PetscReal, dimension(:,:), pointer :: R_pointer
 
       ! integer :: column_block_size, row_block_size, no_of_row_blocks
-      integer :: lwork
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, info, m_bl, n_bl, lda_bl
       integer :: m_size, n_size, errorcode, comm_size, row_length, i_loc
       ! ~~~~~~    
 
@@ -119,17 +121,22 @@ module tsqr
             ! lapack 3.4 we use below
             ! ~~~~~~~~
             ! Start with a workspace query on the size of lwork
-            call dgeqrf(m_size, n_size, &
-                        A(1, 1), m_size, &
-                        tau, work, lwork, errorcode)
+            ! Kind-correct BLAS integer dimensions
+            m_bl = m_size
+            n_bl = n_size
+            lda_bl = m_size
+            call PFLAREgeqrf(m_bl, n_bl, &
+                        A(1, 1), lda_bl, &
+                        tau, work, lwork, info)
+            ! int() is exact for all plausible sizes < 2^24 even when work is single precision
             lwork = int(work(1))
             deallocate(work)
             allocate(work(lwork))
 
             ! Now actually do the qr
-            call dgeqrf(m_size, n_size, &
-                        A(1, 1), m_size, &
-                        tau, work, lwork, errorcode)  
+            call PFLAREgeqrf(m_bl, n_bl, &
+                        A(1, 1), lda_bl, &
+                        tau, work, lwork, info)
          end if
          deallocate(work)            
 
@@ -277,9 +284,11 @@ module tsqr
       integer            :: len 
       MPIU_Datatype      :: type 
 
-      PetscReal, pointer :: invec_r(:), inoutvec_r(:) 
-      integer :: number_chunks, i_loc, lwork, chunk_size
-      integer :: start_chunk, end_chunk, errorcode, j_loc, nb, n_size
+      PetscReal, pointer :: invec_r(:), inoutvec_r(:)
+      integer :: number_chunks, i_loc, chunk_size
+      integer :: start_chunk, end_chunk, j_loc, nb, n_size
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, info, m_bl, n_bl, lda_bl
       PetscReal, dimension(:, :), allocatable :: R_stacked
       PetscReal, dimension(:), allocatable :: work, tau
       ! ~~~~~~~~~
@@ -353,17 +362,22 @@ module tsqr
 
          !Start with a workspace query on the size of lwork
          lwork = -1
-         call dgeqrf(size(R_stacked, 1), size(R_stacked, 2), &
-                     R_stacked(1, 1), size(R_stacked, 1), &
-                     tau, work, lwork, errorcode)
+         ! Kind-correct BLAS integer dimensions
+         m_bl = size(R_stacked, 1)
+         n_bl = size(R_stacked, 2)
+         lda_bl = size(R_stacked, 1)
+         call PFLAREgeqrf(m_bl, n_bl, &
+                     R_stacked(1, 1), lda_bl, &
+                     tau, work, lwork, info)
+         ! int() is exact for all plausible sizes < 2^24 even when work is single precision
          lwork = int(work(1))
          deallocate(work)
          allocate(work(lwork))
 
          ! Now actually do the qr
-         call dgeqrf(size(R_stacked, 1), size(R_stacked, 2), &
-                     R_stacked(1, 1), size(R_stacked, 1), &
-                     tau, work, lwork, errorcode)  
+         call PFLAREgeqrf(m_bl, n_bl, &
+                     R_stacked(1, 1), lda_bl, &
+                     tau, work, lwork, info)
 
          ! We can enforce a unique solution here by enforcing positive diagonal entries
          ! in R, different versions of lapack either do or don't enforce this

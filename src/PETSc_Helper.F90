@@ -11,7 +11,8 @@ module petsc_helper
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
-                
+#include "finclude/pflare_blaslapack.h"
+
    implicit none
 
 logical, protected :: got_debug_kokkos_env = .FALSE.
@@ -1448,19 +1449,21 @@ logical, protected :: kokkos_debug_global = .FALSE.
   
       PetscReal, dimension(size(input, 1), size(input, 2)) :: tmp_input
       PetscReal, dimension(:), allocatable :: WORK
-      integer :: LWORK, M, N, info, errorcode
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: LWORK, M, N, info
+      integer :: errorcode
 
       ! ~~~~~~~~~~~~~~~~
-  
+
      tmp_input = input
      M = size(input, 1)
      N = size(input, 2)
      LWORK = 2*MAX(1,3*MIN(M,N)+MAX(M,N),5*MIN(M,N))
      allocate(WORK(LWORK))
-  
-     call DGESVD('A', 'A', M, N, tmp_input, M, &
+
+     call PFLAREgesvd('A', 'A', M, N, tmp_input, M, &
             sigma, U, M, VT, N, WORK, LWORK, info)
-  
+
       if (info /= 0) then
          print *, "SVD fail"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
@@ -1483,6 +1486,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, dimension(size(input, 2), size(input, 2)) :: VT
 
       integer :: iloc, errorcode
+      ! Kind-correct BLAS integer/real arguments for the dgemm call
+      PetscBLASInt :: n_bl, lda_bl
+      PetscScalar :: blas_one, blas_zero
 
       ! ~~~~~~~~~~~~~~~~
 
@@ -1501,10 +1507,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do
 
       ! Do the matmatmult, making sure to transpose both
-      call dgemm("T", "T", size(input,1), size(input,1), size(input,1), &
-               1d0, VT, size(input,1), &
-               U, size(input,1), &
-               0d0, output, size(input,1))          
+      n_bl = size(input,1)
+      lda_bl = size(input,1)
+      blas_one = 1d0
+      blas_zero = 0d0
+      call PFLAREgemm("T", "T", n_bl, n_bl, n_bl, &
+               blas_one, VT, lda_bl, &
+               U, lda_bl, &
+               blas_zero, output, lda_bl)
 
       ! nan check
       if (any(output /= output)) then
