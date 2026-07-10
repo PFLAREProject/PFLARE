@@ -155,7 +155,15 @@ contains
 
       if (count == nsteps) then
          if (rank == 0) then
+            ! The residuals of two solves that reuse the same restored polynomial
+            ! coefficients agree to ~1e-8 in double, but in single precision both
+            ! residuals sit at the ~1e-6 relative floor, so a 1e-8 comparison is
+            ! beyond the working precision - relax it there (double keeps 1e-8).
+#if defined(PETSC_USE_REAL_SINGLE)
+            if (abs(norm_first - norm_third) / norm_first > 1e-4) then
+#else
             if (abs(norm_first - norm_third) / norm_first > 1e-8) then
+#endif
                print *, "Residuals WRONG"
                error stop 1
             end if

@@ -30,6 +30,22 @@ INCLUDE := -I$(CURDIR)/../ -I../include
 include ${PETSC_DIR}/lib/petsc/conf/variables
 include ${PETSC_DIR}/lib/petsc/conf/rules
 
+# Precision-aware KSP relative tolerance for the test drivers.
+KSP_RTOL := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),1e-5,1e-10)
+
+# Prefix for individual test commands that must be skipped under single precision.
+# Prepending $(SKIP_SINGLE) turns the recipe line into an echo (the command is
+# printed, not run) under single precision, and is empty (runs normally) otherwise;
+# double precision always runs these. Only the specific commands that actually fail
+# under single are gated, not whole classes. Recurring reasons a command needs it:
+#   * Power / Arnoldi GMRES-polynomial bases: their coefficients grow large enough
+#     to exceed single-precision range, so those bases are numerically unusable in
+#     single. The Newton basis is stable by design and is not gated.
+#   * -pc_air_reuse_sparsity across a PC regeneration: that optimisation reuses the
+#     first setup's sparsity pattern, but single-precision roundoff can shift which
+#     polynomial terms survive between setups, leaving the reused pattern stale.
+SKIP_SINGLE := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),@echo "  [skipped under single precision]:",)
+
 # We then have to add the flags back in after the petsc rules/variables
 # have overwritten
 override CFLAGS += $(CFLAGS_INPUT) $(INCLUDE)
@@ -292,7 +308,7 @@ run_tests_no_load_short_serial:
 #	
 	@echo ""
 	@echo "Test AIR with SAI with SUPG CG FEM in 2D"	 
-	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 	 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -ksp_max_it 6 -pc_air_inverse_type sai -dm_refine 1
 #
 	@echo ""
@@ -325,7 +341,7 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs and cycles"
 	./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
 	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1
 #	 
 	@echo ""
@@ -350,7 +366,7 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Verify solution of upwind DG FEM in 3D with hexs and cycles"
 	./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 1 \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 1 \
 	-dm_plex_filename data/annulus_twisted.msh -verify_solution	  
 #
 	@echo ""
@@ -457,7 +473,7 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG Newton with 2nd order GMRES polynomials with PC regenerated with no sparsity change"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2
 	@echo "Test AIRG Newton with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change"
-	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2		
+	$(SKIP_SINGLE) ./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2
 # 
 	@echo ""
 	@echo "Test AIRG Newton with GMRES polynomials with PC reused with no sparsity change with 0th order fixed sparsity"
@@ -499,20 +515,20 @@ run_tests_no_load_short_serial:
 #
 	@echo ""
 	@echo "Test single level GMRES polynomials with PC reused with no sparsity change"
-	./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 8
+	$(SKIP_SINGLE) ./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 8
 	@echo "Test single level GMRES polynomials with PC regenerated with no sparsity change"
-	./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -regen -ksp_max_it 8
+	$(SKIP_SINGLE) ./ex6f -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power -regen -ksp_max_it 8
 #
 	@echo ""
 	@echo "Test AIRG on steady 1D advection"
-	./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
+	./adv_1d -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
 #
 	@echo ""
 	@echo "Test high order GMRES polynomials in small linear system"
@@ -554,13 +570,13 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -pc_air_diag_scale_polys 1 -ksp_max_it 5
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial smoothing and lAIR"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_z_type lair -ksp_max_it 5	
 				
 #	 
@@ -571,7 +587,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 # 
 	@echo ""
 	@echo "Test AIRG on steady 1D advection KOKKOS"
-	./adv_1dk -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
+	./adv_1dk -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 
@@ -597,38 +613,38 @@ run_tests_no_load_serial:
 	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
 	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
 	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
-	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14 \
+	 -pc_air_r_drop 0 -ksp_rtol $(KSP_RTOL) -ksp_pc_side right -ksp_max_it 14 \
 	 -pc_air_inverse_type power
 #
 	@echo ""
 	@echo "Test curved velocity 2D upwind finite-difference"
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
 #
 	@echo ""
 	@echo "Test lAIR on steady 2D structured advection"
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_z_type lair -pc_air_inverse_type wjacobi -ksp_max_it 10
 #
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 0 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
 #
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and multiple DDC its"
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_c_inverse_sparsity_order 0 -pc_air_strong_threshold 0.99 -pc_air_ddc_its 2 -pc_air_ddc_fraction 0.02 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
 #
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio"
 	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
 	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
 #	
@@ -636,13 +652,13 @@ run_tests_no_load_serial:
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a small fixed dd ratio"
 	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.1 \
-	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
 #	
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio"
 	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9 \
-	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11
 #
 	@echo ""
 	@echo "Test improving Z"
@@ -714,7 +730,7 @@ else
 #	
 	@echo ""
 	@echo "Test AIR with SAI with SUPG CG FEM in 2D in parallel"	 
-	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 	 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -ksp_max_it 6 -pc_air_inverse_type sai -dm_refine 1	 
 #
 	@echo ""
@@ -746,7 +762,7 @@ else
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 3D with hexs and cycles in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4 \
 	-dm_plex_filename data/annulus_twisted.msh -u 0 -v 0 -w 1		 
 #	 
 	@echo ""
@@ -771,7 +787,7 @@ else
 	@echo ""
 	@echo "Verify solution of upwind DG FEM in 3D with hexs and cycles in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 1 \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 1 \
 	-dm_plex_filename data/annulus_twisted.msh -verify_solution	 		
 #
 	@echo ""
@@ -898,8 +914,8 @@ else
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_poly_order 2 -pc_air_inverse_sparsity_order 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton
 	@echo "Test AIRG Newton with 2nd order fixed sparsity GMRES polynomials with PC regenerated with no sparsity change in parallel"
-	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2 \
-	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton	
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_inverse_sparsity_order 2 \
+	 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton
 # 
 	@echo ""
 	@echo "Test AIRG Newton with GMRES polynomials with PC reused with no sparsity change in parallel with 0th order fixed sparsity"
@@ -911,14 +927,14 @@ else
 #
 	@echo ""
 	@echo "Test AIRG on steady 1D advection in parallel"
-	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4	 
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4	 
 #
 	@echo ""
 	@echo "Test improving Z with PC regenerated with no sparsity change in parallel"
@@ -933,13 +949,13 @@ else
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -pc_air_diag_scale_polys 1 -ksp_max_it 5
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling GMRES polynomial smoothing and lAIR in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_z_type lair -ksp_max_it 5		
 
 #	 
@@ -950,7 +966,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 # 
 	@echo ""
 	@echo "Test AIRG on steady 1D advection in parallel KOKKOS"
-	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_rtol 1e-10 -ksp_atol 1e-50 -ksp_pc_side right \
+	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 
@@ -978,7 +994,7 @@ else
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and max DD ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
 	 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.50001 -ksp_max_it 7 \
 	 -pc_air_inverse_type power
 #	
@@ -986,26 +1002,26 @@ else
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a small fixed dd ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.1 \
-	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 6
 #	
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9 \
-	 -ksp_rtol 1e-10 -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11	 
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11	 
 #
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"
 	$(MPIEXEC) -n 4 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_z_type lair \
 	 -pc_air_smooth_type ffc -pc_air_symmetric -pc_air_constrain_z \
 	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
-	 -pc_air_r_drop 0 -ksp_rtol 1e-10 -ksp_pc_side right -ksp_max_it 14 \
+	 -pc_air_r_drop 0 -ksp_rtol $(KSP_RTOL) -ksp_pc_side right -ksp_max_it 14 \
 	 -pc_air_inverse_type power
 #
 	@echo ""
 	@echo "Test curved velocity 2D upwind finite-difference in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
-	 -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
 #
 	@echo ""
 	@echo "Test improving Z in parallel"
@@ -1044,7 +1060,7 @@ run_tests_medium_serial:
 	@set -e; for size in $$(seq 100 20 200); do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
-	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	    -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
 	done
 #
 	@echo ""
@@ -1052,7 +1068,7 @@ run_tests_medium_serial:
 	@set -e; for size in 100 200 400 800; do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
-	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	    -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
 	done
 #
 	@echo ""
@@ -1060,7 +1076,7 @@ run_tests_medium_serial:
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
 #
@@ -1069,7 +1085,7 @@ run_tests_medium_serial:
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-curved_velocity -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-curved_velocity -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
 #
@@ -1078,7 +1094,7 @@ run_tests_medium_serial:
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 6; \
 	done
 #
@@ -1087,53 +1103,53 @@ run_tests_medium_serial:
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		./adv_dg_upwind -adv_dg_petscspace_degree 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
 	done
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling power basis GMRES polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type power -ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling Arnoldi basis GMRES polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type arnoldi -ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling Newton basis GMRES polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type newton -ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling power basis GMRES polynomial matrix-free smoothing"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type power -pc_air_matrix_free_polys \
 	-ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling Arnoldi basis GMRES polynomial matrix-free smoothing"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys \
 	-ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling Newton basis GMRES polynomial matrix-free smoothing"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -pc_air_inverse_type newton -pc_air_matrix_free_polys \
 	-ksp_max_it 8	
 #
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling coarsest grid Newton GMRES polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -ksp_max_it 8 \
 	-pc_air_max_levels 3 \
 	-pc_air_coarsest_matrix_free_polys 1 -pc_air_coarsest_inverse_type newton \
@@ -1142,7 +1158,7 @@ run_tests_medium_serial:
 	@echo ""
 	@echo "Test poorly scaled matrix fixed with diagonal scaling coarsest grid Newton GMRES polynomial auto truncate"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_diag_scale_polys 1 -ksp_max_it 8 \
 	-pc_air_auto_truncate_tol 1e-1 -pc_air_auto_truncate_start_level 1 -pc_air_coarsest_matrix_free_polys 1 \
 	-pc_air_coarsest_inverse_type newton \
@@ -1151,20 +1167,20 @@ run_tests_medium_serial:
 	@echo ""
 	@echo "Test poorly scaled matrix with Neumann polynomial"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type neumann -ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix with Neumann polynomial matrix-free smoothing"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type neumann -pc_air_matrix_free_polys \
 	-ksp_max_it 8
 #
 	@echo ""
 	@echo "Test poorly scaled matrix with ISAI"
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
-	-ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -dm_refine 3 -pc_air_inverse_type isai -ksp_max_it 8	
 #	
 	@echo "Verify long time solution with backward-Euler TS with upwind DG FEM in 2D"
@@ -1184,7 +1200,7 @@ else
 	@set -e; for size in $$(seq 100 20 200); do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
-	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6 \
+	    -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6 \
 		 -unit_velocity 0; \
 	done
 #
@@ -1193,7 +1209,7 @@ else
 	@set -e; for size in 100 200 400 800; do \
 		echo "--- Testing size = $$size x $$size ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
-	    -ksp_rtol 1e-10 -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6 \
+	    -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6 \
 		 -unit_velocity 0; \
 	done
 #
@@ -1202,7 +1218,7 @@ else
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
 #
@@ -1211,7 +1227,7 @@ else
 	@set -e; for refine in 2 3 4; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-curved_velocity -ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-curved_velocity -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-pc_air_a_lump -dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 8; \
 	done
 #
@@ -1220,7 +1236,7 @@ else
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		$(MPIEXEC) -n 2 ./adv_dg_upwind -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 6; \
 	done
 #
@@ -1229,7 +1245,7 @@ else
 	@set -e; for refine in 0 1 2; do \
 		echo "--- Testing refinement = $$refine ---"; \
 		$(MPIEXEC) -n 2 ./adv_dg_upwind -adv_dg_petscspace_degree 2 -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned \
-		-ksp_rtol 1e-10 -ksp_atol 1e-50 \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
 	done
 endif
