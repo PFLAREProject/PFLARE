@@ -273,8 +273,8 @@ module c_petsc_interfaces
          bind(c, name="MatSetAllValues_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: val
-      end subroutine MatSetAllValues_kokkos         
+         PetscScalar, value :: val
+      end subroutine MatSetAllValues_kokkos
  
    end interface
    
@@ -284,7 +284,7 @@ module c_petsc_interfaces
          bind(c, name="MatSetAllValues_cpu")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: val
+         PetscScalar, value :: val
       end subroutine MatSetAllValues_cpu
  
    end interface     

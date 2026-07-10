@@ -618,7 +618,7 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
 // Annoying as the fortran pointer returned by MatSeqAIJGetArray seems to be 
 // the wrong size and that can break things sometimes
-PETSC_INTERN void MatSetAllValues_cpu(Mat *A, double val)
+PETSC_INTERN void MatSetAllValues_cpu(Mat *A, PetscScalar val)
 {
 
   MPI_Comm        acomm;
