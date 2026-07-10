@@ -224,14 +224,14 @@ jobs:
           build-args: |
             ARCH=arch-linux-c-debug
 
-  gnu_debug_kokkos_prefix:
+  gnu_debug_kokkos_single_prefix:
     runs-on: ubuntu-22.04
     needs: setup
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image with KOKKOS and debug PETSc with prefix DIR
+      - name: Build Docker image with single precision, KOKKOS and debug PETSc with prefix DIR
         uses: docker/build-push-action@v6
         with:
           platforms: linux/amd64
