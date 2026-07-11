@@ -1,8 +1,8 @@
 ## Installing PFLARE
 
-PFLARE depends on BLAS, LAPACK and PETSc. PFLARE uses the same compilers and flags defined in the PETSc configure. PFLARE has been tested on Linux and MacOS, across a range of compilers, including GNU, Intel, LLVM and Cray. 
+PFLARE depends on BLAS, LAPACK and PETSc. PFLARE uses the same compilers and flags defined in the PETSc configure. PFLARE has been tested on Linux and MacOS, across a range of compilers, including GNU, Intel, LLVM and Cray, in both single and double precision.
 
-If you wish to run in parallel, configure PETSc with MPI. For good performance also configure PETSc with a graph partitioner (e.g., ParMETIS).
+If you wish to run in parallel, configure PETSc with MPI. For good performance in parallel also configure PETSc with a graph partitioner (e.g., ParMETIS).
 
 If you wish to run PFLARE on GPUs, configure PETSc with Kokkos and the relevant GPU backend. 
 
