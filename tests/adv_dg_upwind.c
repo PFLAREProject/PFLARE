@@ -2116,8 +2116,15 @@ int main(int argc, char **argv)
     PetscCall(VecAXPY(x_ones, -1.0, x));
     PetscCall(VecNorm(x_ones, NORM_INFINITY, &err_norm));
     PetscCall(VecDestroy(&x_ones));
-    PetscCheck(err_norm < 1e-10, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
-               "Solution verification FAILED: max|u - 1| = %g > 1e-10", (double)err_norm);
+    /* The exact solution is 1 everywhere; in double it is recovered to ~1e-10, but
+       single precision floors at ~a few * eps (~3.8e-6), so relax the check there. */
+#if defined(PETSC_USE_REAL_SINGLE)
+    const PetscReal verify_tol = 1e-5;
+#else
+    const PetscReal verify_tol = 1e-10;
+#endif
+    PetscCheck(err_norm < verify_tol, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+               "Solution verification FAILED: max|u - 1| = %g > %g", (double)err_norm, (double)verify_tol);
   }
 
   /* ---- Cleanup ---- */
