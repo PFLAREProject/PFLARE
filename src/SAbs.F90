@@ -121,7 +121,8 @@ module sabs
             end if
          
             ! Set the diagonal to 0
-            call MatSetValue(transpose_mat, ifree - 1 + global_row_start, ifree - 1 + global_row_start, PFLARE_ZERO, INSERT_VALUES, ierr)
+            call MatSetValue(transpose_mat, ifree - 1 + global_row_start, ifree - 1 + global_row_start, &
+                     PFLARE_ZERO, INSERT_VALUES, ierr)
          end do
 
          call ISRestoreIndices(zero_diags, zero_diags_pointer, ierr)

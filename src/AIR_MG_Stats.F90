@@ -374,8 +374,10 @@ module air_mg_stats
       ! Now compute the other complexities
       op_complx = real(op_complx_nnzs, kind=kind(op_complx))/real(air_data%coarse_matrix_nnzs(1), kind=kind(op_complx))
       cycle_complx = real(nnzs_air_v, kind=kind(cycle_complx))/real(air_data%coarse_matrix_nnzs(1), kind=kind(cycle_complx))
-      storage_complx = real(mat_storage_nnzs, kind=kind(storage_complx))/real(air_data%coarse_matrix_nnzs(1), kind=kind(storage_complx))  
-      reuse_storage_complx = real(mat_reuse_storage_nnzs, kind=kind(reuse_storage_complx))/real(air_data%coarse_matrix_nnzs(1), kind=kind(reuse_storage_complx))  
+      storage_complx = real(mat_storage_nnzs, kind=kind(storage_complx))/ &
+               real(air_data%coarse_matrix_nnzs(1), kind=kind(storage_complx))  
+      reuse_storage_complx = real(mat_reuse_storage_nnzs, kind=kind(reuse_storage_complx))/ &
+               real(air_data%coarse_matrix_nnzs(1), kind=kind(reuse_storage_complx))  
 
    end subroutine compute_stats
 

@@ -2440,8 +2440,10 @@ end if
 
                   ! Check if the distance between the fixed sparsity root and the one before
                   ! If > zero then they are not complex conjugates and hence we are on the first of the pair         
-                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > PFLARE_TOL_CONSISTENCY .OR. &
-                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > PFLARE_TOL_CONSISTENCY) then
+                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > &
+                        PFLARE_TOL_CONSISTENCY .OR. &
+                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > &
+                        PFLARE_TOL_CONSISTENCY) then
                      output_first_complex = .TRUE.
                      i_sparse = i_sparse + 1
                   end if            
