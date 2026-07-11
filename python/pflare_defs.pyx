@@ -31,8 +31,12 @@ cdef extern from "petsc.h":
 
 cdef extern:
 	void PCRegister_PFLARE()
-	void compute_cf_splitting_c(PetscMat *A, int symmetric_int, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
-	void compute_diag_dom_submatrix_c(PetscMat *A, PetscReal max_dd_ratio, PetscMat *output_mat)
+	# Call the C wrappers (not the _c Fortran routines directly): they call
+	# PetscInitializeFortran() first, which petsc4py does not, so the Fortran
+	# module block (MPIU_REAL etc.) is populated before the Fortran code runs.
+	# Aliased to distinct Cython names so they don't clash with the cpdef wrappers.
+	void compute_cf_splitting_cwrap "compute_cf_splitting" (PetscMat A, int symmetric_int, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
+	void compute_diag_dom_submatrix_cwrap "compute_diag_dom_submatrix" (PetscMat A, PetscReal max_dd_ratio, PetscMat *output_mat)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Get routines
@@ -192,13 +196,13 @@ cpdef compute_cf_splitting(Mat A, bint symmetric, PetscReal strong_threshold, in
 	cdef IS is_coarse
 	is_fine = IS()
 	is_coarse = IS()
-	compute_cf_splitting_c(&(A.mat), symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, &(is_fine.iset), &(is_coarse.iset))
+	compute_cf_splitting_cwrap(A.mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, &(is_fine.iset), &(is_coarse.iset))
 	return is_fine, is_coarse
 
 cpdef compute_diag_dom_submatrix(Mat A, PetscReal max_dd_ratio):
 	cdef Mat output_mat
 	output_mat = Mat()
-	compute_diag_dom_submatrix_c(&(A.mat), max_dd_ratio, &(output_mat.mat))
+	compute_diag_dom_submatrix_cwrap(A.mat, max_dd_ratio, &(output_mat.mat))
 	return output_mat
 
 # -----------------------------------------------------------------------
