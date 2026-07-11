@@ -483,25 +483,25 @@ run_tests_no_load_short_serial:
 # 
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and polynomial coeffs stored"
-	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
+	$(SKIP_SINGLE) ./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and polynomial coeffs stored and lumping"
-	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_a_lump -ksp_max_it 3
+	$(SKIP_SINGLE) ./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_a_lump -ksp_max_it 3
 	@echo "Test PCPFLAREINV get/set polynomial coefficients - arnoldi basis"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type arnoldi
 	@echo "Test PCPFLAREINV get/set polynomial coefficients - power basis"
-	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
+	$(SKIP_SINGLE) ./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients - newton basis"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
 #
 	@echo ""
 	@echo "Test AIRG get/set polynomial coefficients in C with PC regenerated and no sparsity change"
-	./ex6_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
+	$(SKIP_SINGLE) ./ex6_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 3
 	@echo "Test AIRG get/set polynomial coefficients in C with PC regenerated and no sparsity change and lumping"
-	./ex6_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_a_lump -ksp_max_it 3
+	$(SKIP_SINGLE) ./ex6_getcoeffs -m 10 -n 10 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_a_lump -ksp_max_it 3
 	@echo "Test PCPFLAREINV get/set polynomial coefficients in C - arnoldi basis"
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type arnoldi
 	@echo "Test PCPFLAREINV get/set polynomial coefficients in C - power basis"
-	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
+	$(SKIP_SINGLE) ./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients in C - newton basis"
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
 #

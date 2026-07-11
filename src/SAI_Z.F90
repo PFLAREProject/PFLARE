@@ -8,7 +8,7 @@ module sai_z
    use c_petsc_interfaces, only: mat_mat_symbolic_c, calculate_and_build_sai_z_kokkos
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
-         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF
+         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -763,7 +763,7 @@ module sai_z
 
             ! There is floating point compute in these inverses, so we have to be a
             ! bit more tolerant to rounding differences
-            if (normy .gt. 4d-11 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
                print *, "Diff Kokkos and CPU calculate_and_build_sai_z", normy, "row", row_loc
 
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
