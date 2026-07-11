@@ -516,8 +516,11 @@ module pmisr_module
                ! Have to only check unassigned strong neighbours
                if (assigned_local(ad_ja(jfree) + 1)) cycle
 
-               ! Check the measure_local
-               if (measure_local(ifree) .ge. measure_local(ad_ja(jfree) + 1)) then
+               ! Check the measure_local. In single precision may need a tie break
+               ! and we use the global index (larger index loses)
+               if (measure_local(ifree) > measure_local(ad_ja(jfree) + 1) .OR. &
+                     (measure_local(ifree) == measure_local(ad_ja(jfree) + 1) .AND. &
+                      ifree - 1 > ad_ja(jfree))) then
                   in_set_this_loop(ifree) = .FALSE.
                   cycle node_loop_local
                end if
@@ -547,8 +550,12 @@ module pmisr_module
                   ! Have to only check unassigned strong neighbours
                   if (assigned_nonlocal(ao_ja(jfree) + 1)) cycle
    
-                  ! Check the measure_local
-                  if (measure_local(ifree) .ge. measure_nonlocal(ao_ja(jfree) + 1)) then
+                  ! Check the measure_local. Same deterministic global-index tie
+                  ! break as the local loop above; the non-local neighbour's global
+                  ! index is colmap(ao_ja(jfree) + 1)
+                  if (measure_local(ifree) > measure_nonlocal(ao_ja(jfree) + 1) .OR. &
+                        (measure_local(ifree) == measure_nonlocal(ao_ja(jfree) + 1) .AND. &
+                         global_row_start + ifree - 1 > colmap(ao_ja(jfree) + 1))) then
                      in_set_this_loop(ifree) = .FALSE.
                      cycle node_loop
                   end if
@@ -998,8 +1005,11 @@ module pmisr_module
                ! Have to only check unassigned strong neighbours
                if (assigned_local(spst_ja(jfree) + 1)) cycle
 
-               ! Check the measure_local
-               if (measure_local(ifree) .ge. measure_local(spst_ja(jfree) + 1)) then
+               ! Check the measure_local. In single precision may need a tie break
+               ! and we use the global index (larger index loses)
+               if (measure_local(ifree) > measure_local(spst_ja(jfree) + 1) .OR. &
+                     (measure_local(ifree) == measure_local(spst_ja(jfree) + 1) .AND. &
+                      ifree - 1 > spst_ja(jfree))) then
                   veto_local(ifree) = .TRUE.
                   cycle node_loop_local
                end if
@@ -1039,8 +1049,12 @@ module pmisr_module
                      if (assigned_local(aot_ja(jfree) + 1)) cycle
 
                      ! If the nonlocal node's measure >= local row's measure,
-                     ! the nonlocal node is vetoed by this local influence
-                     if (measure_nonlocal(kfree) .ge. measure_local(aot_ja(jfree) + 1)) then
+                     ! the nonlocal node is vetoed by this local influence. In single
+                     ! precision may need a tie break using the global index (larger
+                     ! index loses); the nonlocal node's global index is colmap(kfree)
+                     if (measure_nonlocal(kfree) > measure_local(aot_ja(jfree) + 1) .OR. &
+                           (measure_nonlocal(kfree) == measure_local(aot_ja(jfree) + 1) .AND. &
+                            colmap(kfree) > global_row_start + aot_ja(jfree))) then
                         veto_nonlocal(kfree) = .TRUE.
                         exit
                      end if
@@ -1076,8 +1090,12 @@ module pmisr_module
                   ! Have to only check unassigned strong neighbours
                   if (assigned_nonlocal(ao_ja(jfree) + 1)) cycle
 
-                  ! Check the measure_local
-                  if (measure_local(ifree) .ge. measure_nonlocal(ao_ja(jfree) + 1)) then
+                  ! Check the measure_local. Same deterministic global-index tie
+                  ! break as above; the non-local neighbour's global index is
+                  ! colmap(ao_ja(jfree) + 1)
+                  if (measure_local(ifree) > measure_nonlocal(ao_ja(jfree) + 1) .OR. &
+                        (measure_local(ifree) == measure_nonlocal(ao_ja(jfree) + 1) .AND. &
+                         global_row_start + ifree - 1 > colmap(ao_ja(jfree) + 1))) then
                      veto_local(ifree) = .TRUE.
                      cycle node_loop
                   end if
