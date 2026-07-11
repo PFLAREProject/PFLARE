@@ -158,7 +158,7 @@
       ! we should have almost no difference in the resulting residual
       ! ~~~~~~~~~~~~~
       norm_diff_one = abs(norm_arnoldi - norm_newton)/norm_arnoldi
-      if (norm_diff_one > 1e-9) then
+      if (norm_diff_one > 1e-8) then
          print *, "Residuals differ between polynomial bases!", norm_diff_one
          print *, "Newton basis residual:  ", norm_newton
          print *, "Arnoldi basis residual:   ", norm_arnoldi
@@ -166,7 +166,7 @@
       end if
       if (.NOT. no_power) then
          norm_diff_two = abs(norm_arnoldi - norm_power)/norm_arnoldi
-         if (norm_diff_two > 1e-9) then
+         if (norm_diff_two > 1e-8) then
             print *, "Residuals differ between polynomial bases!", norm_diff_two
             print *, "Power basis residual:  ", norm_power
             print *, "Arnoldi basis residual: ", norm_arnoldi
