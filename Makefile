@@ -119,6 +119,7 @@ export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
 							  $(SRCDIR)/PMISR_Modulek.o \
 							  $(SRCDIR)/DDC_Modulek.o \
 							  $(SRCDIR)/Gmres_Polyk.o \
+							  $(SRCDIR)/Gmres_Poly_Newtonk.o \
 							  $(SRCDIR)/SAI_Zk.o
 endif	
 

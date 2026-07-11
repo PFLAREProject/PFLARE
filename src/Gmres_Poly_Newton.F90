@@ -2,7 +2,7 @@ module gmres_poly_newton
 
    use petscmat
    use gmres_poly
-   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
+   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos
    use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL
@@ -1089,7 +1089,116 @@ module gmres_poly_newton
    end subroutine petsc_newton_residual
 
 !------------------------------------------------------------------------------------------------------------------------
-   
+
+   subroutine build_newton_fixed_sparsity_start(matrix, poly_order, poly_sparsity_order, coefficients, &
+                  cmat, mat_sparsity_match, mat_product_save, status_output, output_first_complex)
+
+      ! Builds cmat with values correct up to the power poly_sparsity_order, along with
+      ! the products we need to compute the remaining fixed sparsity terms
+      ! This is shared by the cpu and kokkos versions of mat_mult_powers_share_sparsity_newton
+      ! and only involves petsc mat operations, so it runs on the device with kokkos mats
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: poly_order, poly_sparsity_order
+      PetscReal, dimension(:, :), target, contiguous, intent(inout)    :: coefficients
+      type(tMat), intent(inout)                          :: cmat
+      type(tMat), intent(inout)                          :: mat_sparsity_match, mat_product_save
+      integer, dimension(:, :), intent(inout)            :: status_output
+      logical, intent(out)                               :: output_first_complex
+
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      logical :: reuse_triggered
+      PetscReal, dimension(poly_sparsity_order+1,2) :: coeffs_contig
+
+      ! ~~~~~~~~~~
+
+      if (poly_sparsity_order .ge. size(coefficients)-1) then
+         print *, "Requested sparsity is greater than or equal to the order"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      reuse_triggered = .NOT. PetscObjectIsNull(cmat)
+
+      ! ~~~~~~~~~~
+      ! Compute cmat for all powers up to poly_sparsity_order
+      ! We have to be more careful here than in the monomial case
+      ! In the mononomial case we just compute the matrix powers up to poly_sparsity_order
+      ! and add them times the coefficients to cmat
+      ! Here though we have to build the Newton basis polynomials
+      ! As a rule, the value input here into cmat is correct up to the power
+      ! of poly_sparsity_order, with all other terms being added in the fixed sparsity loops
+      ! that occur after this routine is called
+      !
+      ! For complex conjugate roots, two terms are computed at a time, but if the sparsity order
+      ! falls in between those two roots, only part of the output cmat is included
+      ! Any remaining terms are output in either mat_sparsity_match or mat_product_save depending
+      ! on the case
+      ! mat_sparsity_match has either temp or prod in it depending on the case
+      ! mat_product_save only exists in some cases and stores prod from the previous term
+      ! mat_sparsity_match and mat_product_save are always output with the sparsity of sparsity order
+      !
+      ! status_output is an array of length the number of roots
+      ! and has a 1 in each position if that term has been added to the output
+      ! It just helps us keep track of what has gone into cmat and what hasn't
+      ! It breaks up complex conjugate pairs into the first root (i) which has the same power as prod
+      !   tmp = 2 * a * prod
+      !   p = p + 1/(a^2 + b^2) * tmp
+      ! and the second root (i+1) which has the same power as prod * A:
+      !   tmp = -A * prod
+      !   p = p + 1/(a^2 + b^2) * tmp
+      ! ~~~~~~~~~~
+
+      output_first_complex = .FALSE.
+      if (poly_sparsity_order == 1) then
+
+         ! If we have a real first coefficient and a second complex
+         ! we can't call build_gmres_polynomial_newton_inverse_1st_1st as it is only correct
+         ! for valid coefficients up to 1st order (ie both real or both complex)
+         if (coefficients(1,2) == 0d0 .AND. coefficients(2,2) /= 0d0) then
+
+            call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
+                  cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
+                  status_output, mat_product_save)
+
+         ! Valid 1st order polynomial, so this case is easy
+         else
+
+            ! Duplicate & copy the matrix, but ensure there is a diagonal present
+            call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, cmat)
+            ! Have to be careful to pass in a contiguous piece of memory here
+            coeffs_contig = coefficients(1:poly_sparsity_order + 1, 1:2)
+            call build_gmres_polynomial_newton_inverse_1st_1st(matrix, 1, &
+                     coeffs_contig, &
+                     cmat, mat_sparsity_match, &
+                     status_output)
+         end if
+      else
+
+         ! If we're any higher, then we build cmat up to that order
+         ! But we have to be careful because the last root we want to explicitly
+         ! build up to here (ie the power of the matrix given by sparsity_order)
+         ! might be the first root of a complex conjugate pair
+         coeffs_contig = coefficients(1:poly_sparsity_order + 1, 1:2)
+         call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, &
+                  coeffs_contig, &
+                  cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
+                  status_output, mat_product_save)
+      end if
+
+      ! We know we will never have non-zero locations outside of the highest constrained sparsity power
+      call MatSetOption(cmat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)
+      call MatSetOption(cmat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
+      ! We know we are only going to insert local vals
+      ! These options should turn off any reductions in the assembly
+      call MatSetOption(cmat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
+
+   end subroutine build_newton_fixed_sparsity_start
+
+!------------------------------------------------------------------------------------------------------------------------
+
    subroutine mat_mult_powers_share_sparsity_newton(matrix, poly_order, poly_sparsity_order, coefficients, &
                   reuse_mat, reuse_submatrices, cmat)
 
@@ -1103,20 +1212,25 @@ module gmres_poly_newton
       type(tMat), intent(inout)                          :: reuse_mat, cmat
       type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
 
-! #if defined(PETSC_HAVE_KOKKOS)                     
-!       integer(c_long_long) :: A_array, B_array, reuse_array
-!       integer :: errorcode, reuse_int_cmat, reuse_int_reuse_mat
-!       PetscErrorCode :: ierr
-!       MatType :: mat_type
-!       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-!       PetscScalar :: normy
-!       logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
-!       type(c_ptr)  :: coefficients_ptr
-!       type(tMat) :: reuse_mat_cpu
-!       type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
-!       type(tVec) :: max_vec
-!       PetscInt :: row_loc         
-! #endif      
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array, reuse_array
+      integer(c_long_long) :: sparsity_array, prod_save_array
+      integer :: errorcode, reuse_int_reuse_mat, num_terms
+      integer :: prod_save_exists_int, output_first_complex_int
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
+      PetscScalar :: normy
+      logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
+      type(c_ptr)  :: coefficients_ptr, status_output_ptr
+      type(tMat) :: reuse_mat_cpu
+      type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      type(tMat) :: mat_sparsity_match, mat_product_save
+      integer, dimension(size(coefficients, 1), 2), target :: status_output
+      logical :: output_first_complex
+#endif
       ! ~~~~~~~~~~
 
       ! ~~~~~~~~~~
@@ -1131,95 +1245,113 @@ if (poly_sparsity_order == 0) then
       return
 end if
 
-! #if defined(PETSC_HAVE_KOKKOS)    
+#if defined(PETSC_HAVE_KOKKOS)
 
-!       call MatGetType(matrix, mat_type, ierr)
-!       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-!             mat_type == MATAIJKOKKOS) then                  
+      call MatGetType(matrix, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
 
-!          A_array = matrix%v             
-!          reuse_triggered_cmat = .NOT. PetscObjectIsNull(cmat) 
-!          reuse_triggered_reuse_mat = .NOT. PetscObjectIsNull(reuse_mat) 
-!          reuse_int_cmat = 0
-!          if (reuse_triggered_cmat) then
-!             reuse_int_cmat = 1
-!             B_array = cmat%v
-!          end if
-!          reuse_int_reuse_mat = 0
-!          if (reuse_triggered_reuse_mat) then
-!             reuse_int_reuse_mat = 1
-!          end if         
-!          reuse_array = reuse_mat%v
-!          coefficients_ptr = c_loc(coefficients)
+         A_array = matrix%v
+         reuse_triggered_cmat = .NOT. PetscObjectIsNull(cmat)
+         reuse_triggered_reuse_mat = .NOT. PetscObjectIsNull(reuse_mat)
+         reuse_int_reuse_mat = 0
+         if (reuse_triggered_reuse_mat) then
+            reuse_int_reuse_mat = 1
+         end if
+         reuse_array = reuse_mat%v
+         coefficients_ptr = c_loc(coefficients)
+         status_output_ptr = c_loc(status_output)
+         num_terms = size(coefficients, 1)
 
-!          ! call mat_mult_powers_share_sparsity_newton_kokkos(A_array, poly_order, poly_sparsity_order, &
-!          !         coefficients_ptr, reuse_int_reuse_mat, reuse_array, reuse_int_cmat, B_array)
-                         
-!          reuse_mat%v = reuse_array
-!          cmat%v = B_array
+         ! Build cmat with values correct up to the power poly_sparsity_order, along with
+         ! mat_sparsity_match, mat_product_save, status_output and output_first_complex
+         ! This is all petsc mat operations so runs on the device with kokkos mats
+         call build_newton_fixed_sparsity_start(matrix, poly_order, poly_sparsity_order, coefficients, &
+                  cmat, mat_sparsity_match, mat_product_save, status_output, output_first_complex)
 
-!          ! If debugging do a comparison between CPU and Kokkos results
-!          if (kokkos_debug()) then
+         ! The build has always created cmat by this point, even if we're not reusing
+         B_array = cmat%v
+         sparsity_array = mat_sparsity_match%v
+         prod_save_array = mat_product_save%v
+         prod_save_exists_int = 0
+         if (.NOT. PetscObjectIsNull(mat_product_save)) prod_save_exists_int = 1
+         output_first_complex_int = 0
+         if (output_first_complex) output_first_complex_int = 1
 
-!             ! If we're doing reuse and debug, then we have to always output the result 
-!             ! from the cpu version, as it will have coo preallocation structures set
-!             ! They aren't copied over if you do a matcopy (or matconvert)
-!             ! If we didn't do that the next time we come through this routine 
-!             ! and try to call the cpu version with reuse, it will segfault
-!             if (reuse_triggered_cmat) then
-!                temp_mat = cmat
-!                call MatConvert(cmat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
-!             else
-!                temp_mat_compare = cmat                         
-!             end if            
+         ! Adds in all the fixed sparsity terms on the device
+         call mat_mult_powers_share_sparsity_newton_kokkos(A_array, sparsity_array, prod_save_array, &
+                  prod_save_exists_int, num_terms, poly_sparsity_order, &
+                  coefficients_ptr, status_output_ptr, output_first_complex_int, &
+                  reuse_int_reuse_mat, reuse_array, B_array)
 
-!             ! Debug check if the CPU and Kokkos versions are the same
-!             ! We send in an empty reuse_mat_cpu here always, as we can't pass through
-!             ! the same one Kokkos uses as it now only gets out the non-local rows we need
-!             ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
-!             reuse_submatrices_cpu => null()
-!             call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
-!                      coefficients, reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
-!             call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)         
-                     
-!             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
-!                         temp_mat_reuse, ierr)                        
+         reuse_mat%v = reuse_array
 
-!             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
-!             ! Find the biggest entry in the difference
-!             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
-!             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
-!             call VecMax(max_vec, row_loc, normy, ierr)
-!             call VecDestroy(max_vec, ierr)
+         ! Delete the temporaries from the build
+         call MatDestroy(mat_sparsity_match, ierr)
+         call MatDestroy(mat_product_save, ierr)
 
-!             ! There is floating point compute in these inverses, so we have to be a 
-!             ! bit more tolerant to rounding differences
-!             if (normy .gt. 1d-11 .OR. normy/=normy) then
-!                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
-!                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
-!                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
 
-!                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)  
-!             end if
-!             call MatDestroy(temp_mat_reuse, ierr)
-!             if (.NOT. reuse_triggered_cmat) then
-!                call MatDestroy(cmat, ierr)
-!             else
-!                call MatDestroy(temp_mat_compare, ierr)
-!             end if
-!             cmat = temp_mat
-!          end if
+            ! If we're doing reuse and debug, then we have to always output the result
+            ! from the cpu version, as it will have coo preallocation structures set
+            ! They aren't copied over if you do a matcopy (or matconvert)
+            ! If we didn't do that the next time we come through this routine
+            ! and try to call the cpu version with reuse, it will segfault
+            if (reuse_triggered_cmat) then
+               temp_mat = cmat
+               call MatConvert(cmat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)
+            else
+               temp_mat_compare = cmat
+            end if
 
-!       else
+            ! Debug check if the CPU and Kokkos versions are the same
+            ! We send in an empty reuse_mat_cpu here always, as we can't pass through
+            ! the same one Kokkos uses as it now only gets out the non-local rows we need
+            ! (ie reuse_mat and reuse_mat_cpu are no longer the same size)
+            reuse_submatrices_cpu => null()
+            call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
+                     coefficients, reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+            call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)
 
-!          call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
-!                   coefficients, reuse_mat, reuse_submatrices, cmat)       
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)
 
-!       end if
-! #else
+            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
+            ! There is floating point compute in these inverses, so we have to be a
+            ! bit more tolerant to rounding differences
+            if (normy .gt. 1d-11 .OR. normy/=normy) then
+               !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
+               !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
+               print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
+
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            if (.NOT. reuse_triggered_cmat) then
+               call MatDestroy(cmat, ierr)
+            else
+               call MatDestroy(temp_mat_compare, ierr)
+            end if
+            cmat = temp_mat
+         end if
+
+      else
+
+         call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
+                  coefficients, reuse_mat, reuse_submatrices, cmat)
+
+      end if
+#else
       call mat_mult_powers_share_sparsity_newton_cpu(matrix, poly_order, poly_sparsity_order, &
                   coefficients, reuse_mat, reuse_submatrices, cmat)
-!#endif         
+#endif
 
       ! ~~~~~~~~~~
       
@@ -1264,22 +1396,15 @@ end if
       ! Matrix entries filled by MatSeqAIJGetArray/MatGetRow are PetscScalar
       PetscScalar, dimension(:), pointer :: vals_two_ptr, vals_ptr
       PetscScalar, pointer :: submatrices_vals(:)
-      logical :: reuse_triggered
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       PetscInt, parameter :: one = 1, zero = 0
       logical :: output_first_complex, skip_add
       PetscReal :: square_sum
       integer, dimension(size(coefficients, 1), 2) :: status_output
-      PetscReal, dimension(poly_sparsity_order+1,2) :: coeffs_contig
-      
-      ! ~~~~~~~~~~  
 
-      if (poly_sparsity_order .ge. size(coefficients)-1) then      
-         print *, "Requested sparsity is greater than or equal to the order"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if      
+      ! ~~~~~~~~~~
 
-      call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)    
+      call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
 
@@ -1288,83 +1413,14 @@ end if
       call MatGetSize(matrix, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(matrix, global_row_start, global_row_end_plus_one, ierr)  
-      call MatGetOwnershipRangeColumn(matrix, global_col_start, global_col_end_plus_one, ierr)  
+      call MatGetOwnershipRangeColumn(matrix, global_col_start, global_col_end_plus_one, ierr)
 
-      reuse_triggered = .NOT. PetscObjectIsNull(cmat) 
+      ! Build cmat with values correct up to the power poly_sparsity_order, along with
+      ! mat_sparsity_match, mat_product_save, status_output and output_first_complex
+      ! which we need to compute the remaining fixed sparsity terms below
+      call build_newton_fixed_sparsity_start(matrix, poly_order, poly_sparsity_order, coefficients, &
+               cmat, mat_sparsity_match, mat_product_save, status_output, output_first_complex)
 
-      ! ~~~~~~~~~~
-      ! Compute cmat for all powers up to poly_sparsity_order
-      ! We have to be more careful here than in the monomial case
-      ! In the mononomial case we just compute the matrix powers up to poly_sparsity_order
-      ! and add them times the coefficients to cmat
-      ! Here though we have to build the Newton basis polynomials
-      ! As a rule, the value input here into cmat is correct up to the power
-      ! of poly_sparsity_order, with all other terms being added in the fixed sparsity loops
-      ! below
-      !
-      ! For complex conjugate roots, two terms are computed at a time, but if the sparsity order
-      ! falls in between those two roots, only part of the output cmat is included
-      ! Any remaining terms are output in either mat_sparsity_match or mat_product_save depending 
-      ! on the case
-      ! mat_sparsity_match has either temp or prod in it depending on the case
-      ! mat_product_save only exists in some cases and stores prod from the previous term
-      ! mat_sparsity_match and mat_product_save are always output with the sparsity of sparsity order
-      !
-      ! status_output is an array of length the number of roots
-      ! and has a 1 in each position if that term has been added to the output
-      ! It just helps us keep track of what has gone into cmat and what hasn't
-      ! It breaks up complex conjugate pairs into the first root (i) which has the same power as prod
-      !   tmp = 2 * a * prod
-      !   p = p + 1/(a^2 + b^2) * tmp
-      ! and the second root (i+1) which has the same power as prod * A:
-      !   tmp = -A * prod
-      !   p = p + 1/(a^2 + b^2) * tmp
-      ! ~~~~~~~~~~
-
-      output_first_complex = .FALSE.
-      if (poly_sparsity_order == 1) then
-
-         ! If we have a real first coefficient and a second complex
-         ! we can't call build_gmres_polynomial_newton_inverse_1st_1st as it is only correct
-         ! for valid coefficients up to 1st order (ie both real or both complex)
-         if (coefficients(1,2) == 0d0 .AND. coefficients(2,2) /= 0d0) then
-
-            call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
-                  cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
-                  status_output, mat_product_save)    
-
-         ! Valid 1st order polynomial, so this case is easy
-         else
-         
-            ! Duplicate & copy the matrix, but ensure there is a diagonal present
-            call mat_duplicate_copy_plus_diag(matrix, reuse_triggered, cmat)  
-            ! Have to be careful to pass in a contiguous piece of memory here
-            coeffs_contig = coefficients(1:poly_sparsity_order + 1, 1:2)
-            call build_gmres_polynomial_newton_inverse_1st_1st(matrix, 1, &
-                     coeffs_contig, &
-                     cmat, mat_sparsity_match, &
-                     status_output)    
-         end if     
-      else
-
-         ! If we're any higher, then we build cmat up to that order
-         ! But we have to be careful because the last root we want to explicitly
-         ! build up to here (ie the power of the matrix given by sparsity_order)
-         ! might be the first root of a complex conjugate pair
-         coeffs_contig = coefficients(1:poly_sparsity_order + 1, 1:2)
-         call build_gmres_polynomial_newton_inverse_full(matrix, poly_order, &
-                  coeffs_contig, &
-                  cmat, mat_sparsity_match, poly_sparsity_order, output_first_complex, &
-                  status_output, mat_product_save)
-      end if 
-      
-      ! We know we will never have non-zero locations outside of the highest constrained sparsity power 
-      call MatSetOption(cmat, MAT_NEW_NONZERO_LOCATION_ERR, PETSC_TRUE,  ierr)     
-      call MatSetOption(cmat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr) 
-      ! We know we are only going to insert local vals
-      ! These options should turn off any reductions in the assembly
-      call MatSetOption(cmat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)     
-      
       ! ~~~~~~~~~~~~
       ! If we're in parallel we need to get the off-process rows of matrix that correspond
       ! to the columns of mat_sparsity_match

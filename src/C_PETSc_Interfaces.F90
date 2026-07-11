@@ -507,8 +507,25 @@ module c_petsc_interfaces
          integer(c_int), value :: poly_order, poly_sparsity_order
          type(c_ptr), value :: coefficients
          integer(c_int), value :: reuse_int_cmat, reuse_int_reuse_mat
-      end subroutine mat_mult_powers_share_sparsity_kokkos         
- 
+      end subroutine mat_mult_powers_share_sparsity_kokkos
+
+   end interface
+
+   interface
+
+      subroutine mat_mult_powers_share_sparsity_newton_kokkos(A_array, sparsity_array, prod_save_array, &
+                  prod_save_exists_int, num_terms, poly_sparsity_order, &
+                  coefficients, status_output, output_first_complex_int, &
+                  reuse_int_reuse_mat, reuse_array, B_array) &
+         bind(c, name="mat_mult_powers_share_sparsity_newton_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, sparsity_array, prod_save_array
+         integer(c_long_long) :: B_array, reuse_array
+         integer(c_int), value :: prod_save_exists_int, num_terms, poly_sparsity_order
+         type(c_ptr), value :: coefficients, status_output
+         integer(c_int), value :: output_first_complex_int, reuse_int_reuse_mat
+      end subroutine mat_mult_powers_share_sparsity_newton_kokkos
+
    end interface
 
    interface
