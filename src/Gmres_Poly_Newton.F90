@@ -1326,7 +1326,12 @@ end if
 
             ! There is floating point compute in these inverses, so we have to be a
             ! bit more tolerant to rounding differences
-            if (normy .gt. 1d-11 .OR. normy/=normy) then
+            ! This recurrence is num_terms long, and per-term rounding differences between
+            ! optimized and unoptimized builds (compiler reordering, not fp-contraction -
+            ! this happens on the CPU and Kokkos sides independently) compound roughly
+            ! quadratically, so scale the tolerance with num_terms rather than using a
+            ! fixed bound that only holds at low order
+            if (normy .gt. 1d-11 * dble(num_terms)**2 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
