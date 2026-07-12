@@ -6,7 +6,7 @@ module gmres_poly_newton
    use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
-         PFLARE_TOL_MATFREE_NEWTON
+         PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -495,7 +495,7 @@ module gmres_poly_newton
          allocate(iwork_allocated(1))
          lwork = -1         
 
-         ! We have rcond = 1e-12 which is used to decide what singular values to drop
+         ! We have rcond = PFLARE_TOL_RCOND which is used to decide what singular values to drop
          ! Matlab uses max(size(A))*eps(norm(A)) in their pinv
          ! Kind-correct BLAS integer dimensions
          np1_bl = poly_order + 1
@@ -655,7 +655,7 @@ module gmres_poly_newton
                if (real_roots_added(j_loc) == coefficients_temp(i_loc, 1) .AND. &
                    abs(imag_roots_added(j_loc)) == abs(coefficients_temp(i_loc, 2))) then
                   k_loc = k_loc + 1
-                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * 5e-8
+                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * PFLARE_TOL_LEJA_PERTURB
                end if
             end do
          end do

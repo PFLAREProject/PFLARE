@@ -174,6 +174,9 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_TOL_LUCKY          = 1e-20
    ! remove_small "drop essentially nothing" sentinel (1d-100 underflows single)
    PetscReal, parameter :: PFLARE_SENTINEL_DROP      = 1e-30
+   ! Leja-ordering perturbation for duplicate added roots (Gmres_Poly_Newton) -
+   ! 5e-8 underflows single eps (~1.19e-7), so duplicates would stay bit-identical
+   PetscReal, parameter :: PFLARE_TOL_LEJA_PERTURB   = 1e-4
 #else
    ! Double branch - EXACT previous literals (bit-identical double builds)
    PetscReal, parameter :: PFLARE_TOL_ZERO           = 1e-12
@@ -195,6 +198,7 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = 1d-50
    PetscReal, parameter :: PFLARE_TOL_LUCKY          = 1d-30
    PetscReal, parameter :: PFLARE_SENTINEL_DROP      = 1d-100
+   PetscReal, parameter :: PFLARE_TOL_LEJA_PERTURB   = 5e-8
 #endif
 
 end module pflare_parameters
