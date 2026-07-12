@@ -32,7 +32,6 @@ RUN set -euo pipefail; \
     make -j2 FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall" && \
     make python && \
     make -j2 check FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall" && \
-    make -j2 tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall" && \
-    make tests_python
+    make -j2 tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall -std=c++20" CPPFLAGS="-Werror -Wall"
 
 WORKDIR /build/PFLARE

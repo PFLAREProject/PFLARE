@@ -51,6 +51,7 @@ RUN set -euo pipefail; \
     fi && \
     if [ "${MALLOC_DUMP}" = "true" ]; then LOG=/tmp/test.log; : > "$LOG"; else LOG=/dev/null; fi; \
     make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror -Wunused-result" 2>&1 | tee -a "$LOG"; \
+    make python 2>&1 | tee -a "$LOG"; \
     make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror -Wunused-result" check 2>&1 | tee -a "$LOG"; \
     make -j2 CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror -Wunused-result" tests 2>&1 | tee -a "$LOG"; \
     if [ "${MALLOC_DUMP}" = "true" ]; then \
