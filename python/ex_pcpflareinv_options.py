@@ -50,10 +50,9 @@ for II in range(Istart, Iend):
 A.assemblyBegin(A.AssemblyType.FINAL)
 A.assemblyEnd(A.AssemblyType.FINAL)
 
-u = PETSc.Vec().createSeq(m * n, comm=comm) if comm.getSize() == 1 else PETSc.Vec().create(comm=comm)
-if comm.getSize() > 1:
-    u.setSizes(m * n)
-    u.setFromOptions()
+# Build the vectors from the matrix so they match its type (e.g. kokkos when
+# -vec_type kokkos is set); creating them independently can mismatch the matrix.
+u = A.createVecs('right')
 b = u.duplicate()
 x = u.duplicate()
 
