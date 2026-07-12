@@ -843,8 +843,13 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   Notes:
   `PCPFLAREINV` requires configuring PETSc with `--download-pflare`.
 
-  Only the most common options are listed here. See https://github.com/PFLAREProject/PFLARE
+  Only the most common options are listed here. See <https://github.com/PFLAREProject/PFLARE>
   and its `docs/options.md` for the complete set, and the `PCPFLAREINVSetXXX()` routines.
+
+  `PCPFLAREINV` can use GPUs in both its setup and solve: configure PETSc with Kokkos and
+  the relevant GPU backend (CUDA, HIP or SYCL), then specify the matrix/vector types as the
+  PETSc Kokkos types (for example `-mat_type aijkokkos -vec_type kokkos`, or
+  `-dm_mat_type aijkokkos -dm_vec_type kokkos` if using a `DM`).
 
 .seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCAIR`, `PCGAMG`
 M*/

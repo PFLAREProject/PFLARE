@@ -3284,8 +3284,13 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
   The combination of `-pc_air_z_type` and `-pc_air_inverse_type` selects the reduction
   multigrid: product + arnoldi gives AIRG, lair + wjacobi gives lAIR, and so on.
 
-  Only the most common options are listed here. See https://github.com/PFLAREProject/PFLARE
+  Only the most common options are listed here. See <https://github.com/PFLAREProject/PFLARE>
   and its `docs/options.md` for the complete set, and the many `PCAIRSetXXX()` routines.
+
+  `PCAIR` can use GPUs in both its setup and solve: configure PETSc with Kokkos and the
+  relevant GPU backend (CUDA, HIP or SYCL), then specify the matrix/vector types as the
+  PETSc Kokkos types (for example `-mat_type aijkokkos -vec_type kokkos`, or
+  `-dm_mat_type aijkokkos -dm_vec_type kokkos` if using a `DM`).
 
   If you use `PCAIR` please cite S. Dargaville et al., "AIR multigrid with GMRES polynomials
   (AIRG) and additive preconditioners for Boltzmann transport", J. Comput. Phys. 518 (2024) 113342.
