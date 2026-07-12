@@ -15,7 +15,7 @@
 PETSC_INTERN void mat_mult_powers_share_sparsity_newton_kokkos(Mat *input_mat, Mat *sparsity_mat, Mat *prod_save_mat, \
                const int prod_save_exists_int, const int num_terms, const int poly_sparsity_order, \
                PetscReal *coefficients, int *status_output, const int output_first_complex_int, \
-               const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *output_mat)
+               const PetscReal tol_zero, const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
@@ -586,7 +586,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_newton_kokkos(Mat *input_mat, M
          {
             // Skips eigenvalues that are numerically zero - see
             // the comment in calculate_gmres_polynomial_roots_newton
-            if (Kokkos::abs(root_real) < 1e-12)
+            if (Kokkos::abs(root_real) < tol_zero)
             {
                term = term + 1;
                continue;
@@ -616,7 +616,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_newton_kokkos(Mat *input_mat, M
          {
             // Skips eigenvalues that are numerically zero - see
             // the comment in calculate_gmres_polynomial_roots_newton
-            if (root_real * root_real + root_imag * root_imag < 1e-12)
+            if (root_real * root_real + root_imag * root_imag < tol_zero)
             {
                term = term + 2;
                continue;
@@ -721,7 +721,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_newton_kokkos(Mat *input_mat, M
       // Final step if last root is real
       const PetscReal last_real = coefficients_d(num_terms - 1);
       const PetscReal last_imag = coefficients_d(2 * num_terms - 1);
-      if (last_imag == 0.0 && Kokkos::abs(last_real) > 1e-12)
+      if (last_imag == 0.0 && Kokkos::abs(last_real) > tol_zero)
       {
          const PetscReal inv_theta = 1.0 / last_real;
          Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_row_i), [&](const PetscInt j) {

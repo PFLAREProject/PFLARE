@@ -1283,7 +1283,7 @@ end if
          call mat_mult_powers_share_sparsity_newton_kokkos(A_array, sparsity_array, prod_save_array, &
                   prod_save_exists_int, num_terms, poly_sparsity_order, &
                   coefficients_ptr, status_output_ptr, output_first_complex_int, &
-                  reuse_int_reuse_mat, reuse_array, B_array)
+                  PFLARE_TOL_ZERO, reuse_int_reuse_mat, reuse_array, B_array)
 
          reuse_mat%v = reuse_array
 
