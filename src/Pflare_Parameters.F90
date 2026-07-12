@@ -147,6 +147,9 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_TOL_MATFREE_12     = 1e-4
    PetscReal, parameter :: PFLARE_TOL_MATFREE_13     = 1e-4
    PetscReal, parameter :: PFLARE_TOL_MATFREE_4EM11  = 1e-2
+   ! Newton fixed-sparsity Kokkos-vs-CPU base tolerance, scaled by num_terms**2 at
+   ! the call site to cover compounded per-term rounding drift at high poly order
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_NEWTON = 1e-3
    ! pseudo-inverse singular-value drop
    PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP     = 1e-6
    ! Arnoldi least-squares relative-residual target (default)
@@ -178,6 +181,7 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_TOL_MATFREE_12     = 1d-12
    PetscReal, parameter :: PFLARE_TOL_MATFREE_13     = 1d-13
    PetscReal, parameter :: PFLARE_TOL_MATFREE_4EM11  = 4d-11
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_NEWTON = 1d-11
    PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP     = 1e-13
    PetscReal, parameter :: PFLARE_TOL_ARNOLDI        = 1e-14
    PetscReal, parameter :: PFLARE_TOL_CONSISTENCY    = 1e-14

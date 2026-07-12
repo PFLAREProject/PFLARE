@@ -5,7 +5,8 @@ module gmres_poly_newton
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos
    use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
-         PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL
+         PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
+         PFLARE_TOL_MATFREE_NEWTON
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -1317,7 +1318,7 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)
 
-            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -1331,7 +1332,7 @@ end if
             ! this happens on the CPU and Kokkos sides independently) compound roughly
             ! quadratically, so scale the tolerance with num_terms rather than using a
             ! fixed bound that only holds at low order
-            if (normy .gt. 1d-11 * dble(num_terms)**2 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_NEWTON * dble(num_terms)**2 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
