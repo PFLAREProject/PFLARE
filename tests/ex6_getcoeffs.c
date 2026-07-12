@@ -247,7 +247,14 @@ int main(int argc, char **args)
      * --------------------------------------------------------------------- */
     if (rank == 0) {
       PetscReal rel_diff = PetscAbsReal(norm_first - norm_third) / norm_first;
+      /* Two solves reusing the restored coefficients agree to ~1e-8 in double, but
+         in single precision both residuals sit at the ~1e-6 relative floor, so a
+         1e-8 comparison is beyond the working precision (double keeps 1e-8). */
+#if defined(PETSC_USE_REAL_SINGLE)
+      if (rel_diff > 1e-4) {
+#else
       if (rel_diff > 1e-8) {
+#endif
         PetscCall(PetscPrintf(PETSC_COMM_SELF,
           "FAIL: residual norms differ by %g (solve1=%g, solve3=%g)\n",
           (double)rel_diff, (double)norm_first, (double)norm_third));

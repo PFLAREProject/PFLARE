@@ -5,19 +5,26 @@ module gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
-         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE
+         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
+         PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
+         PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
+         PFLARE_REAL_KIND
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
    use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
          kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
 
-#include "petsc/finclude/petscmat.h"   
+#include "petsc/finclude/petscmat.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
 
    ! Just define pi
-   PetscReal, parameter, private :: pi = 3.141592653589793
+   ! Kind-suffixed with the build's PetscReal kind: full double precision in double
+   ! builds (previously truncated to single even there - the one intended
+   ! double-numeric change) and no -Wconversion under single.
+   PetscReal, parameter, private :: pi = 3.141592653589793_PFLARE_REAL_KIND
    type int_vec
       integer, dimension(:), pointer :: ptr
    end type int_vec
@@ -103,10 +110,10 @@ module gmres_poly
             if (coefficients(i_loc,2) == 0d0) then
                ! The size of the zero check here has to match that in 
                ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
-               if (abs(coefficients(i_loc,1)) < 1e-12) zero_root = .TRUE.
+               if (abs(coefficients(i_loc,1)) < PFLARE_TOL_ZERO) zero_root = .TRUE.
             else
                if (coefficients(i_loc,1)**2 + &
-                        coefficients(i_loc,2)**2 < 1e-12) zero_root = .TRUE.
+                        coefficients(i_loc,2)**2 < PFLARE_TOL_ZERO) zero_root = .TRUE.
             end if
 
             if (zero_root) then
@@ -148,6 +155,8 @@ module gmres_poly
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
+      ! Kept PetscReal: the intrinsic random_number requires a real array. Its use
+      ! in VecSetValuesCOO below is an identity conversion in all real builds.
       PetscReal, dimension(:, :), allocatable, target   :: random_data
       type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
@@ -244,33 +253,44 @@ module gmres_poly
       PetscReal, dimension(:), intent(inout)    :: y
 
       ! Local variables
-      integer :: errorcode, lwork
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: errorcode, lwork
+      PetscBLASInt :: m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
       PetscReal, dimension(size(H_n,1), size(H_n,2)) :: H_n_copy
       PetscReal, dimension(m+1) :: g0
       PetscReal, dimension(:), allocatable :: work
 
-      ! ~~~~~~   
-            
+      ! ~~~~~~
+
       ! This is the vector we will use as rhs in the least square solve
       g0 = 0d0
-      g0(1) = beta 
+      g0(1) = beta
 
       ! Let's solve our least squares system
       allocate(work(1))
-      lwork = -1      
+      lwork = -1
 
       ! Make a copy as we do a least-squares solve in place
       H_n_copy(1:m+1, 1:m) = H_n(1:m+1, 1:m)
 
+      ! Kind-correct BLAS integer dimensions
+      m_bl = m+1
+      n_bl = m
+      nrhs_bl = 1
+      lda_bl = size(H_n_copy, 1)
+      ldb_bl = size(g0)
+
       lwork = -1
       ! Overwrite y
       errorcode = 0
-      call dgels('N', m+1, m, 1, H_n_copy(1,1), size(H_n_copy, 1), g0, size(g0), work, lwork, errorcode)
+      call PFLAREgels('N', m_bl, n_bl, nrhs_bl, H_n_copy(1,1), lda_bl, g0, ldb_bl, work, lwork, errorcode)
+      ! Workspace query returns optimal lwork in work(1); int() is exact for all
+      ! plausible sizes < 2^24 even when work is single precision
       lwork = int(work(1))
       deallocate(work)
-      allocate(work(lwork))  
-      call dgels('N', m+1, m, 1, H_n_copy(1,1), size(H_n_copy, 1), g0, size(g0), work, lwork, errorcode)
-      deallocate(work)            
+      allocate(work(lwork))
+      call PFLAREgels('N', m_bl, n_bl, nrhs_bl, H_n_copy(1,1), lda_bl, g0, ldb_bl, work, lwork, errorcode)
+      deallocate(work)
 
       if (errorcode /= 0) then
          print *, "LS solve failed"
@@ -305,12 +325,15 @@ module gmres_poly
 
       ! Local variables
       integer :: i_loc, subspace_size
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       PetscReal, dimension(poly_order+2) :: c_j, g0
       PetscReal, dimension(poly_order+1) :: neg_h
       logical :: compute_cn
       PetscReal :: rel_tol
-      PetscInt :: m_petscint 
+      PetscInt :: m_petscint
+      ! Kind-correct BLAS integer/real arguments for the dgemv call
+      PetscBLASInt :: m_bl, n_bl, lda_bl, one_bl
+      PetscReal :: blas_one, blas_zero
 
       ! ~~~~~~   
             
@@ -340,7 +363,7 @@ module gmres_poly
       ! The first entry in C_n - As V_n = K_n C_n
       ! the first orthogonalised vector in V_n is just r0/beta, 
       ! and we know r0 is the first vector in our krylov subspace
-      if (compute_cn) C_n(1,1) = 1d0/beta
+      if (compute_cn) C_n(1,1) = PFLARE_ONE/beta
 
       ! Now loop through and do the iterations up to the max order of the polynomial
       ! we want to build
@@ -388,8 +411,8 @@ module gmres_poly
 
          ! v_j+1 = w_j / h_j+1,j
          call VecAXPBY(V_n(m + 1), &
-                  1d0/H_n(m+1, m), &
-                  0d0, &
+                  PFLARE_ONE/H_n(m+1, m), &
+                  PFLARE_ZERO, &
                   w_j, ierr)           
 
          ! Now we've taken out the H_n(m+1, m) factor from above
@@ -404,12 +427,18 @@ module gmres_poly
          if (rel_tol > 0) then
 
             call ls_solve_arnoldi(beta, m, H_n, y)
-            
+
             ! Compute H_n y
-            call dgemv("N", m+1, m, &
-                  1d0, H_n, size(H_n,1), &
-                  y, 1, &
-                  0d0, g0(1), 1) 
+            m_bl = m+1
+            n_bl = m
+            lda_bl = size(H_n,1)
+            one_bl = 1
+            blas_one = 1d0
+            blas_zero = 0d0
+            call PFLAREgemv("N", m_bl, n_bl, &
+                  blas_one, H_n, lda_bl, &
+                  y, one_bl, &
+                  blas_zero, g0(1), one_bl)
 
             ! Minus away e1 beta
             g0(1) = g0(1) - beta
@@ -448,7 +477,7 @@ module gmres_poly
       PetscInt :: global_rows, global_cols, vecs_needed
       integer :: subspace_size, m
       integer :: errorcode
-      PetscErrorCode :: ierr      
+      PetscErrorCode :: ierr
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       PetscReal, dimension(poly_order+2,poly_order+2) :: C_n
       PetscReal, dimension(poly_order+1) :: y
@@ -456,6 +485,9 @@ module gmres_poly
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       PetscReal :: rel_tol
+      ! Kind-correct BLAS integer/real arguments for the dgemv call
+      PetscBLASInt :: m_bl, lda_bl, one_bl
+      PetscReal :: blas_one, blas_zero
 
       ! ~~~~~~    
 
@@ -489,9 +521,9 @@ module gmres_poly
       ! Do the Arnoldi and compute H_n and C_n
       ! We only compute H_n until we hit a relative residual of 1e-14 against the random rhs
       ! or we hit the given poly_order
-      rel_tol = 1e-14
+      rel_tol = PFLARE_TOL_ARNOLDI
       if (present(user_rel_tol)) rel_tol = user_rel_tol
-      call arnoldi(matrix, poly_order, 1d-30, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
+      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
       if (present(user_rel_tol)) user_rel_tol = rel_tol
 
       ! ~~~~~~~~~~~~~
@@ -499,10 +531,15 @@ module gmres_poly
       ! ~~~~~~~~~~~~~
       ! Set to zero is necessary as m may be less than the subspace_size
       coefficients = 0
-      call dgemv("N", m, m, &
-               1d0, C_n, size(C_n,1), &
-               y, 1, &
-               0d0, coefficients(1), 1) 
+      m_bl = m
+      lda_bl = size(C_n,1)
+      one_bl = 1
+      blas_one = 1d0
+      blas_zero = 0d0
+      call PFLAREgemv("N", m_bl, m_bl, &
+               blas_one, C_n, lda_bl, &
+               y, one_bl, &
+               blas_zero, coefficients(1), one_bl)
 
       vecs_needed = subspace_size + 1
       call VecDestroyVecs(vecs_needed, V_n, ierr)
@@ -651,9 +688,12 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tsqr_buffers), target, intent(inout)                :: buffers
       PetscReal, dimension(:), intent(inout)                        :: coefficients
  
-      integer :: lwork, subspace_size, n_size, rank, iwork_size
+      integer :: subspace_size, n_size, iwork_size
       integer :: errorcode
-      integer, dimension(:), allocatable :: iwork
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, rank, info
+      PetscBLASInt :: m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
+      PetscBLASInt, dimension(:), allocatable :: iwork
       PetscReal, dimension(poly_order+2) :: g0, s
       PetscReal, dimension(:), allocatable :: work
       PetscReal, dimension(:,:), pointer :: R_pointer
@@ -679,6 +719,10 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       end if
 
       ! Point directly at the R block
+      ! NOTE: this raw pointer remap ties R_pointer (PetscReal) to the TSQR
+      ! R_buffer_receive. The whole TSQR -> coefficients chain is deliberately kept
+      ! PetscReal (see docs/plan); any future PetscScalar retype must treat TSQR.F90
+      ! and this finish path as one atomic unit.
       R_pointer(1:n_size, 1:n_size) => buffers%R_buffer_receive(2:n_size * n_size + 1)
       g0 = 0      
       ! We know beta is in the top left of R
@@ -694,20 +738,28 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! will be very close (given the random rhs)
       ! to orthogonal and dgels fails without full rank
       ! Start from the second column in R_pointer
-      call dgelsd(subspace_size+1, subspace_size, 1, R_pointer(1, 2), subspace_size+1, &
-                     g0, size(g0), s, rcond, rank, &
-                     work, lwork, iwork, errorcode)
+      ! Kind-correct BLAS integer dimensions
+      m_bl = subspace_size+1
+      n_bl = subspace_size
+      nrhs_bl = 1
+      lda_bl = subspace_size+1
+      ldb_bl = size(g0)
+      call PFLAREgelsd(m_bl, n_bl, nrhs_bl, R_pointer(1, 2), lda_bl, &
+                     g0, ldb_bl, s, rcond, rank, &
+                     work, lwork, iwork, info)
+      ! Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
+      ! for all plausible sizes < 2^24 even when work is single precision
       lwork = int(work(1))
       iwork_size = iwork(1)
       deallocate(work, iwork)
-      allocate(work(lwork)) 
+      allocate(work(lwork))
       allocate(iwork(iwork_size))
-      call dgelsd(subspace_size+1, subspace_size, 1, R_pointer(1, 2), subspace_size+1, &
-                     g0, size(g0), s, rcond, rank, &
-                     work, lwork, iwork, errorcode)
+      call PFLAREgelsd(m_bl, n_bl, nrhs_bl, R_pointer(1, 2), lda_bl, &
+                     g0, ldb_bl, s, rcond, rank, &
+                     work, lwork, iwork, info)
       deallocate(work, iwork)
 
-      if (errorcode /= 0) then
+      if (info /= 0) then
          print *, "LS solve failed"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if  
@@ -823,7 +875,7 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
 
-            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -832,7 +884,7 @@ end if
 
             ! There is floating point compute in these inverses, so we have to be a 
             ! bit more tolerant to rounding differences
-            if (normy .gt. 4d-11 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
@@ -890,7 +942,8 @@ end if
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
-      PetscReal, dimension(:), allocatable :: vals
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), allocatable :: vals
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
@@ -903,7 +956,8 @@ end if
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
-      PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
+      ! Matrix entries filled by MatSeqAIJGetArray/MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals_two_ptr, vals_ptr
       PetscScalar, pointer :: submatrices_vals(:)
       logical :: reuse_triggered
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
@@ -947,7 +1001,7 @@ end if
          ! as the highest (unconstrained) power and do the mataxpy with a subset of entries
          ! Takes more memory to do this but is faster
          call MatMatMult(matrix, matrix_powers(order-1), &
-               MAT_INITIAL_MATRIX, 1.5d0, matrix_powers(order), ierr)        
+               MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, matrix_powers(order), ierr)        
       end do  
       
       ! mat_sparsity_match now contains the sparsity of the power of A we want to match
@@ -1401,7 +1455,7 @@ end if
       ! Let's do the first y = alpha_n-1 r_0 (ie the highest order term first)
       call VecAXPBY(y, &
                coefficients(size(coefficients)), &
-               0d0, &
+               PFLARE_ZERO, &
                x, ierr)
 
       ! If we are doing a first order polynomial or above, we have to do an extra matvec per order
@@ -1422,7 +1476,7 @@ end if
             ! Compute y = A * temp_vec + alpha_n-i-1 r_0
             call VecAXPBY(y, &
                      coefficients(order), &
-                     1d0, &
+                     PFLARE_ONE, &
                      x, ierr)
          end do
       end if
@@ -1723,10 +1777,10 @@ end if
          ! TODO - these can be reused
          if (order == 2) then
             call MatMatMult(diag_scaled_mat, diag_scaled_mat, &
-                  MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)     
+                  MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat, ierr)     
          else
             call MatMatMult(diag_scaled_mat, mat_power, &
-                  MAT_INITIAL_MATRIX, 1.5d0, temp_mat, ierr)      
+                  MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat, ierr)      
             call MatDestroy(mat_power, ierr)
          end if       
 

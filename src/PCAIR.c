@@ -16,10 +16,10 @@ PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
 PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
 PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int symmetric_int,
-   double strong_threshold, int max_luby_steps, int cf_splitting_type,
-   int ddc_its, double fraction_swap,
+   PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
+   int ddc_its, PetscReal fraction_swap,
    IS *is_fine, IS *is_coarse);
-PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, double max_dd_ratio, Mat *output_mat);
+PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, PetscReal max_dd_ratio, Mat *output_mat);
 PETSC_EXTERN void remove_from_sparse_match_c(Mat *input_mat, Mat *output_mat,
    int lump_int, int alpha_int, PetscReal alpha);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
@@ -203,8 +203,8 @@ PETSC_EXTERN PetscErrorCode c_PCAIRGetPCShell(PC *pc, PC *pc_air_shell)
 
 // CF splitting
 PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
-   double strong_threshold, int max_luby_steps, int cf_splitting_type,
-   int ddc_its, double fraction_swap,
+   PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
+   int ddc_its, PetscReal fraction_swap,
    IS *is_fine, IS *is_coarse)
 {
    // Now we call petsc fortran routines in compute_cf_splitting_c from this C file
@@ -216,7 +216,7 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
       is_fine, is_coarse);
 }
 
-PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, double max_dd_ratio, Mat *output_mat)
+PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, PetscReal max_dd_ratio, Mat *output_mat)
 {
    // Now we call petsc fortran routines in compute_cf_splitting_c from this C file
    // so we have to have made sure this is called

@@ -100,8 +100,8 @@ typedef enum {
 PETSC_EXTERN void PCRegister_PFLARE();
 
 /* Can call the CF splitting separate to everything */
-PETSC_EXTERN void compute_cf_splitting(Mat, int, double, int, int, int, double, IS*, IS*);
-PETSC_EXTERN void compute_diag_dom_submatrix(Mat, double, Mat*);
+PETSC_EXTERN void compute_cf_splitting(Mat, int, PetscReal, int, int, int, PetscReal, IS*, IS*);
+PETSC_EXTERN void compute_diag_dom_submatrix(Mat, PetscReal, Mat*);
 
 /* Restrict input_mat onto output_mat's existing sparsity pattern.
    With alpha_int = 1, performs output_mat += alpha * input_mat on output_mat's

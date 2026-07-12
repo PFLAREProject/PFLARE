@@ -1154,7 +1154,7 @@ PETSC_INTERN void remove_from_sparse_match_kokkos(Mat *input_mat, Mat *output_ma
 //------------------------------------------------------------------------------------------------------------------------
 
 // Set all the values of the matrix to val
-PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscReal val)
+PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscScalar val)
 {
    MatType mat_type;
 

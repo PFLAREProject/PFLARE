@@ -9,6 +9,9 @@
       Mat :: A
       PetscInt :: m, n, nnzs
       PetscInt, parameter :: one = 1, two = 2, three = 3, nine = 9
+      ! d0 literals in PetscScalar/PetscReal params: bit-identical double, float-correct single
+      PetscScalar, parameter :: s_zero = 0d0, s_two = 2d0
+      PetscReal, parameter :: strong_threshold_val = real(0.4d0, kind=PFLARE_REAL_KIND)
       Vec :: x,b
       KSP :: ksp
       PC :: pc
@@ -38,8 +41,8 @@
       call MatSetUp(A,ierr)
 
       call MatCreateVecs(A,b,x,ierr)
-      call VecSet(x, 0d0, ierr)
-      call VecSet(b, 2d0, ierr)      
+      call VecSet(x, s_zero, ierr)
+      call VecSet(b, s_two, ierr)
 
       ! Set random values in matrix
       call MatSetRandom(A, PETSC_NULL_RANDOM, ierr)
@@ -73,11 +76,11 @@
       ! Do a second solve with some changed parameters to test reset
       if (check_airg) then
          call PCAIRSetMaxLevels(pc, two, ierr)
-         call PCAIRSetStrongThreshold(pc, 0.4d0, ierr)      
+         call PCAIRSetStrongThreshold(pc, strong_threshold_val, ierr)
       else
          call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
       end if
-      call VecSet(x, 0d0, ierr)
+      call VecSet(x, s_zero, ierr)
       call KSPSolve(ksp,b,x,ierr)
       call KSPGetConvergedReason(ksp, reason, ierr)
       if (reason%v < 0) then

@@ -102,4 +102,95 @@ module pflare_parameters
    integer, parameter :: COEFFS_INV_ACC         = 2
    integer, parameter :: COEFFS_INV_COARSE      = 3
 
+   ! --------------------------------------------------------
+   ! Precision-aware tolerances
+   ! --------------------------------------------------------
+   ! The double branch below reproduces the previous hardcoded literals EXACTLY
+   ! (including whether a literal was single-default `1e-N` or double `1d-N`, which
+   ! are bit-distinct once widened), so double builds stay bit-identical. The
+   ! single branch scales each to a reachable magnitude (eps_single ~ 1.19e-7 vs
+   ! eps_double ~ 2.2e-16); the single values are validated/tuned in the
+   ! single-precision bring-up. PetscReal expands to real(C_FLOAT/C_DOUBLE), so
+   ! a d0/e0 literal assigned to a PetscReal parameter converts exactly at compile
+   ! time, and epsilon() of a PetscReal entity gives working-precision eps.
+
+   ! Machine epsilon of the build's PetscReal (auto per precision - no branch needed)
+   PetscReal, parameter, private :: PFLARE_ONE_REAL = 1.0
+   PetscReal, parameter :: PFLARE_EPS = epsilon(PFLARE_ONE_REAL)
+   ! Kind of the build's PetscReal - use for kind-suffixed literals / real() casts
+   ! so double builds stay bit-identical while single builds avoid -Wconversion.
+   integer, parameter :: PFLARE_REAL_KIND = kind(PFLARE_ONE_REAL)
+
+   ! Kind-correct 0/1/-1 for PETSc value arguments (MatAXPY/MatScale/VecSet/
+   ! VecAXPY alpha, MatSetValue value, MatMatMult fill, ...). A bare d0 literal
+   ! actual is REAL(8) and mismatches a PetscScalar/PetscReal REAL(4) dummy under
+   ! single precision. Typed as PetscScalar, which shares PetscReal's kind in all
+   ! real builds, so these are valid actuals for both PetscScalar and PetscReal
+   ! dummies. Bit-identical to 0d0/1d0/-1d0 in double builds.
+   PetscScalar, parameter :: PFLARE_ZERO      = 0.0
+   PetscScalar, parameter :: PFLARE_ONE       = 1.0
+   PetscScalar, parameter :: PFLARE_MINUS_ONE = -1.0
+   PetscScalar, parameter :: PFLARE_TWO       = 2.0
+   ! MatMatMult / MatPtAP fill-ratio estimates (PetscReal args; separate values)
+   PetscReal, parameter :: PFLARE_MATMULT_FILL = 1.5
+   PetscReal, parameter :: PFLARE_PTAP_FILL    = 1.58
+
+#if defined(PETSC_USE_REAL_SINGLE)
+   ! Coefficient/root "is effectively zero" tests (Gmres_Poly/Gmres_Poly_Newton)
+   PetscReal, parameter :: PFLARE_TOL_ZERO           = 1e-6
+   ! dgelsd rcond (harmonic Ritz min-norm solve)
+   PetscReal, parameter :: PFLARE_TOL_RCOND          = 1e-6
+   ! Kokkos-vs-CPU consistency (PFLARE_KOKKOS_DEBUG) and matrix-free reconstruction
+   ! guards. In single these diffs are ordinary float32 noise (kokkos reduction
+   ! order + accumulated error); 4EM11 covers the noisier dense-solve/matmul-powers
+   ! comparisons (~2e-3 on large problems), well below the O(1) a real bug produces.
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_12     = 1e-4
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_13     = 1e-4
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_4EM11  = 1e-2
+   ! pseudo-inverse singular-value drop
+   PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP     = 1e-6
+   ! Arnoldi least-squares relative-residual target (default)
+   PetscReal, parameter :: PFLARE_TOL_ARNOLDI        = 1e-6
+   ! Complex-conjugate root-pair consistency check
+   PetscReal, parameter :: PFLARE_TOL_CONSISTENCY    = 1e-5
+   ! Auto-truncate tolerance (user-tunable default)
+   PetscReal, parameter :: PFLARE_TOL_AUTO_TRUNCATE  = 1e-6
+   ! Constrain-grid-transfer inner KSP relative tolerance
+   PetscReal, parameter :: PFLARE_KSP_RTOL_CONSTRAIN = 1e-6
+   ! Diagonal-dominance ratio tolerances
+   PetscReal, parameter :: PFLARE_DD_RATIO_ABS_TOL   = 1e-6
+   PetscReal, parameter :: PFLARE_DD_RATIO_REL_TOL   = 1e-6
+   ! Smoother / coarse-solver KSP tolerances
+   PetscReal, parameter :: PFLARE_KSP_ATOL_SMOOTH    = 1e-6
+   PetscReal, parameter :: PFLARE_KSP_ATOL_COARSE    = 1e-6
+   ! Coarse KSPPREONLY rtol (value irrelevant for preonly; kept for kind-correctness)
+   PetscReal, parameter :: PFLARE_KSP_RTOL_COARSE    = 1e-3
+   ! "atol effectively off" sentinel (1d-50 underflows single)
+   PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = 1e-30
+   ! Arnoldi "lucky breakdown" tolerance (was below double norms; sub-tiny in single)
+   PetscReal, parameter :: PFLARE_TOL_LUCKY          = 1e-20
+   ! remove_small "drop essentially nothing" sentinel (1d-100 underflows single)
+   PetscReal, parameter :: PFLARE_SENTINEL_DROP      = 1e-30
+#else
+   ! Double branch - EXACT previous literals (bit-identical double builds)
+   PetscReal, parameter :: PFLARE_TOL_ZERO           = 1e-12
+   PetscReal, parameter :: PFLARE_TOL_RCOND          = 1e-12
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_12     = 1d-12
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_13     = 1d-13
+   PetscReal, parameter :: PFLARE_TOL_MATFREE_4EM11  = 4d-11
+   PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP     = 1e-13
+   PetscReal, parameter :: PFLARE_TOL_ARNOLDI        = 1e-14
+   PetscReal, parameter :: PFLARE_TOL_CONSISTENCY    = 1e-14
+   PetscReal, parameter :: PFLARE_TOL_AUTO_TRUNCATE  = 1e-14
+   PetscReal, parameter :: PFLARE_KSP_RTOL_CONSTRAIN = 1d-14
+   PetscReal, parameter :: PFLARE_DD_RATIO_ABS_TOL   = 1d-12
+   PetscReal, parameter :: PFLARE_DD_RATIO_REL_TOL   = 1d-10
+   PetscReal, parameter :: PFLARE_KSP_ATOL_SMOOTH    = 1d-10
+   PetscReal, parameter :: PFLARE_KSP_ATOL_COARSE    = 1d-13
+   PetscReal, parameter :: PFLARE_KSP_RTOL_COARSE    = 1d-3
+   PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = 1d-50
+   PetscReal, parameter :: PFLARE_TOL_LUCKY          = 1d-30
+   PetscReal, parameter :: PFLARE_SENTINEL_DROP      = 1d-100
+#endif
+
 end module pflare_parameters

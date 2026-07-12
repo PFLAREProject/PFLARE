@@ -4,6 +4,7 @@ module grid_transfer
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos
    use petsc_helper, only: kokkos_debug
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -60,14 +61,14 @@ module grid_transfer
             ! Debug check if the CPU and Kokkos versions are the same
             call generate_one_point_with_one_entry_from_sparse_cpu(input_mat, temp_mat)      
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
             
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU generate_one_point_with_one_entry_from_sparse", normy, "row", row_loc
@@ -107,10 +108,12 @@ module grid_transfer
       PetscInt :: max_local_col, max_nonlocal_col
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       integer :: max_loc(1)
       integer :: comm_size, errorcode
@@ -118,6 +121,7 @@ module grid_transfer
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: colmap
       type(tMat) :: Ad, Ao
+      ! Derived magnitudes stay PetscReal
       PetscReal :: max_local_val, max_nonlocal_val
       
       ! ~~~~~~~~~~
@@ -166,8 +170,10 @@ module grid_transfer
       counter = 1
       do ifree = global_row_start, global_row_end_plus_one-1             
          
-         max_local_val = -huge(0d0)
-         max_nonlocal_val = -huge(0d0)
+         ! huge() of the PetscReal target (not 0d0) so single builds get the
+         ! representable -huge, not -Inf (which traps under -ffpe-trap=overflow)
+         max_local_val = -huge(max_local_val)
+         max_nonlocal_val = -huge(max_nonlocal_val)
          max_local_col = -1
          max_nonlocal_col = -1
 
@@ -281,14 +287,14 @@ module grid_transfer
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU compute_P_from_W", normy, "row", row_loc
@@ -342,9 +348,11 @@ module grid_transfer
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       PetscInt, dimension(:), pointer :: is_pointer_coarse, is_pointer_fine
       MatType:: mat_type
@@ -533,14 +541,14 @@ module grid_transfer
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
@@ -605,9 +613,11 @@ module grid_transfer
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices_coo, col_indices_coo
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, dimension(:), pointer :: colmap
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       type(tMat) :: Ad, Ao

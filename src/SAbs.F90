@@ -2,6 +2,7 @@ module sabs
 
    use petscmat
    use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, remove_small_from_sparse
+   use pflare_parameters, only: PFLARE_SENTINEL_DROP, PFLARE_ONE, PFLARE_ZERO
 
 #include "petsc/finclude/petscmat.h"
 
@@ -78,7 +79,7 @@ module sabs
          ! anyway
          call MatTranspose(output_mat, MAT_INITIAL_MATRIX, transpose_mat, ierr)
          ! Kokkos + MPI doesn't have a gpu mataxpy yet, so we have a wrapper around our own version
-         call MatAXPYWrapper(output_mat, 1d0, transpose_mat)
+         call MatAXPYWrapper(output_mat, PFLARE_ONE, transpose_mat)
 
          ! Don't forget to destroy the explicit transpose
          call MatDestroy(transpose_mat, ierr)
@@ -90,16 +91,16 @@ module sabs
 
          if (symmetrize) then
             call MatMatMult(output_mat, output_mat, &
-                        MAT_INITIAL_MATRIX, 1d0, transpose_mat, ierr)     
+                        MAT_INITIAL_MATRIX, PFLARE_ONE, transpose_mat, ierr)     
          else
             call MatTransposeMatMult(output_mat, output_mat, &
-                        MAT_INITIAL_MATRIX, 1d0, transpose_mat, ierr)          
+                        MAT_INITIAL_MATRIX, PFLARE_ONE, transpose_mat, ierr)          
          endif     
 
          ! Also have to add in the original distance 1 connections to the square
          ! as the dist 1 strength matrix has had the diagonals removed, so the square won't 
          ! have the dist 1 connetions in it
-         call MatAXPYWrapper(transpose_mat, 1d0, output_mat)
+         call MatAXPYWrapper(transpose_mat, PFLARE_ONE, output_mat)
          call MatDestroy(output_mat, ierr)
 
          ! Can end up with diagonal entries we have to remove
@@ -120,7 +121,8 @@ module sabs
             end if
          
             ! Set the diagonal to 0
-            call MatSetValue(transpose_mat, ifree - 1 + global_row_start, ifree - 1 + global_row_start, 0d0, INSERT_VALUES, ierr)
+            call MatSetValue(transpose_mat, ifree - 1 + global_row_start, ifree - 1 + global_row_start, &
+                     PFLARE_ZERO, INSERT_VALUES, ierr)
          end do
 
          call ISRestoreIndices(zero_diags, zero_diags_pointer, ierr)
@@ -131,13 +133,13 @@ module sabs
          ! Could call MatEliminateZeros in later versions of petsc, but for here
          ! given we know the entries are ==1, we will just create a copy with "small" stuff removed
          ! ie the zero diagonal
-         call remove_small_from_sparse(transpose_mat, 1d-100, output_mat, drop_diagonal_int = 1) 
+         call remove_small_from_sparse(transpose_mat, PFLARE_SENTINEL_DROP, output_mat, drop_diagonal_int = 1) 
          call MatDestroy(transpose_mat, ierr)
 
       end if   
       
       ! Reset the entries in the strength matrix back to 1
-      if (symmetrize .OR. square) call MatSetAllValues(output_mat, 1d0)
+      if (symmetrize .OR. square) call MatSetAllValues(output_mat, PFLARE_ONE)
 
    end subroutine generate_sabs     
 

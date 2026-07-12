@@ -4,6 +4,7 @@ module repartition
    use c_petsc_interfaces, only: MatGetNNZs_both_c, GenerateIS_ProcAgglomeration_c, &
          MatPartitioning_c, MatMPICreateNonemptySubcomm_c
    use petsc_helper, only: MatAXPYWrapper
+   use pflare_parameters, only: PFLARE_ONE
 
 #include "petsc/finclude/petscmat.h"
                 
@@ -52,14 +53,14 @@ module repartition
       if (off_proc_nnzs == 0) then
          ratio = 0
       else
-         ratio = dble(local_nnzs)/dble(off_proc_nnzs)
+         ratio = real(local_nnzs, kind=kind(ratio))/real(off_proc_nnzs, kind=kind(ratio))
       end if
 
-      call MPI_Allreduce(ratio, ratio_parallel, 1, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_MATRIX, errorcode)
+      call MPI_Allreduce(ratio, ratio_parallel, 1, MPIU_REAL, MPI_SUM, MPI_COMM_MATRIX, errorcode)
 
       ratio = ratio_parallel  
       ! Only divide by the number of processors that are active
-      ratio = ratio / dble(no_active_cores)
+      ratio = ratio / real(no_active_cores, kind=kind(ratio))
 
    end subroutine      
    
@@ -116,7 +117,7 @@ module repartition
          ! Have to symmetrize the input matrix or it won't work in parmetis
          ! as it expects a symmetric graph
          call MatTranspose(input_mat, MAT_INITIAL_MATRIX, input_transpose, ierr)
-         call MatAXPYWrapper(input_transpose, 1d0, input_mat)
+         call MatAXPYWrapper(input_transpose, PFLARE_ONE, input_mat)
 
          ! Compute the adjancency graph of the symmetrized input matrix
          call MatConvert(input_transpose, MATMPIADJ, MAT_INITIAL_MATRIX, adj, ierr)

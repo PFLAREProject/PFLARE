@@ -13,7 +13,8 @@ module air_operators_setup
          MAT_INV_ACC, MAT_INV_AFF, MAT_INV_AFF_DROPPED, MAT_RAP, MAT_RAP_DROP, &
          MAT_SAI_SUB, MAT_W, MAT_W_AFF, MAT_W_DROP, MAT_W_NO_SPARSITY, &
          MAT_Z, MAT_Z_AFF, MAT_Z_DROP, MAT_Z_NO_SPARSITY, &
-         AIR_Z_PRODUCT, AIR_Z_LAIR
+         AIR_Z_PRODUCT, AIR_Z_LAIR, &
+         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use c_petsc_interfaces, only: mat_mat_symbolic_c
@@ -563,7 +564,7 @@ module air_operators_setup
                ! the wrong vector type with kokkos, even when it is set correctly
                ! when calling matcreatediagonal
                call MatGetDiagonal(inv_dropped_Aff, diag_vec, ierr)
-               call VecScale(diag_vec, -1d0, ierr)
+               call VecScale(diag_vec, PFLARE_MINUS_ONE, ierr)
                ! Left multiply
                call MatDiagonalScale(air_data%reuse(our_level)%reuse_mat(MAT_W), &
                         diag_vec, PETSC_NULL_VEC, ierr)          
@@ -571,12 +572,12 @@ module air_operators_setup
             else
                if (.NOT. PetscObjectIsNull(temp_mat)) then
                   call MatMatMult(inv_dropped_Aff, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
-                           MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)
+                           MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)
                else
                   call MatMatMult(inv_dropped_Aff, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
-                           MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)  
+                           MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)  
                end if
-               call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_W), -1d0, ierr)                       
+               call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_W), PFLARE_MINUS_ONE, ierr)                       
             end if   
 
             ! ~~~~~~~~~
@@ -828,7 +829,7 @@ module air_operators_setup
             end if
             call MatCreateVecs(inv_dropped_Aff, PETSC_NULL_VEC, diag_vec, ierr)
             call MatGetDiagonal(inv_dropped_Aff, diag_vec, ierr)
-            call VecScale(diag_vec, -1d0, ierr)
+            call VecScale(diag_vec, PFLARE_MINUS_ONE, ierr)
             ! Right multiply
             call MatDiagonalScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                      PETSC_NULL_VEC, diag_vec, ierr)          
@@ -836,12 +837,12 @@ module air_operators_setup
          else         
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
-                     MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
+                     MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
             else
                call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
-                     MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
             end if
-            call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), -1d0, ierr)
+            call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), PFLARE_MINUS_ONE, ierr)
          end if
       end if
 
@@ -1042,13 +1043,13 @@ module air_operators_setup
          if (.NOT. PetscObjectIsNull(temp_mat)) then
 
             call MatPtap(A, air_data%prolongators(our_level), &
-                     MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)             
+                     MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)             
 
          ! First time
          else
 
             call MatPtap(A, air_data%prolongators(our_level), &
-                     MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)          
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)          
          end if
 
       ! ~~~~~~~~~~~
@@ -1061,19 +1062,19 @@ module air_operators_setup
          if (.NOT. PetscObjectIsNull(temp_mat)) then
 
             call MatMatMult(A, air_data%prolongators(our_level), &
-                     MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
+                     MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
                      
             call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
-                     MAT_REUSE_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)             
+                     MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)             
          
          ! First time
          else
 
             call MatMatMult(A, air_data%prolongators(our_level), &
-                     MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
                      
             call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
-                     MAT_INITIAL_MATRIX, 1.58d0, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
          end if
          
          ! Delete temporary if not reusing

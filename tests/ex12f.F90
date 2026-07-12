@@ -24,6 +24,8 @@
       PC               pc
       KSPConvergedReason reason
       PetscInt, parameter :: one=1
+      ! d0 literal in PetscScalar param: bit-identical double, float-correct single
+      PetscScalar, parameter :: s_one = 1d0
       MatType :: mtype, mtype_input
       PetscLogStage :: gpu_copy
 
@@ -111,7 +113,7 @@
       call PetscLogStagePop(ierr)      
 
       if (second_solve) then
-         call VecSet(x, 1d0, ierr)
+         call VecSet(x, s_one, ierr)
          call KSPSolve(ksp,b,x,ierr)
       end if
 

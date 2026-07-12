@@ -23,8 +23,12 @@ module gmres_poly_data_type
       integer :: gmres_poly_sparsity_order = 1
       
       ! Coefficients for the gmres polynomial
-      ! If using the newton basis this has two columns with the real 
+      ! If using the newton basis this has two columns with the real
       ! and imaginary roots
+      ! DEFERRED (complex-prep): coefficients kept PetscReal by design; see
+      ! docs/plan. The Newton basis stores strictly-real eigenvalue parts (wr/wi
+      ! from LAPACK geev) as two real columns, and the chain crosses three public
+      ! API surfaces plus a raw TSQR pointer remap - retype is a separate follow-up.
       PetscReal, pointer, dimension(:, :), contiguous :: coefficients => null()
 
       ! Asynchronous buffers for the TSQR

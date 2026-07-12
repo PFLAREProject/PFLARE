@@ -29,7 +29,7 @@ module sorting
       integer, intent(in)                               :: max_no
 
       integer                                           :: i, j, temp_int
-      real(8)                                           :: rand_temp
+      PetscReal                                         :: rand_temp
       !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       
       do i = 1, max_no

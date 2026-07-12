@@ -4,11 +4,14 @@ module constrain_z_or_w
    use petscksp
    use c_petsc_interfaces, only: vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
    use petsc_helper, only: pseudo_inv
+   use pflare_parameters, only: PFLARE_KSP_RTOL_CONSTRAIN, PFLARE_ZERO, PFLARE_KSP_ATOL_OFF, &
+         PFLARE_ONE
 
 #include "petsc/finclude/petscksp.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
-   public     
+   public
    
    contains
 
@@ -95,13 +98,13 @@ module constrain_z_or_w
          if (left) then
             call MatCreateVecs(input_mat, left_null_vecs(no_nullspace_vecs), PETSC_NULL_VEC, ierr)
             ! Set to the constant     
-            call VecSet(left_null_vecs(no_nullspace_vecs), 1d0, ierr)
+            call VecSet(left_null_vecs(no_nullspace_vecs), PFLARE_ONE, ierr)
          end if
 
          if (right) then
             call MatCreateVecs(input_mat, right_null_vecs(no_nullspace_vecs), PETSC_NULL_VEC, ierr)
             ! Set to the constant
-            call VecSet(right_null_vecs(no_nullspace_vecs), 1d0, ierr)
+            call VecSet(right_null_vecs(no_nullspace_vecs), PFLARE_ONE, ierr)
          end if         
       end if   
       
@@ -151,7 +154,7 @@ module constrain_z_or_w
       ! ~~~~~~~~~~~~
 
       ! We want the nullspace so solve homog problem
-      call VecSet(vec_rhs, 0d0, ierr)     
+      call VecSet(vec_rhs, PFLARE_ZERO, ierr)     
 
       call KSPCreate(MPI_COMM_MATRIX, ksp, ierr)
       !call KSPSetType(ksp, KSPGMRES, ierr)
@@ -165,16 +168,23 @@ module constrain_z_or_w
       !call PCJacobiSetType(pc, 1, ierr)   
 
       ! Do 15 iterations
-      call KSPSetTolerances(ksp, 1d-14, &
-               & 1d-50, &
+      call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_CONSTRAIN, &
+               & PFLARE_KSP_ATOL_OFF, &
                & PETSC_DEFAULT_REAL, &
                & maxits, ierr) 
 
-      call KSPSetOperators(ksp, input_mat, input_mat, ierr)             
-      !call KSPSetFromOptions(ksp_coarse_solver, ierr)    
+      call KSPSetOperators(ksp, input_mat, input_mat, ierr)
+      !call KSPSetFromOptions(ksp_coarse_solver, ierr)
       call KSPSetInitialGuessNonzero(ksp, PETSC_TRUE, ierr)
+      ! In double we skip the residual norm (fixed maxits smoothing sweeps). In
+      ! single precision the self-scale Richardson divides by (Ap,Ap), which
+      ! underflows to zero once the near-nullspace residual gets small (Ap ~ 1e-20
+      ! squared underflows float tiny ~1e-38), giving Inf/NaN. Keep the residual
+      ! norm on so the solve halts at the relative tolerance before that happens.
+#if !defined(PETSC_USE_REAL_SINGLE)
       call KSPSetNormType(ksp, KSP_NORM_NONE, ierr)
-      call KSPSetUp(ksp, ierr)    
+#endif
+      call KSPSetUp(ksp, ierr)
       
       ! ~~~~~~~
       ! Compute the left near nullspace vec
@@ -235,8 +245,10 @@ module constrain_z_or_w
       type(tMat) :: row_mat, temp_mat_aij
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
-      PetscReal, dimension(:), allocatable :: row_vals, diff
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
+      ! Dense near-nullspace work arrays (fed to dgemv/dgemm then MatSetValues)
+      PetscScalar, dimension(:), allocatable :: row_vals, diff
       type(tMat) :: new_z_or_w
       type(c_ptr) :: b_c_nonlocal_c_ptr
       integer(c_long_long) :: A_array, vec_long
@@ -244,10 +256,15 @@ module constrain_z_or_w
       type(tMat) :: Ad, Ao
       type(tVec) :: leaf_vec
       PetscInt, dimension(:), pointer :: colmap
-      real(c_double), pointer :: b_c_nonlocal(:)
+      ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
+      ! vecscatter_mat_end_c - must match the true Vec value type
+      PetscScalar, pointer :: b_c_nonlocal(:)
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
-      PetscReal, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
+      PetscScalar, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0
+      ! Kind-correct BLAS integer/real arguments for the dgemv/dgemm calls
+      PetscBLASInt :: m_bl, n_bl, k_bl, lda_bl, ldb_bl, ldc_bl, one_bl
+      PetscScalar :: blas_one, blas_zero, blas_minus_one
       MatType:: mat_type
 
       ! ~~~~~~
@@ -459,10 +476,17 @@ module constrain_z_or_w
          ! ie W B_c^R - B_f^R      
          ! ~~~~~~~~~
          ! W B_c^R can be done as (B_c^R)^T W
-         call dgemv("T", size(b_c_vals, 1), size(b_c_vals,2), &
-                  1d0, b_c_vals, size(b_c_vals,1), &
-                  row_vals, 1, &
-                  0d0, diff, 1)    
+         one_bl = 1
+         blas_one = 1d0
+         blas_zero = 0d0
+         blas_minus_one = -1d0
+         m_bl = size(b_c_vals, 1)
+         n_bl = size(b_c_vals, 2)
+         lda_bl = size(b_c_vals, 1)
+         call PFLAREgemv("T", m_bl, n_bl, &
+                  blas_one, b_c_vals, lda_bl, &
+                  row_vals, one_bl, &
+                  blas_zero, diff, one_bl)
 
          ! Compute W * B_c^R - B_f^R
          ! Loop over near-nullspace vecs
@@ -475,26 +499,39 @@ module constrain_z_or_w
          end do                  
                
          ! Compute (B_c^R)^T * B_c^R
-         call dgemm("T", "N", size(b_c_vals, 2), size(b_c_vals,2), size(b_c_vals, 1), &
-                  1d0, b_c_vals, size(b_c_vals,1), &
-                  b_c_vals, size(b_c_vals,1), &
-                  0d0, bctbc, size(bctbc,1)) 
+         n_bl = size(b_c_vals, 2)
+         k_bl = size(b_c_vals, 1)
+         lda_bl = size(b_c_vals, 1)
+         ldc_bl = size(bctbc, 1)
+         call PFLAREgemm("T", "N", n_bl, n_bl, k_bl, &
+                  blas_one, b_c_vals, lda_bl, &
+                  b_c_vals, lda_bl, &
+                  blas_zero, bctbc, ldc_bl)
                   
          ! Compute the pseudo inverse of (B_c^R)^T * B_c^R
          call pseudo_inv(bctbc, pseudo)
 
          ! Compute inv((B_c^R)^T * B_c^R) * (B_c^R)^T
-         call dgemm("N", "T", size(pseudo, 1), size(b_c_vals,1), size(pseudo, 2), &
-                  1d0, pseudo, size(pseudo,1), &
-                  b_c_vals, size(b_c_vals,1), &
-                  0d0, temp_mat, size(temp_mat,1))          
+         m_bl = size(pseudo, 1)
+         n_bl = size(b_c_vals, 1)
+         k_bl = size(pseudo, 2)
+         lda_bl = size(pseudo, 1)
+         ldb_bl = size(b_c_vals, 1)
+         ldc_bl = size(temp_mat, 1)
+         call PFLAREgemm("N", "T", m_bl, n_bl, k_bl, &
+                  blas_one, pseudo, lda_bl, &
+                  b_c_vals, ldb_bl, &
+                  blas_zero, temp_mat, ldc_bl)
 
          ! Now compute -(W * B_c^R - B_f^R ) * inv((B_c^R)^T * B_c^R) * (B_c^R)^T
          ! Again we're doing the left vec mat mult with a transpose
-         call dgemv("T", size(temp_mat, 1), size(temp_mat,2), &
-                  -1d0, temp_mat, size(temp_mat,1), &
-                  diff, 1, &
-                  0d0, b_c_vals, 1) 
+         m_bl = size(temp_mat, 1)
+         n_bl = size(temp_mat, 2)
+         lda_bl = size(temp_mat, 1)
+         call PFLAREgemv("T", m_bl, n_bl, &
+                  blas_minus_one, temp_mat, lda_bl, &
+                  diff, one_bl, &
+                  blas_zero, b_c_vals, one_bl)
 
          ! ~~~~~~~~~~~~~
          ! Set all the row values, same sparsity pattern

@@ -262,8 +262,9 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_int), value :: lump_int, alpha_int
+         ! PetscReal by public-API contract (kept coherent with remove_from_sparse_match)
          PetscReal, value :: alpha
-      end subroutine remove_from_sparse_match_kokkos         
+      end subroutine remove_from_sparse_match_kokkos
  
    end interface   
 
@@ -273,8 +274,8 @@ module c_petsc_interfaces
          bind(c, name="MatSetAllValues_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: val
-      end subroutine MatSetAllValues_kokkos         
+         PetscScalar, value :: val
+      end subroutine MatSetAllValues_kokkos
  
    end interface
    
@@ -284,7 +285,7 @@ module c_petsc_interfaces
          bind(c, name="MatSetAllValues_cpu")
          use iso_c_binding
          integer(c_long_long) :: A_array
-         PetscReal, value :: val
+         PetscScalar, value :: val
       end subroutine MatSetAllValues_cpu
  
    end interface     

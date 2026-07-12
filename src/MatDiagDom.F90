@@ -5,14 +5,15 @@ module matdiagdom
    use petsc_helper, only: kokkos_debug
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos, &
          vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
-   use pflare_parameters, only: C_POINT, F_POINT
+   use pflare_parameters, only: C_POINT, F_POINT, &
+         PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL
 
 #include "petsc/finclude/petscmat.h"
 
    implicit none
 
-   PetscReal, parameter :: dd_ratio_abs_tol = 1d-12
-   PetscReal, parameter :: dd_ratio_rel_tol = 1d-10
+   PetscReal, parameter :: dd_ratio_abs_tol = PFLARE_DD_RATIO_ABS_TOL
+   PetscReal, parameter :: dd_ratio_rel_tol = PFLARE_DD_RATIO_REL_TOL
 
    public   
    
@@ -130,7 +131,9 @@ module matdiagdom
       PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
       PetscInt, dimension(:), pointer :: ad_ia => null(), ad_ja => null(), ao_ia => null(), ao_ja => null()
       PetscScalar, dimension(:), pointer :: ad_vals => null(), ao_vals => null()
-      PetscReal, dimension(:), pointer :: cf_markers_nonlocal => null()
+      ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
+      ! vecscatter_mat_end_c - must match the true Vec value type
+      PetscScalar, dimension(:), pointer :: cf_markers_nonlocal => null()
       PetscReal, dimension(:), allocatable, target :: cf_markers_local_real
       type(c_ptr) :: cf_markers_nonlocal_ptr
       PetscInt :: shift = 0
@@ -186,7 +189,7 @@ module matdiagdom
          call MatSeqAIJGetArrayRead(Ao, ao_vals, ierr)
 
          allocate(cf_markers_local_real(local_rows))
-         if (local_rows > 0) cf_markers_local_real = dble(cf_markers_local(1:local_rows))
+         if (local_rows > 0) cf_markers_local_real = real(cf_markers_local(1:local_rows), kind=kind(cf_markers_local_real))
 
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, local_rows, global_rows, &
                cf_markers_local_real, cf_markers_vec, ierr)
@@ -263,7 +266,7 @@ module matdiagdom
       else
          max_dd_ratio_local = maxval(diag_dom_ratio)
       end if
-      call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(max_dd_ratio_local, max_dd_ratio_achieved, 1, MPIU_REAL, &
                          MPI_MAX, MPI_COMM_MATRIX, errorcode)
 
    end subroutine MatDiagDomRatio_cpu

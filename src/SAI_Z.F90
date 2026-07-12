@@ -7,9 +7,11 @@ module sai_z
          merge_pre_sorted, sorted_binary_search
    use c_petsc_interfaces, only: mat_mat_symbolic_c, calculate_and_build_sai_z_kokkos
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper
-   use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI
+   use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
+         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11
 
 #include "petsc/finclude/petscksp.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
    public
@@ -39,8 +41,10 @@ module sai_z
       PetscInt :: i_loc, j_loc, cols_ad, rows_ad
       PetscInt :: rows_ao, cols_ao, ifree, row_size, i_size, j_size
       PetscInt :: global_row_start_aff, global_row_end_plus_one_aff
-      integer :: lwork, intersect_count
+      integer :: intersect_count
       integer :: errorcode, comm_size
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, info, m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: transpose_mat, A_ff
@@ -49,11 +53,15 @@ module sai_z
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0, maxits=1000
       PetscInt, dimension(:), allocatable, target :: j_rows
       PetscInt, dimension(:), allocatable :: i_rows, ad_indices
-      integer, dimension(:), allocatable :: pivots, j_indices, i_indices
+      integer, dimension(:), allocatable :: j_indices, i_indices
+      ! LAPACK pivots must be PetscBLASInt
+      PetscBLASInt, dimension(:), allocatable :: pivots
       PetscInt, dimension(:), pointer :: cols => null(), j_rows_ptr => null()
-      PetscReal, dimension(:), pointer :: vals => null()
-      PetscReal, dimension(:), allocatable :: e_row, j_vals
-      PetscReal, dimension(:,:), allocatable :: submat_vals
+      ! Matrix entries (filled by MatGetRow / fed to MatSetValues and the dense
+      ! solves) are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
+      PetscScalar, dimension(:), allocatable :: e_row, j_vals
+      PetscScalar, dimension(:,:), allocatable :: submat_vals
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs, diag_vec
@@ -242,8 +250,8 @@ module sai_z
          call KSPCreate(PETSC_COMM_SELF, ksp, ierr)
          call KSPSetType(ksp, KSPGMRES, ierr)
          ! Solve to relative 1e-3
-         call KSPSetTolerances(ksp, 1d-3, &
-                  & 1d-50, &
+         call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_COARSE, &
+                  & PFLARE_KSP_ATOL_OFF, &
                   & PETSC_DEFAULT_REAL, &
                   & maxits, ierr) 
          call KSPGetPC(ksp,pc,ierr)
@@ -258,8 +266,8 @@ module sai_z
          call KSPSetType(ksp, KSPLSQR, ierr)
 
          ! Solve to relative 1e-3
-         call KSPSetTolerances(ksp, 1d-3, &
-                  & 1d-50, &
+         call KSPSetTolerances(ksp, PFLARE_KSP_RTOL_COARSE, &
+                  & PFLARE_KSP_ATOL_OFF, &
                   & PETSC_DEFAULT_REAL, &
                   & maxits, ierr)      
                   
@@ -540,7 +548,12 @@ module sai_z
             else
 
                allocate(pivots(size(i_rows)))
-               call dgesv(size(i_rows), 1, submat_vals, size(i_rows), pivots, e_row, size(i_rows), errorcode)
+               ! Kind-correct BLAS integer dimensions
+               n_bl = size(i_rows)
+               nrhs_bl = 1
+               lda_bl = size(i_rows)
+               ldb_bl = size(i_rows)
+               call PFLAREgesv(n_bl, nrhs_bl, submat_vals, lda_bl, pivots, e_row, ldb_bl, info)
                ! Rearrange given the row permutations done by the LU
                e_row(pivots) = e_row
                deallocate(pivots)
@@ -592,13 +605,20 @@ module sai_z
 
                allocate(work(1))
                lwork = -1
-               call dgels('N', i_size, j_size, 1, submat_vals, i_size, &
-                           e_row, i_size, work, lwork, errorcode)
+               ! Kind-correct BLAS integer dimensions
+               m_bl = i_size
+               n_bl = j_size
+               nrhs_bl = 1
+               lda_bl = i_size
+               ldb_bl = i_size
+               call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                           e_row, ldb_bl, work, lwork, info)
+               ! int() is exact for all plausible sizes < 2^24 even when work is single precision
                lwork = int(work(1))
                deallocate(work)
                allocate(work(lwork))
-               call dgels('N', i_size, j_size, 1, submat_vals, i_size, &
-                           e_row, i_size, work, lwork, errorcode)
+               call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                           e_row, ldb_bl, work, lwork, info)
                deallocate(work)
 
             end if
@@ -734,7 +754,7 @@ module sai_z
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)
 
-            call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+            call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -743,7 +763,7 @@ module sai_z
 
             ! There is floating point compute in these inverses, so we have to be a
             ! bit more tolerant to rounding differences
-            if (normy .gt. 4d-11 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
                print *, "Diff Kokkos and CPU calculate_and_build_sai_z", normy, "row", row_loc
 
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -802,7 +822,7 @@ module sai_z
       ! ~~~~~~~~~~~
 
       call generate_identity(matrix, minus_I)
-      call MatScale(minus_I, -1d0, ierr)
+      call MatScale(minus_I, PFLARE_MINUS_ONE, ierr)
       
       ! Calculate our approximate inverse
       ! Now given we are using the same code as SAI Z

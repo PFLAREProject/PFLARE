@@ -8,10 +8,13 @@ module petsc_helper
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, &
          MatGetNNZs_both_c
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
+         PFLARE_TOL_SIGMA_DROP, PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
-                
+#include "finclude/pflare_blaslapack.h"
+
    implicit none
 
 logical, protected :: got_debug_kokkos_env = .FALSE.
@@ -170,14 +173,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call remove_small_from_sparse_cpu(input_mat, tol, temp_mat, relative_max_row_tol_int, &
                      lump, drop_diagonal_int, diag_strength_int)       
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU remove_small_from_sparse", normy, "row", row_loc
@@ -224,12 +227,15 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscCount :: counter
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v          
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries
       integer :: drop_diag_int, diag_stren_int, errorcode, rel_max_row_tol_int
+      ! Derived magnitude/tolerance stays PetscReal
       PetscReal :: rel_row_tol
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
@@ -357,8 +363,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
                      rel_row_tol = tol * abs(vals(diag_index))
                   end if                  
                else
-                  ! Be careful here to use huge(0d0) rather than huge(0)!
-                  abs_biggest_entry = -huge(0d0)
+                  ! Be careful to take huge() of the typed target (not 0d0) so
+                  ! single builds get the representable -huge, not -Inf
+                  abs_biggest_entry = -huge(abs_biggest_entry)
                   ! Find the biggest entry in the row thats not the diagonal
                   do col = 1, ncols
                      if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
@@ -422,9 +429,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
-      
+
       ! ~~~~~~~~~~
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
@@ -540,14 +548,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
             ! Debug check if the CPU and Kokkos versions are the same
             call remove_from_sparse_match_cpu(input_mat, temp_mat, lump, alpha)      
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU remove_from_sparse_match", normy, "row", row_loc
@@ -592,9 +600,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null(), cols_mod
-      PetscReal, dimension(:), pointer :: vals => null(), vals_copy
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null(), vals_copy
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v        
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries, alpha_present
       PetscReal :: lump_sum
@@ -839,14 +849,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                       
 
-            call MatAXPY(temp_mat_reuse, -1d0, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-13 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU compute_R_from_Z", normy, "row", row_loc
@@ -895,9 +905,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null()
-      PetscReal, dimension(:), pointer :: vals => null()
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals => null()
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v         
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
@@ -1036,14 +1048,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
             call MatAXPY(temp_mat, alpha, x_mat, DIFFERENT_NONZERO_PATTERN, ierr)    
 
-            call MatAXPY(temp_mat, -1d0, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, y_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU MatAXPY", normy, "row", row_loc
@@ -1160,14 +1172,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call MatCreateSubMatrix(input_mat, is_row, is_col, &
                   MAT_INITIAL_MATRIX, temp_mat, ierr)    
 
-            call MatAXPY(temp_mat, -1d0, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (normy .gt. 1d-12 .OR. normy/=normy) then
+            if (normy .gt. PFLARE_TOL_MATFREE_12 .OR. normy/=normy) then
                !call MatFilter(temp_mat, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU MatCreateSubMatrix", normy, "row", row_loc
@@ -1204,7 +1216,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: indices
-      PetscReal, allocatable, dimension(:) :: v
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -1267,7 +1280,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: local_indices_size
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -1347,7 +1361,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: local_indices_size
       PetscCount :: counter
-      PetscReal, allocatable, dimension(:) :: v      
+      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -1441,26 +1456,29 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! ~~~~~~~~~~~~~~~~
 
-      PetscReal, dimension(:, :), intent(in) :: input
-      PetscReal, dimension(size(input, 1), size(input, 1)), intent(out) :: U
+      ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
+      PetscScalar, dimension(:, :), intent(in) :: input
+      PetscScalar, dimension(size(input, 1), size(input, 1)), intent(out) :: U
       PetscReal, dimension(min(size(input, 1), size(input, 2))), intent(out) :: sigma
-      PetscReal, dimension(size(input, 2), size(input, 2)), intent(out) :: VT
-  
-      PetscReal, dimension(size(input, 1), size(input, 2)) :: tmp_input
-      PetscReal, dimension(:), allocatable :: WORK
-      integer :: LWORK, M, N, info, errorcode
+      PetscScalar, dimension(size(input, 2), size(input, 2)), intent(out) :: VT
+
+      PetscScalar, dimension(size(input, 1), size(input, 2)) :: tmp_input
+      PetscScalar, dimension(:), allocatable :: WORK
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: LWORK, M, N, info
+      integer :: errorcode
 
       ! ~~~~~~~~~~~~~~~~
-  
+
      tmp_input = input
      M = size(input, 1)
      N = size(input, 2)
      LWORK = 2*MAX(1,3*MIN(M,N)+MAX(M,N),5*MIN(M,N))
      allocate(WORK(LWORK))
-  
-     call DGESVD('A', 'A', M, N, tmp_input, M, &
+
+     call PFLAREgesvd('A', 'A', M, N, tmp_input, M, &
             sigma, U, M, VT, N, WORK, LWORK, info)
-  
+
       if (info /= 0) then
          print *, "SVD fail"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
@@ -1475,14 +1493,18 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! ~~~~~~~~~~~~~~~~
 
-      PetscReal, dimension(:, :), intent(in) :: input
-      PetscReal, dimension(min(size(input, 1), size(input, 2))), intent(out) :: output
+      ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
+      PetscScalar, dimension(:, :), intent(in) :: input
+      PetscScalar, dimension(min(size(input, 1), size(input, 2))), intent(out) :: output
 
-      PetscReal, dimension(size(input, 1), size(input, 1)) :: U
+      PetscScalar, dimension(size(input, 1), size(input, 1)) :: U
       PetscReal, dimension(min(size(input, 1), size(input, 2))) :: sigma
-      PetscReal, dimension(size(input, 2), size(input, 2)) :: VT
+      PetscScalar, dimension(size(input, 2), size(input, 2)) :: VT
 
       integer :: iloc, errorcode
+      ! Kind-correct BLAS integer/real arguments for the dgemm call
+      PetscBLASInt :: n_bl, lda_bl
+      PetscScalar :: blas_one, blas_zero
 
       ! ~~~~~~~~~~~~~~~~
 
@@ -1493,18 +1515,22 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! and sigma is diagonal 
       ! So scale each column of U (given the transpose)
       do iloc = 1, size(input,1)
-         if (abs(sigma(iloc)) > 1e-13) then
-            U(:, iloc) = U(:, iloc) * 1d0/sigma(iloc)
+         if (abs(sigma(iloc)) > PFLARE_TOL_SIGMA_DROP) then
+            U(:, iloc) = U(:, iloc) / sigma(iloc)
          else
             U(:, iloc) = 0d0
          end if
       end do
 
       ! Do the matmatmult, making sure to transpose both
-      call dgemm("T", "T", size(input,1), size(input,1), size(input,1), &
-               1d0, VT, size(input,1), &
-               U, size(input,1), &
-               0d0, output, size(input,1))          
+      n_bl = size(input,1)
+      lda_bl = size(input,1)
+      blas_one = 1d0
+      blas_zero = 0d0
+      call PFLAREgemm("T", "T", n_bl, n_bl, n_bl, &
+               blas_one, VT, lda_bl, &
+               U, lda_bl, &
+               blas_zero, output, lda_bl)
 
       ! nan check
       if (any(output /= output)) then

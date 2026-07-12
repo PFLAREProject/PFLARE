@@ -3,11 +3,15 @@ module gmres_poly_newton
    use petscmat
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
+   use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
+         PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
+         PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL
 
-#include "petsc/finclude/petscmat.h"   
+#include "petsc/finclude/petscmat.h"
+#include "finclude/pflare_blaslapack.h"
 
    implicit none
-   public 
+   public
    
    contains
 
@@ -67,7 +71,7 @@ module gmres_poly_newton
       ! Do while we still have some sorting to do
       do while (counter-1 < size(real_roots))
 
-         max_mag = -huge(0d0)
+         max_mag = -huge(max_mag)
 
          ! For each value compute a product of differences
          do i_loc = 1, size(real_roots)
@@ -207,7 +211,7 @@ module gmres_poly_newton
                         (imag_roots(j) - imag_roots(i))**2)
 
             ! Use the larger magnitude for relative scaling
-            scale = max(mag_i, mag_j, 1.0d0)
+            scale = max(mag_i, mag_j, PFLARE_ONE)
 
             ! Check if within tolerance
             if (dist <= abs_tol + rel_tol * scale) then
@@ -221,8 +225,8 @@ module gmres_poly_newton
 
          ! Compute cluster centroid (mean)
          n_unique = n_unique + 1
-         rtmp(n_unique) = sum_real / dble(cluster_size)
-         itmp(n_unique) = sum_imag / dble(cluster_size)
+         rtmp(n_unique) = sum_real / real(cluster_size, kind=kind(rtmp))
+         itmp(n_unique) = sum_imag / real(cluster_size, kind=kind(itmp))
 
       end do
 
@@ -279,8 +283,8 @@ module gmres_poly_newton
          if (b < 0) cycle
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(a) < 1e-12) cycle
-         if (a**2 + b**2 < 1e-12) cycle
+         if (abs(a) < PFLARE_TOL_ZERO) cycle
+         if (a**2 + b**2 < PFLARE_TOL_ZERO) cycle
 
          ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
          do i_loc = 1, n_roots
@@ -292,8 +296,8 @@ module gmres_poly_newton
             d = imag_roots(i_loc)
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(c) < 1e-12) cycle
-            if (c**2 + d**2 < 1e-12) cycle
+            if (abs(c) < PFLARE_TOL_ZERO) cycle
+            if (c**2 + d**2 < PFLARE_TOL_ZERO) cycle
 
             ! theta_k/theta_i
             div_real = (a * c + b * d)/(c**2 + d**2)
@@ -393,14 +397,18 @@ module gmres_poly_newton
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols, vecs_needed
-      integer :: lwork, subspace_size, rank, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
+      integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
       integer :: total_extra, counter, k_loc, m, numerical_order
-      PetscErrorCode :: ierr      
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, rank, info
+      PetscBLASInt :: np1_bl, nrhs_bl, lda_hnt_bl, ldb_bl, lda_hn_bl, one_bl
+      PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
       PetscReal, dimension(poly_order+1) :: e_d, solution, s
-      integer, dimension(:), allocatable :: iwork_allocated, indices
+      PetscBLASInt, dimension(:), allocatable :: iwork_allocated
+      integer, dimension(:), allocatable :: indices
       PetscReal, dimension(:), allocatable :: work, real_roots_added, imag_roots_added
       PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
       PetscReal, dimension(:,:), allocatable :: VL, VR
@@ -409,7 +417,7 @@ module gmres_poly_newton
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = 1e-12, rel_tol, abs_tol, H_norm
+      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm
 
       ! ~~~~~~    
 
@@ -443,7 +451,7 @@ module gmres_poly_newton
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      call arnoldi(matrix, poly_order, 1d-30, V_n, w_j, beta, H_n, m)
+      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
 
       ! ~~~~~~~~~~~
       ! Now the Ritz values are just the eigenvalues of the square part of H_n
@@ -488,23 +496,30 @@ module gmres_poly_newton
 
          ! We have rcond = 1e-12 which is used to decide what singular values to drop
          ! Matlab uses max(size(A))*eps(norm(A)) in their pinv
-         call dgelsd(poly_order + 1, poly_order + 1, 1, H_n_T, size(H_n_T, 1), &
-                        e_d, size(e_d), s, rcond, rank, &
-                        work, lwork, iwork_allocated, errorcode)
+         ! Kind-correct BLAS integer dimensions
+         np1_bl = poly_order + 1
+         nrhs_bl = 1
+         lda_hnt_bl = size(H_n_T, 1)
+         ldb_bl = size(e_d)
+         call PFLAREgelsd(np1_bl, np1_bl, nrhs_bl, H_n_T, lda_hnt_bl, &
+                        e_d, ldb_bl, s, rcond, rank, &
+                        work, lwork, iwork_allocated, info)
+         ! Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
+         ! for all plausible sizes < 2^24 even when work is single precision
          lwork = int(work(1))
          iwork_size = iwork_allocated(1)
          deallocate(work, iwork_allocated)
-         allocate(work(lwork)) 
+         allocate(work(lwork))
          allocate(iwork_allocated(iwork_size))
-         call dgelsd(poly_order + 1, poly_order + 1, 1, H_n_T, size(H_n_T, 1), &
-                        e_d, size(e_d), s, rcond, rank, &
-                        work, lwork, iwork_allocated, errorcode)
-         deallocate(work, iwork_allocated)        
-         
+         call PFLAREgelsd(np1_bl, np1_bl, nrhs_bl, H_n_T, lda_hnt_bl, &
+                        e_d, ldb_bl, s, rcond, rank, &
+                        work, lwork, iwork_allocated, info)
+         deallocate(work, iwork_allocated)
+
          ! Copy in the solution
          solution = e_d
 
-         if (errorcode /= 0) then
+         if (info /= 0) then
             print *, "Harmonic Ritz solve failed"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
          end if
@@ -528,21 +543,29 @@ module gmres_poly_newton
       lwork = -1      
 
       ! Compute the eigenvalues
-      call dgeev('N', 'N', poly_order + 1, H_n, size(H_n, 1), &
-                     coefficients(1, 1), coefficients(1, 2), VL, 1, VR, 1, &
-                     work, lwork, errorcode)
+      ! Kind-correct BLAS integer dimensions
+      np1_bl = poly_order + 1
+      lda_hn_bl = size(H_n, 1)
+      one_bl = 1
+      ! DEFERRED (complex-prep): coefficients kept PetscReal by design; see docs/plan.
+      ! PFLAREgeev writes the strictly-real eigenvalue parts wr/wi directly into
+      ! coefficients(:,1)/(:,2) - these are LAPACK real arrays, so PetscReal is correct.
+      call PFLAREgeev('N', 'N', np1_bl, H_n, lda_hn_bl, &
+                     coefficients(1, 1), coefficients(1, 2), VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
+      ! int() is exact for all plausible sizes < 2^24 even when work is single precision
       lwork = int(work(1))
       deallocate(work)
-      allocate(work(lwork)) 
-      call dgeev('N', 'N', poly_order + 1, H_n, size(H_n, 1), &
-                     coefficients(1, 1), coefficients(1, 2), VL, 1, VR, 1, &
-                     work, lwork, errorcode)
+      allocate(work(lwork))
+      call PFLAREgeev('N', 'N', np1_bl, H_n, lda_hn_bl, &
+                     coefficients(1, 1), coefficients(1, 2), VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
       deallocate(work, VL, VR)
 
-      if (errorcode /= 0) then
+      if (info /= 0) then
          print *, "Eig decomposition failed"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if  
+      end if
 
       ! ~~~~~~~~~~~~~~
       ! Now we have to check the output eigenvalues
@@ -550,8 +573,8 @@ module gmres_poly_newton
 
       ! These are the tolerances that control the clustering
       H_norm = norm2(H_n(1:m,1:m))
-      rel_tol = 1.0d0 * sqrt(epsilon(1.0d0))
-      abs_tol = epsilon(1.0d0) * max(H_norm, beta)
+      rel_tol = sqrt(PFLARE_EPS)
+      abs_tol = PFLARE_EPS * max(H_norm, beta)
 
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
@@ -762,7 +785,7 @@ module gmres_poly_newton
       ! temp_vec = x
       call VecCopy(x, temp_vec, ierr)
       ! y = 0
-      call VecSet(y, 0d0, ierr)
+      call VecSet(y, PFLARE_ZERO, ierr)
 
       ! ~~~~~~~~~~~~
       ! Iterate over the i
@@ -775,21 +798,21 @@ module gmres_poly_newton
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(real_roots(i)) < 1e-12) then
+            if (abs(real_roots(i)) < PFLARE_TOL_ZERO) then
                i = i + 1
                cycle
             end if
 
             ! y = y + theta_i * temp_vec
             call VecAXPY(y, &
-                     1d0/real_roots(i), &
+                     PFLARE_ONE/real_roots(i), &
                      temp_vec, ierr)   
                                           
             ! temp_vec_two = A * temp_vec
             call MatMult(mat, temp_vec, temp_vec_two, ierr)
             ! temp_vec = temp_vec - theta_i * temp_vec_two
             call VecAXPY(temp_vec, &
-                     -1d0/real_roots(i), &
+                     PFLARE_MINUS_ONE/real_roots(i), &
                      temp_vec_two, ierr) 
 
             i = i + 1
@@ -800,7 +823,7 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (real_roots(i)**2 + imag_roots(i)**2 < 1e-12) then
+            if (real_roots(i)**2 + imag_roots(i)**2 < PFLARE_TOL_ZERO) then
                i = i + 2
                cycle
             end if            
@@ -810,12 +833,12 @@ module gmres_poly_newton
             ! temp_vec_two = 2 * Re(theta_i) * temp_vec - temp_vec_two
             call VecAXPBY(temp_vec_two, &
                   2 * real_roots(i), &
-                  -1d0, &
+                  PFLARE_MINUS_ONE, &
                   temp_vec, ierr)
 
             ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec_two
             call VecAXPY(y, &
-                     1d0/(real_roots(i)**2 + imag_roots(i)**2), &
+                     PFLARE_ONE/(real_roots(i)**2 + imag_roots(i)**2), &
                      temp_vec_two, ierr)  
                      
             if (i .le. size(real_roots) - 2) then
@@ -824,7 +847,7 @@ module gmres_poly_newton
 
                ! temp_vec = temp_vec - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec_three
                call VecAXPY(temp_vec, &
-                        -1d0/(real_roots(i)**2 + imag_roots(i)**2), &
+                        PFLARE_MINUS_ONE/(real_roots(i)**2 + imag_roots(i)**2), &
                         temp_vec_three, ierr)               
             end if
 
@@ -838,12 +861,12 @@ module gmres_poly_newton
       if (imag_roots(size(real_roots)) == 0d0) then
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(real_roots(size(real_roots))) > 1e-12) then
+         if (abs(real_roots(size(real_roots))) > PFLARE_TOL_ZERO) then
 
             ! y = y + theta_i * temp_vec
             call VecAXPBY(y, &
-                     1d0/real_roots(size(real_roots)), &
-                     1d0, &
+                     PFLARE_ONE/real_roots(size(real_roots)), &
+                     PFLARE_ONE, &
                      temp_vec, ierr) 
          end if
       end if
@@ -1015,7 +1038,7 @@ module gmres_poly_newton
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(real_roots(order)) < 1e-12) then
+            if (abs(real_roots(order)) < PFLARE_TOL_ZERO) then
                order = order + 1
                cycle
             end if
@@ -1025,7 +1048,7 @@ module gmres_poly_newton
 
             ! y = y - theta_i * temp_vec_two
             call VecAXPY(y, &
-                     -1d0/real_roots(order), &
+                     PFLARE_MINUS_ONE/real_roots(order), &
                      temp_vec_two, ierr)
 
             order = order + 1
@@ -1036,7 +1059,7 @@ module gmres_poly_newton
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (real_roots(order)**2 + imag_roots(order)**2 < 1e-12) then
+            if (real_roots(order)**2 + imag_roots(order)**2 < PFLARE_TOL_ZERO) then
                order = order + 2
                cycle
             end if           
@@ -1054,7 +1077,7 @@ module gmres_poly_newton
 
             ! y = y + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_vec
             call VecAXPY(y, &
-                     1d0/(real_roots(order)**2 + imag_roots(order)**2), &
+                     PFLARE_ONE/(real_roots(order)**2 + imag_roots(order)**2), &
                      temp_vec, ierr)
 
             ! Skip two evals
@@ -1162,7 +1185,7 @@ end if
 !             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
 !                         temp_mat_reuse, ierr)                        
 
-!             call MatAXPYWrapper(temp_mat_reuse, -1d0, temp_mat_compare)
+!             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
 !             ! Find the biggest entry in the difference
 !             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
 !             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -1226,7 +1249,8 @@ end if
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: cols_index_one, cols_index_two
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array, ad_indices, cols
-      PetscReal, dimension(:), allocatable :: vals
+      ! Matrix entries filled by MatGetRow are PetscScalar
+      PetscScalar, dimension(:), allocatable :: vals
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao, mat_sparsity_match, mat_product_save
       PetscInt, dimension(:), pointer :: colmap
@@ -1237,7 +1261,8 @@ end if
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(:), allocatable :: vals_power_temp, vals_previous_power_temp, temp
       PetscInt, dimension(:), pointer :: submatrices_ia, submatrices_ja, cols_two_ptr, cols_ptr
-      PetscReal, dimension(:), pointer :: vals_two_ptr, vals_ptr
+      ! Matrix entries filled by MatSeqAIJGetArray/MatGetRow are PetscScalar
+      PetscScalar, dimension(:), pointer :: vals_two_ptr, vals_ptr
       PetscScalar, pointer :: submatrices_vals(:)
       logical :: reuse_triggered
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
@@ -1593,7 +1618,7 @@ end if
 
                ! Skips eigenvalues that are numerically zero - see 
                ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (abs(coefficients(term,1)) < 1e-12) then
+               if (abs(coefficients(term,1)) < PFLARE_TOL_ZERO) then
                   term = term + 1
                   cycle
                end if
@@ -1603,7 +1628,7 @@ end if
                ! ~~~~~~~~~~~               
                if (ncols /= 0 .AND. status_output(term, 1) /= 1) then
                   call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                        1d0/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
+                        PFLARE_ONE/coefficients(term, 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)   
                end if          
                
                ! Initialize with previous product before the A*prod subtraction
@@ -1617,7 +1642,7 @@ end if
 
                   ! symbolic_vals(j_loc)%ptr has the matching values of A in it
                   vals_power_temp(symbolic_ones(j_loc)%ptr) = vals_power_temp(symbolic_ones(j_loc)%ptr) - &
-                           1d0/coefficients(term, 1) * &
+                           PFLARE_ONE/coefficients(term, 1) * &
                            symbolic_vals(j_loc)%ptr * vals_previous_power_temp(j_loc)
                end do
 
@@ -1628,12 +1653,12 @@ end if
 
                ! Skips eigenvalues that are numerically zero - see 
                ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (coefficients(term,1)**2 + coefficients(term,2)**2 < 1e-12) then
+               if (coefficients(term,1)**2 + coefficients(term,2)**2 < PFLARE_TOL_ZERO) then
                   term = term + 2
                   cycle
                end if
 
-               square_sum = 1d0/(coefficients(term,1)**2 + coefficients(term,2)**2)
+               square_sum = PFLARE_ONE/(coefficients(term,1)**2 + coefficients(term,2)**2)
 
                ! If our fixed sparsity order falls on the first of a complex conjugate pair
                if (.NOT. skip_add) then
@@ -1668,7 +1693,7 @@ end if
                   ! do the next product 
                   if (status_output(term, 2) == 1) then
                      if (output_first_complex) then
-                        temp(1:ncols) = temp(1:ncols) + 2d0 * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
+                        temp(1:ncols) = temp(1:ncols) + PFLARE_TWO * coefficients(term, 1) * vals_previous_power_temp(1:ncols)
                      end if                     
                   end if                  
 
@@ -1741,9 +1766,9 @@ end if
 
          ! Final step if last root is real
          if (coefficients(size(coefficients, 1),2) == 0d0) then
-            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > 1e-12) then
+            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                     1d0/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
+                     PFLARE_ONE/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
             end if             
          end if
 
@@ -2048,7 +2073,7 @@ end if
       end if
 
       ! Must be real as we only have one coefficient
-      call VecSet(diag_vec, 1d0/coefficients(1, 1), ierr)
+      call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
@@ -2098,10 +2123,10 @@ end if
       call VecDuplicate(diag_vec, temp_vec_two, ierr)
       
       ! Set to zero as we add to it
-      call VecSet(inv_vec, 0d0, ierr) 
+      call VecSet(inv_vec, PFLARE_ZERO, ierr) 
       ! We start with an identity in product_vec    
-      call VecSet(product_vec, 1d0, ierr)
-      call VecSet(one_vec, 1d0, ierr)
+      call VecSet(product_vec, PFLARE_ONE, ierr)
+      call VecSet(one_vec, PFLARE_ONE, ierr)
 
       i = 1
       do while (i .le. size(coefficients, 1) - 1)
@@ -2114,17 +2139,17 @@ end if
 
             ! Skips eigenvalues that are numerically zero - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(coefficients(i,1)) < 1e-12) then
+            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
                i = i + 1
                cycle
             end if        
 
-            call VecAXPY(inv_vec, 1d0/coefficients(i,1), product_vec, ierr)
+            call VecAXPY(inv_vec, PFLARE_ONE/coefficients(i,1), product_vec, ierr)
 
             ! temp_vec_A = A_ff/theta_k       
-            call VecScale(temp_vec_A, -1d0/coefficients(i,1), ierr)
+            call VecScale(temp_vec_A, PFLARE_MINUS_ONE/coefficients(i,1), ierr)
             ! temp_vec_A = I - A_ff/theta_k
-            call VecAXPY(temp_vec_A, 1d0, one_vec, ierr)
+            call VecAXPY(temp_vec_A, PFLARE_ONE, one_vec, ierr)
             
             ! product_vec = product_vec * temp_vec_A
             call VecPointwiseMult(product_vec, product_vec, temp_vec_A, ierr)   
@@ -2135,27 +2160,27 @@ end if
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
+            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
                i = i + 2
                cycle
             end if
 
             ! Compute 2a I - A
             ! temp_vec_A = -A    
-            call VecScale(temp_vec_A, -1d0, ierr)
+            call VecScale(temp_vec_A, PFLARE_MINUS_ONE, ierr)
             ! temp_vec_A = 2a I - A_ff
-            call VecAXPY(temp_vec_A, 2d0 * coefficients(i,1), one_vec, ierr) 
+            call VecAXPY(temp_vec_A, PFLARE_TWO * coefficients(i,1), one_vec, ierr) 
             ! temp_vec_A = (2a I - A_ff)/(a^2 + b^2)
-            call VecScale(temp_vec_A, 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2), ierr) 
+            call VecScale(temp_vec_A, PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2), ierr) 
 
             ! temp_vec_two = temp_vec_A * product_vec
             call VecPointwiseMult(temp_vec_two, temp_vec_A, product_vec, ierr)   
-            call VecAXPY(inv_vec, 1d0, temp_vec_two, ierr)         
+            call VecAXPY(inv_vec, PFLARE_ONE, temp_vec_two, ierr)         
 
             if (i .le. size(coefficients, 1) - 2) then
                ! temp_vec_two = A * temp_vec_two
                call VecPointwiseMult(temp_vec_two, diag_vec, temp_vec_two, ierr) 
-               call VecAXPY(product_vec, -1d0, temp_vec_two, ierr)
+               call VecAXPY(product_vec, PFLARE_MINUS_ONE, temp_vec_two, ierr)
             end if
 
             ! Skip two evals
@@ -2169,8 +2194,8 @@ end if
          ! Add in the final term multiplied by 1/theta_poly_order
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(coefficients(size(coefficients, 1),1)) > 1e-12) then      
-            call VecAXPY(inv_vec, 1d0/coefficients(size(coefficients, 1),1), product_vec, ierr)  
+         if (abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then      
+            call VecAXPY(inv_vec, PFLARE_ONE/coefficients(size(coefficients, 1),1), product_vec, ierr)  
          end if       
       end if
 
@@ -2238,21 +2263,21 @@ end if
          ! solve we don't have a zero coefficient but in the second solve we do
          ! So the mat type needs to remain consistent
          ! This can't happen in the complex case
-         if (abs(coefficients(2,1)) < 1e-12) then
+         if (abs(coefficients(2,1)) < PFLARE_TOL_ZERO) then
 
             ! Set to zero
-            call MatScale(inv_matrix, 0d0, ierr)
+            call MatScale(inv_matrix, PFLARE_ZERO, ierr)
 
             ! Tricky case here as we want to pass out the identity with the 
             ! sparsity of A
             if (output_product) then
                call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
-               call MatShift(mat_prod_or_temp, 1d0, ierr)
+               call MatShift(mat_prod_or_temp, PFLARE_ONE, ierr)
                status_output(1:2, 1) = 1
             end if                
 
             ! Then add in the 0th order inverse
-            call MatShift(inv_matrix, 1d0/coefficients(1,1), ierr)       
+            call MatShift(inv_matrix, PFLARE_ONE/coefficients(1,1), ierr)       
             
             ! Then just return
             return  
@@ -2263,9 +2288,9 @@ end if
          ! theta_1 * theta_2 that would result
 
          ! result = -A_ff/theta_1
-         call MatScale(inv_matrix, -1d0/(coefficients(1, 1)), ierr)
+         call MatScale(inv_matrix, PFLARE_MINUS_ONE/(coefficients(1, 1)), ierr)
          ! result = I -A_ff/theta_1
-         call MatShift(inv_matrix, 1d0, ierr) 
+         call MatShift(inv_matrix, PFLARE_ONE, ierr) 
          ! If we're doing this as part of fixed sparsity multiply, 
          ! we need to return mat_prod_or_temp
          if (output_product) then
@@ -2273,11 +2298,11 @@ end if
          end if
 
          ! result = 1/theta_2 * (I -A_ff/theta_1)
-         call MatScale(inv_matrix, 1d0/(coefficients(2, 1)), ierr)      
+         call MatScale(inv_matrix, PFLARE_ONE/(coefficients(2, 1)), ierr)      
 
          ! result = 1/theta_1 + 1/theta_2 * (I -A_ff/theta_1)
          ! Don't need an assemble as there is one called in this
-         call MatShift(inv_matrix, 1d0/(coefficients(1, 1)), ierr)     
+         call MatShift(inv_matrix, PFLARE_ONE/(coefficients(1, 1)), ierr)     
          
          if (output_product) then
             status_output(1:2, 1) = 1
@@ -2290,17 +2315,17 @@ end if
 
          ! Complex conjugate roots
          ! result = -A_ff
-         call MatScale(inv_matrix, -1d0, ierr)
+         call MatScale(inv_matrix, PFLARE_MINUS_ONE, ierr)
          ! result = 2a I - A_ff
          ! Don't need an assemble as there is one called in this
-         call MatShift(inv_matrix, 2d0 * coefficients(1,1), ierr)      
+         call MatShift(inv_matrix, PFLARE_TWO * coefficients(1,1), ierr)      
          ! If we're doing this as part of fixed sparsity multiply, 
          ! we need to return mat_prod_or_temp         
          if (output_product) then
             call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
          end if      
          ! result = 2a I - A_ff/(a^2 + b^2)
-         call MatScale(inv_matrix, 1d0/square_sum, ierr)
+         call MatScale(inv_matrix, PFLARE_ONE/square_sum, ierr)
 
          if (output_product) then
             status_output(1:2, 2) = 1
@@ -2350,7 +2375,7 @@ end if
       end if      
 
       ! Set to zero as we add in each product of terms
-      call MatScale(inv_matrix, 0d0, ierr)
+      call MatScale(inv_matrix, PFLARE_ZERO, ierr)
 
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(inv_matrix, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)  
@@ -2415,8 +2440,10 @@ end if
 
                   ! Check if the distance between the fixed sparsity root and the one before
                   ! If > zero then they are not complex conjugates and hence we are on the first of the pair         
-                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > 1e-14 .OR. &
-                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > 1e-14) then
+                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > &
+                        PFLARE_TOL_CONSISTENCY .OR. &
+                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > &
+                        PFLARE_TOL_CONSISTENCY) then
                      output_first_complex = .TRUE.
                      i_sparse = i_sparse + 1
                   end if            
@@ -2450,16 +2477,16 @@ end if
             ! Skips eigenvalues that are numerically zero
             ! We still compute the entries as as zero because we need the sparsity
             ! to be correct for the next iteration
-            if (abs(coefficients(i,1)) < 1e-12) then
+            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
                square_sum = 0
             else
-               square_sum = 1d0/coefficients(i,1)
+               square_sum = PFLARE_ONE/coefficients(i,1)
             end if        
 
             ! Then add the scaled version of each product
             if (i == 1) then
                ! If i == 1 then we know mat_product is identity so we can do it directly
-               call MatShift(inv_matrix, 1d0/coefficients(i,1), ierr)  
+               call MatShift(inv_matrix, PFLARE_ONE/coefficients(i,1), ierr)  
             else
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
@@ -2474,7 +2501,7 @@ end if
             ! temp_mat_A = A_ff/theta_k       
             call MatScale(temp_mat_A, -square_sum, ierr)
             ! temp_mat_A = I - A_ff/theta_k
-            call MatShift(temp_mat_A, 1d0, ierr)    
+            call MatShift(temp_mat_A, PFLARE_ONE, ierr)    
             
             ! mat_product_k_plus_1 = mat_product * temp_mat_A
             if (i == 1) then
@@ -2483,7 +2510,7 @@ end if
                call MatConvert(temp_mat_A, MATSAME, MAT_INITIAL_MATRIX, mat_product, ierr)  
             else
                call MatMatMult(temp_mat_A, mat_product, &
-                     MAT_INITIAL_MATRIX, 1.5d0, mat_product_k_plus_1, ierr)      
+                     MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, mat_product_k_plus_1, ierr)      
                call MatDestroy(mat_product, ierr)  
                mat_product = mat_product_k_plus_1  
             end if
@@ -2500,12 +2527,12 @@ end if
          else
 
             ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < 1e-12) then
+            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
                square_sum = 0
                a_coeff = 0
              else  
-               square_sum = 1d0/(coefficients(i,1)**2 + coefficients(i,2)**2)
-               a_coeff = 2d0 * coefficients(i,1)
+               square_sum = PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2)
+               a_coeff = PFLARE_TWO * coefficients(i,1)
             end if
 
             ! If our fixed sparsity root is the first of a complex conjugate pair
@@ -2532,7 +2559,7 @@ end if
             else
 
                ! temp_mat_A = -A    
-               call MatScale(temp_mat_A, -1d0, ierr)
+               call MatScale(temp_mat_A, PFLARE_MINUS_ONE, ierr)
                ! temp_mat_A = 2a I - A_ff
                call MatShift(temp_mat_A, a_coeff, ierr)   
                if (output_product) then
@@ -2546,7 +2573,7 @@ end if
                else
                   ! temp_mat_two = temp_mat_A * mat_product
                   call MatMatMult(temp_mat_A, mat_product, &
-                        MAT_INITIAL_MATRIX, 1.5d0, temp_mat_two, ierr)     
+                        MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat_two, ierr)     
                end if    
                
                ! We copy out the last part of the old product if we're doing this as part of a fixed sparsity multiply
@@ -2581,7 +2608,7 @@ end if
 
                ! temp_mat_three = matrix * temp_mat_two
                call MatMatMult(matrix, temp_mat_two, &
-                     MAT_INITIAL_MATRIX, 1.5d0, temp_mat_three, ierr)     
+                     MAT_INITIAL_MATRIX, PFLARE_MATMULT_FILL, temp_mat_three, ierr)     
                call MatDestroy(temp_mat_two, ierr)   
                if (output_product) then               
                   status_output(i, 2) = 1
@@ -2620,14 +2647,14 @@ end if
             ! Add in the final term multiplied by 1/theta_poly_order
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(coefficients(i_sparse,1)) > 1e-12) then     
+            if (abs(coefficients(i_sparse,1)) > PFLARE_TOL_ZERO) then     
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
-                  call MatAXPY(inv_matrix, 1d0/coefficients(i_sparse,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
+                  call MatAXPY(inv_matrix, PFLARE_ONE/coefficients(i_sparse,1), mat_product, SUBSET_NONZERO_PATTERN, ierr)
                else
                   ! Have to use the DIFFERENT_NONZERO_PATTERN here
-                  call MatAXPYWrapper(inv_matrix, 1d0/coefficients(i_sparse,1), mat_product)
+                  call MatAXPYWrapper(inv_matrix, PFLARE_ONE/coefficients(i_sparse,1), mat_product)
                end if     
                if (output_product) status_output(i_sparse, 1) = 1
             end if       

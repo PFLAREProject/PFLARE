@@ -29,10 +29,13 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    // we build a matching leaf Vec locally and destroy it at the end.
    PetscSF sf = NULL;
    Vec leaf_vec = NULL;
+   // colmap (garray) maps off-diagonal local columns to global indices; needed on
+   // the device for the global-index tie break in the non-local comparison
+   const PetscInt *colmap = NULL;
 
    if (mpi)
    {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, NULL));
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, &colmap));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
       PetscCallVoid(MatGetMultPetscSF(*strength_mat, &sf));
       PetscCallVoid(MatCreateVecs(mat_nonlocal, &leaf_vec, NULL));
@@ -62,11 +65,15 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
    intKokkosView cf_markers_temp_d;
 
    PetscScalarKokkosView measure_nonlocal_d;
+   // Device copy of colmap for the non-local tie break
+   PetscIntKokkosView colmap_d;
 
    if (mpi) {
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
       cf_markers_temp_d = intKokkosView("cf_markers_temp_d", local_rows);
+      colmap_d = PetscIntKokkosView("colmap_d", cols_ao);
+      Kokkos::deep_copy(colmap_d, PetscIntConstKokkosViewHost(colmap, cols_ao));
    }
 
    // Device memory for the mark
@@ -225,9 +232,12 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                   Kokkos::TeamThreadRange(t, ncols_local),
                   [&](const PetscInt j, PetscInt& strong_count) {
 
-                  // Have to only check active strong neighbours
-                  if (measure_local_d(i) >= measure_local_d(device_local_j[device_local_i[i] + j]) && \
-                           cf_markers_d(device_local_j[device_local_i[i] + j]) == 0)
+                  // Have to only check active strong neighbours. In single precision
+                  // may need a tie break and we use the global index (larger index loses)
+                  const PetscInt col = device_local_j[device_local_i[i] + j];
+                  if ((measure_local_d(i) > measure_local_d(col) || \
+                           (measure_local_d(i) == measure_local_d(col) && i > col)) && \
+                           cf_markers_d(col) == 0)
                   {
                      strong_count++;
                   }
@@ -295,8 +305,12 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                      Kokkos::TeamThreadRange(t, ncols_nonlocal),
                      [&](const PetscInt j, PetscInt& strong_count) {
 
-                     if (measure_local_d(i) >= measure_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j])  && \
-                              cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == 0)
+                     // Same deterministic global-index tie break as the local loop;
+                     // the non-local neighbour's global index is colmap_d(col)
+                     const PetscInt col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                     if ((measure_local_d(i) > measure_nonlocal_d(col) || \
+                              (measure_local_d(i) == measure_nonlocal_d(col) && global_row_start + i > colmap_d(col))) && \
+                              cf_markers_nonlocal_d(col) == 0)
                      {
                         strong_count++;
                      }
@@ -559,10 +573,13 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
    bool destroy_nonlocal_transpose = false;
    bool destroy_spst = false;
+   // colmap (garray) maps off-diagonal local columns to global indices; needed on
+   // the device for the global-index tie break in the non-local comparisons
+   const PetscInt *colmap = NULL;
 
    if (mpi)
    {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, NULL));
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*strength_mat, &mat_local, &mat_nonlocal, &colmap));
       PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
       // Borrowed mult SF + locally-built leaf Vec (sized/typed to match Ao)
       PetscCallVoid(MatGetMultPetscSF(*strength_mat, &sf));
@@ -634,6 +651,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
    intKokkosView cf_markers_nonlocal_d;
    PetscScalarKokkosView measure_nonlocal_d;
+   // Device copy of colmap for the non-local tie break
+   PetscIntKokkosView colmap_d;
 
    // ~~~~~~~~~~~~~~~
    // veto stores whether a node has been veto'd as a candidate
@@ -647,6 +666,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
       measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
       veto_nonlocal_d = boolKokkosView("veto_nonlocal_d", cols_ao);
+      colmap_d = PetscIntKokkosView("colmap_d", cols_ao);
+      Kokkos::deep_copy(colmap_d, PetscIntConstKokkosViewHost(colmap, cols_ao));
    }
 
    auto exec = PetscGetKokkosExecutionSpace();
@@ -820,8 +841,11 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                   const PetscInt col = device_local_j_spst[device_local_i_spst[i] + j];
 
                   // Skip the diagonal
-                  // Have to only check active strong influences
-                  if (measure_local_d(i) >= measure_local_d(col) && cf_markers_d(col) == 0 && col != i)
+                  // Have to only check active strong influences. In single precision
+                  // may need a tie break and we use the global index (larger index loses)
+                  if ((measure_local_d(i) > measure_local_d(col) || \
+                        (measure_local_d(i) == measure_local_d(col) && i > col)) && \
+                        cf_markers_d(col) == 0 && col != i)
                   {
                      strong_count++;
                   }
@@ -886,8 +910,12 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
                         const PetscInt col = device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j];
 
-                        // Have to only check active strong influences
-                        if (measure_nonlocal_d(i) >= measure_local_d(col) && cf_markers_d(col) == 0)
+                        // Have to only check active strong influences. In single
+                        // precision may need a tie break using the global index (larger
+                        // index loses); the nonlocal node's global index is colmap_d(i)
+                        if ((measure_nonlocal_d(i) > measure_local_d(col) || \
+                              (measure_nonlocal_d(i) == measure_local_d(col) && colmap_d(i) > global_row_start + col)) && \
+                              cf_markers_d(col) == 0)
                         {
                            strong_count++;
                         }
@@ -961,8 +989,12 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                      Kokkos::TeamThreadRange(t, ncols_nonlocal),
                      [&](const PetscInt j, PetscInt& strong_count) {
 
-                     if (measure_local_d(i) >= measure_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j])  && \
-                              cf_markers_nonlocal_d(device_nonlocal_j[device_nonlocal_i[i] + j]) == 0)
+                     // Same deterministic global-index tie break as the local loop;
+                     // the non-local neighbour's global index is colmap_d(col)
+                     const PetscInt col = device_nonlocal_j[device_nonlocal_i[i] + j];
+                     if ((measure_local_d(i) > measure_nonlocal_d(col) || \
+                              (measure_local_d(i) == measure_nonlocal_d(col) && global_row_start + i > colmap_d(col))) && \
+                              cf_markers_nonlocal_d(col) == 0)
                      {
                         strong_count++;
                      }

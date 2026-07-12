@@ -1,7 +1,8 @@
 module air_data_type_routines
 
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
-   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP, MAT_INV_AFF
+   use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP, MAT_INV_AFF, &
+         PFLARE_TOL_AUTO_TRUNCATE
    use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
    use fc_smooth, only: destroy_VecISCopyLocalWrapper
    
@@ -305,7 +306,7 @@ module air_data_type_routines
       air_data%options%max_levels = 300
       air_data%options%coarse_eq_limit = 6
       air_data%options%auto_truncate_start_level = -1
-      air_data%options%auto_truncate_tol = 1e-14
+      air_data%options%auto_truncate_tol = PFLARE_TOL_AUTO_TRUNCATE
       air_data%options%processor_agglom = .TRUE.
       air_data%options%processor_agglom_ratio = 2
       air_data%options%processor_agglom_factor = 2
