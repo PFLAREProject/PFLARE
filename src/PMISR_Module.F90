@@ -3,18 +3,15 @@ module pmisr_module
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug
-   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h, &
-         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c, &
-         allreducesum_petscint_mine, boolscatter_mat_begin_c, boolscatter_mat_end_c, &
-         boolscatter_mat_reverse_begin_c, boolscatter_mat_reverse_end_c
+   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
 
    implicit none
 
-   public   
-   
+   public
+
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
@@ -296,16 +293,14 @@ module pmisr_module
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscBool, dimension(:), allocatable :: in_set_this_loop
-      PetscBool, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
-      type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
+      PetscBool, dimension(:), allocatable :: assigned_local, assigned_nonlocal
       ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
-      ! vecscatter_mat_end_c - must match the true Vec value type
+      ! VecGetArrayRead - must match the true Vec value type
       PetscScalar, pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao
       type(tVec) :: measure_vec, leaf_vec
+      type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: vec_long, leaf_vec_array
-      integer(c_long_long) :: A_array
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
@@ -368,17 +363,15 @@ module pmisr_module
 
          ! Leaf Vec sized/typed to match the off-diagonal block
          call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
-         leaf_vec_array = leaf_vec%v
 
-         vec_long = measure_vec%v
-         A_array = strength_mat%v
-         call vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array)
-         call vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, measure_nonlocal_ptr)
-         call c_f_pointer(measure_nonlocal_ptr, measure_nonlocal, shape=[cols_ao])
+         ! Use strength_mat's mult SF for the measure scatter and (below) the
+         ! boolean halo exchanges. Keep it checked out until cleanup.
+         call MatGetMultPetscSF(strength_mat, sf, ierr)
+         call VecScatterBegin(sf, measure_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+         call VecScatterEnd(sf, measure_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+         call VecGetArrayRead(leaf_vec, measure_nonlocal, ierr)
 
          allocate(assigned_nonlocal(cols_ao))
-         assigned_local_ptr = c_loc(assigned_local)
-         assigned_nonlocal_ptr = c_loc(assigned_nonlocal)
       else
          ! Need to avoid uninitialised warning
          allocate(assigned_nonlocal(0))
@@ -444,8 +437,7 @@ module pmisr_module
          ! This is just an allreduce sum, but we can't use MPIU_INTEGER, as if we call the pmisr
          ! cf splitting from C it is not defined - also have to pass the matrix so we can get the comm
          ! given they're different in C and fortran
-         A_array = strength_mat%v
-         call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+         call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
          counter_undecided = counter_parallel
 
       ! If we're doing a fixed number of steps, then we don't care
@@ -478,7 +470,7 @@ module pmisr_module
          ! Start the async broadcast of assigned_local to assigned_nonlocal
          ! ~~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call PetscSFBcastBegin(sf, MPI_C_BOOL, assigned_local, assigned_nonlocal, MPI_REPLACE, ierr)
          end if
 
          ! Reset in_set_this_loop, which keeps track of which nodes are added to the set this loop
@@ -531,7 +523,7 @@ module pmisr_module
          ! Finish the async broadcast, assigned_nonlocal is now correct
          ! ~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call PetscSFBcastEnd(sf, MPI_C_BOOL, assigned_local, assigned_nonlocal, MPI_REPLACE, ierr)
          end if
 
          ! ~~~~~~~~
@@ -598,7 +590,11 @@ module pmisr_module
             ! After this comms finishes any local node in another processors halo 
             ! that has been assigned on another process will be correctly marked in assigned_local
             ! ~~~~~~~~~~~    
-            call boolscatter_mat_reverse_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+#if !defined(PETSC_HAVE_MPIUNI)
+            ! MPIUNI's Fortran headers do not provide MPI_LOR; this branch only
+            ! runs when comm_size /= 1, i.e. never in a serial MPIUNI build
+            call PetscSFReduceBegin(sf, MPI_C_BOOL, assigned_nonlocal, assigned_local, MPI_LOR, ierr)
+#endif
 
          end if
 
@@ -623,7 +619,9 @@ module pmisr_module
          ! ~~~~~~~~~
          if (comm_size /= 1) then
             ! Finishes the reduce LOR, assigned_local will now be correct
-            call boolscatter_mat_reverse_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+#if !defined(PETSC_HAVE_MPIUNI)
+            call PetscSFReduceEnd(sf, MPI_C_BOOL, assigned_nonlocal, assigned_local, MPI_LOR, ierr)
+#endif
          end if
 
          ! ~~~~~~~~~~~~
@@ -638,8 +636,7 @@ module pmisr_module
             ! Count how many are undecided
             counter_undecided =  local_rows - count(assigned_local)
             ! Parallel reduction!
-            A_array = strength_mat%v
-            call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+            call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
             counter_undecided = counter_parallel            
          end if
       end do
@@ -664,7 +661,7 @@ module pmisr_module
       ! ~~~~~~~~~      
       deallocate(in_set_this_loop, assigned_local)
       if (comm_size/=1) then
-         call vecscatter_mat_restore_c(leaf_vec_array, measure_nonlocal_ptr)
+         call VecRestoreArrayRead(leaf_vec, measure_nonlocal, ierr)
          call VecDestroy(measure_vec, ierr)
          call VecDestroy(leaf_vec, ierr)
       end if
@@ -725,19 +722,16 @@ module pmisr_module
       integer :: comm_rank, errorcode
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
-      PetscBool, dimension(:), allocatable, target :: in_set_this_loop
-      PetscBool, dimension(:), allocatable, target :: assigned_local, assigned_nonlocal
-      PetscBool, dimension(:), allocatable, target :: veto_local, veto_nonlocal
-      type(c_ptr) :: measure_nonlocal_ptr=c_null_ptr, assigned_local_ptr=c_null_ptr, assigned_nonlocal_ptr=c_null_ptr
-      type(c_ptr) :: veto_local_ptr=c_null_ptr, veto_nonlocal_ptr=c_null_ptr, in_set_ptr=c_null_ptr
+      PetscBool, dimension(:), allocatable :: in_set_this_loop
+      PetscBool, dimension(:), allocatable :: assigned_local, assigned_nonlocal
+      PetscBool, dimension(:), allocatable :: veto_local, veto_nonlocal
       ! c_f_pointer reinterprets the raw Vec array (PetscScalar) returned by
-      ! vecscatter_mat_end_c - must match the true Vec value type
+      ! VecGetArrayRead - must match the true Vec value type
       PetscScalar, pointer :: measure_nonlocal(:) => null()
       type(tMat) :: Ad, Ao, Ad_spst, Ao_transpose
       type(tVec) :: measure_vec, leaf_vec
+      type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: colmap
-      integer(c_long_long) :: vec_long, leaf_vec_array
-      integer(c_long_long) :: A_array
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt, dimension(:), pointer :: spst_ia, spst_ja, aot_ia, aot_ja
       PetscInt :: shift = 0
@@ -848,21 +842,16 @@ module pmisr_module
 
          ! Leaf Vec sized/typed to match the off-diagonal block
          call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
-         leaf_vec_array = leaf_vec%v
 
-         vec_long = measure_vec%v
-         A_array = strength_mat%v
-         call vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array)
-         call vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, measure_nonlocal_ptr)
-         call c_f_pointer(measure_nonlocal_ptr, measure_nonlocal, shape=[cols_ao])
+         ! Use strength_mat's mult SF for the measure scatter and (below) the
+         ! boolean halo exchanges. Keep it checked out until cleanup.
+         call MatGetMultPetscSF(strength_mat, sf, ierr)
+         call VecScatterBegin(sf, measure_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+         call VecScatterEnd(sf, measure_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+         call VecGetArrayRead(leaf_vec, measure_nonlocal, ierr)
 
          allocate(assigned_nonlocal(cols_ao))
          allocate(veto_nonlocal(cols_ao))
-         assigned_local_ptr = c_loc(assigned_local)
-         assigned_nonlocal_ptr = c_loc(assigned_nonlocal)
-         veto_local_ptr = c_loc(veto_local)
-         veto_nonlocal_ptr = c_loc(veto_nonlocal)
-         in_set_ptr = c_loc(in_set_this_loop)
       else
          ! Need to avoid uninitialised warning
          allocate(assigned_nonlocal(0))
@@ -929,8 +918,7 @@ module pmisr_module
          ! This is just an allreduce sum, but we can't use MPIU_INTEGER, as if we call the pmisr
          ! cf splitting from C it is not defined - also have to pass the matrix so we can get the comm
          ! given they're different in C and fortran
-         A_array = strength_mat%v
-         call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+         call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
          counter_undecided = counter_parallel
 
       ! If we're doing a fixed number of steps, then we don't care
@@ -972,7 +960,7 @@ module pmisr_module
          ! and the non-local influence veto
          ! ~~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_begin_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call PetscSFBcastBegin(sf, MPI_C_BOOL, assigned_local, assigned_nonlocal, MPI_REPLACE, ierr)
          end if
 
          ! ~~~~~~~~
@@ -1020,7 +1008,7 @@ module pmisr_module
          ! Finish the async broadcast, assigned_nonlocal is now correct
          ! ~~~~~~~~
          if (comm_size /= 1) then
-            call boolscatter_mat_end_c(A_array, assigned_local_ptr, assigned_nonlocal_ptr)
+            call PetscSFBcastEnd(sf, MPI_C_BOOL, assigned_local, assigned_nonlocal, MPI_REPLACE, ierr)
          end if
 
          ! ~~~~~~~~
@@ -1067,9 +1055,11 @@ module pmisr_module
             ! After this, veto_local(i) is TRUE if any non-local transpose neighbour
             ! vetoes local node i
             ! ~~~~~~~~
-            call boolscatter_mat_reverse_begin_c(A_array, veto_local_ptr, veto_nonlocal_ptr)
+#if !defined(PETSC_HAVE_MPIUNI)
+            call PetscSFReduceBegin(sf, MPI_C_BOOL, veto_nonlocal, veto_local, MPI_LOR, ierr)
             ! Not sure we have any chance to overlap this with anything else
-            call boolscatter_mat_reverse_end_c(A_array, veto_local_ptr, veto_nonlocal_ptr)
+            call PetscSFReduceEnd(sf, MPI_C_BOOL, veto_nonlocal, veto_local, MPI_LOR, ierr)
+#endif
 
             ! ~~~~~~~~
             ! Now the comms have finished, we know exactly which local nodes on this rank have no
@@ -1176,8 +1166,10 @@ module pmisr_module
             ! After this comms finishes any local node in another processors halo
             ! that has been assigned on another process will be correctly marked in assigned_local
             ! ~~~~~~~~~~~
-            call boolscatter_mat_reverse_begin_c(A_array, assigned_local_ptr, veto_nonlocal_ptr)
-            call boolscatter_mat_reverse_end_c(A_array, assigned_local_ptr, veto_nonlocal_ptr)
+#if !defined(PETSC_HAVE_MPIUNI)
+            call PetscSFReduceBegin(sf, MPI_C_BOOL, veto_nonlocal, assigned_local, MPI_LOR, ierr)
+            call PetscSFReduceEnd(sf, MPI_C_BOOL, veto_nonlocal, assigned_local, MPI_LOR, ierr)
+#endif
 
             ! ~~~~~~~~~~~~~~
             ! 3. Non-local influences: we need to know which nonlocal nodes were just
@@ -1188,8 +1180,8 @@ module pmisr_module
 
             ! Reuse veto_nonlocal to receive the forward scatter result
             veto_nonlocal = .FALSE.
-            call boolscatter_mat_begin_c(A_array, in_set_ptr, veto_nonlocal_ptr)
-            call boolscatter_mat_end_c(A_array, in_set_ptr, veto_nonlocal_ptr)
+            call PetscSFBcastBegin(sf, MPI_C_BOOL, in_set_this_loop, veto_nonlocal, MPI_REPLACE, ierr)
+            call PetscSFBcastEnd(sf, MPI_C_BOOL, in_set_this_loop, veto_nonlocal, MPI_REPLACE, ierr)
 
             ! Now veto_nonlocal(k) = TRUE means the remote node at nonlocal column k
             ! was just assigned this loop on its owning processor
@@ -1219,8 +1211,7 @@ module pmisr_module
             ! Count how many are undecided
             counter_undecided =  local_rows - count(assigned_local)
             ! Parallel reduction!
-            A_array = strength_mat%v
-            call allreducesum_petscint_mine(A_array, counter_undecided, counter_parallel)
+            call MPI_Allreduce(counter_undecided, counter_parallel, 1, MPIU_INTEGER, MPI_SUM, MPI_COMM_MATRIX, errorcode)
             counter_undecided = counter_parallel
          end if
       end do
@@ -1252,7 +1243,7 @@ module pmisr_module
 
       deallocate(in_set_this_loop, assigned_local, veto_local)
       if (comm_size/=1) then
-         call vecscatter_mat_restore_c(leaf_vec_array, measure_nonlocal_ptr)
+         call VecRestoreArrayRead(leaf_vec, measure_nonlocal, ierr)
          call VecDestroy(measure_vec, ierr)
          call VecDestroy(leaf_vec, ierr)
       end if

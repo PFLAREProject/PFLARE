@@ -3,8 +3,7 @@ module matdiagdom
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug
-      use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos, &
-         vecscatter_mat_begin_c, vecscatter_mat_end_c, vecscatter_mat_restore_c
+      use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos
    use pflare_parameters, only: C_POINT, F_POINT, &
          PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL
 
@@ -125,9 +124,9 @@ module matdiagdom
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer(c_long_long) :: vec_long, A_array, leaf_vec_array
       type(tMat) :: Ad, Ao
       type(tVec) :: cf_markers_vec, leaf_vec
+      type(tPetscSF) :: sf
       PetscInt, dimension(:), pointer :: is_pointer => null(), colmap => null()
       PetscInt, dimension(:), pointer :: ad_ia => null(), ad_ja => null(), ao_ia => null(), ao_ja => null()
       PetscScalar, dimension(:), pointer :: ad_vals => null(), ao_vals => null()
@@ -135,7 +134,6 @@ module matdiagdom
       ! vecscatter_mat_end_c - must match the true Vec value type
       PetscScalar, dimension(:), pointer :: cf_markers_nonlocal => null()
       PetscReal, dimension(:), allocatable, target :: cf_markers_local_real
-      type(c_ptr) :: cf_markers_nonlocal_ptr
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
       PetscReal :: diag_val, off_diag_sum
@@ -193,17 +191,15 @@ module matdiagdom
 
          call VecCreateMPIWithArray(MPI_COMM_MATRIX, one, local_rows, global_rows, &
                cf_markers_local_real, cf_markers_vec, ierr)
-         vec_long = cf_markers_vec%v
 
          ! Leaf Vec sized/typed to match the off-diagonal block
          call MatCreateVecs(Ao, leaf_vec, PETSC_NULL_VEC, ierr)
-         leaf_vec_array = leaf_vec%v
 
          ! Use input_mat's mult SF + the local leaf Vec for the single halo scatter.
-         A_array = input_mat%v
-         call vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array)
-         call vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, cf_markers_nonlocal_ptr)
-         call c_f_pointer(cf_markers_nonlocal_ptr, cf_markers_nonlocal, shape=[cols_ao])
+         call MatGetMultPetscSF(input_mat, sf, ierr)
+         call VecScatterBegin(sf, cf_markers_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+         call VecScatterEnd(sf, cf_markers_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD, ierr)
+         call VecGetArrayRead(leaf_vec, cf_markers_nonlocal, ierr)
       end if
 
       ! Compute diagonal-dominance sums over the local fine-row list.
@@ -245,7 +241,7 @@ module matdiagdom
 
       ! Cleanup for halo scatter resources.
       if (mpi) then
-         call vecscatter_mat_restore_c(leaf_vec_array, cf_markers_nonlocal_ptr)
+         call VecRestoreArrayRead(leaf_vec, cf_markers_nonlocal, ierr)
          call VecDestroy(cf_markers_vec, ierr)
          call VecDestroy(leaf_vec, ierr)
          deallocate(cf_markers_local_real)

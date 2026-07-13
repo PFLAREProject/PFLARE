@@ -24,105 +24,11 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_long_long) :: C_array
-      end subroutine mat_mat_symbolic_c         
+      end subroutine mat_mat_symbolic_c
 
    end interface
 
    interface
-
-      subroutine vecscatter_mat_begin_c(A_array, vec_long, leaf_vec_array) &
-         bind(c, name="vecscatter_mat_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long, leaf_vec_array
-
-      end subroutine vecscatter_mat_begin_c
-
-   end interface
-
-   interface
-
-      subroutine vecscatter_mat_end_c(A_array, vec_long, leaf_vec_array, cf_markers_nonlocal) &
-         bind(c, name="vecscatter_mat_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array, vec_long, leaf_vec_array
-         type(c_ptr) :: cf_markers_nonlocal
-
-      end subroutine vecscatter_mat_end_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_begin_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-
-      end subroutine boolscatter_mat_begin_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_end_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-      end subroutine boolscatter_mat_end_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_reverse_begin_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_reverse_begin_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-
-      end subroutine boolscatter_mat_reverse_begin_c
-
-   end interface
-
-   interface
-
-      subroutine boolscatter_mat_reverse_end_c(A_array, assigned_local, assigned_nonlocal) &
-         bind(c, name="boolscatter_mat_reverse_end_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         type(c_ptr), value :: assigned_local, assigned_nonlocal
-      end subroutine boolscatter_mat_reverse_end_c
-
-   end interface
-
-   interface
-
-      subroutine vecscatter_mat_restore_c(leaf_vec_array, cf_markers_nonlocal) &
-         bind(c, name="vecscatter_mat_restore_c")
-         use iso_c_binding
-         integer(c_long_long) :: leaf_vec_array
-         type(c_ptr) :: cf_markers_nonlocal
-
-      end subroutine vecscatter_mat_restore_c
-
-   end interface
-   
-   interface
-
-      subroutine allreducesum_petscint_mine(A_array, first_int, return_int) &
-            bind(c, name="allreducesum_petscint_mine")
-            use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscInt, value :: first_int
-         PetscInt :: return_int
-
-      end subroutine allreducesum_petscint_mine         
- 
-   end interface      
-
-   interface   
       
       subroutine GenerateIS_ProcAgglomeration_c(proc_stride, global_size, local_size_reduced, start) &
          bind(c, name="GenerateIS_ProcAgglomeration_c")
@@ -160,28 +66,6 @@ module c_petsc_interfaces
  
    end interface
 
-   interface   
-      
-      subroutine MatGetNNZs_local_c(A_array, nnzs) &
-         bind(c, name="MatGetNNZs_local_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscInt :: nnzs
-      end subroutine MatGetNNZs_local_c
- 
-   end interface
-   
-   interface   
-      
-      subroutine MatGetNNZs_both_c(A_array, nnzs_local, nnzs_nonlocal) &
-         bind(c, name="MatGetNNZs_both_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscInt :: nnzs_local, nnzs_nonlocal
-      end subroutine MatGetNNZs_both_c
- 
-   end interface      
-   
    interface   
       
       subroutine c_PCGetStructureFlag(A_array, flag) &
@@ -279,19 +163,8 @@ module c_petsc_interfaces
  
    end interface
    
-   interface   
-      
-      subroutine MatSetAllValues_cpu(A_array, val) &
-         bind(c, name="MatSetAllValues_cpu")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         PetscScalar, value :: val
-      end subroutine MatSetAllValues_cpu
- 
-   end interface     
-   
-   interface   
-      
+   interface
+
       subroutine create_VecISCopyLocal_kokkos(max_levels_input, handle) &
          bind(c, name="create_VecISCopyLocal_kokkos")
          use iso_c_binding
