@@ -334,7 +334,7 @@ jobs:
   # We do this by checking out petsc main and just replacing the hash it pulls down
   # for PFLARE to the hash from the merge commit for this branch
   gnu_petsc_config:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [setup]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
