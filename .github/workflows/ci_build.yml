@@ -18,7 +18,8 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       branch: ${{ steps.determine_branch.outputs.branch }}
-      commit: ${{ github.sha }}      
+      commit: ${{ github.sha }}
+      head_commit: ${{ steps.determine_branch.outputs.head_commit }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,8 +32,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "branch=${{ github.event.pull_request.head.ref }}" >> $GITHUB_OUTPUT
+            echo "head_commit=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
           else
             echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "head_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           fi
 
       - name: free disk space
@@ -336,6 +339,7 @@ jobs:
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
       COMMIT: ${{ needs.setup.outputs.commit }}
+      HEAD_COMMIT: ${{ needs.setup.outputs.head_commit }}
     steps:
       - name: Test build through PETSc configure
         shell: bash
@@ -343,6 +347,7 @@ jobs:
           set -euo pipefail
           export BRANCH="${{ env.BRANCH }}"
           export COMMIT="${{ env.COMMIT }}"
+          export HEAD_COMMIT="${{ env.HEAD_COMMIT }}"
           echo "Using branch: ${BRANCH}"
           echo "Using commit: ${COMMIT}"
 
@@ -390,13 +395,32 @@ jobs:
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}"
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}" check
 
-          # Build the PETSc docs against the PFLARE commit under test. The gitcommit in
-          # PFLARE.py was already rewritten to ${COMMIT} above, so PETSc's docs clone-and-scan
-          # renders PFLARE's manual pages at this commit. --fail-on-warning (baked into the
-          # `docs` target) turns doctext warnings and unresolved `PCFOO` cross-references into
-          # hard failures. Unset PETSC_ARCH so output lands in doc/_build (the `docs` target
-          # otherwise copies doc -> ${PETSC_ARCH}-doc); PETSC_DIR must stay set so conf.py scans
-          # THIS tree.
+          # PETSc's doc build clones PFLARE with a plain `git clone` + `git checkout <gitcommit>`
+          # to scan its manual pages, which can't see ${COMMIT} when it's a PR merge commit (only
+          # a GitHub-internal ref, not a real clonable commit). Re-point gitcommit at
+          # ${HEAD_COMMIT} - the PFLARE branch tip, not the merge commit - just for this doc scan;
+          # the build/check above already ran against the real ${COMMIT} merge result.
+          python3 - "$HEAD_COMMIT" <<'PY'
+          import pathlib, sys
+          commit = sys.argv[1]
+          path = pathlib.Path("config/BuildSystem/config/packages/PFLARE.py")
+          lines = path.read_text().splitlines()
+          found = False
+          for i, line in enumerate(lines):
+              if line.strip().startswith("self.gitcommit"):
+                  indent = line[:line.find("self.gitcommit")]
+                  lines[i] = f"{indent}self.gitcommit              = '{commit}'"
+                  found = True
+                  break
+          if not found:
+              sys.exit("gitcommit line not found in PFLARE.py")
+          path.write_text("\n".join(lines) + "\n")
+          PY
+
+          # --fail-on-warning (baked into the `docs` target) turns doctext warnings and
+          # unresolved `PCFOO` cross-references into hard failures. Unset PETSC_ARCH so output
+          # lands in doc/_build (the `docs` target otherwise copies doc -> ${PETSC_ARCH}-doc);
+          # PETSC_DIR must stay set so conf.py scans THIS tree.
           unset PETSC_ARCH
           make PETSC_DIR="${PETSC_DIR}" docs
           # Confirm PFLARE's pages made it all the way through to rendered HTML (a dropped
