@@ -422,7 +422,20 @@ jobs:
           # lands in doc/_build (the `docs` target otherwise copies doc -> ${PETSC_ARCH}-doc);
           # PETSC_DIR must stay set so conf.py scans THIS tree.
           unset PETSC_ARCH
-          make PETSC_DIR="${PETSC_DIR}" docs
+          # PETSc's `docs` makefile recipe ends in `; deactivate`, so `make docs` exits 0
+          # even when the inner Sphinx build (including the petsc4py sub-build) failed.
+          # Capture the output and gate on it: Sphinx prints "Warning, treated as error"
+          # on any doctext/cross-reference failure, and conf.py's build_petsc4py_docs prints
+          # "End petsc4py docs" only after the petsc4py Sphinx build succeeds.
+          make PETSC_DIR="${PETSC_DIR}" docs 2>&1 | tee docs_build.log
+          if grep -q "Warning, treated as error" docs_build.log; then
+            echo "Sphinx reported a warning-as-error during the docs build" >&2
+            exit 1
+          fi
+          if ! grep -q "End petsc4py docs" docs_build.log; then
+            echo "petsc4py doc build did not run to completion" >&2
+            exit 1
+          fi
           # Confirm PFLARE's pages made it all the way through to rendered HTML (a dropped
           # SUBMANSEC makes a page silently vanish rather than warn).
           test -f doc/_build/html/manualpages/PC/PCAIR.html
