@@ -590,12 +590,9 @@ module pmisr_module
             ! After this comms finishes any local node in another processors halo 
             ! that has been assigned on another process will be correctly marked in assigned_local
             ! ~~~~~~~~~~~    
-#if !defined(PETSC_HAVE_MPIUNI)
             ! MPIUNI's Fortran headers do not provide MPI_LOR; this branch only
             ! runs when comm_size /= 1, i.e. never in a serial MPIUNI build
             call PetscSFReduceBegin(sf, MPI_C_BOOL, assigned_nonlocal, assigned_local, MPI_LOR, ierr)
-#endif
-
          end if
 
          ! ~~~~~~~~~~~~~~
@@ -619,9 +616,7 @@ module pmisr_module
          ! ~~~~~~~~~
          if (comm_size /= 1) then
             ! Finishes the reduce LOR, assigned_local will now be correct
-#if !defined(PETSC_HAVE_MPIUNI)
             call PetscSFReduceEnd(sf, MPI_C_BOOL, assigned_nonlocal, assigned_local, MPI_LOR, ierr)
-#endif
          end if
 
          ! ~~~~~~~~~~~~
@@ -1055,11 +1050,9 @@ module pmisr_module
             ! After this, veto_local(i) is TRUE if any non-local transpose neighbour
             ! vetoes local node i
             ! ~~~~~~~~
-#if !defined(PETSC_HAVE_MPIUNI)
             call PetscSFReduceBegin(sf, MPI_C_BOOL, veto_nonlocal, veto_local, MPI_LOR, ierr)
             ! Not sure we have any chance to overlap this with anything else
             call PetscSFReduceEnd(sf, MPI_C_BOOL, veto_nonlocal, veto_local, MPI_LOR, ierr)
-#endif
 
             ! ~~~~~~~~
             ! Now the comms have finished, we know exactly which local nodes on this rank have no
@@ -1166,10 +1159,8 @@ module pmisr_module
             ! After this comms finishes any local node in another processors halo
             ! that has been assigned on another process will be correctly marked in assigned_local
             ! ~~~~~~~~~~~
-#if !defined(PETSC_HAVE_MPIUNI)
             call PetscSFReduceBegin(sf, MPI_C_BOOL, veto_nonlocal, assigned_local, MPI_LOR, ierr)
             call PetscSFReduceEnd(sf, MPI_C_BOOL, veto_nonlocal, assigned_local, MPI_LOR, ierr)
-#endif
 
             ! ~~~~~~~~~~~~~~
             ! 3. Non-local influences: we need to know which nonlocal nodes were just
