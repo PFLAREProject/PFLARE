@@ -282,6 +282,12 @@ static PetscErrorCode PCPFLAREINVGetInverseMat_PFLAREINV(PC pc, Mat *mat)
 
   Level: intermediate
 
+  Note:
+  This only affects the polynomial inverse types selected with `PCPFLAREINVSetType()` (for example `power`,
+  `arnoldi`, `newton` or `neumann`); a higher order gives a more accurate inverse, and hence a better
+  preconditioner, at the cost of more matrix-vector products in each apply. It is ignored by the non-polynomial
+  types such as `sai`, `isai` and `jacobi`.
+
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyOrder()`, `PCPFLAREINVSetType()`
 @*/
 PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
@@ -321,6 +327,11 @@ PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
 . -pc_pflareinv_sparsity_order inverse_sparsity_order - power of the input matrix used as the sparsity pattern in assembled inverses; defaults to 1
 
   Level: advanced
+
+  Note:
+  The assembled approximate inverse uses this power of the input matrix as its nonzero pattern, so a larger value
+  gives a denser and typically more accurate inverse at higher setup and apply cost. It has no effect when the
+  inverse is applied matrix-free (see `PCPFLAREINVSetMatrixFree()`).
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetSparsityOrder()`, `PCPFLAREINVSetMatrixFree()`
 @*/
@@ -362,6 +373,12 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 
   Level: intermediate
 
+  Note:
+  The polynomial types (`power`, `arnoldi`, `newton`, `newton_no_extra`, `neumann`) approximate the inverse with a
+  polynomial in the matrix whose degree is set by `PCPFLAREINVSetPolyOrder()`. The `sai` and `isai` types instead
+  assemble a sparse approximate inverse whose pattern is controlled by `PCPFLAREINVSetSparsityOrder()`, while
+  `wjacobi` and `jacobi` are cheap diagonal inverses.
+
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetType()`, `PCPFLAREINVType`, `PCPFLAREINVSetPolyOrder()`
 @*/
 PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType inverse_type)
@@ -401,6 +418,12 @@ PetscErrorCode PCPFLAREINVSetType(PC pc, PCPFLAREINVType inverse_type)
 . -pc_pflareinv_matrix_free (true|false) - apply the approximate inverse matrix-free instead of assembling it; defaults to false
 
   Level: advanced
+
+  Note:
+  When matrix-free the approximate inverse is applied as a sequence of matrix-vector products with the input matrix
+  rather than as a single assembled matrix, avoiding the memory and setup cost of assembling it but making each
+  apply more expensive. Typically the assembled matrix has a fixed sparsity pattern (which is an approximation)
+  so applying matrix-free gives a more accurate inverse. The `sai` and `isai` types cannot be applied matrix-free.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetMatrixFree()`, `PCPFLAREINVGetInverseMat()`
 @*/
@@ -563,6 +586,12 @@ static PetscErrorCode PCPFLAREINVGetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool *
 . -pc_pflareinv_reuse_poly_coeffs (true|false) - skip recomputing the polynomial coefficients during setup when the matrix has the same nonzero pattern; defaults to false
 
   Level: advanced
+
+  Note:
+  This is useful when repeatedly setting up the preconditioner for matrices that share a nonzero pattern but have
+  changed values, since computing the polynomial coefficients (for example the Arnoldi or Newton coefficients)
+  requires parallel reductions that reuse then avoids. Only enable it when the stored coefficients remain a good
+  approximation for the new matrix, as reusing stale coefficients can degrade convergence.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetPolyCoeffs()`
 @*/
@@ -834,9 +863,9 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   approximate inverses, weighted Jacobi), applied assembled or matrix-free
 
   Options Database Keys:
-+ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - approximate inverse type
-. -pc_pflareinv_poly_order  poly_order - polynomial order if using a polynomial inverse type
-- -pc_pflareinv_matrix_free (true|false) - apply matrix-free instead of assembling the inverse
++ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - approximate inverse type; defaults to arnoldi
+. -pc_pflareinv_poly_order  poly_order - polynomial order if using a polynomial inverse type; defaults to 6
+- -pc_pflareinv_matrix_free (true|false) - apply matrix-free instead of assembling the inverse; defaults to false
 
   Level: intermediate
 
