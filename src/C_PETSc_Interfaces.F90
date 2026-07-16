@@ -18,18 +18,6 @@ module c_petsc_interfaces
 
    interface
 
-      subroutine mat_mat_symbolic_c(A_array, B_array, C_array) &
-         bind(c, name="mat_mat_symbolic_c")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: B_array
-         integer(c_long_long) :: C_array
-      end subroutine mat_mat_symbolic_c
-
-   end interface
-
-   interface
-      
       subroutine GenerateIS_ProcAgglomeration_c(proc_stride, global_size, local_size_reduced, start) &
          bind(c, name="GenerateIS_ProcAgglomeration_c")
          use iso_c_binding

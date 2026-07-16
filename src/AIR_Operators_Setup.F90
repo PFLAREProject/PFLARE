@@ -17,13 +17,12 @@ module air_operators_setup
          PFLARE_MINUS_ONE, PFLARE_PTAP_FILL
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
-   use c_petsc_interfaces, only: mat_mat_symbolic_c
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
          compute_P_from_W, compute_R_from_Z
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
-         remove_from_sparse_match
+         remove_from_sparse_match, mat_mat_symbolic
 
 #include "petsc/finclude/petscksp.h"
 
@@ -315,7 +314,7 @@ module air_operators_setup
       type(tVec), dimension(:), allocatable   :: left_null_vecs_f, right_null_vecs_f
       integer :: comm_size, errorcode, order, i_loc
       MPIU_Comm :: MPI_COMM_MATRIX
-      integer(c_long_long) :: A_array, B_array, C_array
+      type(tMat) :: C_mat
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer
@@ -762,24 +761,20 @@ module air_operators_setup
                do order = 3, air_data%options%lair_distance
                   
                   ! Call a symbolic mult as we don't need the values, just the resulting sparsity  
-                  A_array = air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP)%v
-                  B_array = A_ff_power%v
-                  call mat_mat_symbolic_c(A_array, B_array, C_array)
+                  call mat_mat_symbolic(air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), A_ff_power, C_mat)
                   ! Don't delete the original power - ie A_ff
                   if (destroy_mat) call MatDestroy(A_ff_power, ierr)
-                  A_ff_power%v = C_array  
+                  A_ff_power = C_mat
                   destroy_mat = .TRUE.
       
                end do
       
                ! Call a symbolic mult as we don't need the values, just the resulting sparsity  
                ! A_cf * A_ff^(distance - 1)
-               A_array = air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP)%v
-               B_array = A_ff_power%v
-               call mat_mat_symbolic_c(A_array, B_array, C_array)
+               call mat_mat_symbolic(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), A_ff_power, C_mat)
                if (destroy_mat) call MatDestroy(A_ff_power, ierr)
 
-               sparsity_mat_cf%v = C_array    
+               sparsity_mat_cf = C_mat
 
             end if
          end if
