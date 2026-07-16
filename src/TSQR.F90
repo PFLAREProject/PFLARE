@@ -42,9 +42,7 @@ module tsqr
       ! Creates our custom reduction
 
       ! ~~~~~~
-#if !defined(PETSC_HAVE_MPIUNI)
       integer :: errorcode
-#endif
       ! ~~~~~~
 
       ! Point at the custom reduction function
@@ -56,9 +54,7 @@ module tsqr
          ! the coefficients on different cores which is not acceptable
          ! MPIUNI does not provide a Fortran MPI_Op_create; the custom reduction is only
          ! ever used in the parallel (comm_size/=1) path in start_tsqr, so skip it in serial
-#if !defined(PETSC_HAVE_MPIUNI)
          call MPI_Op_create(custom_reduction_tsqr, .FALSE., reduction_op_tsqr, errorcode)
-#endif
          built_custom_op_tsqr = .true.
       end if
       
@@ -248,14 +244,13 @@ module tsqr
       ! ~~~~~~~~~~~
       ! MPIUNI provides no Fortran MPI_IAllreduce and comm_size is always 1 in serial,
       ! so this non-blocking reduction only exists for the parallel (real MPI) build
-#if !defined(PETSC_HAVE_MPIUNI)
       if (comm_size/=1) then
 
          ! Only need a single all reduce, this is the only comms outside of the
          ! matvecs above
          buffers%request = MPI_REQUEST_NULL
          ! This is now a non-blocking allreduce, you have to finish this where needed
-         call MPI_IAllreduce(buffers%R_buffer_send, buffers%R_buffer_receive, &
+         call MPI_Iallreduce(buffers%R_buffer_send, buffers%R_buffer_receive, &
                   n_size * n_size + 1, MPIU_REAL, &
                   reduction_op_tsqr, MPI_COMM_MATRIX, buffers%request, errorcode)
          if (errorcode /= MPI_SUCCESS) then
@@ -271,7 +266,6 @@ module tsqr
          ! ~~~~~
 
       end if
-#endif
       
    end subroutine start_tsqr   
 

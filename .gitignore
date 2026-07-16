@@ -1,0 +1,40 @@
+# Compiled Fortran/C objects and module files
+*.o
+*.mod
+
+# Build output
+lib/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Editor/IDE
+.vscode/
+
+# Run artifacts
+tools/slurm-*.out
+tests/solution.vts
+
+# Compiled test executables (add new ones here as tests are added)
+tests/adv_1d
+tests/adv_1dk
+tests/adv_dg_upwind
+tests/adv_diff_2d
+tests/adv_diff_cg_supg
+tests/adv_diff_fd
+tests/ex12f
+tests/ex12f_gmres_poly
+tests/ex6
+tests/ex6_cf_splitting
+tests/ex6_getcoeffs
+tests/ex6_two_airg
+tests/ex6f
+tests/ex6f_getcoeffs
+tests/ex6f_pcmatapply
+tests/ex6f_reuse_amount
+tests/ilu_factors
+tests/ilu_factors_kokkos
+tests/mat_diag
+tests/matrandom
+tests/matrandom_check_reset
