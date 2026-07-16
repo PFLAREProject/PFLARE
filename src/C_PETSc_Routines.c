@@ -219,53 +219,6 @@ PETSC_INTERN void GenerateIS_ProcAgglomeration_c(PetscInt proc_stride, PetscInt 
    return;
 }
 
-// Computes a symbolic mat mat mult - the fortran interface doesn't have
-// MATPRODUCT_AB or MatProductSetFromOptions set
-PETSC_INTERN void mat_mat_symbolic_c(Mat *A, Mat *B, Mat *result)
-{
-   MPI_Comm comm;
-   int comm_size;
-   MatType mat_type_a, mat_type_b;
-
-   // Get the comm
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*A, &comm));
-   PetscCallMPIAbort(comm, MPI_Comm_size(comm, &comm_size));
-
-   PetscCallVoid(MatGetType(*A, &mat_type_a));
-   PetscCallVoid(MatGetType(*B, &mat_type_b));
-
-   if (strcmp(mat_type_a, MATDIAGONAL) == 0)
-   {
-      PetscCallVoid(MatDuplicate(*B, MAT_DO_NOT_COPY_VALUES, result));
-   }
-   else if (strcmp(mat_type_b, MATDIAGONAL) == 0)
-   {  
-      PetscCallVoid(MatDuplicate(*A, MAT_DO_NOT_COPY_VALUES, result));
-   }
-   else
-   {
-      // For some reason in serial matduplicate is not defined on unassembled matrices
-      // ie we call a matduplicate on the symbolic sparsity_mat returned from this
-      // So we just do an ordinary matmatmult in serial
-      if (comm_size == 1) 
-      {
-         PetscCallVoid(MatMatMult(*A, *B, MAT_INITIAL_MATRIX, 1.0, result));
-      }
-      else
-      {
-         PetscCallVoid(MatProductCreate(*A, *B, NULL, result));
-         PetscCallVoid(MatProductSetType(*result, MATPRODUCT_AB));
-         PetscCallVoid(MatProductSetAlgorithm(*result, "default"));
-         PetscCallVoid(MatProductSetFill(*result, PETSC_DEFAULT));
-         PetscCallVoid(MatProductSetFromOptions(*result));
-         PetscCallVoid(MatProductSymbolic(*result));
-         PetscCallVoid(MatProductClear(*result));
-      }
-   }
-
-   return;
-}
-
 // Takes a Mat and returns a Mat on a subcomm without ranks with no rows
 // If there are no empty ranks, then it returns the same matrix
 // If not there is a new copy that must be destroyed

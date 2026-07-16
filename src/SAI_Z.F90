@@ -5,8 +5,9 @@ module sai_z
    use binary_tree, only: itree, itree2vector, flush_tree
    use sorting, only: create_knuth_shuffle_tree_array, intersect_pre_sorted_indices_only, &
          merge_pre_sorted, sorted_binary_search
-   use c_petsc_interfaces, only: mat_mat_symbolic_c, calculate_and_build_sai_z_kokkos
-   use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper
+   use c_petsc_interfaces, only: calculate_and_build_sai_z_kokkos
+   use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
+         mat_mat_symbolic
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
          PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11
 
@@ -809,7 +810,7 @@ module sai_z
       integer :: order
       PetscErrorCode :: ierr
       logical :: destroy_mat
-      integer(c_long_long) :: A_array, B_array, C_array
+      type(tMat) :: C_mat
       PetscInt, parameter ::  one=1, zero=0
 
       ! ~~~~~~
@@ -851,17 +852,15 @@ module sai_z
             do order = 2, sparsity_order
                
                ! Call a symbolic mult as we don't need the values, just the resulting sparsity  
-               A_array = matrix%v
-               B_array = A_power%v
-               call mat_mat_symbolic_c(A_array, B_array, C_array)
+               call mat_mat_symbolic(matrix, A_power, C_mat)
                ! Don't delete the original power - ie matrix
                if (destroy_mat) call MatDestroy(A_power, ierr)
-               A_power%v = C_array  
+               A_power = C_mat
                destroy_mat = .TRUE.
 
             end do
 
-            sparsity_mat_cf%v = C_array    
+            sparsity_mat_cf = C_mat
 
          ! Reuse
          else

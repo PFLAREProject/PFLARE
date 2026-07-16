@@ -1633,5 +1633,49 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
    !-------------------------------------------------------------------------------------------------------------------------------
 
+   ! Computes the symbolic sparsity of A*B (values not needed).
+   ! Replaces the old C shim mat_mat_symbolic_c now that the PETSc
+   ! Fortran MatProduct interface (incl. MATPRODUCT_AB) exists.
+   subroutine mat_mat_symbolic(A, B, C)
+
+      type(tMat), intent(in)  :: A, B
+      type(tMat), intent(out) :: C
+
+      MatType :: mat_type_a, mat_type_b
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer :: comm_size, errorcode
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~~~~~
+
+      call PetscObjectGetComm(A, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
+
+      call MatGetType(A, mat_type_a, ierr)
+      call MatGetType(B, mat_type_b, ierr)
+
+      if (mat_type_a == MATDIAGONAL) then
+         call MatDuplicate(B, MAT_DO_NOT_COPY_VALUES, C, ierr)
+      else if (mat_type_b == MATDIAGONAL) then
+         call MatDuplicate(A, MAT_DO_NOT_COPY_VALUES, C, ierr)
+      else if (comm_size == 1) then
+         ! For some reason in serial matduplicate is not defined on unassembled matrices
+         ! ie we call a matduplicate on the symbolic sparsity_mat returned from this
+         ! So we just do an ordinary matmatmult in serial
+         call MatMatMult(A, B, MAT_INITIAL_MATRIX, PETSC_DEFAULT_REAL, C, ierr)
+      else
+         call MatProductCreate(A, B, PETSC_NULL_MAT, C, ierr)
+         call MatProductSetType(C, MATPRODUCT_AB, ierr)
+         call MatProductSetAlgorithm(C, 'default', ierr)
+         call MatProductSetFill(C, PETSC_DEFAULT_REAL, ierr)
+         call MatProductSetFromOptions(C, ierr)
+         call MatProductSymbolic(C, ierr)
+         call MatProductClear(C, ierr)
+      end if
+
+   end subroutine mat_mat_symbolic
+
+   !-------------------------------------------------------------------------------------------------------------------------------
+
 end module petsc_helper
 
