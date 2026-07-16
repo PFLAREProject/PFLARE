@@ -279,13 +279,15 @@ static PetscErrorCode ComputeSpilukFactors(MPI_Comm comm, Mat A_seq, PetscInt fi
      side is up to date. */
   Kokkos::View<const PetscScalar *> A_values;
   PetscCall(MatSeqAIJGetKokkosView(A_seq, &A_values));
+  PetscInt annz = (PetscInt)A_values.extent(0);
 
-  /* A_seq's CSR structure straight from the Kokkos CSR graph — already
-     PetscInt-typed device views (64-bit safe). */
-  Mat_SeqAIJKokkos *aijkok = static_cast<Mat_SeqAIJKokkos *>(A_seq->spptr);
-  auto     A_rowmap  = aijkok->csrmat.graph.row_map;   /* const PetscInt view, size m+1 */
-  auto     A_entries = aijkok->csrmat.graph.entries;   /* const PetscInt view, size nnz */
-  PetscInt annz      = (PetscInt)A_values.extent(0);
+  /* A_seq's CSR structure as device pointers, wrapped in PetscInt-typed device
+     views (64-bit safe) for the Kokkos kernels. */
+  const PetscInt *device_i = nullptr, *device_j = nullptr;
+  PetscMemType    memtype;
+  PetscCall(MatSeqAIJGetCSRAndMemType(A_seq, &device_i, &device_j, NULL, &memtype));
+  Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> A_rowmap(device_i, m + 1);
+  Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> A_entries(device_j, annz);
 
   using KernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<
       PetscInt, PetscInt, PetscScalar,
@@ -374,9 +376,11 @@ static PetscErrorCode ComputeILUFactors(Mat A, int npe, const char *algorithm,
       /* A's synced device values + CSR structure for the Kokkos kernel. */
       Kokkos::View<const PetscScalar *> A_values;
       PetscCall(MatSeqAIJGetKokkosView(A, &A_values));
-      Mat_SeqAIJKokkos *aijkok = static_cast<Mat_SeqAIJKokkos *>(A->spptr);
-      auto A_rowmap  = aijkok->csrmat.graph.row_map;
-      auto A_entries = aijkok->csrmat.graph.entries;
+      const PetscInt *device_i = nullptr, *device_j = nullptr;
+      PetscMemType    memtype;
+      PetscCall(MatSeqAIJGetCSRAndMemType(A, &device_i, &device_j, NULL, &memtype));
+      Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> A_rowmap(device_i, m + 1);
+      Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> A_entries(device_j, (PetscInt)A_values.extent(0));
 
       Kokkos::View<PetscInt *>    L_row_map("L_row_map", m + 1);
       Kokkos::View<PetscInt *>    U_row_map("U_row_map", m + 1);
