@@ -196,16 +196,41 @@ static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *pref
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* Time a KSPSetUp and print the wall-clock seconds as a machine-parseable line.
+
+   PETSc only wraps a device synchronise around KSPSolve for -log_view on GPUs,
+   so KSPSetUp (and the PCAIR/ISAI/GMRES-poly PC setup it triggers) shows up as
+   `n/a` in a -log_view report. We therefore time the setups ourselves: fence the
+   device before and after so the wall-clock interval brackets all the async
+   GPU work, then print `SETUP_TIME <label> = <seconds>` (label has no spaces so
+   the driver can split it out of stdout). This is the setup-cost analogue of the
+   KSPSolve times the driver reads from -log_view. */
+static PetscErrorCode TimedKSPSetUp(KSP ksp, const char *label)
+{
+  PetscLogDouble t0, t1;
+  PetscFunctionBeginUser;
+  Kokkos::fence();
+  PetscCall(PetscTime(&t0));
+  PetscCall(KSPSetUp(ksp));
+  Kokkos::fence();
+  PetscCall(PetscTime(&t1));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME %s = %.6e\n",
+                        label, (double)(t1 - t0)));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* Standalone Richardson + <kind> solve on `factor`. rtol=1e-6, max_it=2000,
    unpreconditioned residual norm, explicit setup so -log_view sees setup vs
    solve separately. Reports iteration count via ReportSolve.
+   If setup_label is non-NULL the KSPSetUp is timed (fenced) and its wall-clock
+   cost printed as a SETUP_TIME line, since GPU -log_view does not time setup.
    If ksp_out is non-NULL the set-up KSP is returned to the caller (who then
    owns it and must destroy it) instead of being destroyed here — used to reuse
    the L/U PCAIR hierarchies in the Ax=b shell PC without setting them up twice. */
 static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
                                      InnerPCKind kind, const char *label,
                                      const char *opts_prefix, PetscBool *all_converged,
-                                     KSP *ksp_out)
+                                     KSP *ksp_out, const char *setup_label)
 {
   KSP ksp;
   PC  pc;
@@ -219,7 +244,8 @@ static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
   PetscCall(ConfigureInnerPC(pc, kind));
   if (opts_prefix) PetscCall(KSPSetOptionsPrefix(ksp, opts_prefix));
   PetscCall(KSPSetFromOptions(ksp));
-  PetscCall(KSPSetUp(ksp));
+  if (setup_label) PetscCall(TimedKSPSetUp(ksp, setup_label));
+  else PetscCall(KSPSetUp(ksp));
   PetscCall(KSPSolve(ksp, b, x));
   PetscCall(ReportSolve(label, ksp, factor, b, x, all_converged));
   if (ksp_out) *ksp_out = ksp;
@@ -826,7 +852,9 @@ int main(int argc, char **args)
     PetscCall(PCSetType(pc_Apc, PCBJACOBI));
     PetscCall(KSPSetOptionsPrefix(ksp_Apc, "Apc_"));
     PetscCall(KSPSetFromOptions(ksp_Apc));
-    PetscCall(KSPSetUp(ksp_Apc));
+    /* KSPSetUp here does the exact ILU(k) factorisation + symbolic setup for the
+       PCBJACOBI/ILU baseline; time it (GPU -log_view reports KSPSetUp as n/a). */
+    PetscCall(TimedKSPSetUp(ksp_Apc, "Ax=b_PC_ILU"));
     PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
     PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
     PetscCall(KSPDestroy(&ksp_Apc));
@@ -837,9 +865,18 @@ int main(int argc, char **args)
      ComputeILUFactors (single-rank Kokkos Kernels ILU, or the spiluk-seeded
      block-Jacobi Chow ParILU in parallel). On parallel ParILU divergence we
      tear down and abort, matching the original behaviour. */
+  PetscLogDouble t_ilu0, t_ilu1;
+  Kokkos::fence();
+  PetscCall(PetscTime(&t_ilu0));
   PetscCall(PetscLogStagePush(stage_ilu));
   PetscCall(ComputeILUFactors(A, npe, algorithm, fill_lev, mtype, &converged, &factor_diverged, &L, &U));
   PetscCall(PetscLogStagePop());
+  Kokkos::fence();
+  PetscCall(PetscTime(&t_ilu1));
+  /* The Kokkos spiluk factorisation that produces the L/U used by every
+     approximate solve below; GPU -log_view does not time it, so print it. */
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME ILU_factorisation = %.6e\n",
+                        (double)(t_ilu1 - t_ilu0)));
 
   if (factor_diverged) {
     PetscCall(VecDestroy(&b_rand));
@@ -887,12 +924,12 @@ int main(int argc, char **args)
 
   PetscCall(PetscLogStagePush(stage_L_solve));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_AIR,
-                           "L solve (richardson + PCAIR)", "L_", &solves_converged, &ksp_L_air));
+                           "L solve (richardson + PCAIR)", "L_", &solves_converged, &ksp_L_air, "LU_AIRG_L"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_solve));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_AIR,
-                           "U solve (richardson + PCAIR)", "U_", &solves_converged, &ksp_U_air));
+                           "U solve (richardson + PCAIR)", "U_", &solves_converged, &ksp_U_air, "LU_AIRG_U"));
   PetscCall(PetscLogStagePop());
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner.
@@ -967,42 +1004,42 @@ int main(int argc, char **args)
 
   PetscCall(PetscLogStagePush(stage_L_gmres));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL));
+                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_gmres));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged, NULL));
+                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged, NULL, "LU_GMRES_poly_U"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_neumann));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged, NULL));
+                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged, NULL, "LU_Neumann_poly_L"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_neumann));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged, NULL));
+                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged, NULL, "LU_Neumann_poly_U"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_isai));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_ISAI,
-                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged, NULL));
+                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged, NULL, "LU_ISAI_L"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_isai));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_ISAI,
-                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL));
+                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL, "LU_ISAI_U"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_L_jac));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_JACOBI,
-                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL));
+                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L"));
   PetscCall(PetscLogStagePop());
 
   PetscCall(PetscLogStagePush(stage_U_jac));
   PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_JACOBI,
-                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL));
+                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL, "LU_Jacobi_U"));
   PetscCall(PetscLogStagePop());
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
