@@ -1654,11 +1654,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetType(A, mat_type_a, ierr)
       call MatGetType(B, mat_type_b, ierr)
 
-      if (mat_type_a == MATDIAGONAL) then
-         call MatDuplicate(B, MAT_DO_NOT_COPY_VALUES, C, ierr)
-      else if (mat_type_b == MATDIAGONAL) then
-         call MatDuplicate(A, MAT_DO_NOT_COPY_VALUES, C, ierr)
-      else if (comm_size == 1) then
+      if (comm_size == 1) then
          ! For some reason in serial matduplicate is not defined on unassembled matrices
          ! ie we call a matduplicate on the symbolic sparsity_mat returned from this
          ! So we just do an ordinary matmatmult in serial
