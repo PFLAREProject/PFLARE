@@ -20,7 +20,7 @@ module air_mg_setup
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
-   use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson
+   use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson, mg_coarse_shell_apply
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &
@@ -1134,17 +1134,16 @@ module air_mg_setup
             end if
          end if                    
 
-         ! This has to be called after we've built the coarse grid inverse
-         call KSPSetOperators(ksp_coarse_solver, air_data%coarse_matrix(no_levels), &
-                     air_data%inv_A_ff(no_levels), ierr)
-
          ! ~~~~~~~~~~~~
          ! Set our coarse grid solver
          ! ~~~~~~~~~~~~
-         ! Just apply the approximate inverse matrix
-         call PCSetType(pc_coarse_solver, PCMAT, ierr)      
+         call KSPSetOperators(ksp_coarse_solver, air_data%coarse_matrix(no_levels), &
+                     air_data%coarse_matrix(no_levels), ierr)
+         call PCSetType(pc_coarse_solver, PCSHELL, ierr)
+         call PCShellSetContext(pc_coarse_solver, air_data, ierr)
+         call PCShellSetApply(pc_coarse_solver, mg_coarse_shell_apply, ierr)
          call PCSetUp(pc_coarse_solver, ierr)
-         call KSPSetUp(ksp_coarse_solver, ierr)   
+         call KSPSetUp(ksp_coarse_solver, ierr)
 
       ! If we've only got one level 
       else
