@@ -49,11 +49,8 @@ module grid_transfer_improve
       call MatGetType(A_ff, mat_type_aff, ierr)
       ! Pull out the diagonals if Aff is diagonal
       if (mat_type_aff == MATDIAGONAL) then
-         call MatCreateVecs(W, PETSC_NULL_VEC, left_vec_aff, ierr)
-         ! Should be able to call MatDiagonalGetDiagonal but it returns
-         ! the wrong vector type with kokkos, even when it is set correctly
-         ! when calling matcreatediagonal
-         call MatGetDiagonal(A_ff, left_vec_aff, ierr)  
+         ! Get a reference to Aff's diagonal (restored below), avoiding a copy
+         call MatDiagonalGetDiagonal(A_ff, left_vec_aff, ierr)
       end if
 
       ! Check if inv Aff is diagonal
@@ -188,8 +185,13 @@ module grid_transfer_improve
 
       ! Destroy the temporaries
       if (trigger_delete) call MatDestroy(temp_mat_residual_copy, ierr)
-      call VecDestroy(left_vec_aff, ierr) 
-      call VecDestroy(left_vec_inv_aff, ierr) 
+      ! left_vec_aff is a reference to Aff's diagonal when Aff is MATDIAGONAL, so restore it
+      if (mat_type_aff == MATDIAGONAL) then
+         call MatDiagonalRestoreDiagonal(A_ff, left_vec_aff, ierr)
+      else
+         call VecDestroy(left_vec_aff, ierr)
+      end if
+      call VecDestroy(left_vec_inv_aff, ierr)
          
    end subroutine improve_w   
 
@@ -222,11 +224,8 @@ module grid_transfer_improve
       call MatGetType(A_ff, mat_type_aff, ierr)
       ! Pull out the diagonals if Aff is diagonal
       if (mat_type_aff == MATDIAGONAL) then
-         call MatCreateVecs(Z, right_vec_aff, PETSC_NULL_VEC, ierr)
-         ! Should be able to call MatDiagonalGetDiagonal but it returns
-         ! the wrong vector type with kokkos, even when it is set correctly
-         ! when calling matcreatediagonal
-         call MatGetDiagonal(A_ff, right_vec_aff, ierr)  
+         ! Get a reference to Aff's diagonal (restored below), avoiding a copy
+         call MatDiagonalGetDiagonal(A_ff, right_vec_aff, ierr)
       end if
 
       ! Check if inv Aff is diagonal
@@ -361,8 +360,13 @@ module grid_transfer_improve
 
       ! Destroy the temporaries
       if (trigger_delete) call MatDestroy(temp_mat_residual_copy, ierr)
-      call VecDestroy(right_vec_aff, ierr) 
-      call VecDestroy(right_vec_inv_aff, ierr) 
+      ! right_vec_aff is a reference to Aff's diagonal when Aff is MATDIAGONAL, so restore it
+      if (mat_type_aff == MATDIAGONAL) then
+         call MatDiagonalRestoreDiagonal(A_ff, right_vec_aff, ierr)
+      else
+         call VecDestroy(right_vec_aff, ierr)
+      end if
+      call VecDestroy(right_vec_inv_aff, ierr)
          
    end subroutine improve_z   
    
