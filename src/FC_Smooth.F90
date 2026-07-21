@@ -22,10 +22,34 @@ module fc_smooth
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
-   contains 
+   contains
 
    !------------------------------------------------------------------------------------------------------------------------
-   
+
+   subroutine mg_coarse_shell_apply(pc, x, y, ierr)
+
+      ! PCShell apply for the default coarse-grid solver: applies our polynomial
+      ! approximate inverse of the coarse matrix, inv_A_ff(no_levels), as y = inv_A_ff x.
+      ! Using a shell (rather than PCMAT with the inverse as the Pmat) lets us set the
+      ! coarse KSP's Amat and Pmat to the actual coarse operator, so a user-supplied
+      ! coarse PC (e.g. -mg_coarse_pc_type lu) factorises/solves the right matrix.
+      ! The shell context is the air_multigrid_data (a target that outlives the PC).
+
+      ! ~~~~~~
+      type(tPC)                             :: pc
+      type(tVec)                            :: x, y
+      PetscErrorCode, intent(out)           :: ierr
+
+      type(air_multigrid_data), pointer     :: air_data => null()
+      ! ~~~~~~
+
+      call PCShellGetContext(pc, air_data, ierr)
+      call MatMult(air_data%inv_A_ff(air_data%no_levels), x, y, ierr)
+
+   end subroutine mg_coarse_shell_apply
+
+   !------------------------------------------------------------------------------------------------------------------------
+
    subroutine create_VecISCopyLocalWrapper(air_data, our_level, mat_type, input_mat)
 
       ! Creates any data we might need in VecISCopyLocalWrapper for a given level

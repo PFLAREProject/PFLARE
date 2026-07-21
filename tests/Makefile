@@ -141,7 +141,13 @@ run_tests_load_serial:
 	 -pc_air_inverse_type jacobi -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1
-# 
+#
+	@echo ""
+	@echo "Test exact two-level AIRG in a difficult problem which requires exact coarse solve"
+	./ex12f -f data/spring_chain_40 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 \
+	 -pc_air_inverse_type jacobi -pc_air_max_levels 2 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -mg_coarse_pc_type lu -ksp_max_it 1
+#
 	@echo ""
 	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C"
 	./ex6_cf_splitting  -f data/mat_stream_2364
