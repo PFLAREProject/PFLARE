@@ -27,13 +27,14 @@ module pmisr_module
       logical, intent(in)                 :: pmis
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
       logical, optional, intent(in)       :: zero_measure_c_point
+      integer :: errorcode
 
 #if defined(PETSC_HAVE_KOKKOS)
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array
       MatType :: mat_type
-      integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank, errorcode
+      integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable, target :: measure_local
       PetscInt :: local_rows, local_cols
@@ -41,6 +42,11 @@ module pmisr_module
       integer, dimension(:), allocatable :: cf_markers_local_two
 #endif
       ! ~~~~~~~~~~
+
+      if (max_luby_steps == 0) then
+         print *, "max_luby_steps must be positive or negative (0 is invalid)"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
 #if defined(PETSC_HAVE_KOKKOS)
 
@@ -1245,4 +1251,3 @@ module pmisr_module
    ! -------------------------------------------------------------------------------------------------------------------------------
 
 end module pmisr_module
-
