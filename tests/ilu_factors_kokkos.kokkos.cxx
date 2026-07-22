@@ -221,6 +221,29 @@ static PetscErrorCode TimedKSPSetUp(KSP ksp, const char *label)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* Time a KSPSolve and print `SOLVE_TIME <label> = <seconds>` (label = the CSV
+   column base, e.g. LU_AIRG_L -> LU_AIRG_L_time_s). This is a FALLBACK for the
+   per-stage KSPSolve time the driver normally reads from -log_view: the driver
+   prefers -log_view (the canonical GPU device-synced number) and only uses this
+   when the -log_view report is missing. That happens when a matrix aborts during
+   PetscFinalize (a poisoned HIP context from a caught GPU-OOM tears down non-
+   cleanly) before the report is written, which would otherwise lose every solve
+   time even though the solves themselves finished. Fenced like TimedKSPSetUp so
+   the wall-clock interval brackets the async GPU work. */
+static PetscErrorCode TimedKSPSolve(KSP ksp, Vec b, Vec x, const char *label)
+{
+  PetscLogDouble t0, t1;
+  PetscFunctionBeginUser;
+  Kokkos::fence();
+  PetscCall(PetscTime(&t0));
+  PetscCall(KSPSolve(ksp, b, x));
+  Kokkos::fence();
+  PetscCall(PetscTime(&t1));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SOLVE_TIME %s = %.6e\n",
+                        label, (double)(t1 - t0)));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* Standalone Richardson + <kind> solve on `factor`. rtol=1e-6, max_it=2000,
    unpreconditioned residual norm, explicit setup so -log_view sees setup vs
    solve separately. Reports iteration count via ReportSolve.
@@ -248,7 +271,8 @@ static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
   PetscCall(KSPSetFromOptions(ksp));
   if (setup_label) PetscCall(TimedKSPSetUp(ksp, setup_label));
   else PetscCall(KSPSetUp(ksp));
-  PetscCall(KSPSolve(ksp, b, x));
+  if (setup_label) PetscCall(TimedKSPSolve(ksp, b, x, setup_label));
+  else PetscCall(KSPSolve(ksp, b, x));
   PetscCall(ReportSolve(label, ksp, factor, b, x, all_converged));
   if (ksp_out) *ksp_out = ksp;
   else PetscCall(KSPDestroy(&ksp));
@@ -797,7 +821,7 @@ static PetscErrorCode RunAxbShellAIR(Mat A, Mat L, KSP ksp_L_air, KSP ksp_U_air,
   PetscCall(KSPSetOptionsPrefix(ksp_A, "A_"));
   PetscCall(KSPSetFromOptions(ksp_A));
   PetscCall(KSPSetUp(ksp_A));
-  PetscCall(KSPSolve(ksp_A, b, x));
+  PetscCall(TimedKSPSolve(ksp_A, b, x, "Ax=b_approx_PC_ILU"));
   PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, AIRG inner)", ksp_A, A, b, x, all_converged));
   /* KSPDestroy triggers the PCSHELL destroy callback which tears down shell_ctx
      (its inner KSPs, tmp vec and inv_diag_U_raw). */
@@ -840,7 +864,7 @@ static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it
   PetscCall(KSPSetOptionsPrefix(ksp_Ajac, "A_jac_"));
   PetscCall(KSPSetFromOptions(ksp_Ajac));
   PetscCall(KSPSetUp(ksp_Ajac));
-  PetscCall(KSPSolve(ksp_Ajac, b, x));
+  PetscCall(TimedKSPSolve(ksp_Ajac, b, x, "Ax=b_approx_PC_ILU_Jac"));
   PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
                         ksp_Ajac, A, b, x, all_converged));
   PetscCall(KSPDestroy(&ksp_Ajac));
@@ -1040,7 +1064,7 @@ int main(int argc, char **args)
     /* KSPSetUp here does the exact ILU(k) factorisation + symbolic setup for the
        PCBJACOBI/ILU baseline; time it (GPU -log_view reports KSPSetUp as n/a). */
     PetscCall(TimedKSPSetUp(ksp_Apc, "Ax=b_PC_ILU"));
-    PetscCall(KSPSolve(ksp_Apc, b_rand, x_sol));
+    PetscCall(TimedKSPSolve(ksp_Apc, b_rand, x_sol, "Ax=b_PC_ILU"));
     PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
     PetscCall(KSPDestroy(&ksp_Apc));
   }
