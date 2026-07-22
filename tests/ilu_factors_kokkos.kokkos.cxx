@@ -57,6 +57,8 @@ Input arguments are:\n\
 #include <KokkosSparse_spiluk.hpp>
 #include <KokkosSparse_par_ilut.hpp>
 #include <KokkosSparse_SortCrs.hpp>
+#include <exception>
+#include <stdexcept>
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /*  Helpers                                                                    */
@@ -250,6 +252,62 @@ static PetscErrorCode RunFactorSolve(MPI_Comm comm, Mat factor, Vec b, Vec x,
   PetscCall(ReportSolve(label, ksp, factor, b, x, all_converged));
   if (ksp_out) *ksp_out = ksp;
   else PetscCall(KSPDestroy(&ksp));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* Run one standalone factor solve, TOLERATING FAILURE. Always returns
+   PETSC_SUCCESS so the caller (main) continues to the next method; *ok reports
+   whether this solve actually ran to completion.
+
+   A single inner PC can fail two ways, and both are caught here so one method
+   failing never aborts the whole run (which would drop every method after it):
+     - a C++ exception thrown from Kokkos — the dominant ISAI failure mode on the
+       GPU is a std::runtime_error when the dense per-team scratch the ISAI kernel
+       requests exceeds the device budget (a too-large TeamScratchMemory / "too
+       much scratch memory on level 1"); and
+     - a PETSc error (e.g. a device MatProduct that fails to allocate), which the
+       default traceback handler returns up RunFactorSolve's PetscCall chain.
+   On either, the failure is logged, *all_converged is cleared, any half-built
+   KSP is destroyed, and the method's CSV cells are simply left blank.
+
+   NOTE: an exception thrown out of RunFactorSolve unwinds through PETSc's C
+   frames; in the optimised build used for the GPU runs PetscFunctionBegin/Return
+   keep no checked stack, so this is safe (the previous behaviour let the very
+   same exception unwind all the way to std::terminate — we merely stop it here).
+   The stage push/pop bracket the whole attempt so -log_view stays balanced. */
+static PetscErrorCode TryFactorSolve(MPI_Comm comm, PetscLogStage stage, Mat factor,
+                                     Vec b, Vec x, InnerPCKind kind, const char *label,
+                                     const char *opts_prefix, PetscBool *all_converged,
+                                     KSP *ksp_out, const char *setup_label, PetscBool *ok)
+{
+  PetscErrorCode ierr = PETSC_SUCCESS;
+  PetscFunctionBeginUser;
+  if (ok) *ok = PETSC_FALSE;
+  if (ksp_out) *ksp_out = NULL;
+  PetscCall(PetscLogStagePush(stage));
+  try {
+    ierr = RunFactorSolve(comm, factor, b, x, kind, label, opts_prefix,
+                          all_converged, ksp_out, setup_label);
+  } catch (const std::exception &e) {
+    ierr = PETSC_ERR_LIB;
+    PetscCall(PetscPrintf(comm,
+              "%s: FAILED (C++ exception: %s); skipping this method and continuing\n",
+              label, e.what()));
+  } catch (...) {
+    ierr = PETSC_ERR_LIB;
+    PetscCall(PetscPrintf(comm,
+              "%s: FAILED (unknown C++ exception); skipping this method and continuing\n",
+              label));
+  }
+  PetscCall(PetscLogStagePop());
+  if (ierr) {
+    if (all_converged) *all_converged = PETSC_FALSE;
+    if (ksp_out && *ksp_out) PetscCall(KSPDestroy(ksp_out));
+    /* A PETSc error was already reported by the traceback handler; a C++
+       exception was reported just above. Swallow it so the run continues. */
+  } else if (ok) {
+    *ok = PETSC_TRUE;
+  }
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -669,6 +727,126 @@ static PetscErrorCode ComputeILUFactors(Mat A, int npe, const char *algorithm,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner.
+   Reuses the already-set-up L/U PCAIR KSPs from the standalone AIR solves (only
+   reconfiguring them from Richardson to preonly), so L and U are not set up a
+   second time. The shell takes OWNERSHIP of ksp_L_air, ksp_U_air and
+   inv_diag_U_raw; LUShellDestroy frees all three when ksp_A is destroyed. Also
+   reads the AIR cycle complexity to derive *jac_max_it for the later Jacobi-inner
+   Ax=b shell solve, and prints the "AIR complexities:" line the driver parses.
+
+   Extracted from main so it can be invoked as `ierr = RunAxbShellAIR(...)` (NOT
+   via PetscCall) and wrapped in try/catch: a PETSc error returns up this chain
+   and a Kokkos C++ exception unwinds out, and main catches both and continues
+   rather than aborting the whole run (this solve precedes GMRES poly / Neumann /
+   ISAI / Jacobi, so aborting here would drop all of them). On such a failure the
+   half-built objects leak, which is acceptable for a single failed matrix. */
+static PetscErrorCode RunAxbShellAIR(Mat A, Mat L, KSP ksp_L_air, KSP ksp_U_air,
+                                     Vec inv_diag_U_raw, Vec b, Vec x,
+                                     PetscBool *all_converged, PetscInt *jac_max_it)
+{
+  KSP         ksp_A;
+  PC          pc_A, pcL_inner, pcU_inner;
+  LUShellCtx *shell_ctx;
+  PetscReal   cL = -1.0, cU = -1.0, sL = -1.0, sU = -1.0, gL = -1.0, gU = -1.0;
+  PetscFunctionBeginUser;
+  PetscCall(PetscNew(&shell_ctx));
+  shell_ctx->ksp_L = ksp_L_air;
+  shell_ctx->ksp_U = ksp_U_air;
+  PetscCall(KSPSetType(shell_ctx->ksp_L, KSPPREONLY));
+  PetscCall(KSPSetNormType(shell_ctx->ksp_L, KSP_NORM_NONE));
+  PetscCall(KSPSetType(shell_ctx->ksp_U, KSPPREONLY));
+  PetscCall(KSPSetNormType(shell_ctx->ksp_U, KSP_NORM_NONE));
+  PetscCall(KSPSetUp(shell_ctx->ksp_L));
+  PetscCall(KSPSetUp(shell_ctx->ksp_U));
+  /* Fetch cycle complexity from the two AIR hierarchies to derive the Jacobi
+     inner iteration count (mirrors _jac_inner_from_cycle in test_ilu.py). */
+  PetscCall(KSPGetPC(shell_ctx->ksp_L, &pcL_inner));
+  PetscCall(KSPGetPC(shell_ctx->ksp_U, &pcU_inner));
+  PetscCall(PCAIRGetCycleComplexity(pcL_inner, &cL));
+  PetscCall(PCAIRGetCycleComplexity(pcU_inner, &cU));
+  PetscCall(PCAIRGetStorageComplexity(pcL_inner, &sL));
+  PetscCall(PCAIRGetStorageComplexity(pcU_inner, &sU));
+  PetscCall(PCAIRGetGridComplexity(pcL_inner, &gL));
+  PetscCall(PCAIRGetGridComplexity(pcU_inner, &gU));
+  {
+    PetscReal cmax = (cL > 0.0 && cU > 0.0) ? PetscMax(cL, cU) :
+                     (cL > 0.0) ? cL : (cU > 0.0) ? cU : 1.0;
+    *jac_max_it = PetscMax((PetscInt)1, (PetscInt)PetscCeilReal(cmax));
+  }
+  /* Allow the user to override the inner jacobi iterations. */
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", jac_max_it, NULL));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                        "AIR complexities: cycle L=%.3f U=%.3f, storage L=%.3f U=%.3f, grid L=%.3f U=%.3f\n",
+                        (double)cL, (double)cU, (double)sL, (double)sU, (double)gL, (double)gU));
+  PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
+  shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
+
+  PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_A));
+  PetscCall(KSPSetType(ksp_A, KSPGMRES));
+  PetscCall(KSPGMRESSetRestart(ksp_A, 30));
+  PetscCall(KSPSetNormType(ksp_A, KSP_NORM_UNPRECONDITIONED));
+  PetscCall(KSPSetOperators(ksp_A, A, A));
+  PetscCall(KSPSetTolerances(ksp_A, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+  PetscCall(KSPGetPC(ksp_A, &pc_A));
+  PetscCall(PCSetType(pc_A, PCSHELL));
+  PetscCall(PCShellSetContext(pc_A, shell_ctx));
+  PetscCall(PCShellSetApply(pc_A, LUShellApply));
+  PetscCall(PCShellSetDestroy(pc_A, LUShellDestroy));
+  PetscCall(PCShellSetName(pc_A, "LU_AIR_shell"));
+  PetscCall(KSPSetOptionsPrefix(ksp_A, "A_"));
+  PetscCall(KSPSetFromOptions(ksp_A));
+  PetscCall(KSPSetUp(ksp_A));
+  PetscCall(KSPSolve(ksp_A, b, x));
+  PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, AIRG inner)", ksp_A, A, b, x, all_converged));
+  /* KSPDestroy triggers the PCSHELL destroy callback which tears down shell_ctx
+     (its inner KSPs, tmp vec and inv_diag_U_raw). */
+  PetscCall(KSPDestroy(&ksp_A));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
+   The number of Jacobi sweeps per factor apply equals jac_max_it (derived from
+   the AIR cycle complexities). The shell takes ownership of inv_diag_U_raw_for_jac
+   and the two inner KSPs it builds. Extracted (like RunAxbShellAIR) so main can
+   wrap the call in try/catch and recover from a failure here. */
+static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it,
+                                        Vec inv_diag_U_raw_for_jac, Vec b, Vec x,
+                                        PetscBool *all_converged)
+{
+  KSP         ksp_Ajac;
+  PC          pc_Ajac;
+  LUShellCtx *shell_ctx;
+  PetscFunctionBeginUser;
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Jacobi inner max_it=%" PetscInt_FMT "\n", jac_max_it));
+  PetscCall(PetscNew(&shell_ctx));
+  PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_jac_pc_L_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_L));
+  PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_jac_pc_U_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_U));
+  PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
+  shell_ctx->inv_diag_U_raw = inv_diag_U_raw_for_jac;
+
+  PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Ajac));
+  PetscCall(KSPSetType(ksp_Ajac, KSPGMRES));
+  PetscCall(KSPGMRESSetRestart(ksp_Ajac, 30));
+  PetscCall(KSPSetNormType(ksp_Ajac, KSP_NORM_UNPRECONDITIONED));
+  PetscCall(KSPSetOperators(ksp_Ajac, A, A));
+  PetscCall(KSPSetTolerances(ksp_Ajac, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
+  PetscCall(KSPGetPC(ksp_Ajac, &pc_Ajac));
+  PetscCall(PCSetType(pc_Ajac, PCSHELL));
+  PetscCall(PCShellSetContext(pc_Ajac, shell_ctx));
+  PetscCall(PCShellSetApply(pc_Ajac, LUShellApply));
+  PetscCall(PCShellSetDestroy(pc_Ajac, LUShellDestroy));
+  PetscCall(PCShellSetName(pc_Ajac, "LU_Jacobi_shell"));
+  PetscCall(KSPSetOptionsPrefix(ksp_Ajac, "A_jac_"));
+  PetscCall(KSPSetFromOptions(ksp_Ajac));
+  PetscCall(KSPSetUp(ksp_Ajac));
+  PetscCall(KSPSolve(ksp_Ajac, b, x));
+  PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
+                        ksp_Ajac, A, b, x, all_converged));
+  PetscCall(KSPDestroy(&ksp_Ajac));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /*  Main                                                                       */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -698,9 +876,16 @@ int main(int argc, char **args)
 
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
-  /* Abort with a stack trace at the point of any PETSc error (the API
-     equivalent of -on_error_abort) so every solve below fails loudly. */
-  PetscCall(PetscPushErrorHandler(PetscAbortErrorHandler, NULL));
+  /* Keep PETSc's DEFAULT traceback error handler (do NOT push
+     PetscAbortErrorHandler): a PETSc error inside one method's solve then
+     unwinds as a returned error code that the per-method wrappers below
+     (TryFactorSolve and the guarded Ax=b shell blocks, each invoked as a plain
+     function call rather than through PetscCall) can catch and recover from. A
+     single method failing (e.g. a GPU OOM in an ISAI / GMRES-poly / AIR setup)
+     therefore no longer aborts the whole run and silently drops every later
+     method; the failing method's cells are left blank and the run continues.
+     Genuine infrastructure errors (matrix load, factorisation) still propagate
+     out of main via PetscCall and exit nonzero with a full traceback. */
 
   /* Register the pflare PC types so PCAIR is available. */
   PCRegister_PFLARE();
@@ -917,168 +1102,104 @@ int main(int argc, char **args)
   PetscCall(VecDuplicate(inv_diag_U_raw, &inv_diag_U_raw_for_jac));
   PetscCall(VecCopy(inv_diag_U_raw, inv_diag_U_raw_for_jac));
 
-  /* L and U standalone solves: Richardson + each inner PC. The two PCAIR solves
-     keep their set-up KSPs (ksp_L_air / ksp_U_air) so the Ax=b shell PC below can
-     reuse those AIR hierarchies instead of building them a second time. */
-  KSP ksp_L_air, ksp_U_air;
+  /* L and U standalone solves: Richardson + each inner PC, each run through
+     TryFactorSolve so one method failing (a Kokkos GPU-OOM C++ exception or a
+     PETSc error) is caught and the run continues with the next method instead of
+     aborting and dropping every method after it. The two PCAIR solves keep their
+     set-up KSPs (ksp_L_air / ksp_U_air, valid only when air_{L,U}_ok) so the
+     Ax=b shell PC below can reuse those AIR hierarchies rather than rebuild them. */
+  KSP       ksp_L_air = NULL, ksp_U_air = NULL;
+  PetscBool air_L_ok = PETSC_FALSE, air_U_ok = PETSC_FALSE;
 
-  PetscCall(PetscLogStagePush(stage_L_solve));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_AIR,
-                           "L solve (richardson + PCAIR)", "L_", &solves_converged, &ksp_L_air, "LU_AIRG_L"));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_solve));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_AIR,
-                           "U solve (richardson + PCAIR)", "U_", &solves_converged, &ksp_U_air, "LU_AIRG_U"));
-  PetscCall(PetscLogStagePop());
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_solve, L, b_rand, x_sol, INNER_PC_AIR,
+                           "L solve (richardson + PCAIR)", "L_", &solves_converged,
+                           &ksp_L_air, "LU_AIRG_L", &air_L_ok));
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_solve, U, b_rand, x_sol, INNER_PC_AIR,
+                           "U solve (richardson + PCAIR)", "U_", &solves_converged,
+                           &ksp_U_air, "LU_AIRG_U", &air_U_ok));
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner.
-     Reuse the L/U PCAIR KSPs from the standalone solves above: their AIR
-     hierarchies are already set up, so we only reconfigure them from Richardson
-     to preonly (single PC application, no residual norm work) — no second setup
-     of L and U. The shell takes ownership; LUShellDestroy frees both inner KSPs. */
-  PetscCall(PetscLogStagePush(stage_A_shell));
-  {
-    KSP         ksp_A;
-    PC          pc_A, pcL_inner, pcU_inner;
-    LUShellCtx *shell_ctx;
-    PetscReal   cL = -1.0, cU = -1.0, sL = -1.0, sU = -1.0, gL = -1.0, gU = -1.0;
-    PetscCall(PetscNew(&shell_ctx));
-    shell_ctx->ksp_L = ksp_L_air;
-    shell_ctx->ksp_U = ksp_U_air;
-    PetscCall(KSPSetType(shell_ctx->ksp_L, KSPPREONLY));
-    PetscCall(KSPSetNormType(shell_ctx->ksp_L, KSP_NORM_NONE));
-    PetscCall(KSPSetType(shell_ctx->ksp_U, KSPPREONLY));
-    PetscCall(KSPSetNormType(shell_ctx->ksp_U, KSP_NORM_NONE));
-    PetscCall(KSPSetUp(shell_ctx->ksp_L));
-    PetscCall(KSPSetUp(shell_ctx->ksp_U));
-    /* Fetch cycle complexity from the two AIR hierarchies (set up during the L/U
-       standalone solves) to derive the Jacobi inner iteration count used in the
-       later stage_A_shell_jac solve, mirroring _jac_inner_from_cycle in
-       test_ilu.py. */
-    PetscCall(KSPGetPC(shell_ctx->ksp_L, &pcL_inner));
-    PetscCall(KSPGetPC(shell_ctx->ksp_U, &pcU_inner));
-    PetscCall(PCAIRGetCycleComplexity(pcL_inner, &cL));
-    PetscCall(PCAIRGetCycleComplexity(pcU_inner, &cU));
-    PetscCall(PCAIRGetStorageComplexity(pcL_inner, &sL));
-    PetscCall(PCAIRGetStorageComplexity(pcU_inner, &sU));
-    PetscCall(PCAIRGetGridComplexity(pcL_inner, &gL));
-    PetscCall(PCAIRGetGridComplexity(pcU_inner, &gU));
-    {
-      PetscReal cmax = (cL > 0.0 && cU > 0.0) ? PetscMax(cL, cU) :
-                       (cL > 0.0) ? cL : (cU > 0.0) ? cU : 1.0;
-      jac_max_it = PetscMax((PetscInt)1, (PetscInt)PetscCeilReal(cmax));
+     Only run if BOTH AIR factor solves succeeded (the shell reuses their
+     hierarchies); otherwise skip it and free what it would have owned. The call
+     goes through a try/catch (and is a plain call, not PetscCall) so a failure
+     here is recovered and the later GMRES-poly / Neumann / ISAI / Jacobi solves
+     still run. */
+  if (air_L_ok && air_U_ok) {
+    PetscErrorCode ierr_shell = PETSC_SUCCESS;
+    PetscCall(PetscLogStagePush(stage_A_shell));
+    try {
+      ierr_shell = RunAxbShellAIR(A, L, ksp_L_air, ksp_U_air, inv_diag_U_raw,
+                                  b_rand, x_sol, &solves_converged, &jac_max_it);
+    } catch (const std::exception &e) {
+      ierr_shell = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "A x = b solve (AIRG inner): FAILED (C++ exception: %s); continuing\n",
+                e.what()));
+    } catch (...) {
+      ierr_shell = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "A x = b solve (AIRG inner): FAILED (unknown C++ exception); continuing\n"));
     }
-    // Allow user to override the inner jacobi iterations
-    PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
+    PetscCall(PetscLogStagePop());
+    /* The shell owns (or, on failure, leaked) ksp_L_air/ksp_U_air/inv_diag_U_raw. */
+    ksp_L_air = ksp_U_air = NULL;
+    inv_diag_U_raw = NULL;
+    if (ierr_shell) solves_converged = PETSC_FALSE;
+  } else {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-                          "AIR complexities: cycle L=%.3f U=%.3f, storage L=%.3f U=%.3f, grid L=%.3f U=%.3f\n",
-                          (double)cL, (double)cU, (double)sL, (double)sU, (double)gL, (double)gU));
-    PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
-    /* Hand inv_diag_U_raw to the shell — LUShellDestroy will free it. */
-    shell_ctx->inv_diag_U_raw = inv_diag_U_raw;
-    inv_diag_U_raw            = NULL;
-
-    PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_A));
-    PetscCall(KSPSetType(ksp_A, KSPGMRES));
-    PetscCall(KSPGMRESSetRestart(ksp_A, 30));
-    PetscCall(KSPSetNormType(ksp_A, KSP_NORM_UNPRECONDITIONED));
-    PetscCall(KSPSetOperators(ksp_A, A, A));
-    PetscCall(KSPSetTolerances(ksp_A, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
-    PetscCall(KSPGetPC(ksp_A, &pc_A));
-    PetscCall(PCSetType(pc_A, PCSHELL));
-    PetscCall(PCShellSetContext(pc_A, shell_ctx));
-    PetscCall(PCShellSetApply(pc_A, LUShellApply));
-    PetscCall(PCShellSetDestroy(pc_A, LUShellDestroy));
-    PetscCall(PCShellSetName(pc_A, "LU_AIR_shell"));
-    PetscCall(KSPSetOptionsPrefix(ksp_A, "A_"));
-    PetscCall(KSPSetFromOptions(ksp_A));
-    PetscCall(KSPSetUp(ksp_A));
-    PetscCall(KSPSolve(ksp_A, b_rand, x_sol));
-    PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, AIRG inner)", ksp_A, A, b_rand, x_sol, &solves_converged));
-    /* KSPDestroy triggers the PCSHELL destroy callback which tears down
-       shell_ctx (its inner KSPs and tmp vec). */
-    PetscCall(KSPDestroy(&ksp_A));
+              "A x = b solve (gmres(30) + LU shell PC, AIRG inner): SKIPPED "
+              "(an AIR factor solve failed)\n"));
+    if (ksp_L_air) PetscCall(KSPDestroy(&ksp_L_air));
+    if (ksp_U_air) PetscCall(KSPDestroy(&ksp_U_air));
+    PetscCall(VecDestroy(&inv_diag_U_raw));
+    solves_converged = PETSC_FALSE;
+    /* jac_max_it keeps its default of 1 (no AIR cycle complexity available). */
   }
-  PetscCall(PetscLogStagePop());
 
-  PetscCall(PetscLogStagePush(stage_L_gmres));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L"));
-  PetscCall(PetscLogStagePop());
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_gmres, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                           "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L", NULL));
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_gmres, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged, NULL, "LU_GMRES_poly_U", NULL));
 
-  PetscCall(PetscLogStagePush(stage_U_gmres));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
-                           "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged, NULL, "LU_GMRES_poly_U"));
-  PetscCall(PetscLogStagePop());
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_neumann, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
+                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged, NULL, "LU_Neumann_poly_L", NULL));
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_neumann, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
+                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged, NULL, "LU_Neumann_poly_U", NULL));
 
-  PetscCall(PetscLogStagePush(stage_L_neumann));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "L solve (richardson + Neumann poly)", "L_neumann_", &solves_converged, NULL, "LU_Neumann_poly_L"));
-  PetscCall(PetscLogStagePop());
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_isai, L, b_rand, x_sol, INNER_PC_ISAI,
+                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged, NULL, "LU_ISAI_L", NULL));
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_isai, U, b_rand, x_sol, INNER_PC_ISAI,
+                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL, "LU_ISAI_U", NULL));
 
-  PetscCall(PetscLogStagePush(stage_U_neumann));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_NEUMANN_POLY,
-                           "U solve (richardson + Neumann poly)", "U_neumann_", &solves_converged, NULL, "LU_Neumann_poly_U"));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_L_isai));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_ISAI,
-                           "L solve (richardson + ISAI)", "L_isai_", &solves_converged, NULL, "LU_ISAI_L"));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_isai));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_ISAI,
-                           "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL, "LU_ISAI_U"));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_L_jac));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, L, b_rand, x_sol, INNER_PC_JACOBI,
-                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L"));
-  PetscCall(PetscLogStagePop());
-
-  PetscCall(PetscLogStagePush(stage_U_jac));
-  PetscCall(RunFactorSolve(PETSC_COMM_WORLD, U, b_rand, x_sol, INNER_PC_JACOBI,
-                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL, "LU_Jacobi_U"));
-  PetscCall(PetscLogStagePop());
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_jac, L, b_rand, x_sol, INNER_PC_JACOBI,
+                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L", NULL));
+  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_jac, U, b_rand, x_sol, INNER_PC_JACOBI,
+                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL, "LU_Jacobi_U", NULL));
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
-     The number of Jacobi sweeps per factor apply equals jac_max_it, derived from
-     the AIR cycle complexities of the L and U PCAIR hierarchies above */
-  PetscCall(PetscLogStagePush(stage_A_shell_jac));
+     jac_max_it comes from the AIR cycle complexities above (or defaults to 1 if
+     the AIRG shell was skipped). Wrapped in try/catch like the AIRG shell so a
+     failure here (it is the last solve) is recovered cleanly. */
   {
-    KSP         ksp_Ajac;
-    PC          pc_Ajac;
-    LUShellCtx *shell_ctx;
-    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Jacobi inner max_it=%" PetscInt_FMT "\n", jac_max_it));
-    PetscCall(PetscNew(&shell_ctx));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_jac_pc_L_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_L));
-    PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_jac_pc_U_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_U));
-    PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
-    shell_ctx->inv_diag_U_raw = inv_diag_U_raw_for_jac;
-    inv_diag_U_raw_for_jac    = NULL;
-
-    PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Ajac));
-    PetscCall(KSPSetType(ksp_Ajac, KSPGMRES));
-    PetscCall(KSPGMRESSetRestart(ksp_Ajac, 30));
-    PetscCall(KSPSetNormType(ksp_Ajac, KSP_NORM_UNPRECONDITIONED));
-    PetscCall(KSPSetOperators(ksp_Ajac, A, A));
-    PetscCall(KSPSetTolerances(ksp_Ajac, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
-    PetscCall(KSPGetPC(ksp_Ajac, &pc_Ajac));
-    PetscCall(PCSetType(pc_Ajac, PCSHELL));
-    PetscCall(PCShellSetContext(pc_Ajac, shell_ctx));
-    PetscCall(PCShellSetApply(pc_Ajac, LUShellApply));
-    PetscCall(PCShellSetDestroy(pc_Ajac, LUShellDestroy));
-    PetscCall(PCShellSetName(pc_Ajac, "LU_Jacobi_shell"));
-    PetscCall(KSPSetOptionsPrefix(ksp_Ajac, "A_jac_"));
-    PetscCall(KSPSetFromOptions(ksp_Ajac));
-    PetscCall(KSPSetUp(ksp_Ajac));
-    PetscCall(KSPSolve(ksp_Ajac, b_rand, x_sol));
-    PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
-                          ksp_Ajac, A, b_rand, x_sol, &solves_converged));
-    PetscCall(KSPDestroy(&ksp_Ajac));
+    PetscErrorCode ierr_jac = PETSC_SUCCESS;
+    PetscCall(PetscLogStagePush(stage_A_shell_jac));
+    try {
+      ierr_jac = RunAxbShellJacobi(A, L, U, jac_max_it, inv_diag_U_raw_for_jac,
+                                   b_rand, x_sol, &solves_converged);
+    } catch (const std::exception &e) {
+      ierr_jac = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "A x = b solve (Jacobi inner): FAILED (C++ exception: %s); continuing\n",
+                e.what()));
+    } catch (...) {
+      ierr_jac = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "A x = b solve (Jacobi inner): FAILED (unknown C++ exception); continuing\n"));
+    }
+    PetscCall(PetscLogStagePop());
+    inv_diag_U_raw_for_jac = NULL;  /* consumed (or leaked on failure) by the shell */
+    if (ierr_jac) solves_converged = PETSC_FALSE;
   }
-  PetscCall(PetscLogStagePop());
 
   PetscCall(MatDestroy(&L));
   PetscCall(MatDestroy(&U));
