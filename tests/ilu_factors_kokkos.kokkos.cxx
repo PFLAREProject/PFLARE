@@ -1135,12 +1135,28 @@ int main(int argc, char **args)
   KSP       ksp_L_air = NULL, ksp_U_air = NULL;
   PetscBool air_L_ok = PETSC_FALSE, air_U_ok = PETSC_FALSE;
 
-  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_solve, L, b_rand, x_sol, INNER_PC_AIR,
-                           "L solve (richardson + PCAIR)", "L_", &solves_converged,
-                           &ksp_L_air, "LU_AIRG_L", &air_L_ok));
-  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_solve, U, b_rand, x_sol, INNER_PC_AIR,
-                           "U solve (richardson + PCAIR)", "U_", &solves_converged,
-                           &ksp_U_air, "LU_AIRG_U", &air_U_ok));
+  /* -skip_airg skips BOTH AIRG factor solves. Some hard matrices die INSIDE the
+     PCAIR setup of the L or U factor in a way that cannot be caught in-process: an
+     uncatchable gfortran allocate abort when a MatMatMult GPU-OOMs (CoupCons3D
+     ilu1) or a hang that only the driver's wall-clock timeout can break (crankseg,
+     s3rmq4m1). Either kills the process before any competitor method runs, so the
+     Python driver re-invokes the matrix with -skip_airg as a second pass to recover
+     GMRES poly / Neumann / ISAI / Jacobi. With both AIRG solves skipped, air_L_ok
+     and air_U_ok stay FALSE, so the AIRG Ax=b shell below auto-skips itself. */
+  PetscBool skip_airg = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-skip_airg", &skip_airg, NULL));
+
+  if (!skip_airg) {
+    PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_solve, L, b_rand, x_sol, INNER_PC_AIR,
+                             "L solve (richardson + PCAIR)", "L_", &solves_converged,
+                             &ksp_L_air, "LU_AIRG_L", &air_L_ok));
+    PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_solve, U, b_rand, x_sol, INNER_PC_AIR,
+                             "U solve (richardson + PCAIR)", "U_", &solves_converged,
+                             &ksp_U_air, "LU_AIRG_U", &air_U_ok));
+  } else {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "L/U solve (richardson + PCAIR): SKIPPED (-skip_airg)\n"));
+  }
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCAIR inner.
      Only run if BOTH AIR factor solves succeeded (the shell reuses their
