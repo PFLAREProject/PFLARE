@@ -2833,7 +2833,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    // ~~~~  
    PetscCall(PCAIRGetCoarsestSubcomm(pc, &old_flag));
    flg = old_flag;
-   PetscCall(PetscOptionsBool("-pc_air_coarsest_subcomm", "Computes polynomial coefficients on the coarse grid on subcomm", "PCAIRGetCoarsestSubcomm", old_flag, &flg, NULL));
+   PetscCall(PetscOptionsBool("-pc_air_coarsest_subcomm", "Computes polynomial coefficients on the coarse grid on subcomm", "PCAIRSetCoarsestSubcomm", old_flag, &flg, NULL));
    PetscCall(PCAIRSetCoarsestSubcomm(pc, flg));
    // ~~~~ 
    PetscCall(PCAIRGetALump(pc, &old_flag));
@@ -2873,7 +2873,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    // ~~~~ 
    PetscCall(PCAIRGetDDCFraction(pc, &old_real));
    input_real = old_real;
-   PetscCall(PetscOptionsReal("-pc_air_ddc_fraction", "DDC fraction for CF splitting", "PCAIRGetDDCFraction", old_real, &input_real, NULL));
+   PetscCall(PetscOptionsReal("-pc_air_ddc_fraction", "DDC fraction for CF splitting", "PCAIRSetDDCFraction", old_real, &input_real, NULL));
    PetscCall(PCAIRSetDDCFraction(pc, input_real));
    // ~~~~
    PetscCall(PCAIRGetStrongRThreshold(pc, &old_real));
@@ -2899,7 +2899,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    // ~~~~ 
    PetscCall(PCAIRGetDDCIts(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_ddc_its", "DDC iterations for CF splitting", "PCAIRGetDDCIts", old_int, &input_int, NULL));
+   PetscCall(PetscOptionsInt("-pc_air_ddc_its", "DDC iterations for CF splitting", "PCAIRSetDDCIts", old_int, &input_int, NULL));
    PetscCall(PCAIRSetDDCIts(pc, input_int));
    // ~~~~   
    PetscCall(PCAIRGetMaxLubySteps(pc, &old_int));
