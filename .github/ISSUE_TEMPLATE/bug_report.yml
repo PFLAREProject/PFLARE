@@ -30,7 +30,7 @@ body:
     id: pflare-version
     attributes:
       label: PFLARE version
-      description: The PFLARE release version or git commit (see the `VERSION` file or `git rev-parse HEAD`).
+      description: The PFLARE release version or git commit (see the `VERSION.txt` file or `git rev-parse HEAD`).
       placeholder: v1.26.0
     validations:
       required: true

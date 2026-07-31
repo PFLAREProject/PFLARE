@@ -13,12 +13,14 @@ ifeq ($(PETSC_VERSION_MIN),0)
 $(error PETSc version is too old. PFLARE requires at least version 3.25.0)
 endif
 
-# PFLARE version - the VERSION file is the single source of truth
-PFLARE_VERSION := $(strip $(shell cat $(CURDIR)/VERSION))
-# The PFLARE_VERSION_* macros in include/pflare.h must be kept in sync with VERSION
+# PFLARE version - the VERSION.txt file is the single source of truth
+# (it has a .txt extension as -I$(CURDIR) is on the include path and a file
+# named VERSION shadows the C++ <version> header on case-insensitive macOS)
+PFLARE_VERSION := $(strip $(shell cat $(CURDIR)/VERSION.txt))
+# The PFLARE_VERSION_* macros in include/pflare.h must be kept in sync with VERSION.txt
 PFLARE_VERSION_HEADER := $(strip $(shell awk '/define PFLARE_VERSION_MAJOR/{ma=$$3} /define PFLARE_VERSION_MINOR/{mi=$$3} /define PFLARE_VERSION_SUBMINOR/{su=$$3} END{print ma"."mi"."su}' $(CURDIR)/include/pflare.h))
 ifneq ($(PFLARE_VERSION),$(PFLARE_VERSION_HEADER))
-$(error VERSION file ($(PFLARE_VERSION)) does not match the PFLARE_VERSION_* macros in include/pflare.h ($(PFLARE_VERSION_HEADER)))
+$(error VERSION.txt ($(PFLARE_VERSION)) does not match the PFLARE_VERSION_* macros in include/pflare.h ($(PFLARE_VERSION_HEADER)))
 endif
 
 # Get the flags we have on input

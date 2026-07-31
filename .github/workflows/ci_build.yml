@@ -163,8 +163,8 @@ jobs:
           # Run from outside the source tree so the installed copy is imported
           cd /tmp
           export LD_LIBRARY_PATH=/build/PFLARE/lib:$PETSC_DIR/$PETSC_ARCH/lib
-          # The installed version must match the VERSION file
-          test "$(python3 -m pip show pflare | awk '/^Version:/{print $2}')" = "$(cat /build/PFLARE/VERSION)"
+          # The installed version must match the VERSION.txt file
+          test "$(python3 -m pip show pflare | awk '/^Version:/{print $2}')" = "$(cat /build/PFLARE/VERSION.txt)"
           python3 -c "import pflare; assert pflare.pcair_set_z_type.__doc__"
           python3 /build/PFLARE/python/ex2.py -ksp_max_it 5
           EOF

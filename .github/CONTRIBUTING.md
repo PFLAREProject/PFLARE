@@ -24,7 +24,7 @@ Releases
 
 When making a release:
   - Move the `Unreleased` entries in `CHANGELOG.md` under the new version number.
-  - Bump the version in the `VERSION` file and the matching `PFLARE_VERSION_*` macros in `include/pflare.h` (the build errors out if they differ), along with the `version:` and `date-released:` fields in `CITATION.cff`.
+  - Bump the version in the `VERSION.txt` file and the matching `PFLARE_VERSION_*` macros in `include/pflare.h` (the build errors out if they differ), along with the `version:` and `date-released:` fields in `CITATION.cff`.
 
 Contributing
 ---

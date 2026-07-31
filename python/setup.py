@@ -9,9 +9,9 @@ import numpy
 import petsc4py
 
 def pflare_version():
-    # The VERSION file in the top level directory is the single source of truth
+    # The VERSION.txt file in the top level directory is the single source of truth
     import os
-    version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'VERSION')
+    version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'VERSION.txt')
     try:
         with open(version_file) as f:
             return f.read().strip()
