@@ -13,6 +13,14 @@ ifeq ($(PETSC_VERSION_MIN),0)
 $(error PETSc version is too old. PFLARE requires at least version 3.25.0)
 endif
 
+# PFLARE version - the VERSION file is the single source of truth
+PFLARE_VERSION := $(strip $(shell cat $(CURDIR)/VERSION))
+# The PFLARE_VERSION_* macros in include/pflare.h must be kept in sync with VERSION
+PFLARE_VERSION_HEADER := $(strip $(shell awk '/define PFLARE_VERSION_MAJOR/{ma=$$3} /define PFLARE_VERSION_MINOR/{mi=$$3} /define PFLARE_VERSION_SUBMINOR/{su=$$3} END{print ma"."mi"."su}' $(CURDIR)/include/pflare.h))
+ifneq ($(PFLARE_VERSION),$(PFLARE_VERSION_HEADER))
+$(error VERSION file ($(PFLARE_VERSION)) does not match the PFLARE_VERSION_* macros in include/pflare.h ($(PFLARE_VERSION_HEADER)))
+endif
+
 # Get the flags we have on input
 # These are appended to the flags set by PETSc
 # so that users can add their own flags
@@ -367,7 +375,7 @@ install: all
 		if [ -f "$$m" ]; then $(INSTALL_DATA) "$$m" $(INCLUDEDIR_INSTALL)/; fi; \
 	done
 	@$(MAKE) --no-print-directory install_python PREFIX="$(PREFIX)" DESTDIR="$(DESTDIR)"
-	@printf 'prefix=%s\nexec_prefix=$${prefix}\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: pflare\nDescription: Library with parallel iterative methods for asymmetric linear systems built on PETSc.\nVersion: 1.24.9\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lpflare\nRequires: petsc\n' "$(PREFIX)" > $(PKGCONFIGDIR_INSTALL)/pflare.pc
+	@printf 'prefix=%s\nexec_prefix=$${prefix}\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: pflare\nDescription: Library with parallel iterative methods for asymmetric linear systems built on PETSc.\nVersion: %s\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lpflare\nRequires: petsc\n' "$(PREFIX)" "$(PFLARE_VERSION)" > $(PKGCONFIGDIR_INSTALL)/pflare.pc
 	@echo '==> Install complete'
 
 install_python:

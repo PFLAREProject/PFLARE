@@ -18,6 +18,14 @@ following for general guidelines for contributing:
   - Write a descriptive commit messages
   - Please follow the existing code style and formatting conventions where possible.
   - All the tests must pass before a PR will be merged.
+  - For user-visible changes, please add an entry to the `Unreleased` section of `CHANGELOG.md`.
+
+Releases
+---
+
+When making a release:
+  - Move the `Unreleased` entries in `CHANGELOG.md` under the new version number.
+  - Bump the version in the `VERSION` file and the matching `PFLARE_VERSION_*` macros in `include/pflare.h` (the build errors out if they differ), along with the `version:` and `date-released:` fields in `CITATION.cff`.
 
 Contributing
 ---
