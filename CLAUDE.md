@@ -1,12 +1,19 @@
-Explore
-1. Check the values of env variables: $PETSC_DIR and $PETSC_ARCH
-2. The PETSc source/headers/implementations are located at: `$PETSC_DIR/$PETSC_ARCH`
-3. The Kokkos source/headers/implementations are located at: `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos` and `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos-kernels`
+Codebase map
+- `src/`: Fortran `.F90` (one module per file; module name = lowercase filename) is the bulk of the algorithms. C is only the PETSc PC plumbing (`PCAIR.c`, `PCPFLAREINV.c`, `C_PETSc_Routines.c`). Kokkos kernels: `X.F90` has a sibling `Xk.kokkos.cxx` exporting `<snake_case>_kokkos()` functions, called from Fortran via ISO-C bindings in `C_PETSc_Interfaces.F90`/`C_Fortran_Bindings.F90`.
+- `tests/`: test drivers + a Makefile of literal run commands. `python/`: Cython bindings. `include/pflare.h`: public C API. `docs/`: user docs.
+- Magic tolerances/constants: `src/Pflare_Parameters.F90`. Fortran module dependency order: `OBJS` in the top `Makefile`.
+- Root dir contains gitignored `*.mod` build artifacts — ignore them in listings.
+- PETSc source is at `$PETSC_DIR/$PETSC_ARCH`; Kokkos source at `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos{,-kernels}`. Both env variables must be set.
+
+Read only when the task needs it
+- `docs/dev/testing.md` — before adding or modifying tests
+- `docs/dev/kokkos.md` — before touching `*.kokkos.cxx` or CPU/Kokkos debug-compare paths
+- `docs/dev/ci.md` — when checking or reproducing a CI pipeline
 
 Build
 1. In top repo directory: `make -j3 build_tests`
 2. If Python code changed, in the top repo directory: `make python`
-3. Rule: fix all compile warnings.
+3. Rule: fix all compile warnings (CI builds with `-Werror`).
 
 Tests
 1. Ensure $LD_LIBRARY_PATH matches the $PETSC_DIR and $PETSC_ARCH
@@ -21,4 +28,4 @@ If Kokkos code changed:
 8. `unset PETSC_OPTIONS PFLARE_KOKKOS_DEBUG`
 
 CI
-1. If asked to check a CI pipeline, use the prebuilt Docker image the CI runs off; always pull the latest image before running.
+1. If asked to check a CI pipeline, use the prebuilt Docker image the CI runs off; always pull the latest image before running. Details in `docs/dev/ci.md`.
