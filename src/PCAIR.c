@@ -3099,6 +3099,12 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          PetscCall(PetscViewerASCIIPrintf(viewer, "    Strong threshold=%f \n", \
                   input_real));
       }
+      else if (cf_type == CF_PMIS_AGG)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMIS_AGG \n"));
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    %" PetscInt_FMT " Luby steps \n      Strong threshold=%f \n", \
+                  input_int_two, input_real));
+      }
 
       PetscCall(PCAIRGetFullSmoothingUpAndDown(pc, &flg));
       if (flg) 
