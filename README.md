@@ -17,45 +17,15 @@ Some examples of asymmetric linear systems that PFLARE can scalably solve includ
    - Streaming operators from Boltzmann applications
    - Space-time discretisations
    - Heavily anisotropic Poisson/diffusion equations
+   - Triangle factors from sparse factorisations (e.g. ILU methods)
    
 without requiring Gauss-Seidel methods. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
-
-## Try it now
-
-If PETSc (3.25 or newer) is configured with ``--download-pflare``, the PFLARE PC types are available in any existing PETSc application **without any code changes**; just add a command line argument, e.g., to apply the AIRG multigrid:
-
-     -pc_type air
-
-In a standalone build of PFLARE, registering the new PC types requires one extra call before use:
-
-in C:
-
-     #include "pflare.h"
-     // ...
-     PCRegister_PFLARE();
-     ierr = KSPGetPC(ksp, &pc);
-     ierr = PCSetType(pc, PCAIR);
-
-or in Fortran:
-
-     #include "finclude/pflare.h"
-     ! ...
-     call PCRegister_PFLARE()
-     call KSPGetPC(ksp, pc, ierr)
-     call PCSetType(pc, PCAIR, ierr)
-
-or in Python with petsc4py (registration happens on import):
-
-     import pflare
-
-     pc = ksp.getPC()
-     pc.setType("air")
 
 ## Methods available in PFLARE
 
 PFLARE adds new methods to PETSc, including:
 1) Polynomial approximate inverses, e.g., GMRES and Neumann polynomials
-2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
+2) Reduction multigrids, e.g., AIRG, nAIR, lAIR and others
 3) CF splittings, e.g., PMISR DDC
 4) Methods to extract diagonally dominant submatrices
 
@@ -84,10 +54,10 @@ The Jupyter notebooks below are the best place to start; they can be run interac
 
 ## Documentation
 
-The PFLARE API reference is part of the PETSc manual pages, hosted at petsc.org:
+The PFLARE API references are now available in the PETSc manual pages:
 
-* [PCAIR](https://petsc.org/main/manualpages/PC/PCAIR/) - reduction multigrids (AIRG, nAIR, lAIR)
-* [PCPFLAREINV](https://petsc.org/main/manualpages/PC/PCPFLAREINV/) - polynomial approximate inverses
+* [PCAIR](https://petsc.org/main/manualpages/PC/PCAIR/)
+* [PCPFLAREINV](https://petsc.org/main/manualpages/PC/PCPFLAREINV/)
 
 For more details about PFLARE, please see:
 
@@ -104,19 +74,6 @@ For more details about PFLARE, please see:
 ## More examples
 
 For more ways to use the library please see the Fortran/C examples and the Makefile in `tests/`, along with the Python examples in `python/`.
-
-## Supported configurations
-
-PFLARE is tested in CI across the configurations below (see [.github/workflows/ci_build.yml](.github/workflows/ci_build.yml) for the full matrix):
-
-| | |
-|---|---|
-| OS | Linux, macOS |
-| Compilers | GNU, Intel (also tested with LLVM and Cray) |
-| Precision | double, single |
-| Integers | 32-bit, 64-bit PETSc indices |
-| Parallelism | MPI, no-MPI, OpenMP |
-| GPUs | via Kokkos (CUDA, HIP, etc.) |
 
 ## Contributing
 
