@@ -3,36 +3,50 @@ import pflare_defs
 # And register all the types with PETSc
 pflare_defs.py_PCRegister_PFLARE()
 
-# CF splitting type constants
-CF_PMISR_DDC  = 0
-CF_DIAG_DOM   = 1
-CF_PMIS       = 2
-CF_PMIS_DIST2 = 3
-CF_AGG        = 4
-CF_PMIS_AGG   = 5
+from enum import IntEnum
 
-# Approximate inverse type constants (PCPFLAREINVType / PCAIRInverseType)
-PFLAREINV_POWER           = 0
-PFLAREINV_ARNOLDI         = 1
-PFLAREINV_NEWTON          = 2
-PFLAREINV_NEWTON_NO_EXTRA = 3
-PFLAREINV_NEUMANN         = 4
-PFLAREINV_SAI             = 5
-PFLAREINV_ISAI            = 6
-PFLAREINV_WJACOBI         = 7
-PFLAREINV_JACOBI          = 8
+# The enum values match the C enums in include/pflare.h; the members are also
+# aliased at module level (e.g. pflare.CF_PMISR_DDC) for convenience
 
-# Z / restrictor type constants (PCAIRZType)
-AIR_Z_PRODUCT  = 0
-AIR_Z_LAIR     = 1
-AIR_Z_LAIR_SAI = 2
+class CFSplittingType(IntEnum):
+    """CF splitting algorithms for PCAIR (CFSplittingType in C)"""
+    CF_PMISR_DDC  = 0
+    CF_DIAG_DOM   = 1
+    CF_PMIS       = 2
+    CF_PMIS_DIST2 = 3
+    CF_AGG        = 4
+    CF_PMIS_AGG   = 5
 
-# Selector constants for PCAIRGetPolyCoeffs / PCAIRSetPolyCoeffs
-# These match the Fortran COEFFS_INV_* parameters in pflare_parameters
-COEFFS_INV_AFF         = 0  # Inverse of the fine-fine block A_ff
-COEFFS_INV_AFF_DROPPED = 1  # Inverse of the dropped fine-fine block
-COEFFS_INV_ACC         = 2  # Inverse of the coarse-coarse block A_cc
-COEFFS_INV_COARSE      = 3  # Inverse on the coarsest grid
+class PCPFLAREINVType(IntEnum):
+    """Approximate inverse types for PCPFLAREINV and the PCAIR smoothers (PCPFLAREINVType in C)"""
+    PFLAREINV_POWER           = 0
+    PFLAREINV_ARNOLDI         = 1
+    PFLAREINV_NEWTON          = 2
+    PFLAREINV_NEWTON_NO_EXTRA = 3
+    PFLAREINV_NEUMANN         = 4
+    PFLAREINV_SAI             = 5
+    PFLAREINV_ISAI            = 6
+    PFLAREINV_WJACOBI         = 7
+    PFLAREINV_JACOBI          = 8
+
+class PCAIRZType(IntEnum):
+    """Z / restrictor types for PCAIR (PCAIRZType in C)"""
+    AIR_Z_PRODUCT  = 0
+    AIR_Z_LAIR     = 1
+    AIR_Z_LAIR_SAI = 2
+
+class WhichInverseType(IntEnum):
+    """Selectors for pcair_get_poly_coeffs / pcair_set_poly_coeffs (WhichInverseType in C)"""
+    COEFFS_INV_AFF         = 0  # Inverse of the fine-fine block A_ff
+    COEFFS_INV_AFF_DROPPED = 1  # Inverse of the dropped fine-fine block
+    COEFFS_INV_ACC         = 2  # Inverse of the coarse-coarse block A_cc
+    COEFFS_INV_COARSE      = 3  # Inverse on the coarsest grid
+
+# Alias the enum members at module level for backwards compatibility
+for _enum_class in (CFSplittingType, PCPFLAREINVType, PCAIRZType, WhichInverseType):
+    for _member in _enum_class:
+        globals()[_member.name] = _member
+del _enum_class, _member
 
 # Standalone matrix utility wrappers
 compute_cf_splitting          = pflare_defs.compute_cf_splitting
