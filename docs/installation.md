@@ -36,6 +36,10 @@ If PETSc was configured with petsc4py, the PFLARE Python interfaces can be built
 
 4) ``make python`` in the top level directory.
 
+Alternatively, after step 3 the Python interfaces can be installed into the current Python environment with pip. Build isolation must be disabled so the build uses the numpy/petsc4py matching your PETSc install, and ``--no-deps`` prevents pip from trying to reinstall them (e.g., when petsc4py comes from the PETSc install rather than pip):
+
+     pip install --no-build-isolation --no-deps ./python
+
 Then if desired, check that PFLARE was built successfully by running some simple tests with:
 
 5) ``make check`` in the top level directory.

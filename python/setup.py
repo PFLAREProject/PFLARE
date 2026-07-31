@@ -8,6 +8,16 @@ from Cython.Build import cythonize
 import numpy
 import petsc4py
 
+def pflare_version():
+    # The VERSION file in the top level directory is the single source of truth
+    import os
+    version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'VERSION')
+    try:
+        with open(version_file) as f:
+            return f.read().strip()
+    except OSError:
+        return '0.0.0'
+
 def configure():
     INCLUDE_DIRS = []
     LIBRARY_DIRS = []
@@ -52,9 +62,11 @@ extensions = [
               **configure()),
 ]
 
-setup(name = "pflare_defs",
+setup(name = "pflare",
+      version = pflare_version(),
+      py_modules = ["pflare"],
       ext_modules = cythonize(
-          extensions, 
+          extensions,
           include_path=[petsc4py.get_include()],
           compiler_directives={'language_level': 3}  # Use python3
       ),
