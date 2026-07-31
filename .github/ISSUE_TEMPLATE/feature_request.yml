@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest a new method, interface or improvement for PFLARE
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: What problem would this solve?
+      description: >
+        Describe the use case, e.g., the type of linear systems you are trying to
+        solve, or the workflow that is currently awkward.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you would like to see added or changed, with references to any relevant papers or PETSc functionality.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or existing options you have tried.

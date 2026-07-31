@@ -1,5 +1,6 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/PFLAREProject/PFLARE/ci_build.yml?branch=main&label=CI)](https://github.com/PFLAREProject/PFLARE/actions/workflows/ci_build.yml)
 [![spack](https://img.shields.io/github/actions/workflow/status/PFLAREProject/PFLARE_spack/ci_build.yml?branch=main&label=spack)](https://github.com/PFLAREProject/PFLARE_spack/actions/workflows/ci_build.yml)
+[![release](https://img.shields.io/github/v/release/PFLAREProject/PFLARE?label=release)](https://github.com/PFLAREProject/PFLARE/releases)
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/PFLAREProject/PFLARE/HEAD?urlpath=%2Fdoc%2Ftree%2Fnotebooks%2F01_getting_started.ipynb)
 
 <img align="right" img src="PFLARE_logo.png" width="300" height="300" />
@@ -16,6 +17,7 @@ Some examples of asymmetric linear systems that PFLARE can scalably solve includ
    - Streaming operators from Boltzmann applications
    - Space-time discretisations
    - Heavily anisotropic Poisson/diffusion equations
+   - Triangle factors from sparse factorisations (e.g. ILU methods)
    
 without requiring Gauss-Seidel methods. This includes time dependent or independent equations, with structured or unstructured grids, with lower triangular structure or without.
 
@@ -23,22 +25,41 @@ without requiring Gauss-Seidel methods. This includes time dependent or independ
 
 PFLARE adds new methods to PETSc, including:
 1) Polynomial approximate inverses, e.g., GMRES and Neumann polynomials
-2) Reduction multigrids, e.g., AIRG, nAIR and lAIR
+2) Reduction multigrids, e.g., AIRG, nAIR, lAIR and others
 3) CF splittings, e.g., PMISR DDC
 4) Methods to extract diagonally dominant submatrices
 
 ## Quick start
 
-You can get started with PFLARE in one of four ways:
+You can get started with PFLARE in one of five ways:
 
 * PFLARE is available directly through the PETSc configure (from the PETSc 3.25 release) with: `--download-pflare`, see [docs/installation.md](docs/installation.md)
+* PFLARE is available in the Spack package repository with: `spack install pflare`
 * To run the Jupyter notebooks in `notebooks/` in your browser without requiring a local install, click the Binder badge above
 * To download a Docker image with PFLARE installed, run `docker run -it stevendargaville/pflare`, then `make check` inside the container
 * To build from source, see [docs/installation.md](docs/installation.md) 
 
+## Tutorials
+
+The Jupyter notebooks below are the best place to start; they can be run interactively in your browser via the Binder badge above with no local install:
+
+| Path | Contents |
+|---|---|
+| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduce PFLARE |
+| [notebooks/02_pcpflareinv.ipynb](notebooks/02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
+| [notebooks/03_cf_splitting.ipynb](notebooks/03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
+| [notebooks/04_pcair.ipynb](notebooks/04_pcair.ipynb) | Introduce PCAIR and the AIRG method |
+| [notebooks/05_parallel.ipynb](notebooks/05_parallel.ipynb) | Discuss PCAIR, parallelism and GPUs |
+| [notebooks/06_reuse.ipynb](notebooks/06_reuse.ipynb) | Discuss PCAIR and reuse |
+
 ## Documentation
 
-For details about PFLARE, please see:
+The PFLARE API references are now available in the PETSc manual pages:
+
+* [PCAIR](https://petsc.org/main/manualpages/PC/PCAIR/)
+* [PCPFLAREINV](https://petsc.org/main/manualpages/PC/PCPFLAREINV/)
+
+For more details about PFLARE, please see:
 
 | Path | Contents |
 |---|---|
@@ -50,24 +71,17 @@ For details about PFLARE, please see:
 | [docs/options.md](docs/options.md) | List of the options available in PFLARE |   
 | [docs/faq.md](docs/faq.md) | Frequently asked questions and help! |   
 
-and the Jupyter notebooks:
-
-| Path | Contents |
-|---|---|
-| [notebooks/01_getting_started.ipynb](notebooks/01_getting_started.ipynb) | Introduce PFLARE |
-| [notebooks/02_pcpflareinv.ipynb](notebooks/02_pcpflareinv.ipynb) | Examine some of the approximate inverses found in PCPFLAREINV |
-| [notebooks/03_cf_splitting.ipynb](notebooks/03_cf_splitting.ipynb) | Visualise the C/F splitting and explore the PMISR-DDC algorithm |
-| [notebooks/04_pcair.ipynb](notebooks/04_pcair.ipynb) | Introduce PCAIR and the AIRG method |
-| [notebooks/05_parallel.ipynb](notebooks/05_parallel.ipynb) | Discuss PCAIR, parallelism and GPUs |
-| [notebooks/06_reuse.ipynb](notebooks/06_reuse.ipynb) | Discuss PCAIR and reuse |
-     
 ## More examples
 
 For more ways to use the library please see the Fortran/C examples and the Makefile in `tests/`, along with the Python examples in `python/`.
 
+## Contributing
+
+Contributions and bug reports are very welcome! Please see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for how to get involved, and use the [issue tracker](https://github.com/PFLAREProject/PFLARE/issues) to report problems or request features. PFLARE is [MIT licensed](LICENSE).
+
 ## References \& citing
 
-Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3].
+Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3] (citation metadata is also in [CITATION.cff](CITATION.cff)).
 
 1. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, _Journal of Computational Physics_ 518 (2024) 113342  
 2. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, _The International Journal of High Performance Computing Applications_ 39(3) (2025) 364-384  

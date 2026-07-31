@@ -152,6 +152,23 @@ jobs:
             "$IMAGE" \
             python3 /pflare_ci_python/run_parse_tests.py
 
+      - name: Test pip install of the Python bindings
+        run: |
+          IMAGE=${{ github.event_name == 'pull_request' && 'pflare:pr-ci' || 'stevendargaville/pflare:latest' }}
+          docker run -i --rm "$IMAGE" bash -s <<'EOF'
+          set -e
+          export PYTHONPATH=$PETSC_DIR/$PETSC_ARCH/lib
+          export LIBRARY_PATH=/build/PFLARE/lib
+          python3 -m pip install --no-build-isolation --no-deps /build/PFLARE/python
+          # Run from outside the source tree so the installed copy is imported
+          cd /tmp
+          export LD_LIBRARY_PATH=/build/PFLARE/lib:$PETSC_DIR/$PETSC_ARCH/lib
+          # The installed version must match the VERSION.txt file
+          test "$(python3 -m pip show pflare | awk '/^Version:/{print $2}')" = "$(cat /build/PFLARE/VERSION.txt)"
+          python3 -c "import pflare; assert pflare.pcair_set_z_type.__doc__"
+          python3 /build/PFLARE/python/ex2.py -ksp_max_it 5
+          EOF
+
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
     needs: [setup]

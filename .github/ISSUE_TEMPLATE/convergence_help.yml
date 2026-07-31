@@ -1,0 +1,48 @@
+name: Convergence help
+description: The solver runs but converges slowly, stalls or diverges on your problem
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please have a look at [docs/faq.md](https://github.com/PFLAREProject/PFLARE/blob/main/docs/faq.md)
+        first; it covers the most common causes of poor convergence (diagonal scaling,
+        drop tolerances, coarsening rate, etc.) and how to diagnose them. If that
+        doesn't help, fill in as much of the below as you can.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you solving?
+      description: >
+        The equations and discretisation (e.g., DG advection, SUPG advection-diffusion,
+        space-time, ILU triangular factors), whether the matrix is symmetric, the block
+        size, and roughly how many unknowns and MPI ranks.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Solver options used
+      description: The full set of command line options (or equivalent API calls).
+      placeholder: -ksp_type gmres -pc_type air -pc_air_z_type product ...
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: What does the convergence look like?
+      description: >
+        Iteration counts, residual history (`-ksp_monitor`), and how the behaviour
+        changes with problem size or number of ranks. The output of `-ksp_view` and
+        `-pc_air_print_stats_timings` is very helpful. This will be automatically
+        formatted as code.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: PFLARE and PETSc versions
+      placeholder: PFLARE v1.26.0, PETSc 3.25.0
+    validations:
+      required: true

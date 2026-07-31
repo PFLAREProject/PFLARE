@@ -32,7 +32,7 @@ All options can be set either through command line arguments or programmatically
    | ``-pc_air_auto_truncate_tol``  |  PCAIRGetAutoTruncateTol  PCAIRSetAutoTruncateTol  | Tolerance used to determine if the coarse solver is good enough to truncate at a given level | 1e-14 |
    | ``-pc_air_r_drop``  |  PCAIRGetRDrop  PCAIRSetRDrop  | Drop tolerance applied to R on each level after it is built | 0.01 |
    | ``-pc_air_a_drop``  |  PCAIRGetADrop  PCAIRSetADrop  | Drop tolerance applied to the coarse matrix on each level after it is built | 0.0001 |
-   | ``-pc_air_a_lump``  |  PCAIRSetALump  PCAIRSetALump  | Lump to the diagonal rather than drop for the coarse matrix | false |         
+   | ``-pc_air_a_lump``  |  PCAIRGetALump  PCAIRSetALump  | Lump to the diagonal rather than drop for the coarse matrix | false |         
 
 #### Parallel options
 
@@ -85,6 +85,8 @@ All options can be set either through command line arguments or programmatically
    | ``-pc_air_improve_z_its``  |  PCAIRGetImproveZIts  PCAIRSetImproveZIts  | Apply a number of Richardson iterations to improve the approximate restrictor. Uses the existing Z as an initial guess.    | 0 |  
 
 #### Coarse grid solver options
+
+By default the coarse grid is solved with one application of a polynomial approximate inverse, controlled by the ``-pc_air_coarsest_*`` options below. `PCAIR` is built on PETSc's `PCMG`, so the coarse grid `KSP`/`PC` can also be overridden with the standard PETSc ``-mg_coarse_*`` options. For example, ``-mg_coarse_pc_type lu`` uses a direct solve on the coarse grid, while ``-mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it 5`` applies several iterations of the default polynomial coarse solver.
 
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |

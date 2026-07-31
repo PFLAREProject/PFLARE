@@ -135,6 +135,12 @@ In practice, the extra SpMVs are memory-bandwidth bound rather than FLOP bound, 
 
 Truncating the hierarchy and applying a matrix-free coarse grid solver (see above) is often very effective on GPUs. GPUs are poorly suited to the small solves on the bottom levels of a multigrid hierarchy, where kernel launch overheads become significant and there is not enough work to hide communication. Truncation can give large speed-ups in the solve (e.g., 4x) and also reduces memory use.
 
+## Solving sparse triangular systems (e.g., from ILU factorisations) with `PCAIR`
+
+Sparse triangular systems, such as the L and U factors from (incomplete) LU factorisations, are highly asymmetric and are traditionally solved with sequential forward/back substitution, which parallelises poorly. `PCAIR` can instead be used to solve these triangular systems iteratively and in parallel; the lower triangular structure means reduction multigrids like AIRG are well suited and typically very robust on these problems.
+
+For a worked example, see `tests/ilu_factors.c`, which computes an ILU(0) factorisation, solves the L and U factor systems with AIRG (and several of the polynomial/ISAI inverses from `PCPFLAREINV`), and applies the resulting factorisation as a preconditioner for the original system. The corresponding command lines are in the `tests/` Makefile.
+
 ## Resolving out-of-memory errors with `PCAIR`
 
 AIR multigrid methods for asymmetric linear systems require considerable memory, particularly compared with classical multigrid methods for elliptic problems. They often require more memory than a direct LU factorisation, but the benefit is that scalable solves are possible in parallel.
@@ -149,7 +155,7 @@ Using `-pc_air_matrix_free_polys` avoids assembling and storing the approximate 
 
 ### 2) F-point only smoothing
 
-The default F-point only smoothing (`-pc_air_smooth_type f`) avoids storing $A_{cc}$ and $\mathbf{A}_\textrm{cf}$ on each level. Switching to FC or FCF smoothing can nearly double the storage complexity, so only use it if the convergence improvement justifies the memory cost.
+The default F-point only smoothing (`-pc_air_smooth_type ff`) avoids storing $A_{cc}$ and $\mathbf{A}_\textrm{cf}$ on each level. Switching to FC or FCF smoothing can nearly double the storage complexity, so only use it if the convergence improvement justifies the memory cost.
 
 ### 3) Truncating the hierarchy
 

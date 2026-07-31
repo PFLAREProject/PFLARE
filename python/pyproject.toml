@@ -1,0 +1,32 @@
+# PEP 517 build for the PFLARE Python bindings.
+#
+# The extension links against libpflare and PETSc, so the library must be built
+# first (make in the top level directory) and PETSC_DIR/PETSC_ARCH must be set.
+# numpy and petsc4py must match the PETSc install, so they are taken from the
+# environment rather than pinned build requirements - install with build
+# isolation disabled, and --no-deps if numpy/petsc4py are not pip-installed
+# (e.g., petsc4py from the PETSc install itself):
+#
+#     pip install --no-build-isolation --no-deps ./python
+#
+# Building in-place with make python (in the top level directory) also still works.
+[build-system]
+requires = ["setuptools", "Cython"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pflare"
+description = "Python bindings for PFLARE: parallel iterative methods for asymmetric linear systems built on PETSc"
+readme = {text = "Python bindings for the PFLARE library. See https://github.com/PFLAREProject/PFLARE", content-type = "text/markdown"}
+# SPDX string form; needs setuptools >= 77
+license = "MIT"
+authors = [{name = "Steven Dargaville"}]
+dependencies = ["numpy", "petsc4py"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/PFLAREProject/PFLARE"
+Documentation = "https://github.com/PFLAREProject/PFLARE/tree/main/docs"
+
+[tool.setuptools]
+py-modules = ["pflare"]

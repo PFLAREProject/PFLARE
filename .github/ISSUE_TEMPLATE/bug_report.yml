@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a crash, build failure, wrong result or other bug in PFLARE
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! If the problem is that the solver
+        converges slowly (or not at all) rather than a crash or wrong behaviour, please
+        use the "Convergence help" template instead.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: >
+        The steps to reproduce the problem. Ideally a minimal example, or one of the
+        drivers in `tests/` with the exact command line used.
+      placeholder: |
+        e.g., ./adv_diff_fd -n 100 -pc_type air -pc_air_z_type lair ...
+    validations:
+      required: true
+  - type: input
+    id: pflare-version
+    attributes:
+      label: PFLARE version
+      description: The PFLARE release version or git commit (see the `VERSION.txt` file or `git rev-parse HEAD`).
+      placeholder: v1.26.0
+    validations:
+      required: true
+  - type: input
+    id: petsc-version
+    attributes:
+      label: PETSc version
+      description: The PETSc version or git commit, and whether PFLARE was built via `--download-pflare`, Spack, conda or from source.
+      placeholder: PETSc 3.25.0, --download-pflare
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: >
+        OS, compilers, MPI implementation, and any relevant PETSc configure options
+        (e.g., 64-bit indices, single precision, Kokkos/GPU backend).
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: >
+        Any error messages or output. For solver problems, the output of `-ksp_view`
+        and `-pc_air_print_stats_timings` is very helpful. This will be automatically
+        formatted as code.
+      render: shell

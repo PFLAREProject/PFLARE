@@ -3,6 +3,11 @@
 
 #include "petsc.h"
 
+/* PFLARE version - must be kept in sync with the VERSION.txt file in the top level directory */
+#define PFLARE_VERSION_MAJOR    1
+#define PFLARE_VERSION_MINOR    26
+#define PFLARE_VERSION_SUBMINOR 0
+
 /* SUBMANSEC = PC */
 
 /*E

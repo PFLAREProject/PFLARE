@@ -36,6 +36,10 @@ If PETSc was configured with petsc4py, the PFLARE Python interfaces can be built
 
 4) ``make python`` in the top level directory.
 
+Alternatively, after step 3 the Python interfaces can be installed into the current Python environment with pip. Build isolation must be disabled so the build uses the numpy/petsc4py matching your PETSc install, and ``--no-deps`` prevents pip from trying to reinstall them (e.g., when petsc4py comes from the PETSc install rather than pip):
+
+     pip install --no-build-isolation --no-deps ./python
+
 Then if desired, check that PFLARE was built successfully by running some simple tests with:
 
 5) ``make check`` in the top level directory.
@@ -52,6 +56,18 @@ An up to date Docker image is available on Dockerhub. To download the image and 
 
      docker run -it stevendargaville/pflare
      make check
+
+### Installing to a prefix
+
+After a source build, the library, headers, Fortran module files and Python bindings (if built) can be installed to a prefix with:
+
+     make install
+
+The default prefix is `/usr/local`; this can be changed with `PREFIX` (and `DESTDIR` for staged installs, e.g., when packaging):
+
+     make install PREFIX=/opt/pflare
+
+The install also writes a pkg-config file to `$(PREFIX)/lib/pkgconfig/pflare.pc`, so the compile and link flags can be obtained with `pkg-config --cflags --libs pflare` once that directory is in your `PKG_CONFIG_PATH`. The Python bindings alone can be installed with `make install_python`.
 
 ## Linking to PFLARE
 
