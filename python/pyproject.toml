@@ -18,7 +18,8 @@ build-backend = "setuptools.build_meta"
 name = "pflare"
 description = "Python bindings for PFLARE: parallel iterative methods for asymmetric linear systems built on PETSc"
 readme = {text = "Python bindings for the PFLARE library. See https://github.com/PFLAREProject/PFLARE", content-type = "text/markdown"}
-license = {text = "MIT"}
+# SPDX string form; needs setuptools >= 77
+license = "MIT"
 authors = [{name = "Steven Dargaville"}]
 dependencies = ["numpy", "petsc4py"]
 dynamic = ["version"]
