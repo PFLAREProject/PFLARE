@@ -614,6 +614,10 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
 
   Level: intermediate
 
+  Note:
+  The caller must pass a buffer of at least 11 bytes; the smoothing pattern is at most 10 characters
+  and is null-terminated on return.
+
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetSmoothType()`, `PCAIRGetInverseType()`, `PCAIRGetFullSmoothingUpAndDown()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
@@ -1862,7 +1866,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
 
   Note:
   Each `f` performs a smooth on the F points and each `c` a smooth on the C points; the string may be any
-  combination and length, not only `ff`, `fc`, or `fcf`.
+  combination, not only `ff`, `fc`, or `fcf`. At most 10 characters are used; longer patterns are truncated.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSmoothType()`, `PCAIRSetInverseType()`, `PCAIRSetFullSmoothingUpAndDown()`
 @*/

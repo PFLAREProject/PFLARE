@@ -1321,16 +1321,13 @@ module pcair_c_fortran_bindings
       n = len_trim(fortran_string)
    
       ! Copy Fortran string to C array, null-terminate
+      ! Only n+1 characters are written - the caller's buffer needs to hold
+      ! at most len(fortran_string)+1 characters
       do i = 1, n
          output_string(i) = fortran_string(i:i)
       end do
       output_string(n+1) = c_null_char
-   
-      ! Fill the rest with c_null_char if output_string is longer
-      do i = n+2, 256
-         output_string(i) = c_null_char
-      end do
-   
+
    end subroutine PCAIRGetSmoothType_c
 
 ! -------------------------------------------------------------------------------------------------------------------------------
