@@ -9,6 +9,12 @@ lib/
 __pycache__/
 *.pyc
 
+# Python build artifacts (make python / pip install)
+python/pflare_defs.c
+python/*.so
+python/build/
+python/*.egg-info/
+
 # Editor/IDE
 .vscode/
 
