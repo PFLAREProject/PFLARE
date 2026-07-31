@@ -1,6 +1,5 @@
-PFLARE is distributed under LICENSE.txt:
+PFLARE is distributed under the MIT license, see the `LICENSE` file:
 
-Copyright (c) 2024-2025 PFLARE Developers
 License: MIT, http://opensource.org/licenses/MIT
 
 Guidelines
