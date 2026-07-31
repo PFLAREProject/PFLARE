@@ -544,7 +544,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. cf_splitting_type - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
+. cf_splitting_type - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, `CF_PMIS_AGG`, or `CF_CR`
 
   Level: intermediate
 
@@ -1729,7 +1729,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC pc, PetscBool input_bool)
   This controls how strong a connection must be to influence the CF splitting; a larger threshold treats fewer
   connections as strong, typically producing sparser coarse grids and cheaper cycles but slower
   convergence, while a smaller threshold does the opposite. Values in [0, 1) are required, with 0.5 a reasonable
-  default.
+  default. For the `CF_DIAG_DOM` splitting this instead sets the target diagonal dominance ratio, and for the
+  `CF_CR` splitting it sets the target compatible relaxation rate, the contraction one application of the
+  F-point smoother must achieve (around 0.1 is a reasonable choice there).
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetStrongThreshold()`, `PCAIRSetCFSplittingType()`, `CFSplittingType`
 @*/
@@ -1799,10 +1801,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 
   Input Parameters:
 + pc                - the `PCAIR` preconditioner context
-- cf_splitting_type - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, or `CF_PMIS_AGG`
+- cf_splitting_type - the CF splitting algorithm, one of `CF_PMISR_DDC`, `CF_DIAG_DOM`, `CF_PMIS`, `CF_PMIS_DIST2`, `CF_AGG`, `CF_PMIS_AGG`, or `CF_CR`
 
   Options Database Key:
-. -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg) - the CF splitting algorithm; defaults to pmisr_ddc
+. -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - the CF splitting algorithm; defaults to pmisr_ddc
 
   Level: intermediate
 
@@ -1810,7 +1812,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
   This chooses the algorithm that partitions the unknowns into coarse (C) and fine (F) points on each level; the
   default `CF_PMISR_DDC` combines a PMISR splitting with diagonal-dominance conversion and is a reasonable
   general-purpose choice for well-scaled PDEs. The `CF_DIAG_DOM` splitting enforces a given diagonal dominance ratio,
-  and can be more robust. The strong threshold is used to define strong connections or the target diagonal dominance ratio,
+  and can be more robust. The `CF_CR` splitting uses compatible relaxation, coarsening from scratch until one
+  application of the F-point polynomial smoothing contracts the error on the fine-fine block at a target rate;
+  it needs no strength matrix. The strong threshold is
+  used to define strong connections, the target diagonal dominance ratio, or the target CR rate,
   depending on the splitting chosen (see `PCAIRSetStrongThreshold()`).
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCFSplittingType()`, `CFSplittingType`, `PCAIRSetStrongThreshold()`, `PCAIRSetMaxLubySteps()`
@@ -2891,7 +2896,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsReal("-pc_air_a_drop", "Drop tolerance for A", "PCAIRSetADrop", old_real, &input_real, NULL));
    PetscCall(PCAIRSetADrop(pc, input_real));
    // ~~~~  
-   const char *const CFSplittingTypes[] = {"PMISR_DDC", "DIAG_DOM", "PMIS", "PMIS_DIST2", "AGG", "PMIS_AGG", "CFSplittingType", "CF_", NULL};
+   const char *const CFSplittingTypes[] = {"PMISR_DDC", "DIAG_DOM", "PMIS", "PMIS_DIST2", "AGG", "PMIS_AGG", "CR", "CFSplittingType", "CF_", NULL};
    PetscCall(PCAIRGetCFSplittingType(pc, &old_cf_type));
    cf_type = old_cf_type;
    PetscCall(PetscOptionsEnum("-pc_air_cf_splitting_type", "CF splitting algorithm", "PCAIRSetCFSplittingType", CFSplittingTypes, (PetscEnum)old_cf_type, (PetscEnum *)&cf_type, &flg));
@@ -3107,6 +3112,12 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=PMIS_AGG \n"));
          PetscCall(PetscViewerASCIIPrintf(viewer, "    Strong threshold=%f \n", \
+                  input_real));
+      }
+      else if (cf_type == CF_CR)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  CF splitting algorithm=CR \n"));
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    Target CR rate (strong threshold)=%f \n", \
                   input_real));
       }
 
@@ -3546,7 +3557,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 . -pc_air_inverse_type      (power|arnoldi|newton|neumann|sai|isai|wjacobi|jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
 . -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf); defaults to ff
-. -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg) - CF splitting to use; defaults to pmisr_ddc
+. -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc
 . -pc_air_strong_threshold  strong_threshold - strong threshold used in the CF splitting; defaults to 0.5
 . -pc_air_r_drop            drop_tol - drop tolerance applied to R on each level after it is built; defaults to 0.01
 . -pc_air_a_drop            drop_tol - drop tolerance applied to the coarse matrix on each level after it is built; defaults to 1e-4

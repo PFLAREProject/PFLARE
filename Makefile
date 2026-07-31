@@ -145,13 +145,14 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/DDC_Module.o \
 		  $(SRCDIR)/PMISR_Module.o \
 		  $(SRCDIR)/Aggregation.o \
-		  $(SRCDIR)/CF_Splitting.o \
-		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/Repartition.o \
-		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
+		  $(SRCDIR)/CR_Splitting.o \
+		  $(SRCDIR)/CF_Splitting.o \
+		  $(SRCDIR)/MatDiagDomSubmatrix.o \
+		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \

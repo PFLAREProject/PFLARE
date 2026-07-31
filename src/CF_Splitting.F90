@@ -1,9 +1,10 @@
 module cf_splitting
 
    use petscmat
-   use pflare_parameters, only: C_POINT, F_POINT
+   use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_MAX_ITS
    use pmisr_module, only: pmisr
    use ddc_module, only: ddc
+   use cr_splitting, only: cr_pass
    use sabs, only: generate_sabs
    use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio
    use aggregation, only: generate_serial_aggregation
@@ -20,6 +21,7 @@ module cf_splitting
    PetscEnum, parameter :: CF_PMIS_DIST2=3
    PetscEnum, parameter :: CF_AGG=4
    PetscEnum, parameter :: CF_PMIS_AGG=5
+   PetscEnum, parameter :: CF_CR=6
    
    contains
 
@@ -248,7 +250,8 @@ module cf_splitting
       integer, dimension(:), allocatable, target :: cf_markers_local
       integer :: its, ddc_its_max
       logical :: need_intermediate_is
-      PetscReal :: max_dd_ratio_achieved
+      PetscReal :: max_dd_ratio_achieved, cr_rate_achieved
+      PetscInt :: local_rows, local_cols, n_swapped
 #if defined(PETSC_HAVE_KOKKOS)                     
       MatType :: mat_type
       integer(c_long_long) :: A_array, is_fine_array, is_coarse_array
@@ -268,24 +271,61 @@ module cf_splitting
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then 
 
-            ! If kokkos debugging is on, the pmisr and ddc do 
+            ! If kokkos debugging is on, the pmisr and ddc do
             ! copy to the host after they finish in order to do the comparisons
             ! and hence we do need the intermediate ISs
             ! If doing pmis agg, the initial pmis will be on the device so always
             ! trigger the d2h copy and build the intermediate is
+            ! CR never runs the pmisr/ddc on the device (its heavy numerics are all
+            ! default petsc ops that run on the device anyway) so its host
+            ! cf_markers_local and ISs are always the authoritative ones
             if (.NOT. kokkos_debug() .AND. &
-                  (cf_splitting_type /= CF_AGG .AND. cf_splitting_type /= CF_PMIS_AGG)) then 
-               need_intermediate_is = .FALSE.  
+                  (cf_splitting_type /= CF_AGG .AND. cf_splitting_type /= CF_PMIS_AGG .AND. &
+                   cf_splitting_type /= CF_CR)) then
+               need_intermediate_is = .FALSE.
             end if
       end if                     
 #endif
 
-      ! Call the first pass CF splitting with a symmetrized strength matrix
-      call first_pass_splitting(input_mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
+      ! CR builds its splitting from scratch - all points start as F and each
+      ! cr_pass promotes an independent set of the slowest converging
+      ! F rows to C until the target CR rate is reached
+      ! There is no strength matrix or first pass, so for CR the strong_threshold
+      ! carries the target CR rate (just like it carries the target diagonal
+      ! dominance ratio for CF_DIAG_DOM)
+      if (cf_splitting_type == CF_CR) then
 
-      ! Create the IS for the CF splittings
-      if (need_intermediate_is) call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)   
-      
+         call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+         allocate(cf_markers_local(local_rows))
+         cf_markers_local = F_POINT
+         call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)
+
+         cr_its_loop: do its = 1, PFLARE_CR_MAX_ITS
+
+            ! Directly modifies the values in cf_markers_local
+            call cr_pass(input_mat, is_fine, strong_threshold, &
+                     cr_rate_achieved, n_swapped, cf_markers_local)
+
+            ! If we swapped anything the ISs are now outdated
+            if (n_swapped > 0) then
+               call ISDestroy(is_fine, ierr)
+               call ISDestroy(is_coarse, ierr)
+               call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)
+            end if
+
+            ! Terminate if we've hit the target rate or we can't make progress
+            if (cr_rate_achieved <= strong_threshold .OR. n_swapped == 0) exit cr_its_loop
+         end do cr_its_loop
+
+      else
+
+         ! Call the first pass CF splitting with a symmetrized strength matrix
+         call first_pass_splitting(input_mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
+
+         ! Create the IS for the CF splittings
+         if (need_intermediate_is) call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)
+      end if
+
       ! Only do the DDC pass if we're doing PMISR_DDC
       ! and if we haven't requested an exact independent set, ie strong threshold is not zero
       ! as this gives diagonal Aff)
@@ -341,8 +381,10 @@ module cf_splitting
             call delete_device_diag_dom_ratio()
          end if
       
-         ! Aggregation is not on the device at all
-         if (cf_splitting_type /= CF_AGG .AND. cf_splitting_type /= CF_PMIS_AGG) then
+         ! Aggregation is not on the device at all, and CR never creates
+         ! device cf_markers (its host ISs are already the final answer)
+         if (cf_splitting_type /= CF_AGG .AND. cf_splitting_type /= CF_PMIS_AGG .AND. &
+               cf_splitting_type /= CF_CR) then
 
             A_array = input_mat%v
             is_fine_array = is_fine_kokkos%v

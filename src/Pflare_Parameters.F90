@@ -38,6 +38,30 @@ module pflare_parameters
    integer, parameter :: F_POINT = -1
 
    ! --------------------------------------------------------
+   ! Compatible relaxation (CF_CR) parameters
+   ! --------------------------------------------------------
+   ! Number of weighted Jacobi sweeps on Aff per CR pass
+   integer, parameter :: PFLARE_CR_NU = 10
+   ! Number of GMRES polynomial applications per CR pass
+   ! This is deliberately 1 - AIR applies its F-solve once per smoothing step,
+   ! so the quantity that gates AIR convergence is the ONE application
+   ! contraction ||I - M Aff||, not the asymptotic rate over many applications
+   ! (for advection Aff is near triangular so I - M Aff is close to nilpotent
+   ! and the asymptotic rate looks great for any splitting)
+   integer, parameter :: PFLARE_CR_NU_POLY = 1
+   ! Order of the assembled power-basis GMRES polynomial used as the CR
+   ! relaxation, matching the default -pc_air_poly_order so the CR rate
+   ! measures the same F-point smoothing that AIRG actually applies
+   integer, parameter :: PFLARE_CR_POLY_ORDER = 6
+   ! Safety cap on the number of CR passes
+   integer, parameter :: PFLARE_CR_MAX_ITS = 100
+   ! Candidate threshold - F rows whose relaxed error is bigger than this
+   ! fraction of the biggest remaining error are eligible for promotion to C
+   ! (the hypre CR candidate measure; permissive, the independent set then
+   ! decides which candidates actually get promoted each pass)
+   PetscReal, parameter :: PFLARE_CR_CANDIDATE = 0.1
+
+   ! --------------------------------------------------------
    ! Indices into air_reuse_data%reuse_mat(:)   (from air_data_type)
    ! --------------------------------------------------------
    integer, parameter :: MAT_AP                   = 1

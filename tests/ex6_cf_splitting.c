@@ -252,9 +252,34 @@ int main(int argc,char **args)
   PetscCall(CheckSplitting(A, is_fine, is_coarse, "diag_dom strong_threshold=0.5"));
 
   PetscCall(ISDestroy(&is_fine));
-  PetscCall(ISDestroy(&is_coarse));  
+  PetscCall(ISDestroy(&is_coarse));
 
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  //       Compute a compatible relaxation CF splitting
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ // For CR the strong threshold carries the target CR rate (the contraction
+ // one application of the F-point polynomial smoothing must achieve) and the
+ // luby steps, ddc its and ddc fraction are ignored
+ strong_threshold = 0.1;
+ algorithm = CF_CR;
+
+ compute_cf_splitting(A, \
+     symmetric, \
+     strong_threshold, max_luby_steps, \
+     algorithm, \
+     ddc_its, \
+     ddc_fraction, \
+     &is_fine, &is_coarse);
+
+  PetscCall(CheckSplitting(A, is_fine, is_coarse, "cr target rate=0.1"));
+
+  PetscCall(ISDestroy(&is_fine));
+  PetscCall(ISDestroy(&is_coarse));
+
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   //    Compute a diagonally dominant submatrix

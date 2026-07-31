@@ -76,7 +76,8 @@ typedef enum {
 . `CF_PMIS`       - PMIS with a symmetrised strength matrix
 . `CF_PMIS_DIST2` - distance-2 PMIS, with strength matrix formed from S'S + S and then symmetrised
 . `CF_AGG`        - aggregation with root-nodes as C points; processor-local aggregation in parallel
-- `CF_PMIS_AGG`   - PMIS on boundary nodes with a symmetrised strength matrix, then processor-local aggregation
+. `CF_PMIS_AGG`   - PMIS on boundary nodes with a symmetrised strength matrix, then processor-local aggregation
+- `CF_CR`         - compatible relaxation; starts with all points F and promotes the F rows where the relaxed error remains largest to C, until one application of an assembled sparsified GMRES polynomial on the fine-fine block (i.e., AIR's F-point smoothing) contracts a random error by the target given by the strong threshold
 
   Level: intermediate
 
@@ -89,6 +90,7 @@ typedef enum {
    CF_PMIS_DIST2,
    CF_AGG,
    CF_PMIS_AGG,
+   CF_CR,
 }  CFSplittingType;
 
 #define PCAIR "air"
@@ -104,7 +106,10 @@ typedef enum {
 /* This should be called to register the new PC types */
 PETSC_EXTERN void PCRegister_PFLARE();
 
-/* Can call the CF splitting separate to everything */
+/* Can call the CF splitting separate to everything
+   For CF_CR the strong threshold argument carries the target CR rate
+   (just as it carries the target diagonal dominance ratio for CF_DIAG_DOM)
+   and the max Luby steps, DDC iteration and DDC fraction arguments are ignored */
 PETSC_EXTERN void compute_cf_splitting(Mat, int, PetscReal, int, int, int, PetscReal, IS*, IS*);
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat, PetscReal, Mat*);
 
