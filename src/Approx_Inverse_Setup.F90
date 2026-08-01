@@ -83,7 +83,7 @@ module approx_inverse_setup
       PetscErrorCode :: ierr
       type(tMat) :: reuse_mat, inv_matrix_temp
       type(tMat), dimension(:), pointer :: reuse_submatrices => null()
-      logical :: heap_allocated
+      logical :: heap_allocated, coefficients_supplied
 
       ! ~~~~~~  
 
@@ -111,7 +111,15 @@ module approx_inverse_setup
       buffers%subcomm = subcomm
       ! Don't do any overlapping of comms, if you want that call the start/finish yourself   
 
-      if (present(coefficients) .AND. associated(coefficients)) then
+      ! Careful not to write present(coefficients) .AND. associated(coefficients)
+      ! in one expression - fortran does not short-circuit, so associated() can be
+      ! evaluated on an absent optional and segfault
+      coefficients_supplied = .FALSE.
+      if (present(coefficients)) then
+         if (associated(coefficients)) coefficients_supplied = .TRUE.
+      end if
+
+      if (coefficients_supplied) then
 
          ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
          ! Reuse path: valid coefficients supplied by the caller;
@@ -144,7 +152,7 @@ module approx_inverse_setup
          ! coefficients are being returned to the caller, or Newton basis (2 columns).
          ! Otherwise, stack storage suffices.
          heap_allocated = matrix_free .OR. &
-                          (present(coefficients) .AND. .NOT. associated(coefficients)) .OR. &
+                          (present(coefficients) .AND. .NOT. coefficients_supplied) .OR. &
                           inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
          if (heap_allocated) then
             if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then

@@ -16,6 +16,7 @@ class CFSplittingType(IntEnum):
     CF_PMIS_DIST2 = 3
     CF_AGG        = 4
     CF_PMIS_AGG   = 5
+    CF_CR         = 6
 
 class PCPFLAREINVType(IntEnum):
     """Approximate inverse types for PCPFLAREINV and the PCAIR smoothers (PCPFLAREINVType in C)"""

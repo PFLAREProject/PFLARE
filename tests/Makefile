@@ -300,7 +300,11 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with advection and fixed dd ratio"
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
-#	
+#
+	@echo ""
+	@echo "Test AIRG with advection and compatible relaxation CF splitting"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+#
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
 	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
@@ -667,6 +671,26 @@ run_tests_no_load_serial:
 	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11
 #
 	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with compatible relaxation CF splitting"
+	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+	 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 -ksp_max_it 12 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and compatible relaxation CF splitting"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 18
+#
+	@echo ""
+	@echo "Test AIRG with poorly scaled SUPG CG FEM, compatible relaxation CF splitting and diagonal scaling"
+	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	 -unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_max_it 18
+#
+	@echo ""
 	@echo "Test improving Z"
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 	@echo "Test improving Z with 1 iteration"
@@ -721,6 +745,9 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and fixed dd ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
+	@echo ""
+	@echo "Test AIRG with advection and compatible relaxation CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -1014,7 +1041,27 @@ else
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and a large fixed dd ratio in parallel"
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9 \
-	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11	 
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 11
+#
+	@echo ""
+	@echo "Test AIRG on steady 2D structured advection with compatible relaxation CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 \
+	 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 -ksp_max_it 12 \
+	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and compatible relaxation CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 18
+#
+	@echo ""
+	@echo "Test AIRG with poorly scaled SUPG CG FEM, compatible relaxation CF splitting and diagonal scaling in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
+	 -unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_max_it 18
 #
 	@echo ""
 	@echo "Test solving isotropic diffusion with fast coarsening and near-nullspace in parallel"
