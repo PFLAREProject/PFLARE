@@ -375,6 +375,11 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
          // Reduce with a sum via VecScatter with ADD_VALUES, SCATTER_REVERSE
+         // Note the resulting marker arithmetic (cf_markers_d(i) + sum of neighbour marks)
+         // only stays consistent because the strength matrix passed in is structurally
+         // symmetric (S+S^T) - every neighbour of an in-set node was marked in the round
+         // that node was selected, so an in-set node can never receive marks later
+         // The nonsymmetric case is handled by pmisr_existing_measure_implicit_transpose_kokkos
          // Convert int → PetscScalar for the leaf (nonlocal) data
          {
             PetscScalarKokkosView leaf_scalar_d;

@@ -747,7 +747,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    if (mpi)
    {
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap_input));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao););
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
 
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntConstKokkosViewHost(colmap_input, cols_ao);
@@ -822,7 +822,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
       // We've now built the original fine indices
       PetscCallVoid(ISDestroy(&col_indices));
-      (void)PetscFree(col_indices_off_proc_array);
+      PetscCallVoid(PetscFree(col_indices_off_proc_array));
    }
    else
    {
@@ -1092,7 +1092,8 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 
                // If we're at or after the C point identity, our index into R gets a +1
                // so we skip over writing to that index in R
-               if (device_local_j_output[device_local_i_output[row_index] + j] >= coarse_view_d(i) - global_row_start) offset = 1;
+               // Only applies if the identity was included when the matrix was created
+               if (identity_int && device_local_j_output[device_local_i_output[row_index] + j] >= coarse_view_d(i) - global_row_start) offset = 1;
                device_local_a_output(device_local_i_output[row_index] + j + offset) = device_local_vals(device_local_i[i] + j);
             });
 

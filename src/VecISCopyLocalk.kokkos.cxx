@@ -94,6 +94,8 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(void *handle, int our_leve
    // Log copy with petsc
    size_t bytes = fine_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
+   // Fence after the async copy of the fine IS indices to the device - ISRestoreIndices may free the host array
+   Kokkos::fence();
    PetscCallVoid(ISRestoreIndices(*index_fine, &fine_indices_ptr));
 
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
@@ -113,6 +115,8 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(void *handle, int our_leve
    // Log copy with petsc
    bytes = coarse_view_h.extent(0) * sizeof(PetscInt);
    PetscCallVoid(PetscLogCpuToGpu(bytes));
+   // Fence after the async copy of the coarse IS indices to the device - ISRestoreIndices may free the host array
+   Kokkos::fence();
    PetscCallVoid(ISRestoreIndices(*index_coarse, &coarse_indices_ptr));
 
    // Rewrite the indices as local - save us a minus during VecISCopyLocal_kokkos
