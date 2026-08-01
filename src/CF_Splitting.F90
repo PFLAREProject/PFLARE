@@ -2,7 +2,7 @@ module cf_splitting
 
    use petscmat
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_MAX_ITS, &
-            PFLARE_CR_POLY_ORDER, PFLAREINV_POWER
+            PFLARE_CR_POLY_ORDER, PFLAREINV_ARNOLDI
    use pmisr_module, only: pmisr
    use ddc_module, only: ddc
    use cr_splitting, only: cr_pass
@@ -243,9 +243,9 @@ module cf_splitting
       ! The optional cr_* arguments only apply to CF_CR and set the
       ! approximate inverse used as the CR relaxation - PCAIR passes its
       ! Aff inverse settings so the CR rate certifies the F-solve actually
-      ! applied in the hierarchy; when absent an assembled power-basis
+      ! applied in the hierarchy; when absent an assembled arnoldi-basis
       ! GMRES polynomial of order PFLARE_CR_POLY_ORDER with sparsity order 1
-      ! and no diagonal scaling is used
+      ! and no diagonal scaling is used, matching the PCAIR defaults
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
@@ -311,7 +311,8 @@ module cf_splitting
 
          ! The CR relaxation defaults, overridden by PCAIR with its Aff
          ! inverse settings
-         cr_inverse_type_use = PFLAREINV_POWER
+         ! Matches the default -pc_air_inverse_type
+         cr_inverse_type_use = PFLAREINV_ARNOLDI
          cr_poly_order_use = PFLARE_CR_POLY_ORDER
          cr_sparsity_order_use = 1
          cr_diag_scale_use = .FALSE.
