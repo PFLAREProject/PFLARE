@@ -172,9 +172,10 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
          });
          PetscCallVoid(VecRestoreKokkosView(leaf_vec, &lvec_scalar_d));
       }
+      // Fence after the kernel converting the scattered leaf values to ints - the Vecs backing its views are destroyed next
+      Kokkos::fence();
       PetscCallVoid(VecDestroy(&scatter_root_vec));
       PetscCallVoid(VecDestroy(&leaf_vec));
-      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~~~~

@@ -256,6 +256,8 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       // Log copy with petsc
       bytes = input_nonlocal_to_submat_col_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));
+      // Fence after the async copy of the input->submat colmap mapping to the device - the host mirror is freed at scope exit
+      Kokkos::fence();
    }
 
    // ~~~~~~~~~~~~~~
@@ -587,7 +589,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    // to fortran - to prevent leaking memory we destroy the submatrices pointer ourself, and if we come back
    // into this routine with reuse we just create a new submatrices array    
    if (mpi && !reuse_int_reuse_mat) PetscCallVoid(PetscFree(submatrices));
-   (void)PetscFree(col_indices_off_proc_array);
+   PetscCallVoid(PetscFree(col_indices_off_proc_array));
 
    return;
 }

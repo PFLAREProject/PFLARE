@@ -734,8 +734,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
                // lump_val contains the diagonal so we overwrite
                if (expect_local_diagonal)
                {
-                  // Has to be the local column index
-                  j_local_d[i_local_d[i+1] - 1] = i;
+                  // Has to be the local column index - the row and column ownership
+                  // starts can differ so we can't just use i
+                  j_local_d[i_local_d[i+1] - 1] = row_index_global - global_col_start;
                   a_local_d[i_local_d[i+1] - 1] = lump_val;
                }
                else
@@ -1205,6 +1206,8 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscScalar val)
    {
       Kokkos::deep_copy(exec, device_nonlocal_vals, val);
    }
+   // Fence after the async fill of the matrix values - keep the convention of being finished before we exit
+   Kokkos::fence();
 
    // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
    // marks device modified, invalidates transpose/hermitian, bumps object state).
@@ -2170,7 +2173,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, \
       {
          PetscInt isstart = 0;
          /* Get start indices on each rank for the new columns */
-         MPI_Scan(&local_cols_col, &isstart, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX);
+         PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Scan(&local_cols_col, &isstart, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
          isstart -= local_cols_col;
 
          // cmap values are encoded through PetscScalar and then cast back to PetscInt,
@@ -2335,6 +2338,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, \
          bytes = iscol_o_view_h.extent(0) * sizeof(PetscInt);
          PetscCallVoid(PetscLogCpuToGpu(bytes));
 
+         // Fence after the async copy of the iscol_o indices to the device - ISRestoreIndices may free the host array
+         Kokkos::fence();
          PetscCallVoid(ISRestoreIndices(iscol_o, &iscol_o_indices_ptr));
       }
 
@@ -2435,10 +2440,12 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
       size_t bytes = is_row_view_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));        
       bytes = is_col_view_h.extent(0) * sizeof(PetscInt);
-      PetscCallVoid(PetscLogCpuToGpu(bytes));  
+      PetscCallVoid(PetscLogCpuToGpu(bytes));
 
-      PetscCallVoid(ISRestoreIndices(*is_row, &is_row_indices_ptr));   
-      PetscCallVoid(ISRestoreIndices(*is_col, &is_col_indices_ptr));   
+      // Fence after the async copies of the is_row/is_col indices to the device - ISRestoreIndices may free the host arrays
+      Kokkos::fence();
+      PetscCallVoid(ISRestoreIndices(*is_row, &is_row_indices_ptr));
+      PetscCallVoid(ISRestoreIndices(*is_col, &is_col_indices_ptr));
 
       // ~~~~~~~~~~~~
       // Rewrite to local indices

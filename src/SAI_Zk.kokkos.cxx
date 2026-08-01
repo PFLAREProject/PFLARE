@@ -296,14 +296,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       if (sparsity_max_nnz_iter   < 0) sparsity_max_nnz_iter   = 0;
    }
 
-   // Nothing to do if no rows
-   if (local_rows_cf == 0 || (sparsity_max_nnz_direct == 0 && count_iter == 0))
-   {
-      if (deallocate_submatrices) delete[] submatrices;
-      if (mpi && !reuse_int_reuse_mat) PetscCallVoid(PetscFree(submatrices));
-      (void)PetscFree(col_indices_off_proc_array);
-      return;
-   }
+   // If there are no rows to solve, both kernel sections below are skipped by their
+   // j_max > 0 / count_iter > 0 guards and we fall through to the restores/cleanup
 
    // ~~~~~~~~~~~~~~
    // TeamPolicy: one team per row, with per-team scratch memory
@@ -1180,7 +1174,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    // ~~~~~~~~~~~~~~
    if (deallocate_submatrices) delete[] submatrices;
    if (mpi && !reuse_int_reuse_mat) PetscCallVoid(PetscFree(submatrices));
-   (void)PetscFree(col_indices_off_proc_array);
+   PetscCallVoid(PetscFree(col_indices_off_proc_array));
 
    return;
 }

@@ -72,16 +72,9 @@ struct ReduceData {
       // Add all the counts
       count += src.count;
       // If we have found a diagonal entry at any point in this row
-      // found_diagonal becomes true      
+      // found_diagonal becomes true
       found_diagonal |= src.found_diagonal;
    }
-
-   // Required for Kokkos reduction
-   KOKKOS_INLINE_FUNCTION
-   static void join(volatile ReduceData& dest, const volatile ReduceData& src) {
-      dest.count = dest.count + src.count;
-      dest.found_diagonal = dest.found_diagonal || src.found_diagonal;
-   }   
 };
 
 namespace Kokkos {
@@ -111,15 +104,6 @@ struct ReduceDataMaxRow {
          col = src.col;
       }
    }
-
-   // Required for Kokkos reduction
-   KOKKOS_INLINE_FUNCTION
-   static void join(volatile ReduceDataMaxRow& dest, const volatile ReduceDataMaxRow& src) {
-      if (src.val > dest.val) {
-         dest.val = src.val;
-         dest.col = src.col;
-      }
-   }   
 };
 
 namespace Kokkos {
