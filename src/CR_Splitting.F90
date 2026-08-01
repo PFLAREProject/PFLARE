@@ -129,68 +129,68 @@ module cr_splitting
 
       if (use_poly) then
 
-      ! ~~~~~~~~
-      ! Assembled approximate inverse of Aff with the same settings as the
-      ! F-point smoothing AIRG applies in the hierarchy, so the CR rate
-      ! certifies the contraction of the actual F-solve including the
-      ! sparsity truncation
-      ! Always assembled, never matrix-free - see the module comment
-      ! ~~~~~~~~
-      call calculate_and_build_approximate_inverse(Aff, cr_inverse_type, &
-               cr_poly_order, cr_sparsity_order, &
-               .FALSE., cr_diag_scale, .FALSE., &
-               inv_Aff)
+         ! ~~~~~~~~
+         ! Assembled approximate inverse of Aff with the same settings as the
+         ! F-point smoothing AIRG applies in the hierarchy, so the CR rate
+         ! certifies the contraction of the actual F-solve including the
+         ! sparsity truncation
+         ! Always assembled, never matrix-free - see the module comment
+         ! ~~~~~~~~
+         call calculate_and_build_approximate_inverse(Aff, cr_inverse_type, &
+                  cr_poly_order, cr_sparsity_order, &
+                  .FALSE., cr_diag_scale, .FALSE., &
+                  inv_Aff)
 
       else
 
-      ! ~~~~~~~~
-      ! Build the weighted Jacobi inverse of the diagonal of Aff
-      ! This uses the same weight as calculate_and_build_weighted_jacobi_inverse
-      ! (ie the hypre weight) but we sanitize exactly zero diagonals so they can't
-      ! poison the weight with infs/nans - those rows can never be relaxed so they
-      ! are force promoted to C below
-      ! ~~~~~~~~
-      call MatCreateVecs(Aff, PETSC_NULL_VEC, diag_vec, ierr)
-      call MatGetDiagonal(Aff, diag_vec, ierr)
-      call VecGetArray(diag_vec, vec_array, ierr)
-      do ifree = 1, fine_local
-         if (vec_array(ifree) == 0.0) then
-            vec_array(ifree) = 1.0
-            forced_c(ifree) = .TRUE.
-         end if
-      end do
-      call VecRestoreArray(diag_vec, vec_array, ierr)
-
-      ! 3 / ( 4 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
-      ! Unweighted plain Jacobi if that's what the hierarchy smooths with
-      weight = 1.0
-      if (cr_inverse_type /= PFLAREINV_JACOBI) then
-         call MatDuplicate(Aff, MAT_COPY_VALUES, temp_mat, ierr)
-         call VecDuplicate(diag_vec, scale_vec, ierr)
-         call VecCopy(diag_vec, scale_vec, ierr)
-         call VecSqrtAbs(scale_vec, ierr)
-         call VecReciprocal(scale_vec, ierr)
-         call MatDiagonalScale(temp_mat, scale_vec, scale_vec, ierr)
-         call MatNorm(temp_mat, NORM_INFINITY, norm_inf, ierr)
-         call MatDestroy(temp_mat, ierr)
-         call VecDestroy(scale_vec, ierr)
-         if (norm_inf /= 0.0) weight = 3.0/(4.0 * norm_inf)
-      end if
-
-      ! Invert and apply the weight, zeroing the rows we can't relax
-      call VecReciprocal(diag_vec, ierr)
-      call VecScale(diag_vec, weight, ierr)
-      if (any(forced_c)) then
+         ! ~~~~~~~~
+         ! Build the weighted Jacobi inverse of the diagonal of Aff
+         ! This uses the same weight as calculate_and_build_weighted_jacobi_inverse
+         ! (ie the hypre weight) but we sanitize exactly zero diagonals so they can't
+         ! poison the weight with infs/nans - those rows can never be relaxed so they
+         ! are force promoted to C below
+         ! ~~~~~~~~
+         call MatCreateVecs(Aff, PETSC_NULL_VEC, diag_vec, ierr)
+         call MatGetDiagonal(Aff, diag_vec, ierr)
          call VecGetArray(diag_vec, vec_array, ierr)
          do ifree = 1, fine_local
-            if (forced_c(ifree)) vec_array(ifree) = 0.0
+            if (vec_array(ifree) == 0.0) then
+               vec_array(ifree) = 1.0
+               forced_c(ifree) = .TRUE.
+            end if
          end do
          call VecRestoreArray(diag_vec, vec_array, ierr)
-      end if
 
-      ! The matrix takes ownership of diag_vec
-      call MatCreateDiagonal(diag_vec, inv_Aff, ierr)
-      call VecDestroy(diag_vec, ierr)
+         ! 3 / ( 4 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
+         ! Unweighted plain Jacobi if that's what the hierarchy smooths with
+         weight = 1.0
+         if (cr_inverse_type /= PFLAREINV_JACOBI) then
+            call MatDuplicate(Aff, MAT_COPY_VALUES, temp_mat, ierr)
+            call VecDuplicate(diag_vec, scale_vec, ierr)
+            call VecCopy(diag_vec, scale_vec, ierr)
+            call VecSqrtAbs(scale_vec, ierr)
+            call VecReciprocal(scale_vec, ierr)
+            call MatDiagonalScale(temp_mat, scale_vec, scale_vec, ierr)
+            call MatNorm(temp_mat, NORM_INFINITY, norm_inf, ierr)
+            call MatDestroy(temp_mat, ierr)
+            call VecDestroy(scale_vec, ierr)
+            if (norm_inf /= 0.0) weight = 3.0/(4.0 * norm_inf)
+         end if
+
+         ! Invert and apply the weight, zeroing the rows we can't relax
+         call VecReciprocal(diag_vec, ierr)
+         call VecScale(diag_vec, weight, ierr)
+         if (any(forced_c)) then
+            call VecGetArray(diag_vec, vec_array, ierr)
+            do ifree = 1, fine_local
+               if (forced_c(ifree)) vec_array(ifree) = 0.0
+            end do
+            call VecRestoreArray(diag_vec, vec_array, ierr)
+         end if
+
+         ! The matrix takes ownership of diag_vec
+         call MatCreateDiagonal(diag_vec, inv_Aff, ierr)
+         call VecDestroy(diag_vec, ierr)
 
       end if
 
