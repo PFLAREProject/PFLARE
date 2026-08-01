@@ -77,7 +77,7 @@ typedef enum {
 . `CF_PMIS_DIST2` - distance-2 PMIS, with strength matrix formed from S'S + S and then symmetrised
 . `CF_AGG`        - aggregation with root-nodes as C points; processor-local aggregation in parallel
 . `CF_PMIS_AGG`   - PMIS on boundary nodes with a symmetrised strength matrix, then processor-local aggregation
-- `CF_CR`         - compatible relaxation; starts with all points F and promotes the F rows where the relaxed error remains largest to C, until one application of an assembled sparsified GMRES polynomial on the fine-fine block (i.e., AIR's F-point smoothing) contracts a random error by the target given by the strong threshold
+- `CF_CR`         - compatible relaxation; starts with all points F and promotes the F rows where the relaxed error remains largest to C, until one application of AIR's F-point smoothing contracts a random error by the target given by the strong threshold
 
   Level: intermediate
 

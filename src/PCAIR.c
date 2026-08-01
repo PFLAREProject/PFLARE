@@ -1813,8 +1813,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
   default `CF_PMISR_DDC` combines a PMISR splitting with diagonal-dominance conversion and is a reasonable
   general-purpose choice for well-scaled PDEs. The `CF_DIAG_DOM` splitting enforces a given diagonal dominance ratio,
   and can be more robust. The `CF_CR` splitting uses compatible relaxation, coarsening from scratch until one
-  application of the F-point polynomial smoothing contracts the error on the fine-fine block at a target rate;
-  it needs no strength matrix. The strong threshold is
+  application of the F-point polynomial smoothing contracts the error on the fine-fine block at a target rate. The strong threshold is
   used to define strong connections, the target diagonal dominance ratio, or the target CR rate,
   depending on the splitting chosen (see `PCAIRSetStrongThreshold()`).
 

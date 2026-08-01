@@ -55,7 +55,7 @@ The CF splittings in PFLARE are used within PCAIR to form the multigrid hierarch
    | pmis_dist2  |  CF_PMIS_DIST2  | Distance 2 PMIS method with strength matrix formed by S'S + S and then symmetrised | Partial |
    | agg  |  CF_AGG  | Aggregation method with root-nodes as C points. In parallel this is processor local aggregation  | No |
    | pmis_agg  |  CF_PMIS_AGG  | PMIS method with symmetrised strength matrix on boundary nodes, then processor local aggregation.  | Partial |
-   | cr  |  CF_CR  | Compatible relaxation. Starts with all points as F and promotes the F rows where the relaxed error remains largest to C, until one application of AIR's F-point polynomial smoothing contracts a random error on $\mathbf{A}_\textrm{ff}$ by the target set by strong_threshold. Needs no strength matrix. | Yes |
+   | cr  |  CF_CR  | Compatible relaxation. Starts with all points as F and promotes the F rows where the relaxed error remains largest to C, until one application of AIR's F-point smoother contracts a random error by the target set by strong_threshold. | Yes |
 
 The CF splittings can be called separately to PCAIR and are returned in two PETSc IS's representing the coarse and fine points. For example, to compute a PMISR DDC CF splitting of a PETSc matrix $\mathbf{A}$:
 
@@ -131,7 +131,7 @@ or in Python with petsc4py:
 
 To enforce a fixed diagonal dominance ratio, set `-pc_air_cf_splitting_type diag_dom` (or `algorithm = CF_DIAG_DOM`) and use `-pc_air_strong_threshold` as the target row-wise ratio in $\mathbf{A}_\textrm{ff}$; the section below details a convenience wrapper provided for this purpose.
 
-The compatible relaxation splitting (`-pc_air_cf_splitting_type cr`, or `algorithm = CF_CR`) similarly reuses `-pc_air_strong_threshold` (i.e., the `strong_threshold` argument of `compute_cf_splitting`) as the target CR rate. This is the contraction that one application of an assembled approximate inverse of $\mathbf{A}_\textrm{ff}$ — built with the same settings as PCAIR's $\mathbf{A}_\textrm{ff}$ inverse (`-pc_air_inverse_type`, `-pc_air_poly_order`, `-pc_air_inverse_sparsity_order`, `-pc_air_diag_scale_polys`) — must achieve on a random error with a zero right-hand side. The CR inverse is always assembled, even with `-pc_air_matrix_free_polys`: the ideal restrictor is always built from the assembled sparsified inverse, which is weaker than the matrix-free polynomial and hence is the binding constraint on splitting quality; certifying with the assembled inverse guarantees the restrictor, and the matrix-free smoother simply does better than predicted. As AIR applies its F-point smoothing once per smoothing step, this one-application contraction is the quantity that gates AIR convergence, and the target should be set to the per-application accuracy required of the F-solve; around 0.1 is a reasonable choice. Larger targets coarsen less and give cheaper hierarchies but weaker convergence. The `max_luby_steps`, `ddc_its` and `ddc_fraction` arguments are ignored for `cr`.
+The compatible relaxation splitting (`-pc_air_cf_splitting_type cr`, or `algorithm = CF_CR`) similarly reuses `-pc_air_strong_threshold` as the target CR rate. The `max_luby_steps`, `ddc_its` and `ddc_fraction` arguments are ignored for `cr`.
 
 ### Diagonally dominant submatrix extraction
 
