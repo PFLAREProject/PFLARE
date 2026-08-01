@@ -268,6 +268,12 @@ module air_mg_setup
          if (.NOT. cf_split_reused .AND. .NOT. auto_truncated) then
 
             ! Do the CF splitting
+            ! The cr_* arguments only apply to the CF_CR splitting - the CR
+            ! relaxation mirrors the settings of the Aff inverse used in the
+            ! hierarchy (though the CR always uses an assembled inverse
+            ! regardless of matrix_free_polys, as the ideal restrictor is
+            ! always built from the assembled inverse and that is the binding
+            ! constraint on the splitting quality)
             call compute_cf_splitting(air_data%coarse_matrix(our_level), &
                   air_data%options%symmetric, &
                   air_data%options%strong_threshold, &
@@ -275,7 +281,11 @@ module air_mg_setup
                   air_data%options%cf_splitting_type, &
                   air_data%options%ddc_its, &
                   air_data%options%ddc_fraction, &
-                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level))      
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  cr_inverse_type=air_data%options%inverse_type, &
+                  cr_poly_order=air_data%options%poly_order, &
+                  cr_inverse_sparsity_order=air_data%options%inverse_sparsity_order, &
+                  cr_diag_scale_polys=air_data%options%diag_scale_polys)
             air_data%allocated_is(our_level) = .TRUE.
          end if
          

@@ -5,7 +5,8 @@ module cr_splitting
    use pmisr_module, only: pmisr_existing_measure_implicit_transpose
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_NU, &
-            PFLARE_CR_NU_POLY, PFLARE_CR_POLY_ORDER, PFLAREINV_POWER, &
+            PFLARE_CR_NU_POLY, PFLARE_CR_POLY_ORDER, &
+            PFLAREINV_WJACOBI, PFLAREINV_JACOBI, &
             PFLARE_CR_CANDIDATE, PFLARE_MINUS_ONE, PFLARE_ONE, PFLARE_REAL_KIND
 
 #include "petsc/finclude/petscmat.h"
@@ -14,21 +15,26 @@ module cr_splitting
 
    public
 
-   ! The CR relaxation whose error decides the splitting
-   ! .TRUE. - an assembled power-basis GMRES polynomial on Aff with sparsity
-   !          order 1, ie the same truncated F-point smoothing AIRG applies by
-   !          default, so the CR rate certifies the one-application contraction
-   !          of the actual F-solve in the hierarchy (including the sparsity
-   !          truncation - a matrix-free polynomial is much stronger and
-   !          certifies rates the hierarchy can't deliver)
-   ! .FALSE. - weighted Jacobi on Aff (the classic CR relaxation)
-   logical, parameter :: cr_use_gmres_poly = .TRUE.
+   ! The CR relaxation whose error decides the splitting is the approximate
+   ! inverse of Aff built with the same inverse type, polynomial order, sparsity
+   ! order and diagonal scaling that PCAIR uses for its Aff inverse, so the CR
+   ! rate certifies the one-application contraction of the F-solve actually
+   ! applied in the hierarchy
+   ! It is ALWAYS built assembled, never matrix-free, even when
+   ! -pc_air_matrix_free_polys is on: the ideal restrictor is always built from
+   ! the assembled sparsified inverse (see AIR_Operators_Setup), which is
+   ! weaker than the matrix-free polynomial, so the assembled inverse is the
+   ! binding constraint on the splitting - certifying with the matrix-free
+   ! polynomial under-coarsens and the restrictor quality degrades with
+   ! problem size, while certifying with the assembled inverse guarantees the
+   ! restrictor and the matrix-free smoother simply does better than predicted
 
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine cr_pass(input_mat, is_fine, target_cr_rate, &
+                  cr_inverse_type, cr_poly_order, cr_sparsity_order, cr_diag_scale, &
                   cr_rate_achieved, n_swapped_global, cf_markers_local)
 
       ! One pass of compatible relaxation (CR) coarsening - the CR splitting is
@@ -37,10 +43,12 @@ module cr_splitting
       ! initial error (habituated CR - the C points are held at zero so the relaxation
       ! never touches the whole matrix), then promotes an independent set of the
       ! slowest converging F rows to C
-      ! The relaxation is either an assembled sparsified GMRES polynomial
-      ! (mirroring AIRG's F-point smoothing) or weighted Jacobi - see
-      ! cr_use_gmres_poly above. Tiny Aff blocks always fall back to Jacobi
-      ! as an Arnoldi of the polynomial order doesn't fit
+      ! The relaxation is the assembled approximate inverse with the settings
+      ! given by cr_inverse_type/cr_poly_order/cr_sparsity_order/cr_diag_scale
+      ! (mirroring AIRG's F-point smoothing) - see the module comment above for
+      ! why it is always assembled. Jacobi types and tiny Aff blocks (where an
+      ! Arnoldi of the polynomial order doesn't fit) use the inline Jacobi path,
+      ! which sanitizes zero diagonals
       ! Candidates for promotion are the rows where the relaxed error remains
       ! large relative to the biggest remaining error (the hypre CR candidate
       ! measure), so rows where the relaxation diverges or stalls are promoted first
@@ -51,6 +59,8 @@ module cr_splitting
       type(tMat), target, intent(in)      :: input_mat
       type(tIS), intent(in)               :: is_fine
       PetscReal, intent(in)               :: target_cr_rate
+      integer, intent(in)                 :: cr_inverse_type, cr_poly_order, cr_sparsity_order
+      logical, intent(in)                 :: cr_diag_scale
       PetscReal, intent(out)              :: cr_rate_achieved
       PetscInt, intent(out)               :: n_swapped_global
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
@@ -108,24 +118,27 @@ module cr_splitting
       allocate(forced_c(fine_local))
       forced_c = .FALSE.
 
-      ! A tiny Aff can't fit an Arnoldi of the polynomial order - fall back to Jacobi
-      use_poly = cr_use_gmres_poly .AND. fine_global > PFLARE_CR_POLY_ORDER + 1
+      ! Jacobi inverse types use the inline path below (which sanitizes zero
+      ! diagonals), as does any Aff too tiny to fit an Arnoldi of the
+      ! polynomial order
+      use_poly = cr_inverse_type /= PFLAREINV_WJACOBI .AND. &
+                 cr_inverse_type /= PFLAREINV_JACOBI .AND. &
+                 fine_global > cr_poly_order + 1
       nu = PFLARE_CR_NU
       if (use_poly) nu = PFLARE_CR_NU_POLY
 
       if (use_poly) then
 
       ! ~~~~~~~~
-      ! Assembled power-basis GMRES polynomial approximation of Aff^-1 with
-      ! sparsity order 1, ie the same truncated F-point smoothing AIRG applies
-      ! in the hierarchy by default, so the CR rate certifies the contraction
-      ! of the actual F-solve including the sparsity truncation - a matrix-free
-      ! polynomial is much stronger than the assembled truncated one and
-      ! certifies rates the hierarchy can't deliver
+      ! Assembled approximate inverse of Aff with the same settings as the
+      ! F-point smoothing AIRG applies in the hierarchy, so the CR rate
+      ! certifies the contraction of the actual F-solve including the
+      ! sparsity truncation
+      ! Always assembled, never matrix-free - see the module comment
       ! ~~~~~~~~
-      call calculate_and_build_approximate_inverse(Aff, PFLAREINV_POWER, &
-               PFLARE_CR_POLY_ORDER, 1, &
-               .FALSE., .FALSE., .FALSE., &
+      call calculate_and_build_approximate_inverse(Aff, cr_inverse_type, &
+               cr_poly_order, cr_sparsity_order, &
+               .FALSE., cr_diag_scale, .FALSE., &
                inv_Aff)
 
       else
@@ -149,18 +162,20 @@ module cr_splitting
       call VecRestoreArray(diag_vec, vec_array, ierr)
 
       ! 3 / ( 4 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
-      call MatDuplicate(Aff, MAT_COPY_VALUES, temp_mat, ierr)
-      call VecDuplicate(diag_vec, scale_vec, ierr)
-      call VecCopy(diag_vec, scale_vec, ierr)
-      call VecSqrtAbs(scale_vec, ierr)
-      call VecReciprocal(scale_vec, ierr)
-      call MatDiagonalScale(temp_mat, scale_vec, scale_vec, ierr)
-      call MatNorm(temp_mat, NORM_INFINITY, norm_inf, ierr)
-      call MatDestroy(temp_mat, ierr)
-      call VecDestroy(scale_vec, ierr)
-
+      ! Unweighted plain Jacobi if that's what the hierarchy smooths with
       weight = 1.0
-      if (norm_inf /= 0.0) weight = 3.0/(4.0 * norm_inf)
+      if (cr_inverse_type /= PFLAREINV_JACOBI) then
+         call MatDuplicate(Aff, MAT_COPY_VALUES, temp_mat, ierr)
+         call VecDuplicate(diag_vec, scale_vec, ierr)
+         call VecCopy(diag_vec, scale_vec, ierr)
+         call VecSqrtAbs(scale_vec, ierr)
+         call VecReciprocal(scale_vec, ierr)
+         call MatDiagonalScale(temp_mat, scale_vec, scale_vec, ierr)
+         call MatNorm(temp_mat, NORM_INFINITY, norm_inf, ierr)
+         call MatDestroy(temp_mat, ierr)
+         call VecDestroy(scale_vec, ierr)
+         if (norm_inf /= 0.0) weight = 3.0/(4.0 * norm_inf)
+      end if
 
       ! Invert and apply the weight, zeroing the rows we can't relax
       call VecReciprocal(diag_vec, ierr)

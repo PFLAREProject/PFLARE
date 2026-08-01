@@ -1,7 +1,8 @@
 module cf_splitting
 
    use petscmat
-   use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_MAX_ITS
+   use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_MAX_ITS, &
+            PFLARE_CR_POLY_ORDER, PFLAREINV_POWER
    use pmisr_module, only: pmisr
    use ddc_module, only: ddc
    use cr_splitting, only: cr_pass
@@ -234,9 +235,17 @@ module cf_splitting
    subroutine compute_cf_splitting(input_mat, symmetric, &
                      strong_threshold, max_luby_steps, &
                      cf_splitting_type, ddc_its, fraction_swap, &
-                     is_fine, is_coarse)
+                     is_fine, is_coarse, &
+                     cr_inverse_type, cr_poly_order, cr_inverse_sparsity_order, &
+                     cr_diag_scale_polys)
 
       ! Computes a CF splitting and returns the F and C point ISs
+      ! The optional cr_* arguments only apply to CF_CR and set the
+      ! approximate inverse used as the CR relaxation - PCAIR passes its
+      ! Aff inverse settings so the CR rate certifies the F-solve actually
+      ! applied in the hierarchy; when absent an assembled power-basis
+      ! GMRES polynomial of order PFLARE_CR_POLY_ORDER with sparsity order 1
+      ! and no diagonal scaling is used
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
@@ -245,6 +254,9 @@ module cf_splitting
       integer, intent(in)                 :: max_luby_steps, cf_splitting_type, ddc_its
       PetscReal, intent(in)               :: fraction_swap
       type(tIS), intent(inout)            :: is_fine, is_coarse
+      integer, intent(in), optional       :: cr_inverse_type, cr_poly_order
+      integer, intent(in), optional       :: cr_inverse_sparsity_order
+      logical, intent(in), optional       :: cr_diag_scale_polys
 
       PetscErrorCode :: ierr
       integer, dimension(:), allocatable, target :: cf_markers_local
@@ -252,6 +264,8 @@ module cf_splitting
       logical :: need_intermediate_is
       PetscReal :: max_dd_ratio_achieved, cr_rate_achieved
       PetscInt :: local_rows, local_cols, n_swapped
+      integer :: cr_inverse_type_use, cr_poly_order_use, cr_sparsity_order_use
+      logical :: cr_diag_scale_use
 #if defined(PETSC_HAVE_KOKKOS)                     
       MatType :: mat_type
       integer(c_long_long) :: A_array, is_fine_array, is_coarse_array
@@ -295,6 +309,17 @@ module cf_splitting
       ! dominance ratio for CF_DIAG_DOM)
       if (cf_splitting_type == CF_CR) then
 
+         ! The CR relaxation defaults, overridden by PCAIR with its Aff
+         ! inverse settings
+         cr_inverse_type_use = PFLAREINV_POWER
+         cr_poly_order_use = PFLARE_CR_POLY_ORDER
+         cr_sparsity_order_use = 1
+         cr_diag_scale_use = .FALSE.
+         if (present(cr_inverse_type)) cr_inverse_type_use = cr_inverse_type
+         if (present(cr_poly_order)) cr_poly_order_use = cr_poly_order
+         if (present(cr_inverse_sparsity_order)) cr_sparsity_order_use = cr_inverse_sparsity_order
+         if (present(cr_diag_scale_polys)) cr_diag_scale_use = cr_diag_scale_polys
+
          call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
          allocate(cf_markers_local(local_rows))
          cf_markers_local = F_POINT
@@ -304,6 +329,8 @@ module cf_splitting
 
             ! Directly modifies the values in cf_markers_local
             call cr_pass(input_mat, is_fine, strong_threshold, &
+                     cr_inverse_type_use, cr_poly_order_use, &
+                     cr_sparsity_order_use, cr_diag_scale_use, &
                      cr_rate_achieved, n_swapped, cf_markers_local)
 
             ! If we swapped anything the ISs are now outdated
