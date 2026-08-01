@@ -6,6 +6,13 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- New compatible relaxation CF splitting (`-pc_air_cf_splitting_type cr`),
+  which coarsens from scratch with no strength matrix until one application
+  of AIR's F-point smoothing contracts a random error on Aff by the target
+  rate given by the strong threshold; the CR relaxation mirrors the PCAIR
+  Aff inverse settings and works in serial, parallel and with Kokkos
+- Fixed a latent segfault in `calculate_and_build_approximate_inverse` when
+  called without the optional coefficients argument
 - Minimum PETSc version is now 3.25.0; the C/Fortran interface was rewritten to
   use PETSc's native Fortran types instead of a custom ISO C binding shim
 - Allow a user-supplied coarse-grid solver in PCAIR via the standard PETSc
