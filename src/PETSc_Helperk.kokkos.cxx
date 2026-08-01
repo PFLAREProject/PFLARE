@@ -23,20 +23,43 @@ static PetscErrorCode check_exact_petscint_to_scalar_encoding(PetscInt max_encod
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Generate the colmap and rewrite input global j indices to local given the calculated colmap
-PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscInt **garray_host)
+// Remap each entry in j_d from a global index to its local index via binary search into garray_d.
+// garray_d must be a sorted array of unique global indices.
+// Fences internally.
+static void remap_j_to_local_device(PetscIntKokkosView j_d, PetscIntKokkosView garray_d, PetscInt col_ao_output)
+{
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   if (j_d.extent(0) == 0) return;
+   // Binary search sorted garray to find our local index
+   // Originally used Kokkos::UnorderedMap here but it only handles up to uint32_t
+   // entries
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, j_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) {
+         j_d(i) = binary_search_sorted(garray_d, col_ao_output, j_d(i));
+   });
+   // Ensure the rewrite is finished before we return
+   Kokkos::fence();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Build garray on device from global indices in j_nonlocal_d and remap j_nonlocal_d to local in-place.
+// garray_d (out) is a device view of the sorted unique global column indices (size col_ao_output).
+// Fences internally.
+static void rewrite_j_global_to_local_device(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscIntKokkosView &garray_d)
 {
    auto exec = PetscGetKokkosExecutionSpace();
 
    // Need to preallocate to the max size
-   PetscIntKokkosView colmap_output_d("colmap_output_d", colmap_max_size);   
+   PetscIntKokkosView colmap_output_d("colmap_output_d", colmap_max_size);
    col_ao_output = 0;
 
    // Take a copy of j and sort it and then build garray
    if (j_nonlocal_d.extent(0) > 0)
    {
       ptrdiff_t count_ptr_arith = -1;
-      // Scoped so we don't keep the copy of j around very long
+      // Scoped so we don't keep the sorted copy of j around very long
       {
          PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
          Kokkos::deep_copy(exec, j_nonlocal_d_sorted, j_nonlocal_d);
@@ -49,54 +72,36 @@ PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &
       }
       col_ao_output = static_cast<PetscInt>(count_ptr_arith);
 
-      // Create some host space for the output garray (that stays in scope) and copy it
-      PetscCallVoid(PetscMalloc1(col_ao_output, garray_host));
-      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(*garray_host, col_ao_output);
       PetscInt zero = 0;
+      garray_d = Kokkos::subview(colmap_output_d, Kokkos::make_pair(zero, col_ao_output));
+
+      // Remap j_nonlocal_d to local indices using binary search into garray_d
+      // This fences internally
+      remap_j_to_local_device(j_nonlocal_d, garray_d, col_ao_output);
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Generate the colmap and rewrite input global j indices to local given the calculated colmap
+PETSC_INTERN void rewrite_j_global_to_local(PetscInt colmap_max_size, PetscInt &col_ao_output, PetscIntKokkosView j_nonlocal_d, PetscInt **garray_host)
+{
+   PetscIntKokkosView garray_d;
+
+   // This fences internally
+   rewrite_j_global_to_local_device(colmap_max_size, col_ao_output, j_nonlocal_d, garray_d);
+
+   // Always allocate host space for the output garray (that stays in scope), even
+   // when zero-size, as depending on the compiler this may return a non-null pointer
+   PetscCallVoid(PetscMalloc1(col_ao_output, garray_host));
+   if (col_ao_output > 0)
+   {
+      PetscIntKokkosViewHost colmap_output_h = PetscIntKokkosViewHost(*garray_host, col_ao_output);
       // Device to host so don't need to specify exec space
-      Kokkos::deep_copy(colmap_output_h, Kokkos::subview(colmap_output_d, Kokkos::make_pair(zero, col_ao_output)));
+      Kokkos::deep_copy(colmap_output_h, garray_d);
       // Log copy with petsc
       size_t bytes = col_ao_output * sizeof(PetscInt);
-      PetscCallVoid(PetscLogGpuToCpu(bytes));         
-   }
-   
-   // ~~~~~~~~~~
-   // Now we can go and overwrite the global indices in j with the local equivalents
-   // ~~~~~~~~~~
-   // Do we have any nonlocal columns
-   if (col_ao_output == 0)
-   {
-      // Silly but depending on the compiler this may return a non-null pointer
-      col_ao_output = 0;
-      PetscCallVoid(PetscMalloc1(col_ao_output, garray_host));
-   }
-   else
-   {
-      // Binary search sorted colmap to find our local index
-      // Originally used Kokkos::UnorderedMap here but it only handles up to uint32_t
-      // entries
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(exec, 0, j_nonlocal_d.extent(0)), KOKKOS_LAMBDA(const PetscInt i) { 
-
-            PetscInt low = 0;
-            PetscInt count = col_ao_output; // Number of elements in colmap_output_d
-            PetscInt step = -1;
-            PetscInt mid_idx = -1;
-            
-            while (count > 0) {
-               step = count / 2;
-               mid_idx = low + step;
-               if (colmap_output_d(mid_idx) < j_nonlocal_d(i)) {
-                  low = mid_idx + 1;
-                  count -= (step + 1);
-               } else {
-                  count = step;
-               }
-            }
-            j_nonlocal_d(i) = low;
-      });
-      // Ensure the rewrite is finished before we return
-      Kokkos::fence();         
+      PetscCallVoid(PetscLogGpuToCpu(bytes));
    }
 }
 
@@ -747,9 +752,20 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Let's make sure everything on the device is finished
    Kokkos::fence();
 
+   // Convert j_nonlocal_d from global to local indices now, before any sort below.
+   // All global indices (including any diagonals added in the loop above) are finalised.
+   // garray_d holds the sorted unique global column indices on device.
+   PetscIntKokkosView garray_d;
+   PetscInt col_ao_output = 0;
+   if (mpi)
+   {
+      // This fences internally
+      rewrite_j_global_to_local_device(cols_ao, col_ao_output, j_nonlocal_d, garray_d);
+   }
+
    // Now we may have to sort the column indices
    if (lump_int)
-   {  
+   {
       // Reduce to see if we ever added a diagonal
       bool added_any_diagonal = false;
       Kokkos::parallel_reduce(
@@ -770,10 +786,9 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          
          if (mpi)
          {
-            // The column size is not right here (it will be <= cols_ao)
-            // but it shouldn't matter as we are only construting an explicit kokkos csr matrix here so it can sort
-            KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, cols_ao, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);  
-            KokkosSparse::sort_crs_matrix(csrmat_nonlocal);         
+            // j_nonlocal_d now contains local indices; use col_ao_output as numCols
+            KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, col_ao_output, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);
+            KokkosSparse::sort_crs_matrix(csrmat_nonlocal);
          }
       }
    }
@@ -784,15 +799,20 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
    // we also have to go and build the a, i, j for the non-local off-diagonal block
-   if (mpi) 
+   if (mpi)
    {
-      // Now we need to build garray on the host and rewrite the j_nonlocal_d indices so they are local
-      // The default values here are for the case where we 
-      // let petsc do it, it resets this internally in MatSetUpMultiply_MPIAIJ
+      // Copy the device garray to the host
       PetscInt *garray_host = NULL;
-      PetscInt col_ao_output = 0;
-      // This fences internally
-      rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &garray_host);  
+      PetscCallVoid(PetscMalloc1(col_ao_output, &garray_host));
+      if (col_ao_output > 0)
+      {
+         PetscIntKokkosViewHost garray_h(garray_host, col_ao_output);
+         // Device to host so don't need to specify exec space
+         Kokkos::deep_copy(garray_h, garray_d);
+         // Log copy with petsc
+         size_t bytes = col_ao_output * sizeof(PetscInt);
+         PetscCallVoid(PetscLogGpuToCpu(bytes));
+      }
 
       // We can create our nonlocal diagonal block matrix directly on the device
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
