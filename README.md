@@ -54,13 +54,6 @@ The Jupyter notebooks below are the best place to start; they can be run interac
 
 ## Documentation
 
-The PFLARE API references are now available in the PETSc manual pages:
-
-* [PCAIR](https://petsc.org/main/manualpages/PC/PCAIR/)
-* [PCPFLAREINV](https://petsc.org/main/manualpages/PC/PCPFLAREINV/)
-
-For more details about PFLARE, please see:
-
 | Path | Contents |
 |---|---|
 | [docs/new_methods.md](docs/new_methods.md) | Details on the new methods added by PFLARE |
@@ -70,6 +63,11 @@ For more details about PFLARE, please see:
 | [docs/reuse.md](docs/reuse.md) | Re-using components of PFLARE |
 | [docs/options.md](docs/options.md) | List of the options available in PFLARE |   
 | [docs/faq.md](docs/faq.md) | Frequently asked questions and help! |   
+
+The PFLARE API references are now available in the PETSc manual pages:
+
+* [PCAIR](https://petsc.org/main/manualpages/PC/PCAIR/)
+* [PCPFLAREINV](https://petsc.org/main/manualpages/PC/PCPFLAREINV/)
 
 ## More examples
 
@@ -81,7 +79,7 @@ Contributions and bug reports are very welcome! Please see [CONTRIBUTING.md](.gi
 
 ## References \& citing
 
-Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3] (citation metadata is also in [CITATION.cff](CITATION.cff)).
+Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3].
 
 1. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, _Journal of Computational Physics_ 518 (2024) 113342  
 2. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, _The International Journal of High Performance Computing Applications_ 39(3) (2025) 364-384  
