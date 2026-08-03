@@ -45,7 +45,22 @@ Input arguments are:\n\
   -L_jac_*,     -U_jac_*    : Jacobi factor solves\n\
   -A_*                      : Ax=b GMRES + LU shell PC (PCAIR inner)\n\
   -A_jac_*                  : Ax=b GMRES + LU shell PC (PCJACOBI inner)\n\
-  -Apc_*                    : Ax=b GMRES + PCBJACOBI/ILU baseline\n\n";
+  -Apc_*                    : Ax=b GMRES + PCBJACOBI/ILU baseline\n\
+Every KSP/PC option is read under those prefixes, so PCAIR options must be given\n\
+as -L_pc_air_... AND -U_pc_air_... . A bare -pc_air_... is NOT seen by any solve\n\
+here (PETSc prefixes do not fall back to the unprefixed name); it is silently\n\
+ignored and only shows up in the 'unused option(s)' warning at PetscFinalize.\n\
+Solve-selection flags (at most one of the two -only_* may be given):\n\
+  -skip_airg                : skip both AIRG factor solves (the AIRG-inner Ax=b\n\
+                              solve then auto-skips); used by the driver to\n\
+                              recover the other methods when AIRG hard-aborts\n\
+  -only_airg                : run ONLY the ILU factorisation, AIRG L/U and the\n\
+                              AIRG-inner Ax=b solve (for -pc_air_* sweeps)\n\
+  -only_jac_axb             : run ONLY the ILU factorisation, Jacobi L/U and the\n\
+                              Jacobi-inner Ax=b solve (for -jac_max_it sweeps)\n\
+  -jac_max_it <int>         : inner Jacobi sweeps per factor apply in the\n\
+                              Jacobi-inner Ax=b solve (default: ceil of the max\n\
+                              AIR cycle complexity over L and U)\n\n";
 
 /* Our petsc kokkos definitions - has to go first (pulls in petscvec_kokkos.hpp,
    petscmat_kokkos.hpp, the SeqAIJKokkos internals and DefaultExecutionSpace/Space). */
@@ -1063,6 +1078,29 @@ int main(int argc, char **args)
   PetscBool only_jac_axb = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-only_jac_axb", &only_jac_axb, NULL));
   if (only_jac_axb) skip_airg = PETSC_TRUE;
+  /* -only_airg: the mirror image of -only_jac_axb. Run ONLY the ILU
+     factorisation, the two AIRG (PCAIR) L/U factor solves and the Ax=b
+     GMRES(30)+AIRG-inner shell solve. Skips the exact-PCILU baseline Ax=b solve,
+     GMRES-poly L/U, Neumann-poly L/U, ISAI L/U, Jacobi L/U and the Jacobi-inner
+     Ax=b shell. Built for sweeps of the -pc_air_* options (e.g. matrix-free
+     F-point smoothing, coarse-grid auto-truncation): those options change NOTHING
+     outside PCAIR, so every other method already has committed numbers and
+     re-running them just burns GPU time.
+
+     NOTE for the driver: with every competitor skipped, the "no competitor method
+     ran" signal that gpu_driver.py uses to trigger its -skip_airg recovery pass
+     (D23) fires on every matrix, so the driver must not apply that retry under
+     this flag. */
+  PetscBool only_airg = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-only_airg", &only_airg, NULL));
+  if (only_airg && only_jac_axb) {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "-only_airg and -only_jac_axb are mutually exclusive (they select "
+              "disjoint sets of solves); pass at most one.\n"));
+    PetscCall(MatDestroy(&A));
+    PetscCall(PetscFinalize());
+    return 1;
+  }
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
 
   /* Left-scale A by 1/diag(A) before the factorisation (mirrors test_ilu.py scale_mode=1).
@@ -1086,7 +1124,7 @@ int main(int argc, char **args)
   /* A x = b with GMRES(30) and PETSc's built-in PCBJACOBI/ILU baseline, run
      before the factorisation to establish whether the problem is solvable
      independently of factor quality. */
-  if (!only_jac_axb) {
+  if (!only_jac_axb && !only_airg) {
     PetscCall(PetscLogStagePush(stage_A_pcilu));
     {
       KSP ksp_Apc;
@@ -1114,7 +1152,8 @@ int main(int argc, char **args)
     PetscCall(PetscLogStagePop());
   } else {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "A x = b solve (gmres(30) + PCBJACOBI/ILU): SKIPPED (-only_jac_axb)\n"));
+              "A x = b solve (gmres(30) + PCBJACOBI/ILU): SKIPPED (%s)\n",
+              only_airg ? "-only_airg" : "-only_jac_axb"));
   }
 
   /* Incomplete LU factorisation: produce the L and U factors of A via
@@ -1246,10 +1285,11 @@ int main(int argc, char **args)
 
   /* GMRES-poly / Neumann-poly / ISAI L and U factor solves: skipped under
      -only_jac_axb (they're diagnostic competitor methods unrelated to the
-     Jacobi-inner Ax=b sweep this flag exists for). The Jacobi L/U factor
-     solves just below are deliberately NOT gated the same way: their own
-     iteration counts are a useful per-matrix reference even in sweep mode. */
-  if (!only_jac_axb) {
+     Jacobi-inner Ax=b sweep this flag exists for) and under -only_airg (no
+     -pc_air_* option can change them). The Jacobi L/U factor solves just below
+     are deliberately NOT gated by -only_jac_axb: their own iteration counts are
+     a useful per-matrix reference in that sweep. -only_airg does skip them. */
+  if (!only_jac_axb && !only_airg) {
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_gmres, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
                              "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L", NULL));
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_gmres, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
@@ -1265,18 +1305,24 @@ int main(int argc, char **args)
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_isai, U, b_rand, x_sol, INNER_PC_ISAI,
                              "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL, "LU_ISAI_U", NULL));
   } else {
+    const char *why = only_airg ? "-only_airg" : "-only_jac_axb";
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "L/U solve (richardson + GMRES poly): SKIPPED (-only_jac_axb)\n"));
+              "L/U solve (richardson + GMRES poly): SKIPPED (%s)\n", why));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "L/U solve (richardson + Neumann poly): SKIPPED (-only_jac_axb)\n"));
+              "L/U solve (richardson + Neumann poly): SKIPPED (%s)\n", why));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "L/U solve (richardson + ISAI): SKIPPED (-only_jac_axb)\n"));
+              "L/U solve (richardson + ISAI): SKIPPED (%s)\n", why));
   }
 
-  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_jac, L, b_rand, x_sol, INNER_PC_JACOBI,
-                           "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L", NULL));
-  PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_jac, U, b_rand, x_sol, INNER_PC_JACOBI,
-                           "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL, "LU_Jacobi_U", NULL));
+  if (!only_airg) {
+    PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_jac, L, b_rand, x_sol, INNER_PC_JACOBI,
+                             "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L", NULL));
+    PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_jac, U, b_rand, x_sol, INNER_PC_JACOBI,
+                             "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL, "LU_Jacobi_U", NULL));
+  } else {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "L/U solve (richardson + PCJACOBI): SKIPPED (-only_airg)\n"));
+  }
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
      jac_max_it comes from the AIR cycle complexities above, an explicit
@@ -1284,7 +1330,13 @@ int main(int argc, char **args)
      whether or not AIRG ran), or the hardcoded default of 1 if neither
      applies. Wrapped in try/catch like the AIRG shell so a failure here (it is
      the last solve) is recovered cleanly. */
-  {
+  if (only_airg) {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "A x = b solve (gmres(30) + LU shell PC, Jacobi inner): SKIPPED "
+              "(-only_airg)\n"));
+    /* The shell would have taken ownership of this vec; free it here instead. */
+    PetscCall(VecDestroy(&inv_diag_U_raw_for_jac));
+  } else {
     PetscErrorCode ierr_jac = PETSC_SUCCESS;
     PetscCall(PetscLogStagePush(stage_A_shell_jac));
     try {
