@@ -218,8 +218,12 @@
 ! Set operators, keeping the identical preconditioner matrix for
 ! all linear solves.  This approach is often effective when the
 ! linear systems do not change very much between successive steps.
+! Note we do not need KSPSetReusePreconditioner here: A2 is a copy
+! that is never modified after step 1, and petsc only triggers a PC
+! re-setup off the pmat's object state, so the preconditioner is
+! naturally reused. See reuse_preconditioner.c for a test of
+! KSPSetReusePreconditioner with a pmat whose values change in place.
       if (.NOT. regen) then
-         call KSPSetReusePreconditioner(ksp,PETSC_TRUE,ierr)
          call KSPSetOperators(ksp,A,A2,ierr)
       else
          ! Otherwise this should trigger same_nonzero_pattern

@@ -290,7 +290,11 @@ run_tests_no_load_short_serial:
 	./matrandom_check_reset -ksp_max_it 7
 	@echo "Test PCPFLAREINV with parameter resets on random diagonally dominant matrix"
 	./matrandom_check_reset -ksp_max_it 12 -check_airg 0
-#	
+#
+	@echo ""
+	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place"
+	./reuse_preconditioner
+#
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
@@ -734,8 +738,12 @@ else
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type arnoldi -ksp_max_it 5
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
-	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5	
-#	
+	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5
+#
+	@echo ""
+	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
+	$(MPIEXEC) -n 2 ./reuse_preconditioner
+#
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc

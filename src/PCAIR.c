@@ -152,6 +152,14 @@ static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
    PetscFunctionBegin;
    PC *pc_air_shell = (PC *)pc->data;
 
+   // The shell tracks the pmat state itself, so it must also see the
+   // reusepreconditioner flag: when it is set the outer PCSetUp is skipped
+   // entirely, but the PCApply below calls PCSetUp on the shell, which would
+   // otherwise rebuild the hierarchy after any change to the pmat
+   // This mirrors petsc semantics: once set up, a frozen pc stays frozen
+   // even if the sparsity pattern changes
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+
    // Just call the underlying pcshell apply
    PetscCall(PCApply(*pc_air_shell, x, y));
    PetscFunctionReturn(PETSC_SUCCESS);
@@ -176,10 +184,15 @@ static PetscErrorCode PCSetUp_AIR_c(PC pc)
    PetscFunctionBegin;
    PC *pc_air_shell = (PC *)pc->data;
 
-   // The pc_air_shell doesn't have any operators yet 
+   // The pc_air_shell doesn't have any operators yet
    // as they are not available yet in pccreate
    // so we have to set them
    PetscCall(PCSetOperators(*pc_air_shell, pc->mat, pc->pmat));
+
+   // Keep the shell's reusepreconditioner flag in sync - if the flag has
+   // been unset after a frozen solve the shell must be allowed
+   // to rebuild again
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
 
    // Now we should be able to call the pcshell setup
    // that builds the air hierarchy

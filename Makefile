@@ -184,7 +184,8 @@ export TEST_TARGETS = ex12f \
 		  mat_diag \
 		  adv_dg_upwind \
 		  ex6_two_airg \
-		  ilu_factors
+		  ilu_factors \
+		  reuse_preconditioner
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
