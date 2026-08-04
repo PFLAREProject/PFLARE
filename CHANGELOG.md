@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed PCAIR silently ignoring `KSPSetReusePreconditioner` /
+  `-ksp_reuse_preconditioner`: a values-only change to the pmat between
+  solves rebuilt the full AIR hierarchy despite the flag; a frozen PCAIR
+  now stays frozen (even across sparsity pattern changes, matching PETSc
+  semantics) until the flag is unset (#264)
 - New compatible relaxation CF splitting (`-pc_air_cf_splitting_type cr`),
   which coarsens from scratch with no strength matrix until one application
   of AIR's F-point smoothing contracts a random error on Aff by the target

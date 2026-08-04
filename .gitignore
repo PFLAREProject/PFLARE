@@ -44,3 +44,4 @@ tests/ilu_factors_kokkos
 tests/mat_diag
 tests/matrandom
 tests/matrandom_check_reset
+tests/reuse_preconditioner
