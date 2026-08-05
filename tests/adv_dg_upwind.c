@@ -1698,7 +1698,7 @@ int main(int argc, char **argv)
   PetscInt    dim, cStart, cEnd, Nb, Nq, nrows;
   DMPolytopeType ct;
   PetscBool   simplex;
-  PetscLogStage setup_stage, gpu_copy_stage;
+  PetscLogStage setup_stage, gpu_copy_stage, mesh_build_stage;
   MatType mat_type;
 
   PetscFunctionBeginUser;
@@ -1707,6 +1707,7 @@ int main(int argc, char **argv)
 
   PetscCall(PetscLogStageRegister("Setup", &setup_stage));
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy_stage));
+  PetscCall(PetscLogStageRegister("Mesh build stage", &mesh_build_stage));
 
   PetscCall(ProcessOptions(PETSC_COMM_WORLD, &ctx));
 
@@ -1731,9 +1732,10 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));  
 
   PetscCall(PetscLogStagePush(setup_stage));
+  PetscCall(PetscLogStagePush(mesh_build_stage));
   PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, domain_width, domain_height, 
                      final_smooths, integrity_check, print_stats, &ctx, &dm));
-
+  PetscCall(PetscLogStagePop());
   PetscCall(DMGetDimension(dm, &dim));
 
   /* To verify the solution set the bottom inlet condition as 1
