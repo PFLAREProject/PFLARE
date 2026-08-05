@@ -503,7 +503,7 @@ int main(int argc, char **argv)
   SNES   snes; /* Nonlinear solver */
   Vec    u;    /* Solutions */
   AppCtx options; /* options-defined work context */
-  PetscLogStage setup, gpu_copy;
+  PetscLogStage setup, gpu_copy, mesh_build;
   KSPConvergedReason reason;
   KSP ksp;
   Vec F;
@@ -515,6 +515,7 @@ int main(int argc, char **argv)
 
   PetscCall(PetscLogStageRegister("Setup", &setup));
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
+  PetscCall(PetscLogStageRegister("Mesh build stage", &mesh_build));
   PetscCall(ProcessOptions(PETSC_COMM_WORLD, &options));
 
   PetscBool second_solve= PETSC_FALSE;
@@ -542,8 +543,10 @@ int main(int argc, char **argv)
 
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
+  PetscCall(PetscLogStagePush(mesh_build));
   PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, domain_width, domain_height, 
                      final_smooths, integrity_check, print_stats, &options, &dm));
+  PetscCall(PetscLogStagePop());
   PetscCall(SNESSetDM(snes, dm));
   PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &options));
   // *** Set up the auxiliary vector for SUPG stabilization ***
