@@ -101,6 +101,7 @@ static char help[] = "Solves steady advection with upwinded DG FEM.\n\n";
 
 #include "pflare.h"
 #include "BoxMeshDM.h"
+#include "redist_solve.h"
 
 /* -----------------------------------------------------------------------
    Application context
@@ -233,14 +234,19 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
    ----------------------------------------------------------------------- */
 static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,
                                  double width, double height,
-                                 int final_smooths, 
+                                 int final_smooths,
                                  PetscBool integrity_check, PetscBool print_stats,
+                                 int agglom_factor,
                                  AppCtx *opt, DM *dm)
 {
   PetscFunctionBeginUser;
-  // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
-                           final_smooths, integrity_check, print_stats);
+  // Generate the mesh stored in a parallel DM
+  // The agglomeration factor makes each group of agglom_factor consecutive ranks
+  // own a compact sub-block of the domain, so their rows can be merged onto one
+  // rank for the solve - see redist_solve.h. A factor of 1 gives exactly the
+  // same mesh as the plain GenerateBoxMeshDM.
+  *dm = GenerateBoxMeshDMAgglom(comm, target_edge_length, width, height,
+                           final_smooths, integrity_check, print_stats, agglom_factor);
 
   // Doing overlap then any -dm_refine (triggered by DMSetFromOptions)
   // means we build the overlap on the unrefined dm which is cheap
@@ -1729,12 +1735,28 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-integrity_check", &integrity_check, NULL));    
 
   PetscBool print_stats = PETSC_TRUE;
-  PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));  
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));
+
+  /* Merge every agglom_factor consecutive ranks' rows onto one rank and run
+     the whole solve on the resulting subcommunicator. The default of 1 means
+     no redistribution at all - the mesh and the solve are then exactly as they
+     would be without this option. */
+  PetscInt agglom_factor = 1;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-agglomeration_factor", &agglom_factor, NULL));
+  PetscMPIInt comm_size;
+  PetscCallMPI(MPI_Comm_size(PETSC_COMM_WORLD, &comm_size));
+  PetscCheck(agglom_factor >= 1, PETSC_COMM_WORLD, PETSC_ERR_ARG_OUTOFRANGE,
+             "-agglomeration_factor must be at least 1, got %" PetscInt_FMT, agglom_factor);
+  PetscCheck(comm_size % agglom_factor == 0, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP,
+             "Number of MPI ranks %d is not divisible by -agglomeration_factor %" PetscInt_FMT,
+             comm_size, agglom_factor);
+  PetscCheck(!(ctx.time_depend && agglom_factor > 1), PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE,
+             "-agglomeration_factor > 1 is not supported with -time_depend");
 
   PetscCall(PetscLogStagePush(setup_stage));
   PetscCall(PetscLogStagePush(mesh_build_stage));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, domain_width, domain_height, 
-                     final_smooths, integrity_check, print_stats, &ctx, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, domain_width, domain_height,
+                     final_smooths, integrity_check, print_stats, (int)agglom_factor, &ctx, &dm));
   PetscCall(PetscLogStagePop());
   PetscCall(DMGetDimension(dm, &dim));
 
@@ -2110,6 +2132,41 @@ int main(int argc, char **argv)
     PetscCall(TSGetConvergedReason(ts, &ts_reason));
     PetscCall(TSDestroy(&ts));
     if (ts_reason < 0) return 1;
+
+  } else if (agglom_factor > 1) {
+
+    /* ---- Redistributed KSP solve ----
+       Merge every agglom_factor consecutive ranks' rows onto one rank and solve
+       there. This is after the -diag_scale swap above, so it picks up the scaled
+       operator and rhs automatically. RedistSetup/RedistSolve push their own
+       "Redistribution" log stage internally, and RedistSetup destroys the fine
+       A and leaves it NULL - nothing below here uses it and the cleanup
+       MatDestroy is NULL safe. */
+    RedistCtx          rctx;
+    KSPConvergedReason reason;
+
+    PetscCall(RedistSetup(PETSC_COMM_WORLD, &A, agglom_factor, &rctx));
+
+    PetscCall(PetscLogStagePush(gpu_copy_stage));
+    /* x is 1 everywhere here, same nonzero initial guess as the world solve below */
+    PetscCall(RedistSolve(&rctx, b_rhs, x, PETSC_TRUE, &reason));
+    PetscCall(PetscLogStagePop());
+    if (reason < 0) {
+      return 1;
+    }
+
+    /* ---- Optional second solve (e.g. to time the solve without setup) ---- */
+    if (ctx.second_solve) {
+      PetscCall(VecSet(x, 1.0));
+      PetscCall(RedistSolve(&rctx, b_rhs, x, PETSC_TRUE, &reason));
+      if (reason < 0) {
+        return 1;
+      }
+    }
+
+    /* Release the redistributed operator and its hierarchy before the solution
+       is written out or verified - only the fine x is needed from here */
+    PetscCall(RedistDestroy(&rctx));
 
   } else {
 
