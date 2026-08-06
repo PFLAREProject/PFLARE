@@ -27,6 +27,14 @@
      If any of u,v,w are set then they will override the velocity and unit velocity will be disabled
      Can specify inflow of 1 on bottom face with -bottom_only_inflow_one (default false)
 
+     Can merge every -agglomeration_factor consecutive ranks' rows onto one rank and run the
+     whole solve (outer KSP, MatMult and PC) on the resulting subcommunicator of size
+     comm_size/agglomeration_factor - see redist_solve.h. The default of 1 means no
+     redistribution at all and the mesh and the solve are then exactly as they would be
+     without the option. Note that with a factor > 1 there is no SNESSolve, so the -snes_*
+     viewers do not fire - -snes_view_solution is applied explicitly and still works, but
+     -snes_view and -snes_monitor do not. The -ksp_* options apply to the subcommunicator KSP.
+
 */
 
 static char help[] = "Solves steady advection-diffusion FEM problem with SUPG stabilization.\n\n\n";
@@ -39,6 +47,7 @@ static char help[] = "Solves steady advection-diffusion FEM problem with SUPG st
 
 #include "pflare.h"
 #include "BoxMeshDM.h"
+#include "redist_solve.h"
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
@@ -283,14 +292,18 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length, double width, double height, 
-   int final_smooths, PetscBool integrity_check, PetscBool print_stats, AppCtx *options, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length, double width, double height,
+   int final_smooths, PetscBool integrity_check, PetscBool print_stats, int agglom_factor, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
 
-  // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
-                           final_smooths, integrity_check, print_stats);
+  // Generate the mesh stored in a parallel DM
+  // The agglomeration factor makes each group of agglom_factor consecutive ranks
+  // own a compact sub-block of the domain, so their rows can be merged onto one
+  // rank for the solve - see redist_solve.h. A factor of 1 gives exactly the
+  // same mesh as the plain GenerateBoxMeshDM.
+  *dm = GenerateBoxMeshDMAgglom(comm, target_edge_length, width, height,
+                           final_smooths, integrity_check, print_stats, agglom_factor);
 
   PetscCall(DMSetFromOptions(*dm));
   // Give the DM access to the application context (which includes diffusion coefficient and advection velocity)
@@ -539,13 +552,27 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-integrity_check", &integrity_check, NULL));    
 
   PetscBool print_stats = PETSC_TRUE;
-  PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));   
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_stats", &print_stats, NULL));
+
+  /* Merge every agglom_factor consecutive ranks' rows onto one rank and run
+     the whole solve on the resulting subcommunicator. The default of 1 means
+     no redistribution at all - the mesh and the solve are then exactly as they
+     would be without this option. */
+  PetscInt agglom_factor = 1;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-agglomeration_factor", &agglom_factor, NULL));
+  PetscMPIInt comm_size;
+  PetscCallMPI(MPI_Comm_size(PETSC_COMM_WORLD, &comm_size));
+  PetscCheck(agglom_factor >= 1, PETSC_COMM_WORLD, PETSC_ERR_ARG_OUTOFRANGE,
+             "-agglomeration_factor must be at least 1, got %" PetscInt_FMT, agglom_factor);
+  PetscCheck(comm_size % agglom_factor == 0, PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP,
+             "Number of MPI ranks %d is not divisible by -agglomeration_factor %" PetscInt_FMT,
+             comm_size, agglom_factor);
 
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
   PetscCall(PetscLogStagePush(mesh_build));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, domain_width, domain_height, 
-                     final_smooths, integrity_check, print_stats, &options, &dm));
+  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, domain_width, domain_height,
+                     final_smooths, integrity_check, print_stats, (int)agglom_factor, &options, &dm));
   PetscCall(PetscLogStagePop());
   PetscCall(SNESSetDM(snes, dm));
   PetscCall(SetupDiscretization(dm, "adv_diff", SetupPrimalProblem, &options));
@@ -569,41 +596,125 @@ int main(int argc, char **argv)
   PetscCall(SNESSetUp(snes));
   PetscCall(PetscLogStagePop());  
 
-  PetscCall(PetscLogStagePush(gpu_copy));
-  PetscCall(SNESSolve(snes, NULL, u));
-  PetscCall(PetscLogStagePop());
-
-  // Get the iteration count
-  PetscCall(SNESGetKSP(snes, &ksp));
-  PetscCall(KSPGetConvergedReason(ksp,&reason));  
-  if (reason < 0)
+  if (agglom_factor > 1)
   {
-   return 1;
-  }  
+   RedistCtx rctx;
+   Vec       Y;
+   Mat       J, Jpre;
 
-  // Solve
-  // We set x to 1 rather than random as the vecrandom doesn't yet have a
-  // gpu implementation and we don't want a copy occuring back to the cpu
-  if (second_solve)
-  {
-   PetscCall(VecSet(u, 1.0));
-   // This gets snes->vec_func which is the rhs built by
-   // the previous snessolve 
+   // ~~~~~~~~~~~~~~~~~
+   // Redistributed solve - we do the SNESKSPONLY steps by hand:
+   // compute F(u), compute J, solve J Y = F with a zero initial guess and then
+   // take the step u <- u - Y (see SNESSolve_KSPONLY in
+   // $PETSC_DIR/src/snes/impls/ksponly/ksponly.c).
+   // We have to do this rather than call SNESSolve because RedistSetup takes
+   // ownership of the operator and destroys it, whereas SNESGetJacobian only
+   // lends us a reference - the SNES owns the matrix DMCreateMatrix built
+   // during SNESSetUp. Finishing with the SNES before the solve is also what
+   // actually frees the fine Jacobian at setup rather than keeping it resident
+   // for the whole solve, and it drops the SNES work vectors and unused KSP/PC.
+   // ~~~~~~~~~~~~~~~~~
+   // This gets snes->vec_func, allocated by SNESSetUp above
    PetscCall(SNESGetFunction(snes, &F, NULL, NULL));
-   // On GPUs, calling a second SNESSolve was triggering a rebuild 
-   // of parts of the matrix/rhs (which I think is because of BCs)
-   // but only on certain MPI ranks (corresponding to those with BCs),
-   // so we were seeing a massive imbalance. Instead we just call KSPSolve directly 
-   PetscCall(KSPSolve(ksp, F, u));
-  }
-  
-  PetscCall(KSPGetConvergedReason(ksp,&reason));  
-  if (reason < 0)
-  {
-   return 1;
-  }    
+   // The residual at u = 1, with the BCs applied by plex
+   PetscCall(SNESComputeFunction(snes, u, F));
+   PetscCall(SNESGetJacobian(snes, &J, &Jpre, NULL, NULL));
+   // The lag settings above are read by SNESComputeJacobian itself - a lag of
+   // -2 becomes -1 after this call, so the Jacobian is assembled exactly once
+   PetscCall(SNESComputeJacobian(snes, u, J, Jpre));
+   // SNESSetUpMatrices creates a single matrix and passes it as both J and Jpre
+   PetscCheck(J == Jpre, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE,
+              "Expected the SNES to use a single matrix for both J and Jpre");
 
-  PetscCall(SNESGetSolution(snes, &u));
+   // Take our own references and then let the SNES go - we are now the sole
+   // owner of F and Jpre. SNESDestroy sets snes to NULL and the cleanup below
+   // is NULL safe.
+   PetscCall(PetscObjectReference((PetscObject)F));
+   PetscCall(PetscObjectReference((PetscObject)Jpre));
+   PetscCall(SNESDestroy(&snes));
+
+   // RedistSetup pushes its own "Redistribution" log stage and destroys Jpre,
+   // leaving it NULL
+   PetscCall(RedistSetup(PETSC_COMM_WORLD, &Jpre, agglom_factor, &rctx));
+
+   PetscCall(VecDuplicate(u, &Y));
+   PetscCall(PetscLogStagePush(gpu_copy));
+   // Zero initial guess, exactly as SNESSolve_KSPONLY does
+   PetscCall(RedistSolve(&rctx, F, Y, PETSC_FALSE, &reason));
+   PetscCall(PetscLogStagePop());
+   // RedistSolve broadcasts the reason over the world comm so this is correct
+   // on every rank, including those that took no part in the solve
+   if (reason < 0)
+   {
+    return 1;
+   }
+
+   // Take the computed step to recover the physical solution
+   PetscCall(VecAXPY(u, -1.0, Y));
+
+   // Timing re-solve mirroring -second_solve. Unlike the non-redistributed
+   // path this writes into Y, so u keeps the physical solution.
+   if (second_solve)
+   {
+    PetscCall(RedistSolve(&rctx, F, Y, PETSC_FALSE, &reason));
+    if (reason < 0)
+    {
+     return 1;
+    }
+   }
+
+   PetscCall(VecDestroy(&Y));
+   // Our reference from above
+   PetscCall(VecDestroy(&F));
+   // Release the redistributed operator and its hierarchy before the solution
+   // is written out - only the fine u is needed from here
+   PetscCall(RedistDestroy(&rctx));
+
+   // SNESSolve normally does this at its end (VecViewFromOptions on
+   // snes->vec_sol in $PETSC_DIR/src/snes/interface/snes.c). There is no
+   // SNESSolve on this path so we apply -snes_view_solution by hand, which
+   // keeps -snes_view_solution vtk:solution.vtu working for both paths.
+   PetscCall(VecViewFromOptions(u, NULL, "-snes_view_solution"));
+  }
+  else
+  {
+   PetscCall(PetscLogStagePush(gpu_copy));
+   PetscCall(SNESSolve(snes, NULL, u));
+   PetscCall(PetscLogStagePop());
+
+   // Get the iteration count
+   PetscCall(SNESGetKSP(snes, &ksp));
+   PetscCall(KSPGetConvergedReason(ksp,&reason));
+   if (reason < 0)
+   {
+    return 1;
+   }
+
+   // Solve
+   // We set x to 1 rather than random as the vecrandom doesn't yet have a
+   // gpu implementation and we don't want a copy occuring back to the cpu
+   if (second_solve)
+   {
+    PetscCall(VecSet(u, 1.0));
+    // This gets snes->vec_func which is the rhs built by
+    // the previous snessolve
+    PetscCall(SNESGetFunction(snes, &F, NULL, NULL));
+    // On GPUs, calling a second SNESSolve was triggering a rebuild
+    // of parts of the matrix/rhs (which I think is because of BCs)
+    // but only on certain MPI ranks (corresponding to those with BCs),
+    // so we were seeing a massive imbalance. Instead we just call KSPSolve directly
+    PetscCall(KSPSolve(ksp, F, u));
+   }
+
+   PetscCall(KSPGetConvergedReason(ksp,&reason));
+   if (reason < 0)
+   {
+    return 1;
+   }
+
+   PetscCall(SNESGetSolution(snes, &u));
+  }
+
   /* Cleanup */
   PetscCall(VecDestroy(&u));
   PetscCall(SNESDestroy(&snes));
