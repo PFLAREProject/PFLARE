@@ -175,6 +175,7 @@ export TEST_TARGETS = ex12f \
 		  ex6f_reuse_amount \
 		  ex6 \
 		  adv_1d \
+		  adv_1d_multi_rhs \
 		  adv_diff_fd \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \

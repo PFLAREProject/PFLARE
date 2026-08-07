@@ -24,6 +24,7 @@ tests/solution.vts
 
 # Compiled test executables (add new ones here as tests are added)
 tests/adv_1d
+tests/adv_1d_multi_rhs
 tests/adv_1dk
 tests/adv_dg_upwind
 tests/adv_diff_2d
@@ -37,7 +38,6 @@ tests/ex6_getcoeffs
 tests/ex6_two_airg
 tests/ex6f
 tests/ex6f_getcoeffs
-tests/ex6f_pcmatapply
 tests/ex6f_reuse_amount
 tests/ilu_factors
 tests/ilu_factors_kokkos

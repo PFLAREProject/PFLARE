@@ -6,6 +6,15 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- New `PCMatApply` callback for PCPFLAREINV, so a block of right-hand sides is
+  applied with a single sparse matrix by dense matrix product rather than
+  PETSc's default loop over columns; on the GPU backends this keeps the whole
+  multiple-RHS apply on the device. Note that `KSPMatSolve` only reaches
+  `PCMatApply` for `-ksp_type preonly` (or HPDDM) - any other KSP type falls
+  back to solving column by column. PCAIR does not support multiple right-hand
+  sides yet. New `tests/adv_1d_multi_rhs.c` driver builds the block of
+  right-hand sides with `MatCreateDenseFromVecType` and solves with
+  `KSPMatSolve`
 - Fixed PCAIR silently ignoring `KSPSetReusePreconditioner` /
   `-ksp_reuse_preconditioner`: a values-only change to the pmat between
   solves rebuilt the full AIR hierarchy despite the flag; a frozen PCAIR

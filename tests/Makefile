@@ -540,6 +540,14 @@ run_tests_no_load_short_serial:
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
+	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5
+	@echo "Test multiple RHS block solve with a Newton polynomial PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_type newton
+	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -971,6 +979,12 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5
+	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
