@@ -23,6 +23,9 @@ module matshell_data_type
       PetscReal, dimension(:), pointer :: real_roots => null()
       PetscReal, dimension(:), pointer :: imag_roots => null()
       type(tMat) :: mat, mat_scaled
+      ! Whether the inner mat_scaled shell applies I - D^-1 A (the Neumann polynomial)
+      ! rather than D^-1 A (the diagonally scaled gmres polynomials)
+      logical :: neumann_inner = .FALSE.
       ! Temporary vectors we use
       type(tVec), dimension(5) :: mf_temp_vec
       ! Temporary dense matrices we use during a multiple rhs (block) apply

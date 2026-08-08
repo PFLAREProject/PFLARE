@@ -222,12 +222,11 @@ module c_fortran_bindings
    subroutine pflareinv_shell_block_matapply_c(shell_ptr, x_ptr, y_ptr, applied_int) &
          bind(C,name='pflareinv_shell_block_matapply_c')
 
-      ! Applies one of the matrix-free gmres polynomial matshells to a block of
+      ! Applies one of the matrix-free polynomial matshells to a block of
       ! right hand sides
       ! applied_int comes back as 0 if we couldn't do a block apply, in which case
-      ! the caller has to apply column by column instead
-      ! NB - must only be called for the power/arnoldi/newton matshells, see the
-      ! warning in shell_poly_block_apply
+      ! the caller has to apply column by column instead - that includes being handed
+      ! a matshell whose context isn't one of the polynomials shell_poly_block_apply knows
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in) :: shell_ptr, x_ptr, y_ptr

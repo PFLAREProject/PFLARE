@@ -1485,18 +1485,24 @@ end if
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_horner_block(mat, coefficients, temp_mat, x_mat, y_mat, recip_diag, block_applied)
+   subroutine petsc_horner_block(mat, coefficients, temp_mat, x_mat, y_mat, recip_diag, &
+                  neumann_inner, block_applied)
 
       ! Uses a horner iteration to apply
-      ! y_mat = (coeff(1) + coeff(2) * A + coeff(3) * A^2 + ...) x_mat
+      ! y_mat = (coeff(1) + coeff(2) * B + coeff(3) * B^2 + ...) x_mat
       ! for a block of right hand sides, x_mat, ie the multiple rhs version of petsc_horner
       ! The matvecs of petsc_horner become sparse matrix-dense matrix products (SpMM)
 
-      ! If recip_diag is not null we are applying the diagonally scaled polynomial
-      ! q(D^-1 A), with the mat passed in the *unscaled* A and recip_diag = D^-1.
-      ! We do this rather than running the products on the D^-1 A matshell, as every
-      ! product on a shell degrades to a column by column matvec. The caller must have
-      ! already scaled the block of rhs, ie x_mat = D^-1 X
+      ! There are three different inner operators, B, we can apply, all of them built
+      ! out of real products with the *unscaled* mat we've been given. We do this rather
+      ! than running the products on the matshells the scalar versions use, as every
+      ! product on a shell degrades to a column by column matvec
+      ! 1) recip_diag null                : B = A, the plain polynomial q(A)
+      ! 2) recip_diag non-null            : B = D^-1 A, the diagonally scaled polynomial
+      !                                     q(D^-1 A), with recip_diag = D^-1
+      ! 3) neumann_inner (implies scaled) : B = I - D^-1 A, the Neumann polynomial
+      ! In the scaled cases the caller must have already scaled the block of rhs,
+      ! ie x_mat = D^-1 X
 
       ! block_applied comes back false (with y_mat untouched) if the block of rhs we've
       ! been given has no product with mat, so the caller can fall back to a column by
@@ -1510,6 +1516,7 @@ end if
       type(tMat)                :: x_mat, temp_mat
       type(tMat)                :: y_mat
       type(tVec)                :: recip_diag
+      logical, intent(in)       :: neumann_inner
       logical, intent(out)      :: block_applied
 
       ! Local
@@ -1566,7 +1573,16 @@ end if
             ! This is the arithmetic of the D^-1 A matshell, done blockwise
             if (scaled) call MatDiagonalScale(y_mat, recip_diag, PETSC_NULL_VEC, ierr)
 
-            ! Compute y_mat = A * temp_mat + alpha_n-i-1 r_0
+            ! The inner operator is I - D^-1 A rather than D^-1 A, so finish
+            ! y_mat = temp_mat - D^-1 A temp_mat
+            ! temp_mat still holds the value we did the product with
+            ! This is the arithmetic of the I - D^-1 A matshell, done blockwise
+            if (neumann_inner) then
+               call MatScale(y_mat, PFLARE_MINUS_ONE, ierr)
+               call MatAXPY(y_mat, PFLARE_ONE, temp_mat, SAME_NONZERO_PATTERN, ierr)
+            end if
+
+            ! Compute y_mat = B * temp_mat + alpha_n-i-1 r_0
             call MatAXPY(y_mat, coefficients(order), x_mat, SAME_NONZERO_PATTERN, ierr)
          end do
 

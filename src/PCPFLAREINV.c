@@ -20,10 +20,10 @@ PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, Pets
                      PetscInt subcomm_int, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
                      Mat *inv_matrix);
-// Block (multiple rhs) apply of a matrix-free gmres polynomial matshell, Y = q(A) X.
+// Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.
 // *applied comes back 0 if no block apply was possible and the caller has to apply
-// column by column instead. Only valid for the power/arnoldi/newton matshells - see
-// the warning in shell_poly_block_apply (Gmres_Poly_Newton.F90).
+// column by column instead - that includes being handed a matshell whose context
+// isn't one of the polynomials shell_poly_block_apply (Gmres_Poly_Newton.F90) knows.
 PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int *applied);
 
 // The types available as approximate inverses are (see include/pflare.h):
@@ -643,15 +643,17 @@ static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
 
    if (inv_data->matrix_free) {
       // mat_inverse is a MatShell with only MATOP_MULT registered, so MatMatMult on it
-      // would fail. The gmres polynomial matshells can however be applied blockwise by
+      // would fail. The polynomial matshells can however be applied blockwise by
       // doing the products with the underlying matrix - the Fortran routine below does
       // that and reports whether it managed it.
-      // The family gate here is load bearing: the Neumann matshell shares the diagonally
-      // scaled handler of the gmres polynomials but applies different arithmetic, so it
-      // must never be sent to the block kernels (see shell_poly_block_apply).
+      // The gate here is just the list of families that have a block kernel - it isn't
+      // load bearing for correctness, shell_poly_block_apply works out which arithmetic
+      // to use from the matshell's context and reports back if it can't do the apply
+      // (the two Jacobi types are never matrix-free anyway).
       int applied = 0;
       if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
-          inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
+          inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || \
+          inv_data->inverse_type == PFLAREINV_NEUMANN)
       {
          pflareinv_shell_block_matapply_c(&(inv_data->mat_inverse), &X, &Y, &applied);
       }

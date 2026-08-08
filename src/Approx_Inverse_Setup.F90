@@ -537,7 +537,7 @@ module approx_inverse_setup
 
             ! Any dense scratch blocks built by a multiple rhs (block) apply
             ! These are only ever created by the block applies, so this is a no-op
-            ! for the jacobi/neumann/PCAIR matshells
+            ! for the jacobi/PCAIR matshells
             do i_loc = 1, size(mat_ctx%mf_temp_mat)
                if (.NOT. PetscObjectIsNull(mat_ctx%mf_temp_mat(i_loc))) then
                   call MatDestroy(mat_ctx%mf_temp_mat(i_loc), ierr)

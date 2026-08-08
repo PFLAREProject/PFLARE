@@ -1070,20 +1070,15 @@ module gmres_poly_newton
       ! block_applied comes back false (with y_mat untouched) whenever we can't do a
       ! block apply, and the caller must then apply column by column instead
 
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      ! WARNING - This routine must NEVER be called with a Neumann polynomial matshell
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      ! The diagonally scaled gmres polynomials store an inner matshell in mat_ctx%mat_scaled
-      ! whose matvec is D^-1 A, and the block kernels below deliberately bypass that inner
-      ! shell - they do real products with the unscaled mat_ctx%mat and then scale the
-      ! result by D^-1 themselves (a product on a shell would degrade to a column by
-      ! column matvec). The Neumann polynomial reuses the same right scaled outer handler
-      ! but its inner shell is I - D^-1 A (see Neumann_Poly.F90), which is different
-      ! arithmetic, so the bypass would silently give the wrong answer.
-      ! There is nothing in the context that distinguishes the two, so the callers have
-      ! to gate on the inverse type - PCMatApply_PFLAREINV_c only dispatches here for
-      ! POWER/ARNOLDI/NEWTON/NEWTON_NO_EXTRA and any future caller (eg PCAIR) must do the same
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      ! The polynomials with a right diagonal scaling store an inner matshell in
+      ! mat_ctx%mat_scaled and the block kernels below deliberately bypass it - they do
+      ! real products with the unscaled mat_ctx%mat and then apply the rest of the inner
+      ! shell's arithmetic themselves (a product on a shell would degrade to a column by
+      ! column matvec). That means the kernels have to be told which inner operator they
+      ! are emulating - mat_ctx%neumann_inner picks I - D^-1 A (the Neumann polynomial,
+      ! see Neumann_Poly.F90) rather than D^-1 A (the diagonally scaled gmres polynomials)
+      ! Any new inner operator variant must add to that flag rather than reuse it,
+      ! otherwise the bypass will silently give the wrong answer
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1129,9 +1124,18 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~~~~
       ! Dispatch on what sort of polynomial is in the context
-      ! The newton basis needs three dense temporaries, the power/arnoldi basis one
+      ! The newton basis needs three dense temporaries, the power/arnoldi/neumann basis one
+      ! The Neumann polynomial has to be checked first, as it also has coefficients
       ! ~~~~~~~~~~~~
-      if (associated(mat_ctx%real_roots)) then
+      if (mat_ctx%neumann_inner) then
+         ! The Neumann polynomial is q(I - D^-1 A) D^-1 with coefficients of one and is
+         ! always built with its inner matshell, so we should always have a scaled apply
+         ! here - don't rely on that though, we can't emulate the inner operator without
+         ! the diagonal
+         if (.NOT. scaled) return
+         if (.NOT. associated(mat_ctx%coefficients)) return
+         n_temps = 1
+      else if (associated(mat_ctx%real_roots)) then
          n_temps = 3
       else if (associated(mat_ctx%coefficients)) then
          n_temps = 1
@@ -1150,7 +1154,14 @@ module gmres_poly_newton
          kernel_x = mat_ctx%mf_temp_mat(MF_MAT_RHS)
       end if
 
-      if (associated(mat_ctx%real_roots)) then
+      if (mat_ctx%neumann_inner) then
+
+         ! Neumann polynomial - horner with an inner operator of I - D^-1 A
+         call petsc_horner_block(mat_ctx%mat, mat_ctx%coefficients, &
+                  mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
+                  kernel_x, y_mat, kernel_recip, .TRUE., block_applied)
+
+      else if (associated(mat_ctx%real_roots)) then
 
          ! Newton basis
          call petsc_newton_block(mat_ctx%mat, &
@@ -1165,7 +1176,7 @@ module gmres_poly_newton
          ! Power/arnoldi basis
          call petsc_horner_block(mat_ctx%mat, mat_ctx%coefficients, &
                   mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
-                  kernel_x, y_mat, kernel_recip, block_applied)
+                  kernel_x, y_mat, kernel_recip, .FALSE., block_applied)
 
       end if
 
