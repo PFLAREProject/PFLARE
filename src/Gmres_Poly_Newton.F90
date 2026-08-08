@@ -7,7 +7,7 @@ module gmres_poly_newton
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
          PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB, &
-         MF_MAT_TEMP, MF_MAT_RHS
+         MF_MAT_TEMP, MF_MAT_TEMP_TWO, MF_MAT_TEMP_THREE, MF_MAT_RHS
    use matshell_data_type, only: ensure_block_temp_mats
 
 #include "petsc/finclude/petscmat.h"
@@ -878,6 +878,187 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine petsc_newton_block(mat, real_roots, imag_roots, temp_mat, temp_mat_two, temp_mat_three, &
+                  x_mat, y_mat, recip_diag, block_applied)
+
+      ! Applies a gmres polynomial in the newton basis matrix-free as an inverse
+      ! for a block of right hand sides, x_mat, ie the multiple rhs version of petsc_newton
+      ! The roots are stored in real_roots, imag_roots in the input matshell
+      ! Based on Loe 2021 Toward efficient polynomial preconditioning for GMRES
+      ! This is Algorithm 3 in Loe
+      ! The matvecs of petsc_newton become sparse matrix-dense matrix products (SpMM)
+      ! y_mat = A x_mat
+
+      ! If recip_diag is not null we are applying the diagonally scaled polynomial
+      ! q(D^-1 A), with the mat passed in the *unscaled* A and recip_diag = D^-1.
+      ! We do this rather than running the products on the D^-1 A matshell, as every
+      ! product on a shell degrades to a column by column matvec. The caller must have
+      ! already scaled the block of rhs, ie x_mat = D^-1 X
+      ! Every product below is therefore scaled by D^-1 immediately after it is computed
+      ! and before the result is used for anything else - that is exactly the arithmetic
+      ! of the inner D^-1 A matshell, done blockwise
+
+      ! block_applied comes back false (with y_mat untouched) if the block of rhs we've
+      ! been given has no product with mat, so the caller can fall back to a column by
+      ! column apply
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)              :: mat
+      PetscReal, dimension(:), intent(in) :: real_roots, imag_roots
+      type(tMat)                          :: temp_mat, temp_mat_two, temp_mat_three
+      type(tMat)                          :: x_mat
+      type(tMat)                          :: y_mat
+      type(tVec)                          :: recip_diag
+      logical, intent(out)                :: block_applied
+
+      ! Local
+      integer :: i, nroots
+      logical :: scaled
+      PetscBool :: has_product
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      block_applied = .FALSE.
+      scaled = .NOT. PetscObjectIsNull(recip_diag)
+      nroots = size(real_roots)
+
+      ! If we have more than one root we have to do products as we iterate over
+      ! the roots - attach them now
+      ! This has to happen before we write any values into the temporaries, as the
+      ! symbolic product may set them up
+      if (nroots > 1) then
+
+         ! temp_mat_two = mat * temp_mat
+         call MatProductCreateWithMat(mat, temp_mat, PETSC_NULL_MAT, temp_mat_two, ierr)
+         call MatProductSetType(temp_mat_two, MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(temp_mat_two, ierr)
+
+         ! If there is no product available for these types we have to let the
+         ! caller do a column by column apply instead
+         call MatHasOperation(temp_mat_two, MATOP_PRODUCTSYMBOLIC, has_product, ierr)
+         if (.NOT. has_product) then
+            call MatProductClear(temp_mat_two, ierr)
+            return
+         end if
+
+         call MatProductSymbolic(temp_mat_two, ierr)
+
+         ! temp_mat_three = mat * temp_mat_two
+         ! The types are the same as the product above, so we know this one exists
+         call MatProductCreateWithMat(mat, temp_mat_two, PETSC_NULL_MAT, temp_mat_three, ierr)
+         call MatProductSetType(temp_mat_three, MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(temp_mat_three, ierr)
+         call MatProductSymbolic(temp_mat_three, ierr)
+      end if
+
+      ! temp_mat = x_mat
+      call MatCopy(x_mat, temp_mat, SAME_NONZERO_PATTERN, ierr)
+      ! y_mat = 0
+      call MatZeroEntries(y_mat, ierr)
+
+      ! ~~~~~~~~~~~~
+      ! Iterate over the i
+      ! ~~~~~~~~~~~~
+      i = 1
+      do while (i .le. nroots - 1)
+
+         ! If real this is easy
+         if (imag_roots(i) == 0d0) then
+
+            ! Skips eigenvalues that are numerically zero - see
+            ! the comment in calculate_gmres_polynomial_roots_newton
+            if (abs(real_roots(i)) < PFLARE_TOL_ZERO) then
+               i = i + 1
+               cycle
+            end if
+
+            ! y_mat = y_mat + theta_i * temp_mat
+            call MatAXPY(y_mat, &
+                     PFLARE_ONE/real_roots(i), &
+                     temp_mat, SAME_NONZERO_PATTERN, ierr)
+
+            ! temp_mat_two = A * temp_mat
+            call MatProductNumeric(temp_mat_two, ierr)
+            if (scaled) call MatDiagonalScale(temp_mat_two, recip_diag, PETSC_NULL_VEC, ierr)
+
+            ! temp_mat = temp_mat - theta_i * temp_mat_two
+            call MatAXPY(temp_mat, &
+                     PFLARE_MINUS_ONE/real_roots(i), &
+                     temp_mat_two, SAME_NONZERO_PATTERN, ierr)
+
+            i = i + 1
+
+         ! If imaginary, then have to combine the e'val and its
+         ! complex conjugate to keep the arithmetic real
+         ! Relies on the complex conjugate being next to each other
+         else
+
+            ! Skips eigenvalues that are numerically zero
+            if (real_roots(i)**2 + imag_roots(i)**2 < PFLARE_TOL_ZERO) then
+               i = i + 2
+               cycle
+            end if
+
+            ! temp_mat_two = A * temp_mat
+            call MatProductNumeric(temp_mat_two, ierr)
+            if (scaled) call MatDiagonalScale(temp_mat_two, recip_diag, PETSC_NULL_VEC, ierr)
+
+            ! temp_mat_two = 2 * Re(theta_i) * temp_mat - temp_mat_two
+            call MatScale(temp_mat_two, PFLARE_MINUS_ONE, ierr)
+            call MatAXPY(temp_mat_two, &
+                  PFLARE_TWO * real_roots(i), &
+                  temp_mat, SAME_NONZERO_PATTERN, ierr)
+
+            ! y_mat = y_mat + 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_mat_two
+            call MatAXPY(y_mat, &
+                     PFLARE_ONE/(real_roots(i)**2 + imag_roots(i)**2), &
+                     temp_mat_two, SAME_NONZERO_PATTERN, ierr)
+
+            if (i .le. nroots - 2) then
+               ! temp_mat_three = A * temp_mat_two
+               call MatProductNumeric(temp_mat_three, ierr)
+               if (scaled) call MatDiagonalScale(temp_mat_three, recip_diag, PETSC_NULL_VEC, ierr)
+
+               ! temp_mat = temp_mat - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_mat_three
+               call MatAXPY(temp_mat, &
+                        PFLARE_MINUS_ONE/(real_roots(i)**2 + imag_roots(i)**2), &
+                        temp_mat_three, SAME_NONZERO_PATTERN, ierr)
+            end if
+
+            ! Skip two evals
+            i = i + 2
+
+         end if
+      end do
+
+      ! Final step if last root is real
+      if (imag_roots(nroots) == 0d0) then
+
+         ! Skips eigenvalues that are numerically zero
+         if (abs(real_roots(nroots)) > PFLARE_TOL_ZERO) then
+
+            ! y_mat = y_mat + theta_i * temp_mat
+            call MatAXPY(y_mat, &
+                     PFLARE_ONE/real_roots(nroots), &
+                     temp_mat, SAME_NONZERO_PATTERN, ierr)
+         end if
+      end if
+
+      ! Don't leave the temporaries holding references to mat and each other
+      if (nroots > 1) then
+         call MatProductClear(temp_mat_two, ierr)
+         call MatProductClear(temp_mat_three, ierr)
+      end if
+
+      block_applied = .TRUE.
+
+   end subroutine petsc_newton_block
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine shell_poly_block_apply(shell_mat, x_mat, y_mat, block_applied)
 
       ! Applies one of the matrix-free gmres polynomial inverses to a block of
@@ -914,6 +1095,7 @@ module gmres_poly_newton
 
       ! Local
       PetscErrorCode :: ierr
+      integer :: n_temps
       logical :: scaled
       type(mat_ctxtype), pointer :: mat_ctx => null()
       ! The block of rhs and the D^-1 we hand to the kernels
@@ -947,25 +1129,40 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~~~~
       ! Dispatch on what sort of polynomial is in the context
+      ! The newton basis needs three dense temporaries, the power/arnoldi basis one
       ! ~~~~~~~~~~~~
       if (associated(mat_ctx%real_roots)) then
-
-         ! Newton basis - the newton block kernel is added in a follow-up, so for now
-         ! we fall back to a column by column apply
-         return
-
+         n_temps = 3
       else if (associated(mat_ctx%coefficients)) then
+         n_temps = 1
+      else
+         ! Nothing we know how to apply blockwise
+         return
+      end if
 
-         ! Power/arnoldi basis - one dense temporary, plus somewhere to put D^-1 X
-         call ensure_block_temp_mats(mat_ctx, x_mat, 1, ierr, need_rhs=scaled)
+      ! Make the dense temporaries, plus somewhere to put D^-1 X if we need it
+      call ensure_block_temp_mats(mat_ctx, x_mat, n_temps, ierr, need_rhs=scaled)
 
-         ! Do the right diagonal scaling on the whole block, ie MF_MAT_RHS = D^-1 X
-         if (scaled) then
-            call MatCopy(x_mat, mat_ctx%mf_temp_mat(MF_MAT_RHS), SAME_NONZERO_PATTERN, ierr)
-            call MatDiagonalScale(mat_ctx%mf_temp_mat(MF_MAT_RHS), kernel_recip, PETSC_NULL_VEC, ierr)
-            kernel_x = mat_ctx%mf_temp_mat(MF_MAT_RHS)
-         end if
+      ! Do the right diagonal scaling on the whole block, ie MF_MAT_RHS = D^-1 X
+      if (scaled) then
+         call MatCopy(x_mat, mat_ctx%mf_temp_mat(MF_MAT_RHS), SAME_NONZERO_PATTERN, ierr)
+         call MatDiagonalScale(mat_ctx%mf_temp_mat(MF_MAT_RHS), kernel_recip, PETSC_NULL_VEC, ierr)
+         kernel_x = mat_ctx%mf_temp_mat(MF_MAT_RHS)
+      end if
 
+      if (associated(mat_ctx%real_roots)) then
+
+         ! Newton basis
+         call petsc_newton_block(mat_ctx%mat, &
+                  mat_ctx%real_roots, mat_ctx%imag_roots, &
+                  mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
+                  mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), &
+                  mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), &
+                  kernel_x, y_mat, kernel_recip, block_applied)
+
+      else
+
+         ! Power/arnoldi basis
          call petsc_horner_block(mat_ctx%mat, mat_ctx%coefficients, &
                   mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
                   kernel_x, y_mat, kernel_recip, block_applied)
