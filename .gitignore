@@ -45,3 +45,4 @@ tests/mat_diag
 tests/matrandom
 tests/matrandom_check_reset
 tests/reuse_preconditioner
+tests/shell_block_apply

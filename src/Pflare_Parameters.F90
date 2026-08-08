@@ -103,6 +103,16 @@ module pflare_parameters
    integer, parameter :: MF_VEC_RHS        = 5
 
    ! --------------------------------------------------------
+   ! MatShell temporary dense matrix slot indices   (from matshell_data_type)
+   ! These are the scratch dense blocks used by the multiple rhs (block)
+   ! matrix-free polynomial applies
+   ! --------------------------------------------------------
+   integer, parameter :: MF_MAT_TEMP       = 1
+   integer, parameter :: MF_MAT_TEMP_TWO   = 2
+   integer, parameter :: MF_MAT_TEMP_THREE = 3
+   integer, parameter :: MF_MAT_RHS        = 4
+
+   ! --------------------------------------------------------
    ! Timer IDs   (from timers)
    ! --------------------------------------------------------
    integer, parameter :: TIMER_ID_AIR_SETUP        = 1

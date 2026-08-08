@@ -1481,7 +1481,102 @@ end if
          end do
       end if
 
-   end subroutine petsc_horner     
+   end subroutine petsc_horner
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine petsc_horner_block(mat, coefficients, temp_mat, x_mat, y_mat, recip_diag, block_applied)
+
+      ! Uses a horner iteration to apply
+      ! y_mat = (coeff(1) + coeff(2) * A + coeff(3) * A^2 + ...) x_mat
+      ! for a block of right hand sides, x_mat, ie the multiple rhs version of petsc_horner
+      ! The matvecs of petsc_horner become sparse matrix-dense matrix products (SpMM)
+
+      ! If recip_diag is not null we are applying the diagonally scaled polynomial
+      ! q(D^-1 A), with the mat passed in the *unscaled* A and recip_diag = D^-1.
+      ! We do this rather than running the products on the D^-1 A matshell, as every
+      ! product on a shell degrades to a column by column matvec. The caller must have
+      ! already scaled the block of rhs, ie x_mat = D^-1 X
+
+      ! block_applied comes back false (with y_mat untouched) if the block of rhs we've
+      ! been given has no product with mat, so the caller can fall back to a column by
+      ! column apply
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: mat
+      PetscReal, dimension(:)   :: coefficients
+      type(tMat)                :: x_mat, temp_mat
+      type(tMat)                :: y_mat
+      type(tVec)                :: recip_diag
+      logical, intent(out)      :: block_applied
+
+      ! Local
+      integer :: order
+      logical :: scaled
+      PetscBool :: has_product
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      block_applied = .FALSE.
+      scaled = .NOT. PetscObjectIsNull(recip_diag)
+
+      ! If we are doing a first order polynomial or above, we have to do an extra
+      ! product per order - attach it to y_mat now
+      ! This has to happen before we write any values into y_mat, as the symbolic
+      ! product may set up y_mat
+      if (size(coefficients, 1) > 1) then
+
+         ! y_mat = mat * temp_mat
+         call MatProductCreateWithMat(mat, temp_mat, PETSC_NULL_MAT, y_mat, ierr)
+         call MatProductSetType(y_mat, MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(y_mat, ierr)
+
+         ! If there is no product available for these types we have to let the
+         ! caller do a column by column apply instead
+         call MatHasOperation(y_mat, MATOP_PRODUCTSYMBOLIC, has_product, ierr)
+         if (.NOT. has_product) then
+            call MatProductClear(y_mat, ierr)
+            return
+         end if
+
+         call MatProductSymbolic(y_mat, ierr)
+      end if
+
+      ! Let's do the first y = alpha_n-1 r_0 (ie the highest order term first)
+      call MatCopy(x_mat, y_mat, SAME_NONZERO_PATTERN, ierr)
+      call MatScale(y_mat, coefficients(size(coefficients)), ierr)
+
+      if (size(coefficients, 1) > 1) then
+
+         ! Loop down from the second highest order term down to the constant
+         do order = size(coefficients, 1)-1, 1, -1
+
+            ! Skip this coefficient if zero
+            if (coefficients(order) == 0d0) cycle
+
+            ! Copy y_mat into temp_mat
+            call MatCopy(y_mat, temp_mat, SAME_NONZERO_PATTERN, ierr)
+
+            ! Now do y_mat = A * temp_mat
+            call MatProductNumeric(y_mat, ierr)
+
+            ! This is the arithmetic of the D^-1 A matshell, done blockwise
+            if (scaled) call MatDiagonalScale(y_mat, recip_diag, PETSC_NULL_VEC, ierr)
+
+            ! Compute y_mat = A * temp_mat + alpha_n-i-1 r_0
+            call MatAXPY(y_mat, coefficients(order), x_mat, SAME_NONZERO_PATTERN, ierr)
+         end do
+
+         ! Don't leave y_mat holding references to mat and temp_mat
+         call MatProductClear(y_mat, ierr)
+      end if
+
+      block_applied = .TRUE.
+
+   end subroutine petsc_horner_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

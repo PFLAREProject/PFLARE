@@ -546,6 +546,10 @@ run_tests_no_load_short_serial:
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
+	@echo "Test multiple RHS block solve with a matrix-free Arnoldi PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type arnoldi
+	@echo "Test the block apply of the matrix-free Arnoldi matshell directly, plain and diagonally scaled"
+	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
@@ -985,6 +989,8 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5
 	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
+	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
+	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"

@@ -20,6 +20,11 @@ PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, Pets
                      PetscInt subcomm_int, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
                      Mat *inv_matrix);
+// Block (multiple rhs) apply of a matrix-free gmres polynomial matshell, Y = q(A) X.
+// *applied comes back 0 if no block apply was possible and the caller has to apply
+// column by column instead. Only valid for the power/arnoldi/newton matshells - see
+// the warning in shell_poly_block_apply (Gmres_Poly_Newton.F90).
+PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int *applied);
 
 // The types available as approximate inverses are (see include/pflare.h):
 //
@@ -637,17 +642,35 @@ static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
    inv_data = (PC_PFLAREINV *)pc->data;
 
    if (inv_data->matrix_free) {
-      // mat_inverse is a MatShell with only MATOP_MULT registered,
-      // so MatMatMult on it would fail. Apply column-by-column.
-      PetscInt n_cols, j;
-      Vec cx, cy;
-      PetscCall(MatGetSize(X, NULL, &n_cols));
-      for (j = 0; j < n_cols; j++) {
-         PetscCall(MatDenseGetColumnVecRead(X, j, &cx));
-         PetscCall(MatDenseGetColumnVecWrite(Y, j, &cy));
-         PetscCall(MatMult(inv_data->mat_inverse, cx, cy));
-         PetscCall(MatDenseRestoreColumnVecWrite(Y, j, &cy));
-         PetscCall(MatDenseRestoreColumnVecRead(X, j, &cx));
+      // mat_inverse is a MatShell with only MATOP_MULT registered, so MatMatMult on it
+      // would fail. The gmres polynomial matshells can however be applied blockwise by
+      // doing the products with the underlying matrix - the Fortran routine below does
+      // that and reports whether it managed it.
+      // The family gate here is load bearing: the Neumann matshell shares the diagonally
+      // scaled handler of the gmres polynomials but applies different arithmetic, so it
+      // must never be sent to the block kernels (see shell_poly_block_apply).
+      int applied = 0;
+      if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
+          inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
+      {
+         pflareinv_shell_block_matapply_c(&(inv_data->mat_inverse), &X, &Y, &applied);
+      }
+
+      if (applied) {
+         PetscCall(PetscInfo(pc, "matrix-free PCMatApply used the block polynomial kernel\n"));
+      } else {
+         // Anything we can't do blockwise is applied column-by-column.
+         PetscInt n_cols, j;
+         Vec cx, cy;
+         PetscCall(PetscInfo(pc, "matrix-free PCMatApply solving column by column\n"));
+         PetscCall(MatGetSize(X, NULL, &n_cols));
+         for (j = 0; j < n_cols; j++) {
+            PetscCall(MatDenseGetColumnVecRead(X, j, &cx));
+            PetscCall(MatDenseGetColumnVecWrite(Y, j, &cy));
+            PetscCall(MatMult(inv_data->mat_inverse, cx, cy));
+            PetscCall(MatDenseRestoreColumnVecWrite(Y, j, &cy));
+            PetscCall(MatDenseRestoreColumnVecRead(X, j, &cx));
+         }
       }
    } else {
       // Assembled inverse: real SpMM via MatProduct.

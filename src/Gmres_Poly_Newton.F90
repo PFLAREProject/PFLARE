@@ -6,7 +6,9 @@ module gmres_poly_newton
    use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
-         PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB
+         PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB, &
+         MF_MAT_TEMP, MF_MAT_RHS
+   use matshell_data_type, only: ensure_block_temp_mats
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -872,8 +874,106 @@ module gmres_poly_newton
          end if
       end if
 
-   end subroutine petsc_newton  
-   
+   end subroutine petsc_newton
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine shell_poly_block_apply(shell_mat, x_mat, y_mat, block_applied)
+
+      ! Applies one of the matrix-free gmres polynomial inverses to a block of
+      ! right hand sides, x_mat, ie the multiple rhs version of the matvecs
+      ! petsc_matvec_poly_mf / petsc_matvec_right_scale_poly_mf and their newton equivalents
+      ! The shell_mat passed in is the matshell built by build_gmres_polynomial_inverse
+      ! (or its newton equivalent) and we dispatch on what its context contains
+
+      ! block_applied comes back false (with y_mat untouched) whenever we can't do a
+      ! block apply, and the caller must then apply column by column instead
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      ! WARNING - This routine must NEVER be called with a Neumann polynomial matshell
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      ! The diagonally scaled gmres polynomials store an inner matshell in mat_ctx%mat_scaled
+      ! whose matvec is D^-1 A, and the block kernels below deliberately bypass that inner
+      ! shell - they do real products with the unscaled mat_ctx%mat and then scale the
+      ! result by D^-1 themselves (a product on a shell would degrade to a column by
+      ! column matvec). The Neumann polynomial reuses the same right scaled outer handler
+      ! but its inner shell is I - D^-1 A (see Neumann_Poly.F90), which is different
+      ! arithmetic, so the bypass would silently give the wrong answer.
+      ! There is nothing in the context that distinguishes the two, so the callers have
+      ! to gate on the inverse type - PCMatApply_PFLAREINV_c only dispatches here for
+      ! POWER/ARNOLDI/NEWTON/NEWTON_NO_EXTRA and any future caller (eg PCAIR) must do the same
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      type(tMat), intent(in)    :: shell_mat
+      type(tMat)                :: x_mat
+      type(tMat)                :: y_mat
+      logical, intent(out)      :: block_applied
+
+      ! Local
+      PetscErrorCode :: ierr
+      logical :: scaled
+      type(mat_ctxtype), pointer :: mat_ctx => null()
+      ! The block of rhs and the D^-1 we hand to the kernels
+      ! kernel_recip is left null in the unscaled case
+      type(tMat) :: kernel_x
+      type(tVec) :: kernel_recip
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      block_applied = .FALSE.
+      call MatShellGetContext(shell_mat, mat_ctx, ierr)
+
+      ! Are we applying q(D^-1 A) D^-1 rather than just q(A)?
+      scaled = .NOT. PetscObjectIsNull(mat_ctx%mat_scaled)
+
+      kernel_x = x_mat
+
+      if (scaled) then
+
+         ! Lazily build somewhere to store D^-1
+         if (PetscObjectIsNull(mat_ctx%mf_vec_diag_recip)) then
+            call VecDuplicate(mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_vec_diag_recip, ierr)
+         end if
+         ! We have to refresh the values every apply - the diagonal in MF_VEC_DIAG is
+         ! updated in place whenever the matshell is reused with the same nonzero
+         ! pattern, and there is no hook that would let us know that has happened
+         call VecCopy(mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_vec_diag_recip, ierr)
+         call VecReciprocal(mat_ctx%mf_vec_diag_recip, ierr)
+         kernel_recip = mat_ctx%mf_vec_diag_recip
+      end if
+
+      ! ~~~~~~~~~~~~
+      ! Dispatch on what sort of polynomial is in the context
+      ! ~~~~~~~~~~~~
+      if (associated(mat_ctx%real_roots)) then
+
+         ! Newton basis - the newton block kernel is added in a follow-up, so for now
+         ! we fall back to a column by column apply
+         return
+
+      else if (associated(mat_ctx%coefficients)) then
+
+         ! Power/arnoldi basis - one dense temporary, plus somewhere to put D^-1 X
+         call ensure_block_temp_mats(mat_ctx, x_mat, 1, ierr, need_rhs=scaled)
+
+         ! Do the right diagonal scaling on the whole block, ie MF_MAT_RHS = D^-1 X
+         if (scaled) then
+            call MatCopy(x_mat, mat_ctx%mf_temp_mat(MF_MAT_RHS), SAME_NONZERO_PATTERN, ierr)
+            call MatDiagonalScale(mat_ctx%mf_temp_mat(MF_MAT_RHS), kernel_recip, PETSC_NULL_VEC, ierr)
+            kernel_x = mat_ctx%mf_temp_mat(MF_MAT_RHS)
+         end if
+
+         call petsc_horner_block(mat_ctx%mat, mat_ctx%coefficients, &
+                  mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
+                  kernel_x, y_mat, kernel_recip, block_applied)
+
+      end if
+
+   end subroutine shell_poly_block_apply
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine petsc_matvec_poly_newton_mf(mat, x, y)

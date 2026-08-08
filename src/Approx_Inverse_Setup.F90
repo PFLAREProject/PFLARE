@@ -509,6 +509,7 @@ module approx_inverse_setup
       type(tMat), intent(inout) :: matrix
 
       PetscErrorCode :: ierr
+      integer :: i_loc
       MatType:: mat_type
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       ! ~~~~~~
@@ -532,6 +533,18 @@ module approx_inverse_setup
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), ierr)
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), ierr)
+            end if
+
+            ! Any dense scratch blocks built by a multiple rhs (block) apply
+            ! These are only ever created by the block applies, so this is a no-op
+            ! for the jacobi/neumann/PCAIR matshells
+            do i_loc = 1, size(mat_ctx%mf_temp_mat)
+               if (.NOT. PetscObjectIsNull(mat_ctx%mf_temp_mat(i_loc))) then
+                  call MatDestroy(mat_ctx%mf_temp_mat(i_loc), ierr)
+               end if
+            end do
+            if (.NOT. PetscObjectIsNull(mat_ctx%mf_vec_diag_recip)) then
+               call VecDestroy(mat_ctx%mf_vec_diag_recip, ierr)
             end if
 
             ! Neumann polynomial has extra context that needs deleting

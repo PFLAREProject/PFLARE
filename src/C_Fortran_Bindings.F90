@@ -5,6 +5,7 @@ module c_fortran_bindings
    use pcair_data_type, only: pc_air_multigrid_data
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
+   use gmres_poly_newton, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
    use petsc_helper, only: remove_from_sparse_match
@@ -214,8 +215,39 @@ module c_fortran_bindings
       call reset_inverse_mat(mat)
       mat_ptr = mat%v
 
-   end subroutine reset_inverse_mat_c    
-   
+   end subroutine reset_inverse_mat_c
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pflareinv_shell_block_matapply_c(shell_ptr, x_ptr, y_ptr, applied_int) &
+         bind(C,name='pflareinv_shell_block_matapply_c')
+
+      ! Applies one of the matrix-free gmres polynomial matshells to a block of
+      ! right hand sides
+      ! applied_int comes back as 0 if we couldn't do a block apply, in which case
+      ! the caller has to apply column by column instead
+      ! NB - must only be called for the power/arnoldi/newton matshells, see the
+      ! warning in shell_poly_block_apply
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(in) :: shell_ptr, x_ptr, y_ptr
+      integer(c_int), intent(out)      :: applied_int
+
+      type(tMat)  :: shell_mat, x_mat, y_mat
+      logical     :: block_applied
+      ! ~~~~~~~~
+
+      shell_mat%v = shell_ptr
+      x_mat%v     = x_ptr
+      y_mat%v     = y_ptr
+
+      call shell_poly_block_apply(shell_mat, x_mat, y_mat, block_applied)
+
+      applied_int = 0
+      if (block_applied) applied_int = 1
+
+   end subroutine pflareinv_shell_block_matapply_c
+
    !------------------------------------------------------------------------------------------------------------------------
 
    subroutine compute_cf_splitting_c(input_mat_ptr, symmetric_int, &
