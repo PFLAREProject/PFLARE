@@ -15,16 +15,17 @@ for earlier changes please see the git history.
   sides yet. New `tests/adv_1d_multi_rhs.c` driver builds the block of
   right-hand sides with `MatCreateDenseFromVecType` and solves with
   `KSPMatSolve`
-- The matrix-free GMRES polynomial inverses (`power`, `arnoldi`, `newton`,
-  `newton_no_extra`) now also apply blockwise in `PCMatApply`: the Horner and
-  Newton-basis kernels run sparse matrix by dense matrix products on the
-  underlying operator instead of looping matvecs, with dense scratch blocks
-  cached in the matshell context. The right diagonally scaled variant
+- The matrix-free polynomial inverses (`power`, `arnoldi`, `newton`,
+  `newton_no_extra`, `neumann`) now also apply blockwise in `PCMatApply`: the
+  Horner and Newton-basis kernels run sparse matrix by dense matrix products
+  on the underlying operator instead of looping matvecs, with dense scratch
+  blocks cached in the matshell context. The right diagonally scaled variant
   `q(D^-1 A) D^-1` used by PCAIR's smoothers is supported ready for future
-  PCAIR multiple-RHS work; Neumann and anything else unsupported falls back
-  to the previous column-by-column apply. New `tests/shell_block_apply.c`
-  driver exercises the block apply directly, including the diagonally
-  scaled mode that PCPFLAREINV itself never builds
+  PCAIR multiple-RHS work, as is the Neumann polynomial's intrinsically
+  scaled `q(I - D^-1 A) D^-1`; anything else unsupported falls back to the
+  previous column-by-column apply. New `tests/shell_block_apply.c` driver
+  exercises the block apply directly, including the diagonally scaled mode
+  that PCPFLAREINV itself never builds
 - Fixed PCAIR silently ignoring `KSPSetReusePreconditioner` /
   `-ksp_reuse_preconditioner`: a values-only change to the pmat between
   solves rebuilt the full AIR hierarchy despite the flag; a frozen PCAIR

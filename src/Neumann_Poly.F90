@@ -113,7 +113,10 @@ module neumann_poly
             ! A Neumann polynomial has coefficients of 1
             mat_ctx%coefficients => coefficients
             ! mat_ctx owns the heap-allocated coefficients array and must free it on cleanup
-            mat_ctx%own_coefficients = .TRUE.                      
+            mat_ctx%own_coefficients = .TRUE.
+            ! The inner matshell we build below applies I - D^-1 A rather than D^-1 A
+            ! This is what tells the block (multiple rhs) apply which arithmetic to use
+            mat_ctx%neumann_inner = .TRUE.
 
             ! Create the matshell
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &

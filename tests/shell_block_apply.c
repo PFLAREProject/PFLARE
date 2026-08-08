@@ -1,4 +1,4 @@
-static char help[] = "Tests the multiple rhs (block) apply of the matrix-free GMRES polynomial matshells.\n\n";
+static char help[] = "Tests the multiple rhs (block) apply of the matrix-free polynomial matshells.\n\n";
 
 /*
   This drives the block apply of the matrix-free polynomial matshells directly,
@@ -13,8 +13,13 @@ static char help[] = "Tests the multiple rhs (block) apply of the matrix-free GM
   calculate_and_build_approximate_inverse_c directly, which does expose the
   diagonal scaling flag, and test both modes.
 
+  -inverse_type takes the integer value of the PCPFLAREINVType, so the GMRES
+  polynomials 0 power, 1 arnoldi, 2 newton, 3 newton_no_extra and also
+  4 neumann, which is q(I - D^-1 A) D^-1.
+
     ./shell_block_apply -n 1000 -nrhs 5
     mpiexec -n 2 ./shell_block_apply -n 1000 -nrhs 5
+    ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 4
 
   The operator is the same 1D upwind advection as adv_1d_multi_rhs.c.
 */
@@ -221,7 +226,7 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-nrhs", &nrhs, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-poly_order", &poly_order, NULL));
   // The integer value of the PCPFLAREINVType we want, ie 0 power, 1 arnoldi,
-  // 2 newton, 3 newton_no_extra
+  // 2 newton, 3 newton_no_extra, 4 neumann
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-inverse_type", &inverse_type, NULL));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-check_tol", &check_tol, NULL));
 
@@ -233,6 +238,9 @@ int main(int argc, char **args)
   // The plain polynomial, q(A) - this is what PCPFLAREINV builds
   PetscCall(RunMode(A, inverse_type, poly_order, nrhs, 0, check_tol, "Plain polynomial"));
   // The right diagonally scaled polynomial, q(D^-1 A) D^-1 - what PCAIR builds
+  // NB - the Neumann polynomial (-inverse_type 4) is intrinsically diagonally scaled,
+  // it is q(I - D^-1 A) D^-1 and its builder ignores the diagonal scaling flag, so for
+  // it the two calls here build the identical matshell and just test it twice
   PetscCall(RunMode(A, inverse_type, poly_order, nrhs, 1, check_tol, "Diagonally scaled polynomial"));
 
   PetscCall(MatDestroy(&A));
