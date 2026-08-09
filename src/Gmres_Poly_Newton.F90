@@ -1115,6 +1115,9 @@ module gmres_poly_newton
          temp_vec = mat_ctx%mf_vec_diag_recip
          if (PetscObjectIsNull(temp_vec)) then
             call VecDuplicate(mat_ctx%mf_temp_vec(MF_VEC_DIAG), temp_vec, ierr)
+            ! The new handle has to go back into the context, or we would create
+            ! (and leak) a new vec on every apply
+            mat_ctx%mf_vec_diag_recip = temp_vec
          end if
          ! We have to refresh the values every apply - the diagonal in MF_VEC_DIAG is
          ! updated in place whenever the matshell is reused with the same nonzero

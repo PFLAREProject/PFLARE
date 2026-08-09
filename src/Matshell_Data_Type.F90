@@ -101,6 +101,10 @@ module matshell_data_type
             temp_mat = mat_ctx%mf_temp_mat(i_loc)
             if (.NOT. PetscObjectIsNull(temp_mat)) then
                call MatDestroy(temp_mat, ierr)
+               ! MatDestroy nulls the local copy of the handle, not the slot in the
+               ! context - copy it back or the slot would be left dangling and the
+               ! creation below would skip it
+               mat_ctx%mf_temp_mat(i_loc) = temp_mat
             end if
          end do
          mat_ctx%mf_temp_mat_ncols = -1
