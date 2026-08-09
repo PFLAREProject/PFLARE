@@ -459,7 +459,8 @@ module approx_inverse_setup
 
          coefficients = 1d0
          call calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                     buffers, inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)        
+                     buffers, coefficients(:, 1), inverse_sparsity_order, matrix_free, &
+                     reuse_mat, reuse_submatrices, inv_matrix)
                  
       ! Sparse approximate inverse
       else if (inverse_type == PFLAREINV_SAI .OR. inverse_type == PFLAREINV_ISAI) then

@@ -57,26 +57,30 @@ module neumann_poly
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                  buffers, poly_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)
+                  buffers, coefficients, poly_sparsity_order, matrix_free, &
+                  reuse_mat, reuse_submatrices, inv_matrix)
 
 
       ! Builds an assembled neumann polynomial approximate inverse
       ! If poly_sparsity_order < poly_order it will build a fixed sparsity approximation
       ! Scales by the diagonal and applies the scaled diagonal to the rhs of the output
       ! so it can be used
+      ! The coefficients passed in must all be one (the caller sets this) - the matshell
+      ! points at this storage in the matrix-free case, exactly like the gmres builders,
+      ! so the ownership rules in calculate_and_build_approximate_inverse hold for all
+      ! the polynomial types
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: matrix
       integer, intent(in)                 :: poly_order
       type(tsqr_buffers), intent(inout)   :: buffers
+      PetscReal, dimension(:), target, intent(inout) :: coefficients
       integer, intent(in)                 :: poly_sparsity_order
       logical, intent(in)                 :: matrix_free
       type(tMat), intent(inout)           :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
 
       ! Local variables
-      PetscReal, dimension(:), pointer :: coefficients
-      PetscReal, dimension(poly_order + 1), target :: coefficients_stack
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
@@ -105,15 +109,8 @@ module neumann_poly
          ! If not re-using
          if (PetscObjectIsNull(inv_matrix)) then
 
-            allocate(coefficients(poly_order + 1))
-            coefficients = 1d0
-
             ! Have to dynamically allocate this
             allocate(mat_ctx)
-            ! A Neumann polynomial has coefficients of 1
-            mat_ctx%coefficients => coefficients
-            ! mat_ctx owns the heap-allocated coefficients array and must free it on cleanup
-            mat_ctx%own_coefficients = .TRUE.
             ! The inner matshell we build below applies I - D^-1 A rather than D^-1 A
             ! This is what tells the block (multiple rhs) apply which arithmetic to use
             mat_ctx%neumann_inner = .TRUE.
@@ -143,8 +140,7 @@ module neumann_poly
 
             ! Have to dynamically allocate this
             allocate(mat_ctx_scaled)
-            mat_ctx_scaled%coefficients => coefficients                     
-            
+
             ! Create the matshell
             call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
                         mat_ctx_scaled, mat_ctx%mat_scaled, ierr)
@@ -169,20 +165,32 @@ module neumann_poly
 
          end if
 
+         ! Free old owned coefficients before reassigning, exactly as the gmres
+         ! builders do - avoids a memory leak when the same matshell is reused across
+         ! PCSetUp calls (SAME_NONZERO_PATTERN) but fresh coefficients are passed in
+         if (mat_ctx%own_coefficients .AND. associated(mat_ctx%coefficients)) then
+            deallocate(mat_ctx%coefficients)
+            mat_ctx%coefficients => null()
+         end if
+
+         ! The matshell points at the caller's coefficient storage (all ones) and
+         ! owns it - it is freed by deallocate in reset_inverse_mat
+         mat_ctx%coefficients => coefficients
+         mat_ctx%own_coefficients = .TRUE.
+         mat_ctx_scaled%coefficients => coefficients
+
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
-         mat_ctx%mat = matrix 
-         mat_ctx_scaled%mat = matrix 
+         mat_ctx%mat = matrix
+         mat_ctx_scaled%mat = matrix
 
          ! Get the diagonal
-         call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
+         call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
          mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
 
       ! If not matrix free
       else
 
-         coefficients => coefficients_stack
-         ! A Neumann polynomial has coefficients of 1
-         coefficients = 1d0 
+         ! The coefficients we've been passed are already all one
 
          ! Need to build an assembled I - D^-1 A
          call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)
