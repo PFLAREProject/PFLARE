@@ -3,7 +3,8 @@ module fc_smooth
    use petscksp
    use c_petsc_interfaces, only: create_VecISCopyLocal_kokkos, &
          set_VecISCopyLocal_kokkos_our_level, &
-         destroy_VecISCopyLocal_kokkos, VecISCopyLocal_kokkos
+         destroy_VecISCopyLocal_kokkos, VecISCopyLocal_kokkos, &
+         mat_iscopy_local_kokkos
    use air_data_type, only: air_multigrid_data
    use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
    use matshell_data_type, only: mat_ctxtype
@@ -578,11 +579,12 @@ module fc_smooth
       ScatterMode, intent(in)              :: mode
 
       PetscErrorCode :: ierr
-      PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: i_loc, j_loc, local_row
-      PetscInt, pointer :: is_pointer(:)
-      PetscScalar, pointer :: full_array(:,:), reduced_array(:,:)
-      type(tIS) :: is_local
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: xfull_array, xreduced_array
+      integer :: fine_int, mode_int, errorcode
+      type(tMat) :: temp_mat
+      PetscReal :: normy
+#endif
       ! ~~~~~~~~~~
 
       ! On gpus without kokkos we can't touch the local arrays, so instead we use
@@ -625,61 +627,148 @@ module fc_smooth
          end if
 
       ! Otherwise copy the rows we want directly out of the dense arrays
-      ! Kokkos blocks come through here too for now - that is correct but it
-      ! copies back to the host, a device kernel replaces this later
       else
 
-         if (fine) then
-            is_local = air_data%is_fine_index(our_level)
+#if defined(PETSC_HAVE_KOKKOS)
+
+         ! The single rhs version decides by the vec type of the vec it is handed,
+         ! but we can't do that here - the dense blocks in the mg hierarchy are
+         ! built by petsc with MatDuplicate, which does not propagate the vec type,
+         ! so a block can be backed by kokkos data and still report a standard vec
+         ! type. The device IS views existing is the condition that matters (they
+         ! are only built for a kokkos mat type in create_VecISCopyLocalWrapper) and
+         ! the dense arrays we get back below always live in the default kokkos
+         ! memory space - there is no MATDENSEKOKKOS, the blocks are host MATDENSE
+         ! on a host kokkos backend and MATDENSECUDA/HIP on a device one
+         if (c_associated(air_data%kokkos_is_views_handle)) then
+
+            if (mode == SCATTER_REVERSE) then
+               mode_int = 1
+            else
+               mode_int = 0
+            end if
+            fine_int = 0
+            if (fine) fine_int = 1
+
+            ! SCATTER FORWARD only writes the fine (or coarse) rows of the full
+            ! block, so we have to keep a copy of it to run the cpu version on
+            if (kokkos_debug() .AND. mode /= SCATTER_REVERSE) then
+               call MatDuplicate(xfull_mat, MAT_COPY_VALUES, temp_mat, ierr)
+            end if
+
+            xfull_array = xfull_mat%v
+            xreduced_array = xreduced_mat%v
+            call mat_iscopy_local_kokkos(air_data%kokkos_is_views_handle, our_level, fine_int, xfull_array, &
+                     mode_int, xreduced_array)
+
+            ! If debugging do a comparison between CPU and Kokkos results
+            if (kokkos_debug()) then
+
+               if (mode == SCATTER_REVERSE) then
+
+                  call MatDuplicate(xreduced_mat, MAT_DO_NOT_COPY_VALUES, temp_mat, ierr)
+                  call mat_iscopy_local_host(air_data, our_level, fine, xfull_mat, mode, temp_mat)
+                  call MatAXPY(temp_mat, PFLARE_MINUS_ONE, xreduced_mat, SAME_NONZERO_PATTERN, ierr)
+
+               else
+
+                  call mat_iscopy_local_host(air_data, our_level, fine, temp_mat, mode, xreduced_mat)
+                  call MatAXPY(temp_mat, PFLARE_MINUS_ONE, xfull_mat, SAME_NONZERO_PATTERN, ierr)
+
+               end if
+
+               call MatNorm(temp_mat, NORM_FROBENIUS, normy, ierr)
+               if (normy .gt. PFLARE_TOL_MATFREE_13) then
+                  print *, "Kokkos and CPU versions of MatISCopyLocalWrapper do not match"
+                  call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+               end if
+               call MatDestroy(temp_mat, ierr)
+
+            end if
+
          else
-            is_local = air_data%is_coarse_index(our_level)
+            call mat_iscopy_local_host(air_data, our_level, fine, xfull_mat, mode, xreduced_mat)
          end if
-
-         ! The IS holds global indices
-         call MatGetOwnershipRange(xfull_mat, global_row_start, global_row_end_plus_one, ierr)
-         call ISGetIndices(is_local, is_pointer, ierr)
-
-         ! The petsc fortran interface only hands back a dense array when the
-         ! leading dimension matches the number of local rows, so the arrays here
-         ! are already (local rows, global columns) and need no separate lda
-         if (mode == SCATTER_REVERSE) then
-
-            call MatDenseGetArrayRead(xfull_mat, full_array, ierr)
-            call MatDenseGetArray(xreduced_mat, reduced_array, ierr)
-
-            do j_loc = 1, size(reduced_array, 2)
-               do i_loc = 1, size(reduced_array, 1)
-                  local_row = is_pointer(i_loc) - global_row_start + 1
-                  reduced_array(i_loc, j_loc) = full_array(local_row, j_loc)
-               end do
-            end do
-
-            call MatDenseRestoreArray(xreduced_mat, reduced_array, ierr)
-            call MatDenseRestoreArrayRead(xfull_mat, full_array, ierr)
-
-         ! SCATTER FORWARD - only the fine (or coarse) rows of the full block
-         ! are written, everything else is left alone
-         else
-
-            call MatDenseGetArrayRead(xreduced_mat, reduced_array, ierr)
-            call MatDenseGetArray(xfull_mat, full_array, ierr)
-
-            do j_loc = 1, size(reduced_array, 2)
-               do i_loc = 1, size(reduced_array, 1)
-                  local_row = is_pointer(i_loc) - global_row_start + 1
-                  full_array(local_row, j_loc) = reduced_array(i_loc, j_loc)
-               end do
-            end do
-
-            call MatDenseRestoreArray(xfull_mat, full_array, ierr)
-            call MatDenseRestoreArrayRead(xreduced_mat, reduced_array, ierr)
-
-         end if
-
-         call ISRestoreIndices(is_local, is_pointer, ierr)
+#else
+         call mat_iscopy_local_host(air_data, our_level, fine, xfull_mat, mode, xreduced_mat)
+#endif
       end if
 
    end subroutine MatISCopyLocalWrapper
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_iscopy_local_host(air_data, our_level, fine, xfull_mat, mode, xreduced_mat)
+
+      ! The host version of MatISCopyLocalWrapper - copies the fine or coarse rows
+      ! we want directly out of the local dense arrays
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(air_multigrid_data), intent(in) :: air_data
+      integer, intent(in)                  :: our_level
+      logical, intent(in)                  :: fine
+      type(tMat), intent(inout)            :: xfull_mat, xreduced_mat
+      ScatterMode, intent(in)              :: mode
+
+      PetscErrorCode :: ierr
+      PetscInt :: global_row_start, global_row_end_plus_one
+      PetscInt :: i_loc, j_loc, local_row
+      PetscInt, pointer :: is_pointer(:)
+      PetscScalar, pointer :: full_array(:,:), reduced_array(:,:)
+      type(tIS) :: is_local
+      ! ~~~~~~~~~~
+
+      if (fine) then
+         is_local = air_data%is_fine_index(our_level)
+      else
+         is_local = air_data%is_coarse_index(our_level)
+      end if
+
+      ! The IS holds global indices
+      call MatGetOwnershipRange(xfull_mat, global_row_start, global_row_end_plus_one, ierr)
+      call ISGetIndices(is_local, is_pointer, ierr)
+
+      ! The petsc fortran interface only hands back a dense array when the
+      ! leading dimension matches the number of local rows, so the arrays here
+      ! are already (local rows, global columns) and need no separate lda
+      if (mode == SCATTER_REVERSE) then
+
+         call MatDenseGetArrayRead(xfull_mat, full_array, ierr)
+         call MatDenseGetArray(xreduced_mat, reduced_array, ierr)
+
+         do j_loc = 1, size(reduced_array, 2)
+            do i_loc = 1, size(reduced_array, 1)
+               local_row = is_pointer(i_loc) - global_row_start + 1
+               reduced_array(i_loc, j_loc) = full_array(local_row, j_loc)
+            end do
+         end do
+
+         call MatDenseRestoreArray(xreduced_mat, reduced_array, ierr)
+         call MatDenseRestoreArrayRead(xfull_mat, full_array, ierr)
+
+      ! SCATTER FORWARD - only the fine (or coarse) rows of the full block
+      ! are written, everything else is left alone
+      else
+
+         call MatDenseGetArrayRead(xreduced_mat, reduced_array, ierr)
+         call MatDenseGetArray(xfull_mat, full_array, ierr)
+
+         do j_loc = 1, size(reduced_array, 2)
+            do i_loc = 1, size(reduced_array, 1)
+               local_row = is_pointer(i_loc) - global_row_start + 1
+               full_array(local_row, j_loc) = reduced_array(i_loc, j_loc)
+            end do
+         end do
+
+         call MatDenseRestoreArray(xfull_mat, full_array, ierr)
+         call MatDenseRestoreArrayRead(xreduced_mat, reduced_array, ierr)
+
+      end if
+
+      call ISRestoreIndices(is_local, is_pointer, ierr)
+
+   end subroutine mat_iscopy_local_host
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
