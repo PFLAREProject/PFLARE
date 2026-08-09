@@ -1095,8 +1095,8 @@ module gmres_poly_newton
       type(mat_ctxtype), pointer :: mat_ctx => null()
       ! The block of rhs and the D^-1 we hand to the kernels
       ! kernel_recip is left null in the unscaled case
-      type(tMat) :: kernel_x
-      type(tVec) :: kernel_recip
+      type(tMat) :: kernel_x, temp_mat
+      type(tVec) :: kernel_recip, temp_vec
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1104,22 +1104,24 @@ module gmres_poly_newton
       call MatShellGetContext(shell_mat, mat_ctx, ierr)
 
       ! Are we applying q(D^-1 A) D^-1 rather than just q(A)?
-      scaled = .NOT. PetscObjectIsNull(mat_ctx%mat_scaled)
+      temp_mat = mat_ctx%mat_scaled
+      scaled = .NOT. PetscObjectIsNull(temp_mat)
 
       kernel_x = x_mat
 
       if (scaled) then
 
          ! Lazily build somewhere to store D^-1
-         if (PetscObjectIsNull(mat_ctx%mf_vec_diag_recip)) then
-            call VecDuplicate(mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_vec_diag_recip, ierr)
+         temp_vec = mat_ctx%mf_vec_diag_recip
+         if (PetscObjectIsNull(temp_vec)) then
+            call VecDuplicate(mat_ctx%mf_temp_vec(MF_VEC_DIAG), temp_vec, ierr)
          end if
          ! We have to refresh the values every apply - the diagonal in MF_VEC_DIAG is
          ! updated in place whenever the matshell is reused with the same nonzero
          ! pattern, and there is no hook that would let us know that has happened
-         call VecCopy(mat_ctx%mf_temp_vec(MF_VEC_DIAG), mat_ctx%mf_vec_diag_recip, ierr)
-         call VecReciprocal(mat_ctx%mf_vec_diag_recip, ierr)
-         kernel_recip = mat_ctx%mf_vec_diag_recip
+         call VecCopy(mat_ctx%mf_temp_vec(MF_VEC_DIAG), temp_vec, ierr)
+         call VecReciprocal(temp_vec, ierr)
+         kernel_recip = temp_vec
       end if
 
       ! ~~~~~~~~~~~~

@@ -71,6 +71,7 @@ module matshell_data_type
       logical :: rebuild, want_rhs
       PetscInt :: global_rows, global_cols
       MatType :: x_type, temp_type
+      type(tMat) :: temp_mat
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -86,8 +87,9 @@ module matshell_data_type
       ! The type of block we're given can also change between applies
       if (.NOT. rebuild) then
          do i_loc = 1, size(mat_ctx%mf_temp_mat)
-            if (.NOT. PetscObjectIsNull(mat_ctx%mf_temp_mat(i_loc))) then
-               call MatGetType(mat_ctx%mf_temp_mat(i_loc), temp_type, ierr)
+            temp_mat = mat_ctx%mf_temp_mat(i_loc)
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatGetType(temp_mat, temp_type, ierr)
                if (temp_type /= x_type) rebuild = .TRUE.
                exit
             end if
@@ -96,8 +98,9 @@ module matshell_data_type
 
       if (rebuild) then
          do i_loc = 1, size(mat_ctx%mf_temp_mat)
-            if (.NOT. PetscObjectIsNull(mat_ctx%mf_temp_mat(i_loc))) then
-               call MatDestroy(mat_ctx%mf_temp_mat(i_loc), ierr)
+            temp_mat = mat_ctx%mf_temp_mat(i_loc)
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatDestroy(temp_mat, ierr)
             end if
          end do
          mat_ctx%mf_temp_mat_ncols = -1
@@ -105,12 +108,14 @@ module matshell_data_type
 
       ! Now create any of the slots we need that don't exist
       do i_loc = 1, n_temps
-         if (PetscObjectIsNull(mat_ctx%mf_temp_mat(i_loc))) then
+         temp_mat = mat_ctx%mf_temp_mat(i_loc)
+         if (PetscObjectIsNull(temp_mat)) then
             call MatDuplicate(x_mat, MAT_DO_NOT_COPY_VALUES, mat_ctx%mf_temp_mat(i_loc), ierr)
          end if
       end do
       if (want_rhs) then
-         if (PetscObjectIsNull(mat_ctx%mf_temp_mat(MF_MAT_RHS))) then
+         temp_mat = mat_ctx%mf_temp_mat(MF_MAT_RHS)
+         if (PetscObjectIsNull(temp_mat)) then
             call MatDuplicate(x_mat, MAT_DO_NOT_COPY_VALUES, mat_ctx%mf_temp_mat(MF_MAT_RHS), ierr)
          end if
       end if
