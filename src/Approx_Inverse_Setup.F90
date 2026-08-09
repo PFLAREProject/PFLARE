@@ -541,15 +541,21 @@ module approx_inverse_setup
             ! Any dense scratch blocks built by a multiple rhs (block) apply
             ! These are only ever created by the block applies, so this is a no-op
             ! for the jacobi/PCAIR matshells
+            ! The destroys go through local copies of the handles (the context fields
+            ! expand too long inside the PetscObjectIsNull macro), and destroy nulls
+            ! the local copy, not the context field - so always copy the nulled
+            ! handle back so no dangling handles are left in the context
             do i_loc = 1, size(mat_ctx%mf_temp_mat)
                temp_mat = mat_ctx%mf_temp_mat(i_loc)
                if (.NOT. PetscObjectIsNull(temp_mat)) then
                   call MatDestroy(temp_mat, ierr)
+                  mat_ctx%mf_temp_mat(i_loc) = temp_mat
                end if
             end do
             temp_vec = mat_ctx%mf_vec_diag_recip
             if (.NOT. PetscObjectIsNull(temp_vec)) then
                call VecDestroy(temp_vec, ierr)
+               mat_ctx%mf_vec_diag_recip = temp_vec
             end if
 
             ! Neumann polynomial has extra context that needs deleting
@@ -558,6 +564,7 @@ module approx_inverse_setup
                call MatShellGetContext(temp_mat, mat_ctx_scaled, ierr)
                deallocate(mat_ctx_scaled)
                call MatDestroy(temp_mat, ierr)
+               mat_ctx%mat_scaled = temp_mat
             end if
             deallocate(mat_ctx)
          end if               
