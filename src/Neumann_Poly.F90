@@ -173,10 +173,11 @@ module neumann_poly
             mat_ctx%coefficients => null()
          end if
 
-         ! The matshell points at the caller's coefficient storage (all ones) and
-         ! owns it - it is freed by deallocate in reset_inverse_mat
+         ! The matshell points at the caller's coefficient storage (all ones)
+         ! Ownership is the caller's decision, exactly as with the gmres builders:
+         ! calculate_and_build_approximate_inverse sets own_coefficients after we
+         ! return, and for PCAIR it stays .FALSE. as PCAIR manages its own storage
          mat_ctx%coefficients => coefficients
-         mat_ctx%own_coefficients = .TRUE.
          mat_ctx_scaled%coefficients => coefficients
 
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
