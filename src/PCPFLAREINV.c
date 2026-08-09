@@ -20,6 +20,11 @@ PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, Pets
                      PetscInt subcomm_int, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
                      Mat *inv_matrix);
+// Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.
+// *applied comes back 0 if no block apply was possible and the caller has to apply
+// column by column instead - that includes being handed a matshell whose context
+// isn't one of the polynomials shell_poly_block_apply (Gmres_Poly_Newton.F90) knows.
+PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int *applied);
 
 // The types available as approximate inverses are (see include/pflare.h):
 //
@@ -627,6 +632,63 @@ static PetscErrorCode PCApply_PFLAREINV_c(PC pc, Vec x, Vec y)
 
 // ~~~~~~~~~~
 
+// Multi-RHS apply: Y = mat_inverse * X for dense X, Y.
+// Lets KSPMatSolve / PCMatApply hit a real SpMM (cuSPARSE/hipSPARSE/Kokkos/CPU
+// AIJxDense) instead of PETSc's default column-by-column PCApply fallback.
+static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
+{
+   PC_PFLAREINV *inv_data;
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+
+   if (inv_data->matrix_free) {
+      // mat_inverse is a MatShell with only MATOP_MULT registered, so MatMatMult on it
+      // would fail. The polynomial matshells can however be applied blockwise by
+      // doing the products with the underlying matrix - the Fortran routine below does
+      // that and reports whether it managed it.
+      // The gate here is just the list of families that have a block kernel - it isn't
+      // load bearing for correctness, shell_poly_block_apply works out which arithmetic
+      // to use from the matshell's context and reports back if it can't do the apply
+      // (the two Jacobi types are never matrix-free anyway).
+      int applied = 0;
+      if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
+          inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || \
+          inv_data->inverse_type == PFLAREINV_NEUMANN)
+      {
+         pflareinv_shell_block_matapply_c(&(inv_data->mat_inverse), &X, &Y, &applied);
+      }
+
+      if (applied) {
+         PetscCall(PetscInfo(pc, "matrix-free PCMatApply used the block polynomial kernel\n"));
+      } else {
+         // Anything we can't do blockwise is applied column-by-column.
+         PetscInt n_cols, j;
+         Vec cx, cy;
+         PetscCall(PetscInfo(pc, "matrix-free PCMatApply solving column by column\n"));
+         PetscCall(MatGetSize(X, NULL, &n_cols));
+         for (j = 0; j < n_cols; j++) {
+            PetscCall(MatDenseGetColumnVecRead(X, j, &cx));
+            PetscCall(MatDenseGetColumnVecWrite(Y, j, &cy));
+            PetscCall(MatMult(inv_data->mat_inverse, cx, cy));
+            PetscCall(MatDenseRestoreColumnVecWrite(Y, j, &cy));
+            PetscCall(MatDenseRestoreColumnVecRead(X, j, &cx));
+         }
+      }
+   } else {
+      // Assembled inverse: real SpMM via MatProduct.
+      PetscCall(MatProductCreateWithMat(inv_data->mat_inverse, X, NULL, Y));
+      PetscCall(MatProductSetType(Y, MATPRODUCT_AB));
+      PetscCall(MatProductSetFromOptions(Y));
+      PetscCall(MatProductSymbolic(Y));
+      PetscCall(MatProductNumeric(Y));
+      // Drop product bookkeeping so Y doesn't retain refs to mat_inverse, X.
+      PetscCall(MatProductClear(Y));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
 static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
 {
    PC_PFLAREINV *inv_data;
@@ -926,6 +988,7 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
 
    // Set the method functions
    pc->ops->apply               = PCApply_PFLAREINV_c;
+   pc->ops->matapply            = PCMatApply_PFLAREINV_c;
    pc->ops->setup               = PCSetUp_PFLAREINV_c;
    pc->ops->destroy             = PCDestroy_PFLAREINV_c;
    pc->ops->view                = PCView_PFLAREINV_c;  

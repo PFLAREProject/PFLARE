@@ -459,7 +459,8 @@ module approx_inverse_setup
 
          coefficients = 1d0
          call calculate_and_build_neumann_polynomial_inverse(matrix, poly_order, &
-                     buffers, inverse_sparsity_order, matrix_free, reuse_mat, reuse_submatrices, inv_matrix)        
+                     buffers, coefficients(:, 1), inverse_sparsity_order, matrix_free, &
+                     reuse_mat, reuse_submatrices, inv_matrix)
                  
       ! Sparse approximate inverse
       else if (inverse_type == PFLAREINV_SAI .OR. inverse_type == PFLAREINV_ISAI) then
@@ -509,8 +510,11 @@ module approx_inverse_setup
       type(tMat), intent(inout) :: matrix
 
       PetscErrorCode :: ierr
+      integer :: i_loc
       MatType:: mat_type
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
+      type(tMat) :: temp_mat
+      type(tVec) :: temp_vec
       ! ~~~~~~
 
       if (.NOT. PetscObjectIsNull(matrix)) then
@@ -525,7 +529,8 @@ module approx_inverse_setup
             call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
 
             ! Both newton and neumann polynomials use some extra temporary vectors
-            if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled) .OR. &
+            temp_mat = mat_ctx%mat_scaled
+            if (.NOT. PetscObjectIsNull(temp_mat) .OR. &
                      associated(mat_ctx%real_roots)) then
                
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)
@@ -534,11 +539,33 @@ module approx_inverse_setup
                call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), ierr)
             end if
 
+            ! Any dense scratch blocks built by a multiple rhs (block) apply
+            ! These are only ever created by the block applies, so this is a no-op
+            ! for the jacobi/PCAIR matshells
+            ! The destroys go through local copies of the handles (the context fields
+            ! expand too long inside the PetscObjectIsNull macro), and destroy nulls
+            ! the local copy, not the context field - so always copy the nulled
+            ! handle back so no dangling handles are left in the context
+            do i_loc = 1, size(mat_ctx%mf_temp_mat)
+               temp_mat = mat_ctx%mf_temp_mat(i_loc)
+               if (.NOT. PetscObjectIsNull(temp_mat)) then
+                  call MatDestroy(temp_mat, ierr)
+                  mat_ctx%mf_temp_mat(i_loc) = temp_mat
+               end if
+            end do
+            temp_vec = mat_ctx%mf_vec_diag_recip
+            if (.NOT. PetscObjectIsNull(temp_vec)) then
+               call VecDestroy(temp_vec, ierr)
+               mat_ctx%mf_vec_diag_recip = temp_vec
+            end if
+
             ! Neumann polynomial has extra context that needs deleting
-            if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled)) then
-               call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
+            temp_mat = mat_ctx%mat_scaled
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatShellGetContext(temp_mat, mat_ctx_scaled, ierr)
                deallocate(mat_ctx_scaled)
-               call MatDestroy(mat_ctx%mat_scaled, ierr)
+               call MatDestroy(temp_mat, ierr)
+               mat_ctx%mat_scaled = temp_mat
             end if
             deallocate(mat_ctx)
          end if               

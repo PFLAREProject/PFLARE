@@ -6,6 +6,26 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- New `PCMatApply` callback for PCPFLAREINV, so a block of right-hand sides is
+  applied with a single sparse matrix by dense matrix product rather than
+  PETSc's default loop over columns; on the GPU backends this keeps the whole
+  multiple-RHS apply on the device. Note that `KSPMatSolve` only reaches
+  `PCMatApply` for `-ksp_type preonly` (or HPDDM) - any other KSP type falls
+  back to solving column by column. PCAIR does not support multiple right-hand
+  sides yet. New `tests/adv_1d_multi_rhs.c` driver builds the block of
+  right-hand sides with `MatCreateDenseFromVecType` and solves with
+  `KSPMatSolve`
+- The matrix-free polynomial inverses (`power`, `arnoldi`, `newton`,
+  `newton_no_extra`, `neumann`) now also apply blockwise in `PCMatApply`: the
+  Horner and Newton-basis kernels run sparse matrix by dense matrix products
+  on the underlying operator instead of looping matvecs, with dense scratch
+  blocks cached in the matshell context. The right diagonally scaled variant
+  `q(D^-1 A) D^-1` used by PCAIR's smoothers is supported ready for future
+  PCAIR multiple-RHS work, as is the Neumann polynomial's intrinsically
+  scaled `q(I - D^-1 A) D^-1`; anything else unsupported falls back to the
+  previous column-by-column apply. New `tests/shell_block_apply.c` driver
+  exercises the block apply directly, including the diagonally scaled mode
+  that PCPFLAREINV itself never builds
 - Fixed PCAIR silently ignoring `KSPSetReusePreconditioner` /
   `-ksp_reuse_preconditioner`: a values-only change to the pmat between
   solves rebuilt the full AIR hierarchy despite the flag; a frozen PCAIR

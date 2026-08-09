@@ -540,6 +540,29 @@ run_tests_no_load_short_serial:
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
+	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5
+	@echo "Test multiple RHS block solve with a Newton polynomial PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_type newton
+	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
+	@echo "Test multiple RHS block solve with a matrix-free Arnoldi PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type arnoldi
+	@echo "Test multiple RHS block solve with a matrix-free Newton PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
+	@echo "Test multiple RHS block solve with a matrix-free Newton no extra PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton_no_extra \
+	 -pc_pflareinv_poly_order 10
+	@echo "Test multiple RHS block solve with a matrix-free Neumann PCPFLAREINV"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type neumann
+	@echo "Test the block apply of the matrix-free Arnoldi matshell directly, plain and diagonally scaled"
+	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
+	@echo "Test the block apply of the matrix-free Newton matshell directly, plain and diagonally scaled"
+	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 2
+	@echo "Test the block apply of the matrix-free Neumann matshell directly"
+	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 4
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -971,6 +994,20 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5
+	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
+	@echo "Test multiple RHS block solve with a matrix-free Newton PCPFLAREINV in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
+	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
+	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
+	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"
+	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 2
+	@echo "Test the block apply of the matrix-free Neumann matshell directly in parallel"
+	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 4
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
