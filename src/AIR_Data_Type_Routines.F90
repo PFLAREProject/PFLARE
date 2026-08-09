@@ -25,9 +25,11 @@ module air_data_type_routines
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout)    :: air_data
-      ! ~~~~~~    
 
-      air_data%no_levels = -1    
+      integer :: i_loc
+      ! ~~~~~~
+
+      air_data%no_levels = -1
 
       ! Allocate the AIR specific data structures
       allocate(air_data%IS_fine_index(air_data%options%max_levels))
@@ -80,7 +82,18 @@ module air_data_type_routines
       allocate(air_data%temp_vecs_coarse(4)%array(air_data%options%max_levels))
       allocate(air_data%temp_vecs(1)%array(air_data%options%max_levels))
 
-      ! Reuse 
+      ! Temporary dense blocks used during a multiple rhs (block) smooth
+      ! Only the outer arrays are allocated here, the blocks themselves are
+      ! built lazily in ensure_air_block_temps once we know how many columns
+      ! we have been given
+      do i_loc = 1, size(air_data%block_temp_fine)
+         allocate(air_data%block_temp_fine(i_loc)%array(air_data%options%max_levels))
+         allocate(air_data%block_temp_coarse(i_loc)%array(air_data%options%max_levels))
+      end do
+      allocate(air_data%block_temp_full(1)%array(air_data%options%max_levels))
+      air_data%block_ncols = -1
+
+      ! Reuse
       allocate(air_data%reuse(air_data%options%max_levels))
       
       ! nnzs counts
@@ -120,6 +133,13 @@ module air_data_type_routines
 
       reuse = .FALSE.
       if (present(keep_reuse)) reuse = keep_reuse
+
+      ! The dense scratch blocks are sized from A_ff/A_cf/coarse_matrix on each
+      ! level, so they have to go whenever we reset regardless of whether we are
+      ! reusing - the number of levels and the layouts on them can both change
+      ! when we build again. They are cheap to rebuild, ensure_air_block_temps
+      ! does that lazily on the next block apply
+      call destroy_air_block_temps(air_data)
 
       ! Use if this data structure is allocated to determine if we setup anything
       if (allocated(air_data%allocated_matrices_A_ff)) then
@@ -284,9 +304,188 @@ module air_data_type_routines
       air_data%coarse_matrix_nnzs   = 0   
       air_data%allocated_coarse_matrix = .FALSE.   
 
-   end subroutine reset_air_data     
+   end subroutine reset_air_data
 
-   ! -------------------------------------------------------------------------------------------------------------------------------
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine destroy_air_block_temps(air_data)
+
+      ! Destroys the dense scratch blocks the multiple rhs (block) smooths use
+      ! ensure_air_block_temps rebuilds any of them we need on the next block apply
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+
+      integer :: our_level, i_loc
+      PetscErrorCode :: ierr
+      type(tMat) :: temp_mat
+      ! ~~~~~~
+
+      ! The outer arrays are only allocated in create_air_data
+      if (.NOT. allocated(air_data%block_temp_full(1)%array)) return
+
+      do our_level = 1, size(air_data%block_temp_full(1)%array)
+
+         do i_loc = 1, size(air_data%block_temp_fine)
+
+            ! MatDestroy nulls the local copy of the handle, not the slot in the
+            ! array, so we have to copy it back or the slot would be left dangling
+            ! and ensure_air_block_temps would skip rebuilding it
+            temp_mat = air_data%block_temp_fine(i_loc)%array(our_level)
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatDestroy(temp_mat, ierr)
+               air_data%block_temp_fine(i_loc)%array(our_level) = temp_mat
+            end if
+
+            temp_mat = air_data%block_temp_coarse(i_loc)%array(our_level)
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatDestroy(temp_mat, ierr)
+               air_data%block_temp_coarse(i_loc)%array(our_level) = temp_mat
+            end if
+         end do
+
+         temp_mat = air_data%block_temp_full(1)%array(our_level)
+         if (.NOT. PetscObjectIsNull(temp_mat)) then
+            call MatDestroy(temp_mat, ierr)
+            air_data%block_temp_full(1)%array(our_level) = temp_mat
+         end if
+      end do
+
+      air_data%block_ncols = -1
+
+   end subroutine destroy_air_block_temps
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine create_air_block_temp(op_mat, from_cols, x_mat, local_cols, global_cols, block_mat, ierr)
+
+      ! Creates one dense scratch block with the row layout of op_mat (or its
+      ! column layout if from_cols is true) and the column layout (and dense type)
+      ! of the block of rhs we've been given, x_mat
+      ! Does nothing if the block already exists
+
+      ! ~~~~~~
+      type(tMat), intent(in)        :: op_mat, x_mat
+      logical, intent(in)           :: from_cols
+      PetscInt, intent(in)          :: local_cols, global_cols
+      type(tMat), intent(inout)     :: block_mat
+      PetscErrorCode, intent(inout) :: ierr
+
+      PetscInt :: local_rows, global_rows, local_op_cols, global_op_cols
+      VecType :: vec_type
+      MPIU_Comm :: MPI_COMM_MATRIX
+      type(tMat) :: temp_mat
+      ! ~~~~~~
+
+      temp_mat = block_mat
+      if (.NOT. PetscObjectIsNull(temp_mat)) return
+
+      call PetscObjectGetComm(op_mat, MPI_COMM_MATRIX, ierr)
+      call MatGetLocalSize(op_mat, local_rows, local_op_cols, ierr)
+      call MatGetSize(op_mat, global_rows, global_op_cols, ierr)
+      if (from_cols) then
+         local_rows  = local_op_cols
+         global_rows = global_op_cols
+      end if
+      ! Take the type from the block of rhs, so a block that lives on the device
+      ! gives us device scratch
+      call MatGetVecType(x_mat, vec_type, ierr)
+
+      call MatCreateDenseFromVecType(MPI_COMM_MATRIX, vec_type, local_rows, local_cols, &
+               global_rows, global_cols, PETSC_DECIDE, PETSC_NULL_SCALAR, &
+               block_mat, ierr)
+
+   end subroutine create_air_block_temp
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine ensure_air_block_temps(air_data, x_mat, ierr)
+
+      ! Makes sure the cached dense scratch blocks match the block of rhs, x_mat,
+      ! we've been given
+      ! This is the air equivalent of ensure_block_temp_mats in matshell_data_type
+      ! The blocks have the row layouts of the operators on each level (which we
+      ! only know after the setup) and the column layout of x_mat (which we only
+      ! know once a block apply happens), hence building them lazily here
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      type(tMat), intent(in)                  :: x_mat
+      PetscErrorCode, intent(inout)           :: ierr
+
+      integer :: our_level, i_loc, n_coarse
+      logical :: rebuild
+      PetscInt :: global_rows, global_cols, local_rows, local_cols
+      MatType :: x_type, temp_type
+      type(tMat) :: temp_mat
+      ! ~~~~~~
+
+      ! With full smoothing up and down we never do an FC smooth, so none of these
+      ! blocks are used - the level smoothers and the coarse grid solver apply
+      ! their inverses to the whole block directly
+      if (air_data%options%full_smoothing_up_and_down) return
+      ! Nothing to smooth on if there's only a single level
+      if (air_data%no_levels < 2) return
+      if (.NOT. allocated(air_data%block_temp_full(1)%array)) return
+
+      call MatGetSize(x_mat, global_rows, global_cols, ierr)
+      call MatGetLocalSize(x_mat, local_rows, local_cols, ierr)
+      call MatGetType(x_mat, x_type, ierr)
+
+      ! If the number of columns has changed we have to start again
+      rebuild = air_data%block_ncols /= global_cols
+
+      ! The type of block we're given can also change between applies
+      if (.NOT. rebuild) then
+         do our_level = 1, air_data%no_levels - 1
+            temp_mat = air_data%block_temp_fine(1)%array(our_level)
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatGetType(temp_mat, temp_type, ierr)
+               if (temp_type /= x_type) rebuild = .TRUE.
+               exit
+            end if
+         end do
+      end if
+
+      if (rebuild) call destroy_air_block_temps(air_data)
+
+      ! We only need the extra coarse blocks if we're C point smoothing, in the
+      ! same way as the extra temp_vecs_coarse
+      n_coarse = 1
+      if (air_data%options%any_c_smooths) n_coarse = size(air_data%block_temp_coarse)
+
+      ! Now create any of the blocks we need that don't exist
+      do our_level = 1, air_data%no_levels - 1
+
+         do i_loc = 1, size(air_data%block_temp_fine)
+            call create_air_block_temp(air_data%A_ff(our_level), .FALSE., x_mat, &
+                     local_cols, global_cols, &
+                     air_data%block_temp_fine(i_loc)%array(our_level), ierr)
+         end do
+
+         ! A_fc has the coarse column layout - we take it from A_fc rather than
+         ! A_cf as A_cf is destroyed after the setup unless we're C smoothing,
+         ! and this is where temp_vecs_coarse gets its layout from too
+         do i_loc = 1, n_coarse
+            call create_air_block_temp(air_data%A_fc(our_level), .TRUE., x_mat, &
+                     local_cols, global_cols, &
+                     air_data%block_temp_coarse(i_loc)%array(our_level), ierr)
+         end do
+
+         ! Only the injector version of MatISCopyLocalWrapper needs a full size
+         ! block, in the same way as temp_vecs
+         if (.NOT. air_data%fast_veciscopy_exists) then
+            call create_air_block_temp(air_data%coarse_matrix(our_level), .FALSE., x_mat, &
+                     local_cols, global_cols, &
+                     air_data%block_temp_full(1)%array(our_level), ierr)
+         end if
+      end do
+
+      air_data%block_ncols = global_cols
+
+   end subroutine ensure_air_block_temps
+
+! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine destroy_air_data(air_data)
 
@@ -295,8 +494,8 @@ module air_data_type_routines
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
 
-      integer :: our_level
-      ! ~~~~~~    
+      integer :: our_level, i_loc
+      ! ~~~~~~
 
       call reset_air_data(air_data)
 
@@ -408,7 +607,14 @@ module air_data_type_routines
          deallocate(air_data%temp_vecs_coarse(2)%array)
          deallocate(air_data%temp_vecs_coarse(3)%array)
          deallocate(air_data%temp_vecs_coarse(4)%array)
-         
+
+         ! The blocks themselves have already been destroyed in reset_air_data
+         do i_loc = 1, size(air_data%block_temp_fine)
+            deallocate(air_data%block_temp_fine(i_loc)%array)
+            deallocate(air_data%block_temp_coarse(i_loc)%array)
+         end do
+         deallocate(air_data%block_temp_full(1)%array)
+
          deallocate(air_data%reuse)
          
          ! Delete the nnzs

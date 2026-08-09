@@ -20,7 +20,9 @@ module air_mg_setup
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
-   use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson, mg_coarse_shell_apply
+   use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson, mg_coarse_shell_apply, &
+         mg_FC_block_richardson, mg_coarse_shell_block_apply, &
+         mg_smooth_shell_apply, mg_smooth_shell_block_apply
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &
@@ -80,7 +82,7 @@ module air_mg_setup
       VecType :: vec_type
       logical :: auto_truncated, aff_diag, check_diag_only
       PetscRandom :: rctx
-      MatType:: mat_type, mat_type_aff
+      MatType:: mat_type, mat_type_aff, mat_type_inv_aff
       integer(c_int) :: diag_only
 
       ! ~~~~~~     
@@ -1043,11 +1045,27 @@ module air_mg_setup
 
             ! Set the smoother
             if (.NOT. air_data%options%full_smoothing_up_and_down) then
-               call PCSetType(pc_smoother_up, PCSHELL, ierr)      
-               call PCSetType(pc_smoother_down, PCSHELL, ierr)      
+               call PCSetType(pc_smoother_up, PCSHELL, ierr)
+               call PCSetType(pc_smoother_down, PCSHELL, ierr)
             else
-               call PCSetType(pc_smoother_up, PCMAT, ierr)
-               call PCSetType(pc_smoother_down, PCMAT, ierr)    
+               ! When doing full smoothing the smoother is just the application of
+               ! inv_A_ff, which is what PCMAT does with inv_A_ff as its Pmat
+               ! We can't use PCMAT with a matrix-free inverse though, as its
+               ! multiple rhs apply does a MatMatMult on the Pmat and the matshell
+               ! only has a MATOP_MULT - use a shell that does the same single rhs
+               ! arithmetic and knows how to do the block apply instead
+               call MatGetType(air_data%inv_A_ff(our_level), mat_type_inv_aff, ierr)
+               if (mat_type_inv_aff == MATSHELL) then
+                  call PCSetType(pc_smoother_up, PCSHELL, ierr)
+                  call PCSetType(pc_smoother_down, PCSHELL, ierr)
+                  call PCShellSetApply(pc_smoother_up, mg_smooth_shell_apply, ierr)
+                  call PCShellSetApply(pc_smoother_down, mg_smooth_shell_apply, ierr)
+                  call PCShellSetMatApply(pc_smoother_up, mg_smooth_shell_block_apply, ierr)
+                  call PCShellSetMatApply(pc_smoother_down, mg_smooth_shell_block_apply, ierr)
+               else
+                  call PCSetType(pc_smoother_up, PCMAT, ierr)
+                  call PCSetType(pc_smoother_down, PCMAT, ierr)
+               end if
             end if
 
             ! Set richardson
@@ -1059,6 +1077,10 @@ module air_mg_setup
             if (.NOT. air_data%options%full_smoothing_up_and_down) then
                call PCShellSetApplyRichardson(pc_smoother_up, mg_FC_point_richardson, ierr)
                call PCShellSetApplyRichardson(pc_smoother_down, mg_FC_point_richardson, ierr)
+               ! The multiple rhs version - without this a KSPMatSolve would fall
+               ! back to calling the single rhs richardson on each column in turn
+               call PCShellSetMatApplyRichardson(pc_smoother_up, mg_FC_block_richardson, ierr)
+               call PCShellSetMatApplyRichardson(pc_smoother_down, mg_FC_block_richardson, ierr)
             end if
 
             ! Zero up smooths for kaskade
@@ -1154,6 +1176,9 @@ module air_mg_setup
          call PCSetType(pc_coarse_solver, PCSHELL, ierr)
          call PCShellSetContext(pc_coarse_solver, air_data, ierr)
          call PCShellSetApply(pc_coarse_solver, mg_coarse_shell_apply, ierr)
+         ! The multiple rhs version - the coarse ksp is a preonly, which does have
+         ! a matsolve, so this is what makes the coarse solve a real block apply
+         call PCShellSetMatApply(pc_coarse_solver, mg_coarse_shell_block_apply, ierr)
          call PCSetUp(pc_coarse_solver, ierr)
          call KSPSetUp(ksp_coarse_solver, ierr)
 

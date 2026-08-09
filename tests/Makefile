@@ -568,6 +568,10 @@ run_tests_no_load_short_serial:
 	 -pc_pflareinv_poly_order 10
 	@echo "Test multiple RHS block solve with a matrix-free Neumann PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type neumann
+	@echo "Test multiple RHS block solve with PCAIR via PCMatApply"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
+	@echo "Test multiple RHS block solve with a matrix-free PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly, plain and diagonally scaled"
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly, plain and diagonally scaled"
@@ -1042,6 +1046,8 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
 	@echo "Test multiple RHS block solve with a matrix-free Newton PCPFLAREINV in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
+	@echo "Test multiple RHS block solve with PCAIR via PCMatApply in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"

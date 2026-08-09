@@ -160,9 +160,8 @@ int main(int argc, char **args)
      loop of KSPSolve over the columns of B, so overriding this with -ksp_type
      turns the block solve back into a column-by-column solve.
 
-     Similarly PCPFLAREINV is the default preconditioner here because it is the
-     PFLARE preconditioner that implements PCMatApply; -pc_type air also runs,
-     but only through the column-by-column fallback.
+     PCPFLAREINV is the default preconditioner here, but -pc_type air also does a
+     genuine block solve - both implement PCMatApply.
 
      No KSPSetInitialGuessNonzero - preonly requires a zero initial guess and
      KSPMatSolve zeroes X for us anyway.

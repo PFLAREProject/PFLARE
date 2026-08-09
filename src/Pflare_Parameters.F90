@@ -113,6 +113,17 @@ module pflare_parameters
    integer, parameter :: MF_MAT_RHS        = 4
 
    ! --------------------------------------------------------
+   ! AIR temporary dense matrix slot indices   (from air_data_type)
+   ! These are the scratch dense blocks used by the multiple rhs (block) FC
+   ! smooths and they mirror the roles the temp_vecs_fine/temp_vecs_coarse
+   ! vectors play in the single rhs smooths
+   ! --------------------------------------------------------
+   integer, parameter :: AIR_MAT_SOL      = 1
+   integer, parameter :: AIR_MAT_TEMP     = 2
+   integer, parameter :: AIR_MAT_RESIDUAL = 3
+   integer, parameter :: AIR_MAT_RHS      = 4
+
+   ! --------------------------------------------------------
    ! Timer IDs   (from timers)
    ! --------------------------------------------------------
    integer, parameter :: TIMER_ID_AIR_SETUP        = 1
