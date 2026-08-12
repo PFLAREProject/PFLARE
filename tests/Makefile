@@ -46,6 +46,10 @@ KSP_RTOL := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),1e-5,1e-10)
 #     polynomial terms survive between setups, leaving the reused pattern stale.
 SKIP_SINGLE := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),@echo "  [skipped under single precision]:",)
 
+# Same skip mechanism for kokkos builds - only for the specific commands that hit
+# an existing gap in petsc's kokkos capability, not whole classes
+SKIP_KOKKOS := $(if $(filter 1,$(PETSC_HAVE_KOKKOS)),@echo "  [skipped under kokkos]:",)
+
 # We then have to add the flags back in after the petsc rules/variables
 # have overwritten
 override CFLAGS += $(CFLAGS_INPUT) $(INCLUDE)
@@ -604,7 +608,10 @@ run_tests_no_load_short_serial:
 	@echo "Test multiple RHS block solve with a diagonally scaled coarse grid solver in PCAIR"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_coarsest_diag_scale_polys
 	@echo "Test multiple RHS block solve with PCAIR with a user defined coarse grid solver"
-	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -mg_coarse_pc_type lu
+# Skipped under kokkos: the multiple rhs solve with PCLU needs a MatMatSolve of an
+# aijkokkos factor with a dense rhs block, which petsc does not have yet - its
+# fallback hands host column vecs to the kokkos MatSolve and aborts
+	$(SKIP_KOKKOS) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -mg_coarse_pc_type lu
 	@echo "Test multiple RHS block solve with PCAIR called twice - the scratch space is reused"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -second_solve
 	@echo "Test multiple RHS block solve with PCAIR in batches - the block size changes"
