@@ -58,6 +58,9 @@ Solve-selection flags (at most one of the two -only_* may be given):\n\
                               AIRG-inner Ax=b solve (for -pc_air_* sweeps)\n\
   -only_jac_axb             : run ONLY the ILU factorisation, Jacobi L/U and the\n\
                               Jacobi-inner Ax=b solve (for -jac_max_it sweeps)\n\
+  -only_pcilu               : run ONLY the exact-PCILU baseline Ax=b solve plus\n\
+                              the ILU factorisation and the LU_Exact_{L,U}\n\
+                              level-set setup timings (cheap baseline refresh)\n\
   -jac_max_it <int>         : inner Jacobi sweeps per factor apply in the\n\
                               Jacobi-inner Ax=b solve (default: ceil of the max\n\
                               AIR cycle complexity over L and U)\n\n";
@@ -71,6 +74,7 @@ Solve-selection flags (at most one of the two -only_* may be given):\n\
 #include <KokkosKernels_Handle.hpp>
 #include <KokkosSparse_spiluk.hpp>
 #include <KokkosSparse_par_ilut.hpp>
+#include <KokkosSparse_sptrsv.hpp>
 #include <KokkosSparse_SortCrs.hpp>
 #include <exception>
 #include <stdexcept>
@@ -267,6 +271,59 @@ static PetscErrorCode TimedKSPSolve(KSP ksp, Vec b, Vec x, const char *label)
   Kokkos::fence();
   PetscCall(PetscTime(&t1));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SOLVE_TIME %s = %.6e\n",
+                        label, (double)(t1 - t0)));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* Time the sptrsv level-set (symbolic) analysis of one triangular factor and
+   print it as `SETUP_TIME <label> = <seconds>`.
+
+   This is the setup cost of an EXACT triangular solve on our L/U: what PETSc's
+   Kokkos MatSolve pays (lazily, on its first application) before any level-
+   scheduled substitution can run. None of the iterative inner PCs in this
+   executable ever triggers it, so it must be measured explicitly to give the
+   exact-solve column of the setup-cost comparison. The algorithm mirrors
+   PETSc's aijkok factor path (SPTRSV_CUSPARSE under the cuSPARSE TPL, else
+   SEQLVLSCHD_TP1, which is what runs on HIP), and the handle creation is
+   included in the interval since PETSc pays it per factorisation too. The
+   symbolic analysis depends only on the sparsity pattern, so timing the
+   diagonally-scaled U is identical to timing the raw U. Single-rank only
+   (SeqAIJKokkos): the caller must not pass an MPIAIJ factor. */
+static PetscErrorCode TimeSptrsvSymbolic(Mat F, PetscBool lower_tri, const char *label)
+{
+  PetscInt       m, n;
+  PetscLogDouble t0, t1;
+  PetscFunctionBeginUser;
+  PetscCall(MatGetLocalSize(F, &m, &n));
+
+  Kokkos::View<const PetscScalar *> F_values;
+  PetscCall(MatSeqAIJGetKokkosView(F, &F_values));
+  const PetscInt *device_i = nullptr, *device_j = nullptr;
+  PetscMemType    memtype;
+  PetscCall(MatSeqAIJGetCSRAndMemType(F, &device_i, &device_j, NULL, &memtype));
+  Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> F_rowmap(device_i, m + 1);
+  Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> F_entries(device_j, (PetscInt)F_values.extent(0));
+
+  using KernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<
+      PetscInt, PetscInt, PetscScalar,
+      DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
+  KernelHandle kh;
+#if defined(KOKKOSKERNELS_ENABLE_TPL_CUSPARSE)
+  auto sptrsv_alg = KokkosSparse::Experimental::SPTRSVAlgorithm::SPTRSV_CUSPARSE;
+#else
+  auto sptrsv_alg = KokkosSparse::Experimental::SPTRSVAlgorithm::SEQLVLSCHD_TP1;
+#endif
+
+  Kokkos::fence();
+  PetscCall(PetscTime(&t0));
+  kh.create_sptrsv_handle(sptrsv_alg, m, lower_tri == PETSC_TRUE);
+  KokkosSparse::sptrsv_symbolic(&kh, F_rowmap, F_entries, F_values);
+  Kokkos::fence();
+  PetscCall(PetscTime(&t1));
+  kh.destroy_sptrsv_handle();
+
+  PetscCall(MatSeqAIJRestoreKokkosView(F, &F_values));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME %s = %.6e\n",
                         label, (double)(t1 - t0)));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1093,14 +1150,25 @@ int main(int argc, char **args)
      this flag. */
   PetscBool only_airg = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-only_airg", &only_airg, NULL));
-  if (only_airg && only_jac_axb) {
+  /* -only_pcilu: run ONLY the exact-PCILU baseline Ax=b solve, the ILU
+     factorisation and the LU_Exact_{L,U} level-set setup timings. Skips AIRG
+     L/U (implies skip_airg), GMRES-poly/Neumann/ISAI/Jacobi L/U, and both
+     approximate Ax=b shell solves. Built for the baseline-refresh rerun: the
+     two fixes below (the sub-PC fill level and the warm-up that pulls the
+     deferred block setup + level-set analysis out of the timed solve) change
+     ONLY the baseline's numbers, so every other method keeps its committed
+     cells and re-running them would just burn GPU time. */
+  PetscBool only_pcilu = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-only_pcilu", &only_pcilu, NULL));
+  if ((only_airg && only_jac_axb) || (only_pcilu && (only_airg || only_jac_axb))) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "-only_airg and -only_jac_axb are mutually exclusive (they select "
-              "disjoint sets of solves); pass at most one.\n"));
+              "-only_airg, -only_jac_axb and -only_pcilu are mutually exclusive "
+              "(they select disjoint sets of solves); pass at most one.\n"));
     PetscCall(MatDestroy(&A));
     PetscCall(PetscFinalize());
     return 1;
   }
+  if (only_pcilu) skip_airg = PETSC_TRUE;
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
 
   /* Left-scale A by 1/diag(A) before the factorisation (mirrors test_ilu.py scale_mode=1).
@@ -1141,10 +1209,59 @@ int main(int argc, char **args)
          inside block-Jacobi — the standard "parallel PCILU" pattern. */
       PetscCall(PCSetType(pc_Apc, PCBJACOBI));
       PetscCall(KSPSetOptionsPrefix(ksp_Apc, "Apc_"));
+      /* Forward -fill_level to the baseline's sub-PC. PCILU inside PCBJACOBI
+         reads its fill level from -Apc_sub_pc_factor_levels, which nothing set:
+         the baseline silently ran PETSc's default ILU(0) at BOTH fill levels
+         (only the baked-in ordering differed between the two CSVs). Default it
+         into the options database here so the baseline factors at the same
+         fill level as the spiluk factorisation; an explicit command-line
+         -Apc_sub_pc_factor_levels still wins. */
+      {
+        PetscBool has_sub_levels = PETSC_FALSE;
+        PetscCall(PetscOptionsHasName(NULL, NULL, "-Apc_sub_pc_factor_levels", &has_sub_levels));
+        if (!has_sub_levels) {
+          char lvlstr[16];
+          PetscCall(PetscSNPrintf(lvlstr, sizeof(lvlstr), "%" PetscInt_FMT, fill_lev));
+          PetscCall(PetscOptionsSetValue(NULL, "-Apc_sub_pc_factor_levels", lvlstr));
+        }
+      }
       PetscCall(KSPSetFromOptions(ksp_Apc));
-      /* KSPSetUp here does the exact ILU(k) factorisation + symbolic setup for the
-         PCBJACOBI/ILU baseline; time it (GPU -log_view reports KSPSetUp as n/a). */
+      /* KSPSetUp here reaches only the outer GMRES work vectors and the
+         PCBJACOBI shell: PETSc defers every block cost out of PCSetUp_BJacobi.
+         The pieces that actually cost something are timed separately below so
+         nothing is left to fall inside the timed KSPSolve. */
       PetscCall(TimedKSPSetUp(ksp_Apc, "Ax=b_PC_ILU"));
+      /* The deferred block setup: KSPSetUpOnBlocks does the sub-KSP setup,
+         i.e. the baseline's own exact ILU(k) symbolic + numeric factorisation
+         (host-side for k>0 on aijkokkos, then copied to device). */
+      {
+        PetscLogDouble tb0, tb1;
+        Kokkos::fence();
+        PetscCall(PetscTime(&tb0));
+        PetscCall(KSPSetUpOnBlocks(ksp_Apc));
+        Kokkos::fence();
+        PetscCall(PetscTime(&tb1));
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME Ax=b_PC_ILU_blocks = %.6e\n",
+                              (double)(tb1 - tb0)));
+      }
+      /* The sptrsv level-set analysis of the baseline's factors is deferred
+         one step further still, to the first MatSolve (MatSeqAIJKokkosSolveCheck).
+         Trigger it with one untimed-solve warm-up PCApply so the timed KSPSolve
+         below contains NO one-off setup; the interval printed here is the
+         level-set analysis plus one triangular-solve apply. */
+      {
+        PetscLogDouble tw0, tw1;
+        Vec            warm;
+        PetscCall(VecDuplicate(x_sol, &warm));
+        Kokkos::fence();
+        PetscCall(PetscTime(&tw0));
+        PetscCall(PCApply(pc_Apc, b_rand, warm));
+        Kokkos::fence();
+        PetscCall(PetscTime(&tw1));
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME Ax=b_PC_ILU_levelsets = %.6e\n",
+                              (double)(tw1 - tw0)));
+        PetscCall(VecDestroy(&warm));
+      }
       PetscCall(TimedKSPSolve(ksp_Apc, b_rand, x_sol, "Ax=b_PC_ILU"));
       PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
       PetscCall(KSPDestroy(&ksp_Apc));
@@ -1193,6 +1310,34 @@ int main(int argc, char **args)
   PetscCall(MatGetDiagonal(U, inv_diag_U_raw));
   PetscCall(VecReciprocal(inv_diag_U_raw));
   PetscCall(MatDiagonalScale(U, inv_diag_U_raw, NULL));
+
+  /* Exact-triangular-solve setup cost on OUR L and U: the sptrsv level-set
+     analysis an exact MatSolve of these factors would pay before its first
+     apply. This is the apples-to-apples setup analogue of the LU_AIRG / ISAI /
+     GMRES-poly / Jacobi SETUP_TIME lines (each method's setup on the same two
+     factors); nothing in this executable triggers it implicitly, so it is
+     measured explicitly here. Guarded like the per-method solves: a failure
+     (e.g. a device OOM on a huge factor) is caught and skipped so the rest of
+     the run continues with those two cells left blank. Single-rank only (the
+     parallel factors are MPIAIJ, which sptrsv does not take). */
+  if (npe == 1) {
+    PetscErrorCode ierr_sym = PETSC_SUCCESS;
+    try {
+      ierr_sym = TimeSptrsvSymbolic(L, PETSC_TRUE, "LU_Exact_L");
+      if (!ierr_sym) ierr_sym = TimeSptrsvSymbolic(U, PETSC_FALSE, "LU_Exact_U");
+    } catch (const std::exception &e) {
+      ierr_sym = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "LU_Exact level-set setup timing: FAILED (C++ exception: %s); "
+                "skipping and continuing\n", e.what()));
+    } catch (...) {
+      ierr_sym = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "LU_Exact level-set setup timing: FAILED (unknown C++ exception); "
+                "skipping and continuing\n"));
+    }
+    (void)ierr_sym; /* cells simply stay blank on failure */
+  }
 
   /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
   /*  Solves                                                                  */
@@ -1289,7 +1434,7 @@ int main(int argc, char **args)
      -pc_air_* option can change them). The Jacobi L/U factor solves just below
      are deliberately NOT gated by -only_jac_axb: their own iteration counts are
      a useful per-matrix reference in that sweep. -only_airg does skip them. */
-  if (!only_jac_axb && !only_airg) {
+  if (!only_jac_axb && !only_airg && !only_pcilu) {
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_gmres, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
                              "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L", NULL));
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_gmres, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
@@ -1305,7 +1450,7 @@ int main(int argc, char **args)
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_isai, U, b_rand, x_sol, INNER_PC_ISAI,
                              "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL, "LU_ISAI_U", NULL));
   } else {
-    const char *why = only_airg ? "-only_airg" : "-only_jac_axb";
+    const char *why = only_airg ? "-only_airg" : only_pcilu ? "-only_pcilu" : "-only_jac_axb";
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
               "L/U solve (richardson + GMRES poly): SKIPPED (%s)\n", why));
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
@@ -1314,14 +1459,15 @@ int main(int argc, char **args)
               "L/U solve (richardson + ISAI): SKIPPED (%s)\n", why));
   }
 
-  if (!only_airg) {
+  if (!only_airg && !only_pcilu) {
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_jac, L, b_rand, x_sol, INNER_PC_JACOBI,
                              "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L", NULL));
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_jac, U, b_rand, x_sol, INNER_PC_JACOBI,
                              "U solve (richardson + PCJACOBI)", "U_jac_", &solves_converged, NULL, "LU_Jacobi_U", NULL));
   } else {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "L/U solve (richardson + PCJACOBI): SKIPPED (-only_airg)\n"));
+              "L/U solve (richardson + PCJACOBI): SKIPPED (%s)\n",
+              only_airg ? "-only_airg" : "-only_pcilu"));
   }
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
@@ -1330,10 +1476,10 @@ int main(int argc, char **args)
      whether or not AIRG ran), or the hardcoded default of 1 if neither
      applies. Wrapped in try/catch like the AIRG shell so a failure here (it is
      the last solve) is recovered cleanly. */
-  if (only_airg) {
+  if (only_airg || only_pcilu) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
               "A x = b solve (gmres(30) + LU shell PC, Jacobi inner): SKIPPED "
-              "(-only_airg)\n"));
+              "(%s)\n", only_airg ? "-only_airg" : "-only_pcilu"));
     /* The shell would have taken ownership of this vec; free it here instead. */
     PetscCall(VecDestroy(&inv_diag_U_raw_for_jac));
   } else {
