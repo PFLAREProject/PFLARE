@@ -917,10 +917,12 @@ static PetscErrorCode RunAxbShellAIR(Mat A, Mat L, KSP ksp_L_air, KSP ksp_U_air,
    The number of Jacobi sweeps per factor apply equals jac_max_it (derived from
    the AIR cycle complexities). The shell takes ownership of inv_diag_U_raw_for_jac
    and the two inner KSPs it builds. Extracted (like RunAxbShellAIR) so main can
-   wrap the call in try/catch and recover from a failure here. */
+   wrap the call in try/catch and recover from a failure here. `stage` is the
+   caller's (already pushed) -log_view stage, needed so the warm-up solve below
+   can be excluded from the stage's KSPSolve event. */
 static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it,
                                         Vec inv_diag_U_raw_for_jac, Vec b, Vec x,
-                                        PetscBool *all_converged)
+                                        PetscBool *all_converged, PetscLogStage stage)
 {
   KSP         ksp_Ajac;
   PC          pc_Ajac;
@@ -948,6 +950,29 @@ static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it
   PetscCall(KSPSetOptionsPrefix(ksp_Ajac, "A_jac_"));
   PetscCall(KSPSetFromOptions(ksp_Ajac));
   PetscCall(KSPSetUp(ksp_Ajac));
+  {
+    /* Untimed WARM-UP solve, capped at 5 outer iterations. Under -only_jac_axb
+       this KSP performs the first GMRES-type solve in the process, and its
+       first orthogonalisation (VecMDot) absorbs one-time GPU library/kernel
+       initialisation of ~tens of ms, which is comparable to the entire solve
+       on small matrices: it put a ~16-60 ms floor under every Ax=b time in
+       the original jac_max_it sweep (jac_sweep/, 2026-08). The one-time cost
+       is paid within the first iterations, so a capped warm-up suffices and
+       stays negligible for the 2000-iteration MAX/DIV cases (a full duplicate
+       solve would double them). The caller's -log_view stage is deactivated
+       around the warm-up so the stage's KSPSolve event (the driver's canonical
+       time) counts ONLY the real solve below; KSPSolve zeroes x on entry
+       (default zero initial guess), so the timed solve is identical to a cold
+       one. Tolerances are saved/restored in case options overrode them. */
+    PetscReal wu_rtol, wu_atol, wu_dtol;
+    PetscInt  wu_maxits;
+    PetscCall(KSPGetTolerances(ksp_Ajac, &wu_rtol, &wu_atol, &wu_dtol, &wu_maxits));
+    PetscCall(KSPSetTolerances(ksp_Ajac, wu_rtol, wu_atol, wu_dtol, 5));
+    PetscCall(PetscLogStageSetActive(stage, PETSC_FALSE));
+    PetscCall(KSPSolve(ksp_Ajac, b, x));
+    PetscCall(PetscLogStageSetActive(stage, PETSC_TRUE));
+    PetscCall(KSPSetTolerances(ksp_Ajac, wu_rtol, wu_atol, wu_dtol, wu_maxits));
+  }
   PetscCall(TimedKSPSolve(ksp_Ajac, b, x, "Ax=b_approx_PC_ILU_Jac"));
   PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
                         ksp_Ajac, A, b, x, all_converged));
@@ -1487,7 +1512,7 @@ int main(int argc, char **args)
     PetscCall(PetscLogStagePush(stage_A_shell_jac));
     try {
       ierr_jac = RunAxbShellJacobi(A, L, U, jac_max_it, inv_diag_U_raw_for_jac,
-                                   b_rand, x_sol, &solves_converged);
+                                   b_rand, x_sol, &solves_converged, stage_A_shell_jac);
     } catch (const std::exception &e) {
       ierr_jac = PETSC_ERR_LIB;
       PetscCall(PetscPrintf(PETSC_COMM_WORLD,
