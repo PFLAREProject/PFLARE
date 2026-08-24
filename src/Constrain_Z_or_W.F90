@@ -175,14 +175,18 @@ module constrain_z_or_w
       call KSPSetOperators(ksp, input_mat, input_mat, ierr)
       !call KSPSetFromOptions(ksp_coarse_solver, ierr)
       call KSPSetInitialGuessNonzero(ksp, PETSC_TRUE, ierr)
-      ! In double we skip the residual norm (fixed maxits smoothing sweeps). In
-      ! single precision the self-scale Richardson divides by (Ap,Ap), which
-      ! underflows to zero once the near-nullspace residual gets small (Ap ~ 1e-20
-      ! squared underflows float tiny ~1e-38), giving Inf/NaN. Keep the residual
-      ! norm on so the solve halts at the relative tolerance before that happens.
-#if !defined(PETSC_USE_REAL_SINGLE)
-      call KSPSetNormType(ksp, KSP_NORM_NONE, ierr)
-#endif
+      ! Keep the residual norm on (in both precisions) so the convergence test
+      ! halts the solve before the self-scale Richardson divides by a zero
+      ! (Ap,Ap). In single precision that dot product underflows once the
+      ! near-nullspace residual gets small (Ap ~ 1e-20 squared underflows float
+      ! tiny ~1e-38); in double it becomes exactly 0/0 when the vector collapses
+      ! entirely to zero, which happens on coarse levels of operators with no
+      ! left near-nullspace (pure advection with outflow BCs). The convergence
+      ! test runs before the scale computation each iteration, so a collapsed
+      ! residual exits cleanly instead of raising FE_INVALID - fatal under
+      ! -fp_trap. Healthy smoothing never contracts by the relative tolerance
+      ! within maxits sweeps, so results are unchanged where the vectors do not
+      ! collapse.
       call KSPSetUp(ksp, ierr)
       
       ! ~~~~~~~
