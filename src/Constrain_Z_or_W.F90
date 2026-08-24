@@ -4,7 +4,7 @@ module constrain_z_or_w
    use petscksp
    use petsc_helper, only: pseudo_inv
    use pflare_parameters, only: PFLARE_KSP_RTOL_CONSTRAIN, PFLARE_ZERO, PFLARE_KSP_ATOL_OFF, &
-         PFLARE_ONE
+         PFLARE_ONE, PFLARE_TOL_CONSTRAIN_REL, PFLARE_TOL_CONSTRAIN_ABS
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -259,6 +259,9 @@ module constrain_z_or_w
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscScalar, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
       PetscInt, parameter :: one = 1, zero = 0
+      ! Global scale of the coarse near-nullspace vectors and the per-row test
+      ! against it, see PFLARE_TOL_CONSTRAIN_REL below
+      PetscReal :: b_c_scale, b_c_row_norm, vec_norm_loc
       ! Kind-correct BLAS integer/real arguments for the dgemv/dgemm calls
       PetscBLASInt :: m_bl, n_bl, k_bl, lda_bl, ldb_bl, ldc_bl, one_bl
       PetscScalar :: blas_one, blas_zero, blas_minus_one
@@ -382,6 +385,51 @@ module constrain_z_or_w
 
       end if
 
+      ! ~~~~~
+      ! Global scale of the coarse near-nullspace vectors.
+      ! The row-wise projection below divides by ||B_c|S_i||^2, where B_c|S_i is
+      ! B_c restricted to the sparsity pattern of row i. For some operators (e.g.
+      ! pure advection, where the smoothed left near-nullspace vector is driven to
+      ! zero in a layer near the outflow boundary) that restriction is numerically
+      ! zero for a subset of rows. Dividing by it amplifies the grid-transfer
+      ! entries by its reciprocal - observed as ||Z_constrained||/||Z|| ~ 1e2 and
+      ! a divergent solve. Such a row carries no usable constraint information, so
+      ! we leave it unconstrained instead. The test is relative to the vectors'
+      ! own global scale so it is invariant to a rescaling of B.
+      ! ~~~~~
+      b_c_scale = 0d0
+      do null_vec = 1, size(null_vecs_c)
+         call VecNorm(null_vecs_c(null_vec), NORM_INFINITY, vec_norm_loc, ierr)
+         if (vec_norm_loc > b_c_scale) b_c_scale = vec_norm_loc
+      end do
+
+      ! If the near-nullspace vectors have collapsed to (numerically) zero
+      ! everywhere there is nothing to constrain against, and the per-row test
+      ! below cannot detect it because it is relative to this same scale. This
+      ! happens on coarse levels of operators with no left near-nullspace at all
+      ! - pure advection with outflow BCs is the model case, where relaxing on
+      ! A^T x = 0 converges to the zero vector - and dividing by ||B_c|S_i||^2
+      ! then produces Inf/NaN in Z. The vectors start as the constant (all ones)
+      ! before smoothing, so an absolute floor is meaningful here.
+      if (.NOT. (b_c_scale > PFLARE_TOL_CONSTRAIN_ABS)) then
+         call MatAssemblyBegin(new_z_or_w, MAT_FINAL_ASSEMBLY, ierr)
+         call MatAssemblyEnd(new_z_or_w, MAT_FINAL_ASSEMBLY, ierr)
+         deallocate(b_c_nonlocal_alloc)
+         call MatDestroy(z_or_w, ierr)
+         if (is_z) then
+            call MatDestroy(row_mat, ierr)
+            call MatTranspose(new_z_or_w, MAT_INITIAL_MATRIX, row_mat, ierr)
+            z_or_w = row_mat
+            call MatDestroy(new_z_or_w, ierr)
+         else
+            z_or_w = new_z_or_w
+         end if
+         if (comm_size /= 1 .AND. mat_type /= "mpiaij") then
+            call MatDestroy(temp_mat_aij, ierr)
+         end if
+         return
+      end if
+
       ! Now go through each of the rows
       ! GetRow has to happen over the global indices
       do i_loc = global_row_start, global_row_end_plus_one-1                  
@@ -465,6 +513,19 @@ module constrain_z_or_w
          end if
 
          ! ~~~~~~~~~
+         ! Skip rows whose near-nullspace block is numerically zero relative to
+         ! the global scale of B_c - see the comment above the row loop. The row
+         ! keeps the values already copied into new_z_or_w by MatDuplicate.
+         ! ~~~~~~~~~
+         ! Largest near-nullspace entry seen anywhere in this row's pattern
+         b_c_row_norm = maxval(abs(b_c_vals))
+         if (b_c_row_norm <= PFLARE_TOL_CONSTRAIN_REL * b_c_scale) then
+            deallocate(row_vals, col_indices_off_proc_array, b_c_vals)
+            deallocate(diff, bctbc, pseudo, temp_mat)
+            cycle
+         end if
+
+         ! ~~~~~~~~~
          ! Now we pull out the fine near nullspace component
          ! We are then going to compute the residual for this row
          ! ie W B_c^R - B_f^R      
@@ -526,6 +587,18 @@ module constrain_z_or_w
                   blas_minus_one, temp_mat, lda_bl, &
                   diff, one_bl, &
                   blas_zero, b_c_vals, one_bl)
+
+         ! ~~~~~~~~~~~~~
+         ! Belt and braces: never write a non-finite update into Z or W. The
+         ! tests above bound ||B_c|S_i|| from below relative to the vectors'
+         ! own scale, but a pathological B could still make the projection
+         ! overflow; leaving the row unconstrained is always safe.
+         ! ~~~~~~~~~~~~~
+         if (any(b_c_vals(:, 1) /= b_c_vals(:, 1))) then
+            deallocate(row_vals, col_indices_off_proc_array, b_c_vals)
+            deallocate(diff, bctbc, pseudo, temp_mat)
+            cycle
+         end if
 
          ! ~~~~~~~~~~~~~
          ! Set all the row values, same sparsity pattern

@@ -186,6 +186,19 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_TOL_MATFREE_NEWTON = 1e-3
    ! pseudo-inverse singular-value drop
    PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP     = 1e-6
+   ! Relative companion to PFLARE_TOL_SIGMA_DROP (numpy pinv rcond convention);
+   ! the effective cutoff is max(absolute, relative * sigma_max)
+   PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP_REL = 1e-6
+   ! Constrain-grid-transfer: a row is left unconstrained when the near-nullspace
+   ! vectors restricted to that row's sparsity pattern are negligible relative to
+   ! their own global scale, ie max|B_c|S_i| <= tol * ||B_c||_inf. Without this
+   ! the row-wise projection divides by ||B_c|S_i||^2 ~ 0 and amplifies the
+   ! grid-transfer entries without bound.
+   PetscReal, parameter :: PFLARE_TOL_CONSTRAIN_REL  = 1e-1
+   ! Absolute floor below which the near-nullspace vectors are treated as having
+   ! collapsed to zero and no constraints are applied on that level. They start
+   ! as the constant (all ones) before smoothing, so this is a meaningful scale.
+   PetscReal, parameter :: PFLARE_TOL_CONSTRAIN_ABS  = 1e-6
    ! Arnoldi least-squares relative-residual target (default)
    PetscReal, parameter :: PFLARE_TOL_ARNOLDI        = 1e-6
    ! Complex-conjugate root-pair consistency check
@@ -220,6 +233,9 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_TOL_MATFREE_4EM11  = 4d-11
    PetscReal, parameter :: PFLARE_TOL_MATFREE_NEWTON = 1d-11
    PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP     = 1e-13
+   PetscReal, parameter :: PFLARE_TOL_SIGMA_DROP_REL = 1e-13
+   PetscReal, parameter :: PFLARE_TOL_CONSTRAIN_REL  = 1e-1
+   PetscReal, parameter :: PFLARE_TOL_CONSTRAIN_ABS  = 1e-10
    PetscReal, parameter :: PFLARE_TOL_ARNOLDI        = 1e-14
    PetscReal, parameter :: PFLARE_TOL_CONSISTENCY    = 1e-14
    PetscReal, parameter :: PFLARE_TOL_AUTO_TRUNCATE  = 1e-14

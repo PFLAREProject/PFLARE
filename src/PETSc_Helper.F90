@@ -8,7 +8,7 @@ module petsc_helper
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
-         PFLARE_TOL_SIGMA_DROP, PFLARE_MINUS_ONE
+         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -1593,6 +1593,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscScalar, dimension(size(input, 2), size(input, 2)) :: VT
 
       integer :: iloc, errorcode
+      PetscReal :: sigma_max, sigma_cutoff
       ! Kind-correct BLAS integer/real arguments for the dgemm call
       PetscBLASInt :: n_bl, lda_bl
       PetscScalar :: blas_one, blas_zero
@@ -1603,10 +1604,29 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call svd(input, U, sigma, VT)
 
       ! Now the pseudoinverse is V * inv(sigma) * U^T
-      ! and sigma is diagonal 
+      ! and sigma is diagonal
       ! So scale each column of U (given the transpose)
+      ! Drop a singular value if it is below the absolute floor (as before) OR
+      ! below the standard RELATIVE pseudo-inverse cutoff, ie a fixed fraction of
+      ! this block's largest singular value (numpy.linalg.pinv rcond, pyamg
+      ! pinv_array). Taking the max of the two keeps every drop the original
+      ! absolute test made - removing the absolute floor regresses the
+      ! ex6f -pc_air_constrain_z tests, which rely on it to discard blocks that
+      ! are numerically zero - while also discarding directions that are
+      ! negligible relative to the block, which matters once there is more than
+      ! one constraint vector.
+      ! Note neither test can protect a 1x1 block whose single value is small but
+      ! well above the floor: the caller must decide whether the block carries
+      ! information at all, see PFLARE_TOL_CONSTRAIN_REL in
+      ! constrain_grid_transfer.
+      sigma_max = 0d0
+      do iloc = 1, size(sigma)
+         if (abs(sigma(iloc)) > sigma_max) sigma_max = abs(sigma(iloc))
+      end do
+      sigma_cutoff = max(PFLARE_TOL_SIGMA_DROP, &
+                         PFLARE_TOL_SIGMA_DROP_REL * sigma_max)
       do iloc = 1, size(input,1)
-         if (abs(sigma(iloc)) > PFLARE_TOL_SIGMA_DROP) then
+         if (abs(sigma(iloc)) > sigma_cutoff) then
             U(:, iloc) = U(:, iloc) / sigma(iloc)
          else
             U(:, iloc) = 0d0
