@@ -15,7 +15,7 @@
 PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
 PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
-PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int symmetric_int,
+PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, PetscReal fraction_swap,
    IS *is_fine, IS *is_coarse);
@@ -228,7 +228,7 @@ static PetscErrorCode PCAIRCheckType(PC pc)
 // ~~~~~~~~~~~~~~~~~~~~~
 
 // CF splitting
-PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
+PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, PetscReal fraction_swap,
    IS *is_fine, IS *is_coarse)
@@ -237,7 +237,7 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int symmetric_int,
    // so we have to have made sure this is called
    // Otherwise things like PETSC_NULL_INTEGER_ARRAY aren't defined
    PetscCallVoid(PetscInitializeFortran());
-   compute_cf_splitting_c(&input_mat, symmetric_int, strong_threshold,
+   compute_cf_splitting_c(&input_mat, skip_symmetrize_int, strong_threshold,
       max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
       is_fine, is_coarse);
 }

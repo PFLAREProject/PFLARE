@@ -216,11 +216,11 @@ int main(int argc,char **args)
  int max_luby_steps = -1;
  // PMISR DDC
  int algorithm = CF_PMISR_DDC;
- // Is the matrix symmetric?
- int symmetric = 0;
+ // Symmetrize the strength matrix
+ int skip_symmetrize = 0;
 
  compute_cf_splitting(A, \
-     symmetric, \
+     skip_symmetrize, \
      strong_threshold, max_luby_steps, \
      algorithm, \
      ddc_its, \
@@ -242,7 +242,7 @@ int main(int argc,char **args)
  algorithm = CF_DIAG_DOM;
 
  compute_cf_splitting(A, \
-     symmetric, \
+     skip_symmetrize, \
      strong_threshold, max_luby_steps, \
      algorithm, \
      ddc_its, \
@@ -267,7 +267,7 @@ int main(int argc,char **args)
  algorithm = CF_CR;
 
  compute_cf_splitting(A, \
-     symmetric, \
+     skip_symmetrize, \
      strong_threshold, max_luby_steps, \
      algorithm, \
      ddc_its, \

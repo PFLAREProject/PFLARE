@@ -249,32 +249,33 @@ module c_fortran_bindings
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine compute_cf_splitting_c(input_mat_ptr, symmetric_int, &
+   subroutine compute_cf_splitting_c(input_mat_ptr, skip_symmetrize_int, &
          strong_threshold, max_luby_steps, &
          cf_splitting_type, ddc_its, fraction_swap, &
          is_fine_ptr, is_coarse_ptr) &
          bind(C,name='compute_cf_splitting_c')
 
       ! Computes a CF splitting
+      ! skip_symmetrize_int skips symmetrizing the strength matrix
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
-      integer(c_int), value, intent(in)      :: symmetric_int, max_luby_steps, cf_splitting_type, ddc_its
+      integer(c_int), value, intent(in)      :: skip_symmetrize_int, max_luby_steps, cf_splitting_type, ddc_its
       PetscReal, value, intent(in)           :: strong_threshold, fraction_swap
       integer(c_long_long), intent(inout)    :: is_fine_ptr, is_coarse_ptr
 
       type(tMat)  :: input_mat
       type(tIS)   :: is_fine, is_coarse
-      logical     :: symmetric = .FALSE.
-      ! ~~~~~~~~   
-      
+      logical     :: skip_symmetrize
+      ! ~~~~~~~~
+
       ! Now the input mat long long just gets copied into input_mat%v
       ! This works as the PETSc types are essentially just wrapped around
       ! pointers stored in %v
-      input_mat%v = input_mat_ptr  
-      
-      if (symmetric_int == 1) symmetric = .TRUE.
-      call compute_cf_splitting(input_mat, symmetric, &
+      input_mat%v = input_mat_ptr
+
+      skip_symmetrize = skip_symmetrize_int == 1
+      call compute_cf_splitting(input_mat, skip_symmetrize, &
                         strong_threshold, max_luby_steps, &
                         cf_splitting_type, ddc_its, fraction_swap, &
                         is_fine, is_coarse)

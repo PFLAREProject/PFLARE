@@ -35,7 +35,7 @@ cdef extern:
 	# PetscInitializeFortran() first, which petsc4py does not, so the Fortran
 	# module block (MPIU_REAL etc.) is populated before the Fortran code runs.
 	# Aliased to distinct Cython names so they don't clash with the cpdef wrappers.
-	void compute_cf_splitting_cwrap "compute_cf_splitting" (PetscMat A, int symmetric_int, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
+	void compute_cf_splitting_cwrap "compute_cf_splitting" (PetscMat A, int skip_symmetrize_int, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
 	void compute_diag_dom_submatrix_cwrap "compute_diag_dom_submatrix" (PetscMat A, PetscReal max_dd_ratio, PetscMat *output_mat)
 
 	# -----------------------------------------------------------------------
@@ -191,12 +191,12 @@ cdef extern:
 cpdef py_PCRegister_PFLARE():
 	PCRegister_PFLARE()
 
-cpdef compute_cf_splitting(Mat A, bint symmetric, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap):
+cpdef compute_cf_splitting(Mat A, bint skip_symmetrize, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap):
 	cdef IS is_fine
 	cdef IS is_coarse
 	is_fine = IS()
 	is_coarse = IS()
-	compute_cf_splitting_cwrap(A.mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, &(is_fine.iset), &(is_coarse.iset))
+	compute_cf_splitting_cwrap(A.mat, skip_symmetrize, strong_threshold, max_luby_steps, cf_splitting_type, ddc_its, fraction_swap, &(is_fine.iset), &(is_coarse.iset))
 	return is_fine, is_coarse
 
 cpdef compute_diag_dom_submatrix(Mat A, PetscReal max_dd_ratio):

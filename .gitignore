@@ -44,5 +44,6 @@ tests/ilu_factors_kokkos
 tests/mat_diag
 tests/matrandom
 tests/matrandom_check_reset
+tests/pmisr_nonsymmetric
 tests/reuse_preconditioner
 tests/shell_block_apply

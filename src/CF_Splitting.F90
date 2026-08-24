@@ -85,13 +85,16 @@ module cf_splitting
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine first_pass_splitting(input_mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
+   subroutine first_pass_splitting(input_mat, skip_symmetrize, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
 
-      ! Compute a symmetrized strength matrix and then call the first pass of CF splitting
+      ! Compute a strength matrix and then call the first pass of CF splitting
+      ! skip_symmetrize skips symmetrizing the strength matrix for the PMISR DDC,
+      ! diag dom and aggregation splittings - the PMIS-based splittings always
+      ! symmetrize as they are defined on the symmetrized graph
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
-      logical, intent(in)                 :: symmetric
+      logical, intent(in)                 :: skip_symmetrize
       PetscReal, intent(in)                    :: strong_threshold
       integer, intent(in)                 :: max_luby_steps, cf_splitting_type
       integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
@@ -139,19 +142,19 @@ module cf_splitting
          call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
 
       else if (cf_splitting_type == CF_DIAG_DOM) then
-         ! Only symmetrize if not already symmetric
-         
-         ! Tried to generate a strength matrix based on the relative size compared to the 
+         ! Symmetrize the strength matrix unless asked to skip it
+
+         ! Tried to generate a strength matrix based on the relative size compared to the
          ! diagonal, but it produces a worse initial coarsening when fed to PMISR, making
          ! the DDC cleanup take a lot more work
-         !call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat, &
+         !call generate_sabs(input_mat, strong_threshold, .NOT. skip_symmetrize, .FALSE., strength_mat, &
          !         allow_diag_strength = .TRUE.)
-         call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat)                   
+         call generate_sabs(input_mat, strong_threshold, .NOT. skip_symmetrize, .FALSE., strength_mat)
 
       ! PMISR DDC and Aggregation
-      else 
-         ! Only symmetrize if not already symmetric
-         call generate_sabs(input_mat, strong_threshold, .NOT. symmetric, .FALSE., strength_mat)         
+      else
+         ! Symmetrize the strength matrix unless asked to skip it
+         call generate_sabs(input_mat, strong_threshold, .NOT. skip_symmetrize, .FALSE., strength_mat)
       end if
 
       ! ~~~~~~~~~~~~
@@ -232,7 +235,7 @@ module cf_splitting
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine compute_cf_splitting(input_mat, symmetric, &
+   subroutine compute_cf_splitting(input_mat, skip_symmetrize, &
                      strong_threshold, max_luby_steps, &
                      cf_splitting_type, ddc_its, fraction_swap, &
                      is_fine, is_coarse, &
@@ -240,6 +243,9 @@ module cf_splitting
                      cr_diag_scale_polys)
 
       ! Computes a CF splitting and returns the F and C point ISs
+      ! skip_symmetrize skips symmetrizing the strength matrix (it does not
+      ! apply to the PMIS-based splittings, which are defined on the
+      ! symmetrized graph and always symmetrize)
       ! The optional cr_* arguments only apply to CF_CR and set the
       ! approximate inverse used as the CR relaxation - PCAIR passes its
       ! Aff inverse settings so the CR rate certifies the F-solve actually
@@ -249,7 +255,7 @@ module cf_splitting
 
       ! ~~~~~~
       type(tMat), target, intent(in)      :: input_mat
-      logical, intent(in)                 :: symmetric
+      logical, intent(in)                 :: skip_symmetrize
       PetscReal, intent(in)               :: strong_threshold
       integer, intent(in)                 :: max_luby_steps, cf_splitting_type, ddc_its
       PetscReal, intent(in)               :: fraction_swap
@@ -347,8 +353,8 @@ module cf_splitting
 
       else
 
-         ! Call the first pass CF splitting with a symmetrized strength matrix
-         call first_pass_splitting(input_mat, symmetric, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
+         ! Generate the strength matrix and do the first pass CF splitting
+         call first_pass_splitting(input_mat, skip_symmetrize, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
 
          ! Create the IS for the CF splittings
          if (need_intermediate_is) call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)

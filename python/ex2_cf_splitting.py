@@ -161,11 +161,11 @@ ddc_fraction = 0.1
 max_luby_steps = -1
 # PMISR DDC
 algorithm = pflare.CF_PMISR_DDC
-# Is the matrix symmetric?
-symmetric = False
+# Symmetrize the strength matrix
+skip_symmetrize = False
 
 [is_fine, is_coarse] = pflare.compute_cf_splitting(A,\
-      symmetric,\
+      skip_symmetrize,\
       strong_threshold, max_luby_steps,\
       algorithm,\
       ddc_its, \
