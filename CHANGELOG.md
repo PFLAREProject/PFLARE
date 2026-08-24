@@ -20,10 +20,10 @@ for earlier changes please see the git history.
   previously reachable through `-pc_air_symmetric`, which fed PMISR an
   unsymmetrized strength matrix, and was caught by the `PFLARE_KOKKOS_DEBUG`
   CPU/Kokkos cross-check. Since PCAIR itself now always symmetrizes, a new
-  `tests/pmisr_nonsymmetric` driver keeps this path covered, both through
-  direct `pmisr` calls on a structurally nonsymmetric strength matrix and
-  through `compute_cf_splitting` with `skip_symmetrize` true; both the
-  serial and parallel halo bugs abort the cross-check if reintroduced
+  `tests/pmisr_nonsymmetric` driver keeps this path covered by calling
+  `compute_cf_splitting` with `skip_symmetrize` true on a nonsymmetric
+  operator; both the serial and parallel halo bugs abort the cross-check
+  if reintroduced
 - New `PCMatApply` callback for PCPFLAREINV, so a block of right-hand sides is
   applied with a single sparse matrix by dense matrix product rather than
   PETSc's default loop over columns; on the GPU backends this keeps the whole

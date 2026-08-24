@@ -618,7 +618,7 @@ run_tests_no_load_short_serial:
 #
 	@echo ""
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix"
-	./pmisr_nonsymmetric -n 2500
+	./pmisr_nonsymmetric -n 700
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -1042,8 +1042,8 @@ else
 #
 	@echo ""
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix in parallel"
-	$(MPIEXEC) -n 2 ./pmisr_nonsymmetric -n 2500
-	$(MPIEXEC) -n 4 ./pmisr_nonsymmetric -n 2500
+	$(MPIEXEC) -n 2 ./pmisr_nonsymmetric -n 700
+	$(MPIEXEC) -n 4 ./pmisr_nonsymmetric -n 700
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

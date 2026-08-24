@@ -85,7 +85,8 @@ module cf_splitting
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine first_pass_splitting(input_mat, skip_symmetrize, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
+   subroutine first_pass_splitting(input_mat, skip_symmetrize, strong_threshold, &
+                  max_luby_steps, cf_splitting_type, cf_markers_local)
 
       ! Compute a strength matrix and then call the first pass of CF splitting
       ! skip_symmetrize skips symmetrizing the strength matrix for the PMISR DDC,
@@ -354,7 +355,8 @@ module cf_splitting
       else
 
          ! Generate the strength matrix and do the first pass CF splitting
-         call first_pass_splitting(input_mat, skip_symmetrize, strong_threshold, max_luby_steps, cf_splitting_type, cf_markers_local)
+         call first_pass_splitting(input_mat, skip_symmetrize, strong_threshold, &
+                  max_luby_steps, cf_splitting_type, cf_markers_local)
 
          ! Create the IS for the CF splittings
          if (need_intermediate_is) call create_cf_is(input_mat, cf_markers_local, is_fine, is_coarse)
