@@ -6,6 +6,24 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Behaviour change: PCAIR now always symmetrizes the strength matrix used to
+  compute the CF splitting. Previously `-pc_air_symmetric` skipped the
+  symmetrization, so the CF splittings and hence the results of existing runs
+  with that flag may change; `-pc_air_symmetric` now only controls whether the
+  prolongator is defined as R^T. The second argument of the standalone
+  `compute_cf_splitting` still controls the symmetrization with unchanged
+  polarity, but has been renamed from `symmetric` to `skip_symmetrize` to say
+  what it actually does - existing callers are unaffected other than the
+  Python keyword argument name
+- Fixed the Kokkos PMISR CF splitting producing different results to the CPU
+  implementation on structurally nonsymmetric strength matrices. This was
+  previously reachable through `-pc_air_symmetric`, which fed PMISR an
+  unsymmetrized strength matrix, and was caught by the `PFLARE_KOKKOS_DEBUG`
+  CPU/Kokkos cross-check. Since PCAIR itself now always symmetrizes, a new
+  `tests/pmisr_nonsymmetric` driver keeps this path covered by calling
+  `compute_cf_splitting` with `skip_symmetrize` true on a nonsymmetric
+  operator; both the serial and parallel halo bugs abort the cross-check
+  if reintroduced
 - New `PCMatApply` callback for PCPFLAREINV, so a block of right-hand sides is
   applied with a single sparse matrix by dense matrix product rather than
   PETSc's default loop over columns; on the GPU backends this keeps the whole

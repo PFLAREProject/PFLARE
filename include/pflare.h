@@ -107,10 +107,12 @@ typedef enum {
 PETSC_EXTERN void PCRegister_PFLARE();
 
 /* Can call the CF splitting separate to everything
+   The second argument skips symmetrizing the strength matrix when nonzero
+   (ignored by the PMIS-based splittings, which always symmetrize)
    For CF_CR the strong threshold argument carries the target CR rate
    (just as it carries the target diagonal dominance ratio for CF_DIAG_DOM)
    and the max Luby steps, DDC iteration and DDC fraction arguments are ignored */
-PETSC_EXTERN void compute_cf_splitting(Mat, int, PetscReal, int, int, int, PetscReal, IS*, IS*);
+PETSC_EXTERN void compute_cf_splitting(Mat, int skip_symmetrize, PetscReal, int, int, int, PetscReal, IS*, IS*);
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat, PetscReal, Mat*);
 
 /* Restrict input_mat onto output_mat's existing sparsity pattern.

@@ -32,7 +32,7 @@ module matdiagdomsubmatrix
       type(tIS) :: is_fine, is_coarse
       integer :: ddc_its, max_luby_steps, algorithm, errorcode
       PetscReal :: ddc_fraction
-      logical :: symmetric       
+      logical :: skip_symmetrize
  
       ! ~~~~~~  
 
@@ -50,13 +50,13 @@ module matdiagdomsubmatrix
      ! PMISR DDC where strength of connection is given by 
      ! |a_ij| .ge. max_dd_ratio |a_ii|
      algorithm = CF_DIAG_DOM
-     ! Assume asymmetric - still works for symmetric
-     symmetric = .FALSE.
+     ! Symmetrize the strength matrix
+     skip_symmetrize = .FALSE.
 
      ! Call the CF splitting
      ! We call with max_dd_ratio as the strong_threshold
      call compute_cf_splitting(input_mat, &
-           symmetric, &
+           skip_symmetrize, &
            max_dd_ratio, max_luby_steps, &
            algorithm, &
            ddc_its, &

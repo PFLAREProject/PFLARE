@@ -274,8 +274,10 @@ module air_mg_setup
             ! regardless of matrix_free_polys, as the ideal restrictor is
             ! always built from the assembled inverse and that is the binding
             ! constraint on the splitting quality)
+            ! Always symmetrize the strength matrix - the symmetric option
+            ! only controls whether the prolongator is defined as R^T
             call compute_cf_splitting(air_data%coarse_matrix(our_level), &
-                  air_data%options%symmetric, &
+                  .FALSE., &
                   air_data%options%strong_threshold, &
                   air_data%options%max_luby_steps, &
                   air_data%options%cf_splitting_type, &

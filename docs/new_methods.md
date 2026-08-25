@@ -72,11 +72,11 @@ in Fortran:
      int :: max_luby_steps = -1
      ! PMISR DDC
      integer :: algorithm = CF_PMISR_DDC
-     ! Is the matrix symmetric?
-     logical :: symmetric = .FALSE.
+     ! Symmetrize the strength matrix
+     logical :: skip_symmetrize = .FALSE.
      
      call compute_cf_splitting(A, &
-           symmetric, &
+           skip_symmetrize, &
            strong_threshold, max_luby_steps, &
            algorithm, &
            ddc_its, &
@@ -96,11 +96,11 @@ or in C:
      int max_luby_steps = -1;
      // PMISR DDC
      int algorithm = CF_PMISR_DDC;
-     // Is the matrix symmetric?
-     int symmetric = 0;
+     // Symmetrize the strength matrix
+     int skip_symmetrize = 0;
 
      compute_cf_splitting(A, \
-         symmetric, \
+         skip_symmetrize, \
          strong_threshold, max_luby_steps, \
          algorithm, \
          ddc_its, \
@@ -119,11 +119,11 @@ or in Python with petsc4py:
      max_luby_steps = -1
      # PMISR DDC
      algorithm = pflare.CF_PMISR_DDC
-     # Is the matrix symmetric?
-     symmetric = False
+     # Symmetrize the strength matrix
+     skip_symmetrize = False
 
      [is_fine, is_coarse] = pflare.compute_cf_splitting(A, \
-           symmetric, \
+           skip_symmetrize, \
            strong_threshold, max_luby_steps, \
            algorithm, \
            ddc_its, \

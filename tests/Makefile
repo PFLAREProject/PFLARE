@@ -615,6 +615,10 @@ run_tests_no_load_short_serial:
 	./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
 	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_z_type lair -ksp_max_it 5	
+#
+	@echo ""
+	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix"
+	./pmisr_nonsymmetric -n 700
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -1035,6 +1039,11 @@ else
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -pc_type air -ksp_type richardson -ksp_norm_type unpreconditioned -curved_velocity \
 	-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -dm_plex_filename data/square_unstruc.msh \
 	-unit_velocity 0 -pc_air_diag_scale_polys 1 -pc_air_z_type lair -ksp_max_it 5		
+#
+	@echo ""
+	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix in parallel"
+	$(MPIEXEC) -n 2 ./pmisr_nonsymmetric -n 700
+	$(MPIEXEC) -n 4 ./pmisr_nonsymmetric -n 700
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

@@ -375,11 +375,14 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // We've updated the values in cf_markers_nonlocal
          // Calling a reverse scatter add will then update the values of cf_markers_local
          // Reduce with a sum via VecScatter with ADD_VALUES, SCATTER_REVERSE
-         // Note the resulting marker arithmetic (cf_markers_d(i) + sum of neighbour marks)
-         // only stays consistent because the strength matrix passed in is structurally
-         // symmetric (S+S^T) - every neighbour of an in-set node was marked in the round
-         // that node was selected, so an in-set node can never receive marks later
-         // The nonsymmetric case is handled by pmisr_existing_measure_implicit_transpose_kokkos
+         // The reduction carries only the 0/1 neighbour marks, not the cf marker values
+         // themselves, so the sum is just a logical or of the marks (matching the
+         // MPI_LOR PetscSFReduce into assigned_local in the CPU version) and we merge
+         // it back below only into nodes that are still unassigned
+         // This keeps the same result if the strength matrix is not structurally
+         // symmetric, where an already assigned node (either in the set this loop or
+         // assigned in an earlier loop) can be a neighbour of an in-set node on
+         // another rank and hence receive a mark
          // Convert int → PetscScalar for the leaf (nonlocal) data
          {
             PetscScalarKokkosView leaf_scalar_d;
@@ -390,13 +393,13 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
             });
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_leaf_vec, &leaf_scalar_d));
          }
-         // Convert int → PetscScalar for the root (local) data
+         // The root (local) data only accumulates the neighbour marks, so start at zero
          {
             PetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-                  root_scalar_d(i) = (PetscScalar)cf_markers_d(i);
+                  root_scalar_d(i) = 0.0;
             });
             PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
          }
@@ -434,13 +437,19 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
          // Complete reverse scatter before reading reduced root buffer.
          PetscCallVoid(VecScatterEnd(sf, scatter_leaf_vec, scatter_root_vec, ADD_VALUES, SCATTER_REVERSE));
 
-         // Convert PetscScalar → int back to cf_markers_d after End.
+         // Merge the reduced neighbour marks back into cf_markers_d after End.
+         // Any node that received a mark from a remote in-set node is now assigned,
+         // but only if it hasn't already been assigned - we must never overwrite the
+         // loops_through value of a node in the set this loop, or the marker of a node
+         // assigned in an earlier loop
+         // The CPU version leaves such nodes with a zero cf marker until the final
+         // "unassigned becomes C" pass, so assigning them as C here is equivalent
          {
             ConstPetscScalarKokkosView root_scalar_d;
             PetscCallVoid(VecGetKokkosView(scatter_root_vec, &root_scalar_d));
             Kokkos::parallel_for(
                Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-                  cf_markers_d(i) = (int)root_scalar_d(i);
+                  if (root_scalar_d(i) > 0.0 && cf_markers_d(i) == 0) cf_markers_d(i) = 1;
             });
             PetscCallVoid(VecRestoreKokkosView(scatter_root_vec, &root_scalar_d));
          }
@@ -473,7 +482,17 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                   Kokkos::parallel_for(
                      Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
 
-                        Kokkos::atomic_store(&cf_markers_d(device_local_j[device_local_i[i] + j]), 1);
+                        // Needs to be atomic as may be set by many threads
+                        // Only assign neighbours that are still unassigned - if the
+                        // strength matrix is not structurally symmetric two neighbouring
+                        // nodes can be selected into the set in the same loop, and we
+                        // must not overwrite the loops_through value of an in-set node
+                        // (or the marker of a node assigned in an earlier loop)
+                        // This matches the CPU version, which tracks assignment in a
+                        // separate boolean and never touches an assigned node's marker
+                        // It also means the loops_through values are stable while this
+                        // kernel runs, so the guard above cannot race
+                        Kokkos::atomic_compare_exchange(&cf_markers_d(device_local_j[device_local_i[i] + j]), 0, 1);
                   });
                }
          });
