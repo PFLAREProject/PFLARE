@@ -442,7 +442,20 @@ run_tests_no_load_short_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0
-# 
+#
+	@echo ""
+	@echo "Test constrain z on grid-aligned advection returns to the unconstrained iteration count"
+	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 -u 1 -v 0 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 8 \
+	 -pc_air_constrain_z -ksp_converged_reason
+	@echo "Test constrain z on isotropic diffusion with fast coarsening"
+	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 50 -da_grid_y 50 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 8 \
+	 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 \
+	 -pc_air_constrain_z -ksp_converged_reason
+#
 	@echo ""
 	@echo "Test AIRG with 0th order GMRES polynomials with PC reused with no sparsity change"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 10 -pc_air_poly_order 0
@@ -656,6 +669,31 @@ run_tests_no_load_serial:
 	 -pc_air_cf_splitting_type agg -pc_air_a_drop 1e-5 -pc_air_a_lump \
 	 -pc_air_r_drop 0 -ksp_rtol $(KSP_RTOL) -ksp_pc_side right -ksp_max_it 14 \
 	 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test constrain z on non-grid-aligned advection with fast coarsening"
+	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 \
+	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 60 \
+	 -pc_air_smooth_type ffc -pc_air_inverse_type power \
+	 -pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
+	 -pc_air_constrain_z -ksp_converged_reason
+	@echo "Test constrain w on non-grid-aligned advection with fast coarsening"
+	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 \
+	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 60 \
+	 -pc_air_smooth_type ffc -pc_air_inverse_type power \
+	 -pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
+	 -pc_air_constrain_w -ksp_converged_reason
+	@echo "Test constrain z with a deep hierarchy where a coarse constraint vector collapses"
+	./adv_diff_fd -da_grid_x 200 -da_grid_y 200 \
+	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 14 \
+	 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 \
+	 -pc_air_constrain_z -ksp_converged_reason
 #
 	@echo ""
 	@echo "Test curved velocity 2D upwind finite-difference"
@@ -1126,6 +1164,23 @@ else
 	 -pc_air_inverse_type power
 #
 	@echo ""
+	@echo "Test constrain z on non-grid-aligned advection with fast coarsening in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 \
+	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 60 \
+	 -pc_air_smooth_type ffc -pc_air_inverse_type power \
+	 -pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
+	 -pc_air_constrain_z -ksp_converged_reason
+	@echo "Test constrain z with a deep hierarchy where a coarse constraint vector collapses in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 200 -da_grid_y 200 \
+	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 14 \
+	 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 \
+	 -pc_air_constrain_z -ksp_converged_reason
+#
+	@echo ""
 	@echo "Test curved velocity 2D upwind finite-difference in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
@@ -1176,6 +1231,19 @@ run_tests_medium_serial:
 		echo "--- Testing size = $$size x $$size ---"; \
 		./adv_diff_fd -da_grid_x $$size -da_grid_y $$size -pc_type air -ksp_pc_side right \
 	    -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-5 -pc_air_strong_threshold 0.99 -ksp_max_it 6; \
+	done
+#
+	@echo ""
+	@echo "--- Running scaling study on adv_diff_fd with constrained grid transfers ---"
+	@set -e; for size in 100 200 400; do \
+		echo "--- Testing size = $$size x $$size ---"; \
+		./adv_diff_fd -da_grid_x $$size -da_grid_y $$size \
+		-u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
+		-ksp_type richardson -ksp_norm_type unpreconditioned \
+		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 18 \
+		-pc_air_smooth_type ffc -pc_air_inverse_type power \
+		-pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
+		-pc_air_constrain_z -ksp_converged_reason; \
 	done
 #
 	@echo ""
