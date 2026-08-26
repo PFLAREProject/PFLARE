@@ -675,16 +675,14 @@ run_tests_no_load_serial:
 	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 \
 	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
-	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 60 \
-	 -pc_air_smooth_type ffc -pc_air_inverse_type power \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 20 \
 	 -pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
 	 -pc_air_constrain_z -ksp_converged_reason
 	@echo "Test constrain w on non-grid-aligned advection with fast coarsening"
 	./adv_diff_fd -da_grid_x 100 -da_grid_y 100 \
 	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
-	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 60 \
-	 -pc_air_smooth_type ffc -pc_air_inverse_type power \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 15 \
 	 -pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
 	 -pc_air_constrain_w -ksp_converged_reason
 	@echo "Test constrain z with a deep hierarchy where a coarse constraint vector collapses"
@@ -1168,8 +1166,7 @@ else
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 100 -da_grid_y 100 \
 	 -u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
-	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 60 \
-	 -pc_air_smooth_type ffc -pc_air_inverse_type power \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 20 \
 	 -pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
 	 -pc_air_constrain_z -ksp_converged_reason
 	@echo "Test constrain z with a deep hierarchy where a coarse constraint vector collapses in parallel"
@@ -1241,7 +1238,7 @@ run_tests_medium_serial:
 		-u 0.816496580927726 -v 0.5773502691896258 -pc_type air \
 		-ksp_type richardson -ksp_norm_type unpreconditioned \
 		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_max_it 18 \
-		-pc_air_smooth_type ffc -pc_air_inverse_type power \
+		-pc_air_smooth_type ffc \
 		-pc_air_cf_splitting_type pmis -pc_air_inverse_sparsity_order 2 \
 		-pc_air_constrain_z -ksp_converged_reason; \
 	done
