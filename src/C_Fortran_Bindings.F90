@@ -96,7 +96,7 @@ module c_fortran_bindings
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pcair_shell_block_matapply_c(pc_ptr, x_ptr, y_ptr, applied_int) &
+   subroutine pcair_shell_block_matapply_c(pc_ptr, x_ptr, y_ptr, applied_int, error_int) &
          bind(C,name='pcair_shell_block_matapply_c')
 
       ! Applies the air multigrid to a whole dense block of right hand sides
@@ -104,10 +104,11 @@ module c_fortran_bindings
       ! set up, as this doesn't go through PCApply on the shell)
       ! applied_int comes back as 0 if we couldn't do a block apply, in which case
       ! the caller has to apply column by column instead
+      ! error_int carries back any petsc error so the caller can PetscCall it
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in) :: pc_ptr, x_ptr, y_ptr
-      integer(c_int), intent(out)      :: applied_int
+      integer(c_int), intent(out)      :: applied_int, error_int
 
       type(tPC)   :: pc, pcmg_pc
       type(tMat)  :: x_mat, y_mat
@@ -120,7 +121,12 @@ module c_fortran_bindings
       y_mat%v = y_ptr
 
       applied_int = 0
+      error_int = 0
       call PCShellGetContext(pc, pc_air_data, ierr)
+      if (ierr /= 0) then
+         error_int = int(ierr, c_int)
+         return
+      end if
 
       ! Defensive - the hierarchy hasn't been built so we have nothing to apply
       if (pc_air_data%air_data%no_levels == -1) return
@@ -130,9 +136,14 @@ module c_fortran_bindings
       ! Build the dense scratch the block smooths need - we only know the number
       ! of columns (and the type of block) once we get here
       call ensure_air_block_temps(pc_air_data%air_data, x_mat, ierr)
+      if (ierr /= 0) then
+         error_int = int(ierr, c_int)
+         return
+      end if
 
       ! PCMG (or the single level PCMAT/PCJACOBI) does the rest
       call PCMatApply(pc_air_data%pcmg, x_mat, y_mat, ierr)
+      error_int = int(ierr, c_int)
 
       applied_int = 1
 

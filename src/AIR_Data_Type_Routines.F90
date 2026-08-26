@@ -92,6 +92,7 @@ module air_data_type_routines
       end do
       allocate(air_data%block_temp_full(1)%array(air_data%options%max_levels))
       air_data%block_ncols = -1
+      air_data%block_local_ncols = -1
 
       ! Reuse
       allocate(air_data%reuse(air_data%options%max_levels))
@@ -352,6 +353,7 @@ module air_data_type_routines
       end do
 
       air_data%block_ncols = -1
+      air_data%block_local_ncols = -1
 
    end subroutine destroy_air_block_temps
 
@@ -432,8 +434,11 @@ module air_data_type_routines
       call MatGetLocalSize(x_mat, local_rows, local_cols, ierr)
       call MatGetType(x_mat, x_type, ierr)
 
-      ! If the number of columns has changed we have to start again
-      rebuild = air_data%block_ncols /= global_cols
+      ! If the number of columns has changed we have to start again - the local
+      ! column layout also has to match or the products would have incompatible
+      ! layouts
+      rebuild = air_data%block_ncols /= global_cols .OR. &
+                  air_data%block_local_ncols /= local_cols
 
       ! The type of block we're given can also change between applies
       if (.NOT. rebuild) then
@@ -482,6 +487,7 @@ module air_data_type_routines
       end do
 
       air_data%block_ncols = global_cols
+      air_data%block_local_ncols = local_cols
 
    end subroutine ensure_air_block_temps
 

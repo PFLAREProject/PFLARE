@@ -15,7 +15,7 @@
 PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
 PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
-PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied);
+PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied, int *error_code);
 PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, PetscReal fraction_swap,
@@ -175,7 +175,7 @@ static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
 {
    PetscFunctionBegin;
    PC *pc_air_shell = (PC *)pc->data;
-   int applied = 0;
+   int applied = 0, error_code = 0;
 
    // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
    // so it has to see the reusepreconditioner flag
@@ -185,7 +185,8 @@ static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
    // straight to the underlying PCMG so we have to set the shell up ourselves
    PetscCall(PCSetUp(*pc_air_shell));
 
-   pcair_shell_block_matapply_c(pc_air_shell, &X, &Y, &applied);
+   pcair_shell_block_matapply_c(pc_air_shell, &X, &Y, &applied, &error_code);
+   PetscCall((PetscErrorCode)error_code);
 
    if (applied) {
       PetscCall(PetscInfo(pc, "PCMatApply used the block air multigrid\n"));
@@ -3632,10 +3633,15 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
   PETSc Kokkos types (for example `-mat_type aijkokkos -vec_type kokkos`, or
   `-dm_mat_type aijkokkos -dm_vec_type kokkos` if using a `DM`).
 
+  `PCAIR` implements `PCMatApply()`, so a `KSPMatSolve()` with `KSPPREONLY` or
+  `KSPRICHARDSON` applies the multigrid hierarchy to a whole dense block of right-hand
+  sides at once, with sparse matrix by dense matrix products throughout; on the GPU
+  backends this keeps a multiple right-hand side solve on the device.
+
   If you use `PCAIR` please cite S. Dargaville et al., "AIR multigrid with GMRES polynomials
   (AIRG) and additive preconditioners for Boltzmann transport", J. Comput. Phys. 518 (2024) 113342.
 
-.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`, `PCMatApply()`, `KSPMatSolve()`
 M*/
 
 // Creates the structure we need for this PC

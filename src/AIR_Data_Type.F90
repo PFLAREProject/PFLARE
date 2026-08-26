@@ -352,8 +352,11 @@ module air_data_type
       ! of columns isn't known until the block apply happens
       type(petsc_dense_mat_array), dimension(4) :: block_temp_fine, block_temp_coarse
       type(petsc_dense_mat_array), dimension(1) :: block_temp_full
-      ! The number of global columns the cached block temporaries were built with
+      ! The number of global (and local) columns the cached block temporaries
+      ! were built with - the local column layout has to match the block of rhs
+      ! we're given or the products would have incompatible layouts
       PetscInt :: block_ncols = -1
+      PetscInt :: block_local_ncols = -1
 
       ! Per-PCAIR opaque handle to the kokkos-side IS view storage. Set up by
       ! create_VecISCopyLocal_kokkos, torn down by destroy_VecISCopyLocal_kokkos.
