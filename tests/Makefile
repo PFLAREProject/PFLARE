@@ -618,6 +618,14 @@ run_tests_no_load_short_serial:
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_matsolve_batch_size 2
 	@echo "Test multiple RHS block solve with single level PCAIR"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_max_levels 1
+#
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCPFLAREINV with a fixed iteration count"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -ksp_type richardson -ksp_norm_type none -ksp_max_it 30
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR with a fixed iteration count"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_norm_type none -ksp_max_it 10
+	@echo "Test multiple RHS block solve with Richardson KSP and PCAIR"
+	$(SKIP_SINGLE) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol 1e-10 \
+	 -check_tol 1e-8
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly, plain and diagonally scaled"
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly, plain and diagonally scaled"
@@ -1106,6 +1114,9 @@ else
 	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
 	@echo "Test multiple RHS block solve with PCAIR called twice in parallel - the scratch space is reused"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -second_solve
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR in parallel with a fixed iteration count"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_norm_type none \
+	 -ksp_max_it 10
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"

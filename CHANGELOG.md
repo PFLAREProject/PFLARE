@@ -28,7 +28,8 @@ for earlier changes please see the git history.
   applied with a single sparse matrix by dense matrix product rather than
   PETSc's default loop over columns; on the GPU backends this keeps the whole
   multiple-RHS apply on the device. Note that `KSPMatSolve` only reaches
-  `PCMatApply` for `-ksp_type preonly` (or HPDDM) - any other KSP type falls
+  `PCMatApply` for `-ksp_type preonly`, HPDDM or `-ksp_type richardson` (which
+  iterates blockwise through `PCMatApplyRichardson`) - any other KSP type falls
   back to solving column by column. New `tests/adv_1d_multi_rhs.c` driver
   builds the block of right-hand sides with `MatCreateDenseFromVecType` and
   solves with `KSPMatSolve`
@@ -48,11 +49,12 @@ for earlier changes please see the git history.
   blocks on the GPU backends use real SpMM kernels and stay on the device.
   PCMatApply forwards to the underlying PCMG, with PFLARE supplying the block
   FC smoother, the block coarse solve and the dense-block F/C row extraction,
-  and dense scratch blocks cached per level. This needs a PETSc with
-  `PCMatApplyRichardson` (currently the in-progress richardson-matsolve PETSc
-  MR); on older PETSc the level smoothers gracefully fall back to per-column
-  applies inside PCMG and the results are unchanged. All the PCAIR options are
-  covered blockwise in `tests/adv_1d_multi_rhs.c`, in serial and parallel
+  and dense scratch blocks cached per level. This needs a PETSc main new
+  enough to have `PCMatApplyRichardson` and the `PCShellSetMatApply`/
+  `PCShellSetMatApplyRichardson` Fortran bindings (merged August 2026). All the
+  PCAIR options are covered blockwise in `tests/adv_1d_multi_rhs.c`, in serial
+  and parallel, along with `-ksp_type richardson` block solves through
+  `KSPMatSolve`
 - Fixed PCAIR silently ignoring `KSPSetReusePreconditioner` /
   `-ksp_reuse_preconditioner`: a values-only change to the pmat between
   solves rebuilt the full AIR hierarchy despite the flag; a frozen PCAIR

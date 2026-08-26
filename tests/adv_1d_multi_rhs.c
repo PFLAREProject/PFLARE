@@ -156,8 +156,9 @@ int main(int argc, char **args)
   /*
      KSPMatSolve only does a genuine block solve - that is, one that reaches
      PCMatApply and hence a sparse matrix by dense matrix product - for
-     KSPPREONLY and KSPHPDDM. Every other KSP type silently falls back to a
-     loop of KSPSolve over the columns of B, so overriding this with -ksp_type
+     KSPPREONLY, KSPHPDDM and KSPRICHARDSON (which iterates blockwise through
+     PCMatApplyRichardson). Every other KSP type silently falls back to a loop
+     of KSPSolve over the columns of B, so overriding this with -ksp_type
      turns the block solve back into a column-by-column solve.
 
      PCPFLAREINV is the default preconditioner here, but -pc_type air also does a
