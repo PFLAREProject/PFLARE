@@ -8,7 +8,7 @@ module gmres_poly_newton
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
          PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB, &
          MF_MAT_TEMP, MF_MAT_TEMP_TWO, MF_MAT_TEMP_THREE, MF_MAT_RHS
-   use matshell_data_type, only: ensure_block_temp_mats
+   use matshell_data_type, only: ensure_block_temp_mats, ensure_block_kernel_products
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -935,7 +935,7 @@ module gmres_poly_newton
       ! This has to happen before we write any values into the temporaries, as the
       ! symbolic product may set them up
       if (nroots > 1) then
-         call ensure_block_newton_products(mat_ctx, block_applied)
+         call ensure_block_kernel_products(mat_ctx, MF_MAT_TEMP_THREE, block_applied)
          if (.NOT. block_applied) return
          block_applied = .FALSE.
       end if
@@ -1036,78 +1036,6 @@ module gmres_poly_newton
       block_applied = .TRUE.
 
    end subroutine petsc_newton_block
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine ensure_block_newton_products(mat_ctx, attached)
-
-      ! Makes sure the two products the newton block apply runs are attached to
-      ! the dense temporaries in the context:
-      !    mf_temp_mat(MF_MAT_TEMP_TWO)   = mat * mf_temp_mat(MF_MAT_TEMP)
-      !    mf_temp_mat(MF_MAT_TEMP_THREE) = mat * mf_temp_mat(MF_MAT_TEMP_TWO)
-      ! The newton twin of ensure_block_pingpong_products - the products stay
-      ! attached between applies, die with the scratch whenever
-      ! ensure_block_temp_mats rebuilds it, and are rebuilt here if the mat in
-      ! the context has changed identity (the attached products keep the old mat
-      ! alive, so the handle comparison is safe)
-
-      ! attached comes back false if there is no product for these types and the
-      ! caller has to fall back to a column by column apply
-
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      type(mat_ctxtype), intent(inout) :: mat_ctx
-      logical, intent(out)             :: attached
-
-      PetscBool :: has_product
-      PetscErrorCode :: ierr
-
-      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      attached = .TRUE.
-
-      ! If the mat has been swapped out from under us the attached products
-      ! would still run with the old one - clear them and attach again
-      if (mat_ctx%mf_products_attached) then
-         if (mat_ctx%mf_product_mat%v /= mat_ctx%mat%v) then
-            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
-            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
-            mat_ctx%mf_products_attached = .FALSE.
-         end if
-      end if
-
-      if (.NOT. mat_ctx%mf_products_attached) then
-
-         ! temp_mat_two = mat * temp_mat
-         call MatProductCreateWithMat(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
-                  PETSC_NULL_MAT, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
-         call MatProductSetType(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), MATPRODUCT_AB, ierr)
-         call MatProductSetFromOptions(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
-
-         ! If there is no product available for these types we have to let the
-         ! caller do a column by column apply instead
-         call MatHasOperation(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), MATOP_PRODUCTSYMBOLIC, &
-                  has_product, ierr)
-         if (.NOT. has_product) then
-            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
-            attached = .FALSE.
-            return
-         end if
-         call MatProductSymbolic(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
-
-         ! temp_mat_three = mat * temp_mat_two
-         ! The types are the same as the product above, so we know this one exists
-         call MatProductCreateWithMat(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), &
-                  PETSC_NULL_MAT, mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
-         call MatProductSetType(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), MATPRODUCT_AB, ierr)
-         call MatProductSetFromOptions(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
-         call MatProductSymbolic(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
-
-         mat_ctx%mf_products_attached = .TRUE.
-         mat_ctx%mf_product_mat = mat_ctx%mat
-      end if
-
-   end subroutine ensure_block_newton_products
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

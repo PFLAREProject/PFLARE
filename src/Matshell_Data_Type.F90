@@ -139,5 +139,112 @@ module matshell_data_type
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine attach_mat_product(mat, x_mat, transpose_mat, y_mat, ierr, has_product)
+
+      ! Attaches y_mat = mat * x_mat (or mat^T * x_mat) as a product and runs the
+      ! symbolic phase, leaving the product bookkeeping alive on y_mat so repeat
+      ! computations only have to run MatProductNumeric
+      ! y_mat therefore keeps references to mat and x_mat until the product is
+      ! cleared or y_mat is destroyed
+      ! If has_product is present it comes back false (with the product cleared
+      ! and no symbolic run) when there is no product implementation for these
+      ! types and the caller has to fall back; without it the product is assumed
+      ! to exist
+      ! This lives here rather than in petsc_helper as this file is compiled
+      ! before petsc_helper
+
+      ! ~~~~~~
+      type(tMat), intent(in)         :: mat
+      type(tMat)                     :: x_mat, y_mat
+      logical, intent(in)            :: transpose_mat
+      PetscErrorCode, intent(inout)  :: ierr
+      logical, optional, intent(out) :: has_product
+
+      PetscBool :: has_op
+      ! ~~~~~~
+
+      call MatProductCreateWithMat(mat, x_mat, PETSC_NULL_MAT, y_mat, ierr)
+      if (transpose_mat) then
+         call MatProductSetType(y_mat, MATPRODUCT_AtB, ierr)
+      else
+         call MatProductSetType(y_mat, MATPRODUCT_AB, ierr)
+      end if
+      call MatProductSetFromOptions(y_mat, ierr)
+      if (present(has_product)) then
+         call MatHasOperation(y_mat, MATOP_PRODUCTSYMBOLIC, has_op, ierr)
+         has_product = has_op .eqv. PETSC_TRUE
+         if (.NOT. has_product) then
+            call MatProductClear(y_mat, ierr)
+            return
+         end if
+      end if
+      call MatProductSymbolic(y_mat, ierr)
+
+   end subroutine attach_mat_product
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine ensure_block_kernel_products(mat_ctx, second_target, attached)
+
+      ! Makes sure the two products a matrix-free block apply kernel runs are
+      ! attached to the dense temporaries in the context:
+      !    mf_temp_mat(MF_MAT_TEMP_TWO) = mat * mf_temp_mat(MF_MAT_TEMP)
+      !    mf_temp_mat(second_target)   = mat * mf_temp_mat(MF_MAT_TEMP_TWO)
+      ! The horner kernel ping-pongs between its two temporaries so its second
+      ! target is MF_MAT_TEMP, while the newton kernel's is MF_MAT_TEMP_THREE
+      ! The products stay attached between applies - they die with the scratch
+      ! whenever ensure_block_temp_mats rebuilds it (which resets
+      ! mf_products_attached), and are rebuilt here if the mat in the context has
+      ! changed identity (the attached products keep the old mat alive, so the
+      ! handle comparison is safe)
+
+      ! attached comes back false if there is no product for these types and the
+      ! caller has to fall back to a column by column apply
+
+      ! ~~~~~~
+      type(mat_ctxtype), intent(inout) :: mat_ctx
+      integer, intent(in)              :: second_target
+      logical, intent(out)             :: attached
+
+      logical :: has_product
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      attached = .TRUE.
+
+      ! If the mat has been swapped out from under us the attached products
+      ! would still run with the old one - clear them and attach again
+      if (mat_ctx%mf_products_attached) then
+         if (mat_ctx%mf_product_mat%v /= mat_ctx%mat%v) then
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+            call MatProductClear(mat_ctx%mf_temp_mat(second_target), ierr)
+            mat_ctx%mf_products_attached = .FALSE.
+         end if
+      end if
+
+      if (.NOT. mat_ctx%mf_products_attached) then
+
+         ! temp_two = mat * temp - if there is no product available for these
+         ! types the caller does a column by column apply instead
+         call attach_mat_product(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP), .FALSE., &
+                  mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr, has_product=has_product)
+         if (.NOT. has_product) then
+            attached = .FALSE.
+            return
+         end if
+
+         ! second_target = mat * temp_two
+         ! The types are the same as the product above, so we know this one exists
+         call attach_mat_product(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), .FALSE., &
+                  mat_ctx%mf_temp_mat(second_target), ierr)
+
+         mat_ctx%mf_products_attached = .TRUE.
+         mat_ctx%mf_product_mat = mat_ctx%mat
+      end if
+
+   end subroutine ensure_block_kernel_products
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
 end module matshell_data_type
 
