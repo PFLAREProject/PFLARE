@@ -37,7 +37,10 @@ for earlier changes please see the git history.
   `newton_no_extra`, `neumann`) now also apply blockwise in `PCMatApply`: the
   Horner and Newton-basis kernels run sparse matrix by dense matrix products
   on the underlying operator instead of looping matvecs, with dense scratch
-  blocks cached in the matshell context. The right diagonally scaled variant
+  blocks cached in the matshell context. The kernel products stay attached to
+  that scratch between applies (the Horner iteration ping-pongs between two
+  cached temporaries rather than copying into the output each order), so
+  repeat block applies only run the numeric phase of each product. The right diagonally scaled variant
   `q(D^-1 A) D^-1` used by PCAIR's smoothers is supported, as is the Neumann
   polynomial's intrinsically scaled `q(I - D^-1 A) D^-1`; anything else
   unsupported falls back to the previous column-by-column apply. New

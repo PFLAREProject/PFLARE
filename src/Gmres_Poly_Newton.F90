@@ -878,8 +878,7 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_newton_block(mat, real_roots, imag_roots, temp_mat, temp_mat_two, temp_mat_three, &
-                  x_mat, y_mat, recip_diag, block_applied)
+   subroutine petsc_newton_block(mat_ctx, x_mat, y_mat, recip_diag, block_applied)
 
       ! Applies a gmres polynomial in the newton basis matrix-free as an inverse
       ! for a block of right hand sides, x_mat, ie the multiple rhs version of petsc_newton
@@ -905,53 +904,40 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       ! Input
-      type(tMat), intent(in)              :: mat
-      PetscReal, dimension(:), intent(in) :: real_roots, imag_roots
-      type(tMat)                          :: temp_mat, temp_mat_two, temp_mat_three
+      type(mat_ctxtype), intent(inout)    :: mat_ctx
       type(tMat)                          :: x_mat
       type(tMat)                          :: y_mat
       type(tVec)                          :: recip_diag
       logical, intent(out)                :: block_applied
 
       ! Local
+      PetscReal, dimension(:), pointer :: real_roots, imag_roots
+      type(tMat) :: temp_mat, temp_mat_two, temp_mat_three
       integer :: i, nroots
       logical :: scaled
-      PetscBool :: has_product
       PetscErrorCode :: ierr
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       block_applied = .FALSE.
       scaled = .NOT. PetscObjectIsNull(recip_diag)
+      real_roots => mat_ctx%real_roots
+      imag_roots => mat_ctx%imag_roots
       nroots = size(real_roots)
 
+      temp_mat       = mat_ctx%mf_temp_mat(MF_MAT_TEMP)
+      temp_mat_two   = mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO)
+      temp_mat_three = mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE)
+
       ! If we have more than one root we have to do products as we iterate over
-      ! the roots - attach them now
+      ! the roots - make sure they are attached (they stay attached between
+      ! applies, only the numeric phase runs below)
       ! This has to happen before we write any values into the temporaries, as the
       ! symbolic product may set them up
       if (nroots > 1) then
-
-         ! temp_mat_two = mat * temp_mat
-         call MatProductCreateWithMat(mat, temp_mat, PETSC_NULL_MAT, temp_mat_two, ierr)
-         call MatProductSetType(temp_mat_two, MATPRODUCT_AB, ierr)
-         call MatProductSetFromOptions(temp_mat_two, ierr)
-
-         ! If there is no product available for these types we have to let the
-         ! caller do a column by column apply instead
-         call MatHasOperation(temp_mat_two, MATOP_PRODUCTSYMBOLIC, has_product, ierr)
-         if (.NOT. has_product) then
-            call MatProductClear(temp_mat_two, ierr)
-            return
-         end if
-
-         call MatProductSymbolic(temp_mat_two, ierr)
-
-         ! temp_mat_three = mat * temp_mat_two
-         ! The types are the same as the product above, so we know this one exists
-         call MatProductCreateWithMat(mat, temp_mat_two, PETSC_NULL_MAT, temp_mat_three, ierr)
-         call MatProductSetType(temp_mat_three, MATPRODUCT_AB, ierr)
-         call MatProductSetFromOptions(temp_mat_three, ierr)
-         call MatProductSymbolic(temp_mat_three, ierr)
+         call ensure_block_newton_products(mat_ctx, block_applied)
+         if (.NOT. block_applied) return
+         block_applied = .FALSE.
       end if
 
       ! temp_mat = x_mat
@@ -1047,15 +1033,81 @@ module gmres_poly_newton
          end if
       end if
 
-      ! Don't leave the temporaries holding references to mat and each other
-      if (nroots > 1) then
-         call MatProductClear(temp_mat_two, ierr)
-         call MatProductClear(temp_mat_three, ierr)
-      end if
-
       block_applied = .TRUE.
 
    end subroutine petsc_newton_block
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine ensure_block_newton_products(mat_ctx, attached)
+
+      ! Makes sure the two products the newton block apply runs are attached to
+      ! the dense temporaries in the context:
+      !    mf_temp_mat(MF_MAT_TEMP_TWO)   = mat * mf_temp_mat(MF_MAT_TEMP)
+      !    mf_temp_mat(MF_MAT_TEMP_THREE) = mat * mf_temp_mat(MF_MAT_TEMP_TWO)
+      ! The newton twin of ensure_block_pingpong_products - the products stay
+      ! attached between applies, die with the scratch whenever
+      ! ensure_block_temp_mats rebuilds it, and are rebuilt here if the mat in
+      ! the context has changed identity (the attached products keep the old mat
+      ! alive, so the handle comparison is safe)
+
+      ! attached comes back false if there is no product for these types and the
+      ! caller has to fall back to a column by column apply
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      type(mat_ctxtype), intent(inout) :: mat_ctx
+      logical, intent(out)             :: attached
+
+      PetscBool :: has_product
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      attached = .TRUE.
+
+      ! If the mat has been swapped out from under us the attached products
+      ! would still run with the old one - clear them and attach again
+      if (mat_ctx%mf_products_attached) then
+         if (mat_ctx%mf_product_mat%v /= mat_ctx%mat%v) then
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
+            mat_ctx%mf_products_attached = .FALSE.
+         end if
+      end if
+
+      if (.NOT. mat_ctx%mf_products_attached) then
+
+         ! temp_mat_two = mat * temp_mat
+         call MatProductCreateWithMat(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
+                  PETSC_NULL_MAT, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+         call MatProductSetType(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+
+         ! If there is no product available for these types we have to let the
+         ! caller do a column by column apply instead
+         call MatHasOperation(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), MATOP_PRODUCTSYMBOLIC, &
+                  has_product, ierr)
+         if (.NOT. has_product) then
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+            attached = .FALSE.
+            return
+         end if
+         call MatProductSymbolic(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+
+         ! temp_mat_three = mat * temp_mat_two
+         ! The types are the same as the product above, so we know this one exists
+         call MatProductCreateWithMat(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), &
+                  PETSC_NULL_MAT, mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
+         call MatProductSetType(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
+         call MatProductSymbolic(mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), ierr)
+
+         mat_ctx%mf_products_attached = .TRUE.
+         mat_ctx%mf_product_mat = mat_ctx%mat
+      end if
+
+   end subroutine ensure_block_newton_products
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1129,7 +1181,8 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~~~~
       ! Dispatch on what sort of polynomial is in the context
-      ! The newton basis needs three dense temporaries, the power/arnoldi/neumann basis one
+      ! The newton basis needs three dense temporaries, the power/arnoldi/neumann
+      ! basis two (the horner iteration ping-pongs between them)
       ! The Neumann polynomial has to be checked first, as it also has coefficients
       ! ~~~~~~~~~~~~
       if (mat_ctx%neumann_inner) then
@@ -1139,11 +1192,11 @@ module gmres_poly_newton
          ! the diagonal
          if (.NOT. scaled) return
          if (.NOT. associated(mat_ctx%coefficients)) return
-         n_temps = 1
+         n_temps = 2
       else if (associated(mat_ctx%real_roots)) then
          n_temps = 3
       else if (associated(mat_ctx%coefficients)) then
-         n_temps = 1
+         n_temps = 2
       else
          ! Nothing we know how to apply blockwise
          return
@@ -1162,26 +1215,19 @@ module gmres_poly_newton
       if (mat_ctx%neumann_inner) then
 
          ! Neumann polynomial - horner with an inner operator of I - D^-1 A
-         call petsc_horner_block(mat_ctx%mat, mat_ctx%coefficients, &
-                  mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
-                  kernel_x, y_mat, kernel_recip, .TRUE., block_applied)
+         call petsc_horner_block(mat_ctx, kernel_x, y_mat, kernel_recip, &
+                  .TRUE., block_applied)
 
       else if (associated(mat_ctx%real_roots)) then
 
          ! Newton basis
-         call petsc_newton_block(mat_ctx%mat, &
-                  mat_ctx%real_roots, mat_ctx%imag_roots, &
-                  mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
-                  mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), &
-                  mat_ctx%mf_temp_mat(MF_MAT_TEMP_THREE), &
-                  kernel_x, y_mat, kernel_recip, block_applied)
+         call petsc_newton_block(mat_ctx, kernel_x, y_mat, kernel_recip, block_applied)
 
       else
 
          ! Power/arnoldi basis
-         call petsc_horner_block(mat_ctx%mat, mat_ctx%coefficients, &
-                  mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
-                  kernel_x, y_mat, kernel_recip, .FALSE., block_applied)
+         call petsc_horner_block(mat_ctx, kernel_x, y_mat, kernel_recip, &
+                  .FALSE., block_applied)
 
       end if
 

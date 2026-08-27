@@ -34,6 +34,12 @@ module matshell_data_type
       type(tMat), dimension(4) :: mf_temp_mat
       ! The number of global columns the cached mf_temp_mat's were built with
       PetscInt :: mf_temp_mat_ncols = -1
+      ! Whether the block apply kernels have their products attached to the
+      ! mf_temp_mat scratch, and the mat they were attached with - the products
+      ! themselves keep that mat alive, so the handle comparison in the kernels
+      ! is safe even if the context is later pointed at a different mat
+      logical :: mf_products_attached = .FALSE.
+      type(tMat) :: mf_product_mat
       ! The reciprocal of mf_temp_vec(MF_VEC_DIAG), only used by the block applies
       ! of the diagonally scaled polynomials
       type(tVec) :: mf_vec_diag_recip
@@ -108,6 +114,9 @@ module matshell_data_type
             end if
          end do
          mat_ctx%mf_temp_mat_ncols = -1
+         ! Any products the block apply kernels had attached died with the
+         ! scratch, so they have to attach them again
+         mat_ctx%mf_products_attached = .FALSE.
       end if
 
       ! Now create any of the slots we need that don't exist

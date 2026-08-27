@@ -5,7 +5,7 @@ module gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
-         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
+         MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, MF_MAT_TEMP, MF_MAT_TEMP_TWO, &
          PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
          PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
          PFLARE_REAL_KIND
@@ -1485,7 +1485,7 @@ end if
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_horner_block(mat, coefficients, temp_mat, x_mat, y_mat, recip_diag, &
+   subroutine petsc_horner_block(mat_ctx, x_mat, y_mat, recip_diag, &
                   neumann_inner, block_applied)
 
       ! Uses a horner iteration to apply
@@ -1493,8 +1493,13 @@ end if
       ! for a block of right hand sides, x_mat, ie the multiple rhs version of petsc_horner
       ! The matvecs of petsc_horner become sparse matrix-dense matrix products (SpMM)
 
+      ! The iteration ping-pongs between the two dense temporaries in the context,
+      ! so the products always target our own scratch (never the caller's y_mat)
+      ! and can stay attached between applies - only the numeric phase runs each
+      ! order, and the result is copied into y_mat once at the end
+
       ! There are three different inner operators, B, we can apply, all of them built
-      ! out of real products with the *unscaled* mat we've been given. We do this rather
+      ! out of real products with the *unscaled* mat in the context. We do this rather
       ! than running the products on the matshells the scalar versions use, as every
       ! product on a shell degrades to a column by column matvec
       ! 1) recip_diag null                : B = A, the plain polynomial q(A)
@@ -1511,18 +1516,17 @@ end if
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       ! Input
-      type(tMat), intent(in)    :: mat
-      PetscReal, dimension(:)   :: coefficients
-      type(tMat)                :: x_mat, temp_mat
-      type(tMat)                :: y_mat
-      type(tVec)                :: recip_diag
-      logical, intent(in)       :: neumann_inner
-      logical, intent(out)      :: block_applied
+      type(mat_ctxtype), intent(inout) :: mat_ctx
+      type(tMat)                       :: x_mat
+      type(tMat)                       :: y_mat
+      type(tVec)                       :: recip_diag
+      logical, intent(in)              :: neumann_inner
+      logical, intent(out)             :: block_applied
 
       ! Local
       integer :: order
       logical :: scaled
-      PetscBool :: has_product
+      type(tMat) :: cur_mat, other_mat, swap_mat
       PetscErrorCode :: ierr
 
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1530,69 +1534,135 @@ end if
       block_applied = .FALSE.
       scaled = .NOT. PetscObjectIsNull(recip_diag)
 
-      ! If we are doing a first order polynomial or above, we have to do an extra
-      ! product per order - attach it to y_mat now
-      ! This has to happen before we write any values into y_mat, as the symbolic
-      ! product may set up y_mat
-      if (size(coefficients, 1) > 1) then
+      ! A zeroth order polynomial has no products, just the scaled copy
+      if (size(mat_ctx%coefficients, 1) == 1) then
+         call MatCopy(x_mat, y_mat, SAME_NONZERO_PATTERN, ierr)
+         call MatScale(y_mat, mat_ctx%coefficients(1), ierr)
+         block_applied = .TRUE.
+         return
+      end if
 
-         ! y_mat = mat * temp_mat
-         call MatProductCreateWithMat(mat, temp_mat, PETSC_NULL_MAT, y_mat, ierr)
-         call MatProductSetType(y_mat, MATPRODUCT_AB, ierr)
-         call MatProductSetFromOptions(y_mat, ierr)
+      ! For a first order polynomial or above we do an extra product per order,
+      ! alternating between the two temporaries - make sure both products are
+      ! attached (they stay attached between applies)
+      call ensure_block_pingpong_products(mat_ctx, block_applied)
+      if (.NOT. block_applied) return
+      block_applied = .FALSE.
 
-         ! If there is no product available for these types we have to let the
-         ! caller do a column by column apply instead
-         call MatHasOperation(y_mat, MATOP_PRODUCTSYMBOLIC, has_product, ierr)
-         if (.NOT. has_product) then
-            call MatProductClear(y_mat, ierr)
-            return
+      ! Let's do the first cur = alpha_n-1 r_0 (ie the highest order term first)
+      cur_mat = mat_ctx%mf_temp_mat(MF_MAT_TEMP)
+      other_mat = mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO)
+      call MatCopy(x_mat, cur_mat, SAME_NONZERO_PATTERN, ierr)
+      call MatScale(cur_mat, mat_ctx%coefficients(size(mat_ctx%coefficients)), ierr)
+
+      ! Loop down from the second highest order term down to the constant
+      do order = size(mat_ctx%coefficients, 1)-1, 1, -1
+
+         ! Skip this coefficient if zero
+         if (mat_ctx%coefficients(order) == 0d0) cycle
+
+         ! other = A * cur - each temporary's attached product reads the other
+         ! temporary, so which product runs is decided by which one is cur
+         call MatProductNumeric(other_mat, ierr)
+
+         ! This is the arithmetic of the D^-1 A matshell, done blockwise
+         if (scaled) call MatDiagonalScale(other_mat, recip_diag, PETSC_NULL_VEC, ierr)
+
+         ! The inner operator is I - D^-1 A rather than D^-1 A, so finish
+         ! other = cur - D^-1 A cur
+         ! cur still holds the value we did the product with
+         ! This is the arithmetic of the I - D^-1 A matshell, done blockwise
+         if (neumann_inner) then
+            call MatScale(other_mat, PFLARE_MINUS_ONE, ierr)
+            call MatAXPY(other_mat, PFLARE_ONE, cur_mat, SAME_NONZERO_PATTERN, ierr)
          end if
 
-         call MatProductSymbolic(y_mat, ierr)
-      end if
+         ! Compute other = B * cur + alpha_n-i-1 r_0
+         call MatAXPY(other_mat, mat_ctx%coefficients(order), x_mat, SAME_NONZERO_PATTERN, ierr)
 
-      ! Let's do the first y = alpha_n-1 r_0 (ie the highest order term first)
-      call MatCopy(x_mat, y_mat, SAME_NONZERO_PATTERN, ierr)
-      call MatScale(y_mat, coefficients(size(coefficients)), ierr)
+         ! The result of this order is the input of the next
+         swap_mat = cur_mat
+         cur_mat = other_mat
+         other_mat = swap_mat
+      end do
 
-      if (size(coefficients, 1) > 1) then
-
-         ! Loop down from the second highest order term down to the constant
-         do order = size(coefficients, 1)-1, 1, -1
-
-            ! Skip this coefficient if zero
-            if (coefficients(order) == 0d0) cycle
-
-            ! Copy y_mat into temp_mat
-            call MatCopy(y_mat, temp_mat, SAME_NONZERO_PATTERN, ierr)
-
-            ! Now do y_mat = A * temp_mat
-            call MatProductNumeric(y_mat, ierr)
-
-            ! This is the arithmetic of the D^-1 A matshell, done blockwise
-            if (scaled) call MatDiagonalScale(y_mat, recip_diag, PETSC_NULL_VEC, ierr)
-
-            ! The inner operator is I - D^-1 A rather than D^-1 A, so finish
-            ! y_mat = temp_mat - D^-1 A temp_mat
-            ! temp_mat still holds the value we did the product with
-            ! This is the arithmetic of the I - D^-1 A matshell, done blockwise
-            if (neumann_inner) then
-               call MatScale(y_mat, PFLARE_MINUS_ONE, ierr)
-               call MatAXPY(y_mat, PFLARE_ONE, temp_mat, SAME_NONZERO_PATTERN, ierr)
-            end if
-
-            ! Compute y_mat = B * temp_mat + alpha_n-i-1 r_0
-            call MatAXPY(y_mat, coefficients(order), x_mat, SAME_NONZERO_PATTERN, ierr)
-         end do
-
-         ! Don't leave y_mat holding references to mat and temp_mat
-         call MatProductClear(y_mat, ierr)
-      end if
+      call MatCopy(cur_mat, y_mat, SAME_NONZERO_PATTERN, ierr)
 
       block_applied = .TRUE.
 
    end subroutine petsc_horner_block
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine ensure_block_pingpong_products(mat_ctx, attached)
+
+      ! Makes sure the two ping-pong products the horner block apply runs are
+      ! attached to the dense temporaries in the context:
+      !    mf_temp_mat(MF_MAT_TEMP_TWO) = mat * mf_temp_mat(MF_MAT_TEMP)
+      !    mf_temp_mat(MF_MAT_TEMP)     = mat * mf_temp_mat(MF_MAT_TEMP_TWO)
+      ! The products stay attached between applies - they die with the scratch
+      ! whenever ensure_block_temp_mats rebuilds it (which resets
+      ! mf_products_attached), and are rebuilt here if the mat in the context has
+      ! changed identity (the attached products keep the old mat alive, so the
+      ! handle comparison is safe)
+
+      ! attached comes back false if there is no product for these types and the
+      ! caller has to fall back to a column by column apply
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      type(mat_ctxtype), intent(inout) :: mat_ctx
+      logical, intent(out)             :: attached
+
+      PetscBool :: has_product
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      attached = .TRUE.
+
+      ! If the mat has been swapped out from under us the attached products
+      ! would still run with the old one - clear them and attach again
+      if (mat_ctx%mf_products_attached) then
+         if (mat_ctx%mf_product_mat%v /= mat_ctx%mat%v) then
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP), ierr)
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+            mat_ctx%mf_products_attached = .FALSE.
+         end if
+      end if
+
+      if (.NOT. mat_ctx%mf_products_attached) then
+
+         ! temp_two = mat * temp
+         call MatProductCreateWithMat(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP), &
+                  PETSC_NULL_MAT, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+         call MatProductSetType(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+
+         ! If there is no product available for these types we have to let the
+         ! caller do a column by column apply instead
+         call MatHasOperation(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), MATOP_PRODUCTSYMBOLIC, &
+                  has_product, ierr)
+         if (.NOT. has_product) then
+            call MatProductClear(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+            attached = .FALSE.
+            return
+         end if
+         call MatProductSymbolic(mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), ierr)
+
+         ! temp = mat * temp_two
+         ! The types are the same as the product above, so we know this one exists
+         call MatProductCreateWithMat(mat_ctx%mat, mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO), &
+                  PETSC_NULL_MAT, mat_ctx%mf_temp_mat(MF_MAT_TEMP), ierr)
+         call MatProductSetType(mat_ctx%mf_temp_mat(MF_MAT_TEMP), MATPRODUCT_AB, ierr)
+         call MatProductSetFromOptions(mat_ctx%mf_temp_mat(MF_MAT_TEMP), ierr)
+         call MatProductSymbolic(mat_ctx%mf_temp_mat(MF_MAT_TEMP), ierr)
+
+         mat_ctx%mf_products_attached = .TRUE.
+         mat_ctx%mf_product_mat = mat_ctx%mat
+      end if
+
+   end subroutine ensure_block_pingpong_products
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
