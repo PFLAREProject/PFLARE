@@ -25,18 +25,53 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
   #define DEFAULT_CHECK_TOL 1e-10
 #endif
 
+/*
+  Check the block solve in X against a column-by-column reference solve of the
+  same systems. At preonly this is comparing PCMatApply against PCApply.
+*/
+static PetscErrorCode CheckBlockSolve(KSP ksp, Mat B, Mat X, PetscReal check_tol)
+{
+  Mat       Xref;
+  PetscInt  j, nrhs;
+  PetscReal diff_norm, x_norm;
+
+  PetscFunctionBeginUser;
+  PetscCall(MatGetSize(B, NULL, &nrhs));
+  PetscCall(MatDuplicate(X, MAT_DO_NOT_COPY_VALUES, &Xref));
+
+  for (j = 0; j < nrhs; j++) {
+    Vec cb, cx;
+    PetscCall(MatDenseGetColumnVecRead(B, j, &cb));
+    PetscCall(MatDenseGetColumnVecWrite(Xref, j, &cx));
+    PetscCall(VecSet(cx, 0.0));
+    PetscCall(KSPSolve(ksp, cb, cx));
+    PetscCall(MatDenseRestoreColumnVecWrite(Xref, j, &cx));
+    PetscCall(MatDenseRestoreColumnVecRead(B, j, &cb));
+  }
+
+  PetscCall(MatNorm(X, NORM_FROBENIUS, &x_norm));
+  PetscCall(MatAXPY(Xref, -1.0, X, SAME_NONZERO_PATTERN));
+  PetscCall(MatNorm(Xref, NORM_FROBENIUS, &diff_norm));
+  PetscCheck(diff_norm <= check_tol * x_norm, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+             "Block solve differs from the column-by-column solve: ||X - Xref||_F = %g, ||X||_F = %g, tolerance %g",
+             (double)diff_norm, (double)x_norm, (double)check_tol);
+
+  PetscCall(MatDestroy(&Xref));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 int main(int argc, char **args)
 {
   Vec         x;              /* only used to get the parallel layout */
   Mat         A;              /* linear system matrix */
-  Mat         B, X, Xref;     /* block of rhs, block of solutions, reference solutions */
+  Mat         B, X;           /* block of rhs, block of solutions */
   KSP         ksp;            /* linear solver context */
   PC          pc;             /* preconditioner context */
   VecType     vtype;
   PetscInt    i, j, n = 100, nrhs = 5, global_row_start, global_row_end_plus_one, local_size;
   PetscInt    start_assign;
   PetscCount  counter;
-  PetscReal   check_tol = DEFAULT_CHECK_TOL, diff_norm, x_norm;
+  PetscReal   check_tol = DEFAULT_CHECK_TOL;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy, matsolve, reference;
 
@@ -48,6 +83,8 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-check_tol", &check_tol, NULL));
   PetscBool second_solve = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
+  PetscBool rebuild_solve = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-rebuild_solve", &rebuild_solve, NULL));
   PetscBool check = PETSC_TRUE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check", &check, NULL));
 
@@ -123,7 +160,9 @@ int main(int argc, char **args)
   PetscCall(PetscFree2(oor, ooc));
   // Set the values
   PetscCall(MatSetValuesCOO(A, v, INSERT_VALUES));
-  PetscCall(PetscFree(v));
+  // The rebuild solve below re-sets the values with the same COO indices, so
+  // it has to keep v around
+  if (!rebuild_solve) PetscCall(PetscFree(v));
 
   /*
      Create the dense blocks of right-hand sides and solutions. Taking the vector
@@ -205,28 +244,27 @@ int main(int argc, char **args)
        At the default preonly this is comparing PCMatApply against PCApply.
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
   if (check) {
-    PetscCall(MatDuplicate(X, MAT_DO_NOT_COPY_VALUES, &Xref));
-
     PetscCall(PetscLogStagePush(reference));
-    for (j = 0; j < nrhs; j++) {
-      Vec cb, cx;
-      PetscCall(MatDenseGetColumnVecRead(B, j, &cb));
-      PetscCall(MatDenseGetColumnVecWrite(Xref, j, &cx));
-      PetscCall(VecSet(cx, 0.0));
-      PetscCall(KSPSolve(ksp, cb, cx));
-      PetscCall(MatDenseRestoreColumnVecWrite(Xref, j, &cx));
-      PetscCall(MatDenseRestoreColumnVecRead(B, j, &cb));
-    }
+    PetscCall(CheckBlockSolve(ksp, B, X, check_tol));
     PetscCall(PetscLogStagePop());
+  }
 
-    PetscCall(MatNorm(X, NORM_FROBENIUS, &x_norm));
-    PetscCall(MatAXPY(Xref, -1.0, X, SAME_NONZERO_PATTERN));
-    PetscCall(MatNorm(Xref, NORM_FROBENIUS, &diff_norm));
-    PetscCheck(diff_norm <= check_tol * x_norm, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
-               "Block solve differs from the column-by-column solve: ||X - Xref||_F = %g, ||X||_F = %g, tolerance %g",
-               (double)diff_norm, (double)x_norm, (double)check_tol);
-
-    PetscCall(MatDestroy(&Xref));
+  /*
+     Rebuild solve: change the values in the operator so the next PCSetUp
+     rebuilds the preconditioner (unless -ksp_reuse_preconditioner keeps it
+     frozen), then block solve and check column-by-column again. This exercises
+     the teardown and lazy rebuild of any block scratch (and the products
+     attached to it) that the PC cached against the first setup.
+  */
+  if (rebuild_solve) {
+    PetscCount c;
+    for (c = 0; c < counter; c++) v[c] *= 2.0;
+    PetscCall(MatSetValuesCOO(A, v, INSERT_VALUES));
+    PetscCall(PetscFree(v));
+    PetscCall(KSPSetOperators(ksp, A, A));
+    PetscCall(KSPMatSolve(ksp, B, X));
+    PetscCall(KSPGetConvergedReason(ksp, &reason));
+    if (check) PetscCall(CheckBlockSolve(ksp, B, X, check_tol));
   }
 
   /*

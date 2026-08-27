@@ -618,6 +618,16 @@ run_tests_no_load_short_serial:
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_matsolve_batch_size 2
 	@echo "Test multiple RHS block solve with single level PCAIR"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_max_levels 1
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed between solves"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed and a frozen preconditioner"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve -ksp_reuse_preconditioner
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed and sparsity reuse"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve -pc_air_reuse_sparsity
+	@echo "Test multiple RHS block solve with a matrix-free PCPFLAREINV with the operator values changed"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -rebuild_solve
+	@echo "Test multiple RHS block solve with a matrix-free Newton PCPFLAREINV with the operator values changed"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild_solve
 #
 	@echo "Test multiple RHS block solve with a Richardson KSP and PCPFLAREINV with a fixed iteration count"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -ksp_type richardson -ksp_norm_type none -ksp_max_it 30
@@ -1117,6 +1127,8 @@ else
 	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR in parallel with a fixed iteration count"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_norm_type none \
 	 -ksp_max_it 10
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed between solves in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"
