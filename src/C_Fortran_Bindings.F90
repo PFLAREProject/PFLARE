@@ -5,7 +5,7 @@ module c_fortran_bindings
    use pcair_data_type, only: pc_air_multigrid_data
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
-   use gmres_poly_newton, only: shell_poly_block_apply
+   use gmres_poly_apply, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
    use petsc_helper, only: remove_from_sparse_match

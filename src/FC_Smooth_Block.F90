@@ -5,7 +5,7 @@ module fc_smooth_block
    use air_data_type, only: air_multigrid_data
    use petsc_helper, only: kokkos_debug
    use matshell_data_type, only: mat_ctxtype, attach_mat_product
-   use gmres_poly_newton, only: shell_poly_block_apply
+   use gmres_poly_apply, only: shell_poly_block_apply
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
          AIR_MAT_SOL, AIR_MAT_TEMP, AIR_MAT_RESIDUAL, AIR_MAT_RHS, AIR_MAT_OFF_DIAG
 

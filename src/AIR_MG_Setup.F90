@@ -29,7 +29,7 @@ module air_mg_setup
          get_submatrices_start_poly_coeff_comms, &
          finish_comms_compute_restrict_prolong, compute_coarse_matrix
    use gmres_poly, only: setup_gmres_poly_data
-   use gmres_poly_newton, only: &
+   use gmres_poly_apply, only: &
          petsc_matvec_right_scale_poly_newton_residual_mf, &
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs

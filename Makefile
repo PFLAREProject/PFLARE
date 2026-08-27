@@ -114,6 +114,7 @@ OBJS := $(SRCDIR)/Pflare_Parameters.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
+		  $(SRCDIR)/Gmres_Poly_Apply.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCPFLAREINV_Interfaces.o \

@@ -10,7 +10,8 @@ module approx_inverse_setup
    use gmres_poly, only: &
          start_gmres_polynomial_coefficients_power, &
          calculate_gmres_polynomial_coefficients_arnoldi, &
-         build_gmres_polynomial_inverse, petsc_matvec_da_poly_mf
+         build_gmres_polynomial_inverse
+   use gmres_poly_apply, only: petsc_matvec_da_poly_mf
    use gmres_poly_newton, only: &
          build_gmres_polynomial_newton_inverse, &
          calculate_gmres_polynomial_roots_newton
