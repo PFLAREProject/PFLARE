@@ -9,7 +9,8 @@ module c_fortran_bindings
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
    use petsc_helper, only: remove_from_sparse_match
-   use air_data_type_routines, only: create_air_data, ensure_air_block_temps
+   use air_data_type_routines, only: create_air_data
+   use fc_smooth_block, only: ensure_air_block_temps
 
 #include "petsc/finclude/petscksp.h"
 

@@ -21,8 +21,9 @@ module air_mg_setup
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson, mg_coarse_shell_apply, &
-         mg_FC_block_richardson, mg_coarse_shell_block_apply, &
-         mg_smooth_shell_apply, mg_smooth_shell_block_apply
+         mg_smooth_shell_apply
+   use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
+         mg_smooth_shell_block_apply
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &

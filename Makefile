@@ -137,6 +137,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Gmres_Poly.o \
 		  $(SRCDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/FC_Smooth.o \
+		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
