@@ -4,7 +4,7 @@ module air_data_type_routines
    use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP, MAT_INV_AFF, &
          PFLARE_TOL_AUTO_TRUNCATE
    use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
-   use fc_smooth, only: destroy_VecISCopyLocalWrapper
+   use fc_smooth, only: destroy_VecISCopyLocalWrapper, setup_air_block_products
    
    ! PETSc
    use petscmat
@@ -484,6 +484,13 @@ module air_data_type_routines
                      local_cols, global_cols, &
                      air_data%block_temp_full(1)%array(our_level), ierr)
          end if
+
+         ! The blocks on this level have just been (re)built, so attach the
+         ! products the block smooths run to their scratch targets - the smooths
+         ! then only run the numeric phase of each product every iteration
+         ! rebuild is always true when the blocks didn't exist yet (block_ncols
+         ! starts and is reset to -1), so the products can't be attached twice
+         if (rebuild) call setup_air_block_products(air_data, our_level, ierr)
       end do
 
       air_data%block_ncols = global_cols

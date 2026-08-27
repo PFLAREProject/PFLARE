@@ -49,7 +49,9 @@ for earlier changes please see the git history.
   blocks on the GPU backends use real SpMM kernels and stay on the device.
   PCMatApply forwards to the underlying PCMG, with PFLARE supplying the block
   FC smoother, the block coarse solve and the dense-block F/C row extraction,
-  and dense scratch blocks cached per level. This needs a PETSc main new
+  and dense scratch blocks cached per level. The smoother products are kept
+  attached to the per-level scratch, so each smoother iteration only runs the
+  numeric phase of each product rather than recreating it. This needs a PETSc main new
   enough to have `PCMatApplyRichardson` and the `PCShellSetMatApply`/
   `PCShellSetMatApplyRichardson` Fortran bindings (merged August 2026). All the
   PCAIR options are covered blockwise in `tests/adv_1d_multi_rhs.c`, in serial

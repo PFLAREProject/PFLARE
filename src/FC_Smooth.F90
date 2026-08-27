@@ -10,7 +10,8 @@ module fc_smooth
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_newton, only: shell_poly_block_apply
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO, &
-         PFLARE_ONE, AIR_MAT_SOL, AIR_MAT_TEMP, AIR_MAT_RESIDUAL, AIR_MAT_RHS
+         PFLARE_ONE, AIR_MAT_SOL, AIR_MAT_TEMP, AIR_MAT_RESIDUAL, AIR_MAT_RHS, &
+         AIR_MAT_OFF_DIAG
 
 #include "petsc/finclude/petscksp.h"
 #include "petscconf.h"
@@ -514,14 +515,49 @@ module fc_smooth
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine shell_block_apply_or_columns(inv_mat, x_mat, y_mat, ierr)
+
+      ! Applies a matrix-free matshell inverse to a dense block of right hand
+      ! sides - shell_poly_block_apply knows how to do the polynomial matshells
+      ! blockwise by doing the products with the underlying matrix instead, and
+      ! reports back if it has been handed something it doesn't know about, in
+      ! which case we apply column by column
+
+      ! ~~~~~~
+      type(tMat), intent(in)        :: inv_mat
+      type(tMat)                    :: x_mat, y_mat
+      PetscErrorCode, intent(inout) :: ierr
+
+      logical :: block_applied
+      PetscInt :: global_rows, global_cols, i_loc
+      type(tVec) :: col_x, col_y
+      ! ~~~~~~
+
+      call shell_poly_block_apply(inv_mat, x_mat, y_mat, block_applied)
+
+      ! Anything we can't do blockwise has to be applied column by column
+      if (.NOT. block_applied) then
+         call MatGetSize(x_mat, global_rows, global_cols, ierr)
+         do i_loc = 0, global_cols-1
+            call MatDenseGetColumnVecRead(x_mat, i_loc, col_x, ierr)
+            call MatDenseGetColumnVecWrite(y_mat, i_loc, col_y, ierr)
+            call MatMult(inv_mat, col_x, col_y, ierr)
+            call MatDenseRestoreColumnVecWrite(y_mat, i_loc, col_y, ierr)
+            call MatDenseRestoreColumnVecRead(x_mat, i_loc, col_x, ierr)
+         end do
+      end if
+
+   end subroutine shell_block_apply_or_columns
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine apply_inverse_block(inv_mat, x_mat, y_mat, ierr)
 
       ! Applies one of our approximate inverses to a dense block of right hand
       ! sides, ie the multiple rhs version of MatMult(inv_mat, x, y)
       ! The matrix-free polynomial inverses are matshells with only a MATOP_MULT,
-      ! so a product on them would fail - shell_poly_block_apply knows how to do
-      ! them blockwise by doing the products with the underlying matrix instead,
-      ! and reports back if it has been handed something it doesn't know about
+      ! so a product on them would fail - they go through the blockwise shell
+      ! apply instead
 
       ! ~~~~~~
       type(tMat), intent(in)        :: inv_mat
@@ -529,28 +565,12 @@ module fc_smooth
       PetscErrorCode, intent(inout) :: ierr
 
       MatType :: inv_type
-      logical :: block_applied
-      PetscInt :: global_rows, global_cols, i_loc
-      type(tVec) :: col_x, col_y
       ! ~~~~~~
 
       call MatGetType(inv_mat, inv_type, ierr)
 
       if (inv_type == MATSHELL) then
-
-         call shell_poly_block_apply(inv_mat, x_mat, y_mat, block_applied)
-
-         ! Anything we can't do blockwise has to be applied column by column
-         if (.NOT. block_applied) then
-            call MatGetSize(x_mat, global_rows, global_cols, ierr)
-            do i_loc = 0, global_cols-1
-               call MatDenseGetColumnVecRead(x_mat, i_loc, col_x, ierr)
-               call MatDenseGetColumnVecWrite(y_mat, i_loc, col_y, ierr)
-               call MatMult(inv_mat, col_x, col_y, ierr)
-               call MatDenseRestoreColumnVecWrite(y_mat, i_loc, col_y, ierr)
-               call MatDenseRestoreColumnVecRead(x_mat, i_loc, col_x, ierr)
-            end do
-         end if
+         call shell_block_apply_or_columns(inv_mat, x_mat, y_mat, ierr)
 
       ! Assembled (or diagonal) inverses just do a real product
       else
@@ -558,6 +578,125 @@ module fc_smooth
       end if
 
    end subroutine apply_inverse_block
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine apply_inverse_block_cached(inv_mat, x_mat, y_mat, ierr)
+
+      ! The cached version of apply_inverse_block used inside the block FC
+      ! smooths - for assembled (or diagonal) inverses the product has already
+      ! been attached to y_mat by setup_air_block_products, so only the numeric
+      ! phase runs here. The matrix-free matshells go through the same blockwise
+      ! shell apply as apply_inverse_block
+
+      ! ~~~~~~
+      type(tMat), intent(in)        :: inv_mat
+      type(tMat)                    :: x_mat, y_mat
+      PetscErrorCode, intent(inout) :: ierr
+
+      MatType :: inv_type
+      ! ~~~~~~
+
+      call MatGetType(inv_mat, inv_type, ierr)
+
+      if (inv_type == MATSHELL) then
+         call shell_block_apply_or_columns(inv_mat, x_mat, y_mat, ierr)
+      else
+         call MatProductNumeric(y_mat, ierr)
+      end if
+
+   end subroutine apply_inverse_block_cached
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine attach_block_product(mat, x_mat, y_mat, ierr)
+
+      ! Attaches y_mat = mat * x_mat as a product so repeat computations only
+      ! have to run the numeric phase - this is what mat_product_block does, but
+      ! with the product bookkeeping deliberately left alive on y_mat
+      ! y_mat therefore keeps references to mat and x_mat until it is destroyed
+
+      ! ~~~~~~
+      type(tMat), intent(in)        :: mat
+      type(tMat)                    :: x_mat, y_mat
+      PetscErrorCode, intent(inout) :: ierr
+      ! ~~~~~~
+
+      call MatProductCreateWithMat(mat, x_mat, PETSC_NULL_MAT, y_mat, ierr)
+      call MatProductSetType(y_mat, MATPRODUCT_AB, ierr)
+      call MatProductSetFromOptions(y_mat, ierr)
+      call MatProductSymbolic(y_mat, ierr)
+
+   end subroutine attach_block_product
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine setup_air_block_products(air_data, our_level, ierr)
+
+      ! Attaches the products the block FC smooths compute on a level to their
+      ! dense scratch targets, so each smoother iteration only has to run the
+      ! numeric phase of each product
+      ! Called by ensure_air_block_temps whenever the scratch on this level has
+      ! just been (re)built - the products stay attached until the scratch is
+      ! destroyed, and the scratch outlives every operator it references only
+      ! briefly (destroy_air_block_temps runs first in reset_air_data)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level
+      PetscErrorCode, intent(inout)           :: ierr
+
+      logical :: any_f_smooths, any_c_smooths
+      MatType :: inv_type
+      ! ~~~~~~
+
+      any_f_smooths = any(air_data%smooth_order_levels(our_level)%array > 0)
+      any_c_smooths = any(air_data%smooth_order_levels(our_level)%array < 0)
+
+      if (any_f_smooths) then
+
+         ! A_ff * x_f - computed every F richardson iteration
+         call attach_block_product(air_data%A_ff(our_level), &
+                  air_data%block_temp_fine(AIR_MAT_SOL)%array(our_level), &
+                  air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), ierr)
+
+         ! A_fc * x_c - computed once per F smooth
+         call attach_block_product(air_data%A_fc(our_level), &
+                  air_data%block_temp_coarse(AIR_MAT_SOL)%array(our_level), &
+                  air_data%block_temp_fine(AIR_MAT_OFF_DIAG)%array(our_level), ierr)
+
+         ! The assembled (or diagonal) inverses are applied with a product too -
+         ! the matrix-free matshells go through the blockwise shell apply instead
+         ! and never have a product attached
+         call MatGetType(air_data%inv_A_ff(our_level), inv_type, ierr)
+         if (inv_type /= MATSHELL) then
+            call attach_block_product(air_data%inv_A_ff(our_level), &
+                     air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), &
+                     air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), ierr)
+         end if
+      end if
+
+      if (any_c_smooths) then
+
+         ! A_cc * x_c - computed every C richardson iteration
+         call attach_block_product(air_data%A_cc(our_level), &
+                  air_data%block_temp_coarse(AIR_MAT_SOL)%array(our_level), &
+                  air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), ierr)
+
+         ! A_cf * x_f - computed once per C smooth
+         call attach_block_product(air_data%A_cf(our_level), &
+                  air_data%block_temp_fine(AIR_MAT_SOL)%array(our_level), &
+                  air_data%block_temp_coarse(AIR_MAT_OFF_DIAG)%array(our_level), ierr)
+
+         call MatGetType(air_data%inv_A_cc(our_level), inv_type, ierr)
+         if (inv_type /= MATSHELL) then
+            call attach_block_product(air_data%inv_A_cc(our_level), &
+                     air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), &
+                     air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), ierr)
+         end if
+      end if
+
+   end subroutine setup_air_block_products
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1042,28 +1181,26 @@ module fc_smooth
       end if
 
       ! Compute Afc * x_c^0 - this never changes
-      call mat_product_block(air_data%A_fc(our_level), &
-               air_data%block_temp_coarse(AIR_MAT_SOL)%array(our_level), &
-               air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), .FALSE., ierr)
+      ! The product was attached to the scratch by setup_air_block_products so
+      ! only the numeric phase runs, here and below
+      call MatProductNumeric(air_data%block_temp_fine(AIR_MAT_OFF_DIAG)%array(our_level), ierr)
 
       ! This is b_f - A_fc * x_c^0 - this never changes
       call MatAXPY(air_data%block_temp_fine(AIR_MAT_RHS)%array(our_level), PFLARE_MINUS_ONE, &
-               air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), SAME_NONZERO_PATTERN, ierr)
+               air_data%block_temp_fine(AIR_MAT_OFF_DIAG)%array(our_level), SAME_NONZERO_PATTERN, ierr)
 
       ! Do all the consecutive F smooths
       do f_its = 1, its
 
          ! Then A_ff * x_f^n - this changes at each richardson iteration
-         call mat_product_block(air_data%A_ff(our_level), &
-                  air_data%block_temp_fine(AIR_MAT_SOL)%array(our_level), &
-                  air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), .FALSE., ierr)
+         call MatProductNumeric(air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), ierr)
 
          ! This is b_f - A_fc * x_c - A_ff * x_f^n
          call MatAYPX(air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%block_temp_fine(AIR_MAT_RHS)%array(our_level), SAME_NONZERO_PATTERN, ierr)
 
          ! ! Compute A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
-         call apply_inverse_block(air_data%inv_A_ff(our_level), &
+         call apply_inverse_block_cached(air_data%inv_A_ff(our_level), &
                   air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), &
                   air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), ierr)
 
@@ -1191,27 +1328,25 @@ module fc_smooth
       end if
 
       ! Compute Acf * x_f^0 - this never changes
-      call mat_product_block(air_data%A_cf(our_level), &
-               air_data%block_temp_fine(AIR_MAT_SOL)%array(our_level), &
-               air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), .FALSE., ierr)
+      ! The product was attached to the scratch by setup_air_block_products so
+      ! only the numeric phase runs, here and below
+      call MatProductNumeric(air_data%block_temp_coarse(AIR_MAT_OFF_DIAG)%array(our_level), ierr)
       ! This is b_c - A_cf * x_f^0 - this never changes
       call MatAXPY(air_data%block_temp_coarse(AIR_MAT_RHS)%array(our_level), PFLARE_MINUS_ONE, &
-               air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), SAME_NONZERO_PATTERN, ierr)
+               air_data%block_temp_coarse(AIR_MAT_OFF_DIAG)%array(our_level), SAME_NONZERO_PATTERN, ierr)
 
       ! Do all the consecutive C smooths
       do c_its = 1, its
 
          ! Then A_cc * x_c^n - this changes at each richardson iteration
-         call mat_product_block(air_data%A_cc(our_level), &
-                  air_data%block_temp_coarse(AIR_MAT_SOL)%array(our_level), &
-                  air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), .FALSE., ierr)
+         call MatProductNumeric(air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), ierr)
 
          ! This is b_c - A_cf * x_f^0 - A_cc * x_c^n
          call MatAYPX(air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%block_temp_coarse(AIR_MAT_RHS)%array(our_level), SAME_NONZERO_PATTERN, ierr)
 
          ! ! Compute A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
-         call apply_inverse_block(air_data%inv_A_cc(our_level), &
+         call apply_inverse_block_cached(air_data%inv_A_cc(our_level), &
                   air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), &
                   air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), ierr)
 

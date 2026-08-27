@@ -122,6 +122,10 @@ module pflare_parameters
    integer, parameter :: AIR_MAT_TEMP     = 2
    integer, parameter :: AIR_MAT_RESIDUAL = 3
    integer, parameter :: AIR_MAT_RHS      = 4
+   ! Target of the cached off-diagonal product (A_fc * x_c or A_cf * x_f) - this
+   ! has no single rhs twin, it exists so every cached product has its own
+   ! dedicated target block (a mat can only hold one attached product)
+   integer, parameter :: AIR_MAT_OFF_DIAG = 5
 
    ! --------------------------------------------------------
    ! Timer IDs   (from timers)
