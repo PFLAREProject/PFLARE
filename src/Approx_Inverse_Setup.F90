@@ -514,7 +514,7 @@ module approx_inverse_setup
       integer :: i_loc
       MatType:: mat_type
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
-      type(tMat) :: temp_mat
+      type(tMat) :: temp_mat, temp_mat_local
       type(tVec) :: temp_vec
       ! ~~~~~~
 
@@ -554,7 +554,13 @@ module approx_inverse_setup
                   ! the scratch mats - the horner ping-pong pair reference each
                   ! other, so plain destroys would leave a reference cycle alive -
                   ! clear the products first to break it
+                  ! The parallel aij x dense numeric attaches its own inner product
+                  ! to the local dense block, which recreates the same cycle between
+                  ! the local blocks - clear that one too (for seq dense the local
+                  ! matrix is the mat itself, so this is just a repeat clear)
                   call MatProductClear(temp_mat, ierr)
+                  call MatDenseGetLocalMatrix(temp_mat, temp_mat_local, ierr)
+                  call MatProductClear(temp_mat_local, ierr)
                   call MatDestroy(temp_mat, ierr)
                   mat_ctx%mf_temp_mat(i_loc) = temp_mat
                end if
