@@ -17,10 +17,8 @@ module fc_smooth
    public
 
    ! -------------------------------------------------------------------------------------------------------------------------------
-   ! -------------------------------------------------------------------------------------------------------------------------------
    ! Functions involving the FC smoothing
    ! -------------------------------------------------------------------------------------------------------------------------------
-   ! -------------------------------------------------------------------------------------------------------------------------------      
 
    contains
 
@@ -47,6 +45,30 @@ module fc_smooth
       call MatMult(air_data%inv_A_ff(air_data%no_levels), x, y, ierr)
 
    end subroutine mg_coarse_shell_apply
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mg_smooth_shell_apply(pc, x, y, ierr)
+
+      ! PCShell apply used for the level smoothers when doing full smoothing up
+      ! and down with a matrix-free inverse. This does exactly what PCMAT does
+      ! (the Pmat of the smoother is inv_A_ff on that level), we just can't use
+      ! PCMAT as its multiple rhs apply does a MatMatMult on the Pmat, which fails
+      ! on a matrix-free polynomial matshell
+
+      ! ~~~~~~
+      type(tPC)                             :: pc
+      type(tVec)                            :: x, y
+      PetscErrorCode, intent(out)           :: ierr
+
+      type(tMat) :: mat, pmat
+      ! ~~~~~~
+
+      ierr = 0
+      call PCGetOperators(pc, mat, pmat, ierr)
+      call MatMult(pmat, x, y, ierr)
+
+   end subroutine mg_smooth_shell_apply
 
    !------------------------------------------------------------------------------------------------------------------------
 
@@ -414,7 +436,7 @@ module fc_smooth
          end if
       end if     
          
-   end subroutine VecISCopyLocalWrapper   
+   end subroutine VecISCopyLocalWrapper
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -492,7 +514,7 @@ module fc_smooth
       ! have to return zero here!
       ierr = 0
       
-   end subroutine mg_FC_point_richardson     
+   end subroutine mg_FC_point_richardson
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -637,9 +659,9 @@ module fc_smooth
                SCATTER_FORWARD, air_data%temp_vecs_coarse(1)%array(our_level), &
                air_data%temp_vecs(1)%array(our_level))          
       
-   end subroutine c_smooths      
- 
-   !------------------------------------------------------------------------------------------------------------------------
+   end subroutine c_smooths
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
    
 end module fc_smooth
 

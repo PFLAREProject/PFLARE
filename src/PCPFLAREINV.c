@@ -942,7 +942,12 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   PETSc Kokkos types (for example `-mat_type aijkokkos -vec_type kokkos`, or
   `-dm_mat_type aijkokkos -dm_vec_type kokkos` if using a `DM`).
 
-.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCAIR`, `PCGAMG`
+  `PCPFLAREINV` implements `PCMatApply()`, so a `KSPMatSolve()` with `KSPPREONLY` or
+  `KSPRICHARDSON` applies the approximate inverse (assembled or matrix-free) to a whole
+  dense block of right-hand sides at once; on the GPU backends this keeps a multiple
+  right-hand side solve on the device.
+
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCAIR`, `PCGAMG`, `PCMatApply()`, `KSPMatSolve()`
 M*/
 
 // Creates the structure we need for this PC

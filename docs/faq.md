@@ -137,6 +137,10 @@ In practice, the extra SpMVs are memory-bandwidth bound rather than FLOP bound, 
 
 Truncating the hierarchy and applying a matrix-free coarse grid solver (see above) is often very effective on GPUs. GPUs are poorly suited to the small solves on the bottom levels of a multigrid hierarchy, where kernel launch overheads become significant and there is not enough work to hide communication. Truncation can give large speed-ups in the solve (e.g., 4x) and also reduces memory use.
 
+### 4) Multiple right-hand sides
+
+If you have many right-hand sides, `KSPMatSolve` with `-ksp_type preonly` or `-ksp_type richardson` applies `PCAIR` to the whole dense block of right-hand sides at once (see [docs/gpus.md](gpus.md)). The sparse matrix by dense matrix products throughout the hierarchy give much better GPU throughput than solving each right-hand side in turn, particularly on the lower levels of the hierarchy where a single solve does not have enough work to saturate a GPU.
+
 ## Solving sparse triangular systems (e.g., from ILU factorisations) with `PCAIR`
 
 Sparse triangular systems, such as the L and U factors from (incomplete) LU factorisations, are highly asymmetric and are traditionally solved with sequential forward/back substitution, which parallelises poorly. `PCAIR` can instead be used to solve these triangular systems iteratively and in parallel; the lower triangular structure means reduction multigrids like AIRG are well suited and typically very robust on these problems.

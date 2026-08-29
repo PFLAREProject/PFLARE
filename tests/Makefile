@@ -46,6 +46,10 @@ KSP_RTOL := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),1e-5,1e-10)
 #     polynomial terms survive between setups, leaving the reused pattern stale.
 SKIP_SINGLE := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),@echo "  [skipped under single precision]:",)
 
+# Same skip mechanism for kokkos builds - only for the specific commands that hit
+# an existing gap in petsc's kokkos capability, not whole classes
+SKIP_KOKKOS := $(if $(filter 1,$(PETSC_HAVE_KOKKOS)),@echo "  [skipped under kokkos]:",)
+
 # We then have to add the flags back in after the petsc rules/variables
 # have overwritten
 override CFLAGS += $(CFLAGS_INPUT) $(INCLUDE)
@@ -568,6 +572,70 @@ run_tests_no_load_short_serial:
 	 -pc_pflareinv_poly_order 10
 	@echo "Test multiple RHS block solve with a matrix-free Neumann PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type neumann
+	@echo "Test multiple RHS block solve with PCAIR via PCMatApply"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
+	@echo "Test multiple RHS block solve with a matrix-free PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys
+	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc
+	@echo "Test multiple RHS block solve with PCAIR and FFC smoothing with a weighted Jacobi C smoother"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type ffc -pc_air_c_inverse_type wjacobi
+	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type newton -pc_air_matrix_free_polys \
+	 -pc_air_diag_scale_polys
+	@echo "Test multiple RHS block solve with a matrix-free Neumann PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type neumann -pc_air_matrix_free_polys
+	@echo "Test multiple RHS block solve with a SAI PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type sai
+	@echo "Test multiple RHS block solve with a Jacobi PCAIR - the MATDIAGONAL inverse"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type jacobi
+	@echo "Test multiple RHS block solve with PCAIR with a lumped drop tolerance on A"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_a_drop 1e-3 -pc_air_a_lump
+	@echo "Test multiple RHS block solve with PCAIR with a drop tolerance on R"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_r_drop 1e-3
+	@echo "Test multiple RHS block solve with PCAIR with auto truncation"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-2
+	@echo "Test multiple RHS block solve with symmetric PCAIR - a transpose restrictor"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_symmetric
+	@echo "Test multiple RHS block solve with PCAIR with full smoothing up and down"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_full_smoothing_up_and_down
+	@echo "Test multiple RHS block solve with matrix-free PCAIR with full smoothing up and down"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test multiple RHS block solve with a matrix-free Newton coarse grid solver in PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_coarsest_inverse_type newton \
+	 -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys
+	@echo "Test multiple RHS block solve with a diagonally scaled coarse grid solver in PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_coarsest_diag_scale_polys
+	@echo "Test multiple RHS block solve with PCAIR with a user defined coarse grid solver"
+# Skipped under kokkos: the multiple rhs solve with PCLU needs a MatMatSolve of an
+# aijkokkos factor with a dense rhs block, which petsc does not have yet - its
+# fallback hands host column vecs to the kokkos MatSolve and aborts
+	$(SKIP_KOKKOS) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -mg_coarse_pc_type lu
+	@echo "Test multiple RHS block solve with PCAIR called twice - the scratch space is reused"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -second_solve
+	@echo "Test multiple RHS block solve with PCAIR in batches - the block size changes"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_matsolve_batch_size 2
+	@echo "Test multiple RHS block solve with single level PCAIR"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_max_levels 1
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed between solves"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed and a frozen preconditioner"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve -ksp_reuse_preconditioner
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed and sparsity reuse"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve -pc_air_reuse_sparsity
+	@echo "Test multiple RHS block solve with a matrix-free PCPFLAREINV with the operator values changed"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -rebuild_solve
+	@echo "Test multiple RHS block solve with a matrix-free Newton PCPFLAREINV with the operator values changed"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild_solve
+#
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCPFLAREINV with a fixed iteration count"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -ksp_type richardson -ksp_norm_type none -ksp_max_it 30
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR with a fixed iteration count"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_norm_type none -ksp_max_it 10
+	@echo "Test multiple RHS block solve with Richardson KSP and PCAIR"
+	$(SKIP_SINGLE) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol 1e-10 \
+	 -check_tol 1e-8
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly, plain and diagonally scaled"
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly, plain and diagonally scaled"
@@ -1042,6 +1110,25 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free
 	@echo "Test multiple RHS block solve with a matrix-free Newton PCPFLAREINV in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
+	@echo "Test multiple RHS block solve with PCAIR via PCMatApply in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
+	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type newton \
+	 -pc_air_matrix_free_polys -pc_air_diag_scale_polys
+	@echo "Test multiple RHS block solve with symmetric PCAIR in parallel - a transpose restrictor"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_symmetric
+	@echo "Test multiple RHS block solve with PCAIR with full smoothing up and down in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_full_smoothing_up_and_down
+	@echo "Test multiple RHS block solve with PCAIR with processor agglomeration in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_processor_agglom \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	@echo "Test multiple RHS block solve with PCAIR called twice in parallel - the scratch space is reused"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -second_solve
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR in parallel with a fixed iteration count"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_norm_type none \
+	 -ksp_max_it 10
+	@echo "Test multiple RHS block solve with PCAIR with the operator values changed between solves in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -rebuild_solve
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"

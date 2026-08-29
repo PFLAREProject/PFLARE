@@ -196,6 +196,105 @@ PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_in
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// The multiple rhs version of VecISCopyLocal_kokkos - does the equivalent of
+// veciscopy on the local rows of a dense block using the IS data on the device
+PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_int, Mat *xfull, int mode_int, Mat *xreduced)
+{
+   auto *ctx = static_cast<VecISCopyLocalKokkosCtx *>(handle);
+   const int level_idx = our_level - 1;
+
+   // Can't use the shared pointer directly within the parallel
+   // regions on the device
+   PetscIntKokkosView is_d;
+   auto exec = PetscGetKokkosExecutionSpace();
+   // Make sure to index with 0 based
+   if (fine_int)
+   {
+      is_d = *ctx->IS_fine_views_local[level_idx];
+   }
+   else
+   {
+      is_d = *ctx->IS_coarse_views_local[level_idx];
+   }
+
+   // Dense blocks are only distributed by row, so every column is in the local
+   // array and the number of local rows of the reduced block is the size of the IS
+   PetscInt global_rows, global_cols;
+   PetscCallVoid(MatGetSize(*xreduced, &global_rows, &global_cols));
+   const PetscInt local_rows_reduced = is_d.extent(0);
+
+   // The local arrays are column major and can have a leading dimension bigger
+   // than the number of local rows, particularly on the device
+   PetscInt lda_full, lda_reduced;
+   PetscCallVoid(MatDenseGetLDA(*xfull, &lda_full));
+   PetscCallVoid(MatDenseGetLDA(*xreduced, &lda_reduced));
+
+   // The memtype of the dense arrays always matches the default kokkos memory
+   // space - there is no MATDENSEKOKKOS, a host kokkos backend gives us host
+   // MATDENSE blocks and a device backend gives us MATDENSECUDA/MATDENSEHIP
+   PetscMemType mtype;
+
+   // SCATTER_REVERSE=1
+   // xreduced[i, j] = xfull[is[i], j]
+   if (mode_int == 1)
+   {
+      const PetscScalar *full_ptr;
+      PetscScalar *reduced_ptr;
+      PetscCallVoid(MatDenseGetArrayReadAndMemType(*xfull, &full_ptr, &mtype));
+      // Every entry of the reduced block is overwritten
+      PetscCallVoid(MatDenseGetArrayWriteAndMemType(*xreduced, &reduced_ptr, &mtype));
+
+      Kokkos::View<const PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xfull_d(full_ptr, lda_full * global_cols);
+      Kokkos::View<PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xreduced_d(reduced_ptr, lda_reduced * global_cols);
+
+      // Ranks with no local rows (or an empty block) have nothing to do
+      if (local_rows_reduced > 0 && global_cols > 0)
+      {
+         Kokkos::parallel_for(
+            Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<PetscInt>>(exec, {0, 0}, {local_rows_reduced, global_cols}),
+            KOKKOS_LAMBDA(const PetscInt i, const PetscInt j) {
+               xreduced_d(j * lda_reduced + i) = xfull_d(j * lda_full + is_d(i));
+         });
+      }
+
+      PetscCallVoid(MatDenseRestoreArrayWriteAndMemType(*xreduced, &reduced_ptr));
+      PetscCallVoid(MatDenseRestoreArrayReadAndMemType(*xfull, &full_ptr));
+   }
+   // SCATTER_FORWARD=0
+   // xfull[is[i], j] = xreduced[i, j]
+   else if (mode_int == 0)
+   {
+      const PetscScalar *reduced_ptr;
+      PetscScalar *full_ptr;
+      PetscCallVoid(MatDenseGetArrayReadAndMemType(*xreduced, &reduced_ptr, &mtype));
+      // Only the rows in the IS are written, the rest of the full block is left
+      // alone, so we can't take write only access here
+      PetscCallVoid(MatDenseGetArrayAndMemType(*xfull, &full_ptr, &mtype));
+
+      Kokkos::View<const PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xreduced_d(reduced_ptr, lda_reduced * global_cols);
+      Kokkos::View<PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xfull_d(full_ptr, lda_full * global_cols);
+
+      // Ranks with no local rows (or an empty block) have nothing to do
+      if (local_rows_reduced > 0 && global_cols > 0)
+      {
+         Kokkos::parallel_for(
+            Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<PetscInt>>(exec, {0, 0}, {local_rows_reduced, global_cols}),
+            KOKKOS_LAMBDA(const PetscInt i, const PetscInt j) {
+               xfull_d(j * lda_full + is_d(i)) = xreduced_d(j * lda_reduced + i);
+         });
+      }
+
+      PetscCallVoid(MatDenseRestoreArrayAndMemType(*xfull, &full_ptr));
+      PetscCallVoid(MatDenseRestoreArrayReadAndMemType(*xreduced, &reduced_ptr));
+   }
+   // Ensure we're done before we exit
+   Kokkos::fence();
+
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Accessor used by MatCreateSubMatrix_kokkos to read the per-PCAIR IS view
 // for a given level/fine-or-coarse. Returns a copy of the shared view (cheap;
 // just bumps the underlying refcount of the kokkos View handle).

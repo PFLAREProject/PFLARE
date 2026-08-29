@@ -113,6 +113,21 @@ module pflare_parameters
    integer, parameter :: MF_MAT_RHS        = 4
 
    ! --------------------------------------------------------
+   ! AIR temporary dense matrix slot indices   (from air_data_type)
+   ! These are the scratch dense blocks used by the multiple rhs (block) FC
+   ! smooths and they mirror the roles the temp_vecs_fine/temp_vecs_coarse
+   ! vectors play in the single rhs smooths
+   ! --------------------------------------------------------
+   integer, parameter :: AIR_MAT_SOL      = 1
+   integer, parameter :: AIR_MAT_TEMP     = 2
+   integer, parameter :: AIR_MAT_RESIDUAL = 3
+   integer, parameter :: AIR_MAT_RHS      = 4
+   ! Target of the cached off-diagonal product (A_fc * x_c or A_cf * x_f) - this
+   ! has no single rhs twin, it exists so every cached product has its own
+   ! dedicated target block (a mat can only hold one attached product)
+   integer, parameter :: AIR_MAT_OFF_DIAG = 5
+
+   ! --------------------------------------------------------
    ! Timer IDs   (from timers)
    ! --------------------------------------------------------
    integer, parameter :: TIMER_ID_AIR_SETUP        = 1

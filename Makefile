@@ -114,6 +114,7 @@ OBJS := $(SRCDIR)/Pflare_Parameters.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
+		  $(SRCDIR)/Gmres_Poly_Apply.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCPFLAREINV_Interfaces.o \
@@ -134,9 +135,10 @@ export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
 endif	
 
 OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
-		  $(SRCDIR)/FC_Smooth.o \
 		  $(SRCDIR)/Gmres_Poly.o \
 		  $(SRCDIR)/Gmres_Poly_Newton.o \
+		  $(SRCDIR)/FC_Smooth.o \
+		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \

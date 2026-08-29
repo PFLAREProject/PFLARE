@@ -5,6 +5,7 @@ module air_data_type_routines
          PFLARE_TOL_AUTO_TRUNCATE
    use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
    use fc_smooth, only: destroy_VecISCopyLocalWrapper
+   use fc_smooth_block, only: destroy_air_block_temps
    
    ! PETSc
    use petscmat
@@ -25,9 +26,11 @@ module air_data_type_routines
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout)    :: air_data
-      ! ~~~~~~    
 
-      air_data%no_levels = -1    
+      integer :: i_loc
+      ! ~~~~~~
+
+      air_data%no_levels = -1
 
       ! Allocate the AIR specific data structures
       allocate(air_data%IS_fine_index(air_data%options%max_levels))
@@ -80,7 +83,19 @@ module air_data_type_routines
       allocate(air_data%temp_vecs_coarse(4)%array(air_data%options%max_levels))
       allocate(air_data%temp_vecs(1)%array(air_data%options%max_levels))
 
-      ! Reuse 
+      ! Temporary dense blocks used during a multiple rhs (block) smooth
+      ! Only the outer arrays are allocated here, the blocks themselves are
+      ! built lazily in ensure_air_block_temps once we know how many columns
+      ! we have been given
+      do i_loc = 1, size(air_data%block_temp_fine)
+         allocate(air_data%block_temp_fine(i_loc)%array(air_data%options%max_levels))
+         allocate(air_data%block_temp_coarse(i_loc)%array(air_data%options%max_levels))
+      end do
+      allocate(air_data%block_temp_full(1)%array(air_data%options%max_levels))
+      air_data%block_ncols = -1
+      air_data%block_local_ncols = -1
+
+      ! Reuse
       allocate(air_data%reuse(air_data%options%max_levels))
       
       ! nnzs counts
@@ -120,6 +135,13 @@ module air_data_type_routines
 
       reuse = .FALSE.
       if (present(keep_reuse)) reuse = keep_reuse
+
+      ! The dense scratch blocks are sized from A_ff/A_cf/coarse_matrix on each
+      ! level, so they have to go whenever we reset regardless of whether we are
+      ! reusing - the number of levels and the layouts on them can both change
+      ! when we build again. They are cheap to rebuild, ensure_air_block_temps
+      ! does that lazily on the next block apply
+      call destroy_air_block_temps(air_data)
 
       ! Use if this data structure is allocated to determine if we setup anything
       if (allocated(air_data%allocated_matrices_A_ff)) then
@@ -284,9 +306,9 @@ module air_data_type_routines
       air_data%coarse_matrix_nnzs   = 0   
       air_data%allocated_coarse_matrix = .FALSE.   
 
-   end subroutine reset_air_data     
+   end subroutine reset_air_data
 
-   ! -------------------------------------------------------------------------------------------------------------------------------
+! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine destroy_air_data(air_data)
 
@@ -295,8 +317,8 @@ module air_data_type_routines
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
 
-      integer :: our_level
-      ! ~~~~~~    
+      integer :: our_level, i_loc
+      ! ~~~~~~
 
       call reset_air_data(air_data)
 
@@ -408,7 +430,14 @@ module air_data_type_routines
          deallocate(air_data%temp_vecs_coarse(2)%array)
          deallocate(air_data%temp_vecs_coarse(3)%array)
          deallocate(air_data%temp_vecs_coarse(4)%array)
-         
+
+         ! The blocks themselves have already been destroyed in reset_air_data
+         do i_loc = 1, size(air_data%block_temp_fine)
+            deallocate(air_data%block_temp_fine(i_loc)%array)
+            deallocate(air_data%block_temp_coarse(i_loc)%array)
+         end do
+         deallocate(air_data%block_temp_full(1)%array)
+
          deallocate(air_data%reuse)
          
          ! Delete the nnzs

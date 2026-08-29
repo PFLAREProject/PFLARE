@@ -1,7 +1,8 @@
 module neumann_poly
 
    use petscmat
-   use gmres_poly, only: build_gmres_polynomial_inverse, petsc_matvec_right_scale_poly_mf
+   use gmres_poly, only: build_gmres_polynomial_inverse
+   use gmres_poly_apply, only: petsc_matvec_right_scale_poly_mf
    use matshell_data_type, only: mat_ctxtype
    use tsqr, only: tsqr_buffers
    use pflare_parameters, only: PFLAREINV_NEUMANN, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &

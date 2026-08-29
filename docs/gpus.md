@@ -39,6 +39,18 @@ The hierarchy in this case has 29 levels. If we turn on the auto truncation and 
 
 we find that the 10th order polynomials are good enough coarse solvers to enable truncation of the hierarchy at level 11. This gives the same iteration count as without truncation and we see an overall speedup of ~1.47x in the solve in this example. The speedup is typically greater in parallel. Please see [3] for more details.
 
+### Multiple right-hand sides
+
+Both `PCPFLAREINV` and `PCAIR` implement `PCMatApply`, so systems with multiple right-hand sides can be solved with `KSPMatSolve` and the preconditioner is applied to the whole dense block of right-hand sides at once. Every product in the polynomial inverses and throughout the AIR hierarchy then goes through the `MatProduct` API, so with Kokkos matrix/vector types the sparse matrix by dense matrix products use real SpMM kernels and the whole multiple right-hand side solve stays on the GPU.
+
+Note that `KSPMatSolve` only reaches `PCMatApply` with `-ksp_type preonly` or `-ksp_type richardson` (or HPDDM); any other KSP type silently falls back to solving column by column. Dense scratch blocks with the same number of columns as the block of right-hand sides are stored (in `PCAIR` on each level of the hierarchy), and `-ksp_matsolve_batch_size` can be used to bound this memory by solving the right-hand sides in batches.
+
+For example, solving the 1D advection problem with 16 right-hand sides with AIRG on a single GPU:
+
+`./adv_1d_multi_rhs -n 100000 -nrhs 16 -ksp_type richardson -pc_type air -mat_type aijkokkos -vec_type kokkos`
+
+see `tests/adv_1d_multi_rhs.c` for the details.
+
 ## OpenMP support
 
 If PETSc has been configured with Kokkos using OpenMP as the backend then PCPFLAREINV and PCAIR support OpenMP. To enable OpenMP throughout the setup/solve the matrix/vector types must be specified as Kokkos (see above) and the `OMP_NUM_THREADS` environmental variable must be set. Good performance is dependent on appropriate pinning of MPI ranks and OpenMP threads to CPU cores/NUMA regions.

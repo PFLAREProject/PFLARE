@@ -18,6 +18,11 @@ module air_data_type
    type petsc_vec_array
       type(tVec), allocatable, dimension(:) :: array
    end type petsc_vec_array
+   ! The dense (block) equivalent of petsc_vec_array, one dense scratch block
+   ! per level
+   type petsc_dense_mat_array
+      type(tMat), allocatable, dimension(:) :: array
+   end type petsc_dense_mat_array
 
    type int_vec_array
       integer, allocatable, dimension(:) :: array
@@ -340,6 +345,20 @@ module air_data_type
       ! Temporary storage
       type(petsc_vec_array), dimension(4) :: temp_vecs_fine, temp_vecs_coarse
       type(petsc_vec_array), dimension(1) :: temp_vecs
+
+      ! Temporary dense storage used during a multiple rhs (block) smooth
+      ! These are the block twins of temp_vecs_fine/temp_vecs_coarse/temp_vecs,
+      ! with a fifth slot as the dedicated target of the cached off-diagonal
+      ! product (see setup_air_block_products)
+      ! They are lazily created from the block of rhs we're given, as the number
+      ! of columns isn't known until the block apply happens
+      type(petsc_dense_mat_array), dimension(5) :: block_temp_fine, block_temp_coarse
+      type(petsc_dense_mat_array), dimension(1) :: block_temp_full
+      ! The number of global (and local) columns the cached block temporaries
+      ! were built with - the local column layout has to match the block of rhs
+      ! we're given or the products would have incompatible layouts
+      PetscInt :: block_ncols = -1
+      PetscInt :: block_local_ncols = -1
 
       ! Per-PCAIR opaque handle to the kokkos-side IS view storage. Set up by
       ! create_VecISCopyLocal_kokkos, torn down by destroy_VecISCopyLocal_kokkos.

@@ -5,11 +5,12 @@ module c_fortran_bindings
    use pcair_data_type, only: pc_air_multigrid_data
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
-   use gmres_poly_newton, only: shell_poly_block_apply
+   use gmres_poly_apply, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
    use petsc_helper, only: remove_from_sparse_match
    use air_data_type_routines, only: create_air_data
+   use fc_smooth_block, only: ensure_air_block_temps
 
 #include "petsc/finclude/petscksp.h"
 
@@ -92,8 +93,63 @@ module c_fortran_bindings
       ! Now the PC has been modified so make sure to copy the pointer back
       pc_ptr = pc%v
 
-   end subroutine create_pc_air_shell_c    
-   
+   end subroutine create_pc_air_shell_c
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pcair_shell_block_matapply_c(pc_ptr, x_ptr, y_ptr, applied_int, error_int) &
+         bind(C,name='pcair_shell_block_matapply_c')
+
+      ! Applies the air multigrid to a whole dense block of right hand sides
+      ! The pc handed in is our underlying PCShell (which must already have been
+      ! set up, as this doesn't go through PCApply on the shell)
+      ! applied_int comes back as 0 if we couldn't do a block apply, in which case
+      ! the caller has to apply column by column instead
+      ! error_int carries back any petsc error so the caller can PetscCall it
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(in) :: pc_ptr, x_ptr, y_ptr
+      integer(c_int), intent(out)      :: applied_int, error_int
+
+      type(tPC)   :: pc, pcmg_pc
+      type(tMat)  :: x_mat, y_mat
+      type(pc_air_multigrid_data), pointer :: pc_air_data => null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v    = pc_ptr
+      x_mat%v = x_ptr
+      y_mat%v = y_ptr
+
+      applied_int = 0
+      error_int = 0
+      call PCShellGetContext(pc, pc_air_data, ierr)
+      if (ierr /= 0) then
+         error_int = int(ierr, c_int)
+         return
+      end if
+
+      ! Defensive - the hierarchy hasn't been built so we have nothing to apply
+      if (pc_air_data%air_data%no_levels == -1) return
+      pcmg_pc = pc_air_data%pcmg
+      if (PetscObjectIsNull(pcmg_pc)) return
+
+      ! Build the dense scratch the block smooths need - we only know the number
+      ! of columns (and the type of block) once we get here
+      call ensure_air_block_temps(pc_air_data%air_data, x_mat, ierr)
+      if (ierr /= 0) then
+         error_int = int(ierr, c_int)
+         return
+      end if
+
+      ! PCMG (or the single level PCMAT/PCJACOBI) does the rest
+      call PCMatApply(pc_air_data%pcmg, x_mat, y_mat, ierr)
+      error_int = int(ierr, c_int)
+
+      applied_int = 1
+
+   end subroutine pcair_shell_block_matapply_c
+
    !------------------------------------------------------------------------------------------------------------------------
 
    subroutine calculate_and_build_approximate_inverse_c(input_mat_ptr, inverse_type, &

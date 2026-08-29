@@ -10,7 +10,8 @@ module approx_inverse_setup
    use gmres_poly, only: &
          start_gmres_polynomial_coefficients_power, &
          calculate_gmres_polynomial_coefficients_arnoldi, &
-         build_gmres_polynomial_inverse, petsc_matvec_da_poly_mf
+         build_gmres_polynomial_inverse
+   use gmres_poly_apply, only: petsc_matvec_da_poly_mf
    use gmres_poly_newton, only: &
          build_gmres_polynomial_newton_inverse, &
          calculate_gmres_polynomial_roots_newton
@@ -513,7 +514,7 @@ module approx_inverse_setup
       integer :: i_loc
       MatType:: mat_type
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
-      type(tMat) :: temp_mat
+      type(tMat) :: temp_mat, temp_mat_local
       type(tVec) :: temp_vec
       ! ~~~~~~
 
@@ -549,6 +550,17 @@ module approx_inverse_setup
             do i_loc = 1, size(mat_ctx%mf_temp_mat)
                temp_mat = mat_ctx%mf_temp_mat(i_loc)
                if (.NOT. PetscObjectIsNull(temp_mat)) then
+                  ! The block kernels attach products that hold references between
+                  ! the scratch mats - the horner ping-pong pair reference each
+                  ! other, so plain destroys would leave a reference cycle alive -
+                  ! clear the products first to break it
+                  ! The parallel aij x dense numeric attaches its own inner product
+                  ! to the local dense block, which recreates the same cycle between
+                  ! the local blocks - clear that one too (for seq dense the local
+                  ! matrix is the mat itself, so this is just a repeat clear)
+                  call MatProductClear(temp_mat, ierr)
+                  call MatDenseGetLocalMatrix(temp_mat, temp_mat_local, ierr)
+                  call MatProductClear(temp_mat_local, ierr)
                   call MatDestroy(temp_mat, ierr)
                   mat_ctx%mf_temp_mat(i_loc) = temp_mat
                end if

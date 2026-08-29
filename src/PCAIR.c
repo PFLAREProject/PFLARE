@@ -15,6 +15,7 @@
 PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
 PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
+PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied, int *error_code);
 PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, PetscReal fraction_swap,
@@ -162,6 +163,47 @@ static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
 
    // Just call the underlying pcshell apply
    PetscCall(PCApply(*pc_air_shell, x, y));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+// Multi-RHS apply: applies the air multigrid to a whole block of dense right
+// hand sides, so KSPMatSolve does real sparse matrix by dense matrix products
+// throughout the cycle rather than PETSc's column-by-column PCApply fallback
+static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
+{
+   PetscFunctionBegin;
+   PC *pc_air_shell = (PC *)pc->data;
+   int applied = 0, error_code = 0;
+
+   // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
+   // so it has to see the reusepreconditioner flag
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+
+   // PCApply on the shell would do this for us, but the block path below goes
+   // straight to the underlying PCMG so we have to set the shell up ourselves
+   PetscCall(PCSetUp(*pc_air_shell));
+
+   pcair_shell_block_matapply_c(pc_air_shell, &X, &Y, &applied, &error_code);
+   PetscCall((PetscErrorCode)error_code);
+
+   if (applied) {
+      PetscCall(PetscInfo(pc, "PCMatApply used the block air multigrid\n"));
+   } else {
+      // Anything we can't do blockwise is applied column-by-column
+      PetscInt n_cols, j;
+      Vec cx, cy;
+      PetscCall(PetscInfo(pc, "PCMatApply solving column by column\n"));
+      PetscCall(MatGetSize(X, NULL, &n_cols));
+      for (j = 0; j < n_cols; j++) {
+         PetscCall(MatDenseGetColumnVecRead(X, j, &cx));
+         PetscCall(MatDenseGetColumnVecWrite(Y, j, &cy));
+         PetscCall(PCApply(*pc_air_shell, cx, cy));
+         PetscCall(MatDenseRestoreColumnVecWrite(Y, j, &cy));
+         PetscCall(MatDenseRestoreColumnVecRead(X, j, &cx));
+      }
+   }
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -3591,10 +3633,15 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
   PETSc Kokkos types (for example `-mat_type aijkokkos -vec_type kokkos`, or
   `-dm_mat_type aijkokkos -dm_vec_type kokkos` if using a `DM`).
 
+  `PCAIR` implements `PCMatApply()`, so a `KSPMatSolve()` with `KSPPREONLY` or
+  `KSPRICHARDSON` applies the multigrid hierarchy to a whole dense block of right-hand
+  sides at once, with sparse matrix by dense matrix products throughout; on the GPU
+  backends this keeps a multiple right-hand side solve on the device.
+
   If you use `PCAIR` please cite S. Dargaville et al., "AIR multigrid with GMRES polynomials
   (AIRG) and additive preconditioners for Boltzmann transport", J. Comput. Phys. 518 (2024) 113342.
 
-.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`, `PCMatApply()`, `KSPMatSolve()`
 M*/
 
 // Creates the structure we need for this PC
@@ -3634,6 +3681,7 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
 
    // Set the method functions
    pc->ops->apply               = PCApply_AIR_c;
+   pc->ops->matapply            = PCMatApply_AIR_c;
    pc->ops->setup               = PCSetUp_AIR_c;
    pc->ops->destroy             = PCDestroy_AIR_c;
    pc->ops->view                = PCView_AIR_c;  
