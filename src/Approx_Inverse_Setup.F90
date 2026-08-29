@@ -550,6 +550,11 @@ module approx_inverse_setup
             do i_loc = 1, size(mat_ctx%mf_temp_mat)
                temp_mat = mat_ctx%mf_temp_mat(i_loc)
                if (.NOT. PetscObjectIsNull(temp_mat)) then
+                  ! The block kernels attach products that hold references between
+                  ! the scratch mats - the horner ping-pong pair reference each
+                  ! other, so plain destroys would leave a reference cycle alive -
+                  ! clear the products first to break it
+                  call MatProductClear(temp_mat, ierr)
                   call MatDestroy(temp_mat, ierr)
                   mat_ctx%mf_temp_mat(i_loc) = temp_mat
                end if
