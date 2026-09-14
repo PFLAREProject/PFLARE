@@ -158,7 +158,8 @@ jobs:
           docker run -i --rm "$IMAGE" bash -s <<'EOF'
           set -e
           export PYTHONPATH=$PETSC_DIR/$PETSC_ARCH/lib
-          export LIBRARY_PATH=/build/PFLARE/lib
+          # No LIBRARY_PATH is set, so this also tests that the setup.py finds
+          # libpflare in the source tree on its own
           python3 -m pip install --no-build-isolation --no-deps /build/PFLARE/python
           # Run from outside the source tree so the installed copy is imported
           cd /tmp
