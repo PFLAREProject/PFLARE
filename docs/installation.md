@@ -40,6 +40,8 @@ Alternatively, after step 3 the Python interfaces can be installed into the curr
 
      pip install --no-build-isolation --no-deps ./python
 
+Ensure pip builds with the same compilers as PETSc by setting the ``CC`` environmental variable (given in the PETSc ``lib/petsc/conf/petscvariables`` file) before running pip.
+
 Then if desired, check that PFLARE was built successfully by running some simple tests with:
 
 5) ``make check`` in the top level directory.

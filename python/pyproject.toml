@@ -9,6 +9,9 @@
 #
 #     pip install --no-build-isolation --no-deps ./python
 #
+# CC must also be set to the same compiler as PETSc (given in the PETSc
+# petscvariables file).
+#
 # Building in-place with make python (in the top level directory) also still works.
 [build-system]
 requires = ["setuptools", "Cython"]

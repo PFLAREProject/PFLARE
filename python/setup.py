@@ -38,6 +38,16 @@ def configure():
         LIBRARY_DIRS += [join(PETSC_DIR, 'lib')]
     LIBRARIES += ['petsc', 'pflare']
 
+    # PFLARE
+    # A source build outputs libpflare to lib/ in the top level directory, so
+    # add it here, otherwise pip installs would have to rely on LIBRARY_PATH
+    # being set (the make python build sets it). A PETSc --download-pflare
+    # build instead puts libpflare in the PETSc lib dir added above, where this
+    # directory doesn't exist and is skipped.
+    PFLARE_LIB_DIR = join(os.path.dirname(os.path.abspath(__file__)), os.pardir, 'lib')
+    if isdir(PFLARE_LIB_DIR):
+        LIBRARY_DIRS += [PFLARE_LIB_DIR]
+
     # PETSc for Python
     INCLUDE_DIRS += [petsc4py.get_include()]
 
