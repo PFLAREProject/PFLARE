@@ -6,31 +6,12 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
-- Fixed `-pc_air_full_smoothing_up_and_down` with an assembled inverse applying
-  the wrong smoother, which stopped it converging. The level smoothers there are
-  a `PCMAT` whose Pmat is our approximate inverse, so `PCApply` has to be a
-  matmult with it. Since PETSc 3.21 `PCSetUp_Mat` instead defaults to `MatSolve`
-  whenever the Pmat has one, which matdiagonal does, so a diagonal approximate
-  inverse was being applied as a solve, i.e. multiplied by its own inverse. PCAIR
-  now asks for `MATOP_MULT` explicitly with `PCMatSetApplyOperation`, both for
-  the level smoothers and for the single level auto-truncated case. This only
-  affected the assembled inverses; `-pc_air_matrix_free_polys` goes through a
-  PCSHELL and was always correct
+- Fixed `-pc_air_full_smoothing_up_and_down` with an assembled inverse not
+  converging: since PETSc 3.21 the `PCMAT` smoothers defaulted to `MatSolve`
+  with our diagonal inverses. PCAIR now requests `MATOP_MULT` explicitly
 - Fixed `-pc_air_full_smoothing_up_and_down` ignoring
-  `-pc_air_inverse_sparsity_order` and assembling the inverse of each level
-  matrix as a diagonal. When the F-F block `A_ff` is diagonal, which it is on
-  many problems with a good CF splitting, PCAIR takes a shortcut and drops the
-  sparsity order of the `A_ff` inverse to zero. In full smoothing mode that same
-  polynomial data does not invert `A_ff` at all, it inverts the whole level
-  matrix, so the shortcut was forcing the inverse of the entire level operator
-  to sparsity order zero, i.e. to a diagonal, no matter what
-  `-pc_air_inverse_sparsity_order` was set to. The shortcut is now confined to
-  the `A_ff` inverse used for the grid-transfer operators, and full smoothing
-  builds its inverse with the requested sparsity order and the full level matrix
-  size. The assembled full smoothing V-cycle is much stronger as a result: on
-  `adv_1d -n 1000` it goes from 74 iterations to 14, and
-  `-pc_air_inverse_sparsity_order 2`, which used to make no difference at all,
-  now gives 8
+  `-pc_air_inverse_sparsity_order`: the diagonal `A_ff` shortcut was forcing
+  the assembled inverse of the whole level matrix to be a diagonal
 - PCPFLAREINV now implements `PCApplyTranspose`, so it can be used as the
   preconditioner in a `KSPSolveTranspose`. This works for every inverse type,
   both assembled and matrix-free. It applies the exact transpose of what

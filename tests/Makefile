@@ -570,24 +570,18 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
-# The full smoothing up and down smoothers are a PCMAT whose Pmat is our assembled
-# approximate inverse, so these check that PCApply there is a matmult with the inverse
-# rather than a solve against it - the iteration caps below are the assertion
 	@echo ""
-	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse - 14 its measured, cap 25"
+	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
-	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse - 16 its measured, cap 25"
+	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 25
-	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse - 8 its measured, cap 15"
+	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
-	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion - 20 its measured, cap 30"
+	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion"
 	./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
 	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
-# With full smoothing the inverse in inv_A_ff is the inverse of the whole level matrix, not of
-# A_ff, so a higher inverse sparsity order has to give a stronger V-cycle than the default - this
-# is the assertion that the diagonal A_ff shortcut is not being applied to it
-	@echo "Test AIRG with full smoothing up and down uses the requested inverse sparsity order - 8 its measured, cap 15"
+	@echo "Test AIRG with full smoothing up and down uses the requested inverse sparsity order"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_sparsity_order 2 \
 	 -ksp_max_it 15
 #
@@ -1188,19 +1182,16 @@ else
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
-# The full smoothing up and down smoothers are a PCMAT whose Pmat is our assembled
-# approximate inverse, so these check that PCApply there is a matmult with the inverse
-# rather than a solve against it - the iteration caps below are the assertion
 	@echo ""
-	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse in parallel - 15 its measured, cap 25"
+	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
-	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse - 16 its measured, cap 25"
+	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi \
 	 -ksp_max_it 25
-	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel - 9 its measured, cap 15"
+	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
-	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel - 19 its measured, cap 30"
+	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
 	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
 #
