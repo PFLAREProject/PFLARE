@@ -8,9 +8,7 @@
 # PFLARE library
 #### Created by: Steven Dargaville
 
-This library contains methods which can be used to solve linear systems in parallel with PETSc, with interfaces in C/Fortran/Python. 
-
-It aims to provide fast & scalable iterative methods for asymmetric linear systems, in parallel and on both CPUs and GPUs.
+This library contains methods which can be used to solve linear systems in parallel with PETSc. It aims to provide fast & scalable iterative methods for asymmetric linear systems.
    
 Some examples of asymmetric linear systems that PFLARE can scalably solve include:   
    - Advection equations
@@ -24,10 +22,19 @@ without requiring Gauss-Seidel methods. This includes time dependent or independ
 ## Methods available in PFLARE
 
 PFLARE adds new methods to PETSc, including:
-1) Polynomial approximate inverses, e.g., GMRES and Neumann polynomials
+1) Polynomial approximate inverses, applied matrix-free or as assembled matrices, e.g., GMRES polynomials
 2) Reduction multigrids, e.g., AIRG, nAIR, lAIR and others
 3) CF splittings, e.g., PMISR DDC
 4) Methods to extract diagonally dominant submatrices
+
+## Capabilities
+
+- MPI parallel
+- Single or double precision
+- Block solves for multiple right-hand sides through `KSPMatSolve`, using sparse-dense products for improved throughput
+- GPU support via Kokkos, supporting Nvidia, AMD and Intel GPUs
+- GPU solves (single and multiple right-hand sides) run entirely on the device
+- C/C++, Fortran and Python interfaces
 
 ## Quick start
 
@@ -41,7 +48,7 @@ You can get started with PFLARE in one of five ways:
 
 ## Tutorials
 
-The Jupyter notebooks below are the best place to start; they can be run interactively in your browser via the Binder badge above with no local install:
+The Jupyter notebooks are the best place to start; they can be run interactively in your browser via the Binder badge above with no local install:
 
 | Path | Contents |
 |---|---|
@@ -59,7 +66,7 @@ The Jupyter notebooks below are the best place to start; they can be run interac
 | [docs/new_methods.md](docs/new_methods.md) | Details on the new methods added by PFLARE |
 | [docs/installation.md](docs/installation.md) | How to install PFLARE |
 | [docs/use_pflare.md](docs/use_pflare.md) | How to use PFLARE |
-| [docs/gpus.md](docs/gpus.md) | Using GPUs with PFLARE |
+| [docs/gpus.md](docs/gpus.md) | Using GPUs and multiple right-hand sides with PFLARE |
 | [docs/reuse.md](docs/reuse.md) | Re-using components of PFLARE |
 | [docs/options.md](docs/options.md) | List of the options available in PFLARE |   
 | [docs/faq.md](docs/faq.md) | Frequently asked questions and help! |   
