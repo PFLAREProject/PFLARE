@@ -169,6 +169,73 @@ static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
 
 // ~~~~~~~~~~
 
+// The transposed cycle for the default F-C smoothing hard codes the one F-C
+// richardson a level that setup_air_pcmg builds, so if the user has overridden the
+// level KSPs with -<prefix>mg_levels_* (PCSetUp_MG calls KSPSetFromOptions on them)
+// the transpose would quietly stop being the transpose of the forward apply.
+// Catch that here rather than returning a wrong answer
+static PetscErrorCode PCAIRCheckTransposeLevels(PC pc, PC pc_air_shell)
+{
+   PetscInt  n_levels, level;
+   PetscBool full_smoothing;
+   PC        pcmg;
+
+   PetscFunctionBegin;
+   PCAIRGetNumLevels_c(&pc, &n_levels);
+   PCAIRGetFullSmoothingUpAndDown_c(&pc, &full_smoothing);
+
+   // A single level isn't a PCMG, and full smoothing up and down is driven by
+   // PETSc's own transposed v-cycle, which applies whatever KSP is on each level
+   if (n_levels <= 1 || full_smoothing) PetscFunctionReturn(PETSC_SUCCESS);
+
+   pcair_shell_get_pcmg_c(&pc_air_shell, &pcmg);
+
+   // PETSc level 0 is the coarse solve, which goes through KSPSolveTranspose and
+   // so honours any -mg_coarse_* the user has set
+   for (level = 1; level < n_levels; level++) {
+      KSP       ksp_smoother;
+      PC        pc_smoother;
+      PetscInt  max_it;
+      PetscBool is_richardson, is_shell;
+
+      PetscCall(PCMGGetSmoother(pcmg, level, &ksp_smoother));
+      PetscCall(PetscObjectTypeCompare((PetscObject)ksp_smoother, KSPRICHARDSON, &is_richardson));
+      PetscCall(KSPGetTolerances(ksp_smoother, NULL, NULL, NULL, &max_it));
+      PetscCall(KSPGetPC(ksp_smoother, &pc_smoother));
+      PetscCall(PetscObjectTypeCompare((PetscObject)pc_smoother, PCSHELL, &is_shell));
+
+      PetscCheck(is_richardson && is_shell && max_it == 1, PetscObjectComm((PetscObject)pc), PETSC_ERR_SUP, \
+            "PCAIR cannot apply its transpose with the level smoothers changed by -mg_levels_* - " \
+            "the transposed cycle only knows the single F-C richardson PCAIR builds. Use " \
+            "-pc_air_full_smoothing_up_and_down, where the level KSPs are applied by PETSc, or " \
+            "change the smoothing with -pc_air_smooth_type instead");
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Transposed apply - this applies the exact transpose of what PCApply applies, so
+// the two are adjoints and KSPSolveTranspose works
+static PetscErrorCode PCApplyTranspose_AIR_c(PC pc, Vec x, Vec y)
+{
+   PetscFunctionBegin;
+   PC *pc_air_shell = (PC *)pc->data;
+
+   // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
+   // so it has to see the reusepreconditioner flag
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+
+   // PCApplyTranspose on the shell would set it up for us, but the check below has
+   // to see the hierarchy that is actually going to be applied
+   PetscCall(PCSetUp(*pc_air_shell));
+   PetscCall(PCAIRCheckTransposeLevels(pc, *pc_air_shell));
+
+   // Just call the underlying pcshell transposed apply
+   PetscCall(PCApplyTranspose(*pc_air_shell, x, y));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
 // Multi-RHS apply: applies the air multigrid to a whole block of dense right
 // hand sides, so KSPMatSolve does real sparse matrix by dense matrix products
 // throughout the cycle rather than PETSc's column-by-column PCApply fallback
@@ -3695,6 +3762,9 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
    // Set the method functions
    pc->ops->apply               = PCApply_AIR_c;
    pc->ops->matapply            = PCMatApply_AIR_c;
+   // We deliberately don't set matapplytranspose - PCMatApplyTranspose falls back to
+   // applying PCApplyTranspose column by column when it is NULL, which is correct
+   pc->ops->applytranspose      = PCApplyTranspose_AIR_c;
    pc->ops->setup               = PCSetUp_AIR_c;
    pc->ops->destroy             = PCDestroy_AIR_c;
    pc->ops->view                = PCView_AIR_c;  

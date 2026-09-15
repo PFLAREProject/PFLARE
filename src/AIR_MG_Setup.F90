@@ -21,7 +21,7 @@ module air_mg_setup
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson, mg_coarse_shell_apply, &
-         mg_smooth_shell_apply
+         mg_smooth_shell_apply, mg_coarse_shell_apply_transpose, mg_smooth_shell_apply_transpose
    use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
          mg_smooth_shell_block_apply
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
@@ -1091,6 +1091,10 @@ module air_mg_setup
                   call PCShellSetApply(pc_smoother_down, mg_smooth_shell_apply, ierr)
                   call PCShellSetMatApply(pc_smoother_up, mg_smooth_shell_block_apply, ierr)
                   call PCShellSetMatApply(pc_smoother_down, mg_smooth_shell_block_apply, ierr)
+                  ! PCMAT has a transposed apply, so a shell standing in for it needs
+                  ! one too or a transposed v-cycle can't drive these smoothers
+                  call PCShellSetApplyTranspose(pc_smoother_up, mg_smooth_shell_apply_transpose, ierr)
+                  call PCShellSetApplyTranspose(pc_smoother_down, mg_smooth_shell_apply_transpose, ierr)
                else
                   call PCSetType(pc_smoother_up, PCMAT, ierr)
                   call PCSetType(pc_smoother_down, PCMAT, ierr)
@@ -1216,6 +1220,9 @@ module air_mg_setup
          ! The multiple rhs version - the coarse ksp is a preonly, which does have
          ! a matsolve, so this is what makes the coarse solve a real block apply
          call PCShellSetMatApply(pc_coarse_solver, mg_coarse_shell_block_apply, ierr)
+         ! The transposed apply - this is what a KSPSolveTranspose on the coarse ksp
+         ! ends up calling in our transposed cycle
+         call PCShellSetApplyTranspose(pc_coarse_solver, mg_coarse_shell_apply_transpose, ierr)
          call PCSetUp(pc_coarse_solver, ierr)
          call KSPSetUp(ksp_coarse_solver, ierr)
 
@@ -1266,13 +1273,14 @@ module air_mg_setup
             call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(3)%array(our_level), ierr)
             call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(4)%array(our_level), ierr)        
 
-            ! If we're doing C point smoothing we need some extra temporaries
-            if (air_data%options%any_c_smooths .AND. &
-                     .NOT. air_data%options%full_smoothing_up_and_down) then
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)         
-            end if            
+            ! The C point smooths need these, and so does the transposed F-C smooth,
+            ! which tracks the coarse half of the residual even with no C smooths.
+            ! Three coarse sized vectors a level is nothing next to the matrices, so
+            ! rather than work out whether a transposed apply might happen later we
+            ! always build them
+            call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+            call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
+            call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)
          end if              
          
          air_data%allocated_matrices_A_ff(our_level) = .TRUE.

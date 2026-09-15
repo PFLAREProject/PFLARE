@@ -4,6 +4,7 @@ module pcair_shell
    use c_petsc_interfaces, only: c_PCGetStructureFlag, PCGetSetupCalled_c, PCMarkNotSetUp_c
    use pcair_data_type, only: pc_air_multigrid_data, air_options
    use air_mg_setup, only: setup_air_pcmg
+   use air_mg_apply_transpose, only: apply_air_transpose
    use air_data_type_routines, only: reset_air_data, destroy_air_data
 
 #include "petsc/finclude/petscksp.h"
@@ -36,6 +37,8 @@ module pcair_shell
       call PCShellSetContext(pc, pc_air_data, ierr)
       ! Set the apply routine
       call PCShellSetApply(pc, PCApply_AIR_Shell, ierr)
+      ! Set the transposed apply routine
+      call PCShellSetApplyTranspose(pc, PCApplyTranspose_AIR_Shell, ierr)
       ! Set the destroy routine
       call PCShellSetDestroy(pc, PCDestroy_AIR_Shell, ierr)
       ! Set the setup routine
@@ -185,7 +188,30 @@ module pcair_shell
       ! Just apply the pcmg
       call PCApply(pc_air_data%pcmg, x, y, ierr)
 
-   end subroutine PCApply_AIR_Shell   
+   end subroutine PCApply_AIR_Shell
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCApplyTranspose_AIR_Shell(pc, x, y, ierr)
+
+      ! Apply the transpose of our shell PC
+      ! Unlike the forward apply we can't just hand this to the pcmg, as petsc's
+      ! kaskade cycle ignores the transpose flag - see apply_air_transpose
+
+      ! ~~~~~~
+      type(tPC), intent(in)    :: pc
+      type(tVec)               :: x, y
+      PetscErrorCode, intent(inout)   :: ierr
+
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+
+      ! ~~~~~~
+
+      ! Get the PC context
+      call PCShellGetContext(pc, pc_air_data, ierr)
+      call apply_air_transpose(pc_air_data%air_data, pc_air_data%pcmg, x, y, ierr)
+
+   end subroutine PCApplyTranspose_AIR_Shell
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

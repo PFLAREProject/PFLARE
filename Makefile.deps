@@ -1,6 +1,7 @@
 src/Aggregation.o : src/Aggregation.F90 
 src/AIR_Data_Type.o : src/AIR_Data_Type.F90 src/Pflare_Parameters.o src/Gmres_Poly_Data_Type.o 
 src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.F90 src/FC_Smooth_Block.o src/FC_Smooth.o src/Approx_Inverse_Setup.o src/Pflare_Parameters.o src/AIR_Data_Type.o 
+src/AIR_MG_Apply_Transpose.o : src/AIR_MG_Apply_Transpose.F90 src/FC_Smooth.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/PETSc_Helper.o src/Repartition.o src/Gmres_Poly_Apply.o src/Gmres_Poly.o src/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/FC_Smooth_Block.o src/FC_Smooth.o src/AIR_MG_Stats.o src/AIR_Data_Type.o src/Timers.o src/Approx_Inverse_Setup.o src/Pflare_Parameters.o src/Matshell_Data_Type.o src/CF_Splitting.o src/Constrain_Z_or_W.o 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.F90 src/Gmres_Poly.o src/AIR_Data_Type.o src/PETSc_Helper.o 
 src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/PETSc_Helper.o src/SAI_Z.o src/Grid_Transfer_Improve.o src/Grid_Transfer.o src/AIR_Data_Type.o src/Timers.o src/Pflare_Parameters.o src/Approx_Inverse_Setup.o src/Constrain_Z_or_W.o 
@@ -27,7 +28,7 @@ src/Neumann_Poly.o : src/Neumann_Poly.F90 src/Pflare_Parameters.o src/TSQR.o src
 src/PCAIR_C_Fortran_Bindings.o : src/PCAIR_C_Fortran_Bindings.F90 src/PCAIR_Interfaces.o 
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.F90 src/AIR_Data_Type.o 
 src/PCAIR_Interfaces.o : src/PCAIR_Interfaces.F90 src/Pflare_Parameters.o src/AIR_MG_Stats.o src/PCAIR_Shell.o 
-src/PCAIR_Shell.o : src/PCAIR_Shell.F90 src/AIR_Data_Type_Routines.o src/AIR_MG_Setup.o src/PCAIR_Data_Type.o src/C_PETSc_Interfaces.o 
+src/PCAIR_Shell.o : src/PCAIR_Shell.F90 src/AIR_Data_Type_Routines.o src/AIR_MG_Apply_Transpose.o src/AIR_MG_Setup.o src/PCAIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/PCPFLAREINV_Interfaces.o : src/PCPFLAREINV_Interfaces.F90 
 src/PETSc_Helper.o : src/PETSc_Helper.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o 
 src/PFLARE.o : src/PFLARE.F90 src/Pflare_Parameters.o src/PCAIR_Interfaces.o src/PCPFLAREINV_Interfaces.o 

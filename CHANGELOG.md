@@ -12,6 +12,11 @@ for earlier changes please see the git history.
 - Fixed `-pc_air_full_smoothing_up_and_down` ignoring
   `-pc_air_inverse_sparsity_order`: the diagonal `A_ff` shortcut was forcing
   the assembled inverse of the whole level matrix to be a diagonal
+- PCAIR now implements `PCApplyTranspose`, so it can be used as the
+  preconditioner in a `KSPSolveTranspose`. It applies the exact transpose of the
+  cycle `PCApply` applies, so the two are adjoints. Overriding the level
+  smoothers with `-mg_levels_*` gives an error on a transposed apply, and
+  `PCMatApplyTranspose` falls back to applying `PCApplyTranspose` column by column
 - PCPFLAREINV now implements `PCApplyTranspose`, so it can be used as the
   preconditioner in a `KSPSolveTranspose`. This works for every inverse type,
   both assembled and matrix-free. It applies the exact transpose of what

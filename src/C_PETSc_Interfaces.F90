@@ -82,9 +82,49 @@ module c_petsc_interfaces
          bind(c, name="PCMarkNotSetUp_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
-      end subroutine PCMarkNotSetUp_c         
- 
-   end interface   
+      end subroutine PCMarkNotSetUp_c
+
+   end interface
+
+   ! The per-level work vectors of a PCMG - petsc has the setters but no getters
+   ! so there is nothing we could call from fortran, see the comments above
+   ! PCMGGetRhs_c in C_PETSc_Routines.c. These are temporary and should go once
+   ! petsc has PCMGGetRhs/PCMGGetX/PCMGGetR with fortran bindings
+   interface
+
+      subroutine PCMGGetRhs_c(A_array, level, vec_array) &
+         bind(c, name="PCMGGetRhs_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt, value :: level
+         integer(c_long_long) :: vec_array
+      end subroutine PCMGGetRhs_c
+
+   end interface
+
+   interface
+
+      subroutine PCMGGetX_c(A_array, level, vec_array) &
+         bind(c, name="PCMGGetX_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt, value :: level
+         integer(c_long_long) :: vec_array
+      end subroutine PCMGGetX_c
+
+   end interface
+
+   interface
+
+      subroutine PCMGGetR_c(A_array, level, vec_array) &
+         bind(c, name="PCMGGetR_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt, value :: level
+         integer(c_long_long) :: vec_array
+      end subroutine PCMGGetR_c
+
+   end interface
 
    interface   
       

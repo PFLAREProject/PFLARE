@@ -139,6 +139,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/FC_Smooth.o \
 		  $(SRCDIR)/FC_Smooth_Block.o \
+		  $(SRCDIR)/AIR_MG_Apply_Transpose.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
@@ -180,6 +181,7 @@ export TEST_TARGETS = ex12f \
 		  adv_1d_multi_rhs \
 		  shell_block_apply \
 		  pflareinv_apply_transpose \
+		  pcair_apply_transpose \
 		  adv_diff_fd \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \

@@ -48,6 +48,27 @@ module fc_smooth
 
    !------------------------------------------------------------------------------------------------------------------------
 
+   subroutine mg_coarse_shell_apply_transpose(pc, x, y, ierr)
+
+      ! The transpose of mg_coarse_shell_apply, y = inv_A_ff(no_levels)^T x
+      ! Our polynomial inverses all know how to do a transposed matvec, either
+      ! natively when assembled or through a transposed twin when matrix-free
+
+      ! ~~~~~~
+      type(tPC)                             :: pc
+      type(tVec)                            :: x, y
+      PetscErrorCode, intent(out)           :: ierr
+
+      type(air_multigrid_data), pointer     :: air_data => null()
+      ! ~~~~~~
+
+      call PCShellGetContext(pc, air_data, ierr)
+      call MatMultTranspose(air_data%inv_A_ff(air_data%no_levels), x, y, ierr)
+
+   end subroutine mg_coarse_shell_apply_transpose
+
+   !------------------------------------------------------------------------------------------------------------------------
+
    subroutine mg_smooth_shell_apply(pc, x, y, ierr)
 
       ! PCShell apply used for the level smoothers when doing full smoothing up
@@ -69,6 +90,29 @@ module fc_smooth
       call MatMult(pmat, x, y, ierr)
 
    end subroutine mg_smooth_shell_apply
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mg_smooth_shell_apply_transpose(pc, x, y, ierr)
+
+      ! The transpose of mg_smooth_shell_apply - the Pmat of the smoother is
+      ! inv_A_ff on that level, so this is just a transposed matvec with it
+      ! This is what KSPSolveTranspose on the level smoothers needs when doing
+      ! full smoothing up and down with a matrix-free inverse
+
+      ! ~~~~~~
+      type(tPC)                             :: pc
+      type(tVec)                            :: x, y
+      PetscErrorCode, intent(out)           :: ierr
+
+      type(tMat) :: mat, pmat
+      ! ~~~~~~
+
+      ierr = 0
+      call PCGetOperators(pc, mat, pmat, ierr)
+      call MatMultTranspose(pmat, x, y, ierr)
+
+   end subroutine mg_smooth_shell_apply_transpose
 
    !------------------------------------------------------------------------------------------------------------------------
 
@@ -111,14 +155,12 @@ module fc_smooth
          call generate_identity_is(input_mat, air_data%IS_coarse_index(our_level), &
                   air_data%i_coarse_full_full(our_level))               
 
-         ! If we're C point smoothing as well
-         if (air_data%options%any_c_smooths .AND. &
-                  .NOT. air_data%options%full_smoothing_up_and_down) then     
-            
-            ! Build identity that sets coarse in full to zero
-            call generate_identity_is(input_mat, air_data%IS_fine_index(our_level), &
-                  air_data%i_fine_full_full(our_level))                         
-         end if 
+         ! Build identity that sets coarse in full to zero
+         ! This is needed whenever we scatter coarse values back into a full sized
+         ! vector, which the C point smooths do and so does the transposed F-C
+         ! smooth, as that has to write x_c and r_c back even with no C smooths
+         call generate_identity_is(input_mat, air_data%IS_fine_index(our_level), &
+               air_data%i_fine_full_full(our_level))
 
       ! We're either on the cpu or on the gpu with kokkos
       else
@@ -165,10 +207,7 @@ module fc_smooth
          call MatDestroy(air_data%i_fine_full(our_level), ierr)
          call MatDestroy(air_data%i_coarse_full(our_level), ierr)
          call MatDestroy(air_data%i_fine_full_full(our_level), ierr)
-         if (air_data%options%any_c_smooths .AND. &
-                  .NOT. air_data%options%full_smoothing_up_and_down) then     
-            call MatDestroy(air_data%i_coarse_full_full(our_level), ierr)                       
-         end if 
+         call MatDestroy(air_data%i_coarse_full_full(our_level), ierr)
 
       else
 #if defined(PETSC_HAVE_KOKKOS)
@@ -662,6 +701,181 @@ module fc_smooth
    end subroutine c_smooths
 
    ! -------------------------------------------------------------------------------------------------------------------------------
-   
+
+   subroutine mg_FC_point_richardson_transpose(air_data, our_level, b, x, r)
+
+      ! Applies the transpose of the F-C point smoother that mg_FC_point_richardson
+      ! applies on this level, with a zero initial guess, and also returns the
+      ! transposed residual
+      ! The forward smoother is affine, x_new = E x + N b with E = I - N A, so with a
+      ! zero initial guess this gives x = N^T b and r = b - A^T x, which is E^T b -
+      ! the two things the transposed kaskade cycle needs from a level
+      !
+      ! N is a product of the individual relaxations, so N^T reverses their order:
+      ! we walk the blocks in smooth_order_levels backwards (the relaxations inside
+      ! one block are all the same so their order doesn't matter) and run a zero
+      ! initial guess richardson on A^T with the transposed relaxations, tracking the
+      ! residual as we go. Tracking the residual means we never need A^T itself,
+      ! which is just as well as the full operator on this level doesn't exist when
+      ! we're F-C smoothing - the F and C blocks of A are all we have and all we need
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level
+      type(tVec), intent(inout)               :: b, x, r
+
+      PetscErrorCode :: ierr
+      integer :: i, no_blocks, smooth_its
+
+      ! ~~~~~~
+
+      ! How many blocks of smooths we do on this level - the ordering stops at
+      ! the first zero entry
+      no_blocks = 0
+      do i = 1, size(air_data%smooth_order_levels(our_level)%array)
+         if (air_data%smooth_order_levels(our_level)%array(i) == 0) exit
+         no_blocks = i
+      end do
+
+      ! The residual starts at b, so pull out b_f and b_c
+      call VecISCopyLocalWrapper(air_data, our_level, .TRUE., b, &
+               SCATTER_REVERSE, air_data%temp_vecs_fine(4)%array(our_level))
+      call VecISCopyLocalWrapper(air_data, our_level, .FALSE., b, &
+               SCATTER_REVERSE, air_data%temp_vecs_coarse(4)%array(our_level))
+
+      ! And the solution at zero
+      call VecSet(air_data%temp_vecs_fine(1)%array(our_level), PFLARE_ZERO, ierr)
+      call VecSet(air_data%temp_vecs_coarse(1)%array(our_level), PFLARE_ZERO, ierr)
+
+      ! Reverse order compared to mg_FC_point_richardson
+      do i = no_blocks, 1, -1
+
+         smooth_its = air_data%smooth_order_levels(our_level)%array(i)
+
+         ! Consecutive F point smooths
+         if (smooth_its > 0) then
+
+            call f_smooths_transpose(air_data, our_level, smooth_its)
+
+         ! Consecutive C point smooths
+         else
+
+            call c_smooths_transpose(air_data, our_level, abs(smooth_its))
+         end if
+
+      end do
+
+      ! ~~~~~~~~
+      ! Put both halves of the solution and the residual back into the full sized
+      ! vectors - we have to do the fine and the coarse scatter for each so that
+      ! every entry of x and r is written
+      ! ~~~~~~~~
+      call VecISCopyLocalWrapper(air_data, our_level, .TRUE., x, &
+               SCATTER_FORWARD, air_data%temp_vecs_fine(1)%array(our_level), &
+               air_data%temp_vecs(1)%array(our_level))
+      call VecISCopyLocalWrapper(air_data, our_level, .FALSE., x, &
+               SCATTER_FORWARD, air_data%temp_vecs_coarse(1)%array(our_level), &
+               air_data%temp_vecs(1)%array(our_level))
+
+      call VecISCopyLocalWrapper(air_data, our_level, .TRUE., r, &
+               SCATTER_FORWARD, air_data%temp_vecs_fine(4)%array(our_level), &
+               air_data%temp_vecs(1)%array(our_level))
+      call VecISCopyLocalWrapper(air_data, our_level, .FALSE., r, &
+               SCATTER_FORWARD, air_data%temp_vecs_coarse(4)%array(our_level), &
+               air_data%temp_vecs(1)%array(our_level))
+
+   end subroutine mg_FC_point_richardson_transpose
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine f_smooths_transpose(air_data, our_level, its)
+
+      ! Applies the transpose of consecutive F smooths
+      ! One forward F relaxation is x += Q_f (b - A x) with Q_f = P_f inv_A_ff P_f^T
+      ! and P_f the injection of the F points, so the transposed relaxation is
+      ! w = inv_A_ff^T r_f, x_f += w, r -= A^T P_f w
+      ! The two halves of A^T P_f w are A_ff^T w and A_fc^T w, as the CF block of
+      ! A^T is the transpose of the FC block of A
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level, its
+
+      PetscErrorCode :: ierr
+      integer :: f_its
+
+      ! ~~~~~~
+
+      do f_its = 1, its
+
+         ! w = inv_A_ff^T r_f
+         call MatMultTranspose(air_data%inv_A_ff(our_level), air_data%temp_vecs_fine(4)%array(our_level), &
+                  air_data%temp_vecs_fine(2)%array(our_level), ierr)
+
+         ! x_f = x_f + w
+         call VecAXPY(air_data%temp_vecs_fine(1)%array(our_level), PFLARE_ONE, &
+                  air_data%temp_vecs_fine(2)%array(our_level), ierr)
+
+         ! r_c = r_c - A_fc^T w
+         call MatMultTranspose(air_data%A_fc(our_level), air_data%temp_vecs_fine(2)%array(our_level), &
+                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+         call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), PFLARE_MINUS_ONE, &
+                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+
+         ! r_f = r_f - A_ff^T w
+         call MatMultTranspose(air_data%A_ff(our_level), air_data%temp_vecs_fine(2)%array(our_level), &
+                  air_data%temp_vecs_fine(3)%array(our_level), ierr)
+         call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), PFLARE_MINUS_ONE, &
+                  air_data%temp_vecs_fine(3)%array(our_level), ierr)
+
+      end do
+
+   end subroutine f_smooths_transpose
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine c_smooths_transpose(air_data, our_level, its)
+
+      ! Applies the transpose of consecutive C smooths - the C point mirror of
+      ! f_smooths_transpose, so w = inv_A_cc^T r_c, x_c += w and the two halves of
+      ! A^T P_c w are A_cf^T w and A_cc^T w
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level, its
+
+      PetscErrorCode :: ierr
+      integer :: c_its
+
+      ! ~~~~~~
+
+      do c_its = 1, its
+
+         ! w = inv_A_cc^T r_c
+         call MatMultTranspose(air_data%inv_A_cc(our_level), air_data%temp_vecs_coarse(4)%array(our_level), &
+                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+
+         ! x_c = x_c + w
+         call VecAXPY(air_data%temp_vecs_coarse(1)%array(our_level), PFLARE_ONE, &
+                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+
+         ! r_f = r_f - A_cf^T w
+         call MatMultTranspose(air_data%A_cf(our_level), air_data%temp_vecs_coarse(2)%array(our_level), &
+                  air_data%temp_vecs_fine(2)%array(our_level), ierr)
+         call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), PFLARE_MINUS_ONE, &
+                  air_data%temp_vecs_fine(2)%array(our_level), ierr)
+
+         ! r_c = r_c - A_cc^T w
+         call MatMultTranspose(air_data%A_cc(our_level), air_data%temp_vecs_coarse(2)%array(our_level), &
+                  air_data%temp_vecs_coarse(3)%array(our_level), ierr)
+         call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), PFLARE_MINUS_ONE, &
+                  air_data%temp_vecs_coarse(3)%array(our_level), ierr)
+
+      end do
+
+   end subroutine c_smooths_transpose
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
 end module fc_smooth
 

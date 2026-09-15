@@ -176,12 +176,9 @@ module air_data_type_routines
                   call VecDestroy(air_data%temp_vecs_fine(3)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_fine(4)%array(our_level), ierr)
                   call VecDestroy(air_data%temp_vecs_coarse(1)%array(our_level), ierr)
-                  if (air_data%options%any_c_smooths .AND. &
-                        .NOT. air_data%options%full_smoothing_up_and_down) then
-                     call VecDestroy(air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-                     call VecDestroy(air_data%temp_vecs_coarse(3)%array(our_level), ierr)
-                     call VecDestroy(air_data%temp_vecs_coarse(4)%array(our_level), ierr)
-                  end if
+                  call VecDestroy(air_data%temp_vecs_coarse(2)%array(our_level), ierr)
+                  call VecDestroy(air_data%temp_vecs_coarse(3)%array(our_level), ierr)
+                  call VecDestroy(air_data%temp_vecs_coarse(4)%array(our_level), ierr)
                end if          
                
                ! Only amount=3 preserves A_ff/A_fc/A_cf and grid-transfer operators

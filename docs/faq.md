@@ -141,6 +141,20 @@ Truncating the hierarchy and applying a matrix-free coarse grid solver (see abov
 
 If you have many right-hand sides, `KSPMatSolve` with `-ksp_type preonly` or `-ksp_type richardson` applies `PCAIR` to the whole dense block of right-hand sides at once (see [docs/gpus.md](gpus.md)). The sparse matrix by dense matrix products throughout the hierarchy give much better GPU throughput than solving each right-hand side in turn, particularly on the lower levels of the hierarchy where a single solve does not have enough work to saturate a GPU.
 
+## Transposed (adjoint) solves with `PCAIR` and `PCPFLAREINV`
+
+Both `PCAIR` and `PCPFLAREINV` implement `PCApplyTranspose`, so they can be used as the preconditioner in a `KSPSolveTranspose`, which is what you want when solving an adjoint problem $\mathbf{A}^T \mathbf{x} = \mathbf{b}$.
+
+What they apply is the exact transpose of what `PCApply` applies, not a preconditioner built separately for $\mathbf{A}^T$. That matters: a second hierarchy (or a second polynomial) computed for $\mathbf{A}^T$ would be a different operator, so it would not be an adjoint of the forward preconditioner, and anything relying on that property (for instance a consistent adjoint of a preconditioned solve) would be wrong.
+
+1) Nothing extra needs turning on. `KSPSolveTranspose` with `-pc_type air` or `-pc_type pflareinv` just works, for every inverse type, assembled or matrix-free.
+
+2) The iteration count to compare against is the *right* preconditioned forward solve. Left preconditioned GMRES on the transposed system iterates on $\mathbf{M}^T \mathbf{A}^T = (\mathbf{A} \mathbf{M})^T$, which has the spectrum of $\mathbf{A} \mathbf{M}$, i.e. of the right preconditioned forward problem.
+
+3) There is one limitation in `PCAIR`. With the default F-point/C-point smoothing, the transposed cycle is written out in PFLARE and assumes the single F-C relaxation per level that `PCAIR` sets up, so changing the level smoothers with `-mg_levels_*` gives an error on a transposed apply rather than a silently wrong answer. Use `-pc_air_smooth_type` to change the smoothing, or `-pc_air_full_smoothing_up_and_down`, where PETSc's own transposed v-cycle drives whatever level KSPs are there. The coarse grid solver is unaffected: it goes through `KSPSolveTranspose`, so `-mg_coarse_*` keeps working.
+
+4) `PCMatApplyTranspose` is not implemented directly for either PC, so a transposed block apply falls back to PETSc applying `PCApplyTranspose` one column at a time. The forward `PCMatApply` does do a real block apply (see above), so a transposed multiple right-hand side solve will be slower than the forward one.
+
 ## Solving sparse triangular systems (e.g., from ILU factorisations) with `PCAIR`
 
 Sparse triangular systems, such as the L and U factors from (incomplete) LU factorisations, are highly asymmetric and are traditionally solved with sequential forward/back substitution, which parallelises poorly. `PCAIR` can instead be used to solve these triangular systems iteratively and in parallel; the lower triangular structure means reduction multigrids like AIRG are well suited and typically very robust on these problems.

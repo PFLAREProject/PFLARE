@@ -5,6 +5,8 @@
 // Include the petsc header files
 #include <petsc.h>
 #include <petsc/private/pcimpl.h>
+// For the PCMG level work vectors - see PCMGGetRhs_c below
+#include <petsc/private/pcmgimpl.h>
 
 // MatPartitioningSetNParts doesn't have a fortran interface (and can't pass around
 // a matpartioning object as it doesnt have a %v), so have to do 
@@ -317,6 +319,40 @@ PETSC_INTERN void PCGetSetupCalled_c(PC *pc, PetscInt *setupcalled)
 PETSC_INTERN void PCMarkNotSetUp_c(PC *pc)
 {
    (*pc)->setupcalled = PETSC_FALSE;
+}
+
+// ~~~~~~~~~~
+// PETSc has PCMGSetRhs/PCMGSetX/PCMGSetR but no matching getters, in C or in
+// fortran, so there is no way to reach the per-level work vectors PCSetUp_MG has
+// already allocated. Our transposed air cycle walks the levels itself and wants
+// exactly those vectors rather than allocating a second set of its own.
+// This is a temporary workaround - delete these three once petsc has
+// PCMGGetRhs/PCMGGetX/PCMGGetR and their fortran bindings.
+// These are petsc owned vectors, so the caller must never destroy them or hold
+// on to them across a setup, and must only call these on a PCMG that has been
+// set up with level in range - as with the other accessors in this file there is
+// no checking here.
+// ~~~~~~~~~~
+
+// Returns the level rhs vector (allocated on levels 0 to nlevels-2)
+PETSC_INTERN void PCMGGetRhs_c(PC *pc, PetscInt level, Vec *b)
+{
+   PC_MG *mg = (PC_MG *)(*pc)->data;
+   *b = mg->levels[level]->b;
+}
+
+// Returns the level solution vector (allocated on levels 0 to nlevels-2)
+PETSC_INTERN void PCMGGetX_c(PC *pc, PetscInt level, Vec *x)
+{
+   PC_MG *mg = (PC_MG *)(*pc)->data;
+   *x = mg->levels[level]->x;
+}
+
+// Returns the level residual vector (allocated on levels 1 to nlevels-1)
+PETSC_INTERN void PCMGGetR_c(PC *pc, PetscInt level, Vec *r)
+{
+   PC_MG *mg = (PC_MG *)(*pc)->data;
+   *r = mg->levels[level]->r;
 }
 
 PETSC_EXTERN PetscErrorCode MatGetDiagonalMarkers_SeqAIJ(Mat, const PetscInt **, PetscBool *);
