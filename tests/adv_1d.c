@@ -28,8 +28,10 @@ int main(int argc, char **args)
   PetscCall(PetscInitialize(&argc, &args, (char*)0, help));
 
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
-  PetscBool second_solve= PETSC_FALSE;
+  PetscBool second_solve= PETSC_FALSE, transpose_solve = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
+  // Solve the transposed system A^T x = b with KSPSolveTranspose instead
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-transpose_solve", &transpose_solve, NULL));
 
   // Register the pflare types
   PCRegister_PFLARE();
@@ -160,7 +162,11 @@ int main(int argc, char **args)
   PetscCall(VecSet(x, 1.0));
 
   PetscCall(PetscLogStagePush(gpu_copy));
-  PetscCall(KSPSolve(ksp, b, x));
+  if (transpose_solve) {
+    PetscCall(KSPSolveTranspose(ksp, b, x));
+  } else {
+    PetscCall(KSPSolve(ksp, b, x));
+  }
   PetscCall(PetscLogStagePop());
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -171,7 +177,11 @@ int main(int argc, char **args)
   if (second_solve)
   {
    PetscCall(VecSet(x, 1.0));
-   PetscCall(KSPSolve(ksp, b, x));
+   if (transpose_solve) {
+     PetscCall(KSPSolveTranspose(ksp, b, x));
+   } else {
+     PetscCall(KSPSolve(ksp, b, x));
+   }
   }
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
