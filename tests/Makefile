@@ -570,6 +570,21 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 2 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
+# The full smoothing up and down smoothers are a PCMAT whose Pmat is our assembled
+# approximate inverse, so these check that PCApply there is a matmult with the inverse
+# rather than a solve against it - the iteration caps below are the assertion
+	@echo ""
+	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse - 74 its measured, cap 100"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 100
+	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse - 16 its measured, cap 30"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 30
+	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse - 30 its measured, cap 45"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
+	 -pc_air_poly_order 3 -ksp_max_it 45
+	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion - 42 its measured, cap 60"
+	./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
+	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 60
+#
 	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5
@@ -1166,6 +1181,22 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+# The full smoothing up and down smoothers are a PCMAT whose Pmat is our assembled
+# approximate inverse, so these check that PCApply there is a matmult with the inverse
+# rather than a solve against it - the iteration caps below are the assertion
+	@echo ""
+	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse in parallel - 72 its measured, cap 100"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 100
+	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse - 16 its measured, cap 30"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi \
+	 -ksp_max_it 30
+	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel - 30 its measured, cap 45"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
+	 -pc_air_poly_order 3 -ksp_max_it 45
+	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel - 34 its measured, cap 60"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
+	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 60
 #
 	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply in parallel"

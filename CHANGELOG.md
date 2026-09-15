@@ -6,6 +6,16 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed `-pc_air_full_smoothing_up_and_down` with an assembled inverse applying
+  the wrong smoother, which stopped it converging. The level smoothers there are
+  a `PCMAT` whose Pmat is our approximate inverse, so `PCApply` has to be a
+  matmult with it. Since PETSc 3.21 `PCSetUp_Mat` instead defaults to `MatSolve`
+  whenever the Pmat has one, which matdiagonal does, so a diagonal approximate
+  inverse was being applied as a solve, i.e. multiplied by its own inverse. PCAIR
+  now asks for `MATOP_MULT` explicitly with `PCMatSetApplyOperation`, both for
+  the level smoothers and for the single level auto-truncated case. This only
+  affected the assembled inverses; `-pc_air_matrix_free_polys` goes through a
+  PCSHELL and was always correct
 - PCPFLAREINV now implements `PCApplyTranspose`, so it can be used as the
   preconditioner in a `KSPSolveTranspose`. This works for every inverse type,
   both assembled and matrix-free. It applies the exact transpose of what

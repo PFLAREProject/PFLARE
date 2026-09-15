@@ -1075,6 +1075,14 @@ module air_mg_setup
                else
                   call PCSetType(pc_smoother_up, PCMAT, ierr)
                   call PCSetType(pc_smoother_down, PCMAT, ierr)
+                  ! We want PCApply to be a matmult with inv_A_ff, as inv_A_ff is
+                  ! already an approximate inverse. Since petsc 3.21 PCSetUp_Mat
+                  ! otherwise defaults to MatSolve whenever the Pmat has one, and
+                  ! among the matrix types we build matdiagonal does (unfactored
+                  ! aij does not), which would smooth by multiplying with the
+                  ! inverse of our approximate inverse
+                  call PCMatSetApplyOperation(pc_smoother_up, MATOP_MULT, ierr)
+                  call PCMatSetApplyOperation(pc_smoother_down, MATOP_MULT, ierr)
                end if
             end if
 
@@ -1201,6 +1209,10 @@ module air_mg_setup
             call PCSetOperators(pcmg_input, amat, &
                         air_data%inv_A_ff(no_levels), ierr)         
             call PCSetType(pcmg_input, PCMAT, ierr)
+            ! Same as for the level smoothers above - the Pmat here is already an
+            ! approximate inverse so PCApply has to be a matmult with it, not the
+            ! MatSolve petsc defaults to when the Pmat has one
+            call PCMatSetApplyOperation(pcmg_input, MATOP_MULT, ierr)
 
          ! Otherwise just do a jacobi and tell the user
          else
