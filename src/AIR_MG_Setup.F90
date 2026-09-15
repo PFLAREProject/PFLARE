@@ -510,8 +510,10 @@ module air_mg_setup
             inverse_sparsity_aff = 0         
             ! Our approximation of diagonals is often an exact inverse
             ! So set the number of F smooths to 1
+            ! There are no F smooths if we're smoothing all the unknowns
             if (inverse_type_aff /= PFLAREINV_WJACOBI .AND. &
-                  air_data%options%poly_order > 2) then
+                  air_data%options%poly_order > 2 .AND. &
+                  .NOT. air_data%options%full_smoothing_up_and_down) then
 
                ! Any F smooths we just make 1 iteration
                do i_loc = 1, size(air_data%options%smooth_order)
@@ -530,15 +532,32 @@ module air_mg_setup
          ! Setup the details of our gmres polynomials
          ! ~~~~~~~~~         
 
-         call setup_gmres_poly_data(global_fine_is_size, &
-                  inverse_type_aff, &
-                  air_data%options%poly_order, &
-                  inverse_sparsity_aff, &
-                  air_data%options%subcomm, &
-                  proc_stride, &
-                  air_data%inv_A_ff_poly_data(our_level))
+         ! If we're smoothing all the unknowns, inv_A_ff_poly_data is not the inverse of A_ff, it is
+         ! the inverse of the full level matrix (see AIR_Operators_Setup.F90), so none of the
+         ! diagonal A_ff shortcuts above can apply to it - in particular the sparsity order has to
+         ! stay the one the user asked for, otherwise a diagonal A_ff would force the inverse of the
+         ! entire level matrix to be assembled as a diagonal
+         if (air_data%options%full_smoothing_up_and_down) then
+            call setup_gmres_poly_data(global_rows, &
+                     air_data%options%inverse_type, &
+                     air_data%options%poly_order, &
+                     air_data%options%inverse_sparsity_order, &
+                     air_data%options%subcomm, &
+                     proc_stride, &
+                     air_data%inv_A_ff_poly_data(our_level))
+         else
+            call setup_gmres_poly_data(global_fine_is_size, &
+                     inverse_type_aff, &
+                     air_data%options%poly_order, &
+                     inverse_sparsity_aff, &
+                     air_data%options%subcomm, &
+                     proc_stride, &
+                     air_data%inv_A_ff_poly_data(our_level))
+         end if
 
-         ! Setup the same structure for the inv_A_ff made from dropped Aff 
+         ! Setup the same structure for the inv_A_ff made from dropped Aff
+         ! This genuinely is the inverse of (dropped) A_ff, used to build Z, so it keeps the
+         ! A_ff based values
          call setup_gmres_poly_data(global_fine_is_size, &
                   inverse_type_aff, &
                   air_data%options%poly_order, &
@@ -1075,6 +1094,14 @@ module air_mg_setup
                else
                   call PCSetType(pc_smoother_up, PCMAT, ierr)
                   call PCSetType(pc_smoother_down, PCMAT, ierr)
+                  ! We want PCApply to be a matmult with inv_A_ff, as inv_A_ff is
+                  ! already an approximate inverse. Since petsc 3.21 PCSetUp_Mat
+                  ! otherwise defaults to MatSolve whenever the Pmat has one, and
+                  ! among the matrix types we build matdiagonal does (unfactored
+                  ! aij does not), which would smooth by multiplying with the
+                  ! inverse of our approximate inverse
+                  call PCMatSetApplyOperation(pc_smoother_up, MATOP_MULT, ierr)
+                  call PCMatSetApplyOperation(pc_smoother_down, MATOP_MULT, ierr)
                end if
             end if
 
@@ -1201,6 +1228,10 @@ module air_mg_setup
             call PCSetOperators(pcmg_input, amat, &
                         air_data%inv_A_ff(no_levels), ierr)         
             call PCSetType(pcmg_input, PCMAT, ierr)
+            ! Same as for the level smoothers above - the Pmat here is already an
+            ! approximate inverse so PCApply has to be a matmult with it, not the
+            ! MatSolve petsc defaults to when the Pmat has one
+            call PCMatSetApplyOperation(pcmg_input, MATOP_MULT, ierr)
 
          ! Otherwise just do a jacobi and tell the user
          else

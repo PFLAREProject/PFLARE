@@ -6,6 +6,12 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed `-pc_air_full_smoothing_up_and_down` with an assembled inverse not
+  converging: since PETSc 3.21 the `PCMAT` smoothers defaulted to `MatSolve`
+  with our diagonal inverses. PCAIR now requests `MATOP_MULT` explicitly
+- Fixed `-pc_air_full_smoothing_up_and_down` ignoring
+  `-pc_air_inverse_sparsity_order`: the diagonal `A_ff` shortcut was forcing
+  the assembled inverse of the whole level matrix to be a diagonal
 - PCPFLAREINV now implements `PCApplyTranspose`, so it can be used as the
   preconditioner in a `KSPSolveTranspose`. This works for every inverse type,
   both assembled and matrix-free. It applies the exact transpose of what

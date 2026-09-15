@@ -571,6 +571,21 @@ run_tests_no_load_short_serial:
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
 #
 	@echo ""
+	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
+	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 25
+	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
+	 -pc_air_poly_order 3 -ksp_max_it 15
+	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion"
+	./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
+	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
+	@echo "Test AIRG with full smoothing up and down uses the requested inverse sparsity order"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_sparsity_order 2 \
+	 -ksp_max_it 15
+#
+	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5
 	@echo "Test multiple RHS block solve with a Newton polynomial PCPFLAREINV"
@@ -1166,6 +1181,19 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
+	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi \
+	 -ksp_max_it 25
+	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
+	 -pc_air_poly_order 3 -ksp_max_it 15
+	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
+	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
 #
 	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply in parallel"
