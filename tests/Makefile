@@ -1626,6 +1626,29 @@ endif
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
+run_tests_copies:
+	@echo ""
+	@echo "--- Running host/device copy checks ---"
+	@echo "Test AIRG with default options makes no host/device copies in a second Richardson solve with device types"
+	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
+	@echo "Test AIRG with matrix-free polynomials makes no host/device copies in a second Richardson solve with device types"
+	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -check_copies
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR makes no host/device copies with device types"
+	./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
+	@echo "Test multiple RHS block solve with a Richardson KSP and matrix-free PCAIR makes no host/device copies with device types"
+	./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -check_copies
+#
+	@echo ""
+	@echo "Test AIRG with default options makes no host/device copies in a second Richardson solve with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
+	@echo "Test AIRG with matrix-free polynomials makes no host/device copies in a second Richardson solve with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -check_copies
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR makes no host/device copies with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
+
 run_check:
 
 #

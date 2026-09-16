@@ -23,6 +23,7 @@ int main(int argc, char **args)
   PetscCount  counter;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
+  PetscLogEvent second_solve_event;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &args, (char*)0, help));
@@ -30,12 +31,21 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
+  // Check the second solve does not copy anything between the host and the device
+  // This is only meaningful with device matrices and vectors (e.g. -mat_type aijkokkos
+  // -vec_type kokkos on a gpu), everywhere else the counts are trivially zero
+  PetscBool check_copies = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
+  if (check_copies) second_solve = PETSC_TRUE;
 
   // Register the pflare types
   PCRegister_PFLARE();
 
+  // The copy counts are read from the default log handler, which is only on with -log_view
+  if (check_copies) PetscCall(PetscLogDefaultBegin());
   PetscCall(PetscLogStageRegister("Setup", &setup));
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
+  PetscCall(PetscLogEventRegister("SecondSolve", KSP_CLASSID, &second_solve_event));
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
@@ -171,10 +181,26 @@ int main(int argc, char **args)
   if (second_solve)
   {
    PetscCall(VecSet(x, 1.0));
+   PetscCall(PetscLogEventBegin(second_solve_event, 0, 0, 0, 0));
    PetscCall(KSPSolve(ksp, b, x));
+   PetscCall(PetscLogEventEnd(second_solve_event, 0, 0, 0, 0));
   }
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
+
+#if PetscDefined(HAVE_DEVICE)
+  // The preliminary solve has already moved everything the solve needs onto the
+  // device, so with device matrices and vectors the second solve must not copy
+  // anything between the host and the device in either direction
+  if (check_copies)
+  {
+   PetscEventPerfInfo info;
+
+   PetscCall(PetscLogEventGetPerfInfo(PETSC_DETERMINE, second_solve_event, &info));
+   PetscCheck(info.GpuToCpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected GPU to CPU copies (%g bytes) in the second KSPSolve", info.GpuToCpuCount, info.GpuToCpuSize);
+   PetscCheck(info.CpuToGpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected CPU to GPU copies (%g bytes) in the second KSPSolve", info.CpuToGpuCount, info.CpuToGpuSize);
+  }
+#endif
 
   /*
      Free work space.  All PETSc objects should be destroyed when they

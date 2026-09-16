@@ -121,3 +121,5 @@ jobs:
         run: |
           eval make -j"$(nproc)" $PFLARE_FLAGS check
           eval make -j"$(nproc)" $PFLARE_FLAGS tests
+          # Only run here: checks the solves make no host/device copies, which needs a GPU and GPU-aware MPI
+          eval make -j"$(nproc)" $PFLARE_FLAGS tests_copies

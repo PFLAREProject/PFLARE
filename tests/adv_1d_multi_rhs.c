@@ -8,6 +8,10 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
 
     ./adv_1d_multi_rhs -n 100000 -nrhs 16 -mat_type aijkokkos -vec_type kokkos -log_view
 
+  -check_copies turns on -second_solve and fails the run if that second KSPMatSolve
+  copies anything between the host and the device, which is only meaningful with
+  device types on a gpu.
+
   Include "petscksp.h" so that we can use KSP solvers.  Note that this file
   automatically includes:
      petscsys.h    - base PETSc routines   petscvec.h - vectors
@@ -74,6 +78,7 @@ int main(int argc, char **args)
   PetscReal   check_tol = DEFAULT_CHECK_TOL;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy, matsolve, reference;
+  PetscLogEvent matsolve_event;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &args, (char*)0, help));
@@ -87,14 +92,23 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-rebuild_solve", &rebuild_solve, NULL));
   PetscBool check = PETSC_TRUE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check", &check, NULL));
+  // Check the second solve does not copy anything between the host and the device
+  // This is only meaningful with device matrices and vectors (e.g. -mat_type aijkokkos
+  // -vec_type kokkos on a gpu), everywhere else the counts are trivially zero
+  PetscBool check_copies = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
+  if (check_copies) second_solve = PETSC_TRUE;
 
   // Register the pflare types
   PCRegister_PFLARE();
 
+  // The copy counts are read from the default log handler, which is only on with -log_view
+  if (check_copies) PetscCall(PetscLogDefaultBegin());
   PetscCall(PetscLogStageRegister("Setup", &setup));
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPMatSolve", &gpu_copy));
   PetscCall(PetscLogStageRegister("MatSolve - the timed multiple rhs solve", &matsolve));
   PetscCall(PetscLogStageRegister("Column-by-column reference solve", &reference));
+  PetscCall(PetscLogEventRegister("SecondBlockSolve", KSP_CLASSID, &matsolve_event));
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and the block of right-hand sides that define
@@ -234,10 +248,29 @@ int main(int argc, char **args)
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
   PetscCall(PetscLogStagePush(matsolve));
   PetscCall(KSPMatSolve(ksp, B, X));
-  if (second_solve) PetscCall(KSPMatSolve(ksp, B, X));
+  if (second_solve)
+  {
+    PetscCall(PetscLogEventBegin(matsolve_event, 0, 0, 0, 0));
+    PetscCall(KSPMatSolve(ksp, B, X));
+    PetscCall(PetscLogEventEnd(matsolve_event, 0, 0, 0, 0));
+  }
   PetscCall(PetscLogStagePop());
 
   PetscCall(KSPGetConvergedReason(ksp, &reason));
+
+#if PetscDefined(HAVE_DEVICE)
+  // The earlier block solves have already moved everything the solve needs onto
+  // the device, so with device matrices and dense blocks the second solve must
+  // not copy anything between the host and the device in either direction
+  if (check_copies)
+  {
+    PetscEventPerfInfo info;
+
+    PetscCall(PetscLogEventGetPerfInfo(matsolve, matsolve_event, &info));
+    PetscCheck(info.GpuToCpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected GPU to CPU copies (%g bytes) in the second KSPMatSolve", info.GpuToCpuCount, info.GpuToCpuSize);
+    PetscCheck(info.CpuToGpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected CPU to GPU copies (%g bytes) in the second KSPMatSolve", info.CpuToGpuCount, info.CpuToGpuSize);
+  }
+#endif
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
        Check the block solve against a column-by-column reference solve.
