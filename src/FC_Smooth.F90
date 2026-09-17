@@ -7,8 +7,7 @@ module fc_smooth
    use air_data_type, only: air_multigrid_data
    use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
    use matshell_data_type, only: mat_ctxtype
-   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO, &
-         PFLARE_ONE
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO
 
 #include "petsc/finclude/petscksp.h"
 #include "petscconf.h"
@@ -530,6 +529,9 @@ module fc_smooth
 
       PetscErrorCode :: ierr
       integer :: f_its
+      type(tVec) :: neg_resid
+      MatType :: mat_type
+      logical :: in_place
 
       ! ~~~~~~
 
@@ -551,31 +553,47 @@ module fc_smooth
                      
       end if
 
-      ! Compute Afc * x_c^0 - this never changes
-      call MatMult(air_data%A_fc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
-               air_data%temp_vecs_fine(2)%array(our_level), ierr)               
-      
-      ! This is b_f - A_fc * x_c^0 - this never changes
-      call VecAXPY(air_data%temp_vecs_fine(4)%array(our_level), PFLARE_MINUS_ONE, &
-               air_data%temp_vecs_fine(2)%array(our_level), ierr)                      
+      ! We work with the negated residual, A_fc * x_c + A_ff * x_f^n - b_f, so the
+      ! residual updates can be fused into the matvecs with MatMultAdd rather than
+      ! a separate vector op after each MatMult
+      ! This is -b_f
+      call VecScale(air_data%temp_vecs_fine(4)%array(our_level), PFLARE_MINUS_ONE, ierr)
+
+      ! This is A_fc * x_c^0 - b_f - this never changes
+      call MatMultAdd(air_data%A_fc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
+               air_data%temp_vecs_fine(4)%array(our_level), &
+               air_data%temp_vecs_fine(4)%array(our_level), ierr)
+
+      ! A MATDIAGONAL A_ff can't accumulate in place, as PETSc's MatMultAdd_Diagonal
+      ! duplicates and destroys a work vector on every in-place call
+      call MatGetType(air_data%A_ff(our_level), mat_type, ierr)
+      in_place = mat_type /= MATDIAGONAL
 
       ! Do all the consecutive F smooths
       do f_its = 1, its
 
-         ! Then A_ff * x_f^n - this changes at each richardson iteration
-         call MatMult(air_data%A_ff(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
-                     air_data%temp_vecs_fine(3)%array(our_level), ierr)          
+         ! This is A_ff * x_f^n + A_fc * x_c - b_f
+         if (f_its < its .OR. .NOT. in_place) then
+            ! We need A_fc * x_c - b_f again on the next iteration so accumulate into
+            ! a copy (MatMultAdd copies temp_vecs_fine(4) into temp_vecs_fine(3) first)
+            call MatMultAdd(air_data%A_ff(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
+                     air_data%temp_vecs_fine(4)%array(our_level), &
+                     air_data%temp_vecs_fine(3)%array(our_level), ierr)
+            neg_resid = air_data%temp_vecs_fine(3)%array(our_level)
+         else
+            ! Last iteration so accumulate in place, no copy
+            call MatMultAdd(air_data%A_ff(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
+                     air_data%temp_vecs_fine(4)%array(our_level), &
+                     air_data%temp_vecs_fine(4)%array(our_level), ierr)
+            neg_resid = air_data%temp_vecs_fine(4)%array(our_level)
+         end if
 
-         ! This is b_f - A_fc * x_c - A_ff * x_f^n
-         call VecAYPX(air_data%temp_vecs_fine(3)%array(our_level), PFLARE_MINUS_ONE, &
-                  air_data%temp_vecs_fine(4)%array(our_level), ierr)           
-
-         ! ! Compute A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
-         call MatMult(air_data%inv_A_ff(our_level), air_data%temp_vecs_fine(3)%array(our_level), &
+         ! Compute A_ff^{-1} ( A_ff * x_f^n + A_fc * x_c - b_f )
+         call MatMult(air_data%inv_A_ff(our_level), neg_resid, &
                      air_data%temp_vecs_fine(2)%array(our_level), ierr)    
 
          ! Compute x_f^n + A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
-         call VecAXPY(air_data%temp_vecs_fine(1)%array(our_level), PFLARE_ONE, &
+         call VecAXPY(air_data%temp_vecs_fine(1)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%temp_vecs_fine(2)%array(our_level), ierr)                      
 
       end do
@@ -603,6 +621,9 @@ module fc_smooth
 
       PetscErrorCode :: ierr
       integer :: c_its
+      type(tVec) :: neg_resid
+      MatType :: mat_type
+      logical :: in_place
 
       ! ~~~~~~  
 
@@ -624,30 +645,46 @@ module fc_smooth
                   
       end if
 
-      ! Compute Acf * x_f^0 - this never changes
-      call MatMult(air_data%A_cf(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
-                  air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-      ! This is b_c - A_cf * x_f^0 - this never changes
-      call VecAXPY(air_data%temp_vecs_coarse(4)%array(our_level), PFLARE_MINUS_ONE, &
-               air_data%temp_vecs_coarse(2)%array(our_level), ierr)  
+      ! As in f_smooths we work with the negated residual so the residual updates
+      ! can be fused into the matvecs with MatMultAdd
+      ! This is -b_c
+      call VecScale(air_data%temp_vecs_coarse(4)%array(our_level), PFLARE_MINUS_ONE, ierr)
+
+      ! This is A_cf * x_f^0 - b_c - this never changes
+      call MatMultAdd(air_data%A_cf(our_level), air_data%temp_vecs_fine(1)%array(our_level), &
+               air_data%temp_vecs_coarse(4)%array(our_level), &
+               air_data%temp_vecs_coarse(4)%array(our_level), ierr)
+
+      ! A MATDIAGONAL A_cc can't accumulate in place, as PETSc's MatMultAdd_Diagonal
+      ! duplicates and destroys a work vector on every in-place call
+      call MatGetType(air_data%A_cc(our_level), mat_type, ierr)
+      in_place = mat_type /= MATDIAGONAL
 
       ! Do all the consecutive C smooths
       do c_its = 1, its
 
-         ! Then A_cc * x_c^n - this changes at each richardson iteration
-         call MatMult(air_data%A_cc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
-                     air_data%temp_vecs_coarse(3)%array(our_level), ierr)       
+         ! This is A_cc * x_c^n + A_cf * x_f^0 - b_c
+         if (c_its < its .OR. .NOT. in_place) then
+            ! We need A_cf * x_f^0 - b_c again on the next iteration so accumulate into
+            ! a copy (MatMultAdd copies temp_vecs_coarse(4) into temp_vecs_coarse(3) first)
+            call MatMultAdd(air_data%A_cc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
+                     air_data%temp_vecs_coarse(4)%array(our_level), &
+                     air_data%temp_vecs_coarse(3)%array(our_level), ierr)
+            neg_resid = air_data%temp_vecs_coarse(3)%array(our_level)
+         else
+            ! Last iteration so accumulate in place, no copy
+            call MatMultAdd(air_data%A_cc(our_level), air_data%temp_vecs_coarse(1)%array(our_level), &
+                     air_data%temp_vecs_coarse(4)%array(our_level), &
+                     air_data%temp_vecs_coarse(4)%array(our_level), ierr)
+            neg_resid = air_data%temp_vecs_coarse(4)%array(our_level)
+         end if
 
-         ! This is b_c - A_cf * x_f^0 - A_cc * x_c^n
-         call VecAYPX(air_data%temp_vecs_coarse(3)%array(our_level), PFLARE_MINUS_ONE, &
-                  air_data%temp_vecs_coarse(4)%array(our_level), ierr)          
-
-         ! ! Compute A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
-         call MatMult(air_data%inv_A_cc(our_level), air_data%temp_vecs_coarse(3)%array(our_level), &
+         ! Compute A_cc^{-1} ( A_cc * x_c^n + A_cf * x_f^0 - b_c )
+         call MatMult(air_data%inv_A_cc(our_level), neg_resid, &
                      air_data%temp_vecs_coarse(2)%array(our_level), ierr)    
 
          ! Compute x_c^n + A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
-         call VecAXPY(air_data%temp_vecs_coarse(1)%array(our_level), PFLARE_ONE, &
+         call VecAXPY(air_data%temp_vecs_coarse(1)%array(our_level), PFLARE_MINUS_ONE, &
                      air_data%temp_vecs_coarse(2)%array(our_level), ierr)    
                      
       end do
