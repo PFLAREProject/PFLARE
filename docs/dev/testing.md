@@ -2,7 +2,8 @@
 
 How tests are wired
 - Test executables are listed by hand in `TEST_TARGETS` (top `Makefile`, ~line 160); `adv_1dk` is appended only when PETSc has Kokkos. `CHECK_TARGETS` (`adv_diff_fd matrandom`) is what `make check` runs.
-- `tests/Makefile` has no per-test declarations: it is a set of `run_tests_*` recipe targets whose bodies are literal `./exe -options` lines with `@echo` labels. Groups: `run_tests_load_{serial,parallel}`, `run_tests_no_load_short_{serial,parallel}`, `run_tests_no_load_{serial,parallel}`, `run_tests_medium_{serial,parallel}`, `run_check`.
+- `tests/Makefile` has no per-test declarations: it is a set of `run_tests_*` recipe targets whose bodies are literal `./exe -options` lines with `@echo` labels. Groups: `run_tests_load_{serial,parallel}`, `run_tests_no_load_short_{serial,parallel}`, `run_tests_no_load_{serial,parallel}`, `run_tests_medium_{serial,parallel}`, `run_tests_copies`, `run_check`.
+- `run_tests_copies` (`make tests_copies`, serial and parallel in one group) runs the `-check_copies` drivers that fail on any host/device copy in a second solve. Not part of `make tests` or the default `tests_search` groups: it only means anything on a GPU and its parallel lines need GPU-aware MPI, so only the GPU CI workflow calls it.
 - Executables are built by PETSc's implicit rules; `tests/Makefile` itself exports `LD_LIBRARY_PATH`/`DYLD_FALLBACK_LIBRARY_PATH` pointing at `lib/`.
 
 Checklist for adding a test

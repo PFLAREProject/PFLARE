@@ -318,6 +318,12 @@ tests_medium: build_tests
 	$(MAKE) tests_medium_serial
 	$(MAKE) tests_medium_parallel
 
+# Host/device copy checks - only meaningful on a GPU, so run from the GPU CI
+# workflow and deliberately not part of make tests
+.PHONY: tests_copies
+tests_copies: build_tests
+	$(MAKE) -C tests run_tests_copies
+
 # Build and run all the tests
 # The python tests only run if the python module has been built
 .PHONY: tests

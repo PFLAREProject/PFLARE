@@ -436,12 +436,13 @@ jobs:
           PY
 
           # --fail-on-warning (baked into the `docs` target) turns doctext warnings and
-          # unresolved `PCFOO` cross-references into hard failures. Unset PETSC_ARCH so output
-          # lands in doc/_build (the `docs` target otherwise copies doc -> ${PETSC_ARCH}-doc);
-          # PETSC_DIR must stay set so conf.py scans THIS tree.
+          # unresolved `PCFOO` cross-references into hard failures. PETSc builds the docs out
+          # of source under ${PETSC_ARCH}/doc; unset PETSC_ARCH so it uses (and configures) its
+          # own default arch-docs rather than the arch built above. PETSC_DIR must stay set so
+          # conf.py scans THIS tree.
           unset PETSC_ARCH
-          # PETSc's `docs` makefile recipe ends in `; deactivate`, so `make docs` exits 0
-          # even when the inner Sphinx build (including the petsc4py sub-build) failed.
+          # PETSc's `docs` makefile recipe has not always propagated a failure of the inner
+          # Sphinx build (including the petsc4py sub-build) to the exit code of `make docs`.
           # Capture the output and gate on it: Sphinx prints "Warning, treated as error"
           # on any doctext/cross-reference failure, and conf.py's build_petsc4py_docs prints
           # "End petsc4py docs" only after the petsc4py Sphinx build succeeds.
@@ -456,8 +457,8 @@ jobs:
           fi
           # Confirm PFLARE's pages made it all the way through to rendered HTML (a dropped
           # SUBMANSEC makes a page silently vanish rather than warn).
-          test -f doc/_build/html/manualpages/PC/PCAIR.html
-          test -f doc/_build/html/manualpages/PC/PCPFLAREINV.html
+          test -f arch-docs/doc/_build/html/manualpages/PC/PCAIR.html
+          test -f arch-docs/doc/_build/html/manualpages/PC/PCPFLAREINV.html
 
   # No docker on macos with github actions so have to just build petsc first
   # It then caches petsc for speed based on the hash of the HEAD of petsc main
