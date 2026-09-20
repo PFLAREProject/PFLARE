@@ -32,7 +32,8 @@ PFLARE adds new methods to PETSc, including:
 - MPI parallel
 - Single or double precision
 - Block solves for multiple right-hand sides through `KSPMatSolve`, using sparse-dense products for improved throughput
-- GPU support via Kokkos, supporting Nvidia, AMD and Intel GPUs
+- Transposed solves through `KSPSolveTranspose`, e.g. for adjoint problems, with the exact transpose of the forward preconditioner
+- GPU support via Kokkos on Nvidia, AMD and Intel GPUs
 - GPU solves (single and multiple right-hand sides) run entirely on the device
 - C/C++, Fortran and Python interfaces
 

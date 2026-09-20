@@ -717,6 +717,25 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -n 5000 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 #
 	@echo ""
+	@echo "Test PCApplyTranspose with the default PCAIR - the F point smoothing Kaskade cycle"
+	./pcair_apply_transpose
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing - the smoother blocks run in reverse"
+	./pcair_apply_transpose -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with symmetric PCAIR - the restrictor is the transposed prolongator"
+	./pcair_apply_transpose -pc_air_symmetric
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down - petsc's transposed V-cycle"
+	./pcair_apply_transpose -pc_air_full_smoothing_up_and_down
+	./pcair_apply_transpose -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with matrix-free PCAIR polynomials - the transposed matshell twins"
+	./pcair_apply_transpose -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with a single level PCAIR - defers to the inner PCMG"
+	./pcair_apply_transpose -pc_air_max_levels 1
+	@echo "Test PCApplyTranspose after the PCAIR nonzero pattern changes - the hierarchy is rebuilt"
+	./pcair_apply_transpose -rebuild_pattern
+	@echo "Test KSPSolveTranspose through PCAIR"
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -1252,6 +1271,18 @@ else
 	 -transpose_solve -ksp_max_it 100
 #
 	@echo ""
+	@echo "Test PCApplyTranspose with the default PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_full_smoothing_up_and_down
+	@echo "Test PCApplyTranspose after the PCAIR operator values change in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild
+	@echo "Test KSPSolveTranspose through PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4	 
@@ -1562,6 +1593,104 @@ run_tests_medium_serial:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_time 2.5 -bottom_only_inflow_one	-verify_solution								
 
+#
+	@echo ""
+	@echo "PCAIR PCApplyTranspose - the bulk of the configurations; the essential ones are in the short tests"
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing - the smoother blocks run in reverse"
+	./pcair_apply_transpose -pc_air_smooth_type fc
+	./pcair_apply_transpose -pc_air_smooth_type ffc
+	./pcair_apply_transpose -pc_air_smooth_type cf
+	@echo "Test PCApplyTranspose with PCAIR with a C point inverse different to the F point one"
+	./pcair_apply_transpose -pc_air_smooth_type fc -pc_air_c_inverse_type wjacobi
+	./pcair_apply_transpose -pc_air_smooth_type fcf -pc_air_c_inverse_type newton
+	@echo "Test PCApplyTranspose with symmetric PCAIR - the restrictor is the transposed prolongator"
+	./pcair_apply_transpose -pc_air_symmetric -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down - petsc's transposed V-cycle"
+	./pcair_apply_transpose -pc_air_full_smoothing_up_and_down -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with matrix-free PCAIR polynomials - the transposed matshell twins"
+	./pcair_apply_transpose -pc_air_matrix_free_polys -pc_air_smooth_type fcf
+	./pcair_apply_transpose -pc_air_matrix_free_polys -pc_air_inverse_type newton
+	@echo "Test PCApplyTranspose with a matrix-free PCAIR coarse grid solver"
+	./pcair_apply_transpose -pc_air_coarsest_matrix_free_polys
+	./pcair_apply_transpose -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton
+	@echo "Test PCApplyTranspose with diagonally scaled PCAIR polynomials - the scaling transposes too"
+	./pcair_apply_transpose -pc_air_diag_scale_polys
+	./pcair_apply_transpose -pc_air_diag_scale_polys -pc_air_matrix_free_polys
+	./pcair_apply_transpose -pc_air_coarsest_diag_scale_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test PCApplyTranspose with every PCAIR inverse type"
+	$(SKIP_SINGLE) ./pcair_apply_transpose -pc_air_inverse_type power
+	./pcair_apply_transpose -pc_air_inverse_type arnoldi
+	./pcair_apply_transpose -pc_air_inverse_type newton
+	./pcair_apply_transpose -pc_air_inverse_type newton_no_extra -pc_air_poly_order 10
+	./pcair_apply_transpose -pc_air_inverse_type neumann
+	./pcair_apply_transpose -pc_air_inverse_type sai
+	./pcair_apply_transpose -pc_air_inverse_type isai
+	./pcair_apply_transpose -pc_air_inverse_type wjacobi
+	./pcair_apply_transpose -pc_air_inverse_type jacobi
+	@echo "Test PCApplyTranspose with a PCAIR coarse grid inverse type of its own"
+	./pcair_apply_transpose -pc_air_coarsest_inverse_type newton
+	./pcair_apply_transpose -pc_air_coarsest_inverse_type jacobi
+	@echo "Test PCApplyTranspose with the PCAIR Z types and lAIR distances"
+	./pcair_apply_transpose -pc_air_z_type product
+	./pcair_apply_transpose -pc_air_z_type lair
+	./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 1
+	./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 3
+	./pcair_apply_transpose -pc_air_z_type lair_sai
+	@echo "Test PCApplyTranspose with a classical PCAIR prolongator rather than the one point one"
+	./pcair_apply_transpose -pc_air_one_point_classical_prolong 0
+	./pcair_apply_transpose -pc_air_one_point_classical_prolong 0 -pc_air_improve_w_its 2
+	@echo "Test PCApplyTranspose with constrained PCAIR grid-transfer operators"
+	./pcair_apply_transpose -pc_air_constrain_z
+	./pcair_apply_transpose -pc_air_constrain_w -pc_air_one_point_classical_prolong 0
+	./pcair_apply_transpose -pc_air_constrain_z -pc_air_constrain_w -pc_air_one_point_classical_prolong 0
+	@echo "Test PCApplyTranspose with a lumped and a dropped PCAIR A"
+	./pcair_apply_transpose -pc_air_a_lump
+	./pcair_apply_transpose -pc_air_a_lump -pc_air_a_drop 1e-3
+	@echo "Test PCApplyTranspose with a direct and an iterative PCAIR coarse grid solve"
+	./pcair_apply_transpose -mg_coarse_pc_type lu
+	./pcair_apply_transpose -mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it 3 \
+	 -mg_coarse_ksp_norm_type none
+	@echo "Test PCApplyTranspose with a single level PCAIR - defers to the inner PCMG"
+	./pcair_apply_transpose -pc_air_max_levels 1 -pc_air_coarsest_matrix_free_polys
+	./pcair_apply_transpose -pc_air_max_levels 1 -pc_air_coarsest_inverse_type jacobi
+	@echo "Test PCApplyTranspose with a two level PCAIR"
+	./pcair_apply_transpose -pc_air_max_levels 2
+	./pcair_apply_transpose -pc_air_max_levels 2 -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose after the PCAIR operator values change - the same nonzero pattern"
+	./pcair_apply_transpose -rebuild
+	./pcair_apply_transpose -rebuild -pc_air_smooth_type fcf
+	./pcair_apply_transpose -rebuild -pc_air_matrix_free_polys
+	$(SKIP_SINGLE) ./pcair_apply_transpose -rebuild -pc_air_reuse_sparsity
+	$(SKIP_SINGLE) ./pcair_apply_transpose -rebuild -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs
+	@echo "Test PCApplyTranspose after the PCAIR nonzero pattern changes - the hierarchy is rebuilt"
+	./pcair_apply_transpose -rebuild_pattern -pc_air_smooth_type fcf
+	./pcair_apply_transpose -rebuild_pattern -pc_air_full_smoothing_up_and_down
+	@echo "Test PCApplyTranspose with PCAIR on a 2D upwind advection-diffusion operator"
+	./pcair_apply_transpose -dim 2 -n 20
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_smooth_type fcf
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_z_type lair
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_full_smoothing_up_and_down
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_matrix_free_polys -rebuild
+	./pcair_apply_transpose -dim 2 -n 20 -rebuild_pattern
+	@echo "Test KSPSolveTranspose through PCAIR"
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_smooth_type fcf
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_symmetric
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -mg_coarse_pc_type lu
+	./pcair_apply_transpose -dim 2 -n 20 -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_matrix_free_polys
+	@echo "Test KSPSolveTranspose through PCAIR with full smoothing up and down - petsc's transposed v-cycle"
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 -its_slack 4 \
+	 -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi
+	./pcair_apply_transpose -dim 2 -n 20 -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 -its_slack 4 \
+	 -pc_air_full_smoothing_up_and_down
+	@echo "Test PCApplyTranspose with PCAIR at a size too big for the explicit check"
+	./pcair_apply_transpose -n 5000
+	./pcair_apply_transpose -n 5000 -pc_air_matrix_free_polys -pc_air_smooth_type fcf
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_medium_parallel:
@@ -1622,6 +1751,62 @@ else
 		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
 	done
+#
+	@echo ""
+	@echo "PCAIR PCApplyTranspose in parallel - the bulk of the configurations; the essential ones are in the short tests"
+	@echo "Test PCApplyTranspose with the default PCAIR in parallel"
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_smooth_type fc
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -pc_air_smooth_type cf
+	@echo "Test PCApplyTranspose with symmetric PCAIR in parallel - a transposed prolongator restrictor"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_symmetric
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with matrix-free PCAIR polynomials in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_matrix_free_polys
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_matrix_free_polys -pc_air_inverse_type newton
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_diag_scale_polys -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with different PCAIR inverse types in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type newton
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type neumann
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type wjacobi
+	@echo "Test PCApplyTranspose with the PCAIR Z types in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 3
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair_sai
+	@echo "Test PCApplyTranspose with constrained PCAIR grid-transfer operators in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_constrain_z -pc_air_constrain_w \
+	 -pc_air_one_point_classical_prolong 0
+	@echo "Test PCApplyTranspose with PCAIR with processor agglomeration in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_processor_agglom \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -pc_air_processor_agglom -pc_air_smooth_type fcf \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_processor_agglom -pc_air_matrix_free_polys \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	@echo "Test PCApplyTranspose with a single and a two level PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_max_levels 1
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_max_levels 2
+	@echo "Test PCApplyTranspose with a redundant direct PCAIR coarse grid solve in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -mg_coarse_pc_type redundant -mg_coarse_redundant_pc_type lu
+	@echo "Test PCApplyTranspose after the PCAIR operator values change in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild -pc_air_matrix_free_polys
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild -pc_air_reuse_sparsity
+	@echo "Test PCApplyTranspose after the PCAIR nonzero pattern changes in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild_pattern
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -rebuild_pattern -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with PCAIR on a 2D upwind advection-diffusion operator in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -dim 2 -n 20
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -dim 2 -n 20 -pc_air_smooth_type fcf
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -dim 2 -n 20 -pc_air_z_type lair
+	@echo "Test KSPSolveTranspose through PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_smooth_type fcf
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with PCAIR at a size too big for the explicit check in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -n 5000 -pc_air_matrix_free_polys
 endif
 
 # ~~~~~~~~~~~

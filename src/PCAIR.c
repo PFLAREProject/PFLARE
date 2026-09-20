@@ -167,6 +167,22 @@ static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Transposed apply - this applies the exact transpose of what PCApply applies, so
+// the two are adjoints and KSPSolveTranspose works
+static PetscErrorCode PCApplyTranspose_AIR_c(PC pc, Vec x, Vec y)
+{
+   PetscFunctionBegin;
+   PC *pc_air_shell = (PC *)pc->data;
+
+   // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
+   // so it has to see the reusepreconditioner flag
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+
+   // Just call the underlying pcshell transposed apply
+   PetscCall(PCApplyTranspose(*pc_air_shell, x, y));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // ~~~~~~~~~~
 
 // Multi-RHS apply: applies the air multigrid to a whole block of dense right
@@ -3695,6 +3711,9 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
    // Set the method functions
    pc->ops->apply               = PCApply_AIR_c;
    pc->ops->matapply            = PCMatApply_AIR_c;
+   // We deliberately don't set matapplytranspose - PCMatApplyTranspose falls back to
+   // applying PCApplyTranspose column by column when it is NULL, which is correct
+   pc->ops->applytranspose      = PCApplyTranspose_AIR_c;
    pc->ops->setup               = PCSetUp_AIR_c;
    pc->ops->destroy             = PCDestroy_AIR_c;
    pc->ops->view                = PCView_AIR_c;  

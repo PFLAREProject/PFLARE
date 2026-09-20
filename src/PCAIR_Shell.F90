@@ -36,6 +36,8 @@ module pcair_shell
       call PCShellSetContext(pc, pc_air_data, ierr)
       ! Set the apply routine
       call PCShellSetApply(pc, PCApply_AIR_Shell, ierr)
+      ! Set the transposed apply routine
+      call PCShellSetApplyTranspose(pc, PCApplyTranspose_AIR_Shell, ierr)
       ! Set the destroy routine
       call PCShellSetDestroy(pc, PCDestroy_AIR_Shell, ierr)
       ! Set the setup routine
@@ -185,7 +187,32 @@ module pcair_shell
       ! Just apply the pcmg
       call PCApply(pc_air_data%pcmg, x, y, ierr)
 
-   end subroutine PCApply_AIR_Shell   
+   end subroutine PCApply_AIR_Shell
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCApplyTranspose_AIR_Shell(pc, x, y, ierr)
+
+      ! Apply the transpose of our shell PC
+      ! Just like the forward apply we hand this straight to the pcmg - petsc's
+      ! transposed cycles are the transpose of the forward ones, given the
+      ! transposed smoother and transposed residual setup_air_pcmg registers
+
+      ! ~~~~~~
+      type(tPC), intent(in)    :: pc
+      type(tVec), intent(in)   :: x, y
+      PetscErrorCode, intent(inout)   :: ierr
+
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+
+      ! ~~~~~~
+
+      ! Get the PC context
+      call PCShellGetContext(pc, pc_air_data, ierr)
+      ! Just apply the transpose of the pcmg
+      call PCApplyTranspose(pc_air_data%pcmg, x, y, ierr)
+
+   end subroutine PCApplyTranspose_AIR_Shell
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
