@@ -1,8 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it using the following metadata."
 title: "PFLARE"
-version: "1.26.0"
-date-released: "2026-03-23"
+version: "1.27.0"
 abstract: "A library containing methods which can be used to solve linear systems in parallel with PETSc, with interfaces in C/Fortran/Python. It aims to provide fast & scalable iterative methods for asymmetric linear systems, in parallel and on both CPUs and GPUs."
 authors:
   - family-names: "Dargaville"
