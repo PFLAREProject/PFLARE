@@ -24,7 +24,7 @@ jobs:
     # Only people allowed to deploy to this environment can start a GPU run
     environment: protected-manual-builds
     # Hard cap on the rented GPU time
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       # Vast.ai does not expose the image's ENV to the session the runner is
       # started from, so everything the build needs is set explicitly here.
