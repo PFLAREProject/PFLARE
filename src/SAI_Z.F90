@@ -592,11 +592,11 @@ module sai_z
                allocate(work(1))
                lwork = -1
                ! Kind-correct BLAS integer dimensions
-               m_bl = i_size
-               n_bl = j_size
+               m_bl = int(i_size, kind=kind(m_bl))
+               n_bl = int(j_size, kind=kind(n_bl))
                nrhs_bl = 1
-               lda_bl = i_size
-               ldb_bl = i_size
+               lda_bl = int(i_size, kind=kind(lda_bl))
+               ldb_bl = int(i_size, kind=kind(ldb_bl))
                call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
                            e_row, ldb_bl, work, lwork, info)
                ! int() is exact for all plausible sizes < 2^24 even when work is single precision
