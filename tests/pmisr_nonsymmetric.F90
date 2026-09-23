@@ -33,7 +33,7 @@
       PetscInt       :: n, i, rstart, rend
       PetscInt, parameter :: one = 1, two = 2, three = 3
       PetscScalar, parameter :: s_one = 1d0
-      PetscReal, parameter :: strong_threshold = 0.5d0, ddc_fraction = 0.1d0
+      PetscReal, parameter :: strong_threshold = 0.5d0, ddc_fraction = real(0.1d0, kind=PETSC_REAL_KIND)
       integer, parameter  :: max_luby_steps = -1, ddc_its = 1
       PetscErrorCode :: ierr
       PetscBool      :: flg
