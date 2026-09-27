@@ -312,6 +312,12 @@ run_tests_no_load_short_serial:
 	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
 	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
 	 -pc_air_full_smoothing_up_and_down
+	@echo "Test the hierarchy stats with only one level are finite - jacobi fallback and auto truncated"
+	./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
+	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_print_stats_timings -fp_trap
+	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
@@ -953,6 +959,10 @@ else
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
+	@echo "Test the hierarchy stats with only one level are finite in parallel"
+	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
+	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"

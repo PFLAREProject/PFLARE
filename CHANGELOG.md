@@ -6,6 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the PCAIR complexities (`-pc_air_print_stats_timings` and
+  `PCAIRGet*Complexity`) being zero or NaN when the hierarchy has only a single
+  level (the Jacobi fallback or auto truncation on the top level)
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
