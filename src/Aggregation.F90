@@ -83,8 +83,10 @@ module aggregation
 
          if (ncols == 0) then
 
-            ! No neighbours it stays fine
-            cf_markers(indices(ifree)) = -1
+            ! No neighbours it stays fine, unless it came in pre-assigned
+            ! (e.g., a C point from the boundary PMIS in PMIS_AGG whose strong
+            ! neighbours are all off-process), in which case we leave it alone
+            if (cf_markers(indices(ifree)) == 0) cf_markers(indices(ifree)) = -1
 
          else       
 

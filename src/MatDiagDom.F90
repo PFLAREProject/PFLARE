@@ -5,7 +5,7 @@ module matdiagdom
    use petsc_helper, only: kokkos_debug
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos
    use pflare_parameters, only: C_POINT, F_POINT, &
-         PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL
+         PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL, PFLARE_DD_RATIO_ZERO_DIAG
 
 #include "petsc/finclude/petscmat.h"
 
@@ -136,7 +136,7 @@ module matdiagdom
       PetscReal, dimension(:), allocatable, target :: cf_markers_local_real
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
-      PetscReal :: diag_val, off_diag_sum
+      PetscReal :: diag_val, off_diag_sum, off_diag_any
       PetscReal :: max_dd_ratio_local
       logical :: mpi
 
@@ -205,14 +205,18 @@ module matdiagdom
       ! Compute diagonal-dominance sums over the local fine-row list.
       ! For each row: accumulate abs(off-diagonal) over F neighbors only,
       ! store abs(diagonal) for an F diagonal entry, then form ratio.
+      ! We also accumulate abs(off-diagonal) over all neighbours (F or C) so we
+      ! can tell a zero-diagonal row with connections apart from an empty row
       do ifree = 1, fine_size
          local_row = is_pointer(ifree) - input_row_start + 1
          diag_val = 0d0
          off_diag_sum = 0d0
+         off_diag_any = 0d0
 
          do jfree = ad_ia(local_row) + 1, ad_ia(local_row + 1)
             target_col = ad_ja(jfree) + 1
 
+            if (target_col /= local_row) off_diag_any = off_diag_any + abs(ad_vals(jfree))
             if (cf_markers_local(target_col) /= F_POINT) cycle
 
             if (target_col == local_row) then
@@ -226,16 +230,23 @@ module matdiagdom
             do jfree = ao_ia(local_row) + 1, ao_ia(local_row + 1)
                target_col = ao_ja(jfree) + 1
 
+               off_diag_any = off_diag_any + abs(ao_vals(jfree))
                if (nint(cf_markers_nonlocal(target_col)) /= F_POINT) cycle
 
                off_diag_sum = off_diag_sum + abs(ao_vals(jfree))
             end do
          end if
 
-         ! If no diagonal was found, keep ratio at zero.
-         ! This matches the Kokkos behavior for rows without a diagonal entry.
          if (diag_val /= 0d0) then
             diag_dom_ratio(ifree) = off_diag_sum / diag_val
+
+         ! If the diagonal is zero (or missing) but the row has any nonzero
+         ! off-diagonal, this F point would give Aff a zero diagonal, so give it
+         ! a huge ratio to guarantee it is promoted to a C point
+         ! Rows with no nonzeros at all keep a ratio of zero
+         ! This matches the Kokkos behaviour
+         else if (off_diag_any /= 0d0) then
+            diag_dom_ratio(ifree) = PFLARE_DD_RATIO_ZERO_DIAG
          end if
       end do
 

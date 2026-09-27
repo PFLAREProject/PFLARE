@@ -131,8 +131,11 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
             Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
             // Let's bin the entry
+            // Clamp the ratio to 1 before the floor, as a really large ratio (e.g., the one
+            // given to zero diagonal rows) would overflow the integer conversion
             int bin;
-            int test_bin = floor(diag_dom_ratio_d(i) * double(dom_bins_d.extent(0))) + 1;
+            const PetscReal clamped_ratio = diag_dom_ratio_d(i) < 1.0 ? diag_dom_ratio_d(i) : 1.0;
+            int test_bin = floor(clamped_ratio * double(dom_bins_d.extent(0))) + 1;
             if (test_bin < int(dom_bins_d.extent(0)) && test_bin >= 0) {
                bin = test_bin;
             }

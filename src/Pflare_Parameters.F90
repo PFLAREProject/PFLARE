@@ -183,6 +183,12 @@ module pflare_parameters
    ! MatMatMult / MatPtAP fill-ratio estimates (PetscReal args; separate values)
    PetscReal, parameter :: PFLARE_MATMULT_FILL = 1.5
    PetscReal, parameter :: PFLARE_PTAP_FILL    = 1.58
+   ! Diagonal-dominance ratio assigned to an F row with a zero (or missing) diagonal
+   ! but nonzero off-diagonals, so the DDC/diag_dom cleanup always promotes it to C
+   ! (otherwise Aff would have a zero diagonal). 2**100 is exact in single and double
+   ! and matches the literal 0x1p100 used in MatDiagDomk.kokkos.cxx. It stays well
+   ! below huge() so 2x it (the DDC PMISR measure scale) can't overflow.
+   PetscReal, parameter :: PFLARE_DD_RATIO_ZERO_DIAG = 2.0**100
 
 #if defined(PETSC_USE_REAL_SINGLE)
    ! Coefficient/root "is effectively zero" tests (Gmres_Poly/Gmres_Poly_Newton)
