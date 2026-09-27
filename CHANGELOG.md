@@ -6,6 +6,12 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the Kokkos dense direct solve used to build lAIR/SAI Z and ISAI
+  rows not pivoting, which gave Inf/NaN or inaccurate rows when a local block
+  had a zero or small leading pivot (e.g. matrices with zero diagonals); it now
+  uses LU with partial pivoting like the CPU LAPACK solve. The CPU dense ISAI
+  solve also no longer permutes the (already unpermuted) gesv solution
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
