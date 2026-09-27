@@ -926,6 +926,10 @@ module pcair_c_fortran_bindings
       ! The C interface to this differs by sending out a pointer, rather than a copy of the coefficients
       ! in an allocatable array - hence you will have to take a copy of the values externally if you want 
       ! to save them
+      ! If there are no coefficients stored for this level and inverse (invalid petsc_level or 
+      ! which_inverse, not setup, or not a polynomial inverse) this returns a NULL pointer with 
+      ! zero sizes, which the C wrapper turns into a PETSc error. PCAIRSetPolyCoeffs in C 
+      ! also copies into the pointer returned from here
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -935,65 +939,22 @@ module pcair_c_fortran_bindings
       type(c_ptr), intent(out)            :: coeffs_ptr
 
       type(tPC)                              :: pc
-      PetscErrorCode                         :: ierr
-      integer                                :: our_level, errorcode
-      PetscInt                               :: num_levels
-      type(tPC)                              :: pc_shell
-      type(pc_air_multigrid_data), pointer   :: pc_air_data=>null()      
-
+      PetscReal, dimension(:,:), pointer, contiguous :: coeffs_internal
       ! ~~~~~~~~
 
       pc%v = pc_ptr
 
-      ! Get the underlying PCShell
-      call PCAIRGetPCShell(pc, pc_shell)
+      call PCAIRGetPolyCoeffsPointer(pc, petsc_level, int(which_inverse), coeffs_internal)
 
-      ! Get the PC shell context
-      call PCShellGetContext(pc_shell, pc_air_data, ierr)
-
-      ! Get the number of levels in our mg
-      call PCAIRGetNumLevels(pc, num_levels, ierr) 
-
-      ! We order our levels from 1 to num_levels
-      our_level = int(num_levels - petsc_level)
-      
-      ! Inverse Aff
-      if (which_inverse == COEFFS_INV_AFF) then
-
-         row_size = size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 1)
-         col_size = size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 2)
-
-         coeffs_ptr = c_loc(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients)
-
-      ! Inverse dropped Aff
-      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
-
-         row_size = size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 1)
-         col_size = size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 2)       
-
-         coeffs_ptr = c_loc(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
-
-      ! Inverse Acc
-      else if (which_inverse == COEFFS_INV_ACC) then
-
-         row_size = size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 1)
-         col_size = size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 2)            
-
-         coeffs_ptr = c_loc(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients)
-
-      ! Coarsest grid matrix
-      else if (which_inverse == COEFFS_INV_COARSE) then
-
-         row_size = size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 1)
-         col_size = size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 2)         
-
-         coeffs_ptr = c_loc(pc_air_data%air_data%inv_coarsest_poly_data%coefficients)
-
+      if (associated(coeffs_internal)) then
+         row_size = size(coeffs_internal, 1)
+         col_size = size(coeffs_internal, 2)
+         coeffs_ptr = c_loc(coeffs_internal)
       else
-         print *, "Unknown which_inverse in PCAIRGetPolyCoeffs_c"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if      
-
+         row_size = 0
+         col_size = 0
+         coeffs_ptr = c_null_ptr
+      end if
 
    end subroutine PCAIRGetPolyCoeffs_c      
    
@@ -1897,92 +1858,6 @@ module pcair_c_fortran_bindings
       call PCAIRSetReuseAmount(pc, amount, ierr)
 
    end subroutine PCAIRSetReuseAmount_c
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRSetPolyCoeffs_c(pc_ptr, petsc_level, which_inverse, &
-               coeffs_ptr, row_size, col_size) bind(C, name='PCAIRSetPolyCoeffs_c')
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(inout) :: pc_ptr
-      PetscInt, value, intent(in)         :: petsc_level
-      integer(c_int), value, intent(in)   :: which_inverse 
-      PetscInt, value, intent(in)         :: row_size, col_size
-      type(c_ptr), value, intent(in)      :: coeffs_ptr
-
-      type(tPC)                              :: pc
-      PetscErrorCode                         :: ierr
-      integer                                :: our_level, errorcode
-      PetscInt                               :: num_levels, i_loc, j_loc
-      type(tPC)                              :: pc_shell
-      type(pc_air_multigrid_data), pointer   :: pc_air_data=>null()   
-      PetscReal, pointer :: coeffs_c(:,:)   
-
-      ! ~~~~~~~~
-
-      pc%v = pc_ptr
-
-      ! Get the underlying PCShell
-      call PCAIRGetPCShell(pc, pc_shell)
-
-      ! Get the PC shell context
-      call PCShellGetContext(pc_shell, pc_air_data, ierr)
-
-      ! Get the number of levels in our mg
-      call PCAIRGetNumLevels(pc, num_levels, ierr) 
-
-      ! We order our levels from 1 to num_levels
-      our_level = int(num_levels) - int(petsc_level)
-
-      call c_f_pointer(coeffs_ptr, coeffs_c, shape=[row_size, col_size])
-      
-      ! Inverse Aff
-      if (which_inverse == COEFFS_INV_AFF) then
-
-         do i_loc = 1, col_size
-            do j_loc = 1, row_size
-               pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients(j_loc, i_loc) = &
-                     coeffs_c(j_loc, i_loc)
-            end do
-         end do
-
-      ! Inverse dropped Aff
-      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
-
-         do i_loc = 1, col_size
-            do j_loc = 1, row_size
-               pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients(j_loc, i_loc) = &
-                     coeffs_c(j_loc, i_loc)
-            end do
-         end do     
-
-      ! Inverse Acc
-      else if (which_inverse == COEFFS_INV_ACC) then
-
-         do i_loc = 1, col_size
-            do j_loc = 1, row_size
-               pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients(j_loc, i_loc) = &
-                     coeffs_c(j_loc, i_loc)
-            end do
-         end do          
-
-      ! Coarsest grid matrix
-      else if (which_inverse == COEFFS_INV_COARSE) then
-
-         do i_loc = 1, col_size
-            do j_loc = 1, row_size
-               pc_air_data%air_data%inv_coarsest_poly_data%coefficients(j_loc, i_loc) = &
-                     coeffs_c(j_loc, i_loc)
-            end do
-         end do        
-
-      else
-         print *, "Unknown which_inverse in PCAIRSetPolyCoeffs_c"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if      
-
-
-   end subroutine PCAIRSetPolyCoeffs_c      
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

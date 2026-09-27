@@ -102,7 +102,9 @@ cdef extern:
 
 	# PCAIR - polynomial coefficients
 	# Returns a pointer into internal PCAIR memory (valid until the next PCSetUp or PCReset).
-	# The Python wrapper copies the data before returning.
+	# The Python wrapper copies the data before returning. Calls the C wrapper (not the
+	# _c Fortran routine) so an invalid level/inverse or a call before setup raises a
+	# PETSc error rather than reading through a null pointer.
 	PetscErrorCode PCAIRGetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 	PetscErrorCode PCAIRGetGridComplexity(PetscPC pc, PetscReal *complexity)
@@ -164,7 +166,8 @@ cdef extern:
 	PetscErrorCode PCAIRSetReusePolyCoeffs(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReuseAmount(PetscPC pc, PetscInt amount)
 
-	# PCAIR - set polynomial coefficients (copies from the provided pointer)
+	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
+	# wrapper checks the level/inverse are valid and the sizes match before copying.
 	PetscErrorCode PCAIRSetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 
@@ -505,7 +508,7 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 	cdef PetscInt row_size = 0, col_size = 0
 	cdef PetscInt i, j
 	CHKERR(PCAIRGetPolyCoeffs(pc.pc, petsc_level, which_inverse,
-	                             &coeffs_ptr, &row_size, &col_size))
+	                          &coeffs_ptr, &row_size, &col_size))
 	# Match the numpy dtype to the build's PetscReal width (float32 single /
 	# float64 double) and copy element-wise through the PetscReal* pointer.
 	# A raw memcpy sized with sizeof(PetscReal) into a double[::1,:] view would
@@ -706,7 +709,7 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	cdef PetscInt col_size = <PetscInt>staging.shape[1]
 	cdef PetscReal *sptr = <PetscReal*><size_t>staging.ctypes.data
 	CHKERR(PCAIRSetPolyCoeffs(pc.pc, petsc_level, which_inverse,
-	                             sptr, row_size, col_size))
+	                          sptr, row_size, col_size))
 
 # -----------------------------------------------------------------------
 # PCPFLAREINV wrappers
