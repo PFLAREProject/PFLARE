@@ -6,6 +6,9 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed an MPI communicator leak on every setup with `-pc_air_subcomm` when
+  some ranks have no rows on a level
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
