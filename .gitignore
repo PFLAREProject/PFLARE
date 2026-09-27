@@ -47,6 +47,7 @@ tests/matrandom
 tests/matrandom_check_reset
 tests/operator_refcount
 tests/pflareinv_apply_transpose
+tests/newton_imag_roots
 tests/pmisr_nonsymmetric
 tests/poly_zero_coeffs
 tests/leja_ordering

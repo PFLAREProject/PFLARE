@@ -729,6 +729,11 @@ run_tests_no_load_short_serial:
 	./poly_zero_coeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
 #
 	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
+# Skipped in single as there the roots' real parts are not below the zero tolerance
+	$(SKIP_SINGLE) ./newton_imag_roots
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -1284,6 +1289,10 @@ else
 	@echo "Test monomial polynomial coefficients with exact zeros in parallel, assembled and matrix-free"
 	$(MPIEXEC) -n 2 ./poly_zero_coeffs
 	$(MPIEXEC) -n 2 ./poly_zero_coeffs -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
