@@ -226,7 +226,7 @@ PETSC_INTERN void GenerateIS_ProcAgglomeration_c(PetscInt proc_stride, PetscInt 
 PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcomm, Mat *B)
 {
   const PetscInt *ranges;
-  MPI_Comm        acomm, bcomm;
+  MPI_Comm        acomm, bcomm, pcomm;
   MPI_Group       agroup, bgroup;
   PetscMPIInt     i, size, nranks, *ranks;
   Mat mat_local, mat_nonlocal;
@@ -294,7 +294,15 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
       // MAT_NO_OFF_PROC_ENTRIES is set to true in this routine so 
       // don't need to set it externally
       // Have to be careful here as need to feed in copies of A and B
-      PetscCall(MatCreateMPIAIJWithSeqAIJ(bcomm, M, N, Ad_copy, Ao_copy, garray_host, B));
+      // We can't just create B on bcomm and then free bcomm, as the layouts
+      // of B store the comm they are given without duplicating it
+      // Instead create B on the PETSc inner comm of bcomm, which B then holds
+      // a reference to (and hence is freed when B is destroyed)
+      PetscCall(PetscCommDuplicate(bcomm, &pcomm, NULL));
+      PetscCall(MatCreateMPIAIJWithSeqAIJ(pcomm, M, N, Ad_copy, Ao_copy, garray_host, B));
+      // Drop our reference to the inner comm and free bcomm, otherwise bcomm leaks
+      PetscCall(PetscCommDestroy(&pcomm));
+      (void)MPI_Comm_free(&bcomm);
     }
   }
   PetscFunctionReturn(PETSC_SUCCESS);
