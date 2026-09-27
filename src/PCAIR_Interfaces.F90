@@ -25,11 +25,12 @@ module pcair_interfaces
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    interface   
       
-      subroutine c_PCAIRGetPCShell(A_array, B_array) &
+      function c_PCAIRGetPCShell(A_array, B_array) &
          bind(c, name="c_PCAIRGetPCShell")
          use iso_c_binding
          integer(c_long_long) :: A_array, B_array
-      end subroutine c_PCAIRGetPCShell         
+         PetscErrorCode       :: c_PCAIRGetPCShell
+      end function c_PCAIRGetPCShell         
  
    end interface   
 
@@ -55,12 +56,13 @@ module pcair_interfaces
       type(tPC), intent(inout) :: pc, pc_shell
 
       integer(c_long_long) :: pc_ptr, pc_shell_ptr
+      PetscErrorCode :: ierr
       ! ~~~~~~~~
 
       pc_ptr = pc%v
 
-      ! Call the c routine
-      call c_PCAIRGetPCShell(pc_ptr, pc_shell_ptr)
+      ! Call the c routine - this can't fail
+      ierr = c_PCAIRGetPCShell(pc_ptr, pc_shell_ptr)
       pc_shell%v = pc_shell_ptr
 
    end subroutine PCAIRGetPCShell
