@@ -14,6 +14,15 @@ for earlier changes please see the git history.
   order + 1 (e.g. small block Jacobi sub-blocks); the order is now clamped to
   the matrix size as in PCAIR, so `PCPFLAREINVGetPolyCoeffs` returns the
   clamped size
+- Fixed PCPFLAREINV crashing with `-pc_pflareinv_type jacobi` or `wjacobi`
+  and `-pc_pflareinv_matrix_free`; matrix-free is now ignored for the Jacobi
+  types, as it already was in PCAIR
+- Behaviour change: `PCPFLAREINVGetPolyCoeffs` now returns `NULL` and 0x0 for
+  the non-polynomial PCPFLAREINV types (sai, isai, wjacobi, jacobi) instead of
+  uninitialised memory, and coefficients set with `PCPFLAREINVSetPolyCoeffs`
+  are discarded during setup for these types
+- Fixed `PCPFLAREINVSetPolyCoeffs` reading freed memory when passed the
+  pointer returned by `PCPFLAREINVGetPolyCoeffs`
 
 ## [v1.27.0]
 
