@@ -195,7 +195,8 @@ export TEST_TARGETS = ex12f \
 		  operator_refcount \
 		  pcair_reuse_amount_range \
 		  comm_self_then_world \
-		  pmisr_nonsymmetric
+		  pmisr_nonsymmetric \
+		  leja_ordering
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
