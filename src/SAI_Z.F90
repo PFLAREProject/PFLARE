@@ -214,8 +214,13 @@ module sai_z
          call ISDestroy(row_indices(1), ierr)
          if (.NOT. incomplete) call ISDestroy(all_cols_indices(1), ierr)
 
-         row_size = size(col_indices_off_proc_array)
-         call ISDestroy(col_indices(1), ierr)
+         ! col_indices_off_proc_array is only allocated in the incomplete case
+         if (incomplete) then
+            row_size = size(col_indices_off_proc_array)
+            call ISDestroy(col_indices(1), ierr)
+         else
+            row_size = global_cols
+         end if
 
       ! Easy in serial as we have everything we neeed
       else
