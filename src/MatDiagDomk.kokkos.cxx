@@ -251,14 +251,18 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Ensure we're done before we exit
    Kokkos::fence();
 
+   // Kokkos::Max over an empty range returns the reducer identity (lowest representable value),
+   // so only reduce if we have local F points (matches the CPU which uses zero if there are none)
    PetscReal max_dd_ratio_local = 0.0;
-   Kokkos::parallel_reduce("max_dd_ratio", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
-      KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
-         PetscReal dd_ratio = diag_dom_ratio_d(i);
-         thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;
-      },
-      Kokkos::Max<PetscReal>(max_dd_ratio_local)
-   );
+   if (local_rows_row > 0) {
+      Kokkos::parallel_reduce("max_dd_ratio", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+         KOKKOS_LAMBDA(const PetscInt i, PetscReal& thread_max) {
+            PetscReal dd_ratio = diag_dom_ratio_d(i);
+            thread_max = (dd_ratio > thread_max) ? dd_ratio : thread_max;
+         },
+         Kokkos::Max<PetscReal>(max_dd_ratio_local)
+      );
+   }
 
    PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&max_dd_ratio_local, max_dd_ratio_achieved, 1, MPIU_REAL, MPI_MAX, MPI_COMM_MATRIX));
 
