@@ -63,6 +63,9 @@ module approx_inverse_setup
       !     caller takes ownership via the returned pointer).
       !   - If absent: existing behaviour. The matshell takes ownership of heap-allocated
       !     coefficients (matrix-free case) or stack storage is used (assembled case).
+      !   - Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI) have no coefficients:
+      !     supplied coefficients are ignored and none are allocated or returned, so
+      !     coefficients is left unassociated if it was not associated on entry.
 
       ! ~~~~~~
       type(tMat), intent(in)                                        :: matrix
@@ -84,7 +87,7 @@ module approx_inverse_setup
       PetscErrorCode :: ierr
       type(tMat) :: reuse_mat, inv_matrix_temp
       type(tMat), dimension(:), pointer :: reuse_submatrices => null()
-      logical :: heap_allocated, coefficients_supplied
+      logical :: heap_allocated, coefficients_supplied, poly_type
 
       ! ~~~~~~  
 
@@ -115,6 +118,10 @@ module approx_inverse_setup
       ! Careful not to write present(coefficients) .AND. associated(coefficients)
       ! in one expression - fortran does not short-circuit, so associated() can be
       ! evaluated on an absent optional and segfault
+      poly_type = inverse_type == PFLAREINV_POWER .OR. inverse_type == PFLAREINV_ARNOLDI .OR. &
+                  inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                  inverse_type == PFLAREINV_NEUMANN
+
       coefficients_supplied = .FALSE.
       if (present(coefficients)) then
          if (associated(coefficients)) coefficients_supplied = .TRUE.
@@ -139,7 +146,7 @@ module approx_inverse_setup
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
          ! Caller owns the coefficient memory; matshell must not free it
-         if (matrix_free) then
+         if (matrix_free .AND. poly_type) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
             mat_ctx%own_coefficients = .FALSE.
          end if
@@ -151,10 +158,11 @@ module approx_inverse_setup
          ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
          ! Heap-allocate when: matrix-free (matshell will hold the pointer),
          ! coefficients are being returned to the caller, or Newton basis (2 columns).
-         ! Otherwise, stack storage suffices.
-         heap_allocated = matrix_free .OR. &
+         ! Otherwise, stack storage suffices. Non-polynomial types never touch the
+         ! coefficients, so they just get the (unused) stack storage.
+         heap_allocated = poly_type .AND. (matrix_free .OR. &
                           (present(coefficients) .AND. .NOT. coefficients_supplied) .OR. &
-                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
          if (heap_allocated) then
             if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
                ! Newton basis needs storage for real and imaginary roots
@@ -177,7 +185,9 @@ module approx_inverse_setup
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
 
-         if (matrix_free) then
+         if (.NOT. poly_type) then
+            ! No coefficients to return; leave coefficients unassociated
+         else if (matrix_free) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
             ! The matshell always owns its coefficients and frees them via deallocate
             ! in reset_inverse_mat. When present(coefficients), the C binding is
