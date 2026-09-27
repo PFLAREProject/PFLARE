@@ -102,10 +102,13 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
          Kokkos::TeamThreadRange(t, ncols_local),
          [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
-            // If it's the biggest value keep it
-            if (Kokkos::abs(device_local_vals(device_local_i[i] + j)) > thread_data.val) {
-               thread_data.val = Kokkos::abs(device_local_vals(device_local_i[i] + j));
-               thread_data.col = device_local_j[device_local_i[i] + j];
+            // If it's the biggest value keep it - ties go to the smallest column
+            // to match the CPU maxloc
+            const PetscReal abs_val = Kokkos::abs(device_local_vals(device_local_i[i] + j));
+            const PetscInt col = device_local_j[device_local_i[i] + j];
+            if (thread_data.is_better(abs_val, col)) {
+               thread_data.val = abs_val;
+               thread_data.col = col;
             }
          }, local_row_result
       );
@@ -117,11 +120,14 @@ PETSC_INTERN void generate_one_point_with_one_entry_from_sparse_kokkos(Mat *inpu
             Kokkos::TeamThreadRange(t, ncols_nonlocal),
             [&](const PetscInt j, ReduceDataMaxRow& thread_data) {
 
-               // If it's the biggest value keep it
-               if (Kokkos::abs(device_nonlocal_vals(device_nonlocal_i[i] + j)) > thread_data.val) {
-                  thread_data.val = Kokkos::abs(device_nonlocal_vals(device_nonlocal_i[i] + j));
-                  // Set the global index
-                  thread_data.col = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
+               // If it's the biggest value keep it - ties go to the smallest column
+               // (colmap is sorted, so this matches the CPU maxloc)
+               const PetscReal abs_val = Kokkos::abs(device_nonlocal_vals(device_nonlocal_i[i] + j));
+               // Global index
+               const PetscInt col = colmap_input_d(device_nonlocal_j[device_nonlocal_i[i] + j]);
+               if (thread_data.is_better(abs_val, col)) {
+                  thread_data.val = abs_val;
+                  thread_data.col = col;
                }
             }, nonlocal_row_result
          );         
