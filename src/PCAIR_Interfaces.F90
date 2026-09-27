@@ -1017,7 +1017,12 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      inv_type = options%c_inverse_type
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_inverse_type == -1) then
+         inv_type = options%inverse_type
+      else
+         inv_type = options%c_inverse_type
+      end if
       ierr = 0
 
    end subroutine PCAIRGetCInverseType   
@@ -1074,7 +1079,12 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      order = options%c_poly_order
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_poly_order == -1) then
+         order = options%poly_order
+      else
+         order = options%c_poly_order
+      end if
       ierr = 0
 
    end subroutine PCAIRGetCPolyOrder
@@ -1093,7 +1103,12 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      order = options%c_inverse_sparsity_order
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_inverse_sparsity_order == -1) then
+         order = options%inverse_sparsity_order
+      else
+         order = options%c_inverse_sparsity_order
+      end if
       ierr = 0
 
    end subroutine PCAIRGetCInverseSparsityOrder   
@@ -2293,6 +2308,10 @@ module pcair_interfaces
 
       call PCAIRGetCInverseType(pc, old_type, ierr)
       if (old_type == inv_type) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_inverse_type = inv_type
          ierr = 0
          return
       end if
@@ -2448,6 +2467,10 @@ module pcair_interfaces
 
       call PCAIRGetCPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_poly_order = int(order)
          ierr = 0
          return
       end if
@@ -2479,6 +2502,10 @@ module pcair_interfaces
 
       call PCAIRGetCInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_inverse_sparsity_order = int(order)
          ierr = 0
          return
       end if

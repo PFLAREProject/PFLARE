@@ -157,6 +157,47 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
 
+# -----------------------------------------------------------------------
+# C point smoother options default to the F point values if unset
+# -----------------------------------------------------------------------
+# Without calling setFromOptions, unset C values follow the F values
+pc_c = PETSc.PC().create(comm=comm)
+pc_c.setType('air')
+pflare.pcair_set_inverse_type(pc_c, pflare.PFLAREINV_POWER)
+pflare.pcair_set_poly_order(pc_c, 5)
+pflare.pcair_set_inverse_sparsity_order(pc_c, 2)
+check('c_inverse_type_default', pflare.pcair_get_c_inverse_type(pc_c), pflare.PFLAREINV_POWER)
+check('c_poly_order_default', pflare.pcair_get_c_poly_order(pc_c), 5)
+check('c_inverse_sparsity_order_default', pflare.pcair_get_c_inverse_sparsity_order(pc_c), 2)
+# setFromOptions must not pin the unset C values, they keep following F
+pc_c.setFromOptions()
+pflare.pcair_set_poly_order(pc_c, 7)
+check('c_poly_order_follows_f', pflare.pcair_get_c_poly_order(pc_c), 7)
+pc_c.destroy()
+
+# C values set explicitly must survive setFromOptions and later F changes
+pc_c = PETSc.PC().create(comm=comm)
+pc_c.setType('air')
+pflare.pcair_set_c_inverse_type(pc_c, pflare.PFLAREINV_NEUMANN)
+pflare.pcair_set_c_poly_order(pc_c, 3)
+pflare.pcair_set_c_inverse_sparsity_order(pc_c, 0)
+pc_c.setFromOptions()
+pflare.pcair_set_inverse_type(pc_c, pflare.PFLAREINV_POWER)
+pflare.pcair_set_poly_order(pc_c, 9)
+pflare.pcair_set_inverse_sparsity_order(pc_c, 2)
+check('c_inverse_type_explicit', pflare.pcair_get_c_inverse_type(pc_c), pflare.PFLAREINV_NEUMANN)
+check('c_poly_order_explicit', pflare.pcair_get_c_poly_order(pc_c), 3)
+check('c_inverse_sparsity_order_explicit', pflare.pcair_get_c_inverse_sparsity_order(pc_c), 0)
+pc_c.destroy()
+
+# Setting a C value equal to the current F value still pins it
+pc_c = PETSc.PC().create(comm=comm)
+pc_c.setType('air')
+pflare.pcair_set_c_poly_order(pc_c, pflare.pcair_get_poly_order(pc_c))
+pflare.pcair_set_poly_order(pc_c, 2)
+check('c_poly_order_pinned', pflare.pcair_get_c_poly_order(pc_c), 6)
+pc_c.destroy()
+
 if errors:
     if rank == 0:
         for e in errors:

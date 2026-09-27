@@ -3015,11 +3015,12 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsEnum("-pc_air_inverse_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
    PetscCall(PCAIRSetInverseType(pc, type));
    // ~~~~ 
-   // Defaults to whatever the F point smoother is atm
-   PetscCall(PCAIRGetInverseType(pc, &old_type));
+   // If not explicitly set, the getter returns the F point smoother value
+   // Only set if given, so an unset C value keeps following the F point smoother
+   PetscCall(PCAIRGetCInverseType(pc, &old_type));
    type = old_type;
    PetscCall(PetscOptionsEnum("-pc_air_c_inverse_type", "C point inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
-   PetscCall(PCAIRSetCInverseType(pc, type));
+   if (flg) PetscCall(PCAIRSetCInverseType(pc, type));
    // ~~~~
    const char *const PCAIRZTypes[] = {"PRODUCT", "LAIR", "LAIR_SAI", "PCAIRZType", "AIR_Z_", NULL};
    PetscCall(PCAIRGetZType(pc, &old_z_type));
@@ -3042,17 +3043,17 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsInt("-pc_air_inverse_sparsity_order", "Inverse sparsity order", "PCAIRSetInverseSparsityOrder", old_int, &input_int, NULL));
    PetscCall(PCAIRSetInverseSparsityOrder(pc, input_int));
    // ~~~~ 
-   // Defaults to whatever the F point smoother is atm
-   PetscCall(PCAIRGetPolyOrder(pc, &old_int));
+   // If not explicitly set, the getter returns the F point smoother value
+   PetscCall(PCAIRGetCPolyOrder(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_c_poly_order", "C point polynomial order", "PCAIRSetCPolyOrder", old_int, &input_int, NULL));
-   PetscCall(PCAIRSetCPolyOrder(pc, input_int));
+   PetscCall(PetscOptionsInt("-pc_air_c_poly_order", "C point polynomial order", "PCAIRSetCPolyOrder", old_int, &input_int, &flg));
+   if (flg) PetscCall(PCAIRSetCPolyOrder(pc, input_int));
    // ~~~~ 
-   // Defaults to whatever the F point smoother is atm
-   PetscCall(PCAIRGetInverseSparsityOrder(pc, &old_int));
+   // If not explicitly set, the getter returns the F point smoother value
+   PetscCall(PCAIRGetCInverseSparsityOrder(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_c_inverse_sparsity_order", "C point inverse sparsity order", "PCAIRSetCInverseSparsityOrder", old_int, &input_int, NULL));
-   PetscCall(PCAIRSetCInverseSparsityOrder(pc, input_int));
+   PetscCall(PetscOptionsInt("-pc_air_c_inverse_sparsity_order", "C point inverse sparsity order", "PCAIRSetCInverseSparsityOrder", old_int, &input_int, &flg));
+   if (flg) PetscCall(PCAIRSetCInverseSparsityOrder(pc, input_int));
    // ~~~~ 
    PetscCall(PCAIRGetCoarsestInverseType(pc, &old_type));
    type = old_type;

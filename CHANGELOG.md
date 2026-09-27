@@ -6,6 +6,12 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the PCAIR C point smoother options (`-pc_air_c_inverse_type`,
+  `-pc_air_c_poly_order`, `-pc_air_c_inverse_sparsity_order`): values set via
+  the API are no longer overwritten by the F point values in
+  `PCSetFromOptions`, and if unset they now follow the F point smoother values
+  as documented, even without calling `PCSetFromOptions`
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
