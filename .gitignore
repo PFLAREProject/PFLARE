@@ -27,6 +27,7 @@ tests/adv_1d
 tests/adv_1d_multi_rhs
 tests/adv_1dk
 tests/adv_dg_upwind
+tests/comm_self_then_world
 tests/adv_diff_2d
 tests/adv_diff_cg_supg
 tests/adv_diff_fd
@@ -48,6 +49,9 @@ tests/matrandom_check_reset
 tests/operator_refcount
 tests/pcair_reuse_amount_range
 tests/pflareinv_apply_transpose
+tests/newton_imag_roots
 tests/pmisr_nonsymmetric
+tests/poly_zero_coeffs
+tests/leja_ordering
 tests/reuse_preconditioner
 tests/shell_block_apply

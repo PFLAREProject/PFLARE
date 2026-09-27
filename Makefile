@@ -180,6 +180,8 @@ export TEST_TARGETS = ex12f \
 		  adv_1d_multi_rhs \
 		  shell_block_apply \
 		  pflareinv_apply_transpose \
+		  poly_zero_coeffs \
+		  newton_imag_roots \
 		  adv_diff_fd \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \
@@ -194,7 +196,9 @@ export TEST_TARGETS = ex12f \
 		  operator_refcount \
 		  dll_register \
 		  pcair_reuse_amount_range \
-		  pmisr_nonsymmetric
+		  comm_self_then_world \
+		  pmisr_nonsymmetric \
+		  leja_ordering
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk

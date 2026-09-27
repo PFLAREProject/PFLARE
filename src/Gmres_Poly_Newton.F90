@@ -38,6 +38,7 @@ module gmres_poly_newton
       PetscReal, dimension(:), allocatable :: magnitude
       PetscReal :: a, b, squares, max_mag
       logical, dimension(size(real_roots)) :: sorted
+      logical :: found
 
       ! ~~~~~~    
 
@@ -76,6 +77,7 @@ module gmres_poly_newton
       do while (counter-1 < size(real_roots))
 
          max_mag = -huge(max_mag)
+         found = .FALSE.
 
          ! For each value compute a product of differences
          do i_loc = 1, size(real_roots)
@@ -101,12 +103,16 @@ module gmres_poly_newton
             if (magnitude(i_loc) > max_mag) then
                max_mag = magnitude(i_loc)
                max_loc(1) = i_loc
+               found = .TRUE.
             end if            
          end do
 
          ! If we found nothing (ie the only unsorted are repeated roots with zero distance)
          ! just have the next entry in the list
-         if (max_mag < 0) then
+         ! Note we can't test max_mag < 0 here, as the log of the product of distances
+         ! is legitimately negative whenever that product is small (e.g., tightly 
+         ! clustered or small magnitude eigenvalues), which would make the ordering scale dependent
+         if (.NOT. found) then
             do i_loc = 1, size(real_roots)
                if (.NOT. sorted(i_loc)) then
                   max_loc(1) = i_loc
@@ -286,7 +292,9 @@ module gmres_poly_newton
          if (b < 0) cycle
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(a) < PFLARE_TOL_ZERO) cycle
+         ! This matches the zero test used when applying the polynomial, ie 
+         ! a purely imaginary root (a == 0, b /= 0) is not zero
+         if (b == 0d0 .AND. abs(a) < PFLARE_TOL_ZERO) cycle
          if (a**2 + b**2 < PFLARE_TOL_ZERO) cycle
 
          ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
@@ -299,7 +307,7 @@ module gmres_poly_newton
             d = imag_roots(i_loc)
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(c) < PFLARE_TOL_ZERO) cycle
+            if (d == 0d0 .AND. abs(c) < PFLARE_TOL_ZERO) cycle
             if (c**2 + d**2 < PFLARE_TOL_ZERO) cycle
 
             ! theta_k/theta_i
@@ -1015,7 +1023,7 @@ end if
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao, mat_sparsity_match, mat_product_save
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       type(int_vec), dimension(:), allocatable :: symbolic_ones
       type(real_vec), dimension(:), allocatable :: symbolic_vals
       integer(c_long_long) A_array
@@ -1032,6 +1040,10 @@ end if
       integer, dimension(size(coefficients, 1), 2) :: status_output
 
       ! ~~~~~~~~~~
+
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)
       ! Get the comm size 

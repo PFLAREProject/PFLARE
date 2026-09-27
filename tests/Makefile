@@ -308,6 +308,11 @@ run_tests_no_load_short_serial:
 	./reuse_preconditioner
 #
 	@echo ""
+	@echo "Test assembled PCPFLAREINV and PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+#
+	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact"
 	./operator_refcount -ksp_max_it 3
 	./operator_refcount -ksp_max_it 3 -pc_air_full_smoothing_up_and_down
@@ -796,6 +801,18 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -n 5000 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 #
 	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros, assembled and matrix-free"
+	./poly_zero_coeffs
+	./poly_zero_coeffs -pc_pflareinv_matrix_free
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
+# Skipped in single as there the roots' real parts are not below the zero tolerance
+	$(SKIP_SINGLE) ./newton_imag_roots
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -834,6 +851,8 @@ run_tests_no_load_short_serial:
 	./mat_diag -ksp_max_it 1
 	@echo "Test Arnoldi GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type arnoldi -ksp_max_it 1
+	@echo "Test Arnoldi GMRES polynomial doesn't stop Arnoldi early on a well-conditioned diagonal matrix"
+	$(SKIP_SINGLE) ./mat_diag -pc_pflareinv_type arnoldi -pc_pflareinv_poly_order 10 -ksp_max_it 1 -check_rel_res 2e-14
 	@echo "Test Power GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type power -ksp_max_it 1
 #
@@ -852,6 +871,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix"
 	./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test the modified Leja ordering of the Newton basis roots is invariant to scaling"
+	./leja_ordering
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -1040,6 +1063,17 @@ else
 	@echo ""
 	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
 	$(MPIEXEC) -n 2 ./reuse_preconditioner
+#
+	@echo ""
+	@echo "Test assembled PCPFLAREINV set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type isai
+	@echo "Test PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups reusing the sparsity"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type arnoldi -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type isai -pc_air_z_type lair \
+	 -pc_air_reuse_sparsity
 #
 	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact in parallel"
@@ -1385,6 +1419,15 @@ else
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
 	 -transpose_solve -ksp_max_it 100
+#
+	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros in parallel, assembled and matrix-free"
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"

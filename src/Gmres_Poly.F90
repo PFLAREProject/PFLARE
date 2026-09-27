@@ -11,7 +11,7 @@ module gmres_poly
          PFLARE_REAL_KIND
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_apply, only: petsc_matvec_poly_mf, petsc_matvec_right_scale_poly_mf, &
-         petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf
+         petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf, highest_nonzero_coeff
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
    use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
@@ -125,13 +125,10 @@ module gmres_poly
 
       ! For power or Arnoldi   
       else
-         ! The size of the zero check is exactly 0d0, normally can only happen
-         ! in an Arnoldi that terminates early
-         do i_loc = 1, size(coefficients,1)
-            if (abs(coefficients(i_loc,1)) == 0d0) then
-               matvecs = matvecs - 1
-            end if
-         end do         
+         ! Horner can only skip the leading (highest order) zero coefficients,
+         ! normally can only happen in an Arnoldi that terminates early
+         ! This has to match petsc_horner
+         matvecs = highest_nonzero_coeff(coefficients(:,1))
       end if      
 
    end subroutine compute_mf_gmres_poly_num_matvecs   
@@ -444,8 +441,9 @@ module gmres_poly
 
             ! Minus away e1 beta
             g0(1) = g0(1) - beta
-            ! This is the relative residual
-            user_rel_tol = norm2(g0(1:m))/beta
+            ! This is the relative residual - H_n is (m+1) x m so the residual
+            ! has m+1 entries (the last is typically the largest)
+            user_rel_tol = norm2(g0(1:m+1))/beta
             !print *, m, "rel residual", user_rel_tol
             if (user_rel_tol < rel_tol) exit
          end if
@@ -949,7 +947,7 @@ end if
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
       type(tMat), pointer :: mat_sparsity_match
       type(int_vec), dimension(:), allocatable :: symbolic_ones
@@ -966,6 +964,10 @@ end if
       PetscInt, parameter :: one = 1, zero = 0
       
       ! ~~~~~~~~~~  
+
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       if (poly_sparsity_order .ge. size(coefficients)-1) then      
          print *, "Requested sparsity is greater than or equal to the order"
@@ -1594,10 +1596,9 @@ end if
       ! For terms 2nd order and higher
       ! ~~~~~~~~~~~~~   
 
-      do order = 2, poly_order
-
-         ! Skip this term if the coefficient is zero
-         if (coefficients(order+1) == 0d0) cycle
+      ! Only the leading (highest order) zero coefficients can be skipped entirely,
+      ! any lower order zero coefficient still needs its matrix power computed for the next order
+      do order = 2, highest_nonzero_coeff(coefficients) - 1
 
          ! TODO - these can be reused
          if (order == 2) then
@@ -1614,7 +1615,10 @@ end if
          call MatDestroy(temp_mat, ierr)
 
          ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
-         if (reuse_triggered) then
+         ! Skip the add if the coefficient is zero
+         if (coefficients(order+1) == 0d0) then
+            cycle
+         else if (reuse_triggered) then
             ! If doing reuse we know our nonzeros are a subset
             call MatAXPY(inv_matrix, coefficients(order+1), mat_power, SUBSET_NONZERO_PATTERN, ierr)
          else
