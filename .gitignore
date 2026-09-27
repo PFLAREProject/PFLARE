@@ -50,6 +50,7 @@ tests/operator_refcount
 tests/pcair_reuse_amount_range
 tests/pflareinv_apply_transpose
 tests/newton_imag_roots
+tests/pflareinv_exact_inverse
 tests/pmisr_nonsymmetric
 tests/poly_zero_coeffs
 tests/leja_ordering
