@@ -79,6 +79,13 @@
          call PCAIRSetStrongThreshold(pc, strong_threshold_val, ierr)
       else
          call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
+         ! Check the Fortran getter hands back the value we just set
+         check = PETSC_FALSE
+         call PCPFLAREINVGetMatrixFree(pc, check, ierr)
+         if (.NOT. check) then
+            print *, "PCPFLAREINVGetMatrixFree did not return the value set"
+            error stop 1
+         end if
       end if
       call VecSet(x, s_zero, ierr)
       call KSPSolve(ksp,b,x,ierr)
