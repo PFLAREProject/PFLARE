@@ -85,8 +85,29 @@ module approx_inverse_setup
       type(tMat) :: reuse_mat, inv_matrix_temp
       type(tMat), dimension(:), pointer :: reuse_submatrices => null()
       logical :: heap_allocated, coefficients_supplied
+      integer :: poly_order_eff, inverse_sparsity_order_eff
+      PetscInt :: global_rows, global_cols
 
       ! ~~~~~~  
+
+      ! For matrices with size smaller than the subspace size (ie polynomial order + 1)
+      ! the gmres polynomials can only go up to the matrix size (at which point they are 
+      ! (close to) an exact solver), so clamp the order like setup_gmres_poly_data does for PCAIR
+      ! Also make sure we aren't trying to take sparsity bigger than the clamped order
+      poly_order_eff = poly_order
+      inverse_sparsity_order_eff = inverse_sparsity_order
+      if (inverse_type == PFLAREINV_POWER .OR. &
+          inverse_type == PFLAREINV_ARNOLDI .OR. &
+          inverse_type == PFLAREINV_NEWTON .OR. &
+          inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+         call MatGetSize(matrix, global_rows, global_cols, ierr)
+         if (poly_order_eff + 1 > global_rows) then
+            poly_order_eff = int(global_rows - 1)
+         end if
+         if (inverse_sparsity_order_eff > poly_order_eff) then
+            inverse_sparsity_order_eff = poly_order_eff
+         end if
+      end if
 
       ! This is diabolical - In petsc 3.22, they changed the way to test for 
       ! a null matrix in fortran
@@ -134,7 +155,7 @@ module approx_inverse_setup
          buffers%matrix     = matrix
          call PetscObjectReference(matrix, ierr)
          call finish_approximate_inverse(matrix, inverse_type, &
-                     poly_order, inverse_sparsity_order, &
+                     poly_order_eff, inverse_sparsity_order_eff, &
                      buffers, work_coefficients, &
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
@@ -151,16 +172,17 @@ module approx_inverse_setup
          ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
          ! Heap-allocate when: matrix-free (matshell will hold the pointer),
          ! coefficients are being returned to the caller, or Newton basis (2 columns).
-         ! Otherwise, stack storage suffices.
-         heap_allocated = matrix_free .OR. &
+         ! Otherwise, stack storage suffices (unless the order has been clamped, 
+         ! as the stack storage is sized with the unclamped order).
+         heap_allocated = matrix_free .OR. poly_order_eff /= poly_order .OR. &
                           (present(coefficients) .AND. .NOT. coefficients_supplied) .OR. &
                           inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
          if (heap_allocated) then
             if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
                ! Newton basis needs storage for real and imaginary roots
-               allocate(work_coefficients(poly_order + 1, 2))
+               allocate(work_coefficients(poly_order_eff + 1, 2))
             else
-               allocate(work_coefficients(poly_order + 1, 1))
+               allocate(work_coefficients(poly_order_eff + 1, 1))
             end if
          else
             work_coefficients => coefficients_stack
@@ -168,11 +190,11 @@ module approx_inverse_setup
 
          ! Start the calculation
          call start_approximate_inverse(matrix, inverse_type, &
-                     poly_order, diag_scale_polys, &
+                     poly_order_eff, diag_scale_polys, &
                      buffers, work_coefficients)
          ! Finish it
          call finish_approximate_inverse(matrix, inverse_type, &
-                     poly_order, inverse_sparsity_order, &
+                     poly_order_eff, inverse_sparsity_order_eff, &
                      buffers, work_coefficients, &
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)

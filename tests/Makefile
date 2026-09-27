@@ -549,6 +549,14 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients in C - newton basis"
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - arnoldi basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - power basis"
+	$(SKIP_SINGLE) ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - newton basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - matrix-free newton basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_matrix_free
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
@@ -946,6 +954,14 @@ else
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5
+#
+	@echo ""
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order in parallel"
+	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
+	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test block Jacobi with PCPFLAREINV sub-blocks with fewer rows than the polynomial order + 1 in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 2 -da_grid_y 4 -pc_type bjacobi -sub_pc_type pflareinv -sub_pc_pflareinv_type newton
 #
 	@echo ""
 	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
