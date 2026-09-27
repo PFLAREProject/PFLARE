@@ -26,6 +26,9 @@ for earlier changes please see the git history.
   on coarse levels
 - PETSc errors inside the C routines that build the `-pc_air_subcomm` matrices
   and check whether Aff is diagonal now abort, rather than being ignored
+- Fixed PCAIR on non-Kokkos GPU matrix types (e.g. `aijcusparse`,
+  `aijhipsparse`) building its F/C point injectors from the not yet created
+  Afc/Acf submatrices, which could crash or corrupt the first setup
 
 ## [v1.27.0]
 

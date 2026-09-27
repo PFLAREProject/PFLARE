@@ -1303,21 +1303,21 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
    !------------------------------------------------------------------------------------------------------------------------
    
-   subroutine generate_identity_rect(full_mat, rect_mat, rect_indices, output_mat)
+   subroutine generate_identity_rect(full_mat, rect_indices, output_mat)
 
       ! Returns an assembled (rectangular) injector that pulls out points in the row_indices: looks like [I 0]
+      ! The rows are sized from rect_indices (local and global size)
    
       ! ~~~~~~~~~~
       ! Input 
-      type(tMat), intent(in)    :: full_mat, rect_mat
+      type(tMat), intent(in)    :: full_mat
       type(tIS), intent(in)     :: rect_indices
       type(tMat), intent(inout) :: output_mat
       
       PetscInt :: i_loc, local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: local_rows_rect, local_cols_rect, global_rows_rect, global_cols_rect
       PetscInt :: global_row_start_rect, global_row_end_plus_one_rect
-      PetscInt :: local_indices_size
+      PetscInt :: local_indices_size, global_indices_size
       PetscCount :: counter
       PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       ! COO value buffer feeding MatSetValuesCOO is PetscScalar
@@ -1338,22 +1338,20 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(full_mat, global_row_start, global_row_end_plus_one, ierr)  
 
-      call MatGetLocalSize(rect_mat, local_rows_rect, local_cols_rect, ierr)
-      call MatGetSize(rect_mat, global_rows_rect, global_cols_rect, ierr)
-      ! This returns the global index of the local portion of the matrix
-      call MatGetOwnershipRange(rect_mat, global_row_start_rect, global_row_end_plus_one_rect, ierr)       
-
-      ! Get the local sizes
-      call IsGetLocalSize(rect_indices, local_indices_size, ierr)
+      ! Get the local and global sizes of the rows we're pulling out
+      call ISGetLocalSize(rect_indices, local_indices_size, ierr)
+      call ISGetSize(rect_indices, global_indices_size, ierr)
 
       call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
       ! Rectangular matrix 
-      call MatSetSizes(output_mat, local_rows_rect, local_cols, &
-                  global_rows_rect, global_cols, ierr)
+      call MatSetSizes(output_mat, local_indices_size, local_cols, &
+                  global_indices_size, global_cols, ierr)
       ! Match the output type
       call MatGetType(full_mat, mat_type, ierr)
       call MatSetType(output_mat, mat_type, ierr)
       call MatSetUp(output_mat, ierr) 
+      ! This returns the global index of the local portion of the output
+      call MatGetOwnershipRange(output_mat, global_row_start_rect, global_row_end_plus_one_rect, ierr)       
       
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)

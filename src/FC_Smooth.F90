@@ -98,12 +98,12 @@ module fc_smooth
       if (.NOT. air_data%fast_veciscopy_exists) then
 
          ! Build fine to full injector
-         call generate_identity_rect(input_mat, air_data%A_fc(our_level), &
+         call generate_identity_rect(input_mat, &
                   air_data%IS_fine_index(our_level), &
                   air_data%i_fine_full(our_level))
 
          ! Build coarse to full injector
-         call generate_identity_rect(input_mat, air_data%A_cf(our_level), &
+         call generate_identity_rect(input_mat, &
                   air_data%IS_coarse_index(our_level), &
                   air_data%i_coarse_full(our_level))
                   
