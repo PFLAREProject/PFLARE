@@ -71,7 +71,7 @@ module sai_z
       type(tKSP) :: ksp
       type(tPC) :: pc
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       PetscInt, dimension(:), allocatable :: col_indices_off_proc_array
       integer(c_long_long) :: A_array
       MatType:: mat_type, mat_type_input
@@ -86,6 +86,9 @@ module sai_z
 
       disable_approx_solve = .FALSE.
       if (present(no_approx_solve)) disable_approx_solve = no_approx_solve
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       call PetscObjectGetComm(A_ff_input, MPI_COMM_MATRIX, ierr)    
       ! Get the comm size 

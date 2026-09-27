@@ -6,6 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed a crash when an assembled GMRES polynomial or SAI/ISAI inverse (in
+  PCPFLAREINV or PCAIR) was set up in parallel after one had been set up on a
+  single rank in the same program, eg as a block Jacobi sub-PC
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
