@@ -12,6 +12,10 @@
 
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
+// Whether an inverse type is a polynomial, ie has coefficients and builds a matshell when
+// applied matrix-free - the non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no
+// coefficients and are always assembled. *is_polynomial comes back as 1 or 0
+PETSC_EXTERN void inverse_type_is_polynomial_c(int inverse_type, int *is_polynomial);
 // coeffs_ptr/row_size/col_size are in/out:
 //   *coeffs_ptr == NULL on entry  -> fresh: Fortran allocates, writes c_loc to *coeffs_ptr on return
 //   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
@@ -497,15 +501,20 @@ static PetscErrorCode PCPFLAREINVSetMatrixFree_PFLAREINV(PC pc, PetscBool flg)
 
   Output Parameters:
 + coeffs - pointer to the column-major array of polynomial coefficients
-. rows   - the number of rows, equal to the polynomial order plus one
+. rows   - the number of rows, equal to the polynomial order plus one (for the GMRES polynomial types the order is
+           clamped to one less than the global number of rows on small matrices)
 - cols   - the number of columns, 1 for the power, Arnoldi, and Neumann inverse types, or 2 for the Newton types
 
   Level: advanced
 
-  Note:
+  Notes:
   This routine returns a pointer into the `PCPFLAREINV` object itself, valid only until the next `PCSetUp()`,
   `PCReset()` or `PCPFLAREINVSetPolyCoeffs()` call; copy the coefficients yourself if you need to save or restore
   them later. This differs from the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
+
+  The non-polynomial inverse types (`PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, and `PFLAREINV_JACOBI`)
+  have no coefficients, so after `PCSetUp()` with one of them `coeffs` is `NULL` and `rows` and `cols` are 0, as they
+  are before the first `PCSetUp()`.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCSetUp()`
 @*/
@@ -630,7 +639,9 @@ static PetscErrorCode PCPFLAREINVGetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool *
   This is useful when repeatedly setting up the preconditioner for matrices that share a nonzero pattern but have
   changed values, since computing the polynomial coefficients (for example the Arnoldi or Newton coefficients)
   requires parallel reductions that reuse then avoids. Only enable it when the stored coefficients remain a good
-  approximation for the new matrix, as reusing stale coefficients can degrade convergence.
+  approximation for the new matrix, as reusing stale coefficients can degrade convergence. It has no effect with the
+  non-polynomial inverse types (`PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, and `PFLAREINV_JACOBI`),
+  which discard any stored coefficients during setup.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetPolyCoeffs()`
 @*/
@@ -942,7 +953,11 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          // Optionally reuse stored polynomial coefficients:
          //   poly_coeffs != NULL and reuse flag set  ->  pass the existing pointer (reuse path)
          //   otherwise                               ->  pass NULL so Fortran computes fresh ones
-         if (!(inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL)) {
+         // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no coefficients, so any
+         // stored ones are dropped and Fortran returns NULL
+         int is_polynomial;
+         inverse_type_is_polynomial_c((int)type, &is_polynomial);
+         if (!(is_polynomial && inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL)) {
             // Fresh: free old coefficients so poly_coeffs is NULL going into the call
             free(inv_data->poly_coeffs);
             inv_data->poly_coeffs      = NULL;
