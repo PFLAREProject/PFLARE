@@ -45,6 +45,9 @@ for earlier changes please see the git history.
 - The Kokkos one-point prolongator now breaks ties between equal maximum
   entries on the smallest column, as the CPU version does, so on GPUs the
   prolongator (and iteration counts) may change and now match the CPU
+- Fixed `-pc_pflareinv_matrix_free` bypassing `PCPFLAREINVSetMatrixFree`, so
+  changing it after a setup (e.g. via `KSPSetFromOptions`) now resets the PC
+  instead of reusing the old inverse in the wrong form and crashing
 
 ## [v1.27.0]
 

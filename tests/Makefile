@@ -729,6 +729,9 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild
+	@echo "Test PCPFLAREINV re-setup after toggling -pc_pflareinv_matrix_free through PCSetFromOptions"
+	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild -toggle_matrix_free
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild -toggle_matrix_free
 	@echo "Test KSPSolveTranspose through PCPFLAREINV, assembled and matrix-free"
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
@@ -1290,6 +1293,9 @@ else
 	@echo "Test PCApplyTranspose after the operator values change in parallel"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
+	@echo "Test PCPFLAREINV re-setup after toggling -pc_pflareinv_matrix_free in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild -toggle_matrix_free
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild -toggle_matrix_free
 	@echo "Test KSPSolveTranspose through PCPFLAREINV in parallel, assembled and matrix-free"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
