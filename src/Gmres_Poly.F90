@@ -444,8 +444,9 @@ module gmres_poly
 
             ! Minus away e1 beta
             g0(1) = g0(1) - beta
-            ! This is the relative residual
-            user_rel_tol = norm2(g0(1:m))/beta
+            ! This is the relative residual - H_n is (m+1) x m so the residual
+            ! has m+1 entries (the last is typically the largest)
+            user_rel_tol = norm2(g0(1:m+1))/beta
             !print *, m, "rel residual", user_rel_tol
             if (user_rel_tol < rel_tol) exit
          end if

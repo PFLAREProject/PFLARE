@@ -755,6 +755,8 @@ run_tests_no_load_short_serial:
 	./mat_diag -ksp_max_it 1
 	@echo "Test Arnoldi GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type arnoldi -ksp_max_it 1
+	@echo "Test Arnoldi GMRES polynomial doesn't stop Arnoldi early on a well-conditioned diagonal matrix"
+	$(SKIP_SINGLE) ./mat_diag -pc_pflareinv_type arnoldi -pc_pflareinv_poly_order 10 -ksp_max_it 1 -check_rel_res 2e-14
 	@echo "Test Power GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type power -ksp_max_it 1
 #
