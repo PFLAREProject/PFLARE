@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed `PCAIRSetDiagScalePolys` / `-pc_air_diag_scale_polys` being silently
+  ignored while the inverse type was Neumann, which lost the setting for the C
+  point inverse and for any later change of inverse type. `PCAIRGetDiagScalePolys`
+  now returns the stored value (Neumann still always diagonally scales)
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

@@ -4,8 +4,7 @@ module pcair_interfaces
    use petscksp
    use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
    use air_mg_stats, only: compute_stats
-   use pflare_parameters, only: PFLAREINV_NEUMANN, &
-         COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
+   use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -803,12 +802,11 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      ! Always true for neumann
-      if (options%inverse_type == PFLAREINV_NEUMANN) then
-         scale = .TRUE.
-      else
-         scale = options%diag_scale_polys
-      end if
+      ! Return the stored value, even if the inverse type is neumann
+      ! Neumann polynomials always diagonally scale regardless of this flag,
+      ! but it is still used by the other inverses (e.g., C point smoothing)
+      ! and must survive a later change of inverse type
+      scale = options%diag_scale_polys
       ierr = 0
 
    end subroutine PCAIRGetDiagScalePolys   

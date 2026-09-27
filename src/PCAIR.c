@@ -708,6 +708,9 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 
   Level: advanced
 
+  Note:
+  Returns the stored value; a `PFLAREINV_NEUMANN` inverse always diagonally scales regardless of this value.
+
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagScalePolys()`, `PCAIRGetInverseType()`, `PCAIRGetMatrixFreePolys()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
@@ -3242,10 +3245,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          else if (input_type == PFLAREINV_NEUMANN)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
-            if (flg_diag_scale)
-            {
-               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
-            }            
+            // Neumann always diagonally scales
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
          }
          else if (input_type == PFLAREINV_WJACOBI)
          {
@@ -3340,10 +3341,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEUMANN)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
-               if (flg_diag_scale)
-               {
-                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
-               }
+               // Neumann always diagonally scales
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
             }
             else if (input_type == PFLAREINV_WJACOBI)
             {
@@ -3428,10 +3427,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEUMANN)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
-               if (flg_diag_scale)
-               {
-                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
-               }
+               // Neumann always diagonally scales
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
             }     
             else if (input_type == PFLAREINV_WJACOBI)
             {
