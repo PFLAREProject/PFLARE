@@ -49,5 +49,6 @@ tests/operator_refcount
 tests/pflareinv_apply_transpose
 tests/pmisr_nonsymmetric
 tests/poly_zero_coeffs
+tests/leja_ordering
 tests/reuse_preconditioner
 tests/shell_block_apply
