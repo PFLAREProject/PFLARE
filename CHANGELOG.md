@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the CPU ISAI exact dense solve wrongly permuting the solution returned
+  by LAPACK `gesv`, which gave an incorrect ISAI (and lAIR Z) whenever a local
+  submatrix needed row pivoting; a singular local submatrix now aborts rather
+  than silently returning the right-hand side
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
