@@ -1958,13 +1958,14 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
 - input_string - the smoothing pattern, any sequence of `f` and `c` characters giving the type and number of smooths (for example `ff`, `fc`, `fcf`, `ffc`, ...)
 
   Options Database Key:
-. -pc_air_smooth_type input_string - the type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf); defaults to ff
+. -pc_air_smooth_type input_string - the type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 
   Level: intermediate
 
   Note:
   Each `f` performs a smooth on the F points and each `c` a smooth on the C points; the string may be any
-  combination, not only `ff`, `fc`, or `fcf`. At most 10 characters are used; longer patterns are truncated.
+  combination, not only `ff`, `fc`, or `fcf`. The pattern may be at most 10 characters long; longer patterns
+  generate an error.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSmoothType()`, `PCAIRSetInverseType()`, `PCAIRSetFullSmoothingUpAndDown()`
 @*/
@@ -1972,6 +1973,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // The Fortran side only stores (and reads) at most 10 characters
+   PetscCheck(strlen(input_string) <= 10, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Smooth type %s has %d characters, at most 10 are supported", input_string, (int)strlen(input_string));
    PCAIRSetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -3656,7 +3659,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 + -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type; defaults to product
 . -pc_air_inverse_type      (power|arnoldi|newton|neumann|sai|isai|wjacobi|jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
-. -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf); defaults to ff
+. -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc
 . -pc_air_strong_threshold  strong_threshold - strong threshold used in the CF splitting; defaults to 0.5
 . -pc_air_r_drop            drop_tol - drop tolerance applied to R on each level after it is built; defaults to 0.01
