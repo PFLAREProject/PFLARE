@@ -6,6 +6,12 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed PCPFLAREINV aborting with the GMRES polynomial types (power, arnoldi,
+  newton, newton_no_extra) on operators with fewer rows than the polynomial
+  order + 1 (e.g. small block Jacobi sub-blocks); the order is now clamped to
+  the matrix size as in PCAIR, so `PCPFLAREINVGetPolyCoeffs` returns the
+  clamped size
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
