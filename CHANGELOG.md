@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed PCAIR with `-pc_air_strong_threshold 0` assuming Aff is diagonal for
+  every CF splitting type; this only holds for `pmisr_ddc` and `diag_dom`, so
+  other splittings (e.g., `pmis`, `agg`) silently dropped the off-diagonal
+  entries of Aff, degrading or breaking convergence
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
