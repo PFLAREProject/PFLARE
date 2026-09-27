@@ -6,6 +6,8 @@ ARG PETSC_DIR=/build/petsc
 ARG ARCH=arch-linux-c-opt
 # Don't use malloc dump by default
 ARG MALLOC_DUMP=false
+# Extra Fortran flags appended to the defaults, e.g. "-fcheck=all -g" for runtime checking
+ARG EXTRA_FFLAGS=""
 
 LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE"
@@ -40,10 +42,10 @@ RUN set -euo pipefail; \
         sed -i 's/-on_error_abort//g' python/Makefile; \
     fi && \
     if [ "${MALLOC_DUMP}" = "true" ]; then LOG=/tmp/test.log; : > "$LOG"; else LOG=/dev/null; fi; \
-    make -j2 FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee -a "$LOG"; \
+    make -j2 FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132 ${EXTRA_FFLAGS}" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee -a "$LOG"; \
     make python 2>&1 | tee -a "$LOG"; \
-    make -j2 check FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee -a "$LOG"; \
-    make -j2 tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee -a "$LOG"; \
+    make -j2 check FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132 ${EXTRA_FFLAGS}" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee -a "$LOG"; \
+    make -j2 tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132 ${EXTRA_FFLAGS}" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee -a "$LOG"; \
     if [ "${MALLOC_DUMP}" = "true" ]; then \
       if grep -q "PetscTrMalloc" "$LOG"; then \
         echo "Error: found PetscTrMalloc in test output" >&2; exit 1; \
