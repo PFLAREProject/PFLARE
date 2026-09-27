@@ -101,18 +101,6 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine generate_identity_is_kokkos(A_array, index, B_array) &
-         bind(c, name="generate_identity_is_kokkos")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: index
-         integer(c_long_long) :: B_array
-      end subroutine generate_identity_is_kokkos         
- 
-   end interface 
-   
-   interface   
-      
       subroutine remove_small_from_sparse_kokkos(A_array, tol, B_array, &
                      relative_max_row_tolerance_int, lump_int, allow_drop_diagonal_int, &
                      allow_diag_strength_int) &
@@ -342,36 +330,6 @@ module c_petsc_interfaces
  
    end interface
    
-   interface   
-      
-      subroutine build_gmres_polynomial_inverse_0th_order_kokkos(A_array, poly_order, &
-                  coefficients, reuse_int, B_array) &
-         bind(c, name="build_gmres_polynomial_inverse_0th_order_kokkos")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: B_array
-         integer(c_int), value :: poly_order
-         type(c_ptr), value :: coefficients
-         integer(c_int), value :: reuse_int
-      end subroutine build_gmres_polynomial_inverse_0th_order_kokkos         
- 
-   end interface
-   
-   interface   
-      
-      subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(A_array, poly_order, &
-                  coefficients, reuse_int, B_array) &
-         bind(c, name="build_gmres_polynomial_inverse_0th_order_sparsity_kokkos")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: B_array
-         integer(c_int), value :: poly_order
-         type(c_ptr), value :: coefficients
-         integer(c_int), value :: reuse_int
-      end subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos         
- 
-   end interface    
-
    interface   
       
       subroutine mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
