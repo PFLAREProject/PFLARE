@@ -360,9 +360,10 @@ module air_data_type_routines
       air_data%options%poly_order = 6
       air_data%options%inverse_sparsity_order = 1
 
-      air_data%options%c_inverse_type = PFLAREINV_ARNOLDI
-      air_data%options%c_poly_order = 6
-      air_data%options%c_inverse_sparsity_order = 1
+      ! -1 means unset, i.e., use the same as the F point smoother
+      air_data%options%c_inverse_type = -1
+      air_data%options%c_poly_order = -1
+      air_data%options%c_inverse_sparsity_order = -1
       
       air_data%options%coarsest_inverse_type = PFLAREINV_ARNOLDI
       air_data%options%coarsest_poly_order = 6
