@@ -38,6 +38,7 @@ tests/ex6_getcoeffs
 tests/ex6_two_airg
 tests/ex6f
 tests/ex6f_getcoeffs
+tests/dll_register
 tests/ex6f_reuse_amount
 tests/ilu_factors
 tests/ilu_factors_kokkos
