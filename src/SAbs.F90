@@ -126,6 +126,7 @@ module sabs
          end do
 
          call ISRestoreIndices(zero_diags, zero_diags_pointer, ierr)
+         call ISDestroy(zero_diags, ierr)
          
          call MatAssemblyBegin(transpose_mat, MAT_FINAL_ASSEMBLY, ierr)
          call MatAssemblyEnd(transpose_mat, MAT_FINAL_ASSEMBLY, ierr)
