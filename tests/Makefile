@@ -762,6 +762,13 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -n 5000 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 #
 	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros, assembled and matrix-free"
+	./poly_zero_coeffs
+	./poly_zero_coeffs -pc_pflareinv_matrix_free
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -1347,6 +1354,11 @@ else
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
 	 -transpose_solve -ksp_max_it 100
+#
+	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros in parallel, assembled and matrix-free"
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs -pc_pflareinv_matrix_free
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"

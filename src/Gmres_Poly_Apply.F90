@@ -21,6 +21,32 @@ module gmres_poly_apply
 
    contains
 
+   pure function highest_nonzero_coeff(coefficients) result(top_order)
+
+      ! Returns the index of the highest order nonzero monomial coefficient, ie
+      ! the leading (highest order) zero coefficients are the only ones that
+      ! can be skipped when applying the polynomial
+      ! Returns zero if every coefficient is zero
+      ! The zero check is exactly 0d0, normally can only happen in an Arnoldi that
+      ! terminates early (or if the user has set the coefficients)
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! Input
+      PetscReal, dimension(:), intent(in) :: coefficients
+      integer                             :: top_order
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      do top_order = size(coefficients, 1), 1, -1
+         if (coefficients(top_order) /= 0d0) return
+      end do
+      top_order = 0
+
+   end function highest_nonzero_coeff
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine petsc_matvec_da_poly_mf(mat, x, y)
 
       ! Applies D^-1 A as a shell
@@ -186,7 +212,7 @@ module gmres_poly_apply
       type(tVec)                :: y
 
       ! Local
-      integer :: order, n_products
+      integer :: order, n_products, top_order
       type(tVec) :: cur_vec, other_vec, swap_vec
       PetscErrorCode :: ierr      
 
@@ -216,11 +242,14 @@ module gmres_poly_apply
       ! lands in y without a copy at the end either
       ! ~~~~~~~
 
-      ! Count the matvecs we'll do - one per nonzero coefficient below the highest order
-      n_products = 0
-      do order = size(coefficients, 1)-1, 1, -1
-         if (coefficients(order) /= 0d0) n_products = n_products + 1
-      end do
+      ! Only the leading (highest order) zero coefficients can be skipped, e.g., from an
+      ! Arnoldi that terminates early - once we've hit a nonzero coefficient every
+      ! lower order still needs its multiply by A, even if its own coefficient is zero
+      ! This has to match compute_mf_gmres_poly_num_matvecs
+      top_order = highest_nonzero_coeff(coefficients)
+
+      ! Count the matvecs we'll do - one per order below the highest nonzero order
+      n_products = max(top_order - 1, 0)
 
       ! An odd number of matvecs starting in temp_vec ends in y, an even number starting in y ends in y
       if (mod(n_products, 2) == 1) then
@@ -231,26 +260,27 @@ module gmres_poly_apply
          other_vec = temp_vec
       end if
 
-      ! Let's do the first cur = alpha_n-1 r_0 (ie the highest order term first)
+      ! Let's do the first cur = alpha_n-1 r_0 (ie the highest nonzero order term first)
+      ! If every coefficient is zero this just zeros y
       call VecAXPBY(cur_vec, &
-               coefficients(size(coefficients)), &
+               coefficients(max(top_order, 1)), &
                PFLARE_ZERO, &
                x, ierr)
 
-      ! Loop down from the second highest order term down to the constant, one matvec
+      ! Loop down from the second highest nonzero order term down to the constant, one matvec
       ! per order - a zeroth order polynomial has only the constant so never enters the loop
-      do order = size(coefficients, 1)-1, 1, -1
-
-         ! Skip this coefficient if zero
-         if (coefficients(order) == 0d0) cycle
+      do order = top_order-1, 1, -1
 
          ! other = A * cur
          call MatMult(mat, cur_vec, other_vec, ierr)
 
          ! Compute other = A * cur + alpha_n-i-1 r_0
-         call VecAXPY(other_vec, &
-                  coefficients(order), &
-                  x, ierr)
+         ! Only the axpy can be skipped for a zero coefficient
+         if (coefficients(order) /= 0d0) then
+            call VecAXPY(other_vec, &
+                     coefficients(order), &
+                     x, ierr)
+         end if
 
          ! The result of this order is the input of the next
          swap_vec = cur_vec
@@ -557,7 +587,7 @@ module gmres_poly_apply
       logical, intent(out)             :: block_applied
 
       ! Local
-      integer :: order
+      integer :: order, top_order
       logical :: scaled
       type(tMat) :: cur_mat, other_mat, swap_mat
       PetscErrorCode :: ierr
@@ -567,8 +597,13 @@ module gmres_poly_apply
       block_applied = .FALSE.
       scaled = .NOT. PetscObjectIsNull(recip_diag)
 
+      ! Only the leading (highest order) zero coefficients can be skipped - once we've
+      ! hit a nonzero coefficient every lower order still needs its product
+      top_order = highest_nonzero_coeff(mat_ctx%coefficients)
+
       ! A zeroth order polynomial has no products, just the scaled copy
-      if (size(mat_ctx%coefficients, 1) == 1) then
+      ! (if every coefficient is zero this just zeros y_mat)
+      if (top_order <= 1) then
          call MatCopy(x_mat, y_mat, SAME_NONZERO_PATTERN, ierr)
          call MatScale(y_mat, mat_ctx%coefficients(1), ierr)
          block_applied = .TRUE.
@@ -582,17 +617,14 @@ module gmres_poly_apply
       if (.NOT. block_applied) return
       block_applied = .FALSE.
 
-      ! Let's do the first cur = alpha_n-1 r_0 (ie the highest order term first)
+      ! Let's do the first cur = alpha_n-1 r_0 (ie the highest nonzero order term first)
       cur_mat = mat_ctx%mf_temp_mat(MF_MAT_TEMP)
       other_mat = mat_ctx%mf_temp_mat(MF_MAT_TEMP_TWO)
       call MatCopy(x_mat, cur_mat, SAME_NONZERO_PATTERN, ierr)
-      call MatScale(cur_mat, mat_ctx%coefficients(size(mat_ctx%coefficients)), ierr)
+      call MatScale(cur_mat, mat_ctx%coefficients(top_order), ierr)
 
-      ! Loop down from the second highest order term down to the constant
-      do order = size(mat_ctx%coefficients, 1)-1, 1, -1
-
-         ! Skip this coefficient if zero
-         if (mat_ctx%coefficients(order) == 0d0) cycle
+      ! Loop down from the second highest nonzero order term down to the constant
+      do order = top_order-1, 1, -1
 
          ! other = A * cur - each temporary's attached product reads the other
          ! temporary, so which product runs is decided by which one is cur
@@ -611,7 +643,10 @@ module gmres_poly_apply
          end if
 
          ! Compute other = B * cur + alpha_n-i-1 r_0
-         call MatAXPY(other_mat, mat_ctx%coefficients(order), x_mat, SAME_NONZERO_PATTERN, ierr)
+         ! Only the axpy can be skipped for a zero coefficient
+         if (mat_ctx%coefficients(order) /= 0d0) then
+            call MatAXPY(other_mat, mat_ctx%coefficients(order), x_mat, SAME_NONZERO_PATTERN, ierr)
+         end if
 
          ! The result of this order is the input of the next
          swap_mat = cur_mat
