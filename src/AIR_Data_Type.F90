@@ -194,17 +194,18 @@ module air_data_type
       integer :: inverse_sparsity_order = 1
 
       ! Inverse type for c smoothing
-      ! This defaults to whatever the F point smoother is atm
+      ! If unset (-1) this defaults to whatever the F point smoother is
+      ! Use the PCAIRGetC* routines to get the resolved value
       ! -pc_air_c_inverse_type
-      integer :: c_inverse_type = 1      
+      integer :: c_inverse_type = -1
       ! Poly order for c smoothing
-      ! This defaults to whatever the F point smoother is atm
+      ! If unset (-1) this defaults to whatever the F point smoother is
       ! -pc_air_c_poly_order
-      integer :: c_poly_order = 6
+      integer :: c_poly_order = -1
       ! Inverse sparsity order for c smoothing
-      ! This defaults to whatever the F point smoother is atm
+      ! If unset (-1) this defaults to whatever the F point smoother is
       ! -pc_air_c_inverse_sparsity_order
-      integer :: c_inverse_sparsity_order = 1      
+      integer :: c_inverse_sparsity_order = -1
       
       ! These are for the coarse grid solver
       ! -pc_air_coarsest_inverse_type
