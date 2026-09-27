@@ -344,23 +344,6 @@ module air_mg_setup
                call ISGetLocalSize(air_data%IS_coarse_index(our_level-1), local_fine_is_size, ierr)            
             end if
 
-            if (air_data%options%constrain_z) then
-               ! Destroy our copy of the left near nullspace vectors
-               do i_loc = 1, size(left_null_vecs)
-                  call VecDestroy(left_null_vecs(i_loc), ierr)
-               end do
-            end if
-            if (allocated(left_null_vecs)) deallocate(left_null_vecs)
-            if (allocated(left_null_vecs_c)) deallocate(left_null_vecs_c)            
-            if (air_data%options%constrain_w) then
-               ! Destroy our copy of the right near nullspace vectors
-               do i_loc = 1, size(right_null_vecs)
-                  call VecDestroy(right_null_vecs(i_loc), ierr)
-               end do
-            end if   
-            if (allocated(right_null_vecs)) deallocate(right_null_vecs)
-            if (allocated(right_null_vecs_c)) deallocate(right_null_vecs_c)                     
-
             no_levels = our_level
 
             ! Exit out of the coarsening loop
@@ -950,6 +933,24 @@ module air_mg_setup
          if (air_data%options%print_stats_timings .AND. comm_rank == 0) call print_timers()
 
       end do level_loop
+
+      ! Destroy our copies of the near nullspace vectors
+      ! This has to happen after the loop, as we can leave it either by 
+      ! coarsening far enough or by hitting the max number of levels
+      if (air_data%options%constrain_z) then
+         do i_loc = 1, size(left_null_vecs)
+            call VecDestroy(left_null_vecs(i_loc), ierr)
+         end do
+      end if
+      if (allocated(left_null_vecs)) deallocate(left_null_vecs)
+      if (allocated(left_null_vecs_c)) deallocate(left_null_vecs_c)
+      if (air_data%options%constrain_w) then
+         do i_loc = 1, size(right_null_vecs)
+            call VecDestroy(right_null_vecs(i_loc), ierr)
+         end do
+      end if
+      if (allocated(right_null_vecs)) deallocate(right_null_vecs)
+      if (allocated(right_null_vecs_c)) deallocate(right_null_vecs_c)
 
       ! Record how many levels we have
       air_data%no_levels = no_levels

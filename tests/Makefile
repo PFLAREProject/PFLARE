@@ -458,6 +458,10 @@ run_tests_no_load_short_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 4 -pc_air_constrain_z	
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
+	@echo "Test AIRG with constrain z and w with the hierarchy capped by max levels"
+	./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 2
+	@echo "Test AIRG with constrain z and w with one level"
+	./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 1
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0
 #
@@ -1102,6 +1106,10 @@ else
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w	\
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	@echo "Test AIRG with constrain z and w with the hierarchy capped by max levels in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 2
+	@echo "Test AIRG with constrain z and w with one level in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 1
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0	\
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
