@@ -6,6 +6,13 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the CPU `remove_from_sparse_match` with lumping discarding the
+  existing values of the output matrix: with alpha it now computes
+  output += alpha * input (as the Kokkos version does) and entries of the
+  output that are not in the input's sparsity are kept. The C
+  `remove_from_sparse_match` now also initialises the PETSc Fortran
+  interface, as the other standalone C routines do
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

@@ -312,6 +312,9 @@ PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, PetscReal max_dd_rat
 PETSC_EXTERN void remove_from_sparse_match(Mat input_mat, Mat output_mat,
    int lump_int, int alpha_int, PetscReal alpha)
 {
+   // We call petsc fortran routines in remove_from_sparse_match_c, so have to make
+   // sure this is called, otherwise things like PETSC_NULL_INTEGER_POINTER aren't defined
+   PetscCallVoid(PetscInitializeFortran());
    remove_from_sparse_match_c(&input_mat, &output_mat, lump_int, alpha_int, alpha);
 }
 
