@@ -1282,6 +1282,11 @@ else
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix in parallel"
 	$(MPIEXEC) -n 2 ./pmisr_nonsymmetric -n 700
 	$(MPIEXEC) -n 4 ./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test processor agglomeration picks the smallest stride that meets the process eq limit in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -pc_type air -ksp_max_it 2 -pc_air_processor_agglom \
+	 -pc_air_process_eq_limit 60 -pc_air_print_stats_timings | grep -E "agglomeration onto no cores: +2$$"
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

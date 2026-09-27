@@ -711,11 +711,17 @@ module air_mg_setup
                   
                   ! can tell us how many idle threads we have on lower grids
                   proc_stride = proc_stride * air_data%options%processor_agglom_factor
+                  ! Update the number of active cores to match the new stride
+                  ! Stolen from calculate_repartition, make sure they match!
+                  no_active_cores = floor(dble(comm_size)/dble(proc_stride))
+                  ! Be careful of rounding!
+                  if (no_active_cores == 0) no_active_cores = 1
 
                   ! If we don't have at least process_eq_limit unknowns per core (on average)
                   ! then we need to be more aggressive with our processor agglomeration
                   ! We'll just keep increasing the stride until we have more than process_eq_limit unknowns per core
-                  stride_loop: do while (global_rows_repart < air_data%options%process_eq_limit * no_active_cores)
+                  stride_loop: do while (global_rows_repart < air_data%options%process_eq_limit * no_active_cores &
+                                 .AND. no_active_cores /= 1)
                      proc_stride = proc_stride * air_data%options%processor_agglom_factor
                      ! Stolen from calculate_repartition, make sure they match!
                      no_active_cores = floor(dble(comm_size)/dble(proc_stride))     
