@@ -10,6 +10,9 @@ for earlier changes please see the git history.
   from a level that failed the truncation test, which gave the wrong coarse
   grid polynomial (or an out-of-bounds write with the power basis) when the
   coarsest grid had fewer rows than the coarse polynomial order
+- Fixed the PCAIR complexities (`-pc_air_print_stats_timings` and
+  `PCAIRGet*Complexity`) being zero or NaN when the hierarchy has only a single
+  level (the Jacobi fallback or auto truncation on the top level)
 
 ## [v1.27.0]
 
