@@ -6,6 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed `-pc_pflareinv_matrix_free` bypassing `PCPFLAREINVSetMatrixFree`, so
+  changing it after a setup (e.g. via `KSPSetFromOptions`) now resets the PC
+  instead of reusing the old inverse in the wrong form and crashing
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

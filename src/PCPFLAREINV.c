@@ -834,7 +834,7 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
 
 static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems PetscOptionsObject)
 {
-   PetscBool    flg;
+   PetscBool    flg, matrix_free;
    PCPFLAREINVType deflt, type;
    PetscInt poly_order, inverse_sparsity_order;
    PC_PFLAREINV *inv_data;
@@ -848,7 +848,9 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
    const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg));
    if (flg) PetscCall(PCPFLAREINVSetType(pc, type));
-   PetscCall(PetscOptionsBool("-pc_pflareinv_matrix_free", "Apply matrix free", "PCPFLAREINVSetMatrixFree", inv_data->matrix_free, &inv_data->matrix_free, NULL));
+   // Go through the setter so a changed value resets the PC
+   PetscCall(PetscOptionsBool("-pc_pflareinv_matrix_free", "Apply matrix free", "PCPFLAREINVSetMatrixFree", inv_data->matrix_free, &matrix_free, &flg));
+   if (flg) PetscCall(PCPFLAREINVSetMatrixFree(pc, matrix_free));
    PetscCall(PetscOptionsBool("-pc_pflareinv_reuse_poly_coeffs", "Reuses gmres polynomial coefficients during setup", "PCPFLAREINVSetReusePolyCoeffs", inv_data->reuse_poly_coeffs, &inv_data->reuse_poly_coeffs, NULL));
    PetscCall(PetscOptionsInt("-pc_pflareinv_poly_order", "Order of polynomial", "PCPFLAREINVSetPolyOrder", inv_data->poly_order, &poly_order, &flg));
    if (flg) PetscCall(PCPFLAREINVSetPolyOrder(pc, poly_order));
