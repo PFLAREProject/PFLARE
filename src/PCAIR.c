@@ -3718,10 +3718,14 @@ PETSC_EXTERN void PCRegister_AIR()
 // This is called automatically when libpflare is loaded by 
 // petsc as a shared library - this enables --download-pflare in the petsc
 // configure to just work
+// Registers every PC type PFLARE provides through PCRegister_PFLARE, so the list
+// of types only lives in one place
+// Registering twice (e.g., if user code also calls PCRegister_PFLARE) is 
+// harmless, PCRegister just replaces the existing entry
 // Is unused if static linking
 PETSC_EXTERN PetscErrorCode PetscDLLibraryRegister_petscpflare(void)
 {
   PetscFunctionBegin;
-  PCRegister_AIR();
+  PCRegister_PFLARE();
   PetscFunctionReturn(PETSC_SUCCESS);
 }

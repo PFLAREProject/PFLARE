@@ -414,6 +414,15 @@ jobs:
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}"
           make PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}" check
 
+          # PETSc's ex3 doesn't call PCRegister_PFLARE, so it can only find the PFLARE PC types
+          # if they were registered when PETSc loaded the PFLARE shared library - the PFLARE
+          # make check above can't catch that as its tests call PCRegister_PFLARE themselves
+          make -C src/ksp/ksp/tests PETSC_DIR="${PETSC_DIR}" PETSC_ARCH="${PETSC_ARCH}" ex3
+          for pc_type in air pflareinv; do
+            ./src/ksp/ksp/tests/ex3 -pc_type "${pc_type}" -ksp_max_it 5 -m 10
+            "${PETSC_DIR}/${PETSC_ARCH}/bin/mpiexec" -n 2 ./src/ksp/ksp/tests/ex3 -pc_type "${pc_type}" -ksp_max_it 5 -m 10
+          done
+
           # PETSc's doc build clones PFLARE with a plain `git clone` + `git checkout <gitcommit>`
           # to scan its manual pages, which can't see ${COMMIT} when it's a PR merge commit (only
           # a GitHub-internal ref, not a real clonable commit). Re-point gitcommit at

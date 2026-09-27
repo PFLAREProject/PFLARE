@@ -62,6 +62,9 @@ for earlier changes please see the git history.
   are discarded during setup for these types
 - Fixed `PCPFLAREINVSetPolyCoeffs` reading freed memory when passed the
   pointer returned by `PCPFLAREINVGetPolyCoeffs`
+- Fixed the shared library registration routine (called by PETSc when it
+  loads PFLARE, e.g., with `--download-pflare`) only registering PCAIR, so
+  `-pc_type pflareinv` now works without calling `PCRegister_PFLARE()`
 
 ## [v1.27.0]
 
