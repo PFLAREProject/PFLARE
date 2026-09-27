@@ -601,6 +601,9 @@ run_tests_no_load_short_serial:
 	 -pc_pflareinv_poly_order 10
 	@echo "Test multiple RHS block solve with a matrix-free Neumann PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type neumann
+	@echo "Test multiple RHS block solve with matrix-free Jacobi PCPFLAREINVs - matrix-free is ignored for Jacobi"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type jacobi
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type wjacobi
 	@echo "Test multiple RHS block solve with PCAIR via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
 	@echo "Test multiple RHS block solve with a matrix-free PCAIR"
@@ -708,6 +711,13 @@ run_tests_no_load_short_serial:
 	@echo "Test PCApplyTranspose after the operator values change - the twin has to pick up new coefficients"
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
+	@echo "Test PCApplyTranspose with matrix-free Jacobi PCPFLAREINVs - matrix-free is ignored for Jacobi"
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type jacobi
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type wjacobi -rebuild
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type jacobi -rebuild -pc_pflareinv_reuse_poly_coeffs
+	@echo "Test matrix-free polys with Jacobi PCAIR inverses - matrix-free is ignored for Jacobi"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type jacobi -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_inverse_type wjacobi -pc_air_coarsest_matrix_free_polys
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild
 	@echo "Test KSPSolveTranspose through PCPFLAREINV, assembled and matrix-free"
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
