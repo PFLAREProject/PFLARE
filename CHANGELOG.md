@@ -73,6 +73,10 @@ for earlier changes please see the git history.
   `pcair_set_reuse_amount`) now reject values other than 1, 2 or 3 with
   `PETSC_ERR_ARG_OUTOFRANGE` (`ValueError` in Python); previously they were
   used unchecked to index the reuse tables
+- Fixed `PCAIRSetDiagScalePolys` / `-pc_air_diag_scale_polys` being silently
+  ignored while the inverse type was Neumann, which lost the setting for the C
+  point inverse and for any later change of inverse type. `PCAIRGetDiagScalePolys`
+  now returns the stored value (Neumann still always diagonally scales)
 
 ## [v1.27.0]
 

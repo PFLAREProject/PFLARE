@@ -159,6 +159,17 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
 
+# Neumann always diagonally scales, but setting the flag while Neumann is the
+# inverse type must still be stored, as it is used by the other (e.g., C point)
+# inverses and must survive a later change of inverse type
+pflare.pcair_set_inverse_type(pc, pflare.PFLAREINV_NEUMANN)
+pflare.pcair_set_diag_scale_polys(pc, True)
+pflare.pcair_set_inverse_type(pc, pflare.PFLAREINV_ARNOLDI)
+check('diag_scale_polys_after_neumann', pflare.pcair_get_diag_scale_polys(pc), True)
+
+pflare.pcair_set_diag_scale_polys(pc, False)
+check('diag_scale_polys_false', pflare.pcair_get_diag_scale_polys(pc), False)
+
 # Reuse amounts outside 1, 2 or 3 must be rejected and leave the value alone
 for bad_amount in (0, 4):
     try:
