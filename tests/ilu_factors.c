@@ -51,6 +51,29 @@ static PetscErrorCode CreateMatLike(MPI_Comm comm, MatType mtype,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* Check remove_from_sparse_match with lumping and alpha = -1 on a pre-filled
+   output: a copy of output_init must become expected, ie
+   output += -input on output's pattern, with the dropped entries of -input
+   added to the diagonal and output's other entries left untouched. */
+static PetscErrorCode CheckSparseMatchLump(const char *label, Mat input, Mat output_init, Mat expected)
+{
+  Mat       out;
+  PetscReal diff_norm, exp_norm;
+
+  PetscFunctionBeginUser;
+  PetscCall(MatDuplicate(output_init, MAT_COPY_VALUES, &out));
+  remove_from_sparse_match(input, out, 1, 1, -1.0);
+  PetscCall(MatNorm(expected, NORM_FROBENIUS, &exp_norm));
+  PetscCall(MatAXPY(out, -1.0, expected, UNKNOWN_NONZERO_PATTERN));
+  PetscCall(MatNorm(out, NORM_FROBENIUS, &diff_norm));
+  PetscCall(MatDestroy(&out));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "remove_from_sparse_match lump check (%s): ||diff||_F = %.6e\n",
+                        label, (double)diff_norm));
+  PetscCheck(diff_norm <= 1e-10 * PetscMax(exp_norm, 1.0), PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+             "remove_from_sparse_match lump check (%s) failed: ||diff||_F = %g", label, (double)diff_norm);
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* Apply the python-reference DEFAULT_AIR_OPTS to a PCAIR. */
 static PetscErrorCode ApplyPythonAIRDefaults(PC pc)
 {
@@ -436,6 +459,33 @@ int main(int argc, char **args)
     Mat all[] = {L, U, A_L_strict, A_U, R_L, R_U};
     for (int k = 0; k < 6; k++) PetscCall(MatAssemblyBegin(all[k], MAT_FINAL_ASSEMBLY));
     for (int k = 0; k < 6; k++) PetscCall(MatAssemblyEnd  (all[k], MAT_FINAL_ASSEMBLY));
+  }
+
+  /* Test remove_from_sparse_match with lump = 1, alpha = -1 on an output
+     pre-filled with A_U. Every entry of A_L_strict is outside pat(A_U), so the
+     lumped diagonal term is -rowsum(A_L_strict). */
+  {
+    Mat expected;
+    Vec lump_vec;
+    PetscCall(MatCreateVecs(A_U, NULL, &lump_vec));
+    PetscCall(MatGetRowSum(A_L_strict, lump_vec));
+    PetscCall(VecScale(lump_vec, -1.0));
+
+    /* Input pattern disjoint from the output pattern: all of A_U must be
+       kept and only the diagonal changes */
+    PetscCall(MatDuplicate(A_U, MAT_COPY_VALUES, &expected));
+    PetscCall(MatDiagonalSet(expected, lump_vec, ADD_VALUES));
+    PetscCall(CheckSparseMatchLump("input A_L_strict", A_L_strict, A_U, expected));
+    PetscCall(MatDestroy(&expected));
+
+    /* Input A: the matched upper part cancels A_U, leaving only the lumped
+       lower part on the diagonal */
+    PetscCall(MatDuplicate(A_U, MAT_COPY_VALUES, &expected));
+    PetscCall(MatZeroEntries(expected));
+    PetscCall(MatDiagonalSet(expected, lump_vec, ADD_VALUES));
+    PetscCall(CheckSparseMatchLump("input A", A, A_U, expected));
+    PetscCall(MatDestroy(&expected));
+    PetscCall(VecDestroy(&lump_vec));
   }
 
   PetscReal A_norm;
