@@ -181,6 +181,7 @@ export TEST_TARGETS = ex12f \
 		  shell_block_apply \
 		  pflareinv_apply_transpose \
 		  poly_zero_coeffs \
+		  newton_imag_roots \
 		  adv_diff_fd \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \
