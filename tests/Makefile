@@ -634,6 +634,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5
+#
+	@echo ""
+	@echo "Test distance 2 PMIS on 1D central difference advection - skew-symmetric off-diagonals must not cancel in the strength matrix"
+	./adv_1d -n 1000 -skew -pc_type air -pc_air_cf_splitting_type pmis_dist2 -min_levels 3 -ksp_max_it 5
 	@echo "Test multiple RHS block solve with a Newton polynomial PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV"
@@ -1316,6 +1320,8 @@ else
 	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
+	@echo "Test distance 2 PMIS on 1D central difference advection in parallel - skew-symmetric off-diagonals must not cancel in the strength matrix"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -skew -pc_type air -pc_air_cf_splitting_type pmis_dist2 -min_levels 3 -ksp_max_it 5
 	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
 	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
