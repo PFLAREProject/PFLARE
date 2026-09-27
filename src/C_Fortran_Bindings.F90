@@ -4,7 +4,8 @@ module c_fortran_bindings
    use iso_c_binding
    use pcair_data_type, only: pc_air_multigrid_data
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
-   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
+   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
+         inverse_type_is_polynomial
    use gmres_poly_apply, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
@@ -265,7 +266,8 @@ module c_fortran_bindings
          ! For matrix-free: the matshell owns its Fortran allocation (own_coefficients=.TRUE.)
          ! and will deallocate it independently via reset_inverse_mat. The C copy is
          ! stored separately in poly_coeffs and freed via free() in PCReset_PFLAREINV_c.
-         if (.NOT. matrix_free) deallocate(coefficients)
+         ! The non-polynomial types (e.g., Jacobi) never build a matshell, even if matrix-free
+         if (.NOT. matrix_free .OR. .NOT. inverse_type_is_polynomial(int(inverse_type))) deallocate(coefficients)
          coeffs_ptr = c_buf
          row_size   = nr
          col_size   = nc
