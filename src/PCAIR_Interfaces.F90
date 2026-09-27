@@ -1759,6 +1759,15 @@ module pcair_interfaces
       integer :: errorcode, n, i
       ! ~~~~~~~~
 
+      ! Each block of consecutive f or c characters takes one entry of smooth_order
+      ! and the C interfaces only pass 10 characters, so limit the length
+      ! to the size of smooth_order
+      call PCAIRGetOptions(pc, options)
+      if (len_trim(input_string) > size(options%smooth_order)) then
+         print *, "Smooth order must be at most ", size(options%smooth_order), " characters"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
       call PCAIRGetSmoothType(pc, old_string, ierr)
       if (trim(old_string) == trim(input_string)) then
          ierr = 0

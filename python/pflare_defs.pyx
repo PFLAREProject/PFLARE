@@ -576,7 +576,10 @@ cpdef pcair_set_smooth_type(PC pc, str smooth_type):
 	cdef int i, n
 	for i in range(11):
 		buf[i] = 0
-	n = min(len(encoded), 10)
+	# The underlying C/Fortran interface only supports at most 10 characters
+	if len(encoded) > 10:
+		raise ValueError(f"smooth type {smooth_type!r} has {len(encoded)} characters, at most 10 are supported")
+	n = len(encoded)
 	for i in range(n):
 		buf[i] = encoded[i]
 	CHKERR(PCAIRSetSmoothType(pc.pc, buf))

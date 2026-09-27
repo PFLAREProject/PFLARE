@@ -204,6 +204,36 @@ for pc_type in ['jacobi', 'pflareinv', None]:
     pc_wrong.destroy()
 PETSc.Sys.popErrorHandler()
 
+# A 10 character smooth type is the longest supported and must round-trip
+pflare.pcair_set_smooth_type(pc, 'fcfcfcfcfc')
+check('smooth_type_10',  pflare.pcair_get_smooth_type(pc),     'fcfcfcfcfc')
+
+# Longer smooth types must error rather than be silently truncated
+try:
+    pflare.pcair_set_smooth_type(pc, 'ffffffffffc')
+    errors.append('smooth_type_11: expected ValueError from pcair_set_smooth_type')
+except ValueError:
+    pass
+check('smooth_type_11_unchanged', pflare.pcair_get_smooth_type(pc), 'fcfcfcfcfc')
+
+# Same through the options database, which goes through the C PCAIRSetSmoothType
+# The error handler is swapped so the expected error is returned rather than aborting
+pc_opts = PETSc.PC().create(comm=comm)
+pc_opts.setType('air')
+pc_opts.setOptionsPrefix('long_smooth_')
+opts = PETSc.Options()
+opts['long_smooth_pc_air_smooth_type'] = 'ffffffffffc'
+PETSc.Sys.pushErrorHandler('return')
+try:
+    pc_opts.setFromOptions()
+    errors.append('smooth_type_11_options: expected an error from -pc_air_smooth_type')
+except PETSc.Error:
+    pass
+finally:
+    PETSc.Sys.popErrorHandler()
+del opts['long_smooth_pc_air_smooth_type']
+pc_opts.destroy()
+
 if errors:
     if rank == 0:
         for e in errors:
