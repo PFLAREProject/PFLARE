@@ -65,6 +65,10 @@ for earlier changes please see the git history.
 - Fixed the shared library registration routine (called by PETSc when it
   loads PFLARE, e.g., with `--download-pflare`) only registering PCAIR, so
   `-pc_type pflareinv` now works without calling `PCRegister_PFLARE()`
+- `PCAIRGetPolyCoeffs` / `PCAIRSetPolyCoeffs` (C, Fortran and Python) now
+  error on an out of range level, a call before setup, an inverse with no
+  stored polynomial, or (set) mismatched sizes, rather than reading or writing
+  through invalid memory
 
 ## [v1.27.0]
 

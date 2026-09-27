@@ -18,6 +18,7 @@ within a relative tolerance of 1e-8.
 '''
 
 import sys
+import numpy as np
 import petsc4py
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
@@ -159,6 +160,28 @@ for count in range(1, nsteps + 1):
                     pc, petsc_level, pflare.COEFFS_INV_AFF)
             coeffs_air[0] = pflare.pcair_get_poly_coeffs(
                 pc, 0, pflare.COEFFS_INV_COARSE)
+
+            # Invalid gets/sets must raise rather than read/write through bad
+            # memory: out of range level, no Acc polynomial (no C smoothing),
+            # and mismatched sizes. Use the Python error handler so these raise
+            # PETSc.Error even when run with -on_error_abort
+            PETSc.Sys.pushErrorHandler("python")
+            bad_calls = [
+                lambda: pflare.pcair_get_poly_coeffs(pc, num_levels, pflare.COEFFS_INV_AFF),
+                lambda: pflare.pcair_get_poly_coeffs(pc, num_levels - 1, pflare.COEFFS_INV_ACC),
+                lambda: pflare.pcair_set_poly_coeffs(pc, num_levels - 1, pflare.COEFFS_INV_AFF,
+                                                     np.zeros((coeffs_air[num_levels - 1].shape[0] + 1,
+                                                               coeffs_air[num_levels - 1].shape[1]))),
+            ]
+            for i_call, bad_call in enumerate(bad_calls):
+                try:
+                    bad_call()
+                except PETSc.Error:
+                    continue
+                PETSc.Sys.popErrorHandler()
+                print(f"FAIL: invalid PCAIR poly coeffs call {i_call} did not raise")
+                sys.exit(1)
+            PETSc.Sys.popErrorHandler()
 
         elif is_pflareinv:
             coeffs_pflareinv = pflare.pcpflareinv_get_poly_coeffs(pc)
