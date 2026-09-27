@@ -156,6 +156,9 @@ run_tests_load_serial:
 	@echo ""
 	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C"
 	./ex6_cf_splitting  -f data/mat_stream_2364
+	@echo "Test PMISR DDC and diag_dom CF splittings never leave zero diagonal rows as F points"
+	./ex6_cf_splitting  -f data/mat_stream_2364 -zero_diag_stride 7
+	./ex6_cf_splitting  -f data/e05r0100_petsc -b_in_f 0
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals"
@@ -254,6 +257,9 @@ else
 # 
 	@echo "Test PMISR DDC CF splitting and diagonal dominance extract in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364
+	@echo "Test PMISR DDC and diag_dom CF splittings never leave zero diagonal rows as F points in parallel"
+	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/mat_stream_2364 -zero_diag_stride 7
+	$(MPIEXEC) -n 2 ./ex6_cf_splitting  -f data/e05r0100_petsc -b_in_f 0
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"

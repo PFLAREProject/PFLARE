@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the DDC cleanup of the `pmisr_ddc` and `diag_dom` CF splittings (and
+  `compute_diag_dom_submatrix`) leaving F points with a zero or missing
+  diagonal but nonzero off-diagonals, which gave Aff a zero diagonal. These
+  rows are now always made C points
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

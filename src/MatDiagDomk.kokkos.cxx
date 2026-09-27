@@ -107,6 +107,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Have to store the diagonal entry
    PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
    Kokkos::deep_copy(exec, diag_entry_d, 0);
+   // And the sum of abs(off-diagonal) over all columns (F or C), so we can tell
+   // a zero-diagonal row with connections apart from an empty row
+   PetscScalarKokkosView off_diag_any_d = PetscScalarKokkosView("off_diag_any_d", local_rows_row);
 
    // Scoping to reduce peak memory
    {
@@ -152,9 +155,22 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                Kokkos::Sum<PetscScalar>(sum_val)
             );
 
+            // Reduce abs(off-diagonal) over all local columns, F or C
+            PetscScalar any_val = 0.0;
+            Kokkos::parallel_reduce(
+               Kokkos::TeamVectorRange(t, ncols_local),
+               [&](const PetscInt j, PetscScalar& thread_sum) {
+                  if (device_local_j[device_local_i[i] + j] != i) {
+                     thread_sum += Kokkos::abs(device_local_vals[device_local_i[i] + j]);
+                  }
+               },
+               Kokkos::Sum<PetscScalar>(any_val)
+            );
+
             // Only want one thread in the team to write the result
             Kokkos::single(Kokkos::PerTeam(t), [&]() {
                diag_dom_ratio_d(i_idx_is_row) = sum_val;
+               off_diag_any_d(i_idx_is_row) = any_val;
             });
       });  
    }
@@ -224,10 +240,21 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                   Kokkos::Sum<PetscScalar>(sum_val)
                );
 
+               // Every nonlocal entry is off-diagonal, F or C
+               PetscScalar any_val = 0.0;
+               Kokkos::parallel_reduce(
+                  Kokkos::TeamVectorRange(t, ncols_nonlocal),
+                  [&](const PetscInt j, PetscScalar& thread_sum) {
+                     thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
+                  },
+                  Kokkos::Sum<PetscScalar>(any_val)
+               );
+
                // Only want one thread in the team to write the result
                Kokkos::single(Kokkos::PerTeam(t), [&]() {
                   // Add into existing
                   diag_dom_ratio_d(i_idx_is_row) += sum_val;
+                  off_diag_any_d(i_idx_is_row) += any_val;
                });
          });  
       }       
@@ -239,11 +266,20 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i) {
 
-      // If diag_val is zero we didn't find a diagonal
+      // If diag_val is zero we didn't find a (nonzero) diagonal
       if (diag_entry_d(i) != 0.0){
          // Compute the diagonal dominance ratio
          diag_dom_ratio_d(i) = diag_dom_ratio_d(i) / diag_entry_d(i);
       }
+      // If the diagonal is zero (or missing) but the row has any nonzero
+      // off-diagonal, this F point would give Aff a zero diagonal, so give it
+      // a huge ratio to guarantee it is promoted to a C point
+      // This is 2**100, and must match PFLARE_DD_RATIO_ZERO_DIAG in Pflare_Parameters.F90
+      else if (off_diag_any_d(i) != 0.0){
+         diag_dom_ratio_d(i) = (PetscScalar)0x1p100;
+      }
+      // Rows with no nonzeros at all keep a ratio of zero
+      // This matches the CPU behaviour
       else{
          diag_dom_ratio_d(i) = 0.0;
       }

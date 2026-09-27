@@ -426,13 +426,11 @@ module ddc_module
          do ifree = 1, local_rows
 
             ! Bin the entries between 0 and 1
-            ! The top bin has entries greater than 0.9 (including greater than 1)
-            bin = min(floor(diag_dom_ratio(ifree) * size(dom_bins)) + 1, size(dom_bins))
-            ! If the diagonal dominance ratio is really large the expression above will overflow
-            ! the int to negative, so we just stick that in the top bin            
-            if (bin < 0) then
-               bin = size(dom_bins)
-            end if
+            ! The top bin has entries greater than 0.999 (including greater than 1)
+            ! We clamp the ratio to 1 before the floor, as a really large ratio (e.g., the one
+            ! given to zero diagonal rows) would overflow the integer conversion
+            bin = min(floor(min(diag_dom_ratio(ifree), real(1, kind=kind(diag_dom_ratio))) * size(dom_bins)) + 1, &
+                  size(dom_bins))
             dom_bins(bin) = dom_bins(bin) + 1
 
          end do      
