@@ -17,6 +17,8 @@ for earlier changes please see the git history.
 - Fixed a leak of the near-nullspace vectors with `-pc_air_symmetric
   -pc_air_constrain_w`; `-pc_air_constrain_w` is ignored with
   `-pc_air_symmetric` as the prolongator is R^T
+- Fixed an MPI communicator leak on every setup with `-pc_air_subcomm` when
+  some ranks have no rows on a level
 
 ## [v1.27.0]
 
