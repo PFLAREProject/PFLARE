@@ -14,6 +14,9 @@ for earlier changes please see the git history.
 - Fixed the PCAIR complexities (`-pc_air_print_stats_timings` and
   `PCAIRGet*Complexity`) being zero or NaN when the hierarchy has only a single
   level (the Jacobi fallback or auto truncation on the top level)
+- Fixed a leak of the near-nullspace vectors with `-pc_air_symmetric
+  -pc_air_constrain_w`; `-pc_air_constrain_w` is ignored with
+  `-pc_air_symmetric` as the prolongator is R^T
 
 ## [v1.27.0]
 
