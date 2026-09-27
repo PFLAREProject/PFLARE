@@ -192,6 +192,7 @@ export TEST_TARGETS = ex12f \
 		  ilu_factors \
 		  reuse_preconditioner \
 		  operator_refcount \
+		  pcair_reuse_amount_range \
 		  pmisr_nonsymmetric
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)

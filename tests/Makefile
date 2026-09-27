@@ -320,6 +320,10 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3"
+	./pcair_reuse_amount_range
+#
+	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
@@ -1007,6 +1011,10 @@ else
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
 	 -pc_air_print_stats_timings -fp_trap
+#
+	@echo ""
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
+	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
