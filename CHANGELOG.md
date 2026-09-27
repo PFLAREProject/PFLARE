@@ -29,6 +29,12 @@ for earlier changes please see the git history.
 - Fixed PCAIR on non-Kokkos GPU matrix types (e.g. `aijcusparse`,
   `aijhipsparse`) building its F/C point injectors from the not yet created
   Afc/Acf submatrices, which could crash or corrupt the first setup
+- Fixed the CPU `remove_from_sparse_match` with lumping discarding the
+  existing values of the output matrix: with alpha it now computes
+  output += alpha * input (as the Kokkos version does) and entries of the
+  output that are not in the input's sparsity are kept. The C
+  `remove_from_sparse_match` now also initialises the PETSc Fortran
+  interface, as the other standalone C routines do
 
 ## [v1.27.0]
 

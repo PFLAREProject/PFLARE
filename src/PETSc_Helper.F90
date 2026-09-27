@@ -601,12 +601,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, dimension(:), pointer :: cols => null(), cols_mod
       ! Matrix entries filled by MatGetRow are PetscScalar
       PetscScalar, dimension(:), pointer :: vals => null(), vals_copy
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      PetscInt, allocatable, dimension(:) :: col_indices
+      ! Value buffer feeding MatSetValues is PetscScalar
+      PetscScalar, allocatable, dimension(:) :: v, lump_vals
+      PetscCount, allocatable, dimension(:) :: row_ptr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries, alpha_present
       PetscReal :: lump_sum
+      InsertMode :: insert_mode
       MPIU_Comm :: MPI_COMM_MATRIX
       
       ! ~~~~~~~~~~
@@ -655,7 +657,6 @@ logical, protected :: kokkos_debug_global = .FALSE.
       allocate(vals_copy(max_nnzs))
 
       ! Times 2 here in case we are lumping
-      allocate(row_indices(max_nnzs_total * 2))
       allocate(col_indices(max_nnzs_total * 2))
       allocate(v(max_nnzs_total * 2))       
        
@@ -664,11 +665,19 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)      
       call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)     
+      ! This ensures any entries outside the existing sparsity of output_mat are dropped
+      ! (e.g., a lumped diagonal entry when output_mat has no diagonal)
+      call MatSetOption(output_mat, MAT_NEW_NONZERO_LOCATIONS, PETSC_FALSE, ierr)
+
+      allocate(lump_vals(local_rows))
+      allocate(row_ptr(local_rows + 1))
       
       ! Now go and fill the new matrix
       ! Loop over global row indices
       counter = 1
       do ifree = global_row_start, global_row_end_plus_one-1                  
+
+         row_ptr(ifree - global_row_start + 1) = counter
       
          ! Get the row
          call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)  
@@ -717,34 +726,55 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! Stick in the intersecting values
          do col = 1, ncols_mod
             if (cols_mod(col) /= -1) then
-               row_indices(counter) = ifree
                col_indices(counter) = cols_mod(col)
                v(counter) = vals_copy(col)
                counter = counter + 1
             end if
          end do
 
-         ! Add lumped terms to the diagonal
-         if (lump_entries) then
-            row_indices(counter) = ifree
-            col_indices(counter) = ifree
-            v(counter) = lump_sum
-            counter = counter + 1
-         end if              
+         ! Lumped term to add to the diagonal
+         lump_vals(ifree - global_row_start + 1) = lump_sum
       end do  
+      row_ptr(local_rows + 1) = counter
             
       deallocate(cols_mod, vals_copy)
-      ! Set the values
-      call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
-      deallocate(row_indices, col_indices)
+
+      ! Set the values into the existing output_mat
+      ! We can't use MatSetPreallocationCOO here, as that resets the sparsity and 
+      ! values of output_mat, which would lose the existing values when adding with alpha 
+      ! and any entries of output_mat that aren't in input_mat
+      ! We also can't MatGetRow on output_mat once we start setting values, hence the 
+      ! intersecting values have been stored above
       if (alpha_present) then
          ! If alpha is present, we add the values to the output matrix
-         call MatSetValuesCOO(output_mat, v, ADD_VALUES, ierr)    
+         insert_mode = ADD_VALUES
       else
          ! Otherwise we just copy the values across
-         call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
+         insert_mode = INSERT_VALUES
       end if
-      deallocate(v)  
+      do ifree = 1, local_rows
+         ncols = int(row_ptr(ifree + 1) - row_ptr(ifree), kind(ncols))
+         if (ncols /= 0) then
+            call MatSetValues(output_mat, one, [ifree + global_row_start - 1], ncols, &
+                  col_indices(row_ptr(ifree):row_ptr(ifree + 1) - 1), &
+                  v(row_ptr(ifree):row_ptr(ifree + 1) - 1), insert_mode, ierr)
+         end if
+      end do
+      ! Can't mix insert and add without an assembly in between
+      if (.NOT. alpha_present) then
+         call MatAssemblyBegin(output_mat, MAT_FLUSH_ASSEMBLY, ierr)
+         call MatAssemblyEnd(output_mat, MAT_FLUSH_ASSEMBLY, ierr)
+      end if
+      ! Add the lumped terms to the diagonal
+      do ifree = global_row_start, global_row_end_plus_one-1
+         call MatSetValues(output_mat, one, [ifree], one, [ifree], &
+               [lump_vals(ifree - global_row_start + 1)], ADD_VALUES, ierr)
+      end do
+
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr) 
+
+      deallocate(col_indices, v, lump_vals, row_ptr)  
          
    end subroutine remove_from_sparse_match_cpu
 
