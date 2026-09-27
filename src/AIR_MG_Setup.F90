@@ -2,7 +2,7 @@ module air_mg_setup
 
    use petscksp
    use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
-   use cf_splitting, only: compute_cf_splitting
+   use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: &
          PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
@@ -454,10 +454,18 @@ module air_mg_setup
          inverse_sparsity_aff = air_data%options%inverse_sparsity_order
          aff_diag = .FALSE.
          check_diag_only = .TRUE.
-         ! Don't have to check if we have strong threshold of zero 
-         ! or its already matdiagonal due to reuse
+         ! Don't have to check if its already matdiagonal due to reuse
+         ! or if we have strong threshold of zero with a PMISR based splitting, 
+         ! as then the F points are an independent set in the (symmetrized) 
+         ! graph of A and hence Aff is diagonal
+         ! That is not true for the other CF splittings (e.g., PMIS gives
+         ! independent C points, aggregation has connected F points and 
+         ! CR uses the strong threshold as a target rate), so we have to check
          call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
-         if (mat_type_aff == MATDIAGONAL .OR. air_data%options%strong_threshold == 0d0) then
+         if (mat_type_aff == MATDIAGONAL .OR. &
+               (air_data%options%strong_threshold == 0d0 .AND. &
+                  (air_data%options%cf_splitting_type == CF_PMISR_DDC .OR. &
+                   air_data%options%cf_splitting_type == CF_DIAG_DOM))) then
             check_diag_only = .FALSE.
          end if
 

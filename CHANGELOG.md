@@ -105,6 +105,10 @@ for earlier changes please see the git history.
   longer depends on the scaling of the spectrum, and purely imaginary roots now
   receive extra roots for stability, so results may change for tightly
   clustered, small magnitude or skew-symmetric spectra
+- Fixed PCAIR with `-pc_air_strong_threshold 0` assuming Aff is diagonal for
+  every CF splitting type; this only holds for `pmisr_ddc` and `diag_dom`, so
+  other splittings (e.g., `pmis`, `agg`) silently dropped the off-diagonal
+  entries of Aff, degrading or breaking convergence
 
 ## [v1.27.0]
 
