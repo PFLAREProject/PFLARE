@@ -555,7 +555,7 @@ module fc_smooth_block
 
       PetscErrorCode :: ierr
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: i_loc, j_loc, local_row
+      PetscInt :: i_loc, j_loc, local_row, is_local_size
       PetscInt, pointer :: is_pointer(:)
       PetscScalar, pointer :: full_array(:,:), reduced_array(:,:)
       type(tIS) :: is_local
@@ -566,6 +566,13 @@ module fc_smooth_block
       else
          is_local = air_data%is_coarse_index(our_level)
       end if
+
+      ! If we have no fine (or coarse) rows locally there is nothing to copy
+      ! The reduced block then has no local rows, so petsc hands back an
+      ! unassociated fortran pointer for it (the underlying storage is null)
+      ! which we can't take the size of
+      call ISGetLocalSize(is_local, is_local_size, ierr)
+      if (is_local_size == 0) return
 
       ! The IS holds global indices
       call MatGetOwnershipRange(xfull_mat, global_row_start, global_row_end_plus_one, ierr)
