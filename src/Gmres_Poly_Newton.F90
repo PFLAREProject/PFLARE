@@ -286,7 +286,9 @@ module gmres_poly_newton
          if (b < 0) cycle
 
          ! Skips eigenvalues that are numerically zero
-         if (abs(a) < PFLARE_TOL_ZERO) cycle
+         ! This matches the zero test used when applying the polynomial, ie 
+         ! a purely imaginary root (a == 0, b /= 0) is not zero
+         if (b == 0d0 .AND. abs(a) < PFLARE_TOL_ZERO) cycle
          if (a**2 + b**2 < PFLARE_TOL_ZERO) cycle
 
          ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
@@ -299,7 +301,7 @@ module gmres_poly_newton
             d = imag_roots(i_loc)
 
             ! Skips eigenvalues that are numerically zero
-            if (abs(c) < PFLARE_TOL_ZERO) cycle
+            if (d == 0d0 .AND. abs(c) < PFLARE_TOL_ZERO) cycle
             if (c**2 + d**2 < PFLARE_TOL_ZERO) cycle
 
             ! theta_k/theta_i

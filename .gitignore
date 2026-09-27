@@ -46,6 +46,7 @@ tests/matrandom
 tests/matrandom_check_reset
 tests/operator_refcount
 tests/pflareinv_apply_transpose
+tests/newton_imag_roots
 tests/pmisr_nonsymmetric
 tests/reuse_preconditioner
 tests/shell_block_apply
