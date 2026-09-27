@@ -248,7 +248,14 @@ module air_mg_setup
             else
                call reset_inverse_mat(air_data%inv_A_ff(our_level))
                call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)             
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)
+               ! The coefficients were sized for this level, but the coarsest grid may be
+               ! smaller than the polynomial order (setup_gmres_poly_data then lowers the order)
+               ! so throw them away and let them be reallocated with the right size
+               if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
+                  deallocate(air_data%inv_coarsest_poly_data%coefficients)
+                  air_data%inv_coarsest_poly_data%coefficients => null()
+               end if
             end if
 
             call VecDestroy(rand_vec, ierr)
@@ -343,23 +350,6 @@ module air_mg_setup
                call ISGetSize(air_data%IS_coarse_index(our_level-1), global_fine_is_size, ierr)
                call ISGetLocalSize(air_data%IS_coarse_index(our_level-1), local_fine_is_size, ierr)            
             end if
-
-            if (air_data%options%constrain_z) then
-               ! Destroy our copy of the left near nullspace vectors
-               do i_loc = 1, size(left_null_vecs)
-                  call VecDestroy(left_null_vecs(i_loc), ierr)
-               end do
-            end if
-            if (allocated(left_null_vecs)) deallocate(left_null_vecs)
-            if (allocated(left_null_vecs_c)) deallocate(left_null_vecs_c)            
-            if (air_data%options%constrain_w) then
-               ! Destroy our copy of the right near nullspace vectors
-               do i_loc = 1, size(right_null_vecs)
-                  call VecDestroy(right_null_vecs(i_loc), ierr)
-               end do
-            end if   
-            if (allocated(right_null_vecs)) deallocate(right_null_vecs)
-            if (allocated(right_null_vecs_c)) deallocate(right_null_vecs_c)                     
 
             no_levels = our_level
 
@@ -482,7 +472,12 @@ module air_mg_setup
          ! Check if Aff is only a diagonal
          if (check_diag_only) then      
 
-            call MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
+            ierr = MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
+            ! Don't carry on with a garbage diag_only if petsc failed in the c routine
+            if (ierr /= 0) then
+               print *, "MatGetDiagonalOnly_c failed"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
             ! If Aff is diagonal we can exploit this                
             if (diag_only == 1) then
                aff_diag = .TRUE.
@@ -723,11 +718,17 @@ module air_mg_setup
                   
                   ! can tell us how many idle threads we have on lower grids
                   proc_stride = proc_stride * air_data%options%processor_agglom_factor
+                  ! Update the number of active cores to match the new stride
+                  ! Stolen from calculate_repartition, make sure they match!
+                  no_active_cores = floor(dble(comm_size)/dble(proc_stride))
+                  ! Be careful of rounding!
+                  if (no_active_cores == 0) no_active_cores = 1
 
                   ! If we don't have at least process_eq_limit unknowns per core (on average)
                   ! then we need to be more aggressive with our processor agglomeration
                   ! We'll just keep increasing the stride until we have more than process_eq_limit unknowns per core
-                  stride_loop: do while (global_rows_repart < air_data%options%process_eq_limit * no_active_cores)
+                  stride_loop: do while (global_rows_repart < air_data%options%process_eq_limit * no_active_cores &
+                                 .AND. no_active_cores /= 1)
                      proc_stride = proc_stride * air_data%options%processor_agglom_factor
                      ! Stolen from calculate_repartition, make sure they match!
                      no_active_cores = floor(dble(comm_size)/dble(proc_stride))     
@@ -962,6 +963,24 @@ module air_mg_setup
          if (air_data%options%print_stats_timings .AND. comm_rank == 0) call print_timers()
 
       end do level_loop
+
+      ! Destroy our copies of the near nullspace vectors
+      ! This has to happen after the loop, as we can leave it either by 
+      ! coarsening far enough or by hitting the max number of levels
+      if (air_data%options%constrain_z) then
+         do i_loc = 1, size(left_null_vecs)
+            call VecDestroy(left_null_vecs(i_loc), ierr)
+         end do
+      end if
+      if (allocated(left_null_vecs)) deallocate(left_null_vecs)
+      if (allocated(left_null_vecs_c)) deallocate(left_null_vecs_c)
+      if (air_data%options%constrain_w) then
+         do i_loc = 1, size(right_null_vecs)
+            call VecDestroy(right_null_vecs(i_loc), ierr)
+         end do
+      end if
+      if (allocated(right_null_vecs)) deallocate(right_null_vecs)
+      if (allocated(right_null_vecs_c)) deallocate(right_null_vecs_c)
 
       ! Record how many levels we have
       air_data%no_levels = no_levels

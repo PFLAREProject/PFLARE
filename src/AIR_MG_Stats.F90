@@ -24,18 +24,23 @@ module air_mg_stats
       integer :: our_level
       PetscErrorCode :: ierr
       MatType:: mat_type
+      type(tMat) :: temp_mat
 
-      ! ~~~~~~    
+      ! ~~~~~~
 
       ! The coarse solver nnzs
-      if (air_data%no_levels /= 1) then
+      ! With a single level the "coarse" matrix is the top grid matrix and we
+      ! only have a coarse solver (in inv_A_ff) if we auto truncated, otherwise
+      ! we used jacobi
+      temp_mat = air_data%inv_A_ff(air_data%no_levels)
+      if (.NOT. PetscObjectIsNull(temp_mat)) then
          ! Are we mf?
          call MatGetType(air_data%inv_A_ff(air_data%no_levels), mat_type, ierr)
          if (mat_type/=MATSHELL) then
-            call get_nnzs_petsc_sparse(air_data%inv_A_ff(air_data%no_levels), air_data%inv_A_ff_nnzs(air_data%no_levels))                                             
+            call get_nnzs_petsc_sparse(air_data%inv_A_ff(air_data%no_levels), air_data%inv_A_ff_nnzs(air_data%no_levels))
          end if
-         call get_nnzs_petsc_sparse(air_data%coarse_matrix(air_data%no_levels), air_data%coarse_matrix_nnzs(air_data%no_levels))      
       end if
+      call get_nnzs_petsc_sparse(air_data%coarse_matrix(air_data%no_levels), air_data%coarse_matrix_nnzs(air_data%no_levels))
       
       ! Then go over all the levels except the coarse
       do our_level = 1, air_data%no_levels-1        
@@ -87,7 +92,7 @@ module air_mg_stats
       integer(kind=8), intent(out)           :: nnzs
 
       integer :: our_level, non_zero_order, i
-      PetscInt :: maxits, petsc_level
+      PetscInt :: maxits, petsc_level, global_rows, global_cols
       PetscErrorCode :: ierr
       PCType :: pc_type
       type(tKSP) :: ksp
@@ -101,8 +106,31 @@ module air_mg_stats
       ! Set to zero to start
       nnzs = 0
 
-      ! Check we're doing mg
       call PCGetType(pcmg_input, pc_type, ierr)
+
+      ! If we only have a single level we either auto truncated and our PC
+      ! is a single application of the coarse grid solver, or we are doing jacobi
+      if (air_data%no_levels == 1) then
+         if (pc_type == PCMAT) then
+            ! Are we mf?
+            call MatGetType(air_data%inv_A_ff(1), mat_type, ierr)
+            if (mat_type==MATSHELL) then
+               call compute_mf_gmres_poly_num_matvecs(air_data%options%coarsest_inverse_type, &
+                           air_data%inv_coarsest_poly_data%coefficients, &
+                           non_zero_order)
+               nnzs = int(non_zero_order, kind=8) * air_data%coarse_matrix_nnzs(1)
+            else
+               nnzs = air_data%inv_A_ff_nnzs(1)
+            end if
+         else if (pc_type == PCJACOBI) then
+            ! Jacobi is a diagonal scaling, so one entry per row
+            call MatGetSize(air_data%coarse_matrix(1), global_rows, global_cols, ierr)
+            nnzs = int(global_rows, kind=8)
+         end if
+         return
+      end if
+
+      ! Check we're doing mg
       if (pc_type /= PCMG) return
 
       ! Coarse grid solve
@@ -272,6 +300,7 @@ module air_mg_stats
       integer(kind=8) :: nnzs_air_v, mat_storage_nnzs, op_complx_nnzs, mat_reuse_storage_nnzs, mat_nnzs
       type(tMat) :: temp_mat
       type(tIS) :: temp_is
+      PCType :: pc_type
 
       ! ~~~~~~    
 
@@ -290,11 +319,9 @@ module air_mg_stats
          call MatGetSize(air_data%coarse_matrix(our_level), global_rows, global_cols, ierr)
          grid_complx = grid_complx + real(global_rows, kind=kind(grid_complx))
       end do
-      ! Don't forget the bottom grid
-      if (air_data%no_levels /= 1) then
-         call MatGetSize(air_data%coarse_matrix(air_data%no_levels), global_rows, global_cols, ierr)
-         grid_complx = grid_complx + real(global_rows, kind=kind(grid_complx))
-      end if
+      ! Don't forget the bottom grid (which is the top grid if we only have one level)
+      call MatGetSize(air_data%coarse_matrix(air_data%no_levels), global_rows, global_cols, ierr)
+      grid_complx = grid_complx + real(global_rows, kind=kind(grid_complx))
 
       call MatGetSize(air_data%coarse_matrix(1), global_rows, global_cols, ierr)
       grid_complx = grid_complx/real(global_rows, kind=kind(grid_complx))      
@@ -346,6 +373,23 @@ module air_mg_stats
                mat_storage_nnzs = mat_storage_nnzs + air_data%coarse_matrix_nnzs(air_data%no_levels)      
             end if         
          end if 
+
+      ! If we only have a single level
+      else
+         call PCGetType(pcmg_input, pc_type, ierr)
+         ! If we auto truncated the PC is a single application of the coarse grid solver
+         ! so we never need the matrix to compute a residual unless we're mf
+         if (pc_type == PCMAT) then
+            if (air_data%options%coarsest_matrix_free_polys) then
+               mat_storage_nnzs = mat_storage_nnzs + air_data%coarse_matrix_nnzs(1)
+            else
+               mat_storage_nnzs = mat_storage_nnzs + air_data%inv_A_ff_nnzs(1)
+            end if
+         ! Jacobi just needs the diagonal
+         else if (pc_type == PCJACOBI) then
+            call MatGetSize(air_data%coarse_matrix(1), global_rows, global_cols, ierr)
+            mat_storage_nnzs = mat_storage_nnzs + int(global_rows, kind=8)
+         end if
       end if   
       
       ! ~~~~~~~~~

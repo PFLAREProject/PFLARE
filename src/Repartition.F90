@@ -149,11 +149,18 @@ module repartition
 
       integer(c_long_long) :: A_array, B_array
       integer(c_int)       :: on_subcomm_int
+      integer              :: errorcode
+      PetscErrorCode       :: ierr
 
       ! ~~~~~~  
 
       A_array = input_mat%v
-      call MatMPICreateNonemptySubcomm_c(A_array, on_subcomm_int, B_array)
+      ierr = MatMPICreateNonemptySubcomm_c(A_array, on_subcomm_int, B_array)
+      ! Don't carry on with a garbage B_array if petsc failed in the c routine
+      if (ierr /= 0) then
+         print *, "MatMPICreateNonemptySubcomm_c failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
       if (on_subcomm_int == 1) then
          on_subcomm = .TRUE.
       else

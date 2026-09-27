@@ -1585,8 +1585,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! ~~~~~~~~~~~~~~~~
 
       ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
+      ! The pseudo inverse of an m x n matrix is n x m (this routine assumes
+      ! square input, see the gemm below)
       PetscScalar, dimension(:, :), intent(in) :: input
-      PetscScalar, dimension(min(size(input, 1), size(input, 2))), intent(out) :: output
+      PetscScalar, dimension(size(input, 2), size(input, 1)), intent(out) :: output
 
       PetscScalar, dimension(size(input, 1), size(input, 1)) :: U
       PetscReal, dimension(min(size(input, 1), size(input, 2))) :: sigma

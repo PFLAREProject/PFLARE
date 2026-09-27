@@ -617,11 +617,6 @@ module air_operators_setup
             call constrain_grid_transfer(air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), .FALSE., &
                      right_null_vecs_f, right_null_vecs_c)
             call timer_finish(TIMER_ID_AIR_CONSTRAIN)
-
-            do i_loc = 1, size(right_null_vecs_f) 
-               call VecDestroy(right_null_vecs_f(i_loc), ierr)       
-            end do             
-            deallocate(right_null_vecs_f)
          end if      
 
          ! Now we have W
@@ -685,6 +680,16 @@ module air_operators_setup
 
          call timer_finish(TIMER_ID_AIR_PROLONG)   
          
+      end if
+
+      ! Destroy the F point constraints on W
+      ! If symmetric we never build W (P = R^T) so constrain_w is ignored and 
+      ! these are unused, but they still have to be destroyed
+      if (air_data%options%constrain_w) then
+         do i_loc = 1, size(right_null_vecs_f) 
+            call VecDestroy(right_null_vecs_f(i_loc), ierr)       
+         end do             
+         deallocate(right_null_vecs_f)
       end if
 
       ! ~~~~~~~~~~~~~~~~~~~

@@ -318,6 +318,12 @@ run_tests_no_load_short_serial:
 	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
 	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
 	 -pc_air_full_smoothing_up_and_down
+	@echo "Test the hierarchy stats with only one level are finite - jacobi fallback and auto truncated"
+	./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
+	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_print_stats_timings -fp_trap
+	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
 	@echo "Test the shared library registration routine registers every PFLARE PC type"
@@ -331,6 +337,12 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
@@ -486,6 +498,12 @@ run_tests_no_load_short_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 4 -pc_air_constrain_z	
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
+	@echo "Test AIRG with constrain z and w with the hierarchy capped by max levels"
+	./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 2
+	@echo "Test AIRG with constrain z and w with one level"
+	./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 1
+	@echo "Test AIRG with symmetric and constrain w, which is ignored"
+	./ex6f -m 10 -n 10 -pc_air_symmetric -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0
 #
@@ -1020,6 +1038,10 @@ else
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
+	@echo "Test the hierarchy stats with only one level are finite in parallel"
+	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
+	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
 	@echo "Test the shared library registration routine registers every PFLARE PC type in parallel"
@@ -1037,6 +1059,12 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
@@ -1188,6 +1216,12 @@ else
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w	\
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	@echo "Test AIRG with constrain z and w with the hierarchy capped by max levels in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 2
+	@echo "Test AIRG with constrain z and w with one level in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 1
+	@echo "Test AIRG with symmetric and constrain w, which is ignored, in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_symmetric -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0	\
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
@@ -1373,6 +1407,11 @@ else
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix in parallel"
 	$(MPIEXEC) -n 2 ./pmisr_nonsymmetric -n 700
 	$(MPIEXEC) -n 4 ./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test processor agglomeration picks the smallest stride that meets the process eq limit in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -pc_type air -ksp_max_it 2 -pc_air_processor_agglom \
+	 -pc_air_process_eq_limit 60 -pc_air_print_stats_timings | grep -E "agglomeration onto no cores: +2$$"
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
