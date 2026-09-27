@@ -4,8 +4,7 @@ module c_fortran_bindings
    use iso_c_binding
    use pcair_data_type, only: pc_air_multigrid_data
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
-   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
-         inverse_type_is_polynomial
+   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat
    use gmres_poly_apply, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
@@ -190,6 +189,8 @@ module c_fortran_bindings
       !   On entry, if coeffs_ptr is non-null: reuse those coefficients; the polynomial
       !     computation is skipped (see calculate_and_build_approximate_inverse).
       !     coeffs_ptr/row_size/col_size are unchanged on return.
+      !   Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI) have no coefficients;
+      !     on the fresh path coeffs_ptr is returned as c_null_ptr with row_size = col_size = 0.
 
 
       ! Interface to C stdlib malloc
@@ -252,7 +253,11 @@ module c_fortran_bindings
                matrix_free, diag_scale_polys, subcomm, &
                inv_matrix, coefficients)
 
-      if (.NOT. c_associated(coeffs_ptr)) then
+      if (.NOT. c_associated(coeffs_ptr) .AND. .NOT. associated(coefficients)) then
+         ! Fresh path with a non-polynomial inverse type: no coefficients
+         row_size   = 0
+         col_size   = 0
+      else if (.NOT. c_associated(coeffs_ptr)) then
          ! Fresh path: Fortran allocate may use a compiler-specific allocator
          ! (e.g. _mm_malloc on Intel) that is incompatible with C free().
          ! Copy the data into a C-malloc'd buffer so the C side can safely free() it.
@@ -266,8 +271,9 @@ module c_fortran_bindings
          ! For matrix-free: the matshell owns its Fortran allocation (own_coefficients=.TRUE.)
          ! and will deallocate it independently via reset_inverse_mat. The C copy is
          ! stored separately in poly_coeffs and freed via free() in PCReset_PFLAREINV_c.
-         ! The non-polynomial types (e.g., Jacobi) never build a matshell, even if matrix-free
-         if (.NOT. matrix_free .OR. .NOT. inverse_type_is_polynomial(int(inverse_type))) deallocate(coefficients)
+         ! Only the polynomial types reach here (the others return no coefficients), so
+         ! matrix_free means there is a matshell
+         if (.NOT. matrix_free) deallocate(coefficients)
          coeffs_ptr = c_buf
          row_size   = nr
          col_size   = nc

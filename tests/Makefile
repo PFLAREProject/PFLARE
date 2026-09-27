@@ -557,6 +557,12 @@ run_tests_no_load_short_serial:
 	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
 	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - matrix-free newton basis"
 	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_matrix_free
+	@echo "Test PCPFLAREINV returns no polynomial coefficients in C for non-polynomial types"
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type sai
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type isai
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type wjacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi -pc_pflareinv_matrix_free
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
