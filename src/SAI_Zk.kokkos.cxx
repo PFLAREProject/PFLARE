@@ -956,9 +956,12 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                if (rnorm_sq < stop_sq) break;
 
                // Jacobi update: sol += r / diag. diag(A_ff(J,J)^T) == diag(A_ff(J,J)).
+               // A zero (or missing) diagonal is replaced by 1, matching PCJACOBI
+               // which the CPU approximate solve uses.
                Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
                   [&](const PetscInt k) {
-                     sol(k) += r(k) / diag(k);
+                     const PetscScalar d = diag(k);
+                     sol(k) += (d == 0.0) ? r(k) : r(k) / d;
                   });
                member.team_barrier();
             }
@@ -1198,9 +1201,12 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                if (rnorm_sq < stop_sq) break;
 
                // Jacobi update: sol += r / diag. diag(A_ff(J,J)^T) == diag(A_ff(J,J)).
+               // A zero (or missing) diagonal is replaced by 1, matching PCJACOBI
+               // which the CPU approximate solve uses.
                Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
                   [&](const PetscInt k) {
-                     sol(k) += r(k) / diag(k);
+                     const PetscScalar d = diag(k);
+                     sol(k) += (d == 0.0) ? r(k) : r(k) / d;
                   });
                member.team_barrier();
             }
