@@ -955,6 +955,11 @@ else
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
 #
 	@echo ""
+	@echo "Test PMIS_AGG keeps boundary C points whose strong neighbours are all off-process in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -da_grid_x 4 -da_grid_y 64 -da_processors_x 4 -da_processors_y 1 -u 1 -v 0 \
+	 -pc_type air -pc_air_cf_splitting_type pmis_agg -ksp_max_it 1
+#
+	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
