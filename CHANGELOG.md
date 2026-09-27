@@ -18,6 +18,13 @@ for earlier changes please see the git history.
   `-pc_air_symmetric` as the prolongator is R^T
 - Fixed an MPI communicator leak on every setup with `-pc_air_subcomm` when
   some ranks have no rows on a level
+- Fixed a leak of the near-nullspace vectors with `-pc_air_constrain_z` or
+  `-pc_air_constrain_w` when the hierarchy is capped by `-pc_air_max_levels`
+- Behaviour change: fixed PCAIR processor agglomeration going one
+  agglomeration factor further than needed, so more cores may now stay active
+  on coarse levels
+- PETSc errors inside the C routines that build the `-pc_air_subcomm` matrices
+  and check whether Aff is diagonal now abort, rather than being ignored
 
 ## [v1.27.0]
 
