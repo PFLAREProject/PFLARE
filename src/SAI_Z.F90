@@ -4,7 +4,7 @@ module sai_z
    use petscksp
    use binary_tree, only: itree, itree2vector, flush_tree
    use sorting, only: create_knuth_shuffle_tree_array, intersect_pre_sorted_indices_only, &
-         merge_pre_sorted, sorted_binary_search
+         merge_pre_sorted
    use c_petsc_interfaces, only: calculate_and_build_sai_z_kokkos
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
          mat_mat_symbolic

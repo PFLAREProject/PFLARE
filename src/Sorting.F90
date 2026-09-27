@@ -78,47 +78,6 @@ module sorting
    ! -------------------------------------------------------------------------------------------------------------------------------
       
    
-   ! Binary search of a sorted array, returns -1 if not found
-   
-   subroutine sorted_binary_search(array1, x, location)
-   
-      !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      PetscInt, dimension(:), intent(in) :: array1
-      PetscInt, intent(in) :: x
-      integer, intent(out) :: location
-      
-      integer :: high, low, mid
-      !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      location = -1
-      low = 1
-      high = size(array1)
-      do while (low /= high) 
-
-         mid = (low + high)/2
-
-         if (array1(mid) == x) then
-            location = mid
-            return
-
-         else if (x > array1(mid)) then
-            low = mid + 1
-         else
-            high = mid - 1
-         end if
-      end do
-
-      ! It should be low or high now, and if not we haven't found it
-      if (array1(low) == x) then
-         location = low
-         return
-      end if
-
-   end subroutine sorted_binary_search     
-
-   ! -------------------------------------------------------------------------------------------------------------------------------
-      
-   
    ! Intersection of two arrays - Assume they are sorted and only return the matching
    ! indices for both arrays
    
