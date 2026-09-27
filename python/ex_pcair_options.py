@@ -2,10 +2,12 @@
 Tests the direct Python API for PCAIR get/set option functions introduced in
 pflare.py (backed by PCAIR_C_Fortran_Bindings.F90).
 
-Two checks are performed:
+Three checks are performed:
   1. Round-trip: set a value via the direct API, get it back, verify it matches.
   2. Functional: configure lAIR with WJacobi smoothing via the direct API,
      run a solve, verify convergence.
+  3. Wrong type: the get/set functions raise PETSc.Error on a PC that is not
+     of type PCAIR, rather than corrupting memory.
 '''
 
 import sys
@@ -156,6 +158,42 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
+
+# -----------------------------------------------------------------------
+# Wrong PC type: the pcair_* (and pcpflareinv_* getter) wrappers must raise
+# PETSc.Error rather than let the Fortran interpret another PC type's data
+# as PCAIR data. Push the python error handler so -on_error_abort doesn't
+# abort on the (expected) PETSc errors
+# -----------------------------------------------------------------------
+def expect_petsc_error(name, fn, *args):
+    try:
+        fn(*args)
+    except PETSc.Error:
+        return
+    errors.append(f'{name}: expected PETSc.Error on a PC of the wrong type')
+
+PETSc.Sys.pushErrorHandler('python')
+for pc_type in ['jacobi', 'pflareinv', None]:
+    pc_wrong = PETSc.PC().create(comm=comm)
+    if pc_type is not None:
+        pc_wrong.setType(pc_type)
+    label = f'wrong_type_{pc_type}'
+    expect_petsc_error(label + '_get_num_levels', pflare.pcair_get_num_levels, pc_wrong)
+    expect_petsc_error(label + '_get_max_levels', pflare.pcair_get_max_levels, pc_wrong)
+    expect_petsc_error(label + '_get_strong_threshold', pflare.pcair_get_strong_threshold, pc_wrong)
+    expect_petsc_error(label + '_get_symmetric', pflare.pcair_get_symmetric, pc_wrong)
+    expect_petsc_error(label + '_get_smooth_type', pflare.pcair_get_smooth_type, pc_wrong)
+    expect_petsc_error(label + '_get_grid_complexity', pflare.pcair_get_grid_complexity, pc_wrong)
+    expect_petsc_error(label + '_set_max_levels', pflare.pcair_set_max_levels, pc_wrong, 5)
+    expect_petsc_error(label + '_set_strong_threshold', pflare.pcair_set_strong_threshold, pc_wrong, 0.5)
+    expect_petsc_error(label + '_set_symmetric', pflare.pcair_set_symmetric, pc_wrong, True)
+    expect_petsc_error(label + '_set_smooth_type', pflare.pcair_set_smooth_type, pc_wrong, 'fc')
+    expect_petsc_error(label + '_set_inverse_type', pflare.pcair_set_inverse_type, pc_wrong, pflare.PFLAREINV_POWER)
+    if pc_type != 'pflareinv':
+        expect_petsc_error(label + '_pflareinv_get_poly_order', pflare.pcpflareinv_get_poly_order, pc_wrong)
+        expect_petsc_error(label + '_pflareinv_get_matrix_free', pflare.pcpflareinv_get_matrix_free, pc_wrong)
+    pc_wrong.destroy()
+PETSc.Sys.popErrorHandler()
 
 if errors:
     if rank == 0:

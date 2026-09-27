@@ -6,6 +6,7 @@ from petsc4py import PETSc
 from petsc4py.PETSc cimport Mat, PetscMat
 from petsc4py.PETSc cimport PC, PetscPC
 from petsc4py.PETSc cimport IS, PetscIS
+from petsc4py.PETSc cimport CHKERR, PetscErrorCode
 
 
 # Bring PetscInt and PetscReal from petsc.h so the C compiler resolves the
@@ -44,152 +45,155 @@ cdef extern:
 
 	# -----------------------------------------------------------------------
 	# PCAIR Get routines
+	# Call the public C API (not the _c Fortran routines directly): it checks
+	# the PC is of type PCAIR first, as the Fortran casts pc->data blindly.
+	# Wrapping the calls in CHKERR raises PETSc.Error on a wrong type.
 	# -----------------------------------------------------------------------
 
 	# PCAIR - number of multigrid levels
-	void PCAIRGetNumLevels_c(PetscPC *pc, PetscInt *input_int)
+	PetscErrorCode PCAIRGetNumLevels(PetscPC pc, PetscInt *input_int)
 
-	void PCAIRGetPrintStatsTimings_c(PetscPC *pc, PetscBool *print_stats)
-	void PCAIRGetMaxLevels_c(PetscPC *pc, PetscInt *max_levels)
-	void PCAIRGetCoarseEqLimit_c(PetscPC *pc, PetscInt *coarse_eq_limit)
-	void PCAIRGetAutoTruncateStartLevel_c(PetscPC *pc, PetscInt *start_level)
-	void PCAIRGetAutoTruncateTol_c(PetscPC *pc, PetscReal *tol)
-	void PCAIRGetProcessorAgglom_c(PetscPC *pc, PetscBool *processor_agglom)
-	void PCAIRGetProcessorAgglomRatio_c(PetscPC *pc, PetscReal *ratio)
-	void PCAIRGetProcessorAgglomFactor_c(PetscPC *pc, PetscInt *factor)
-	void PCAIRGetProcessEqLimit_c(PetscPC *pc, PetscInt *limit)
-	void PCAIRGetSubcomm_c(PetscPC *pc, PetscBool *subcomm)
-	void PCAIRGetStrongThreshold_c(PetscPC *pc, PetscReal *thresh)
-	void PCAIRGetDDCIts_c(PetscPC *pc, PetscInt *its)
-	void PCAIRGetDDCFraction_c(PetscPC *pc, PetscReal *frac)
-	void PCAIRGetCFSplittingType_c(PetscPC *pc, int *algo)
-	void PCAIRGetMaxLubySteps_c(PetscPC *pc, PetscInt *steps)
-	void PCAIRGetDiagScalePolys_c(PetscPC *pc, PetscBool *scale)
-	void PCAIRGetMatrixFreePolys_c(PetscPC *pc, PetscBool *mf)
-	void PCAIRGetOnePointClassicalProlong_c(PetscPC *pc, PetscBool *onep)
-	void PCAIRGetFullSmoothingUpAndDown_c(PetscPC *pc, PetscBool *full)
-	void PCAIRGetSymmetric_c(PetscPC *pc, PetscBool *sym)
-	void PCAIRGetConstrainW_c(PetscPC *pc, PetscBool *constrain)
-	void PCAIRGetConstrainZ_c(PetscPC *pc, PetscBool *constrain)
-	void PCAIRGetImproveWIts_c(PetscPC *pc, PetscInt *its)
-	void PCAIRGetImproveZIts_c(PetscPC *pc, PetscInt *its)
-	void PCAIRGetStrongRThreshold_c(PetscPC *pc, PetscReal *thresh)
-	void PCAIRGetInverseType_c(PetscPC *pc, int *inv_type)
-	void PCAIRGetCInverseType_c(PetscPC *pc, int *inv_type)
-	void PCAIRGetZType_c(PetscPC *pc, int *z_type)
-	void PCAIRGetLairDistance_c(PetscPC *pc, PetscInt *distance)
-	void PCAIRGetPolyOrder_c(PetscPC *pc, PetscInt *order)
-	void PCAIRGetInverseSparsityOrder_c(PetscPC *pc, PetscInt *order)
-	void PCAIRGetCPolyOrder_c(PetscPC *pc, PetscInt *order)
-	void PCAIRGetCInverseSparsityOrder_c(PetscPC *pc, PetscInt *order)
-	void PCAIRGetCoarsestInverseType_c(PetscPC *pc, int *inv_type)
-	void PCAIRGetCoarsestPolyOrder_c(PetscPC *pc, PetscInt *order)
-	void PCAIRGetCoarsestInverseSparsityOrder_c(PetscPC *pc, PetscInt *order)
-	void PCAIRGetCoarsestMatrixFreePolys_c(PetscPC *pc, PetscBool *mf)
-	void PCAIRGetCoarsestDiagScalePolys_c(PetscPC *pc, PetscBool *scale)
-	void PCAIRGetCoarsestSubcomm_c(PetscPC *pc, PetscBool *subcomm)
-	void PCAIRGetRDrop_c(PetscPC *pc, PetscReal *rdrop)
-	void PCAIRGetADrop_c(PetscPC *pc, PetscReal *adrop)
-	void PCAIRGetALump_c(PetscPC *pc, PetscBool *lump)
-	void PCAIRGetReuseSparsity_c(PetscPC *pc, PetscBool *reuse)
-	void PCAIRGetReusePolyCoeffs_c(PetscPC *pc, PetscBool *reuse)
-	void PCAIRGetReuseAmount_c(PetscPC *pc, PetscInt *amount)
-	void PCAIRGetSmoothType_c(PetscPC *pc, char *output_string)
+	PetscErrorCode PCAIRGetPrintStatsTimings(PetscPC pc, PetscBool *print_stats)
+	PetscErrorCode PCAIRGetMaxLevels(PetscPC pc, PetscInt *max_levels)
+	PetscErrorCode PCAIRGetCoarseEqLimit(PetscPC pc, PetscInt *coarse_eq_limit)
+	PetscErrorCode PCAIRGetAutoTruncateStartLevel(PetscPC pc, PetscInt *start_level)
+	PetscErrorCode PCAIRGetAutoTruncateTol(PetscPC pc, PetscReal *tol)
+	PetscErrorCode PCAIRGetProcessorAgglom(PetscPC pc, PetscBool *processor_agglom)
+	PetscErrorCode PCAIRGetProcessorAgglomRatio(PetscPC pc, PetscReal *ratio)
+	PetscErrorCode PCAIRGetProcessorAgglomFactor(PetscPC pc, PetscInt *factor)
+	PetscErrorCode PCAIRGetProcessEqLimit(PetscPC pc, PetscInt *limit)
+	PetscErrorCode PCAIRGetSubcomm(PetscPC pc, PetscBool *subcomm)
+	PetscErrorCode PCAIRGetStrongThreshold(PetscPC pc, PetscReal *thresh)
+	PetscErrorCode PCAIRGetDDCIts(PetscPC pc, PetscInt *its)
+	PetscErrorCode PCAIRGetDDCFraction(PetscPC pc, PetscReal *frac)
+	PetscErrorCode PCAIRGetCFSplittingType(PetscPC pc, int *algo)
+	PetscErrorCode PCAIRGetMaxLubySteps(PetscPC pc, PetscInt *steps)
+	PetscErrorCode PCAIRGetDiagScalePolys(PetscPC pc, PetscBool *scale)
+	PetscErrorCode PCAIRGetMatrixFreePolys(PetscPC pc, PetscBool *mf)
+	PetscErrorCode PCAIRGetOnePointClassicalProlong(PetscPC pc, PetscBool *onep)
+	PetscErrorCode PCAIRGetFullSmoothingUpAndDown(PetscPC pc, PetscBool *full)
+	PetscErrorCode PCAIRGetSymmetric(PetscPC pc, PetscBool *sym)
+	PetscErrorCode PCAIRGetConstrainW(PetscPC pc, PetscBool *constrain)
+	PetscErrorCode PCAIRGetConstrainZ(PetscPC pc, PetscBool *constrain)
+	PetscErrorCode PCAIRGetImproveWIts(PetscPC pc, PetscInt *its)
+	PetscErrorCode PCAIRGetImproveZIts(PetscPC pc, PetscInt *its)
+	PetscErrorCode PCAIRGetStrongRThreshold(PetscPC pc, PetscReal *thresh)
+	PetscErrorCode PCAIRGetInverseType(PetscPC pc, int *inv_type)
+	PetscErrorCode PCAIRGetCInverseType(PetscPC pc, int *inv_type)
+	PetscErrorCode PCAIRGetZType(PetscPC pc, int *z_type)
+	PetscErrorCode PCAIRGetLairDistance(PetscPC pc, PetscInt *distance)
+	PetscErrorCode PCAIRGetPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetInverseSparsityOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCInverseSparsityOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCoarsestInverseType(PetscPC pc, int *inv_type)
+	PetscErrorCode PCAIRGetCoarsestPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PetscPC pc, PetscBool *mf)
+	PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PetscPC pc, PetscBool *scale)
+	PetscErrorCode PCAIRGetCoarsestSubcomm(PetscPC pc, PetscBool *subcomm)
+	PetscErrorCode PCAIRGetRDrop(PetscPC pc, PetscReal *rdrop)
+	PetscErrorCode PCAIRGetADrop(PetscPC pc, PetscReal *adrop)
+	PetscErrorCode PCAIRGetALump(PetscPC pc, PetscBool *lump)
+	PetscErrorCode PCAIRGetReuseSparsity(PetscPC pc, PetscBool *reuse)
+	PetscErrorCode PCAIRGetReusePolyCoeffs(PetscPC pc, PetscBool *reuse)
+	PetscErrorCode PCAIRGetReuseAmount(PetscPC pc, PetscInt *amount)
+	PetscErrorCode PCAIRGetSmoothType(PetscPC pc, char *output_string)
 
 	# PCAIR - polynomial coefficients
 	# Returns a pointer into internal PCAIR memory (valid until the next PCSetUp or PCReset).
 	# The Python wrapper copies the data before returning.
-	void PCAIRGetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
+	PetscErrorCode PCAIRGetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
-	void PCAIRGetGridComplexity_c(PetscPC *pc, PetscReal *complexity)
-	void PCAIRGetOperatorComplexity_c(PetscPC *pc, PetscReal *complexity)
-	void PCAIRGetCycleComplexity_c(PetscPC *pc, PetscReal *complexity)
-	void PCAIRGetStorageComplexity_c(PetscPC *pc, PetscReal *complexity)
-	void PCAIRGetReuseStorageComplexity_c(PetscPC *pc, PetscReal *complexity)
+	PetscErrorCode PCAIRGetGridComplexity(PetscPC pc, PetscReal *complexity)
+	PetscErrorCode PCAIRGetOperatorComplexity(PetscPC pc, PetscReal *complexity)
+	PetscErrorCode PCAIRGetCycleComplexity(PetscPC pc, PetscReal *complexity)
+	PetscErrorCode PCAIRGetStorageComplexity(PetscPC pc, PetscReal *complexity)
+	PetscErrorCode PCAIRGetReuseStorageComplexity(PetscPC pc, PetscReal *complexity)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Set routines
 	# -----------------------------------------------------------------------
 
-	void PCAIRSetPrintStatsTimings_c(PetscPC *pc, PetscBool print_stats)
-	void PCAIRSetMaxLevels_c(PetscPC *pc, PetscInt max_levels)
-	void PCAIRSetCoarseEqLimit_c(PetscPC *pc, PetscInt coarse_eq_limit)
-	void PCAIRSetAutoTruncateStartLevel_c(PetscPC *pc, PetscInt start_level)
-	void PCAIRSetAutoTruncateTol_c(PetscPC *pc, PetscReal tol)
-	void PCAIRSetProcessorAgglom_c(PetscPC *pc, PetscBool processor_agglom)
-	void PCAIRSetProcessorAgglomRatio_c(PetscPC *pc, PetscReal ratio)
-	void PCAIRSetProcessorAgglomFactor_c(PetscPC *pc, PetscInt factor)
-	void PCAIRSetProcessEqLimit_c(PetscPC *pc, PetscInt limit)
-	void PCAIRSetSubcomm_c(PetscPC *pc, PetscBool subcomm)
-	void PCAIRSetStrongThreshold_c(PetscPC *pc, PetscReal thresh)
-	void PCAIRSetDDCIts_c(PetscPC *pc, PetscInt its)
-	void PCAIRSetDDCFraction_c(PetscPC *pc, PetscReal frac)
-	void PCAIRSetCFSplittingType_c(PetscPC *pc, int algo)
-	void PCAIRSetMaxLubySteps_c(PetscPC *pc, PetscInt steps)
-	void PCAIRSetSmoothType_c(PetscPC *pc, char *input_string)
-	void PCAIRSetDiagScalePolys_c(PetscPC *pc, PetscBool scale)
-	void PCAIRSetMatrixFreePolys_c(PetscPC *pc, PetscBool mf)
-	void PCAIRSetOnePointClassicalProlong_c(PetscPC *pc, PetscBool onep)
-	void PCAIRSetFullSmoothingUpAndDown_c(PetscPC *pc, PetscBool full)
-	void PCAIRSetSymmetric_c(PetscPC *pc, PetscBool sym)
-	void PCAIRSetConstrainW_c(PetscPC *pc, PetscBool constrain)
-	void PCAIRSetConstrainZ_c(PetscPC *pc, PetscBool constrain)
-	void PCAIRSetImproveWIts_c(PetscPC *pc, PetscInt its)
-	void PCAIRSetImproveZIts_c(PetscPC *pc, PetscInt its)
-	void PCAIRSetStrongRThreshold_c(PetscPC *pc, PetscReal thresh)
-	void PCAIRSetInverseType_c(PetscPC *pc, int inv_type)
-	void PCAIRSetCInverseType_c(PetscPC *pc, int inv_type)
-	void PCAIRSetZType_c(PetscPC *pc, int z_type)
-	void PCAIRSetLairDistance_c(PetscPC *pc, PetscInt distance)
-	void PCAIRSetPolyOrder_c(PetscPC *pc, PetscInt order)
-	void PCAIRSetInverseSparsityOrder_c(PetscPC *pc, PetscInt order)
-	void PCAIRSetCPolyOrder_c(PetscPC *pc, PetscInt order)
-	void PCAIRSetCInverseSparsityOrder_c(PetscPC *pc, PetscInt order)
-	void PCAIRSetCoarsestInverseType_c(PetscPC *pc, int inv_type)
-	void PCAIRSetCoarsestPolyOrder_c(PetscPC *pc, PetscInt order)
-	void PCAIRSetCoarsestInverseSparsityOrder_c(PetscPC *pc, PetscInt order)
-	void PCAIRSetCoarsestMatrixFreePolys_c(PetscPC *pc, PetscBool mf)
-	void PCAIRSetCoarsestDiagScalePolys_c(PetscPC *pc, PetscBool scale)
-	void PCAIRSetCoarsestSubcomm_c(PetscPC *pc, PetscBool subcomm)
-	void PCAIRSetRDrop_c(PetscPC *pc, PetscReal rdrop)
-	void PCAIRSetADrop_c(PetscPC *pc, PetscReal adrop)
-	void PCAIRSetALump_c(PetscPC *pc, PetscBool lump)
+	PetscErrorCode PCAIRSetPrintStatsTimings(PetscPC pc, PetscBool print_stats)
+	PetscErrorCode PCAIRSetMaxLevels(PetscPC pc, PetscInt max_levels)
+	PetscErrorCode PCAIRSetCoarseEqLimit(PetscPC pc, PetscInt coarse_eq_limit)
+	PetscErrorCode PCAIRSetAutoTruncateStartLevel(PetscPC pc, PetscInt start_level)
+	PetscErrorCode PCAIRSetAutoTruncateTol(PetscPC pc, PetscReal tol)
+	PetscErrorCode PCAIRSetProcessorAgglom(PetscPC pc, PetscBool processor_agglom)
+	PetscErrorCode PCAIRSetProcessorAgglomRatio(PetscPC pc, PetscReal ratio)
+	PetscErrorCode PCAIRSetProcessorAgglomFactor(PetscPC pc, PetscInt factor)
+	PetscErrorCode PCAIRSetProcessEqLimit(PetscPC pc, PetscInt limit)
+	PetscErrorCode PCAIRSetSubcomm(PetscPC pc, PetscBool subcomm)
+	PetscErrorCode PCAIRSetStrongThreshold(PetscPC pc, PetscReal thresh)
+	PetscErrorCode PCAIRSetDDCIts(PetscPC pc, PetscInt its)
+	PetscErrorCode PCAIRSetDDCFraction(PetscPC pc, PetscReal frac)
+	PetscErrorCode PCAIRSetCFSplittingType(PetscPC pc, int algo)
+	PetscErrorCode PCAIRSetMaxLubySteps(PetscPC pc, PetscInt steps)
+	PetscErrorCode PCAIRSetSmoothType(PetscPC pc, const char *input_string)
+	PetscErrorCode PCAIRSetDiagScalePolys(PetscPC pc, PetscBool scale)
+	PetscErrorCode PCAIRSetMatrixFreePolys(PetscPC pc, PetscBool mf)
+	PetscErrorCode PCAIRSetOnePointClassicalProlong(PetscPC pc, PetscBool onep)
+	PetscErrorCode PCAIRSetFullSmoothingUpAndDown(PetscPC pc, PetscBool full)
+	PetscErrorCode PCAIRSetSymmetric(PetscPC pc, PetscBool sym)
+	PetscErrorCode PCAIRSetConstrainW(PetscPC pc, PetscBool constrain)
+	PetscErrorCode PCAIRSetConstrainZ(PetscPC pc, PetscBool constrain)
+	PetscErrorCode PCAIRSetImproveWIts(PetscPC pc, PetscInt its)
+	PetscErrorCode PCAIRSetImproveZIts(PetscPC pc, PetscInt its)
+	PetscErrorCode PCAIRSetStrongRThreshold(PetscPC pc, PetscReal thresh)
+	PetscErrorCode PCAIRSetInverseType(PetscPC pc, int inv_type)
+	PetscErrorCode PCAIRSetCInverseType(PetscPC pc, int inv_type)
+	PetscErrorCode PCAIRSetZType(PetscPC pc, int z_type)
+	PetscErrorCode PCAIRSetLairDistance(PetscPC pc, PetscInt distance)
+	PetscErrorCode PCAIRSetPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetInverseSparsityOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCInverseSparsityOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCoarsestInverseType(PetscPC pc, int inv_type)
+	PetscErrorCode PCAIRSetCoarsestPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PetscPC pc, PetscBool mf)
+	PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PetscPC pc, PetscBool scale)
+	PetscErrorCode PCAIRSetCoarsestSubcomm(PetscPC pc, PetscBool subcomm)
+	PetscErrorCode PCAIRSetRDrop(PetscPC pc, PetscReal rdrop)
+	PetscErrorCode PCAIRSetADrop(PetscPC pc, PetscReal adrop)
+	PetscErrorCode PCAIRSetALump(PetscPC pc, PetscBool lump)
 
 	# PCAIR - reuse flags
-	void PCAIRSetReuseSparsity_c(PetscPC *pc, PetscBool input_bool)
-	void PCAIRSetReusePolyCoeffs_c(PetscPC *pc, PetscBool input_bool)
-	void PCAIRSetReuseAmount_c(PetscPC *pc, PetscInt amount)
+	PetscErrorCode PCAIRSetReuseSparsity(PetscPC pc, PetscBool input_bool)
+	PetscErrorCode PCAIRSetReusePolyCoeffs(PetscPC pc, PetscBool input_bool)
+	PetscErrorCode PCAIRSetReuseAmount(PetscPC pc, PetscInt amount)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer)
-	void PCAIRSetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
+	PetscErrorCode PCAIRSetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 
 	# PCPFLAREINV - Get routines (PC passed by value, not pointer)
-	int PCPFLAREINVGetPolyOrder(PetscPC pc, PetscInt *order)
-	int PCPFLAREINVGetSparsityOrder(PetscPC pc, PetscInt *order)
-	int PCPFLAREINVGetType(PetscPC pc, int *pflare_type)
-	int PCPFLAREINVGetMatrixFree(PetscPC pc, PetscBool *flag)
-	int PCPFLAREINVGetReusePolyCoeffs(PetscPC pc, PetscBool *flag)
+	PetscErrorCode PCPFLAREINVGetPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCPFLAREINVGetSparsityOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCPFLAREINVGetType(PetscPC pc, int *pflare_type)
+	PetscErrorCode PCPFLAREINVGetMatrixFree(PetscPC pc, PetscBool *flag)
+	PetscErrorCode PCPFLAREINVGetReusePolyCoeffs(PetscPC pc, PetscBool *flag)
 
 	# PCPFLAREINV - underlying approximate-inverse matrix (borrowed reference)
-	int PCPFLAREINVGetInverseMat(PetscPC pc, PetscMat *mat)
+	PetscErrorCode PCPFLAREINVGetInverseMat(PetscPC pc, PetscMat *mat)
 
 	# PCPFLAREINV - polynomial coefficients (PC passed by value, not pointer)
 	# Returns a pointer into internal PCPFLAREINV memory (valid until the next PCSetUp or PCReset).
 	# The Python wrapper copies the data before returning.
-	int PCPFLAREINVGetPolyCoeffs(PetscPC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
+	PetscErrorCode PCPFLAREINVGetPolyCoeffs(PetscPC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
 
 	# PCPFLAREINV - Set routines (PC passed by value, not pointer)
-	int PCPFLAREINVSetPolyOrder(PetscPC pc, PetscInt order)
-	int PCPFLAREINVSetSparsityOrder(PetscPC pc, PetscInt order)
-	int PCPFLAREINVSetType(PetscPC pc, int pflare_type)
-	int PCPFLAREINVSetMatrixFree(PetscPC pc, PetscBool flag)
+	PetscErrorCode PCPFLAREINVSetPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCPFLAREINVSetSparsityOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCPFLAREINVSetType(PetscPC pc, int pflare_type)
+	PetscErrorCode PCPFLAREINVSetMatrixFree(PetscPC pc, PetscBool flag)
 
 	# PCPFLAREINV - set polynomial coefficients (copies from the provided pointer)
-	int PCPFLAREINVSetPolyCoeffs(PetscPC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
+	PetscErrorCode PCPFLAREINVSetPolyCoeffs(PetscPC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
 
 	# PCPFLAREINV - reuse flag
-	int PCPFLAREINVSetReusePolyCoeffs(PetscPC pc, PetscBool flg)
+	PetscErrorCode PCPFLAREINVSetReusePolyCoeffs(PetscPC pc, PetscBool flg)
 
 
 cpdef py_PCRegister_PFLARE():
@@ -216,257 +220,257 @@ cpdef compute_diag_dom_submatrix(Mat A, PetscReal max_dd_ratio):
 cpdef int pcair_get_num_levels(PC pc):
 	"""Return the number of multigrid levels in a PCAIR preconditioner."""
 	cdef PetscInt num_levels = 0
-	PCAIRGetNumLevels_c(&(pc.pc), &num_levels)
+	CHKERR(PCAIRGetNumLevels(pc.pc, &num_levels))
 	return <int>num_levels
 
 cpdef bint pcair_get_print_stats_timings(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetPrintStatsTimings_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetPrintStatsTimings(pc.pc, &result))
 	return bool(result)
 
 cpdef int pcair_get_max_levels(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetMaxLevels_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetMaxLevels(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_coarse_eq_limit(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetCoarseEqLimit_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCoarseEqLimit(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_auto_truncate_start_level(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetAutoTruncateStartLevel_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetAutoTruncateStartLevel(pc.pc, &result))
 	return <int>result
 
 cpdef double pcair_get_auto_truncate_tol(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetAutoTruncateTol_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetAutoTruncateTol(pc.pc, &result))
 	return <double>result
 
 cpdef bint pcair_get_processor_agglom(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetProcessorAgglom_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetProcessorAgglom(pc.pc, &result))
 	return bool(result)
 
 cpdef double pcair_get_processor_agglom_ratio(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetProcessorAgglomRatio_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetProcessorAgglomRatio(pc.pc, &result))
 	return <double>result
 
 cpdef int pcair_get_processor_agglom_factor(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetProcessorAgglomFactor_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetProcessorAgglomFactor(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_process_eq_limit(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetProcessEqLimit_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetProcessEqLimit(pc.pc, &result))
 	return <int>result
 
 cpdef bint pcair_get_subcomm(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetSubcomm_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetSubcomm(pc.pc, &result))
 	return bool(result)
 
 cpdef double pcair_get_strong_threshold(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetStrongThreshold_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetStrongThreshold(pc.pc, &result))
 	return <double>result
 
 cpdef int pcair_get_ddc_its(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetDDCIts_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetDDCIts(pc.pc, &result))
 	return <int>result
 
 cpdef double pcair_get_ddc_fraction(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetDDCFraction_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetDDCFraction(pc.pc, &result))
 	return <double>result
 
 cpdef int pcair_get_cf_splitting_type(PC pc):
 	cdef int result = 0
-	PCAIRGetCFSplittingType_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCFSplittingType(pc.pc, &result))
 	return result
 
 cpdef int pcair_get_max_luby_steps(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetMaxLubySteps_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetMaxLubySteps(pc.pc, &result))
 	return <int>result
 
 cpdef bint pcair_get_diag_scale_polys(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetDiagScalePolys_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetDiagScalePolys(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_matrix_free_polys(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetMatrixFreePolys_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetMatrixFreePolys(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_one_point_classical_prolong(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetOnePointClassicalProlong_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetOnePointClassicalProlong(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_full_smoothing_up_and_down(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetFullSmoothingUpAndDown_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetFullSmoothingUpAndDown(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_symmetric(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetSymmetric_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetSymmetric(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_constrain_w(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetConstrainW_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetConstrainW(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_constrain_z(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetConstrainZ_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetConstrainZ(pc.pc, &result))
 	return bool(result)
 
 cpdef int pcair_get_improve_w_its(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetImproveWIts_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetImproveWIts(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_improve_z_its(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetImproveZIts_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetImproveZIts(pc.pc, &result))
 	return <int>result
 
 cpdef double pcair_get_strong_r_threshold(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetStrongRThreshold_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetStrongRThreshold(pc.pc, &result))
 	return <double>result
 
 cpdef int pcair_get_inverse_type(PC pc):
 	cdef int result = 0
-	PCAIRGetInverseType_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetInverseType(pc.pc, &result))
 	return result
 
 cpdef int pcair_get_c_inverse_type(PC pc):
 	cdef int result = 0
-	PCAIRGetCInverseType_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCInverseType(pc.pc, &result))
 	return result
 
 cpdef int pcair_get_z_type(PC pc):
 	cdef int result = 0
-	PCAIRGetZType_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetZType(pc.pc, &result))
 	return result
 
 cpdef int pcair_get_lair_distance(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetLairDistance_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetLairDistance(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_poly_order(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetPolyOrder_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetPolyOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_inverse_sparsity_order(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetInverseSparsityOrder_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetInverseSparsityOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_c_poly_order(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetCPolyOrder_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCPolyOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_c_inverse_sparsity_order(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetCInverseSparsityOrder_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCInverseSparsityOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_coarsest_inverse_type(PC pc):
 	cdef int result = 0
-	PCAIRGetCoarsestInverseType_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCoarsestInverseType(pc.pc, &result))
 	return result
 
 cpdef int pcair_get_coarsest_poly_order(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetCoarsestPolyOrder_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCoarsestPolyOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_coarsest_inverse_sparsity_order(PC pc):
 	cdef PetscInt result = 0
-	PCAIRGetCoarsestInverseSparsityOrder_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCoarsestInverseSparsityOrder(pc.pc, &result))
 	return <int>result
 
 cpdef bint pcair_get_coarsest_matrix_free_polys(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetCoarsestMatrixFreePolys_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetCoarsestMatrixFreePolys(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_coarsest_diag_scale_polys(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetCoarsestDiagScalePolys_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetCoarsestDiagScalePolys(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_coarsest_subcomm(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetCoarsestSubcomm_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetCoarsestSubcomm(pc.pc, &result))
 	return bool(result)
 
 cpdef double pcair_get_r_drop(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetRDrop_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetRDrop(pc.pc, &result))
 	return <double>result
 
 cpdef double pcair_get_a_drop(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetADrop_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetADrop(pc.pc, &result))
 	return <double>result
 
 cpdef double pcair_get_grid_complexity(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetGridComplexity_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetGridComplexity(pc.pc, &result))
 	return <double>result
 
 cpdef double pcair_get_operator_complexity(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetOperatorComplexity_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetOperatorComplexity(pc.pc, &result))
 	return <double>result
 
 cpdef double pcair_get_cycle_complexity(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetCycleComplexity_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetCycleComplexity(pc.pc, &result))
 	return <double>result
 
 cpdef double pcair_get_storage_complexity(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetStorageComplexity_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetStorageComplexity(pc.pc, &result))
 	return <double>result
 
 cpdef double pcair_get_reuse_storage_complexity(PC pc):
 	cdef PetscReal result = 0.0
-	PCAIRGetReuseStorageComplexity_c(&(pc.pc), &result)
+	CHKERR(PCAIRGetReuseStorageComplexity(pc.pc, &result))
 	return <double>result
 
 cpdef bint pcair_get_a_lump(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetALump_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetALump(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_reuse_sparsity(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetReuseSparsity_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetReuseSparsity(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcair_get_reuse_poly_coeffs(PC pc):
-	cdef PetscBool result = False
-	PCAIRGetReusePolyCoeffs_c(&(pc.pc), &result)
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetReusePolyCoeffs(pc.pc, &result))
 	return bool(result)
 
 cpdef int pcair_get_reuse_amount(PC pc):
 	cdef PetscInt amount = 3
-	PCAIRGetReuseAmount_c(&(pc.pc), &amount)
+	CHKERR(PCAIRGetReuseAmount(pc.pc, &amount))
 	return int(amount)
 
 cpdef str pcair_get_smooth_type(PC pc):
@@ -474,7 +478,7 @@ cpdef str pcair_get_smooth_type(PC pc):
 	cdef int i
 	for i in range(256):
 		buf[i] = 0
-	PCAIRGetSmoothType_c(&(pc.pc), buf)
+	CHKERR(PCAIRGetSmoothType(pc.pc, buf))
 	return buf[:strlen(buf)].decode('utf-8')
 
 cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
@@ -500,8 +504,8 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt row_size = 0, col_size = 0
 	cdef PetscInt i, j
-	PCAIRGetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
-	                      &coeffs_ptr, &row_size, &col_size)
+	CHKERR(PCAIRGetPolyCoeffs(pc.pc, petsc_level, which_inverse,
+	                             &coeffs_ptr, &row_size, &col_size))
 	# Match the numpy dtype to the build's PetscReal width (float32 single /
 	# float64 double) and copy element-wise through the PetscReal* pointer.
 	# A raw memcpy sized with sizeof(PetscReal) into a double[::1,:] view would
@@ -518,49 +522,49 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 # -----------------------------------------------------------------------
 
 cpdef pcair_set_print_stats_timings(PC pc, bint flag):
-	PCAIRSetPrintStatsTimings_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetPrintStatsTimings(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_max_levels(PC pc, int max_levels):
-	PCAIRSetMaxLevels_c(&(pc.pc), <PetscInt>max_levels)
+	CHKERR(PCAIRSetMaxLevels(pc.pc, <PetscInt>max_levels))
 
 cpdef pcair_set_coarse_eq_limit(PC pc, int coarse_eq_limit):
-	PCAIRSetCoarseEqLimit_c(&(pc.pc), <PetscInt>coarse_eq_limit)
+	CHKERR(PCAIRSetCoarseEqLimit(pc.pc, <PetscInt>coarse_eq_limit))
 
 cpdef pcair_set_auto_truncate_start_level(PC pc, int start_level):
-	PCAIRSetAutoTruncateStartLevel_c(&(pc.pc), <PetscInt>start_level)
+	CHKERR(PCAIRSetAutoTruncateStartLevel(pc.pc, <PetscInt>start_level))
 
 cpdef pcair_set_auto_truncate_tol(PC pc, double tol):
-	PCAIRSetAutoTruncateTol_c(&(pc.pc), <PetscReal>tol)
+	CHKERR(PCAIRSetAutoTruncateTol(pc.pc, <PetscReal>tol))
 
 cpdef pcair_set_processor_agglom(PC pc, bint flag):
-	PCAIRSetProcessorAgglom_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetProcessorAgglom(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_processor_agglom_ratio(PC pc, double ratio):
-	PCAIRSetProcessorAgglomRatio_c(&(pc.pc), <PetscReal>ratio)
+	CHKERR(PCAIRSetProcessorAgglomRatio(pc.pc, <PetscReal>ratio))
 
 cpdef pcair_set_processor_agglom_factor(PC pc, int factor):
-	PCAIRSetProcessorAgglomFactor_c(&(pc.pc), <PetscInt>factor)
+	CHKERR(PCAIRSetProcessorAgglomFactor(pc.pc, <PetscInt>factor))
 
 cpdef pcair_set_process_eq_limit(PC pc, int limit):
-	PCAIRSetProcessEqLimit_c(&(pc.pc), <PetscInt>limit)
+	CHKERR(PCAIRSetProcessEqLimit(pc.pc, <PetscInt>limit))
 
 cpdef pcair_set_subcomm(PC pc, bint flag):
-	PCAIRSetSubcomm_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetSubcomm(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_strong_threshold(PC pc, double thresh):
-	PCAIRSetStrongThreshold_c(&(pc.pc), <PetscReal>thresh)
+	CHKERR(PCAIRSetStrongThreshold(pc.pc, <PetscReal>thresh))
 
 cpdef pcair_set_ddc_its(PC pc, int its):
-	PCAIRSetDDCIts_c(&(pc.pc), <PetscInt>its)
+	CHKERR(PCAIRSetDDCIts(pc.pc, <PetscInt>its))
 
 cpdef pcair_set_ddc_fraction(PC pc, double frac):
-	PCAIRSetDDCFraction_c(&(pc.pc), <PetscReal>frac)
+	CHKERR(PCAIRSetDDCFraction(pc.pc, <PetscReal>frac))
 
 cpdef pcair_set_cf_splitting_type(PC pc, int algo):
-	PCAIRSetCFSplittingType_c(&(pc.pc), algo)
+	CHKERR(PCAIRSetCFSplittingType(pc.pc, algo))
 
 cpdef pcair_set_max_luby_steps(PC pc, int steps):
-	PCAIRSetMaxLubySteps_c(&(pc.pc), <PetscInt>steps)
+	CHKERR(PCAIRSetMaxLubySteps(pc.pc, <PetscInt>steps))
 
 cpdef pcair_set_smooth_type(PC pc, str smooth_type):
 	"""Set the smooth type string (e.g. 'ff', 'fcf', 'f')."""
@@ -572,102 +576,102 @@ cpdef pcair_set_smooth_type(PC pc, str smooth_type):
 	n = min(len(encoded), 10)
 	for i in range(n):
 		buf[i] = encoded[i]
-	PCAIRSetSmoothType_c(&(pc.pc), buf)
+	CHKERR(PCAIRSetSmoothType(pc.pc, buf))
 
 cpdef pcair_set_diag_scale_polys(PC pc, bint flag):
-	PCAIRSetDiagScalePolys_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetDiagScalePolys(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_matrix_free_polys(PC pc, bint flag):
-	PCAIRSetMatrixFreePolys_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetMatrixFreePolys(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_one_point_classical_prolong(PC pc, bint flag):
-	PCAIRSetOnePointClassicalProlong_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetOnePointClassicalProlong(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_full_smoothing_up_and_down(PC pc, bint flag):
-	PCAIRSetFullSmoothingUpAndDown_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetFullSmoothingUpAndDown(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_symmetric(PC pc, bint flag):
-	PCAIRSetSymmetric_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetSymmetric(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_constrain_w(PC pc, bint flag):
-	PCAIRSetConstrainW_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetConstrainW(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_constrain_z(PC pc, bint flag):
-	PCAIRSetConstrainZ_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetConstrainZ(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_improve_w_its(PC pc, int its):
-	PCAIRSetImproveWIts_c(&(pc.pc), <PetscInt>its)
+	CHKERR(PCAIRSetImproveWIts(pc.pc, <PetscInt>its))
 
 cpdef pcair_set_improve_z_its(PC pc, int its):
-	PCAIRSetImproveZIts_c(&(pc.pc), <PetscInt>its)
+	CHKERR(PCAIRSetImproveZIts(pc.pc, <PetscInt>its))
 
 cpdef pcair_set_strong_r_threshold(PC pc, double thresh):
-	PCAIRSetStrongRThreshold_c(&(pc.pc), <PetscReal>thresh)
+	CHKERR(PCAIRSetStrongRThreshold(pc.pc, <PetscReal>thresh))
 
 cpdef pcair_set_inverse_type(PC pc, int inv_type):
-	PCAIRSetInverseType_c(&(pc.pc), inv_type)
+	CHKERR(PCAIRSetInverseType(pc.pc, inv_type))
 
 cpdef pcair_set_c_inverse_type(PC pc, int inv_type):
-	PCAIRSetCInverseType_c(&(pc.pc), inv_type)
+	CHKERR(PCAIRSetCInverseType(pc.pc, inv_type))
 
 cpdef pcair_set_z_type(PC pc, int z_type):
-	PCAIRSetZType_c(&(pc.pc), z_type)
+	CHKERR(PCAIRSetZType(pc.pc, z_type))
 
 cpdef pcair_set_lair_distance(PC pc, int distance):
-	PCAIRSetLairDistance_c(&(pc.pc), <PetscInt>distance)
+	CHKERR(PCAIRSetLairDistance(pc.pc, <PetscInt>distance))
 
 cpdef pcair_set_poly_order(PC pc, int order):
-	PCAIRSetPolyOrder_c(&(pc.pc), <PetscInt>order)
+	CHKERR(PCAIRSetPolyOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_inverse_sparsity_order(PC pc, int order):
-	PCAIRSetInverseSparsityOrder_c(&(pc.pc), <PetscInt>order)
+	CHKERR(PCAIRSetInverseSparsityOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_c_poly_order(PC pc, int order):
-	PCAIRSetCPolyOrder_c(&(pc.pc), <PetscInt>order)
+	CHKERR(PCAIRSetCPolyOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_c_inverse_sparsity_order(PC pc, int order):
-	PCAIRSetCInverseSparsityOrder_c(&(pc.pc), <PetscInt>order)
+	CHKERR(PCAIRSetCInverseSparsityOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_coarsest_inverse_type(PC pc, int inv_type):
-	PCAIRSetCoarsestInverseType_c(&(pc.pc), inv_type)
+	CHKERR(PCAIRSetCoarsestInverseType(pc.pc, inv_type))
 
 cpdef pcair_set_coarsest_poly_order(PC pc, int order):
-	PCAIRSetCoarsestPolyOrder_c(&(pc.pc), <PetscInt>order)
+	CHKERR(PCAIRSetCoarsestPolyOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_coarsest_inverse_sparsity_order(PC pc, int order):
-	PCAIRSetCoarsestInverseSparsityOrder_c(&(pc.pc), <PetscInt>order)
+	CHKERR(PCAIRSetCoarsestInverseSparsityOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_coarsest_matrix_free_polys(PC pc, bint flag):
-	PCAIRSetCoarsestMatrixFreePolys_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetCoarsestMatrixFreePolys(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_coarsest_diag_scale_polys(PC pc, bint flag):
-	PCAIRSetCoarsestDiagScalePolys_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetCoarsestDiagScalePolys(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_coarsest_subcomm(PC pc, bint flag):
-	PCAIRSetCoarsestSubcomm_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetCoarsestSubcomm(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_r_drop(PC pc, double rdrop):
-	PCAIRSetRDrop_c(&(pc.pc), <PetscReal>rdrop)
+	CHKERR(PCAIRSetRDrop(pc.pc, <PetscReal>rdrop))
 
 cpdef pcair_set_a_drop(PC pc, double adrop):
-	PCAIRSetADrop_c(&(pc.pc), <PetscReal>adrop)
+	CHKERR(PCAIRSetADrop(pc.pc, <PetscReal>adrop))
 
 cpdef pcair_set_a_lump(PC pc, bint flag):
-	PCAIRSetALump_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetALump(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_reuse_sparsity(PC pc, bint flag):
 	"""Tell PCAIR to reuse sparsity (CF splitting and matrix structure) on the next setup.
 
 	Must be called before KSPSolve to take effect.
 	"""
-	PCAIRSetReuseSparsity_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetReuseSparsity(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_reuse_poly_coeffs(PC pc, bint flag):
 	"""Tell PCAIR to reuse the current polynomial coefficients on the next setup.
 
 	Must be called before KSPSolve, after pcair_set_poly_coeffs, to take effect.
 	"""
-	PCAIRSetReusePolyCoeffs_c(&(pc.pc), <PetscBool>flag)
+	CHKERR(PCAIRSetReusePolyCoeffs(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_reuse_amount(PC pc, int amount):
 	"""Set how much data PCAIR stores for reuse when reuse_sparsity is enabled.
@@ -676,7 +680,7 @@ cpdef pcair_set_reuse_amount(PC pc, int amount):
 	2 - additionally store repartitioned matrices and CF-splitting related matrices/IS
 	3 - store everything (default, preserves previous behaviour)
 	"""
-	PCAIRSetReuseAmount_c(&(pc.pc), <PetscInt>amount)
+	CHKERR(PCAIRSetReuseAmount(pc.pc, <PetscInt>amount))
 
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.
@@ -701,8 +705,8 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	cdef PetscInt row_size = <PetscInt>staging.shape[0]
 	cdef PetscInt col_size = <PetscInt>staging.shape[1]
 	cdef PetscReal *sptr = <PetscReal*><size_t>staging.ctypes.data
-	PCAIRSetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
-	                      sptr, row_size, col_size)
+	CHKERR(PCAIRSetPolyCoeffs(pc.pc, petsc_level, which_inverse,
+	                             sptr, row_size, col_size))
 
 # -----------------------------------------------------------------------
 # PCPFLAREINV wrappers
@@ -720,7 +724,7 @@ cpdef pcpflareinv_get_poly_coeffs(PC pc):
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt rows = 0, cols = 0
 	cdef PetscInt i, j
-	PCPFLAREINVGetPolyCoeffs(pc.pc, &coeffs_ptr, &rows, &cols)
+	CHKERR(PCPFLAREINVGetPolyCoeffs(pc.pc, &coeffs_ptr, &rows, &cols))
 	# See pcair_get_poly_coeffs: dtype must track the build's PetscReal width and
 	# the copy must go element-wise through the PetscReal* (Fortran/column-major).
 	result = np.empty((rows, cols), dtype=np.dtype(PETSc.RealType), order='F')
@@ -746,38 +750,38 @@ cpdef pcpflareinv_set_poly_coeffs(PC pc, coeffs):
 	cdef PetscInt rows = <PetscInt>staging.shape[0]
 	cdef PetscInt cols = <PetscInt>staging.shape[1]
 	cdef PetscReal *sptr = <PetscReal*><size_t>staging.ctypes.data
-	PCPFLAREINVSetPolyCoeffs(pc.pc, sptr, rows, cols)
+	CHKERR(PCPFLAREINVSetPolyCoeffs(pc.pc, sptr, rows, cols))
 
 cpdef pcpflareinv_set_reuse_poly_coeffs(PC pc, bint flag):
 	"""Tell PCPFLAREINV to reuse the current polynomial coefficients on the next setup.
 
 	Must be called before KSPSolve, after pcpflareinv_set_poly_coeffs, to take effect.
 	"""
-	PCPFLAREINVSetReusePolyCoeffs(pc.pc, <PetscBool>flag)
+	CHKERR(PCPFLAREINVSetReusePolyCoeffs(pc.pc, <PetscBool>flag))
 
 cpdef int pcpflareinv_get_poly_order(PC pc):
 	cdef PetscInt result = 0
-	PCPFLAREINVGetPolyOrder(pc.pc, &result)
+	CHKERR(PCPFLAREINVGetPolyOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcpflareinv_get_sparsity_order(PC pc):
 	cdef PetscInt result = 0
-	PCPFLAREINVGetSparsityOrder(pc.pc, &result)
+	CHKERR(PCPFLAREINVGetSparsityOrder(pc.pc, &result))
 	return <int>result
 
 cpdef int pcpflareinv_get_type(PC pc):
 	cdef int result = 0
-	PCPFLAREINVGetType(pc.pc, &result)
+	CHKERR(PCPFLAREINVGetType(pc.pc, &result))
 	return result
 
 cpdef bint pcpflareinv_get_matrix_free(PC pc):
-	cdef PetscBool result = False
-	PCPFLAREINVGetMatrixFree(pc.pc, &result)
+	cdef PetscBool result = 0
+	CHKERR(PCPFLAREINVGetMatrixFree(pc.pc, &result))
 	return bool(result)
 
 cpdef bint pcpflareinv_get_reuse_poly_coeffs(PC pc):
-	cdef PetscBool result = False
-	PCPFLAREINVGetReusePolyCoeffs(pc.pc, &result)
+	cdef PetscBool result = 0
+	CHKERR(PCPFLAREINVGetReusePolyCoeffs(pc.pc, &result))
 	return bool(result)
 
 cpdef pcpflareinv_get_inverse_mat(PC pc):
@@ -787,7 +791,7 @@ cpdef pcpflareinv_get_inverse_mat(PC pc):
 	setup/reset. Returns None if PCSetUp has not been called yet.
 	"""
 	cdef Mat mat = Mat()
-	PCPFLAREINVGetInverseMat(pc.pc, &(mat.mat))
+	CHKERR(PCPFLAREINVGetInverseMat(pc.pc, &(mat.mat)))
 	if mat.mat == NULL:
 		return None
 	# Borrowed reference: petsc4py will MatDestroy on garbage collection, so
@@ -796,13 +800,13 @@ cpdef pcpflareinv_get_inverse_mat(PC pc):
 	return mat
 
 cpdef pcpflareinv_set_poly_order(PC pc, int order):
-	PCPFLAREINVSetPolyOrder(pc.pc, <PetscInt>order)
+	CHKERR(PCPFLAREINVSetPolyOrder(pc.pc, <PetscInt>order))
 
 cpdef pcpflareinv_set_sparsity_order(PC pc, int order):
-	PCPFLAREINVSetSparsityOrder(pc.pc, <PetscInt>order)
+	CHKERR(PCPFLAREINVSetSparsityOrder(pc.pc, <PetscInt>order))
 
 cpdef pcpflareinv_set_type(PC pc, int pflare_type):
-	PCPFLAREINVSetType(pc.pc, pflare_type)
+	CHKERR(PCPFLAREINVSetType(pc.pc, pflare_type))
 
 cpdef pcpflareinv_set_matrix_free(PC pc, bint flag):
-	PCPFLAREINVSetMatrixFree(pc.pc, <PetscBool>flag)
+	CHKERR(PCPFLAREINVSetMatrixFree(pc.pc, <PetscBool>flag))
