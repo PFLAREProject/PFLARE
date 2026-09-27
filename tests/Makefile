@@ -326,6 +326,9 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting"
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+	@echo ""
+	@echo "Test AIRG with advection and distance 2 PMIS CF splitting"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
@@ -966,6 +969,9 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+	@echo ""
+	@echo "Test AIRG with advection and distance 2 PMIS CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
