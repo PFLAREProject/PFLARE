@@ -13,6 +13,9 @@
       Mat :: A
       PetscInt :: m, n, nnzs
       PetscInt, parameter :: one = 1, two = 2, three = 3, zero = 0
+      PetscInt :: i_loc, istart, iend, global_size
+      PetscScalar :: diag_val
+      PetscReal :: norm_res, norm_b, check_rel_res
       ! d0 literals in PetscScalar params: bit-identical double, float-correct single
       PetscScalar, parameter :: s_zero = 0d0, s_one = 1d0, s_half = 0.5d0, s_two_half = 2.5d0
       Vec :: x,b
@@ -30,6 +33,9 @@
       n      = 10
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER,'-m',m,flg,ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER,'-n',n,flg,ierr)
+      ! Optional maximum relative residual allowed after the well-conditioned solve below
+      check_rel_res = -1
+      call PetscOptionsGetReal(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER,'-check_rel_res',check_rel_res,flg,ierr)
 
       ! Create matrix
       call MatCreate(PETSC_COMM_WORLD,A,ierr)
@@ -112,6 +118,43 @@
       if (reason%v < 0) then
          error stop 1
       end if       
+
+      ! ~~~~~~~~~~~~~~
+      ! Instead now have well-conditioned distinct diagonal values spread
+      ! over [1, 1.05]
+      ! The gmres polynomial converges quickly here, so if -check_rel_res is given
+      ! we check the relative residual after a single application of the polynomial
+      ! This checks the Arnoldi basis doesn't terminate its Arnoldi iteration
+      ! prematurely (and hence truncate the polynomial) by underestimating
+      ! the least-squares residual
+      ! ~~~~~~~~~~~~~~
+      call MatGetOwnershipRange(A, istart, iend, ierr)
+      call MatGetSize(A, global_size, PETSC_NULL_INTEGER, ierr)
+      do i_loc = istart, iend-1
+         diag_val = 1.0 + 0.05 * real(i_loc)/real(global_size - 1)
+         call MatSetValue(A, i_loc, i_loc, diag_val, INSERT_VALUES, ierr)
+      end do
+      call MatAssemblyBegin(A,MAT_FINAL_ASSEMBLY,ierr)
+      call MatAssemblyEnd(A,MAT_FINAL_ASSEMBLY,ierr)      
+      call VecSet(x, s_zero, ierr)    
+
+      call KSPSolve(ksp,b,x,ierr)
+      call KSPGetConvergedReason(ksp, reason, ierr)
+      if (reason%v < 0) then
+         error stop 1
+      end if  
+
+      ! Check the true relative residual
+      if (check_rel_res > 0) then
+         call VecNorm(b, NORM_2, norm_b, ierr)
+         call VecScale(x, -s_one, ierr)
+         call MatMultAdd(A, x, b, b, ierr)
+         call VecNorm(b, NORM_2, norm_res, ierr)
+         if (norm_res/norm_b > check_rel_res) then
+            print *, "Relative residual too large", norm_res/norm_b
+            error stop 1
+         end if
+      end if
 
       call MatDestroy(A, ierr)
       call VecDestroy(b, ierr)
