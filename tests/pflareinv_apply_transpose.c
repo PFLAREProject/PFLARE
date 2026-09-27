@@ -34,6 +34,11 @@ static char help[] = "Tests PCApplyTranspose for PCPFLAREINV.\n\n";
   -rebuild re-does the setup with new values in the same nonzero pattern and
   re-checks, which is what covers the transposed twin being refreshed rather
   than left pointing at stale coefficients.
+
+  -toggle_matrix_free (with -rebuild) also flips -pc_pflareinv_matrix_free
+  through the options database and PCSetFromOptions before the re-setup. That
+  has to reset the PC and rebuild the inverse in the new form, rather than
+  reusing an assembled inverse as a matshell (or vice versa).
 */
 #include <petscksp.h>
 #include "pflare.h"
@@ -337,7 +342,9 @@ int main(int argc, char **args)
   PetscRandom rand;
   PetscInt    n = 200, n_pairs = 5, explicit_max = 400, its_slack = 2;
   PetscReal   advection = 1.0, shift = 0.1, tol = DEFAULT_CHECK_TOL;
-  PetscBool   transpose_solve = PETSC_FALSE, rebuild = PETSC_FALSE;
+  PetscBool   transpose_solve = PETSC_FALSE, rebuild = PETSC_FALSE, toggle_matrix_free = PETSC_FALSE;
+  PetscBool   matrix_free, is_shell;
+  Mat         mat_inverse;
 
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
@@ -349,6 +356,7 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-transpose_solve", &transpose_solve, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-its_slack", &its_slack, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-rebuild", &rebuild, NULL));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-toggle_matrix_free", &toggle_matrix_free, NULL));
 
   // Register the PFLARE types
   PCRegister_PFLARE();
@@ -378,8 +386,24 @@ int main(int argc, char **args)
     // picking up refreshed coefficients and a refreshed diagonal, rather than
     // holding on to the ones it was built with
     PetscCall(SetOperatorValues(A, n, 2.0 * advection, shift));
+    if (toggle_matrix_free) {
+      // Flip matrix-free through the options database, the PC has to notice
+      // the change and rebuild rather than reuse the old inverse
+      PetscCall(PCPFLAREINVGetMatrixFree(pc, &matrix_free));
+      PetscCall(PetscOptionsSetValue(NULL, "-pc_pflareinv_matrix_free", matrix_free ? "false" : "true"));
+      PetscCall(PCSetFromOptions(pc));
+    }
     PetscCall(PCSetOperators(pc, A, A));
     PetscCall(PCSetUp(pc));
+    if (toggle_matrix_free) {
+      // The inverse has to be in the form we asked for
+      PetscCall(PCPFLAREINVGetMatrixFree(pc, &matrix_free));
+      PetscCall(PCPFLAREINVGetInverseMat(pc, &mat_inverse));
+      PetscCall(PetscObjectTypeCompare((PetscObject)mat_inverse, MATSHELL, &is_shell));
+      PetscCheck(is_shell == matrix_free, PETSC_COMM_WORLD, PETSC_ERR_PLIB, \
+                 "after toggling -pc_pflareinv_matrix_free the inverse is %s but matrix_free is %s", \
+                 is_shell ? "a matshell" : "assembled", matrix_free ? "true" : "false");
+    }
     PetscCall(CheckTransposeIdentity(pc, A, rand, tol, n_pairs, "after rebuild"));
     if (n <= explicit_max) PetscCall(CheckTransposeExplicitly(pc, A, n, tol, "after rebuild"));
   }
