@@ -6,6 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the shared library registration routine (called by PETSc when it
+  loads PFLARE, e.g., with `--download-pflare`) only registering PCAIR, so
+  `-pc_type pflareinv` now works without calling `PCRegister_PFLARE()`
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
