@@ -319,6 +319,10 @@ run_tests_no_load_short_serial:
 	./dll_register -register_twice
 #
 	@echo ""
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3"
+	./pcair_reuse_amount_range
+#
+	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
@@ -962,6 +966,10 @@ else
 	@echo ""
 	@echo "Test the shared library registration routine registers every PFLARE PC type in parallel"
 	$(MPIEXEC) -n 2 ./dll_register
+#
+	@echo ""
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
+	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"

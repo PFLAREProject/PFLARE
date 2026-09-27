@@ -46,6 +46,7 @@ tests/mat_diag
 tests/matrandom
 tests/matrandom_check_reset
 tests/operator_refcount
+tests/pcair_reuse_amount_range
 tests/pflareinv_apply_transpose
 tests/pmisr_nonsymmetric
 tests/reuse_preconditioner

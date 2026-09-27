@@ -159,6 +159,15 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
 
+# Reuse amounts outside 1, 2 or 3 must be rejected and leave the value alone
+for bad_amount in (0, 4):
+    try:
+        pflare.pcair_set_reuse_amount(pc, bad_amount)
+        errors.append(f'reuse_amount_{bad_amount}: expected ValueError')
+    except ValueError:
+        pass
+    check(f'reuse_amount_{bad_amount}_unchanged', pflare.pcair_get_reuse_amount(pc), 3)
+
 # -----------------------------------------------------------------------
 # Wrong PC type: the pcair_* (and pcpflareinv_* getter) wrappers must raise
 # PETSc.Error rather than let the Fortran interpret another PC type's data

@@ -2739,6 +2739,15 @@ module pcair_interfaces
       PetscInt :: old_int
       ! ~~~~~~~~
 
+      ! The amount is used as an index into REUSE_MAT_ACTIVE/REUSE_IS_ACTIVE
+      ! so only 1, 2 and 3 are valid
+      if (amount < 1 .OR. amount > 3) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Reuse amount must be 1, 2 or 3")
+         return
+      end if
+
       call PCAIRGetReuseAmount(pc, old_int, ierr)
       if (old_int == amount) then
          ierr = 0
