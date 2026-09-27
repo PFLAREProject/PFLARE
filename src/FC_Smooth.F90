@@ -222,9 +222,13 @@ module fc_smooth
 
 #if defined(PETSC_HAVE_KOKKOS)  
 
+               ! The device IS views only exist if the matrix type was kokkos in
+               ! create_VecISCopyLocalWrapper, so fall back to VecISCopy if not
+               ! (e.g., kokkos vecs with an aij matrix)
                call VecGetType(vfull, vec_type, ierr)
-               if (vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
-                        vec_type == "kokkos") then
+               if ((vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
+                        vec_type == "kokkos") .AND. &
+                        c_associated(air_data%kokkos_is_views_handle)) then
 
                   fine_int = 0
                   if (fine) fine_int = 1
@@ -281,9 +285,13 @@ module fc_smooth
 
 #if defined(PETSC_HAVE_KOKKOS)  
 
+               ! The device IS views only exist if the matrix type was kokkos in
+               ! create_VecISCopyLocalWrapper, so fall back to VecISCopy if not
+               ! (e.g., kokkos vecs with an aij matrix)
                call VecGetType(vfull, vec_type, ierr)
-               if (vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
-                        vec_type == "kokkos") then
+               if ((vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
+                        vec_type == "kokkos") .AND. &
+                        c_associated(air_data%kokkos_is_views_handle)) then
 
                   if (kokkos_debug()) then             
                      call VecDuplicate(vfull, temp_vec, ierr)
@@ -334,9 +342,13 @@ module fc_smooth
 
 #if defined(PETSC_HAVE_KOKKOS)  
 
+               ! The device IS views only exist if the matrix type was kokkos in
+               ! create_VecISCopyLocalWrapper, so fall back to VecISCopy if not
+               ! (e.g., kokkos vecs with an aij matrix)
                call VecGetType(vfull, vec_type, ierr)
-               if (vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
-                        vec_type == "kokkos") then
+               if ((vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
+                        vec_type == "kokkos") .AND. &
+                        c_associated(air_data%kokkos_is_views_handle)) then
 
                   fine_int = 0
                   if (fine) fine_int = 1
@@ -393,9 +405,13 @@ module fc_smooth
                
 #if defined(PETSC_HAVE_KOKKOS)  
 
+               ! The device IS views only exist if the matrix type was kokkos in
+               ! create_VecISCopyLocalWrapper, so fall back to VecISCopy if not
+               ! (e.g., kokkos vecs with an aij matrix)
                call VecGetType(vfull, vec_type, ierr)
-               if (vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
-                        vec_type == "kokkos") then
+               if ((vec_type == "seqkokkos" .OR. vec_type == "mpikokkos" .OR. &
+                        vec_type == "kokkos") .AND. &
+                        c_associated(air_data%kokkos_is_views_handle)) then
 
                   if (kokkos_debug()) then             
                      call VecDuplicate(vfull, temp_vec, ierr)
