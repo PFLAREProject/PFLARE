@@ -244,10 +244,11 @@ module pcpflareinv_interfaces
       integer :: flag_int
       ! ~~~~~~~~~~
 
-      pc_ptr= pc%v
+      pc_ptr   = pc%v
       flag_int = 0
-      if (flag) flag_int = 1
-      ierr = PCPFLAREINVGetMatrixFree_mine(pc_ptr, flag_int)
+      ierr     = PCPFLAREINVGetMatrixFree_mine(pc_ptr, flag_int)
+      flag     = PETSC_FALSE
+      if (flag_int /= 0) flag = PETSC_TRUE
 
    end subroutine PCPFLAREINVGetMatrixFree   
 

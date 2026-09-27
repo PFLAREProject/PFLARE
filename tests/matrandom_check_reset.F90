@@ -15,7 +15,7 @@
       Vec :: x,b
       KSP :: ksp
       PC :: pc
-      PetscBool :: flg, check_airg, check
+      PetscBool :: flg, check_airg, check, mf_flag
       KSPConvergedReason reason
 
       call PetscInitialize(PETSC_NULL_CHARACTER,ierr)    
@@ -79,6 +79,14 @@
          call PCAIRSetStrongThreshold(pc, strong_threshold_val, ierr)
       else
          call PCPFLAREINVSetMatrixFree(pc, PETSC_TRUE, ierr)
+         ! Check the matrix-free flag round-trips through the Fortran getter
+         ! (start from the opposite value so a getter that doesn't write its output fails)
+         mf_flag = PETSC_FALSE
+         call PCPFLAREINVGetMatrixFree(pc, mf_flag, ierr)
+         if (.NOT. mf_flag) then
+            print *, "PCPFLAREINVGetMatrixFree did not return the value set"
+            error stop 1
+         end if
       end if
       call VecSet(x, s_zero, ierr)
       call KSPSolve(ksp,b,x,ierr)
