@@ -14,6 +14,14 @@ for earlier changes please see the git history.
   every CF splitting type; this only holds for `pmisr_ddc` and `diag_dom`, so
   other splittings (e.g., `pmis`, `agg`) silently dropped the off-diagonal
   entries of Aff, degrading or breaking convergence
+- Fixed the `pmis_agg` CF splitting: in parallel, boundary C points whose
+  strong neighbours were all off-process were turned into F points (which
+  could remove every C point), and with Kokkos matrices the aggregation read
+  uninitialised PMIS markers from the host
+- Fixed the `pmis_dist2` CF splitting cancelling signed connections when
+  squaring the strength matrix (e.g., skew-symmetric advection gave almost no
+  connections and coarsening failed), and leaking an IS on every setup. The
+  coarse grids from `pmis_dist2` may change
 
 ## [v1.27.0]
 
