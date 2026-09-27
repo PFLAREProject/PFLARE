@@ -49,23 +49,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image with debug PETSc
-        uses: docker/build-push-action@v6
-        with:
-          platforms: linux/amd64
-          push: false
-          context: .
-          file: ./dockerfiles/Dockerfile
-          build-args: |
-            ARCH=arch-linux-c-debug
-
-  gnu_debug_fcheck:
-    runs-on: ubuntu-22.04
-    needs: setup
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Build Docker image with debug PETSc and gfortran runtime checks
         uses: docker/build-push-action@v6
         with:
