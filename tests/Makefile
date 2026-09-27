@@ -607,6 +607,8 @@ run_tests_no_load_short_serial:
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys
 	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc
+	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing on host MATDENSE blocks"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc -host_blocks
 	@echo "Test multiple RHS block solve with PCAIR and FFC smoothing with a weighted Jacobi C smoother"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type ffc -pc_air_c_inverse_type wjacobi
 	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR"
@@ -1210,6 +1212,8 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with PCAIR via PCMatApply in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
+	@echo "Test multiple RHS block solve with PCAIR on host MATDENSE blocks in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -host_blocks
 	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type newton \
 	 -pc_air_matrix_free_polys -pc_air_diag_scale_polys

@@ -201,13 +201,14 @@ module c_petsc_interfaces
 
    interface
 
-      subroutine mat_iscopy_local_kokkos(handle, our_level, fine_int, xfull, mode_int, xreduced) &
+      subroutine mat_iscopy_local_kokkos(handle, our_level, fine_int, xfull, mode_int, xreduced, done) &
          bind(c, name="mat_iscopy_local_kokkos")
          use iso_c_binding
          type(c_ptr), value :: handle
          integer(c_int), value :: our_level, fine_int, mode_int
          integer(c_long_long) :: xfull
          integer(c_long_long) :: xreduced
+         integer(c_int) :: done
       end subroutine mat_iscopy_local_kokkos
 
    end interface
