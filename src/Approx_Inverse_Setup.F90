@@ -84,11 +84,16 @@ module approx_inverse_setup
       PetscErrorCode :: ierr
       type(tMat) :: reuse_mat, inv_matrix_temp
       type(tMat), dimension(:), pointer :: reuse_submatrices => null()
-      logical :: heap_allocated, coefficients_supplied
+      logical :: heap_allocated, coefficients_supplied, matrix_free_shell
       integer :: poly_order_eff, inverse_sparsity_order_eff
       PetscInt :: global_rows, global_cols
 
       ! ~~~~~~  
+
+      ! Only the polynomial types build a matshell when applied matrix-free
+      ! The other types (e.g., Jacobi) ignore matrix_free and are always assembled
+      ! so we must not touch a matshell context for them
+      matrix_free_shell = matrix_free .AND. inverse_type_is_polynomial(inverse_type)
 
       ! For matrices with size smaller than the subspace size (ie polynomial order + 1)
       ! the gmres polynomials can only go up to the matrix size (at which point they are 
@@ -160,7 +165,7 @@ module approx_inverse_setup
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
          ! Caller owns the coefficient memory; matshell must not free it
-         if (matrix_free) then
+         if (matrix_free_shell) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
             mat_ctx%own_coefficients = .FALSE.
          end if
@@ -174,7 +179,7 @@ module approx_inverse_setup
          ! coefficients are being returned to the caller, or Newton basis (2 columns).
          ! Otherwise, stack storage suffices (unless the order has been clamped, 
          ! as the stack storage is sized with the unclamped order).
-         heap_allocated = matrix_free .OR. poly_order_eff /= poly_order .OR. &
+         heap_allocated = matrix_free_shell .OR. poly_order_eff /= poly_order .OR. &
                           (present(coefficients) .AND. .NOT. coefficients_supplied) .OR. &
                           inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
          if (heap_allocated) then
@@ -199,7 +204,7 @@ module approx_inverse_setup
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
 
-         if (matrix_free) then
+         if (matrix_free_shell) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
             ! The matshell always owns its coefficients and frees them via deallocate
             ! in reset_inverse_mat. When present(coefficients), the C binding is
@@ -224,6 +229,25 @@ module approx_inverse_setup
       inv_matrix = inv_matrix_temp
 
    end subroutine calculate_and_build_approximate_inverse    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   pure logical function inverse_type_is_polynomial(inverse_type)
+
+      ! Returns true if the inverse type is a polynomial, ie one that builds
+      ! a matshell when applied matrix-free
+
+      ! ~~~~~~
+      integer, intent(in) :: inverse_type
+      ! ~~~~~~
+
+      inverse_type_is_polynomial = inverse_type == PFLAREINV_POWER .OR. &
+                                   inverse_type == PFLAREINV_ARNOLDI .OR. &
+                                   inverse_type == PFLAREINV_NEWTON .OR. &
+                                   inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                                   inverse_type == PFLAREINV_NEUMANN
+
+   end function inverse_type_is_polynomial
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
