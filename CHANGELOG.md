@@ -117,6 +117,10 @@ for earlier changes please see the git history.
   squaring the strength matrix (e.g., skew-symmetric advection gave almost no
   connections and coarsening failed), and leaking an IS on every setup. The
   coarse grids from `pmis_dist2` may change
+- Fixed the CPU ISAI exact dense solve wrongly permuting the solution returned
+  by LAPACK `gesv`, which gave an incorrect ISAI (and lAIR Z) whenever a local
+  submatrix needed row pivoting; a singular local submatrix now aborts rather
+  than silently returning the right-hand side
 
 ## [v1.27.0]
 

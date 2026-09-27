@@ -791,6 +791,11 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./newton_imag_roots
 #
 	@echo ""
+	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
+	./pflareinv_exact_inverse -pc_pflareinv_type isai
+	./pflareinv_exact_inverse -pc_pflareinv_type sai
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -1402,6 +1407,11 @@ else
 	@echo ""
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
+#
+	@echo ""
+	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_exact_inverse -pc_pflareinv_type isai
+	$(MPIEXEC) -n 2 ./pflareinv_exact_inverse -pc_pflareinv_type sai
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
