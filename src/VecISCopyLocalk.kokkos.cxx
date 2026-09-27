@@ -136,6 +136,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(void *handle, int our_leve
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
+   // The handle is only built by create_VecISCopyLocalWrapper for kokkos matrix types
+   PetscCheckAbort(handle, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,
+         "VecISCopyLocal_kokkos called with a NULL handle - the device IS views were not built");
    auto *ctx = static_cast<VecISCopyLocalKokkosCtx *>(handle);
    const int level_idx = our_level - 1;
 

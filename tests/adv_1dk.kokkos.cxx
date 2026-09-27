@@ -140,8 +140,17 @@ int main(int argc, char **args)
          coo_v(i*2 + 1) = 1.0;
       });
 
-   // This should all happen on the gpu
-   PetscCall(MatSetValuesCOO(A, coo_v.data(), INSERT_VALUES));
+   // With a Kokkos matrix this should all happen on the gpu
+   // A non-Kokkos matrix (e.g., -mat_type aij) reads the values on the host,
+   // so they have to be copied back from the device first
+   PetscBool mat_is_kokkos;
+   PetscCall(PetscObjectTypeCompareAny((PetscObject)A, &mat_is_kokkos, MATSEQAIJKOKKOS, MATMPIAIJKOKKOS, ""));
+   if (mat_is_kokkos) {
+      PetscCall(MatSetValuesCOO(A, coo_v.data(), INSERT_VALUES));
+   } else {
+      auto coo_v_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), coo_v);
+      PetscCall(MatSetValuesCOO(A, coo_v_h.data(), INSERT_VALUES));
+   }
   }
 
   /*
