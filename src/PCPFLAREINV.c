@@ -19,9 +19,11 @@ PETSC_EXTERN void inverse_type_is_polynomial_c(int inverse_type, int *is_polynom
 // coeffs_ptr/row_size/col_size are in/out:
 //   *coeffs_ptr == NULL on entry  -> fresh: Fortran allocates, writes c_loc to *coeffs_ptr on return
 //   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
-PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, PetscInt inverse_type, PetscInt order, \
-                     PetscInt sparsity_order, PetscInt matrix_free_int, PetscInt diag_scale_polys_int, \
-                     PetscInt subcomm_int, \
+// The by-value arguments are integer(c_int) on the Fortran side, so must be int here
+// (not PetscInt, which is 64-bit with --with-64-bit-indices)
+PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int inverse_type, int order, \
+                     int sparsity_order, int matrix_free_int, int diag_scale_polys_int, \
+                     int subcomm_int, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
                      Mat *inv_matrix);
 // Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.

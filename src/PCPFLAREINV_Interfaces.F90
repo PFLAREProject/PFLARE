@@ -59,7 +59,7 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(c_int)                         :: b
+         PetscBool                              :: b
          PetscErrorCode  :: PCPFLAREINVGetMatrixFree_mine
       end function PCPFLAREINVGetMatrixFree_mine 
    end interface    
@@ -83,7 +83,7 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(c_int), intent(out)            :: b
+         PetscBool, intent(out)                 :: b
          PetscErrorCode  :: PCPFLAREINVGetReusePolyCoeffs_mine
       end function PCPFLAREINVGetReusePolyCoeffs_mine
    end interface
@@ -142,7 +142,7 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(c_int), value                  :: b
+         PetscBool, value                       :: b
          PetscErrorCode  :: PCPFLAREINVSetMatrixFree_mine
       end function PCPFLAREINVSetMatrixFree_mine 
    end interface  
@@ -166,7 +166,7 @@ module pcpflareinv_interfaces
          use iso_c_binding
 #include "finclude/pflare_types.h"
          integer(c_long_long), value            :: A_array
-         integer(c_int), value                  :: b
+         PetscBool, value                       :: b
          PetscErrorCode  :: PCPFLAREINVSetReusePolyCoeffs_mine
       end function PCPFLAREINVSetReusePolyCoeffs_mine
    end interface
@@ -241,13 +241,10 @@ module pcpflareinv_interfaces
       PetscErrorCode, intent(inout) :: ierr
 
       integer(c_long_long) :: pc_ptr
-      integer :: flag_int
       ! ~~~~~~~~~~
 
       pc_ptr= pc%v
-      flag_int = 0
-      if (flag) flag_int = 1
-      ierr = PCPFLAREINVGetMatrixFree_mine(pc_ptr, flag_int)
+      ierr = PCPFLAREINVGetMatrixFree_mine(pc_ptr, flag)
 
    end subroutine PCPFLAREINVGetMatrixFree   
 
@@ -310,14 +307,10 @@ module pcpflareinv_interfaces
       PetscErrorCode, intent(inout) :: ierr
 
       integer(c_long_long) :: pc_ptr
-      integer :: flag_int
       ! ~~~~~~~~~~
 
       pc_ptr   = pc%v
-      flag_int = 0
-      ierr     = PCPFLAREINVGetReusePolyCoeffs_mine(pc_ptr, flag_int)
-      flag     = PETSC_FALSE
-      if (flag_int /= 0) flag = PETSC_TRUE
+      ierr     = PCPFLAREINVGetReusePolyCoeffs_mine(pc_ptr, flag)
 
    end subroutine PCPFLAREINVGetReusePolyCoeffs
 
@@ -411,13 +404,10 @@ module pcpflareinv_interfaces
       PetscErrorCode, intent(inout) :: ierr
 
       integer(c_long_long) :: pc_ptr
-      integer :: flag_int
       ! ~~~~~~~~~~
 
       pc_ptr= pc%v
-      flag_int = 0
-      if (flag) flag_int = 1
-      ierr = PCPFLAREINVSetMatrixFree_mine(pc_ptr, flag_int)
+      ierr = PCPFLAREINVSetMatrixFree_mine(pc_ptr, flag)
 
    end subroutine PCPFLAREINVSetMatrixFree    
 
@@ -459,13 +449,10 @@ module pcpflareinv_interfaces
       PetscErrorCode, intent(inout) :: ierr
 
       integer(c_long_long) :: pc_ptr
-      integer :: flag_int
       ! ~~~~~~~~~~
 
       pc_ptr   = pc%v
-      flag_int = 0
-      if (flag) flag_int = 1
-      ierr = PCPFLAREINVSetReusePolyCoeffs_mine(pc_ptr, flag_int)
+      ierr = PCPFLAREINVSetReusePolyCoeffs_mine(pc_ptr, flag)
 
    end subroutine PCPFLAREINVSetReusePolyCoeffs
 
