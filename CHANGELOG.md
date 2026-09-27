@@ -48,6 +48,11 @@ for earlier changes please see the git history.
 - Fixed `-pc_pflareinv_matrix_free` bypassing `PCPFLAREINVSetMatrixFree`, so
   changing it after a setup (e.g. via `KSPSetFromOptions`) now resets the PC
   instead of reusing the old inverse in the wrong form and crashing
+- Fixed PCPFLAREINV aborting with the GMRES polynomial types (power, arnoldi,
+  newton, newton_no_extra) on operators with fewer rows than the polynomial
+  order + 1 (e.g. small block Jacobi sub-blocks); the order is now clamped to
+  the matrix size as in PCAIR, so `PCPFLAREINVGetPolyCoeffs` returns the
+  clamped size
 
 ## [v1.27.0]
 
