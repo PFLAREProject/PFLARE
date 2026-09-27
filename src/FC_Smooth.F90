@@ -164,11 +164,10 @@ module fc_smooth
 
          call MatDestroy(air_data%i_fine_full(our_level), ierr)
          call MatDestroy(air_data%i_coarse_full(our_level), ierr)
+         ! i_coarse_full_full is always built, i_fine_full_full only if we
+         ! C point smooth - destroy both, MatDestroy on a null handle is fine
+         call MatDestroy(air_data%i_coarse_full_full(our_level), ierr)
          call MatDestroy(air_data%i_fine_full_full(our_level), ierr)
-         if (air_data%options%any_c_smooths .AND. &
-                  .NOT. air_data%options%full_smoothing_up_and_down) then     
-            call MatDestroy(air_data%i_coarse_full_full(our_level), ierr)                       
-         end if 
 
       else
 #if defined(PETSC_HAVE_KOKKOS)
