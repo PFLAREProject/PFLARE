@@ -4,6 +4,7 @@ run_parse_tests.py  -  CI test runner for parse_pflare_output.
 
 Runs a subset of small PFLARE advection test cases, captures their output,
 calls parse_pflare_output() on it, and asserts:
+  - all complexities are finite
   - grid complexity < 3.0           (loose bound; won't break on minor changes)
   - reuse_storage complexity == 0.0 (no reuse used in these tests)
   - KSP iterations < ksp_max_it     (solver converged within configured limit)
@@ -12,6 +13,7 @@ Designed to run inside the PFLARE Docker image (stevendargaville/pflare:latest)
 where the test executables live at /build/PFLARE/tests.
 """
 
+import math
 import os
 import subprocess
 import sys
@@ -128,7 +130,11 @@ def _run_test(desc, cmd, ksp_max_it):
             gc = data["complexities"]["grid"]
             rs = data["complexities"]["reuse_storage"]
 
-            if gc >= 3.0:
+            for key, val in data["complexities"].items():
+                if not math.isfinite(val):
+                    failures.append(f"{key} complexity {val} is not finite")
+
+            if not gc < 3.0:
                 failures.append(
                     f"grid complexity {gc:.4f} >= 3.0 (expected < 3.0)"
                 )
