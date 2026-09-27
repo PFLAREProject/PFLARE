@@ -1015,7 +1015,7 @@ end if
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao, mat_sparsity_match, mat_product_save
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       type(int_vec), dimension(:), allocatable :: symbolic_ones
       type(real_vec), dimension(:), allocatable :: symbolic_vals
       integer(c_long_long) A_array
@@ -1032,6 +1032,10 @@ end if
       integer, dimension(size(coefficients, 1), 2) :: status_output
 
       ! ~~~~~~~~~~
+
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)
       ! Get the comm size 

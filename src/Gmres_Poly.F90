@@ -949,7 +949,7 @@ end if
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
       type(tMat), pointer :: mat_sparsity_match
       type(int_vec), dimension(:), allocatable :: symbolic_ones
@@ -966,6 +966,10 @@ end if
       PetscInt, parameter :: one = 1, zero = 0
       
       ! ~~~~~~~~~~  
+
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       if (poly_sparsity_order .ge. size(coefficients)-1) then      
          print *, "Requested sparsity is greater than or equal to the order"
