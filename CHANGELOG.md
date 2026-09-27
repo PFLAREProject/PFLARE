@@ -82,6 +82,15 @@ for earlier changes please see the git history.
   the API are no longer overwritten by the F point values in
   `PCSetFromOptions`, and if unset they now follow the F point smoother values
   as documented, even without calling `PCSetFromOptions`
+- `PCAIRSetSmoothType` / `-pc_air_smooth_type` (and the Python
+  `pcair_set_smooth_type`) now error on smooth types longer than 10 characters
+  (`ValueError` in Python) rather than silently truncating them
+- The Python `pcair_*` / `pcpflareinv_*` wrappers now call the public C API and
+  raise `PETSc.Error` when given a PC of the wrong type, rather than crashing
+  (PCAIR) or silently returning a default value (PCPFLAREINV getters)
+- Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
+  and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
+  routines match their definitions exactly (`PetscBool`, `int` by value)
 
 ## [v1.27.0]
 
