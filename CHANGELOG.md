@@ -6,6 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed PCAIR on non-Kokkos GPU matrix types (e.g. `aijcusparse`,
+  `aijhipsparse`) building its F/C point injectors from the not yet created
+  Afc/Acf submatrices, which could crash or corrupt the first setup
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
