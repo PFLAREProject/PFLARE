@@ -674,6 +674,8 @@ run_tests_no_load_short_serial:
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys
 	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc
+	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing on host MATDENSE blocks"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc -host_blocks
 	@echo "Test multiple RHS block solve with PCAIR and FFC smoothing with a weighted Jacobi C smoother"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type ffc -pc_air_c_inverse_type wjacobi
 	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR"
@@ -862,6 +864,12 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	./adv_1dk -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG on steady 1D advection with kokkos vecs but a non-kokkos aij matrix"
+	./adv_1dk -n 1000 -ksp_max_it 5 -vec_type kokkos -mat_type aij
+	@echo "Test AIRG on steady 1D advection with kokkos vecs but a non-kokkos aij matrix with FC smoothing"
+	./adv_1d -n 1000 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aij -pc_air_smooth_type fc
 
 endif
 
@@ -1326,6 +1334,8 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with PCAIR via PCMatApply in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
+	@echo "Test multiple RHS block solve with PCAIR on host MATDENSE blocks in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -host_blocks
 	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type newton \
 	 -pc_air_matrix_free_polys -pc_air_diag_scale_polys
@@ -1424,6 +1434,12 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG on steady 1D advection in parallel with kokkos vecs but a non-kokkos aij matrix"
+	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_max_it 5 -vec_type kokkos -mat_type aij
+	@echo "Test AIRG on steady 1D advection in parallel with kokkos vecs but a non-kokkos aij matrix with FC smoothing"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aij -pc_air_smooth_type fc
 
 endif
 endif

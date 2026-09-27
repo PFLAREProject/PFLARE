@@ -87,6 +87,25 @@ for earlier changes please see the git history.
   on coarse levels
 - PETSc errors inside the C routines that build the `-pc_air_subcomm` matrices
   and check whether Aff is diagonal now abort, rather than being ignored
+- Fixed PCAIR on non-Kokkos GPU matrix types (e.g. `aijcusparse`,
+  `aijhipsparse`) building its F/C point injectors from the not yet created
+  Afc/Acf submatrices, which could crash or corrupt the first setup
+- Fixed the CPU `remove_from_sparse_match` with lumping discarding the
+  existing values of the output matrix: with alpha it now computes
+  output += alpha * input (as the Kokkos version does) and entries of the
+  output that are not in the input's sparsity are kept. The C
+  `remove_from_sparse_match` now also initialises the PETSc Fortran
+  interface, as the other standalone C routines do
+- Fixed PCAIR crashing on the first F smooth with Kokkos vectors but a
+  non-Kokkos matrix type (e.g. `-vec_type kokkos -mat_type aij`)
+- Fixed PCAIR leaking one full-size injector matrix per level on every
+  reset/destroy with non-Kokkos GPU matrix types and F-point only smoothing
+- Fixed the PCAIR block apply (`KSPMatSolve`) passing host pointers to a
+  device kernel when given host `MATDENSE` blocks with Kokkos matrices on a
+  CUDA/HIP build; it now falls back to a host copy
+- The Kokkos one-point prolongator now breaks ties between equal maximum
+  entries on the smallest column, as the CPU version does, so on GPUs the
+  prolongator (and iteration counts) may change and now match the CPU
 
 ## [v1.27.0]
 

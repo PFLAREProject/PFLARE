@@ -95,11 +95,19 @@ struct ReduceDataMaxRow {
    KOKKOS_INLINE_FUNCTION
    ReduceDataMaxRow() : col(-1), val(-1.0) {}
    
+   // Is (v, c) a better max than this - bigger value, or on ties the smaller column
+   // This matches the CPU maxloc (first entry in the sorted row) regardless of
+   // how the entries were split across threads or the order the threads are joined
+   KOKKOS_INLINE_FUNCTION
+   bool is_better(const PetscReal v, const PetscInt c) const {
+      return v > val || (v == val && c < col);
+   }
+
    // We use this in our parallel reduction to find maximum
    KOKKOS_INLINE_FUNCTION
    void operator+=(const ReduceDataMaxRow& src) {
-      // If src has a larger value, take it
-      if (src.val > val) {
+      // If src has a larger value (or same value with smaller column), take it
+      if (is_better(src.val, src.col)) {
          val = src.val;
          col = src.col;
       }
