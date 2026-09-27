@@ -539,9 +539,13 @@ module sai_z
                nrhs_bl = 1
                lda_bl = size(i_rows)
                ldb_bl = size(i_rows)
+               ! gesv applies the row interchanges from the LU to the rhs internally,
+               ! so e_row comes back as the solution in the original ordering
                call PFLAREgesv(n_bl, nrhs_bl, submat_vals, lda_bl, pivots, e_row, ldb_bl, info)
-               ! Rearrange given the row permutations done by the LU
-               e_row(pivots) = e_row
+               if (info /= 0) then
+                  print *, "ISAI dense solve fail - singular local submatrix"
+                  call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+               end if
                deallocate(pivots)
 
             end if
