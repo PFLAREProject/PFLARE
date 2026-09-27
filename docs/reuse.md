@@ -346,7 +346,11 @@ or in C:
      ierr = KSPSolve(ksp, b, x);
 
      // Save the polynomial coefficients from the first solve
-     ierr = PCPFLAREINVGetPolyCoeffs(pc, &coeffs, &rows, &cols);
+     // The returned pointer is owned by the PC and is invalidated by the next setup,
+     // so copy the coefficients into our own storage
+     ierr = PCPFLAREINVGetPolyCoeffs(pc, &pc_coeffs, &rows, &cols);
+     ierr = PetscMalloc1(rows * cols, &coeffs);
+     ierr = PetscArraycpy(coeffs, pc_coeffs, rows * cols);
 
      // ...[Modify entries in A to get a different linear system]
 
@@ -361,6 +365,9 @@ or in C:
 
      // Third solve - reproduces the preconditioner from the first solve
      ierr = KSPSolve(ksp, b, x);
+
+     // PCPFLAREINVSetPolyCoeffs copies the coefficients, so we can free our copy
+     ierr = PetscFree(coeffs);
 
 or in Python with petsc4py:
 

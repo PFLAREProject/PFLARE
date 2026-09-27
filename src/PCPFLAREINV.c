@@ -503,9 +503,9 @@ static PetscErrorCode PCPFLAREINVSetMatrixFree_PFLAREINV(PC pc, PetscBool flg)
   Level: advanced
 
   Note:
-  This routine returns a pointer into the `PCPFLAREINV` object itself, valid only until the next `PCSetUp()` or
-  `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
-  the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
+  This routine returns a pointer into the `PCPFLAREINV` object itself, valid only until the next `PCSetUp()`,
+  `PCReset()` or `PCPFLAREINVSetPolyCoeffs()` call; copy the coefficients yourself if you need to save or restore
+  them later. This differs from the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCSetUp()`
 @*/
@@ -560,13 +560,17 @@ PetscErrorCode PCPFLAREINVSetPolyCoeffs(PC pc, PetscReal *coeffs, PetscInt rows,
 static PetscErrorCode PCPFLAREINVSetPolyCoeffs_PFLAREINV(PC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
 {
    PC_PFLAREINV *inv_data;
+   PetscReal    *new_coeffs;
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
+   // Copy into a new buffer before freeing the old one, as coeffs may be the
+   // pointer returned by PCPFLAREINVGetPolyCoeffs (ie it may alias poly_coeffs)
+   new_coeffs = (PetscReal *)malloc((size_t)rows * (size_t)cols * sizeof(PetscReal));
+   PetscCheck(new_coeffs, PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed in PCPFLAREINVSetPolyCoeffs");
+   memcpy(new_coeffs, coeffs, (size_t)rows * (size_t)cols * sizeof(PetscReal));
    free(inv_data->poly_coeffs);
-   inv_data->poly_coeffs = (PetscReal *)malloc((size_t)rows * (size_t)cols * sizeof(PetscReal));
-   PetscCheck(inv_data->poly_coeffs, PETSC_COMM_SELF, PETSC_ERR_MEM, "malloc failed in PCPFLAREINVSetPolyCoeffs");
-   memcpy(inv_data->poly_coeffs, coeffs, (size_t)rows * (size_t)cols * sizeof(PetscReal));
+   inv_data->poly_coeffs      = new_coeffs;
    inv_data->poly_coeffs_rows = rows;
    inv_data->poly_coeffs_cols = cols;
    PetscFunctionReturn(PETSC_SUCCESS);

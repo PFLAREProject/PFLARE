@@ -238,6 +238,17 @@ int main(int argc, char **args)
           memcpy(saved_pflareinv_coeffs, ptr, (size_t)(rows * cols) * sizeof(PetscReal));
           saved_pflareinv_rows = rows;
           saved_pflareinv_cols = cols;
+
+          /* Setting the coefficients with the pointer returned by Get (which aliases
+             the internal storage) must leave the stored coefficients unchanged */
+          PetscCall(PCPFLAREINVSetPolyCoeffs(pc, ptr, rows, cols));
+          PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &ptr, &rows, &cols));
+          if (rows != saved_pflareinv_rows || cols != saved_pflareinv_cols ||
+              memcmp(ptr, saved_pflareinv_coeffs, (size_t)(rows * cols) * sizeof(PetscReal)) != 0) {
+            PetscCall(PetscPrintf(PETSC_COMM_SELF, "FAIL: PCPFLAREINVSetPolyCoeffs with the Get pointer changed the coefficients\n"));
+            PetscCall(PetscFinalize());
+            return 1;
+          }
         }
       }
     } /* end for count */
