@@ -117,7 +117,8 @@ int main(int argc, char **args)
   PetscRandom     rand;
   PCPFLAREINVType type;
   PetscBool       matrix_free;
-  PetscInt        n = 100, set, j;
+  PetscInt        n = 100, set, j, local_size;
+  VecType         vtype;
   PetscReal       tol = DEFAULT_CHECK_TOL;
   // Monomial coefficients, lowest order first, with exact zeros in the leading
   // (highest order) and/or interior positions
@@ -164,7 +165,11 @@ int main(int argc, char **args)
   PetscCall(PetscRandomSetFromOptions(rand));
   PetscCall(MatCreateVecs(A, &x, &y));
   PetscCall(VecDuplicate(x, &ref));
-  PetscCall(MatCreateDense(PETSC_COMM_WORLD, PETSC_DECIDE, PETSC_DECIDE, n, N_RHS, NULL, &X));
+  // Match the dense block to the operator's vector type, so the block apply stays on
+  // the device (and doesn't mix host dense with device sparse) when run with Kokkos
+  PetscCall(MatGetVecType(A, &vtype));
+  PetscCall(MatGetLocalSize(A, &local_size, NULL));
+  PetscCall(MatCreateDenseFromVecType(PETSC_COMM_WORLD, vtype, local_size, PETSC_DECIDE, n, N_RHS, PETSC_DECIDE, NULL, &X));
   PetscCall(MatDuplicate(X, MAT_DO_NOT_COPY_VALUES, &Y));
 
   for (set = 0; set < N_COEFF_SETS; set++) {
