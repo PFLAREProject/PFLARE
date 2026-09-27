@@ -6,6 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed a leak of the near-nullspace vectors with `-pc_air_symmetric
+  -pc_air_constrain_w`; `-pc_air_constrain_w` is ignored with
+  `-pc_air_symmetric` as the prolongator is R^T
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
