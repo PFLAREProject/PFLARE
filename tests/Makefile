@@ -50,6 +50,12 @@ SKIP_SINGLE := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),@echo "  [skipped under
 # an existing gap in petsc's kokkos capability, not whole classes
 SKIP_KOKKOS := $(if $(filter 1,$(PETSC_HAVE_KOKKOS)),@echo "  [skipped under kokkos]:",)
 
+# Same skip mechanism for PFLARE_KOKKOS_DEBUG=1 runs - only for the specific commands
+# whose CPU/Kokkos debug comparison is known not to match. Recurring reasons:
+#   * Zero diagonals in the (I)SAI local solves: the Kokkos dense direct solve
+#     (forced in debug mode) does not pivot, while the CPU LAPACK solve does
+SKIP_KOKKOS_DEBUG := $(if $(filter 1,$(PFLARE_KOKKOS_DEBUG)),@echo "  [skipped under PFLARE_KOKKOS_DEBUG]:",)
+
 # We then have to add the flags back in after the petsc rules/variables
 # have overwritten
 override CFLAGS += $(CFLAGS_INPUT) $(INCLUDE)
@@ -164,6 +170,9 @@ run_tests_load_serial:
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -ksp_max_it 26			
 	@echo "Test AIRG with lAIR in indefinite problem with zero diagonals, local dense solves need pivoting"
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_z_type lair -ksp_max_it 5
+	@echo "Test single level ISAI in indefinite problem with zero diagonals (Jacobi local solves hit zero diagonals)"
+	$(SKIP_KOKKOS_DEBUG) ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_type pflareinv -pc_pflareinv_type isai \
+	 -ksp_max_it 20 -ksp_converged_maxits
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order"
@@ -262,6 +271,9 @@ else
 	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26		
 	@echo "Test AIRG with lAIR in indefinite problem with zero diagonals, local dense solves need pivoting in parallel"
 	$(MPIEXEC) -n 3 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_z_type lair -ksp_max_it 5
+	@echo "Test single level ISAI in indefinite problem with zero diagonals (Jacobi local solves hit zero diagonals) in parallel"
+	$(SKIP_KOKKOS_DEBUG) $(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_type pflareinv -pc_pflareinv_type isai \
+	 -ksp_max_it 20 -ksp_converged_maxits
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order in parallel"
