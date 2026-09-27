@@ -340,6 +340,13 @@ run_tests_no_load_short_serial:
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
 #
 	@echo ""
+	@echo "Test AIRG with advection, zero strong threshold and PMIS CF splitting (Aff not diagonal)"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 3 -pc_air_cf_splitting_type pmis -pc_air_strong_threshold 0.0
+	@echo ""
+	@echo "Test AIRG with advection, zero strong threshold and aggregation CF splitting (Aff not diagonal)"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type agg -pc_air_strong_threshold 0.0
+#
+	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
 	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_a_drop 1e-3 -pc_air_inverse_type power \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
