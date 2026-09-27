@@ -321,6 +321,15 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                                + ScratchIntView::shmem_size(j_max)
                                + ScratchIntView::shmem_size(j_max);
 
+   // The dense j_max x j_max block has to fit in the Kokkos level-1 team scratch cap.
+   // Outside of debug mode only rows with j_size <= iter_threshold come here, so this
+   // can only trigger when no_approx_solve_int forces every row through the direct
+   // solve (PFLARE_KOKKOS_DEBUG=1); error cleanly rather than failing inside Kokkos
+   PetscCheckAbort(level1_scratch <= static_cast<size_t>(team_policy_t::scratch_size_max(1)), PETSC_COMM_SELF, PETSC_ERR_SUP,
+      "SAI_Z direct solve needs %zu bytes of Kokkos level-1 team scratch for a sparsity row with %" PetscInt_FMT " entries, but the Kokkos maximum is %d bytes. "
+      "Reduce the sparsity (e.g., -pc_air_lair_distance or -pc_air_inverse_sparsity_order) or unset PFLARE_KOKKOS_DEBUG, which forces every row through the direct solve",
+      level1_scratch, j_max, team_policy_t::scratch_size_max(1));
+
    // Level 0 scratch budget for TeamGesv: it internally allocates n*(n+4) scalars
    // Disabling the level 0 scratch since we are using the nopivoting version of
    // teamgesv as it doesn't require temporary space
