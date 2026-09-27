@@ -94,6 +94,17 @@ for earlier changes please see the git history.
 - Fixed a crash when an assembled GMRES polynomial or SAI/ISAI inverse (in
   PCPFLAREINV or PCAIR) was set up in parallel after one had been set up on a
   single rank in the same program, eg as a block Jacobi sub-PC
+- Behaviour change: the Arnoldi basis GMRES polynomial (the default PCAIR
+  inverse type) now includes every entry of the least-squares residual in its
+  early termination test, so it no longer stops before reaching its tolerance
+  and iteration counts may change slightly
+- Fixed monomial GMRES polynomials with exactly zero interior coefficients
+  (eg set with `PCPFLAREINVSetPolyCoeffs`) applying the wrong polynomial, both
+  assembled and matrix-free
+- Newton basis GMRES polynomials: the modified Leja ordering of the roots no
+  longer depends on the scaling of the spectrum, and purely imaginary roots now
+  receive extra roots for stability, so results may change for tightly
+  clustered, small magnitude or skew-symmetric spectra
 
 ## [v1.27.0]
 
