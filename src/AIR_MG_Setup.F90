@@ -464,7 +464,12 @@ module air_mg_setup
          ! Check if Aff is only a diagonal
          if (check_diag_only) then      
 
-            call MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
+            ierr = MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
+            ! Don't carry on with a garbage diag_only if petsc failed in the c routine
+            if (ierr /= 0) then
+               print *, "MatGetDiagonalOnly_c failed"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
             ! If Aff is diagonal we can exploit this                
             if (diag_only == 1) then
                aff_diag = .TRUE.

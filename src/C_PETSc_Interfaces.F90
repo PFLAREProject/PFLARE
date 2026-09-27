@@ -44,13 +44,14 @@ module c_petsc_interfaces
    
    interface   
       
-      subroutine MatMPICreateNonemptySubcomm_c(A_array, on_subcomm, B_array) &
+      function MatMPICreateNonemptySubcomm_c(A_array, on_subcomm, B_array) &
          bind(c, name="MatMPICreateNonemptySubcomm_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_int)       :: on_subcomm
          integer(c_long_long) :: B_array
-      end subroutine MatMPICreateNonemptySubcomm_c         
+         PetscErrorCode       :: MatMPICreateNonemptySubcomm_c
+      end function MatMPICreateNonemptySubcomm_c         
  
    end interface
 
@@ -88,12 +89,13 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine MatGetDiagonalOnly_c(A_array, diag_only) &
+      function MatGetDiagonalOnly_c(A_array, diag_only) &
          bind(c, name="MatGetDiagonalOnly_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_int) :: diag_only
-      end subroutine MatGetDiagonalOnly_c         
+         PetscErrorCode :: MatGetDiagonalOnly_c
+      end function MatGetDiagonalOnly_c         
  
    end interface   
 
