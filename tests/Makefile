@@ -317,6 +317,12 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
+	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_poly_order 10
+	@echo ""
 	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
 	@echo ""
@@ -961,6 +967,12 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
