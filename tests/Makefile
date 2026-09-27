@@ -558,6 +558,20 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients in C - newton basis"
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - arnoldi basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - power basis"
+	$(SKIP_SINGLE) ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - newton basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - matrix-free newton basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_matrix_free
+	@echo "Test PCPFLAREINV returns no polynomial coefficients in C for non-polynomial types"
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type sai
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type isai
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type wjacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi -pc_pflareinv_matrix_free
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
@@ -610,6 +624,9 @@ run_tests_no_load_short_serial:
 	 -pc_pflareinv_poly_order 10
 	@echo "Test multiple RHS block solve with a matrix-free Neumann PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type neumann
+	@echo "Test multiple RHS block solve with matrix-free Jacobi PCPFLAREINVs - matrix-free is ignored for Jacobi"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type jacobi
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type wjacobi
 	@echo "Test multiple RHS block solve with PCAIR via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
 	@echo "Test multiple RHS block solve with a matrix-free PCAIR"
@@ -717,7 +734,17 @@ run_tests_no_load_short_serial:
 	@echo "Test PCApplyTranspose after the operator values change - the twin has to pick up new coefficients"
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
+	@echo "Test PCApplyTranspose with matrix-free Jacobi PCPFLAREINVs - matrix-free is ignored for Jacobi"
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type jacobi
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type wjacobi -rebuild
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type jacobi -rebuild -pc_pflareinv_reuse_poly_coeffs
+	@echo "Test matrix-free polys with Jacobi PCAIR inverses - matrix-free is ignored for Jacobi"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type jacobi -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_inverse_type wjacobi -pc_air_coarsest_matrix_free_polys
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild
+	@echo "Test PCPFLAREINV re-setup after toggling -pc_pflareinv_matrix_free through PCSetFromOptions"
+	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild -toggle_matrix_free
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild -toggle_matrix_free
 	@echo "Test KSPSolveTranspose through PCPFLAREINV, assembled and matrix-free"
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
@@ -952,6 +979,14 @@ else
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5
+#
+	@echo ""
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order in parallel"
+	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
+	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test block Jacobi with PCPFLAREINV sub-blocks with fewer rows than the polynomial order + 1 in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 2 -da_grid_y 4 -pc_type bjacobi -sub_pc_type pflareinv -sub_pc_pflareinv_type newton
 #
 	@echo ""
 	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
@@ -1263,6 +1298,9 @@ else
 	@echo "Test PCApplyTranspose after the operator values change in parallel"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
+	@echo "Test PCPFLAREINV re-setup after toggling -pc_pflareinv_matrix_free in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild -toggle_matrix_free
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild -toggle_matrix_free
 	@echo "Test KSPSolveTranspose through PCPFLAREINV in parallel, assembled and matrix-free"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \

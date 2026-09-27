@@ -12,7 +12,9 @@ The test passes when the residual norm of solve 3 equals that of solve 1\n\
 to within a relative tolerance of 1e-8.\n\
 For PCAIR it also checks that PCAIRGetPolyCoeffs/PCAIRSetPolyCoeffs return an\n\
 error (rather than corrupting memory) before setup, for an out of range level,\n\
-for an inverse with no stored coefficients and for mismatched sizes.\n\n";
+for an inverse with no stored coefficients and for mismatched sizes.\n\
+For the non-polynomial PCPFLAREINV types (sai, isai, wjacobi, jacobi) it\n\
+instead checks that no coefficients are returned, even after some are set.\n\n";
 
 #include <petscksp.h>
 #include <string.h>
@@ -99,6 +101,10 @@ int main(int argc, char **args)
   PetscBool   no_power = PETSC_FALSE;
   PetscBool   skip     = PETSC_FALSE;
 
+  /* PCPFLAREINV types without polynomial coefficients (sai, isai, wjacobi, jacobi) */
+  PetscBool   nonpoly  = PETSC_FALSE;
+  PetscReal   dummy_coeffs[1] = {1.0};
+
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
   PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
 
@@ -183,6 +189,12 @@ int main(int argc, char **args)
     PetscCall(PCPFLAREINVGetType(pc, &pflare_type));
     if (pflare_type == PFLAREINV_POWER) skip = PETSC_TRUE;
   }
+  if (is_pflareinv) {
+    PCPFLAREINVType pflare_type;
+    PetscCall(PCPFLAREINVGetType(pc, &pflare_type));
+    nonpoly = (PetscBool)(pflare_type == PFLAREINV_SAI || pflare_type == PFLAREINV_ISAI ||
+                          pflare_type == PFLAREINV_WJACOBI || pflare_type == PFLAREINV_JACOBI);
+  }
 
   if (!skip) {
     /* Getting/setting coefficients before setup must error */
@@ -231,6 +243,11 @@ int main(int argc, char **args)
                                         saved_rows[0],
                                         saved_cols[0]));
           PetscCall(PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE));
+        } else if (is_pflareinv && nonpoly) {
+          /* Setting (meaningless) coefficients with reuse on must be harmless and
+             they must be discarded by the setup */
+          PetscCall(PCPFLAREINVSetPolyCoeffs(pc, dummy_coeffs, 1, 1));
+          PetscCall(PCPFLAREINVSetReusePolyCoeffs(pc, PETSC_TRUE));
         } else if (is_pflareinv) {
           PetscCall(PCPFLAREINVSetPolyCoeffs(pc, saved_pflareinv_coeffs,
                                               saved_pflareinv_rows,
@@ -257,8 +274,23 @@ int main(int argc, char **args)
         if (count == 3) norm_third = norm;
       }
 
+      /* Non-polynomial PCPFLAREINV: there must be no coefficients after any setup */
+      if (is_pflareinv && nonpoly) {
+        PetscReal *ptr;
+        PetscInt   rows, cols;
+
+        PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &ptr, &rows, &cols));
+        if (ptr != NULL || rows != 0 || cols != 0) {
+          if (rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF,
+            "FAIL: non-polynomial PCPFLAREINV returned coefficients on solve %d (%d x %d)\n",
+            (int)count, (int)rows, (int)cols));
+          PetscCall(PetscFinalize());
+          return 1;
+        }
+      }
+
       /* After solve 1: save polynomial coefficients (copy internal data) */
-      if (count == 1) {
+      if (count == 1 && !nonpoly) {
         if (is_air) {
           PetscReal *ptr;
           PetscInt   rows, cols, petsc_level;
@@ -295,6 +327,17 @@ int main(int argc, char **args)
           memcpy(saved_pflareinv_coeffs, ptr, (size_t)(rows * cols) * sizeof(PetscReal));
           saved_pflareinv_rows = rows;
           saved_pflareinv_cols = cols;
+
+          /* Setting the coefficients with the pointer returned by Get (which aliases
+             the internal storage) must leave the stored coefficients unchanged */
+          PetscCall(PCPFLAREINVSetPolyCoeffs(pc, ptr, rows, cols));
+          PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &ptr, &rows, &cols));
+          if (rows != saved_pflareinv_rows || cols != saved_pflareinv_cols ||
+              memcmp(ptr, saved_pflareinv_coeffs, (size_t)(rows * cols) * sizeof(PetscReal)) != 0) {
+            PetscCall(PetscPrintf(PETSC_COMM_SELF, "FAIL: PCPFLAREINVSetPolyCoeffs with the Get pointer changed the coefficients\n"));
+            PetscCall(PetscFinalize());
+            return 1;
+          }
         }
       }
     } /* end for count */

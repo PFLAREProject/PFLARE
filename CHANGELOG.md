@@ -35,6 +35,23 @@ for earlier changes please see the git history.
 - Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
   and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
   routines match their definitions exactly (`PetscBool`, `int` by value)
+- Fixed `-pc_pflareinv_matrix_free` bypassing `PCPFLAREINVSetMatrixFree`, so
+  changing it after a setup (e.g. via `KSPSetFromOptions`) now resets the PC
+  instead of reusing the old inverse in the wrong form and crashing
+- Fixed PCPFLAREINV aborting with the GMRES polynomial types (power, arnoldi,
+  newton, newton_no_extra) on operators with fewer rows than the polynomial
+  order + 1 (e.g. small block Jacobi sub-blocks); the order is now clamped to
+  the matrix size as in PCAIR, so `PCPFLAREINVGetPolyCoeffs` returns the
+  clamped size
+- Fixed PCPFLAREINV crashing with `-pc_pflareinv_type jacobi` or `wjacobi`
+  and `-pc_pflareinv_matrix_free`; matrix-free is now ignored for the Jacobi
+  types, as it already was in PCAIR
+- Behaviour change: `PCPFLAREINVGetPolyCoeffs` now returns `NULL` and 0x0 for
+  the non-polynomial PCPFLAREINV types (sai, isai, wjacobi, jacobi) instead of
+  uninitialised memory, and coefficients set with `PCPFLAREINVSetPolyCoeffs`
+  are discarded during setup for these types
+- Fixed `PCPFLAREINVSetPolyCoeffs` reading freed memory when passed the
+  pointer returned by `PCPFLAREINVGetPolyCoeffs`
 
 ## [v1.27.0]
 
