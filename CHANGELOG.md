@@ -6,6 +6,36 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the shared library registration routine (called by PETSc when it
+  loads PFLARE, e.g., with `--download-pflare`) only registering PCAIR, so
+  `-pc_type pflareinv` now works without calling `PCRegister_PFLARE()`
+- `PCAIRGetPolyCoeffs` / `PCAIRSetPolyCoeffs` (C, Fortran and Python) now
+  error on an out of range level, a call before setup, an inverse with no
+  stored polynomial, or (set) mismatched sizes, rather than reading or writing
+  through invalid memory
+- `PCAIRSetReuseAmount` / `-pc_air_reuse_amount` (and the Python
+  `pcair_set_reuse_amount`) now reject values other than 1, 2 or 3 with
+  `PETSC_ERR_ARG_OUTOFRANGE` (`ValueError` in Python); previously they were
+  used unchecked to index the reuse tables
+- Fixed `PCAIRSetDiagScalePolys` / `-pc_air_diag_scale_polys` being silently
+  ignored while the inverse type was Neumann, which lost the setting for the C
+  point inverse and for any later change of inverse type. `PCAIRGetDiagScalePolys`
+  now returns the stored value (Neumann still always diagonally scales)
+- Fixed the PCAIR C point smoother options (`-pc_air_c_inverse_type`,
+  `-pc_air_c_poly_order`, `-pc_air_c_inverse_sparsity_order`): values set via
+  the API are no longer overwritten by the F point values in
+  `PCSetFromOptions`, and if unset they now follow the F point smoother values
+  as documented, even without calling `PCSetFromOptions`
+- `PCAIRSetSmoothType` / `-pc_air_smooth_type` (and the Python
+  `pcair_set_smooth_type`) now error on smooth types longer than 10 characters
+  (`ValueError` in Python) rather than silently truncating them
+- The Python `pcair_*` / `pcpflareinv_*` wrappers now call the public C API and
+  raise `PETSc.Error` when given a PC of the wrong type, rather than crashing
+  (PCAIR) or silently returning a default value (PCPFLAREINV getters)
+- Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
+  and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
+  routines match their definitions exactly (`PetscBool`, `int` by value)
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

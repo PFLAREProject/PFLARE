@@ -4,8 +4,7 @@ module pcair_interfaces
    use petscksp
    use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
    use air_mg_stats, only: compute_stats
-   use pflare_parameters, only: PFLAREINV_NEUMANN, &
-         COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
+   use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -364,6 +363,75 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
+
+      ! Returns a pointer to the polynomial coefficients stored internally in the PC
+      ! for the given level and inverse, or a null pointer if there are none. That is
+      ! the case if which_inverse is unknown, petsc_level is out of range, PCSetUp
+      ! has not been called (or the PC has been reset since), or the requested
+      ! inverse is not stored as a polynomial on that level (e.g. COEFFS_INV_ACC when
+      ! there is no C point smoothing)
+      ! petsc_level is ignored for COEFFS_INV_COARSE
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                        :: pc
+      PetscInt, intent(in)                            :: petsc_level
+      integer, intent(in)                             :: which_inverse
+      PetscReal, dimension(:,:), pointer, contiguous, intent(out) :: coeffs_internal
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      PetscInt                              :: num_levels
+      PetscErrorCode                        :: ierr
+      integer                               :: our_level
+      ! ~~~~~~~~
+
+      coeffs_internal => null()
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+
+      ! Coarsest grid matrix
+      if (which_inverse == COEFFS_INV_COARSE) then
+         coeffs_internal => pc_air_data%air_data%inv_coarsest_poly_data%coefficients
+         return
+      end if
+
+      ! Get the number of levels in our mg - this is -1 before setup
+      call PCAIRGetNumLevels(pc, num_levels, ierr)
+
+      ! Check the level is in range before indexing any of the level data
+      if (petsc_level < 0 .OR. petsc_level >= num_levels) return
+
+      ! We order our levels from 1 to num_levels
+      our_level = int(num_levels - petsc_level)
+
+      ! Inverse Aff
+      if (which_inverse == COEFFS_INV_AFF) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data)) return
+         coeffs_internal => pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients
+
+      ! Inverse dropped Aff
+      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
+         coeffs_internal => pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients
+
+      ! Inverse Acc
+      else if (which_inverse == COEFFS_INV_ACC) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_cc_poly_data)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_cc_poly_data)) return
+         coeffs_internal => pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients
+      end if
+
+   end subroutine PCAIRGetPolyCoeffsPointer
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr)
 
       ! This routine returns a copy of the polynomial coefficients stored in the PC.
@@ -378,108 +446,33 @@ module pcair_interfaces
       PetscReal, dimension(:,:), pointer, intent(inout)       :: coeffs
       PetscErrorCode, intent(out)                        :: ierr
 
-      type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
-      PetscInt                              :: num_levels
-      integer                               :: our_level, errorcode
+      PetscReal, dimension(:,:), pointer, contiguous :: coeffs_internal
+      integer                               :: errorcode
       ! ~~~~~~~~
 
-      ! Get the underlying PCShell
-      call PCAIRGetPCShell(pc, pc_shell)
+      call PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
 
-      ! Get the PC shell context
-      call PCShellGetContext(pc_shell, pc_air_data, ierr)
-
-      ! Get the number of levels in our mg
-      call PCAIRGetNumLevels(pc, num_levels, ierr) 
-
-      ! We order our levels from 1 to num_levels
-      our_level = int(num_levels - petsc_level)
-
-      ! Inverse Aff
-      if (which_inverse == COEFFS_INV_AFF) then
-
-         ! Check sizes
-         if (associated(coeffs)) then
-            if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 1) .AND. &
-                size(coeffs,2) == size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 2))) then
-
-               deallocate(coeffs)
-               coeffs => null()
-            end if
-         end if
-
-         if (.NOT. associated(coeffs)) then
-            allocate(coeffs(size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 1), &
-                            size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 2)))
-         end if
-
-         coeffs = pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients
-
-      ! Inverse dropped Aff
-      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
-
-         ! Check sizes
-         if (associated(coeffs)) then
-            if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 1) .AND. &
-                size(coeffs,2) == size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 2))) then
-
-               deallocate(coeffs)
-               coeffs => null()
-            end if
-         end if
-
-         if (.NOT. associated(coeffs)) then
-            allocate(coeffs(size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 1), &
-                            size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 2)))
-         end if         
-
-         coeffs = pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients
-
-      ! Inverse Acc
-      else if (which_inverse == COEFFS_INV_ACC) then
-
-         ! Check sizes
-         if (associated(coeffs)) then
-            if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 1) .AND. &
-                size(coeffs,2) == size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 2))) then
-
-               deallocate(coeffs)
-               coeffs => null()
-            end if
-         end if
-
-         if (.NOT. associated(coeffs)) then
-            allocate(coeffs(size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 1), &
-                            size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 2)))
-         end if          
-
-         coeffs = pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients
-
-      ! Coarsest grid matrix
-      else if (which_inverse == COEFFS_INV_COARSE) then
-
-         ! Check sizes
-         if (associated(coeffs)) then
-            if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 1) .AND. &
-                size(coeffs,2) == size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 2))) then
-
-               deallocate(coeffs)
-               coeffs => null()
-            end if
-         end if
-
-         if (.NOT. associated(coeffs)) then
-            allocate(coeffs(size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 1), &
-                            size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 2)))
-         end if         
-
-         coeffs = pc_air_data%air_data%inv_coarsest_poly_data%coefficients
-
-      else
-         print *, "Unknown which_inverse in PCAIRGetPolyCoeffs"
+      if (.NOT. associated(coeffs_internal)) then
+         print *, "PCAIRGetPolyCoeffs: no coefficients stored for this petsc_level and which_inverse;", &
+                  " check both are valid and that PCSetUp has been called"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
+
+      ! Check sizes
+      if (associated(coeffs)) then
+         if (.NOT. (size(coeffs,1) == size(coeffs_internal, 1) .AND. &
+             size(coeffs,2) == size(coeffs_internal, 2))) then
+
+            deallocate(coeffs)
+            coeffs => null()
+         end if
+      end if
+
+      if (.NOT. associated(coeffs)) then
+         allocate(coeffs(size(coeffs_internal, 1), size(coeffs_internal, 2)))
+      end if
+
+      coeffs = coeffs_internal
 
       ierr = 0
 
@@ -500,100 +493,32 @@ module pcair_interfaces
       PetscReal, dimension(:,:), pointer, intent(in)          :: coeffs
       PetscErrorCode, intent(out)                        :: ierr
 
-      type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
-      PetscInt                              :: num_levels
-      integer                               :: our_level, errorcode
+      PetscReal, dimension(:,:), pointer, contiguous :: coeffs_internal
+      integer                               :: errorcode
       ! ~~~~~~~~
 
-      ! Get the underlying PCShell
-      call PCAIRGetPCShell(pc, pc_shell)
+      call PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
 
-      ! Get the PC shell context
-      call PCShellGetContext(pc_shell, pc_air_data, ierr)
-
-      ! Get the number of levels in our mg
-      call PCAIRGetNumLevels(pc, num_levels, ierr) 
-
-      ! We order our levels from 1 to num_levels
-      our_level = int(num_levels - petsc_level)
-
-      ! Inverse Aff
-      if (which_inverse == COEFFS_INV_AFF) then
-
-         if (.NOT. associated(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
-            print *, "PCAIR MG not setup yet"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)            
-         end if
-
-         ! Check sizes
-         if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 1) .AND. &
-               size(coeffs,2) == size(pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients, 2))) then
-
-            print *, "Sizes wrong in PCAIRSetPolyCoeffs"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if
-
-         pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients = coeffs
-
-      ! Inverse dropped Aff
-      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
-
-         if (.NOT. associated(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
-            print *, "PCAIR MG not setup yet"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)            
-         end if         
-
-         ! Check sizes
-         if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 1) .AND. &
-               size(coeffs,2) == size(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, 2))) then
-
-            print *, "Sizes wrong in PCAIRSetPolyCoeffs"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if
-       
-         pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients = coeffs
-
-      ! Inverse Acc
-      else if (which_inverse == COEFFS_INV_ACC) then
-
-         if (.NOT. associated(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
-            print *, "PCAIR MG not setup yet"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)            
-         end if          
-
-         ! Check sizes
-         if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 1) .AND. &
-               size(coeffs,2) == size(pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients, 2))) then
-
-            print *, "Sizes wrong in PCAIRSetPolyCoeffs"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if
-
-         pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients = coeffs
-
-      ! Coarsest grid matrix
-      else if (which_inverse == COEFFS_INV_COARSE) then
-
-         if (.NOT. associated(pc_air_data%air_data%inv_coarsest_poly_data%coefficients)) then
-            print *, "PCAIR MG not setup yet"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)            
-         end if          
-
-         ! Check sizes
-         if (.NOT. (size(coeffs,1) == size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 1) .AND. &
-               size(coeffs,2) == size(pc_air_data%air_data%inv_coarsest_poly_data%coefficients, 2))) then
-
-            print *, "Sizes wrong in PCAIRSetPolyCoeffs"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-         end if        
-
-         pc_air_data%air_data%inv_coarsest_poly_data%coefficients = coeffs
-
-      else
-         print *, "Unknown which_inverse in PCAIRSetPolyCoeffs"
+      if (.NOT. associated(coeffs_internal)) then
+         print *, "PCAIRSetPolyCoeffs: no coefficients stored for this petsc_level and which_inverse;", &
+                  " check both are valid and that PCSetUp has been called"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
+
+      if (.NOT. associated(coeffs)) then
+         print *, "PCAIRSetPolyCoeffs: coeffs is not associated"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Check sizes
+      if (.NOT. (size(coeffs,1) == size(coeffs_internal, 1) .AND. &
+            size(coeffs,2) == size(coeffs_internal, 2))) then
+
+         print *, "Sizes wrong in PCAIRSetPolyCoeffs"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      coeffs_internal = coeffs
 
       ierr = 0
 
@@ -803,12 +728,11 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      ! Always true for neumann
-      if (options%inverse_type == PFLAREINV_NEUMANN) then
-         scale = .TRUE.
-      else
-         scale = options%diag_scale_polys
-      end if
+      ! Return the stored value, even if the inverse type is neumann
+      ! Neumann polynomials always diagonally scale regardless of this flag,
+      ! but it is still used by the other inverses (e.g., C point smoothing)
+      ! and must survive a later change of inverse type
+      scale = options%diag_scale_polys
       ierr = 0
 
    end subroutine PCAIRGetDiagScalePolys   
@@ -1017,7 +941,12 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      inv_type = options%c_inverse_type
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_inverse_type == -1) then
+         inv_type = options%inverse_type
+      else
+         inv_type = options%c_inverse_type
+      end if
       ierr = 0
 
    end subroutine PCAIRGetCInverseType   
@@ -1074,7 +1003,12 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      order = options%c_poly_order
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_poly_order == -1) then
+         order = options%poly_order
+      else
+         order = options%c_poly_order
+      end if
       ierr = 0
 
    end subroutine PCAIRGetCPolyOrder
@@ -1093,7 +1027,12 @@ module pcair_interfaces
 
       ! Get the options
       call PCAIRGetOptions(pc, options)    
-      order = options%c_inverse_sparsity_order
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_inverse_sparsity_order == -1) then
+         order = options%inverse_sparsity_order
+      else
+         order = options%c_inverse_sparsity_order
+      end if
       ierr = 0
 
    end subroutine PCAIRGetCInverseSparsityOrder   
@@ -1833,6 +1772,15 @@ module pcair_interfaces
       integer :: errorcode, n, i
       ! ~~~~~~~~
 
+      ! Each block of consecutive f or c characters takes one entry of smooth_order
+      ! and the C interfaces only pass 10 characters, so limit the length
+      ! to the size of smooth_order
+      call PCAIRGetOptions(pc, options)
+      if (len_trim(input_string) > size(options%smooth_order)) then
+         print *, "Smooth order must be at most ", size(options%smooth_order), " characters"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
       call PCAIRGetSmoothType(pc, old_string, ierr)
       if (trim(old_string) == trim(input_string)) then
          ierr = 0
@@ -2293,6 +2241,10 @@ module pcair_interfaces
 
       call PCAIRGetCInverseType(pc, old_type, ierr)
       if (old_type == inv_type) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_inverse_type = inv_type
          ierr = 0
          return
       end if
@@ -2448,6 +2400,10 @@ module pcair_interfaces
 
       call PCAIRGetCPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_poly_order = int(order)
          ierr = 0
          return
       end if
@@ -2479,6 +2435,10 @@ module pcair_interfaces
 
       call PCAIRGetCInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_inverse_sparsity_order = int(order)
          ierr = 0
          return
       end if
@@ -2812,6 +2772,15 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt :: old_int
       ! ~~~~~~~~
+
+      ! The amount is used as an index into REUSE_MAT_ACTIVE/REUSE_IS_ACTIVE
+      ! so only 1, 2 and 3 are valid
+      if (amount < 1 .OR. amount > 3) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Reuse amount must be 1, 2 or 3")
+         return
+      end if
 
       call PCAIRGetReuseAmount(pc, old_int, ierr)
       if (old_int == amount) then
