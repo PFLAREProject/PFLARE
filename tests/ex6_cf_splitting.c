@@ -1,6 +1,7 @@
 static char help[] = "Checks we can read in a linear system and compute a CF splitting.\n\
 Input arguments are:\n\
-  -f <input_file> : file to load. For example see $PETSC_DIR/share/petsc/datafiles/matrices\n\n";
+  -f <input_file> : file to load. For example see $PETSC_DIR/share/petsc/datafiles/matrices\n\
+  -zero_diag_stride <n> : if > 0, zero the diagonal of every n-th global row after loading\n\n";
 
 #include <petscksp.h>
 #include <petsclog.h>
@@ -73,8 +74,46 @@ static PetscErrorCode CheckSplitting(Mat A, IS is_fine, IS is_coarse, const char
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Check that every locally owned row with a zero (or missing) diagonal but a nonzero
+// off-diagonal has been made a C point - an F point like that gives Aff a zero diagonal
+static PetscErrorCode CheckZeroDiagCoarse(Mat A, IS is_fine, const char *label)
+{
+  PetscInt          i, j, ncols, nlocal, n_zero_diag = 0, n_zero_diag_global = 0;
+  const PetscInt    *cols, *idx_fine;
+  const PetscScalar *vals;
+  PetscReal         diag_val, off_diag_sum;
+  PetscMPIInt       rank;
+
+  PetscFunctionBeginUser;
+  PetscCallMPI(MPI_Comm_rank(PETSC_COMM_WORLD, &rank));
+
+  PetscCall(ISGetLocalSize(is_fine, &nlocal));
+  PetscCall(ISGetIndices(is_fine, &idx_fine));
+  for (i = 0; i < nlocal; i++) {
+    diag_val = 0.0;
+    off_diag_sum = 0.0;
+    PetscCall(MatGetRow(A, idx_fine[i], &ncols, &cols, &vals));
+    for (j = 0; j < ncols; j++) {
+      if (cols[j] == idx_fine[i]) diag_val = PetscAbsScalar(vals[j]);
+      else off_diag_sum += PetscAbsScalar(vals[j]);
+    }
+    PetscCall(MatRestoreRow(A, idx_fine[i], &ncols, &cols, &vals));
+    if (diag_val == 0.0 && off_diag_sum != 0.0) n_zero_diag++;
+  }
+  PetscCall(ISRestoreIndices(is_fine, &idx_fine));
+
+  PetscCallMPI(MPI_Allreduce(&n_zero_diag, &n_zero_diag_global, 1, MPIU_INT, MPI_SUM, PETSC_COMM_WORLD));
+  PetscCheck(n_zero_diag_global == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB,
+             "%s: %" PetscInt_FMT " F points have a zero diagonal", label, n_zero_diag_global);
+
+  if (!rank) PetscCall(PetscPrintf(PETSC_COMM_SELF, "%s: no zero diagonal F points OK\n", label));
+
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // Check that a returned diagonally dominant submatrix is diagonally dominant
-//   ratio = sum(abs(offdiag entries)) / abs(diagonal), with ratio=0 if no diagonal exists.
+//   ratio = sum(abs(offdiag entries)) / abs(diagonal), with ratio=0 if the row is empty
+//   and ratio=inf if there is no diagonal but there are off-diagonal entries.
 static PetscErrorCode CheckDiagDomSubmatrix(Mat A, Mat A_dd, PetscReal max_dd_ratio, const char *label)
 {
   PetscInt    a_local_rows, a_local_cols, a_global_rows, a_global_cols;
@@ -113,7 +152,7 @@ static PetscErrorCode CheckDiagDomSubmatrix(Mat A, Mat A_dd, PetscReal max_dd_ra
     PetscCall(MatRestoreRow(A_dd, i, &ncols, &cols, &vals));
 
     // Ensure we don't divide by zero if no diagonal
-    row_ratio = (diag_val != 0.0) ? (off_diag_sum / diag_val) : 0.0;
+    row_ratio = (diag_val != 0.0) ? (off_diag_sum / diag_val) : (off_diag_sum != 0.0 ? PETSC_INFINITY : 0.0);
     max_row_ratio_local = PetscMax(max_row_ratio_local, row_ratio);
 
   }
@@ -144,12 +183,14 @@ int main(int argc,char **args)
   char           file[PETSC_MAX_PATH_LEN];
   PetscViewer    fd;
   PetscBool      flg,b_in_f = PETSC_TRUE;
+  PetscInt       zero_diag_stride = 0;
   IS is_fine, is_coarse;
   Mat A_dd;
   VecType vtype;
 
   PetscCall(PetscInitialize(&argc,&args,(char*)0,help));
   PetscCall(PetscOptionsGetBool(NULL,NULL,"-b_in_f",&b_in_f,NULL));
+  PetscCall(PetscOptionsGetInt(NULL,NULL,"-zero_diag_stride",&zero_diag_stride,NULL));
 
   /* Read matrix and RHS */
   PetscCall(PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg));
@@ -197,6 +238,19 @@ int main(int argc,char **args)
   PetscCall(VecDuplicate(b,&u));
 
   PetscCall(VecSet(x,0.0));
+
+  // Optionally zero the diagonal of every zero_diag_stride'th global row
+  // The CF splittings below must then never leave those rows as F points
+  if (zero_diag_stride > 0) {
+    PetscInt rstart, rend, i;
+    PetscCall(MatGetOwnershipRange(A, &rstart, &rend));
+    PetscCall(MatSetOption(A, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_FALSE));
+    for (i = rstart; i < rend; i++) {
+      if (i % zero_diag_stride == 0) PetscCall(MatSetValue(A, i, i, 0.0, INSERT_VALUES));
+    }
+    PetscCall(MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY));
+    PetscCall(MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY));
+  }
   PetscCall(PetscBarrier((PetscObject)A));
 
   PetscCall(PetscLogStageRegister("mystage 1",&stage1));
@@ -228,6 +282,7 @@ int main(int argc,char **args)
      &is_fine, &is_coarse);
 
   PetscCall(CheckSplitting(A, is_fine, is_coarse, "default PMISR_DDC"));
+  PetscCall(CheckZeroDiagCoarse(A, is_fine, "default PMISR_DDC"));
 
   PetscCall(ISDestroy(&is_fine));
   PetscCall(ISDestroy(&is_coarse));  
@@ -250,6 +305,7 @@ int main(int argc,char **args)
      &is_fine, &is_coarse);
 
   PetscCall(CheckSplitting(A, is_fine, is_coarse, "diag_dom strong_threshold=0.5"));
+  PetscCall(CheckZeroDiagCoarse(A, is_fine, "diag_dom strong_threshold=0.5"));
 
   PetscCall(ISDestroy(&is_fine));
   PetscCall(ISDestroy(&is_coarse));
