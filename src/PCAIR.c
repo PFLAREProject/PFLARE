@@ -2776,7 +2776,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
 
   Input Parameters:
 + pc        - the `PCAIR` preconditioner context
-- input_int - the amount of data to store when `-pc_air_reuse_sparsity` is enabled
+- input_int - the amount of data to store when `-pc_air_reuse_sparsity` is enabled, must be 1, 2 or 3
 
   Options Database Key:
 . -pc_air_reuse_amount amount - how much data to store when `-pc_air_reuse_sparsity` is enabled: 1 stores only the CF splitting and parallel repartitioning, 2 additionally stores everything needed to reuse sparsity in the SpGEMMs, and 3 stores everything; defaults to 3
@@ -2794,6 +2794,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // The amount indexes the reuse tables in AIR_Data_Type.F90 so must be 1, 2 or 3
+   PetscCheck(input_int >= 1 && input_int <= 3, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Reuse amount %" PetscInt_FMT " must be 1, 2 or 3", input_int);
    PCAIRSetReuseAmount_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2925,7 +2927,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    // ~~~~
    PetscCall(PCAIRGetReuseAmount(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_reuse_amount", "Amount of data to reuse during setup with reuse_sparsity (1, 2, or 3 - 3 is store everything)", "PCAIRSetReuseAmount", old_int, &input_int, NULL));
+   PetscCall(PetscOptionsRangeInt("-pc_air_reuse_amount", "Amount of data to reuse during setup with reuse_sparsity (1, 2, or 3 - 3 is store everything)", "PCAIRSetReuseAmount", old_int, &input_int, NULL, 1, 3));
    PetscCall(PCAIRSetReuseAmount(pc, input_int));
    // ~~~~
    PetscCall(PCAIRGetProcessorAgglomRatio(pc, &old_real));

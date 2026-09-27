@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- `PCAIRSetReuseAmount` / `-pc_air_reuse_amount` (and the Python
+  `pcair_set_reuse_amount`) now reject values other than 1, 2 or 3 with
+  `PETSC_ERR_ARG_OUTOFRANGE` (`ValueError` in Python); previously they were
+  used unchecked to index the reuse tables
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

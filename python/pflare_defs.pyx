@@ -668,10 +668,14 @@ cpdef pcair_set_reuse_poly_coeffs(PC pc, bint flag):
 cpdef pcair_set_reuse_amount(PC pc, int amount):
 	"""Set how much data PCAIR stores for reuse when reuse_sparsity is enabled.
 
-	1 - store only graph-partitioner IS and symbolic SpGEMM matrices (MAT_AP, MAT_RAP)
-	2 - additionally store repartitioned matrices and CF-splitting related matrices/IS
-	3 - store everything (default, preserves previous behaviour)
+	1 - store only the CF splitting and parallel repartitioning
+	2 - additionally store everything needed to reuse sparsity in the SpGEMMs
+	3 - store everything (default)
+
+	Raises ValueError for any other amount.
 	"""
+	if amount < 1 or amount > 3:
+		raise ValueError(f"reuse amount {amount} must be 1, 2 or 3")
 	PCAIRSetReuseAmount_c(&(pc.pc), <PetscInt>amount)
 
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
