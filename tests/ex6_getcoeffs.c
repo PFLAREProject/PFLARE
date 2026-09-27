@@ -9,12 +9,63 @@ Three solves are performed:\n\
   Solve 3 - original system again, with saved coefficients restored\n\
 \n\
 The test passes when the residual norm of solve 3 equals that of solve 1\n\
-to within a relative tolerance of 1e-8.\n\n";
+to within a relative tolerance of 1e-8.\n\
+For PCAIR it also checks that PCAIRGetPolyCoeffs/PCAIRSetPolyCoeffs return an\n\
+error (rather than corrupting memory) before setup, for an out of range level,\n\
+for an inverse with no stored coefficients and for mismatched sizes.\n\n";
 
 #include <petscksp.h>
 #include <string.h>
 #include <stdlib.h>
 #include "pflare.h"
+
+/* Calls PCAIRGetPolyCoeffs/PCAIRSetPolyCoeffs with invalid arguments and checks that
+   each returns an error. Errors are returned (not printed or aborted on) while the
+   PetscReturnErrorHandler is pushed, so the results are only checked after popping it */
+static PetscErrorCode CheckPCAIRPolyCoeffsErrors(PC pc, PetscBool after_setup)
+{
+  PetscErrorCode ierr[5];
+  PetscInt       n_checks = 0, num_levels = 0, rows = 0, cols = 0, k;
+  PetscReal     *ptr = NULL, *internal = NULL;
+  PetscReal      dummy[64];
+
+  PetscFunctionBegin;
+  for (k = 0; k < 64; k++) dummy[k] = 0.0;
+  if (after_setup) {
+    PetscCall(PCAIRGetNumLevels(pc, &num_levels));
+    PetscCall(PCAIRGetPolyCoeffs(pc, num_levels - 1, COEFFS_INV_AFF, &internal, &rows, &cols));
+    PetscCheck((rows + 1) * cols <= 64, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Test buffer too small");
+  }
+
+  PetscCall(PetscPushErrorHandler(PetscReturnErrorHandler, NULL));
+  if (!after_setup) {
+    /* No hierarchy exists before PCSetUp() */
+    ierr[n_checks++] = PCAIRGetPolyCoeffs(pc, 1, COEFFS_INV_AFF, &ptr, &rows, &cols);
+    ierr[n_checks++] = PCAIRGetPolyCoeffs(pc, 0, COEFFS_INV_COARSE, &ptr, &rows, &cols);
+    ierr[n_checks++] = PCAIRSetPolyCoeffs(pc, 0, COEFFS_INV_COARSE, dummy, 1, 1);
+  } else {
+    /* Out of range levels */
+    ierr[n_checks++] = PCAIRGetPolyCoeffs(pc, num_levels, COEFFS_INV_AFF, &ptr, &rows, &cols);
+    ierr[n_checks++] = PCAIRGetPolyCoeffs(pc, -1, COEFFS_INV_AFF, &ptr, &rows, &cols);
+    /* No C point smoothing in these tests, so no Acc polynomial is stored */
+    ierr[n_checks++] = PCAIRGetPolyCoeffs(pc, num_levels - 1, COEFFS_INV_ACC, &ptr, &rows, &cols);
+    /* Unknown inverse */
+    ierr[n_checks++] = PCAIRGetPolyCoeffs(pc, num_levels - 1, 99, &ptr, &rows, &cols);
+    /* Sizes that don't match those stored */
+    ierr[n_checks++] = PCAIRSetPolyCoeffs(pc, num_levels - 1, COEFFS_INV_AFF, dummy, rows + 1, cols);
+  }
+  PetscCall(PetscPopErrorHandler());
+
+  for (k = 0; k < n_checks; k++) {
+    PetscCheck(ierr[k] != PETSC_SUCCESS, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Invalid PCAIR poly coeffs call %" PetscInt_FMT " (after setup %d) did not error", k, (int)after_setup);
+  }
+  /* The failed calls must not have changed the stored coefficients */
+  if (after_setup) {
+    PetscCall(PCAIRGetPolyCoeffs(pc, num_levels - 1, COEFFS_INV_AFF, &ptr, &rows, &cols));
+    PetscCheck(ptr == internal, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Stored coefficients moved");
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 int main(int argc, char **args)
 {
@@ -134,6 +185,9 @@ int main(int argc, char **args)
   }
 
   if (!skip) {
+    /* Getting/setting coefficients before setup must error */
+    if (is_air) PetscCall(CheckPCAIRPolyCoeffsErrors(pc, PETSC_FALSE));
+
     for (count = 1; count <= nsteps; count++) {
 
       /* Modify the operator between solves so that solve 3 reproduces solve 1 */
@@ -228,6 +282,9 @@ int main(int argc, char **args)
           memcpy(saved_coeffs[0], ptr, (size_t)(rows * cols) * sizeof(PetscReal));
           saved_rows[0] = rows;
           saved_cols[0] = cols;
+
+          /* Invalid gets/sets must error; the saved copies above are unaffected */
+          PetscCall(CheckPCAIRPolyCoeffsErrors(pc, PETSC_TRUE));
 
         } else if (is_pflareinv) {
           PetscReal *ptr;

@@ -129,7 +129,6 @@ PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size);
 
 // ~~~~~~~~~~~~~
 
@@ -274,6 +273,25 @@ static PetscErrorCode PCAIRCheckType(PC pc)
    PetscValidHeaderSpecific(pc, PC_CLASSID, 1);
    PetscCall(PetscObjectTypeCompare((PetscObject)pc, PCAIR, &is_air));
    PetscCheck(is_air, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_WRONG, "PC is not of type PCAIR");
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Returns a pointer to the polynomial coefficients stored internally by PCAIR for a given
+// level and inverse, erroring if there are none. Used by both PCAIRGetPolyCoeffs and
+// PCAIRSetPolyCoeffs; petsc_level is ignored for COEFFS_INV_COARSE
+static PetscErrorCode PCAIRGetPolyCoeffsPointer_Private(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
+{
+   PetscInt num_levels;
+
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PetscCheck(which_inverse == COEFFS_INV_AFF || which_inverse == COEFFS_INV_AFF_DROPPED || which_inverse == COEFFS_INV_ACC || which_inverse == COEFFS_INV_COARSE, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "Unknown which_inverse %d", which_inverse);
+   // The number of levels is -1 before PCSetUp() and after the hierarchy is reset
+   PCAIRGetNumLevels_c(&pc, &num_levels);
+   PetscCheck(num_levels > 0, PETSC_COMM_SELF, PETSC_ERR_ORDER, "PCAIR has no multigrid hierarchy; call PCSetUp() first");
+   PetscCheck(which_inverse == COEFFS_INV_COARSE || (petsc_level >= 0 && petsc_level < num_levels), PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "petsc_level %" PetscInt_FMT " out of range [0, %" PetscInt_FMT "]", petsc_level, num_levels - 1);
+   PCAIRGetPolyCoeffs_c(&pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size);
+   PetscCheck(*coeffs_ptr, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "PCAIR stores no polynomial coefficients for which_inverse %d on petsc_level %" PetscInt_FMT "; that inverse is not built as a polynomial there with the current options", which_inverse, petsc_level);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1355,14 +1373,19 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
   `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
   the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
+  It is an error to call this before `PCSetUp()`, with petsc_level outside [0, number of levels - 1], or for an
+  inverse that is not stored as a polynomial on that level (e.g. `COEFFS_INV_ACC` without C point smoothing).
+  petsc_level is ignored for `COEFFS_INV_COARSE`.
+
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetPolyCoeffs()`, `PCAIRGetReusePolyCoeffs()`, `WhichInverseType`, `PCSetUp()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 {
    PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRGetPolyCoeffs_c(&pc,petsc_level, which_inverse, \
-      coeffs_ptr, row_size, col_size);
+   PetscAssertPointer(coeffs_ptr, 4);
+   PetscAssertPointer(row_size, 5);
+   PetscAssertPointer(col_size, 6);
+   PetscCall(PCAIRGetPolyCoeffsPointer_Private(pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2814,16 +2837,21 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 
   Note:
   This routine copies the data from coeffs_ptr into the `PCAIR` object; the caller's array is not referenced after
-  this call and may be freed or modified.
+  this call and may be freed or modified. row_size and col_size must match the sizes returned by
+  `PCAIRGetPolyCoeffs()` for the same petsc_level and which_inverse, which must also be valid there.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 {
+   PetscReal *coeffs_internal;
+   PetscInt   rows_internal, cols_internal;
+
    PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRSetPolyCoeffs_c(&pc,petsc_level, which_inverse, \
-      coeffs_ptr, row_size, col_size);
+   PetscCall(PCAIRGetPolyCoeffsPointer_Private(pc, petsc_level, which_inverse, &coeffs_internal, &rows_internal, &cols_internal));
+   PetscCheck(row_size == rows_internal && col_size == cols_internal, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT " but PCAIR stores %" PetscInt_FMT " x %" PetscInt_FMT " for which_inverse %d on petsc_level %" PetscInt_FMT, row_size, col_size, rows_internal, cols_internal, which_inverse, petsc_level);
+   PetscAssertPointer(coeffs_ptr, 4);
+   PetscCall(PetscArraycpy(coeffs_internal, coeffs_ptr, rows_internal * cols_internal));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

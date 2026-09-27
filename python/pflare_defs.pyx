@@ -6,6 +6,7 @@ from petsc4py import PETSc
 from petsc4py.PETSc cimport Mat, PetscMat
 from petsc4py.PETSc cimport PC, PetscPC
 from petsc4py.PETSc cimport IS, PetscIS
+from petsc4py.PETSc cimport PetscErrorCode, CHKERR
 
 
 # Bring PetscInt and PetscReal from petsc.h so the C compiler resolves the
@@ -94,8 +95,10 @@ cdef extern:
 
 	# PCAIR - polynomial coefficients
 	# Returns a pointer into internal PCAIR memory (valid until the next PCSetUp or PCReset).
-	# The Python wrapper copies the data before returning.
-	void PCAIRGetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
+	# The Python wrapper copies the data before returning. Calls the C wrapper (not the
+	# _c Fortran routine) so an invalid level/inverse or a call before setup raises a
+	# PETSc error rather than reading through a null pointer.
+	PetscErrorCode PCAIRGetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 	void PCAIRGetGridComplexity_c(PetscPC *pc, PetscReal *complexity)
 	void PCAIRGetOperatorComplexity_c(PetscPC *pc, PetscReal *complexity)
@@ -156,8 +159,9 @@ cdef extern:
 	void PCAIRSetReusePolyCoeffs_c(PetscPC *pc, int input_bool)
 	void PCAIRSetReuseAmount_c(PetscPC *pc, PetscInt amount)
 
-	# PCAIR - set polynomial coefficients (copies from the provided pointer)
-	void PCAIRSetPolyCoeffs_c(PetscPC *pc, PetscInt petsc_level, int which_inverse,
+	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
+	# wrapper checks the level/inverse are valid and the sizes match before copying.
+	PetscErrorCode PCAIRSetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 
 	# PCPFLAREINV - Get routines (PC passed by value, not pointer)
@@ -496,8 +500,8 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt row_size = 0, col_size = 0
 	cdef PetscInt i, j
-	PCAIRGetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
-	                      &coeffs_ptr, &row_size, &col_size)
+	CHKERR(PCAIRGetPolyCoeffs(pc.pc, petsc_level, which_inverse,
+	                          &coeffs_ptr, &row_size, &col_size))
 	# Match the numpy dtype to the build's PetscReal width (float32 single /
 	# float64 double) and copy element-wise through the PetscReal* pointer.
 	# A raw memcpy sized with sizeof(PetscReal) into a double[::1,:] view would
@@ -697,8 +701,8 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	cdef PetscInt row_size = <PetscInt>staging.shape[0]
 	cdef PetscInt col_size = <PetscInt>staging.shape[1]
 	cdef PetscReal *sptr = <PetscReal*><size_t>staging.ctypes.data
-	PCAIRSetPolyCoeffs_c(&(pc.pc), petsc_level, which_inverse,
-	                      sptr, row_size, col_size)
+	CHKERR(PCAIRSetPolyCoeffs(pc.pc, petsc_level, which_inverse,
+	                          sptr, row_size, col_size))
 
 # -----------------------------------------------------------------------
 # PCPFLAREINV wrappers

@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- `PCAIRGetPolyCoeffs` / `PCAIRSetPolyCoeffs` (C, Fortran and Python) now
+  error on an out of range level, a call before setup, an inverse with no
+  stored polynomial, or (set) mismatched sizes, rather than reading or writing
+  through invalid memory
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
