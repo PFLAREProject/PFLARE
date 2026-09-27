@@ -89,6 +89,12 @@ module sabs
       ! Square the strength matrix to aggressively coarsen (gives a distance 2 MIS)
       if (square) then
 
+         ! Set the entries to 1 before squaring, otherwise the signed values
+         ! can cancel (e.g., skew-symmetric off-diagonals give S + S^T == 0 and
+         ! products of mixed sign entries can sum to zero in the square),
+         ! and those cancelled connections would be dropped below
+         call MatSetAllValues(output_mat, PFLARE_ONE)
+
          if (symmetrize) then
             call MatMatMult(output_mat, output_mat, &
                         MAT_INITIAL_MATRIX, PFLARE_ONE, transpose_mat, ierr)     
