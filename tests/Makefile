@@ -773,6 +773,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix"
 	./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test the modified Leja ordering of the Newton basis roots is invariant to scaling"
+	./leja_ordering
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 

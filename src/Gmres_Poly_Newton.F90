@@ -38,6 +38,7 @@ module gmres_poly_newton
       PetscReal, dimension(:), allocatable :: magnitude
       PetscReal :: a, b, squares, max_mag
       logical, dimension(size(real_roots)) :: sorted
+      logical :: found
 
       ! ~~~~~~    
 
@@ -76,6 +77,7 @@ module gmres_poly_newton
       do while (counter-1 < size(real_roots))
 
          max_mag = -huge(max_mag)
+         found = .FALSE.
 
          ! For each value compute a product of differences
          do i_loc = 1, size(real_roots)
@@ -101,12 +103,16 @@ module gmres_poly_newton
             if (magnitude(i_loc) > max_mag) then
                max_mag = magnitude(i_loc)
                max_loc(1) = i_loc
+               found = .TRUE.
             end if            
          end do
 
          ! If we found nothing (ie the only unsorted are repeated roots with zero distance)
          ! just have the next entry in the list
-         if (max_mag < 0) then
+         ! Note we can't test max_mag < 0 here, as the log of the product of distances
+         ! is legitimately negative whenever that product is small (e.g., tightly 
+         ! clustered or small magnitude eigenvalues), which would make the ordering scale dependent
+         if (.NOT. found) then
             do i_loc = 1, size(real_roots)
                if (.NOT. sorted(i_loc)) then
                   max_loc(1) = i_loc
