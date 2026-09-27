@@ -91,6 +91,9 @@ for earlier changes please see the git history.
 - Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
   and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
   routines match their definitions exactly (`PetscBool`, `int` by value)
+- Fixed a crash when an assembled GMRES polynomial or SAI/ISAI inverse (in
+  PCPFLAREINV or PCAIR) was set up in parallel after one had been set up on a
+  single rank in the same program, eg as a block Jacobi sub-PC
 
 ## [v1.27.0]
 

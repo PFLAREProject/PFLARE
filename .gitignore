@@ -27,6 +27,7 @@ tests/adv_1d
 tests/adv_1d_multi_rhs
 tests/adv_1dk
 tests/adv_dg_upwind
+tests/comm_self_then_world
 tests/adv_diff_2d
 tests/adv_diff_cg_supg
 tests/adv_diff_fd

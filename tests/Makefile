@@ -302,6 +302,11 @@ run_tests_no_load_short_serial:
 	./reuse_preconditioner
 #
 	@echo ""
+	@echo "Test assembled PCPFLAREINV and PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+#
+	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact"
 	./operator_refcount -ksp_max_it 3
 	./operator_refcount -ksp_max_it 3 -pc_air_full_smoothing_up_and_down
@@ -1001,6 +1006,17 @@ else
 	@echo ""
 	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
 	$(MPIEXEC) -n 2 ./reuse_preconditioner
+#
+	@echo ""
+	@echo "Test assembled PCPFLAREINV set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type isai
+	@echo "Test PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups reusing the sparsity"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type arnoldi -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type isai -pc_air_z_type lair \
+	 -pc_air_reuse_sparsity
 #
 	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact in parallel"
