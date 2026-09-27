@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
+  from a level that failed the truncation test, which gave the wrong coarse
+  grid polynomial (or an out-of-bounds write with the power basis) when the
+  coarsest grid had fewer rows than the coarse polynomial order
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to

@@ -248,7 +248,14 @@ module air_mg_setup
             else
                call reset_inverse_mat(air_data%inv_A_ff(our_level))
                call destroy_matrix_reuse(air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)             
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)
+               ! The coefficients were sized for this level, but the coarsest grid may be
+               ! smaller than the polynomial order (setup_gmres_poly_data then lowers the order)
+               ! so throw them away and let them be reallocated with the right size
+               if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
+                  deallocate(air_data%inv_coarsest_poly_data%coefficients)
+                  air_data%inv_coarsest_poly_data%coefficients => null()
+               end if
             end if
 
             call VecDestroy(rand_vec, ierr)
