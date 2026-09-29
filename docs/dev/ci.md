@@ -5,6 +5,7 @@ Workflow: `.github/workflows/ci_build.yml` (push/PR to main, monthly cron, manua
 Jobs, grouped
 - GNU debug/opt: `gnu_debug`, `gnu_opt` (pushes `stevendargaville/pflare:latest` on non-PR events), `gnu_opt_64_bit`.
 - Leak/memory checks: `*_malloc_dump` variants run with `-malloc_dump` and fail if `PetscTrMalloc` appears in the test log; `gnu_debug_valgrind`, `gnu_debug_kokkos_valgrind`.
+- Fortran runtime checks: `gnu_debug` builds with `EXTRA_FFLAGS="-fcheck=all -g -fbacktrace"` (a `dockerfiles/Dockerfile` build arg) and runs the full suite, so out-of-bounds indexing, unallocated/unassociated arrays and non-conforming array assignments abort with a `Fortran runtime error`. To reproduce locally, add those flags to `FFLAGS`.
 - Kokkos: `gnu_opt_kokkos`, `gnu_opt_64_bit_kokkos`, `gnu_opt_omp_kokkos`, `gnu_debug_no_mpi_kokkos`, `gnu_debug_kokkos_single_prefix` (single precision).
 - Other: `intel_opt`, `macos_debug`, `macos_64_bit_kokkos`, `notebook_tutorial`, `gnu_petsc_config` (builds PETSc `main` with `--download-pflare` and gates the Sphinx doc build).
 
