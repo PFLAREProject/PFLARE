@@ -43,6 +43,6 @@ body:
     id: versions
     attributes:
       label: PFLARE and PETSc versions
-      placeholder: PFLARE v1.26.0, PETSc 3.25.0
+      placeholder: PFLARE v1.27.0, PETSc 3.26.0
     validations:
       required: true

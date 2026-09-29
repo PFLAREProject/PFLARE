@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Minimum PETSc version is now 3.26.0
+
 ## [v1.27.0]
 
 - Behaviour change: PCAIR now always symmetrizes the strength matrix used to
