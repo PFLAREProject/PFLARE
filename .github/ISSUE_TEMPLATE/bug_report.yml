@@ -39,7 +39,7 @@ body:
     attributes:
       label: PETSc version
       description: The PETSc version or git commit, and whether PFLARE was built via `--download-pflare`, Spack, conda or from source.
-      placeholder: PETSc 3.25.0, --download-pflare
+      placeholder: PETSc 3.26.0, --download-pflare
     validations:
       required: true
   - type: textarea
