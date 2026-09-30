@@ -312,10 +312,26 @@ run_tests_no_load_short_serial:
 	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
 	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
 	 -pc_air_full_smoothing_up_and_down
+	@echo "Test the hierarchy stats with only one level are finite - jacobi fallback and auto truncated"
+	./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
+	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_print_stats_timings -fp_trap
+	./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
+#
+	@echo ""
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3"
+	./pcair_reuse_amount_range
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
+	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
@@ -458,6 +474,12 @@ run_tests_no_load_short_serial:
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 4 -pc_air_constrain_z	
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w
+	@echo "Test AIRG with constrain z and w with the hierarchy capped by max levels"
+	./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 2
+	@echo "Test AIRG with constrain z and w with one level"
+	./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 1
+	@echo "Test AIRG with symmetric and constrain w, which is ignored"
+	./ex6f -m 10 -n 10 -pc_air_symmetric -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold"
 	./ex6f -m 10 -n 10 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0
 #
@@ -549,6 +571,19 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients in C - newton basis"
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - arnoldi basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - power basis"
+	$(SKIP_SINGLE) ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - newton basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order, with get/set coefficients - matrix-free newton basis"
+	./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_matrix_free
+	@echo "Test PCPFLAREINV returns no polynomial coefficients in C for non-polynomial types"
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type sai
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type isai
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type wjacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
@@ -607,6 +642,8 @@ run_tests_no_load_short_serial:
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type arnoldi -pc_air_matrix_free_polys
 	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc
+	@echo "Test multiple RHS block solve with PCAIR and F and C point smoothing on host MATDENSE blocks"
+	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type fc -host_blocks
 	@echo "Test multiple RHS block solve with PCAIR and FFC smoothing with a weighted Jacobi C smoother"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_smooth_type ffc -pc_air_c_inverse_type wjacobi
 	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR"
@@ -709,6 +746,9 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild
+	@echo "Test PCPFLAREINV re-setup after toggling -pc_pflareinv_matrix_free through PCSetFromOptions"
+	./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild -toggle_matrix_free
+	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild -toggle_matrix_free
 	@echo "Test KSPSolveTranspose through PCPFLAREINV, assembled and matrix-free"
 	./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
@@ -785,6 +825,12 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	./adv_1dk -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 1 \
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG on steady 1D advection with kokkos vecs but a non-kokkos aij matrix"
+	./adv_1dk -n 1000 -ksp_max_it 5 -vec_type kokkos -mat_type aij
+	@echo "Test AIRG on steady 1D advection with kokkos vecs but a non-kokkos aij matrix with FC smoothing"
+	./adv_1d -n 1000 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aij -pc_air_smooth_type fc
 
 endif
 
@@ -945,6 +991,14 @@ else
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5
 #
 	@echo ""
+	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order in parallel"
+	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
+	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test block Jacobi with PCPFLAREINV sub-blocks with fewer rows than the polynomial order + 1 in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 2 -da_grid_y 4 -pc_type bjacobi -sub_pc_type pflareinv -sub_pc_pflareinv_type newton
+#
+	@echo ""
 	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
 	$(MPIEXEC) -n 2 ./reuse_preconditioner
 #
@@ -953,10 +1007,24 @@ else
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10
+	@echo "Test the hierarchy stats with only one level are finite in parallel"
+	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1 -pc_air_print_stats_timings -fp_trap
+	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e10 \
+	 -pc_air_print_stats_timings -fp_trap
+#
+	@echo ""
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
+	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
+	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing with diagonal sparsity C smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc -pc_air_c_inverse_sparsity_order 0		
@@ -1102,6 +1170,12 @@ else
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change with constrain w in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_constrain_w	\
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+	@echo "Test AIRG with constrain z and w with the hierarchy capped by max levels in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 2
+	@echo "Test AIRG with constrain z and w with one level in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_constrain_z -pc_air_constrain_w -pc_air_max_levels 1
+	@echo "Test AIRG with symmetric and constrain w, which is ignored, in parallel"
+	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -pc_air_symmetric -pc_air_constrain_w
 	@echo "Test AIRG with GMRES polynomials with PC regenerated with no sparsity change and 0 strong threshold in parallel"
 	$(MPIEXEC) -n 2 ./ex6f -m 10 -n 10 -regen -pc_air_reuse_sparsity -ksp_max_it 3 -pc_air_strong_threshold 0.0	\
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
@@ -1204,6 +1278,8 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with PCAIR via PCMatApply in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air
+	@echo "Test multiple RHS block solve with PCAIR on host MATDENSE blocks in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -host_blocks
 	@echo "Test multiple RHS block solve with a matrix-free diagonally scaled Newton PCAIR in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -pc_air_inverse_type newton \
 	 -pc_air_matrix_free_polys -pc_air_diag_scale_polys
@@ -1246,6 +1322,9 @@ else
 	@echo "Test PCApplyTranspose after the operator values change in parallel"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type neumann -rebuild
+	@echo "Test PCPFLAREINV re-setup after toggling -pc_pflareinv_matrix_free in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -rebuild -toggle_matrix_free
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton -rebuild -toggle_matrix_free
 	@echo "Test KSPSolveTranspose through PCPFLAREINV in parallel, assembled and matrix-free"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
@@ -1282,6 +1361,11 @@ else
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix in parallel"
 	$(MPIEXEC) -n 2 ./pmisr_nonsymmetric -n 700
 	$(MPIEXEC) -n 4 ./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test processor agglomeration picks the smallest stride that meets the process eq limit in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -pc_type air -ksp_max_it 2 -pc_air_processor_agglom \
+	 -pc_air_process_eq_limit 60 -pc_air_print_stats_timings | grep -E "agglomeration onto no cores: +2$$"
 
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -1294,6 +1378,12 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -ksp_pc_side right \
 	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10 -pc_air_coarsest_matrix_free_polys -ksp_max_it 10 \
 	 -vec_type kokkos -mat_type aijkokkos -pc_air_a_drop 1e-3 -pc_air_inverse_type power
+#
+	@echo ""
+	@echo "Test AIRG on steady 1D advection in parallel with kokkos vecs but a non-kokkos aij matrix"
+	$(MPIEXEC) -n 2 ./adv_1dk -n 1000 -ksp_max_it 5 -vec_type kokkos -mat_type aij
+	@echo "Test AIRG on steady 1D advection in parallel with kokkos vecs but a non-kokkos aij matrix with FC smoothing"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -ksp_max_it 5 -vec_type kokkos -mat_type aij -pc_air_smooth_type fc
 
 endif
 endif

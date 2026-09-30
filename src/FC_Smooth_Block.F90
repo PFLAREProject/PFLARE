@@ -424,6 +424,7 @@ module fc_smooth_block
 #if defined(PETSC_HAVE_KOKKOS)
       integer(c_long_long) :: xfull_array, xreduced_array
       integer :: fine_int, mode_int, errorcode
+      integer(c_int) :: done_int
       type(tMat) :: temp_mat
       PetscReal :: normy
 #endif
@@ -478,10 +479,11 @@ module fc_smooth_block
          ! built by petsc with MatDuplicate, which does not propagate the vec type,
          ! so a block can be backed by kokkos data and still report a standard vec
          ! type. The device IS views existing is the condition that matters (they
-         ! are only built for a kokkos mat type in create_VecISCopyLocalWrapper) and
-         ! the dense arrays we get back below always live in the default kokkos
-         ! memory space - there is no MATDENSEKOKKOS, the blocks are host MATDENSE
-         ! on a host kokkos backend and MATDENSECUDA/HIP on a device one
+         ! are only built for a kokkos mat type in create_VecISCopyLocalWrapper)
+         ! The blocks are typically host MATDENSE on a host kokkos backend and
+         ! MATDENSECUDA/HIP on a device one, but the finest level uses the blocks
+         ! the user gave to KSPMatSolve, which can be host MATDENSE on a device
+         ! backend - mat_iscopy_local_kokkos tells us if it couldn't use them
          if (c_associated(air_data%kokkos_is_views_handle)) then
 
             if (mode == SCATTER_REVERSE) then
@@ -501,7 +503,13 @@ module fc_smooth_block
             xfull_array = xfull_mat%v
             xreduced_array = xreduced_mat%v
             call mat_iscopy_local_kokkos(air_data%kokkos_is_views_handle, our_level, fine_int, xfull_array, &
-                     mode_int, xreduced_array)
+                     mode_int, xreduced_array, done_int)
+            ! If either block is in host memory the default kokkos execution space
+            ! can't access, the kokkos version doesn't do anything and we have
+            ! to copy on the host instead
+            if (done_int == 0) then
+               call mat_iscopy_local_host(air_data, our_level, fine, xfull_mat, mode, xreduced_mat)
+            end if
 
             ! If debugging do a comparison between CPU and Kokkos results
             if (kokkos_debug()) then

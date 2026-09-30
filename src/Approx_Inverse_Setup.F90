@@ -63,6 +63,9 @@ module approx_inverse_setup
       !     caller takes ownership via the returned pointer).
       !   - If absent: existing behaviour. The matshell takes ownership of heap-allocated
       !     coefficients (matrix-free case) or stack storage is used (assembled case).
+      !   - Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI) have no coefficients:
+      !     supplied coefficients are ignored and none are allocated or returned, so
+      !     coefficients is left unassociated if it was not associated on entry.
 
       ! ~~~~~~
       type(tMat), intent(in)                                        :: matrix
@@ -84,9 +87,36 @@ module approx_inverse_setup
       PetscErrorCode :: ierr
       type(tMat) :: reuse_mat, inv_matrix_temp
       type(tMat), dimension(:), pointer :: reuse_submatrices => null()
-      logical :: heap_allocated, coefficients_supplied
+      logical :: heap_allocated, coefficients_supplied, poly_type, matrix_free_shell
+      integer :: poly_order_eff, inverse_sparsity_order_eff
+      PetscInt :: global_rows, global_cols
 
       ! ~~~~~~  
+
+      ! Only the polynomial types have coefficients. The other types (SAI, ISAI, WJACOBI, JACOBI)
+      ! don't allocate, return or take ownership of any
+      poly_type = inverse_type_is_polynomial(inverse_type)
+      ! Only the polynomial types build a matshell when applied matrix-free
+      ! The other types (e.g., Jacobi) ignore matrix_free and are always assembled
+      ! so we must not touch a matshell context for them
+      matrix_free_shell = matrix_free .AND. poly_type
+
+      ! For matrices with size smaller than the subspace size (ie polynomial order + 1)
+      ! the gmres polynomials can only go up to the matrix size (at which point they are 
+      ! (close to) an exact solver), so clamp the order like setup_gmres_poly_data does for PCAIR
+      ! Also make sure we aren't trying to take sparsity bigger than the clamped order
+      poly_order_eff = poly_order
+      inverse_sparsity_order_eff = inverse_sparsity_order
+      ! The Neumann polynomial doesn't build a Krylov subspace so doesn't need clamping
+      if (poly_type .AND. inverse_type /= PFLAREINV_NEUMANN) then
+         call MatGetSize(matrix, global_rows, global_cols, ierr)
+         if (poly_order_eff + 1 > global_rows) then
+            poly_order_eff = int(global_rows - 1)
+         end if
+         if (inverse_sparsity_order_eff > poly_order_eff) then
+            inverse_sparsity_order_eff = poly_order_eff
+         end if
+      end if
 
       ! This is diabolical - In petsc 3.22, they changed the way to test for 
       ! a null matrix in fortran
@@ -134,12 +164,12 @@ module approx_inverse_setup
          buffers%matrix     = matrix
          call PetscObjectReference(matrix, ierr)
          call finish_approximate_inverse(matrix, inverse_type, &
-                     poly_order, inverse_sparsity_order, &
+                     poly_order_eff, inverse_sparsity_order_eff, &
                      buffers, work_coefficients, &
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
          ! Caller owns the coefficient memory; matshell must not free it
-         if (matrix_free) then
+         if (matrix_free_shell) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
             mat_ctx%own_coefficients = .FALSE.
          end if
@@ -151,16 +181,18 @@ module approx_inverse_setup
          ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
          ! Heap-allocate when: matrix-free (matshell will hold the pointer),
          ! coefficients are being returned to the caller, or Newton basis (2 columns).
-         ! Otherwise, stack storage suffices.
-         heap_allocated = matrix_free .OR. &
+         ! Otherwise, stack storage suffices (unless the order has been clamped,
+         ! as the stack storage is sized with the unclamped order). Non-polynomial types
+         ! never touch the coefficients, so they just get the (unused) stack storage.
+         heap_allocated = poly_type .AND. (matrix_free .OR. poly_order_eff /= poly_order .OR. &
                           (present(coefficients) .AND. .NOT. coefficients_supplied) .OR. &
-                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
          if (heap_allocated) then
             if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
                ! Newton basis needs storage for real and imaginary roots
-               allocate(work_coefficients(poly_order + 1, 2))
+               allocate(work_coefficients(poly_order_eff + 1, 2))
             else
-               allocate(work_coefficients(poly_order + 1, 1))
+               allocate(work_coefficients(poly_order_eff + 1, 1))
             end if
          else
             work_coefficients => coefficients_stack
@@ -168,16 +200,18 @@ module approx_inverse_setup
 
          ! Start the calculation
          call start_approximate_inverse(matrix, inverse_type, &
-                     poly_order, diag_scale_polys, &
+                     poly_order_eff, diag_scale_polys, &
                      buffers, work_coefficients)
          ! Finish it
          call finish_approximate_inverse(matrix, inverse_type, &
-                     poly_order, inverse_sparsity_order, &
+                     poly_order_eff, inverse_sparsity_order_eff, &
                      buffers, work_coefficients, &
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
 
-         if (matrix_free) then
+         if (.NOT. poly_type) then
+            ! No coefficients to return; leave coefficients unassociated
+         else if (matrix_free_shell) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
             ! The matshell always owns its coefficients and frees them via deallocate
             ! in reset_inverse_mat. When present(coefficients), the C binding is
@@ -202,6 +236,27 @@ module approx_inverse_setup
       inv_matrix = inv_matrix_temp
 
    end subroutine calculate_and_build_approximate_inverse    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   pure logical function inverse_type_is_polynomial(inverse_type)
+
+      ! Returns true if the inverse type is a polynomial, ie one that has coefficients
+      ! and builds a matshell when applied matrix-free. The other types (SAI, ISAI,
+      ! WJACOBI, JACOBI) have no coefficients and are always assembled
+      ! Also called from C through inverse_type_is_polynomial_c
+
+      ! ~~~~~~
+      integer, intent(in) :: inverse_type
+      ! ~~~~~~
+
+      inverse_type_is_polynomial = inverse_type == PFLAREINV_POWER .OR. &
+                                   inverse_type == PFLAREINV_ARNOLDI .OR. &
+                                   inverse_type == PFLAREINV_NEWTON .OR. &
+                                   inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                                   inverse_type == PFLAREINV_NEUMANN
+
+   end function inverse_type_is_polynomial
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

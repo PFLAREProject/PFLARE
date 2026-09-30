@@ -129,7 +129,6 @@ PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size);
 
 // ~~~~~~~~~~~~~
 
@@ -277,6 +276,25 @@ static PetscErrorCode PCAIRCheckType(PC pc)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Returns a pointer to the polynomial coefficients stored internally by PCAIR for a given
+// level and inverse, erroring if there are none. Used by both PCAIRGetPolyCoeffs and
+// PCAIRSetPolyCoeffs; petsc_level is ignored for COEFFS_INV_COARSE
+static PetscErrorCode PCAIRGetPolyCoeffsPointer_Private(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
+{
+   PetscInt num_levels;
+
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PetscCheck(which_inverse == COEFFS_INV_AFF || which_inverse == COEFFS_INV_AFF_DROPPED || which_inverse == COEFFS_INV_ACC || which_inverse == COEFFS_INV_COARSE, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "Unknown which_inverse %d", which_inverse);
+   // The number of levels is -1 before PCSetUp() and after the hierarchy is reset
+   PCAIRGetNumLevels_c(&pc, &num_levels);
+   PetscCheck(num_levels > 0, PETSC_COMM_SELF, PETSC_ERR_ORDER, "PCAIR has no multigrid hierarchy; call PCSetUp() first");
+   PetscCheck(which_inverse == COEFFS_INV_COARSE || (petsc_level >= 0 && petsc_level < num_levels), PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "petsc_level %" PetscInt_FMT " out of range [0, %" PetscInt_FMT "]", petsc_level, num_levels - 1);
+   PCAIRGetPolyCoeffs_c(&pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size);
+   PetscCheck(*coeffs_ptr, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "PCAIR stores no polynomial coefficients for which_inverse %d on petsc_level %" PetscInt_FMT "; that inverse is not built as a polynomial there with the current options", which_inverse, petsc_level);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~
 // Now all the get/set routines for options
 // Most of the explanation are in the comments above the set routines
@@ -312,6 +330,9 @@ PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, PetscReal max_dd_rat
 PETSC_EXTERN void remove_from_sparse_match(Mat input_mat, Mat output_mat,
    int lump_int, int alpha_int, PetscReal alpha)
 {
+   // We call petsc fortran routines in remove_from_sparse_match_c, so have to make
+   // sure this is called, otherwise things like PETSC_NULL_INTEGER_POINTER aren't defined
+   PetscCallVoid(PetscInitializeFortran());
    remove_from_sparse_match_c(&input_mat, &output_mat, lump_int, alpha_int, alpha);
 }
 
@@ -707,6 +728,9 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 . input_bool - `PETSC_TRUE` if diagonally scaling before computing a polynomial inverse
 
   Level: advanced
+
+  Note:
+  Returns the stored value; a `PFLAREINV_NEUMANN` inverse always diagonally scales regardless of this value.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagScalePolys()`, `PCAIRGetInverseType()`, `PCAIRGetMatrixFreePolys()`
 @*/
@@ -1355,14 +1379,19 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
   `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
   the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
+  It is an error to call this before `PCSetUp()`, with petsc_level outside [0, number of levels - 1], or for an
+  inverse that is not stored as a polynomial on that level (e.g. `COEFFS_INV_ACC` without C point smoothing).
+  petsc_level is ignored for `COEFFS_INV_COARSE`.
+
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetPolyCoeffs()`, `PCAIRGetReusePolyCoeffs()`, `WhichInverseType`, `PCSetUp()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 {
    PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRGetPolyCoeffs_c(&pc,petsc_level, which_inverse, \
-      coeffs_ptr, row_size, col_size);
+   PetscAssertPointer(coeffs_ptr, 4);
+   PetscAssertPointer(row_size, 5);
+   PetscAssertPointer(col_size, 6);
+   PetscCall(PCAIRGetPolyCoeffsPointer_Private(pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1932,13 +1961,14 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
 - input_string - the smoothing pattern, any sequence of `f` and `c` characters giving the type and number of smooths (for example `ff`, `fc`, `fcf`, `ffc`, ...)
 
   Options Database Key:
-. -pc_air_smooth_type input_string - the type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf); defaults to ff
+. -pc_air_smooth_type input_string - the type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 
   Level: intermediate
 
   Note:
   Each `f` performs a smooth on the F points and each `c` a smooth on the C points; the string may be any
-  combination, not only `ff`, `fc`, or `fcf`. At most 10 characters are used; longer patterns are truncated.
+  combination, not only `ff`, `fc`, or `fcf`. The pattern may be at most 10 characters long; longer patterns
+  generate an error.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSmoothType()`, `PCAIRSetInverseType()`, `PCAIRSetFullSmoothingUpAndDown()`
 @*/
@@ -1946,6 +1976,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // The Fortran side only stores (and reads) at most 10 characters
+   PetscCheck(strlen(input_string) <= 10, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Smooth type %s has %d characters, at most 10 are supported", input_string, (int)strlen(input_string));
    PCAIRSetSmoothType_c(&pc, input_string);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2776,7 +2808,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
 
   Input Parameters:
 + pc        - the `PCAIR` preconditioner context
-- input_int - the amount of data to store when `-pc_air_reuse_sparsity` is enabled
+- input_int - the amount of data to store when `-pc_air_reuse_sparsity` is enabled, must be 1, 2 or 3
 
   Options Database Key:
 . -pc_air_reuse_amount amount - how much data to store when `-pc_air_reuse_sparsity` is enabled: 1 stores only the CF splitting and parallel repartitioning, 2 additionally stores everything needed to reuse sparsity in the SpGEMMs, and 3 stores everything; defaults to 3
@@ -2794,6 +2826,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // The amount indexes the reuse tables in AIR_Data_Type.F90 so must be 1, 2 or 3
+   PetscCheck(input_int >= 1 && input_int <= 3, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Reuse amount %" PetscInt_FMT " must be 1, 2 or 3", input_int);
    PCAIRSetReuseAmount_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2814,16 +2848,21 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 
   Note:
   This routine copies the data from coeffs_ptr into the `PCAIR` object; the caller's array is not referenced after
-  this call and may be freed or modified.
+  this call and may be freed or modified. row_size and col_size must match the sizes returned by
+  `PCAIRGetPolyCoeffs()` for the same petsc_level and which_inverse, which must also be valid there.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 {
+   PetscReal *coeffs_internal;
+   PetscInt   rows_internal, cols_internal;
+
    PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRSetPolyCoeffs_c(&pc,petsc_level, which_inverse, \
-      coeffs_ptr, row_size, col_size);
+   PetscCall(PCAIRGetPolyCoeffsPointer_Private(pc, petsc_level, which_inverse, &coeffs_internal, &rows_internal, &cols_internal));
+   PetscCheck(row_size == rows_internal && col_size == cols_internal, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT " but PCAIR stores %" PetscInt_FMT " x %" PetscInt_FMT " for which_inverse %d on petsc_level %" PetscInt_FMT, row_size, col_size, rows_internal, cols_internal, which_inverse, petsc_level);
+   PetscAssertPointer(coeffs_ptr, 4);
+   PetscCall(PetscArraycpy(coeffs_internal, coeffs_ptr, rows_internal * cols_internal));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -2925,7 +2964,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    // ~~~~
    PetscCall(PCAIRGetReuseAmount(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_reuse_amount", "Amount of data to reuse during setup with reuse_sparsity (1, 2, or 3 - 3 is store everything)", "PCAIRSetReuseAmount", old_int, &input_int, NULL));
+   PetscCall(PetscOptionsRangeInt("-pc_air_reuse_amount", "Amount of data to reuse during setup with reuse_sparsity (1, 2, or 3 - 3 is store everything)", "PCAIRSetReuseAmount", old_int, &input_int, NULL, 1, 3));
    PetscCall(PCAIRSetReuseAmount(pc, input_int));
    // ~~~~
    PetscCall(PCAIRGetProcessorAgglomRatio(pc, &old_real));
@@ -3015,11 +3054,12 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsEnum("-pc_air_inverse_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
    PetscCall(PCAIRSetInverseType(pc, type));
    // ~~~~ 
-   // Defaults to whatever the F point smoother is atm
-   PetscCall(PCAIRGetInverseType(pc, &old_type));
+   // If not explicitly set, the getter returns the F point smoother value
+   // Only set if given, so an unset C value keeps following the F point smoother
+   PetscCall(PCAIRGetCInverseType(pc, &old_type));
    type = old_type;
    PetscCall(PetscOptionsEnum("-pc_air_c_inverse_type", "C point inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
-   PetscCall(PCAIRSetCInverseType(pc, type));
+   if (flg) PetscCall(PCAIRSetCInverseType(pc, type));
    // ~~~~
    const char *const PCAIRZTypes[] = {"PRODUCT", "LAIR", "LAIR_SAI", "PCAIRZType", "AIR_Z_", NULL};
    PetscCall(PCAIRGetZType(pc, &old_z_type));
@@ -3042,17 +3082,17 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsInt("-pc_air_inverse_sparsity_order", "Inverse sparsity order", "PCAIRSetInverseSparsityOrder", old_int, &input_int, NULL));
    PetscCall(PCAIRSetInverseSparsityOrder(pc, input_int));
    // ~~~~ 
-   // Defaults to whatever the F point smoother is atm
-   PetscCall(PCAIRGetPolyOrder(pc, &old_int));
+   // If not explicitly set, the getter returns the F point smoother value
+   PetscCall(PCAIRGetCPolyOrder(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_c_poly_order", "C point polynomial order", "PCAIRSetCPolyOrder", old_int, &input_int, NULL));
-   PetscCall(PCAIRSetCPolyOrder(pc, input_int));
+   PetscCall(PetscOptionsInt("-pc_air_c_poly_order", "C point polynomial order", "PCAIRSetCPolyOrder", old_int, &input_int, &flg));
+   if (flg) PetscCall(PCAIRSetCPolyOrder(pc, input_int));
    // ~~~~ 
-   // Defaults to whatever the F point smoother is atm
-   PetscCall(PCAIRGetInverseSparsityOrder(pc, &old_int));
+   // If not explicitly set, the getter returns the F point smoother value
+   PetscCall(PCAIRGetCInverseSparsityOrder(pc, &old_int));
    input_int = old_int;
-   PetscCall(PetscOptionsInt("-pc_air_c_inverse_sparsity_order", "C point inverse sparsity order", "PCAIRSetCInverseSparsityOrder", old_int, &input_int, NULL));
-   PetscCall(PCAIRSetCInverseSparsityOrder(pc, input_int));
+   PetscCall(PetscOptionsInt("-pc_air_c_inverse_sparsity_order", "C point inverse sparsity order", "PCAIRSetCInverseSparsityOrder", old_int, &input_int, &flg));
+   if (flg) PetscCall(PCAIRSetCInverseSparsityOrder(pc, input_int));
    // ~~~~ 
    PetscCall(PCAIRGetCoarsestInverseType(pc, &old_type));
    type = old_type;
@@ -3242,10 +3282,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          else if (input_type == PFLAREINV_NEUMANN)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
-            if (flg_diag_scale)
-            {
-               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
-            }            
+            // Neumann always diagonally scales
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
          }
          else if (input_type == PFLAREINV_WJACOBI)
          {
@@ -3340,10 +3378,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEUMANN)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
-               if (flg_diag_scale)
-               {
-                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
-               }
+               // Neumann always diagonally scales
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
             }
             else if (input_type == PFLAREINV_WJACOBI)
             {
@@ -3428,10 +3464,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEUMANN)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: Neumann polynomial, order %" PetscInt_FMT " \n", input_int_two));
-               if (flg_diag_scale)
-               {
-                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
-               }
+               // Neumann always diagonally scales
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
             }     
             else if (input_type == PFLAREINV_WJACOBI)
             {
@@ -3623,7 +3657,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 + -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type; defaults to product
 . -pc_air_inverse_type      (power|arnoldi|newton|neumann|sai|isai|wjacobi|jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
-. -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of f and c characters (for example ff, fc, fcf); defaults to ff
+. -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc
 . -pc_air_strong_threshold  strong_threshold - strong threshold used in the CF splitting; defaults to 0.5
 . -pc_air_r_drop            drop_tol - drop tolerance applied to R on each level after it is built; defaults to 0.01
@@ -3715,10 +3749,14 @@ PETSC_EXTERN void PCRegister_AIR()
 // This is called automatically when libpflare is loaded by 
 // petsc as a shared library - this enables --download-pflare in the petsc
 // configure to just work
+// Registers every PC type PFLARE provides through PCRegister_PFLARE, so the list
+// of types only lives in one place
+// Registering twice (e.g., if user code also calls PCRegister_PFLARE) is 
+// harmless, PCRegister just replaces the existing entry
 // Is unused if static linking
 PETSC_EXTERN PetscErrorCode PetscDLLibraryRegister_petscpflare(void)
 {
   PetscFunctionBegin;
-  PCRegister_AIR();
+  PCRegister_PFLARE();
   PetscFunctionReturn(PETSC_SUCCESS);
 }

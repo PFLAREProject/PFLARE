@@ -7,6 +7,90 @@ for earlier changes please see the git history.
 ## Unreleased
 
 - Minimum PETSc version is now 3.26.0
+- Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
+  from a level that failed the truncation test, which gave the wrong coarse
+  grid polynomial (or an out-of-bounds write with the power basis) when the
+  coarsest grid had fewer rows than the coarse polynomial order
+- Fixed the PCAIR complexities (`-pc_air_print_stats_timings` and
+  `PCAIRGet*Complexity`) being zero or NaN when the hierarchy has only a single
+  level (the Jacobi fallback or auto truncation on the top level)
+- Fixed a leak of the near-nullspace vectors with `-pc_air_symmetric
+  -pc_air_constrain_w`; `-pc_air_constrain_w` is ignored with
+  `-pc_air_symmetric` as the prolongator is R^T
+- Fixed an MPI communicator leak on every setup with `-pc_air_subcomm` when
+  some ranks have no rows on a level
+- Fixed a leak of the near-nullspace vectors with `-pc_air_constrain_z` or
+  `-pc_air_constrain_w` when the hierarchy is capped by `-pc_air_max_levels`
+- Behaviour change: fixed PCAIR processor agglomeration going one
+  agglomeration factor further than needed, so more cores may now stay active
+  on coarse levels
+- PETSc errors inside the C routines that build the `-pc_air_subcomm` matrices
+  and check whether Aff is diagonal now abort, rather than being ignored
+- Fixed PCAIR on non-Kokkos GPU matrix types (e.g. `aijcusparse`,
+  `aijhipsparse`) building its F/C point injectors from the not yet created
+  Afc/Acf submatrices, which could crash or corrupt the first setup
+- Fixed the CPU `remove_from_sparse_match` with lumping discarding the
+  existing values of the output matrix: with alpha it now computes
+  output += alpha * input (as the Kokkos version does) and entries of the
+  output that are not in the input's sparsity are kept. The C
+  `remove_from_sparse_match` now also initialises the PETSc Fortran
+  interface, as the other standalone C routines do
+- Fixed PCAIR crashing on the first F smooth with Kokkos vectors but a
+  non-Kokkos matrix type (e.g. `-vec_type kokkos -mat_type aij`)
+- Fixed PCAIR leaking one full-size injector matrix per level on every
+  reset/destroy with non-Kokkos GPU matrix types and F-point only smoothing
+- Fixed the PCAIR block apply (`KSPMatSolve`) passing host pointers to a
+  device kernel when given host `MATDENSE` blocks with Kokkos matrices on a
+  CUDA/HIP build; it now falls back to a host copy
+- The Kokkos one-point prolongator now breaks ties between equal maximum
+  entries on the smallest column, as the CPU version does, so on GPUs the
+  prolongator (and iteration counts) may change and now match the CPU
+- Fixed `-pc_pflareinv_matrix_free` bypassing `PCPFLAREINVSetMatrixFree`, so
+  changing it after a setup (e.g. via `KSPSetFromOptions`) now resets the PC
+  instead of reusing the old inverse in the wrong form and crashing
+- Fixed PCPFLAREINV aborting with the GMRES polynomial types (power, arnoldi,
+  newton, newton_no_extra) on operators with fewer rows than the polynomial
+  order + 1 (e.g. small block Jacobi sub-blocks); the order is now clamped to
+  the matrix size as in PCAIR, so `PCPFLAREINVGetPolyCoeffs` returns the
+  clamped size
+- Fixed PCPFLAREINV crashing with `-pc_pflareinv_type jacobi` or `wjacobi`
+  and `-pc_pflareinv_matrix_free`; matrix-free is now ignored for the Jacobi
+  types, as it already was in PCAIR
+- Behaviour change: `PCPFLAREINVGetPolyCoeffs` now returns `NULL` and 0x0 for
+  the non-polynomial PCPFLAREINV types (sai, isai, wjacobi, jacobi) instead of
+  uninitialised memory, and coefficients set with `PCPFLAREINVSetPolyCoeffs`
+  are discarded during setup for these types
+- Fixed `PCPFLAREINVSetPolyCoeffs` reading freed memory when passed the
+  pointer returned by `PCPFLAREINVGetPolyCoeffs`
+- Fixed the shared library registration routine (called by PETSc when it
+  loads PFLARE, e.g., with `--download-pflare`) only registering PCAIR, so
+  `-pc_type pflareinv` now works without calling `PCRegister_PFLARE()`
+- `PCAIRGetPolyCoeffs` / `PCAIRSetPolyCoeffs` (C, Fortran and Python) now
+  error on an out of range level, a call before setup, an inverse with no
+  stored polynomial, or (set) mismatched sizes, rather than reading or writing
+  through invalid memory
+- `PCAIRSetReuseAmount` / `-pc_air_reuse_amount` (and the Python
+  `pcair_set_reuse_amount`) now reject values other than 1, 2 or 3 with
+  `PETSC_ERR_ARG_OUTOFRANGE` (`ValueError` in Python); previously they were
+  used unchecked to index the reuse tables
+- Fixed `PCAIRSetDiagScalePolys` / `-pc_air_diag_scale_polys` being silently
+  ignored while the inverse type was Neumann, which lost the setting for the C
+  point inverse and for any later change of inverse type. `PCAIRGetDiagScalePolys`
+  now returns the stored value (Neumann still always diagonally scales)
+- Fixed the PCAIR C point smoother options (`-pc_air_c_inverse_type`,
+  `-pc_air_c_poly_order`, `-pc_air_c_inverse_sparsity_order`): values set via
+  the API are no longer overwritten by the F point values in
+  `PCSetFromOptions`, and if unset they now follow the F point smoother values
+  as documented, even without calling `PCSetFromOptions`
+- `PCAIRSetSmoothType` / `-pc_air_smooth_type` (and the Python
+  `pcair_set_smooth_type`) now error on smooth types longer than 10 characters
+  (`ValueError` in Python) rather than silently truncating them
+- The Python `pcair_*` / `pcpflareinv_*` wrappers now call the public C API and
+  raise `PETSc.Error` when given a PC of the wrong type, rather than crashing
+  (PCAIR) or silently returning a default value (PCPFLAREINV getters)
+- Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
+  and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
+  routines match their definitions exactly (`PetscBool`, `int` by value)
 
 ## [v1.27.0]
 

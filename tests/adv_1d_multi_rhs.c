@@ -35,7 +35,8 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
 */
 static PetscErrorCode CheckBlockSolve(KSP ksp, Mat B, Mat X, PetscReal check_tol)
 {
-  Mat       Xref;
+  Mat       A, Xref;
+  Vec       b, x;
   PetscInt  j, nrhs;
   PetscReal diff_norm, x_norm;
 
@@ -43,15 +44,23 @@ static PetscErrorCode CheckBlockSolve(KSP ksp, Mat B, Mat X, PetscReal check_tol
   PetscCall(MatGetSize(B, NULL, &nrhs));
   PetscCall(MatDuplicate(X, MAT_DO_NOT_COPY_VALUES, &Xref));
 
+  // The single rhs solves use vecs of the operator's type, as with -host_blocks
+  // the columns of the blocks are host vecs regardless of the operator's type
+  PetscCall(KSPGetOperators(ksp, &A, NULL));
+  PetscCall(MatCreateVecs(A, &x, &b));
   for (j = 0; j < nrhs; j++) {
     Vec cb, cx;
     PetscCall(MatDenseGetColumnVecRead(B, j, &cb));
-    PetscCall(MatDenseGetColumnVecWrite(Xref, j, &cx));
-    PetscCall(VecSet(cx, 0.0));
-    PetscCall(KSPSolve(ksp, cb, cx));
-    PetscCall(MatDenseRestoreColumnVecWrite(Xref, j, &cx));
+    PetscCall(VecCopy(cb, b));
     PetscCall(MatDenseRestoreColumnVecRead(B, j, &cb));
+    PetscCall(VecSet(x, 0.0));
+    PetscCall(KSPSolve(ksp, b, x));
+    PetscCall(MatDenseGetColumnVecWrite(Xref, j, &cx));
+    PetscCall(VecCopy(x, cx));
+    PetscCall(MatDenseRestoreColumnVecWrite(Xref, j, &cx));
   }
+  PetscCall(VecDestroy(&x));
+  PetscCall(VecDestroy(&b));
 
   PetscCall(MatNorm(X, NORM_FROBENIUS, &x_norm));
   PetscCall(MatAXPY(Xref, -1.0, X, SAME_NONZERO_PATTERN));
@@ -98,6 +107,10 @@ int main(int argc, char **args)
   PetscBool check_copies = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
   if (check_copies) second_solve = PETSC_TRUE;
+  // Create the dense blocks with MatCreateDense, so they are host MATDENSE
+  // regardless of the type of the operator
+  PetscBool host_blocks = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-host_blocks", &host_blocks, NULL));
 
   // Register the pflare types
   PCRegister_PFLARE();
@@ -183,10 +196,17 @@ int main(int argc, char **args)
      type from A means a device matrix gives device dense blocks, so nothing has
      to come back to the host. KSPMatSolve requires B and X to be different
      matrices of the same type.
+     With -host_blocks the blocks are host MATDENSE even with a device matrix,
+     which PCMG hands straight to the finest level of the preconditioner.
   */
-  PetscCall(MatGetVecType(A, &vtype));
-  PetscCall(MatCreateDenseFromVecType(PETSC_COMM_WORLD, vtype, local_size, PETSC_DECIDE, n, nrhs, PETSC_DECIDE, NULL, &B));
-  PetscCall(MatCreateDenseFromVecType(PETSC_COMM_WORLD, vtype, local_size, PETSC_DECIDE, n, nrhs, PETSC_DECIDE, NULL, &X));
+  if (host_blocks) {
+    PetscCall(MatCreateDense(PETSC_COMM_WORLD, local_size, PETSC_DECIDE, n, nrhs, NULL, &B));
+    PetscCall(MatCreateDense(PETSC_COMM_WORLD, local_size, PETSC_DECIDE, n, nrhs, NULL, &X));
+  } else {
+    PetscCall(MatGetVecType(A, &vtype));
+    PetscCall(MatCreateDenseFromVecType(PETSC_COMM_WORLD, vtype, local_size, PETSC_DECIDE, n, nrhs, PETSC_DECIDE, NULL, &B));
+    PetscCall(MatCreateDenseFromVecType(PETSC_COMM_WORLD, vtype, local_size, PETSC_DECIDE, n, nrhs, PETSC_DECIDE, NULL, &X));
+  }
 
   /*
      Give each column of B a different constant. We deliberately don't use

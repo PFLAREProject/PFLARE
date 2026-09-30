@@ -136,6 +136,9 @@ PETSC_INTERN void set_VecISCopyLocal_kokkos_our_level(void *handle, int our_leve
 // Do the equivalent of veciscopy on local data using the IS data on the device
 PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_int, Vec *vfull, int mode_int, Vec *vreduced)
 {
+   // The handle is only built by create_VecISCopyLocalWrapper for kokkos matrix types
+   PetscCheckAbort(handle, PETSC_COMM_SELF, PETSC_ERR_ARG_NULL,
+         "VecISCopyLocal_kokkos called with a NULL handle - the device IS views were not built");
    auto *ctx = static_cast<VecISCopyLocalKokkosCtx *>(handle);
    const int level_idx = our_level - 1;
 
@@ -198,8 +201,30 @@ PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_in
 
 // The multiple rhs version of VecISCopyLocal_kokkos - does the equivalent of
 // veciscopy on the local rows of a dense block using the IS data on the device
-PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_int, Mat *xfull, int mode_int, Mat *xreduced)
+// done is set to 1 if the copy was done, or to 0 if the caller has to do it
+// on the host instead (if either block lives in host memory that the default
+// kokkos execution space can't access)
+PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_int, Mat *xfull, int mode_int, Mat *xreduced, int *done)
 {
+   *done = 0;
+
+   // The dense blocks aren't guaranteed to live in the default kokkos memory
+   // space - the finest level of PCMG uses the B and X given to KSPMatSolve
+   // directly, so a host MATDENSE block can turn up here even with a device
+   // kokkos backend and we can't hand its host pointer to a device kernel
+   // On a host kokkos backend host memory is always accessible, so this is skipped
+   if constexpr (!Kokkos::SpaceAccessibility<DefaultExecutionSpace, Kokkos::HostSpace>::accessible)
+   {
+      const PetscScalar *probe_ptr;
+      PetscMemType mtype_full, mtype_reduced;
+      // Read only access so neither the host or device copies are marked out of date
+      PetscCallVoid(MatDenseGetArrayReadAndMemType(*xfull, &probe_ptr, &mtype_full));
+      PetscCallVoid(MatDenseRestoreArrayReadAndMemType(*xfull, &probe_ptr));
+      PetscCallVoid(MatDenseGetArrayReadAndMemType(*xreduced, &probe_ptr, &mtype_reduced));
+      PetscCallVoid(MatDenseRestoreArrayReadAndMemType(*xreduced, &probe_ptr));
+      if (PetscMemTypeHost(mtype_full) || PetscMemTypeHost(mtype_reduced)) return;
+   }
+
    auto *ctx = static_cast<VecISCopyLocalKokkosCtx *>(handle);
    const int level_idx = our_level - 1;
 
@@ -229,9 +254,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
    PetscCallVoid(MatDenseGetLDA(*xfull, &lda_full));
    PetscCallVoid(MatDenseGetLDA(*xreduced, &lda_reduced));
 
-   // The memtype of the dense arrays always matches the default kokkos memory
-   // space - there is no MATDENSEKOKKOS, a host kokkos backend gives us host
-   // MATDENSE blocks and a device backend gives us MATDENSECUDA/MATDENSEHIP
+   // We know from above the dense arrays are accessible from the default
+   // kokkos execution space
    PetscMemType mtype;
 
    // SCATTER_REVERSE=1
@@ -289,6 +313,7 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
    }
    // Ensure we're done before we exit
    Kokkos::fence();
+   *done = 1;
 
    return;
 }

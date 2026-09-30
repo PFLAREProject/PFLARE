@@ -2,10 +2,12 @@
 Tests the direct Python API for PCAIR get/set option functions introduced in
 pflare.py (backed by PCAIR_C_Fortran_Bindings.F90).
 
-Two checks are performed:
+Three checks are performed:
   1. Round-trip: set a value via the direct API, get it back, verify it matches.
   2. Functional: configure lAIR with WJacobi smoothing via the direct API,
      run a solve, verify convergence.
+  3. Wrong type: the get/set functions raise PETSc.Error on a PC that is not
+     of type PCAIR, rather than corrupting memory.
 '''
 
 import sys
@@ -156,6 +158,115 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
+
+# Neumann always diagonally scales, but setting the flag while Neumann is the
+# inverse type must still be stored, as it is used by the other (e.g., C point)
+# inverses and must survive a later change of inverse type
+pflare.pcair_set_inverse_type(pc, pflare.PFLAREINV_NEUMANN)
+pflare.pcair_set_diag_scale_polys(pc, True)
+pflare.pcair_set_inverse_type(pc, pflare.PFLAREINV_ARNOLDI)
+check('diag_scale_polys_after_neumann', pflare.pcair_get_diag_scale_polys(pc), True)
+
+pflare.pcair_set_diag_scale_polys(pc, False)
+check('diag_scale_polys_false', pflare.pcair_get_diag_scale_polys(pc), False)
+
+# Reuse amounts outside 1, 2 or 3 must be rejected and leave the value alone
+for bad_amount in (0, 4):
+    try:
+        pflare.pcair_set_reuse_amount(pc, bad_amount)
+        errors.append(f'reuse_amount_{bad_amount}: expected ValueError')
+    except ValueError:
+        pass
+    check(f'reuse_amount_{bad_amount}_unchanged', pflare.pcair_get_reuse_amount(pc), 3)
+
+# -----------------------------------------------------------------------
+# Wrong PC type: the pcair_* (and pcpflareinv_* getter) wrappers must raise
+# PETSc.Error rather than let the Fortran interpret another PC type's data
+# as PCAIR data. Push the python error handler so -on_error_abort doesn't
+# abort on the (expected) PETSc errors
+# -----------------------------------------------------------------------
+def expect_petsc_error(name, fn, *args):
+    try:
+        fn(*args)
+    except PETSc.Error:
+        return
+    errors.append(f'{name}: expected PETSc.Error on a PC of the wrong type')
+
+PETSc.Sys.pushErrorHandler('python')
+for pc_type in ['jacobi', 'pflareinv', None]:
+    pc_wrong = PETSc.PC().create(comm=comm)
+    if pc_type is not None:
+        pc_wrong.setType(pc_type)
+    label = f'wrong_type_{pc_type}'
+    expect_petsc_error(label + '_get_num_levels', pflare.pcair_get_num_levels, pc_wrong)
+    expect_petsc_error(label + '_get_max_levels', pflare.pcair_get_max_levels, pc_wrong)
+    expect_petsc_error(label + '_get_strong_threshold', pflare.pcair_get_strong_threshold, pc_wrong)
+    expect_petsc_error(label + '_get_symmetric', pflare.pcair_get_symmetric, pc_wrong)
+    expect_petsc_error(label + '_get_smooth_type', pflare.pcair_get_smooth_type, pc_wrong)
+    expect_petsc_error(label + '_get_grid_complexity', pflare.pcair_get_grid_complexity, pc_wrong)
+    expect_petsc_error(label + '_set_max_levels', pflare.pcair_set_max_levels, pc_wrong, 5)
+    expect_petsc_error(label + '_set_strong_threshold', pflare.pcair_set_strong_threshold, pc_wrong, 0.5)
+    expect_petsc_error(label + '_set_symmetric', pflare.pcair_set_symmetric, pc_wrong, True)
+    expect_petsc_error(label + '_set_smooth_type', pflare.pcair_set_smooth_type, pc_wrong, 'fc')
+    expect_petsc_error(label + '_set_inverse_type', pflare.pcair_set_inverse_type, pc_wrong, pflare.PFLAREINV_POWER)
+    if pc_type != 'pflareinv':
+        expect_petsc_error(label + '_pflareinv_get_poly_order', pflare.pcpflareinv_get_poly_order, pc_wrong)
+        expect_petsc_error(label + '_pflareinv_get_matrix_free', pflare.pcpflareinv_get_matrix_free, pc_wrong)
+    pc_wrong.destroy()
+PETSc.Sys.popErrorHandler()
+
+# A 10 character smooth type is the longest supported and must round-trip
+pflare.pcair_set_smooth_type(pc, 'fcfcfcfcfc')
+check('smooth_type_10',  pflare.pcair_get_smooth_type(pc),     'fcfcfcfcfc')
+
+# Longer smooth types must error rather than be silently truncated
+try:
+    pflare.pcair_set_smooth_type(pc, 'ffffffffffc')
+    errors.append('smooth_type_11: expected ValueError from pcair_set_smooth_type')
+except ValueError:
+    pass
+check('smooth_type_11_unchanged', pflare.pcair_get_smooth_type(pc), 'fcfcfcfcfc')
+
+# -----------------------------------------------------------------------
+# C point smoother options default to the F point values if unset
+# -----------------------------------------------------------------------
+# Without calling setFromOptions, unset C values follow the F values
+pc_c = PETSc.PC().create(comm=comm)
+pc_c.setType('air')
+pflare.pcair_set_inverse_type(pc_c, pflare.PFLAREINV_POWER)
+pflare.pcair_set_poly_order(pc_c, 5)
+pflare.pcair_set_inverse_sparsity_order(pc_c, 2)
+check('c_inverse_type_default', pflare.pcair_get_c_inverse_type(pc_c), pflare.PFLAREINV_POWER)
+check('c_poly_order_default', pflare.pcair_get_c_poly_order(pc_c), 5)
+check('c_inverse_sparsity_order_default', pflare.pcair_get_c_inverse_sparsity_order(pc_c), 2)
+# setFromOptions must not pin the unset C values, they keep following F
+pc_c.setFromOptions()
+pflare.pcair_set_poly_order(pc_c, 7)
+check('c_poly_order_follows_f', pflare.pcair_get_c_poly_order(pc_c), 7)
+pc_c.destroy()
+
+# C values set explicitly must survive setFromOptions and later F changes
+pc_c = PETSc.PC().create(comm=comm)
+pc_c.setType('air')
+pflare.pcair_set_c_inverse_type(pc_c, pflare.PFLAREINV_NEUMANN)
+pflare.pcair_set_c_poly_order(pc_c, 3)
+pflare.pcair_set_c_inverse_sparsity_order(pc_c, 0)
+pc_c.setFromOptions()
+pflare.pcair_set_inverse_type(pc_c, pflare.PFLAREINV_POWER)
+pflare.pcair_set_poly_order(pc_c, 9)
+pflare.pcair_set_inverse_sparsity_order(pc_c, 2)
+check('c_inverse_type_explicit', pflare.pcair_get_c_inverse_type(pc_c), pflare.PFLAREINV_NEUMANN)
+check('c_poly_order_explicit', pflare.pcair_get_c_poly_order(pc_c), 3)
+check('c_inverse_sparsity_order_explicit', pflare.pcair_get_c_inverse_sparsity_order(pc_c), 0)
+pc_c.destroy()
+
+# Setting a C value equal to the current F value still pins it
+pc_c = PETSc.PC().create(comm=comm)
+pc_c.setType('air')
+pflare.pcair_set_c_poly_order(pc_c, pflare.pcair_get_poly_order(pc_c))
+pflare.pcair_set_poly_order(pc_c, 2)
+check('c_poly_order_pinned', pflare.pcair_get_c_poly_order(pc_c), 6)
+pc_c.destroy()
 
 if errors:
     if rank == 0:

@@ -44,13 +44,14 @@ module c_petsc_interfaces
    
    interface   
       
-      subroutine MatMPICreateNonemptySubcomm_c(A_array, on_subcomm, B_array) &
+      function MatMPICreateNonemptySubcomm_c(A_array, on_subcomm, B_array) &
          bind(c, name="MatMPICreateNonemptySubcomm_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_int)       :: on_subcomm
          integer(c_long_long) :: B_array
-      end subroutine MatMPICreateNonemptySubcomm_c         
+         PetscErrorCode       :: MatMPICreateNonemptySubcomm_c
+      end function MatMPICreateNonemptySubcomm_c         
  
    end interface
 
@@ -88,27 +89,16 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine MatGetDiagonalOnly_c(A_array, diag_only) &
+      function MatGetDiagonalOnly_c(A_array, diag_only) &
          bind(c, name="MatGetDiagonalOnly_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_int) :: diag_only
-      end subroutine MatGetDiagonalOnly_c         
+         PetscErrorCode :: MatGetDiagonalOnly_c
+      end function MatGetDiagonalOnly_c         
  
    end interface   
 
-   interface   
-      
-      subroutine generate_identity_is_kokkos(A_array, index, B_array) &
-         bind(c, name="generate_identity_is_kokkos")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: index
-         integer(c_long_long) :: B_array
-      end subroutine generate_identity_is_kokkos         
- 
-   end interface 
-   
    interface   
       
       subroutine remove_small_from_sparse_kokkos(A_array, tol, B_array, &
@@ -201,13 +191,14 @@ module c_petsc_interfaces
 
    interface
 
-      subroutine mat_iscopy_local_kokkos(handle, our_level, fine_int, xfull, mode_int, xreduced) &
+      subroutine mat_iscopy_local_kokkos(handle, our_level, fine_int, xfull, mode_int, xreduced, done) &
          bind(c, name="mat_iscopy_local_kokkos")
          use iso_c_binding
          type(c_ptr), value :: handle
          integer(c_int), value :: our_level, fine_int, mode_int
          integer(c_long_long) :: xfull
          integer(c_long_long) :: xreduced
+         integer(c_int) :: done
       end subroutine mat_iscopy_local_kokkos
 
    end interface
@@ -340,36 +331,6 @@ module c_petsc_interfaces
  
    end interface
    
-   interface   
-      
-      subroutine build_gmres_polynomial_inverse_0th_order_kokkos(A_array, poly_order, &
-                  coefficients, reuse_int, B_array) &
-         bind(c, name="build_gmres_polynomial_inverse_0th_order_kokkos")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: B_array
-         integer(c_int), value :: poly_order
-         type(c_ptr), value :: coefficients
-         integer(c_int), value :: reuse_int
-      end subroutine build_gmres_polynomial_inverse_0th_order_kokkos         
- 
-   end interface
-   
-   interface   
-      
-      subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos(A_array, poly_order, &
-                  coefficients, reuse_int, B_array) &
-         bind(c, name="build_gmres_polynomial_inverse_0th_order_sparsity_kokkos")
-         use iso_c_binding
-         integer(c_long_long) :: A_array
-         integer(c_long_long) :: B_array
-         integer(c_int), value :: poly_order
-         type(c_ptr), value :: coefficients
-         integer(c_int), value :: reuse_int
-      end subroutine build_gmres_polynomial_inverse_0th_order_sparsity_kokkos         
- 
-   end interface    
-
    interface   
       
       subroutine mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
