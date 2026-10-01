@@ -45,12 +45,15 @@ Input arguments are:\n\
   -L_jac_*,     -U_jac_*    : Jacobi factor solves\n\
   -A_*                      : Ax=b GMRES + LU shell PC (PCAIR inner)\n\
   -A_jac_*                  : Ax=b GMRES + LU shell PC (PCJACOBI inner)\n\
+  -A_isai_*, -A_gmres_*     : Ax=b GMRES + LU shell PC (ISAI / GMRES-poly inner,\n\
+                              -only_inner_axb only); inner factor KSPs are\n\
+                              -A_{isai,gmres}_pc_{L,U}_*\n\
   -Apc_*                    : Ax=b GMRES + PCBJACOBI/ILU baseline\n\
 Every KSP/PC option is read under those prefixes, so PCAIR options must be given\n\
 as -L_pc_air_... AND -U_pc_air_... . A bare -pc_air_... is NOT seen by any solve\n\
 here (PETSc prefixes do not fall back to the unprefixed name); it is silently\n\
 ignored and only shows up in the 'unused option(s)' warning at PetscFinalize.\n\
-Solve-selection flags (at most one of the two -only_* may be given):\n\
+Solve-selection flags (at most one -only_* may be given):\n\
   -skip_airg                : skip both AIRG factor solves (the AIRG-inner Ax=b\n\
                               solve then auto-skips); used by the driver to\n\
                               recover the other methods when AIRG hard-aborts\n\
@@ -58,6 +61,11 @@ Solve-selection flags (at most one of the two -only_* may be given):\n\
                               AIRG-inner Ax=b solve (for -pc_air_* sweeps)\n\
   -only_jac_axb             : run ONLY the ILU factorisation, Jacobi L/U and the\n\
                               Jacobi-inner Ax=b solve (for -jac_max_it sweeps)\n\
+  -only_inner_axb <isai|gmres_poly> : run ONLY the ILU factorisation, that\n\
+                              method's L/U solves and the Ax=b solve with that\n\
+                              method as the inner factor solve (inner-count sweeps)\n\
+  -inner_max_it <int>       : inner iterations per factor apply for\n\
+                              -only_inner_axb (default 1 = one application)\n\
   -only_pcilu               : run ONLY the exact-PCILU baseline Ax=b solve plus\n\
                               the ILU factorisation and the LU_Exact_{L,U}\n\
                               level-set setup timings (cheap baseline refresh)\n\
@@ -203,8 +211,16 @@ static PetscErrorCode ConfigureInnerPC(PC pc, InnerPCKind kind)
 /* Build an inner KSP for a triangular factor.
    max_it == 1: preonly (single PC application, no residual norm work), matching
                 python _LUAirShellPC with LU_PC_INNER max_it=1.
-   max_it  > 1: Richardson with unpreconditioned norm, rtol=1e-6, atol=1e-50,
-                matching python LU_PC_INNER with max_it>1. */
+   max_it  > 1: Richardson for EXACTLY max_it iterations: KSP_NORM_NONE (the
+                default convergence test then never stops early), so no residual norm (a GPU reduction
+                and sync) is computed and the solve never stops early. The
+                inner solve is then a fixed linear operator, as the outer
+                (non-flexible) GMRES requires and as the paper describes ("a
+                fixed number of iterations for the inner solve"). Before
+                2026-10-01 this used the unpreconditioned norm with rtol 1e-6
+                (copied from python LU_PC_INNER): a norm every inner iteration
+                and an early exit that made the preconditioner vary, letting
+                GMRES report convergence with a true residual of ~1e-3. */
 static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *prefix,
                                      InnerPCKind kind, PetscInt max_it, KSP *ksp)
 {
@@ -216,8 +232,8 @@ static PetscErrorCode CreateInnerKSP(MPI_Comm comm, Mat factor, const char *pref
     PetscCall(KSPSetNormType(*ksp, KSP_NORM_NONE));
   } else {
     PetscCall(KSPSetType(*ksp, KSPRICHARDSON));
-    PetscCall(KSPSetNormType(*ksp, KSP_NORM_UNPRECONDITIONED));
-    PetscCall(KSPSetTolerances(*ksp, 1e-6, 1e-50, PETSC_DEFAULT, max_it));
+    PetscCall(KSPSetNormType(*ksp, KSP_NORM_NONE));
+    PetscCall(KSPSetTolerances(*ksp, PETSC_DEFAULT, PETSC_DEFAULT, PETSC_DEFAULT, max_it));
   }
   PetscCall(KSPSetOperators(*ksp, factor, factor));
   PetscCall(KSPSetInitialGuessNonzero(*ksp, PETSC_FALSE));
@@ -913,25 +929,59 @@ static PetscErrorCode RunAxbShellAIR(Mat A, Mat L, KSP ksp_L_air, KSP ksp_U_air,
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
-   The number of Jacobi sweeps per factor apply equals jac_max_it (derived from
-   the AIR cycle complexities). The shell takes ownership of inv_diag_U_raw_for_jac
-   and the two inner KSPs it builds. Extracted (like RunAxbShellAIR) so main can
-   wrap the call in try/catch and recover from a failure here. `stage` is the
-   caller's (already pushed) -log_view stage, needed so the warm-up solve below
-   can be excluded from the stage's KSPSolve event. */
-static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it,
-                                        Vec inv_diag_U_raw_for_jac, Vec b, Vec x,
-                                        PetscBool *all_converged, PetscLogStage stage)
+/* Per-inner-kind names for the Ax=b LU-shell solves that build their own inner
+   KSPs (everything except AIRG, whose shell reuses the standalone hierarchies).
+   The Jacobi strings are the historical ones and must not change: the driver
+   parses the report label and SOLVE_TIME label into the Ax=b_approx_PC_ILU_Jac
+   columns, and the jac_sweep data was recorded under these options prefixes. */
+typedef struct {
+  const char *name;          /* "Jacobi inner max_it=" print + FAILED messages */
+  const char *prefix_L;      /* options prefix of the inner L KSP */
+  const char *prefix_U;      /* options prefix of the inner U KSP */
+  const char *prefix_A;      /* options prefix of the outer GMRES(30) KSP */
+  const char *shell_name;    /* PCShellSetName */
+  const char *time_label;    /* SOLVE_TIME label = CSV column base */
+  const char *report_label;  /* ReportSolve label (driver LABEL_TO_COL key) */
+} AxbInnerNames;
+
+static const AxbInnerNames AXB_INNER_JACOBI = {
+  "Jacobi", "A_jac_pc_L_", "A_jac_pc_U_", "A_jac_", "LU_Jacobi_shell",
+  "Ax=b_approx_PC_ILU_Jac",
+  "A x = b solve (gmres(30) + LU shell PC, Jacobi inner)"};
+static const AxbInnerNames AXB_INNER_ISAI = {
+  "ISAI", "A_isai_pc_L_", "A_isai_pc_U_", "A_isai_", "LU_ISAI_shell",
+  "Ax=b_approx_PC_ILU_ISAI",
+  "A x = b solve (gmres(30) + LU shell PC, ISAI inner)"};
+static const AxbInnerNames AXB_INNER_GMRES_POLY = {
+  "GMRES poly", "A_gmres_pc_L_", "A_gmres_pc_U_", "A_gmres_", "LU_GMRES_poly_shell",
+  "Ax=b_approx_PC_ILU_GMRES_poly",
+  "A x = b solve (gmres(30) + LU shell PC, GMRES poly inner)"};
+
+/* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via `kind` inner
+   solves (PCJACOBI, ISAI or GMRES poly), each factor apply being `inner_max_it`
+   Richardson iterations of that PC (preonly, one application, when 1). The
+   inner KSPs are built here, from the same factors and with the same PC
+   configuration as the standalone L/U solves of that kind. For Jacobi
+   inner_max_it is jac_max_it (derived from the AIR cycle complexities unless
+   overridden); for ISAI / GMRES poly it is -inner_max_it. The shell takes
+   ownership of inv_diag_U_raw_for_jac and the two inner KSPs it builds.
+   Extracted (like RunAxbShellAIR) so main can wrap the call in try/catch and
+   recover from a failure here. `stage` is the caller's (already pushed)
+   -log_view stage, needed so the warm-up solve below can be excluded from the
+   stage's KSPSolve event. */
+static PetscErrorCode RunAxbShellInner(Mat A, Mat L, Mat U, InnerPCKind kind,
+                                       const AxbInnerNames *nm, PetscInt inner_max_it,
+                                       Vec inv_diag_U_raw_for_jac, Vec b, Vec x,
+                                       PetscBool *all_converged, PetscLogStage stage)
 {
   KSP         ksp_Ajac;
   PC          pc_Ajac;
   LUShellCtx *shell_ctx;
   PetscFunctionBeginUser;
-  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Jacobi inner max_it=%" PetscInt_FMT "\n", jac_max_it));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%s inner max_it=%" PetscInt_FMT "\n", nm->name, inner_max_it));
   PetscCall(PetscNew(&shell_ctx));
-  PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, "A_jac_pc_L_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_L));
-  PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, "A_jac_pc_U_", INNER_PC_JACOBI, jac_max_it, &shell_ctx->ksp_U));
+  PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, L, nm->prefix_L, kind, inner_max_it, &shell_ctx->ksp_L));
+  PetscCall(CreateInnerKSP(PETSC_COMM_WORLD, U, nm->prefix_U, kind, inner_max_it, &shell_ctx->ksp_U));
   PetscCall(MatCreateVecs(L, &shell_ctx->tmp, NULL));
   shell_ctx->inv_diag_U_raw = inv_diag_U_raw_for_jac;
 
@@ -946,13 +996,13 @@ static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it
   PetscCall(PCShellSetContext(pc_Ajac, shell_ctx));
   PetscCall(PCShellSetApply(pc_Ajac, LUShellApply));
   PetscCall(PCShellSetDestroy(pc_Ajac, LUShellDestroy));
-  PetscCall(PCShellSetName(pc_Ajac, "LU_Jacobi_shell"));
-  PetscCall(KSPSetOptionsPrefix(ksp_Ajac, "A_jac_"));
+  PetscCall(PCShellSetName(pc_Ajac, nm->shell_name));
+  PetscCall(KSPSetOptionsPrefix(ksp_Ajac, nm->prefix_A));
   PetscCall(KSPSetFromOptions(ksp_Ajac));
   PetscCall(KSPSetUp(ksp_Ajac));
   {
     /* Untimed WARM-UP solve, capped at 5 outer iterations. Under -only_jac_axb
-       this KSP performs the first GMRES-type solve in the process, and its
+       (and -only_inner_axb) this KSP performs the first GMRES-type solve in the process, and its
        first orthogonalisation (VecMDot) absorbs one-time GPU library/kernel
        initialisation of ~tens of ms, which is comparable to the entire solve
        on small matrices: it put a ~16-60 ms floor under every Ax=b time in
@@ -973,9 +1023,8 @@ static PetscErrorCode RunAxbShellJacobi(Mat A, Mat L, Mat U, PetscInt jac_max_it
     PetscCall(PetscLogStageSetActive(stage, PETSC_TRUE));
     PetscCall(KSPSetTolerances(ksp_Ajac, wu_rtol, wu_atol, wu_dtol, wu_maxits));
   }
-  PetscCall(TimedKSPSolve(ksp_Ajac, b, x, "Ax=b_approx_PC_ILU_Jac"));
-  PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, Jacobi inner)",
-                        ksp_Ajac, A, b, x, all_converged));
+  PetscCall(TimedKSPSolve(ksp_Ajac, b, x, nm->time_label));
+  PetscCall(ReportSolve(nm->report_label, ksp_Ajac, A, b, x, all_converged));
   PetscCall(KSPDestroy(&ksp_Ajac));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -993,7 +1042,7 @@ int main(int argc, char **args)
   PetscLogStage stage_ilu, stage_L_solve, stage_U_solve, stage_A_shell, stage_A_pcilu;
   PetscLogStage stage_L_gmres, stage_U_gmres, stage_L_neumann, stage_U_neumann;
   PetscLogStage stage_L_isai,  stage_U_isai,  stage_L_jac,     stage_U_jac;
-  PetscLogStage stage_A_shell_jac;
+  PetscLogStage stage_A_shell_jac, stage_A_shell_isai, stage_A_shell_gmres;
 #endif
   PetscRandom rnd;
   PetscViewer fd;
@@ -1041,6 +1090,8 @@ int main(int argc, char **args)
   PetscCall(PetscLogStageRegister("L solve (Richardson+PCJACOBI)",       &stage_L_jac));
   PetscCall(PetscLogStageRegister("U solve (Richardson+PCJACOBI)",       &stage_U_jac));
   PetscCall(PetscLogStageRegister("A solve (GMRES+LU shell, Jacobi inner)", &stage_A_shell_jac));
+  PetscCall(PetscLogStageRegister("A solve (GMRES+LU shell, ISAI inner)", &stage_A_shell_isai));
+  PetscCall(PetscLogStageRegister("A solve (GMRES+LU shell, GMRES poly inner)", &stage_A_shell_gmres));
 
   PetscCall(PetscOptionsGetString(NULL, NULL, "-f", file, sizeof(file), &flg));
   if (!flg) SETERRQ(PETSC_COMM_WORLD, PETSC_ERR_USER_INPUT, "Must indicate binary file with the -f option");
@@ -1185,15 +1236,61 @@ int main(int argc, char **args)
      cells and re-running them would just burn GPU time. */
   PetscBool only_pcilu = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-only_pcilu", &only_pcilu, NULL));
-  if ((only_airg && only_jac_axb) || (only_pcilu && (only_airg || only_jac_axb))) {
+  /* -only_inner_axb <isai|gmres_poly>: the ISAI / GMRES-poly analogue of
+     -only_jac_axb. Run ONLY the ILU factorisation, that method's two standalone
+     L/U factor solves (a per-matrix reference, and a check against the
+     committed counts) and the Ax=b GMRES(30) + LU-shell solve whose inner
+     factor solves are -inner_max_it Richardson iterations of that method (one
+     preonly application when 1). Built for the inner-count sweeps that give
+     ISAI and GMRES poly the same tuning as the Jacobi-inner solve. Skips AIRG
+     (implies skip_airg), the other competitors, Jacobi and the exact-PCILU
+     baseline. */
+  char      inner_axb_type[32] = "";
+  PetscBool only_inner_axb     = PETSC_FALSE;
+  PetscCall(PetscOptionsGetString(NULL, NULL, "-only_inner_axb", inner_axb_type,
+                                  sizeof(inner_axb_type), &only_inner_axb));
+  InnerPCKind          inner_axb_kind  = INNER_PC_ISAI;
+  const AxbInnerNames *inner_axb_names = &AXB_INNER_ISAI;
+  PetscLogStage        stage_inner_axb = stage_A_shell_isai;
+  if (only_inner_axb) {
+    if (!strcmp(inner_axb_type, "isai")) {
+      inner_axb_kind  = INNER_PC_ISAI;
+      inner_axb_names = &AXB_INNER_ISAI;
+      stage_inner_axb = stage_A_shell_isai;
+    } else if (!strcmp(inner_axb_type, "gmres_poly")) {
+      inner_axb_kind  = INNER_PC_GMRES_POLY;
+      inner_axb_names = &AXB_INNER_GMRES_POLY;
+      stage_inner_axb = stage_A_shell_gmres;
+    } else {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "-only_inner_axb takes isai or gmres_poly (got '%s').\n", inner_axb_type));
+      PetscCall(MatDestroy(&A));
+      PetscCall(PetscFinalize());
+      return 1;
+    }
+  }
+  /* -inner_max_it is read here, unconditionally, and REJECTED without
+     -only_inner_axb: it is read by nothing else, and a value silently having
+     no effect is exactly how -jac_max_it once went dead (see above). */
+  PetscInt  inner_max_it     = 1;
+  PetscBool inner_max_it_set = PETSC_FALSE;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-inner_max_it", &inner_max_it, &inner_max_it_set));
+  if ((inner_max_it_set && !only_inner_axb) || inner_max_it < 1) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "-only_airg, -only_jac_axb and -only_pcilu are mutually exclusive "
-              "(they select disjoint sets of solves); pass at most one.\n"));
+              "-inner_max_it must be >= 1 and is only used with -only_inner_axb.\n"));
     PetscCall(MatDestroy(&A));
     PetscCall(PetscFinalize());
     return 1;
   }
-  if (only_pcilu) skip_airg = PETSC_TRUE;
+  if ((int)only_airg + (int)only_jac_axb + (int)only_pcilu + (int)only_inner_axb > 1) {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "-only_airg, -only_jac_axb, -only_pcilu and -only_inner_axb are mutually "
+              "exclusive (they select disjoint sets of solves); pass at most one.\n"));
+    PetscCall(MatDestroy(&A));
+    PetscCall(PetscFinalize());
+    return 1;
+  }
+  if (only_pcilu || only_inner_axb) skip_airg = PETSC_TRUE;
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
 
   /* Left-scale A by 1/diag(A) before the factorisation (mirrors test_ilu.py scale_mode=1).
@@ -1217,7 +1314,7 @@ int main(int argc, char **args)
   /* A x = b with GMRES(30) and PETSc's built-in PCBJACOBI/ILU baseline, run
      before the factorisation to establish whether the problem is solvable
      independently of factor quality. */
-  if (!only_jac_axb && !only_airg) {
+  if (!only_jac_axb && !only_airg && !only_inner_axb) {
     PetscCall(PetscLogStagePush(stage_A_pcilu));
     {
       KSP ksp_Apc;
@@ -1295,7 +1392,7 @@ int main(int argc, char **args)
   } else {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
               "A x = b solve (gmres(30) + PCBJACOBI/ILU): SKIPPED (%s)\n",
-              only_airg ? "-only_airg" : "-only_jac_axb"));
+              only_airg ? "-only_airg" : only_inner_axb ? "-only_inner_axb" : "-only_jac_axb"));
   }
 
   /* Incomplete LU factorisation: produce the L and U factors of A via
@@ -1459,7 +1556,24 @@ int main(int argc, char **args)
      -pc_air_* option can change them). The Jacobi L/U factor solves just below
      are deliberately NOT gated by -only_jac_axb: their own iteration counts are
      a useful per-matrix reference in that sweep. -only_airg does skip them. */
-  if (!only_jac_axb && !only_airg && !only_pcilu) {
+  if (only_inner_axb) {
+    /* Only the swept method's standalone L/U solves (same prefixes, labels and
+       stages as in a full run, so they fill the usual columns). */
+    if (inner_axb_kind == INNER_PC_ISAI) {
+      PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_isai, L, b_rand, x_sol, INNER_PC_ISAI,
+                               "L solve (richardson + ISAI)", "L_isai_", &solves_converged, NULL, "LU_ISAI_L", NULL));
+      PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_isai, U, b_rand, x_sol, INNER_PC_ISAI,
+                               "U solve (richardson + ISAI)", "U_isai_", &solves_converged, NULL, "LU_ISAI_U", NULL));
+    } else {
+      PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_gmres, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                               "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L", NULL));
+      PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_gmres, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
+                               "U solve (richardson + GMRES poly)", "U_gmres_", &solves_converged, NULL, "LU_GMRES_poly_U", NULL));
+    }
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "L/U solve (richardson + other competitors): SKIPPED (-only_inner_axb %s)\n",
+              inner_axb_type));
+  } else if (!only_jac_axb && !only_airg && !only_pcilu) {
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_gmres, L, b_rand, x_sol, INNER_PC_GMRES_POLY,
                              "L solve (richardson + GMRES poly)", "L_gmres_", &solves_converged, NULL, "LU_GMRES_poly_L", NULL));
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_gmres, U, b_rand, x_sol, INNER_PC_GMRES_POLY,
@@ -1484,7 +1598,7 @@ int main(int argc, char **args)
               "L/U solve (richardson + ISAI): SKIPPED (%s)\n", why));
   }
 
-  if (!only_airg && !only_pcilu) {
+  if (!only_airg && !only_pcilu && !only_inner_axb) {
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_L_jac, L, b_rand, x_sol, INNER_PC_JACOBI,
                              "L solve (richardson + PCJACOBI)", "L_jac_", &solves_converged, NULL, "LU_Jacobi_L", NULL));
     PetscCall(TryFactorSolve(PETSC_COMM_WORLD, stage_U_jac, U, b_rand, x_sol, INNER_PC_JACOBI,
@@ -1492,7 +1606,7 @@ int main(int argc, char **args)
   } else {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
               "L/U solve (richardson + PCJACOBI): SKIPPED (%s)\n",
-              only_airg ? "-only_airg" : "-only_pcilu"));
+              only_airg ? "-only_airg" : only_pcilu ? "-only_pcilu" : "-only_inner_axb"));
   }
 
   /* A x = b with GMRES(30) and a shell PC applying U^-1 L^-1 via PCJACOBI inner.
@@ -1501,7 +1615,32 @@ int main(int argc, char **args)
      whether or not AIRG ran), or the hardcoded default of 1 if neither
      applies. Wrapped in try/catch like the AIRG shell so a failure here (it is
      the last solve) is recovered cleanly. */
-  if (only_airg || only_pcilu) {
+  if (only_inner_axb) {
+    /* ISAI / GMRES-poly inner Ax=b (the inner-count sweep). Same guarded
+       pattern as the Jacobi shell below; it consumes inv_diag_U_raw_for_jac. */
+    PetscErrorCode ierr_inner = PETSC_SUCCESS;
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "A x = b solve (gmres(30) + LU shell PC, Jacobi inner): SKIPPED (-only_inner_axb)\n"));
+    PetscCall(PetscLogStagePush(stage_inner_axb));
+    try {
+      ierr_inner = RunAxbShellInner(A, L, U, inner_axb_kind, inner_axb_names, inner_max_it,
+                                    inv_diag_U_raw_for_jac, b_rand, x_sol,
+                                    &solves_converged, stage_inner_axb);
+    } catch (const std::exception &e) {
+      ierr_inner = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "A x = b solve (%s inner): FAILED (C++ exception: %s); continuing\n",
+                inner_axb_names->name, e.what()));
+    } catch (...) {
+      ierr_inner = PETSC_ERR_LIB;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                "A x = b solve (%s inner): FAILED (unknown C++ exception); continuing\n",
+                inner_axb_names->name));
+    }
+    PetscCall(PetscLogStagePop());
+    inv_diag_U_raw_for_jac = NULL;  /* consumed (or leaked on failure) by the shell */
+    if (ierr_inner) solves_converged = PETSC_FALSE;
+  } else if (only_airg || only_pcilu) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
               "A x = b solve (gmres(30) + LU shell PC, Jacobi inner): SKIPPED "
               "(%s)\n", only_airg ? "-only_airg" : "-only_pcilu"));
@@ -1511,8 +1650,9 @@ int main(int argc, char **args)
     PetscErrorCode ierr_jac = PETSC_SUCCESS;
     PetscCall(PetscLogStagePush(stage_A_shell_jac));
     try {
-      ierr_jac = RunAxbShellJacobi(A, L, U, jac_max_it, inv_diag_U_raw_for_jac,
-                                   b_rand, x_sol, &solves_converged, stage_A_shell_jac);
+      ierr_jac = RunAxbShellInner(A, L, U, INNER_PC_JACOBI, &AXB_INNER_JACOBI, jac_max_it,
+                                  inv_diag_U_raw_for_jac, b_rand, x_sol,
+                                  &solves_converged, stage_A_shell_jac);
     } catch (const std::exception &e) {
       ierr_jac = PETSC_ERR_LIB;
       PetscCall(PetscPrintf(PETSC_COMM_WORLD,
