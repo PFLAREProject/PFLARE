@@ -7,11 +7,11 @@
     flux on interior facets and inflow boundary facets couples the cells.
 
     Usage mirrors the SUPG CG code:
-      Can control dimension with         -dm_plex_dim
-      Can control simplex/quad with      -dm_plex_simplex
-      Can control face count with        -dm_plex_box_faces
+      The mesh is an unstructured box mesh from BoxMeshDM
+      Can control dimension with         -dim (2 triangles, 3 tetrahedra)
+      Can control edge length with       -target_edge_length
+      Can control domain size with       -domain_width -domain_height -domain_depth
       Can refine with                    -dm_refine
-      Can read a gmsh file with          -dm_plex_filename
       Can specify basis function order   -adv_diff_petscspace_degree
       Specify inflow of 1 on bottom face -bottom_only_inflow_one
       Can write out vtk solution with    -write_vtk
@@ -231,16 +231,21 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *opt)
 /* -----------------------------------------------------------------------
    Mesh creation
    ----------------------------------------------------------------------- */
-static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length,
-                                 double width, double height,
+static PetscErrorCode CreateMesh(MPI_Comm comm, PetscInt mesh_dim, double target_edge_length,
+                                 double width, double height, double depth,
                                  int final_smooths, 
                                  PetscBool integrity_check, PetscBool print_stats,
                                  AppCtx *opt, DM *dm)
 {
   PetscFunctionBeginUser;
   // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
-                           final_smooths, integrity_check, print_stats);
+  if (mesh_dim == 3) {
+    *dm = GenerateBoxMeshDM3D(comm, target_edge_length, width, height, depth,
+                             final_smooths, integrity_check, print_stats);
+  } else {
+    *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
+                             final_smooths, integrity_check, print_stats);
+  }
 
   // Doing overlap then any -dm_refine (triggered by DMSetFromOptions)
   // means we build the overlap on the unrefined dm which is cheap
@@ -1724,6 +1729,14 @@ int main(int argc, char **argv)
    
   double domain_height = 1.0;
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_height", &domain_height, &set));
+
+  // 2D triangles or 3D tetrahedra
+  PetscInt mesh_dim = 2;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-dim", &mesh_dim, &set));
+  PetscCheck(mesh_dim == 2 || mesh_dim == 3, PETSC_COMM_WORLD, PETSC_ERR_ARG_OUTOFRANGE, "-dim must be 2 or 3");
+
+  double domain_depth = 1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_depth", &domain_depth, &set));
   
   PetscBool integrity_check = PETSC_TRUE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-integrity_check", &integrity_check, NULL));    
@@ -1733,7 +1746,7 @@ int main(int argc, char **argv)
 
   PetscCall(PetscLogStagePush(setup_stage));
   PetscCall(PetscLogStagePush(mesh_build_stage));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD, target_len, domain_width, domain_height, 
+  PetscCall(CreateMesh(PETSC_COMM_WORLD, mesh_dim, target_len, domain_width, domain_height, domain_depth,
                      final_smooths, integrity_check, print_stats, &ctx, &dm));
   PetscCall(PetscLogStagePop());
   PetscCall(DMGetDimension(dm, &dim));

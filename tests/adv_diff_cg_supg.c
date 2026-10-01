@@ -2,13 +2,11 @@
      Steady advection-diffusion equation with SUPG stabilised CG FEM
      Default is 2D with default velocity (1,1) normalised.
      In 3D default velocity is (1,1,1) normalised.
-     Can control dimension with -dm_plex_dim
-     Can control quad/hex tri/tet with -dm_plex_simplex (if tri/tet need to configure petsc with triangle/ctetgen)
-     Can control number of faces with -dm_plex_box_faces (if in parallel make sure you start with enough faces
-       to sensibly distribute the initial mesh before refining)
+     The mesh is an unstructured box mesh from BoxMeshDM
+     Can control dimension with -dim (2 triangles, 3 tetrahedra, 3D needs petsc configured with tetgen)
+     Can control edge length with -target_edge_length
+     Can control domain size with -domain_width -domain_height -domain_depth
      Can refine with -dm_refine
-     Can read in an unstructured gmsh file with -dm_plex_filename
-         - have to make sure boundary ids match (1 through 4 in 2D, 1 through 6 in 3D)
      Can view the solution with -snes_view_solution vtk:solution.vtu
 
      ./adv_diff_cg_supg -dm_refine 1
@@ -283,14 +281,19 @@ static PetscErrorCode ProcessOptions(MPI_Comm comm, AppCtx *options)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static PetscErrorCode CreateMesh(MPI_Comm comm, double target_edge_length, double width, double height, 
-   int final_smooths, PetscBool integrity_check, PetscBool print_stats, AppCtx *options, DM *dm)
+static PetscErrorCode CreateMesh(MPI_Comm comm, PetscInt mesh_dim, double target_edge_length, double width, double height, 
+   double depth, int final_smooths, PetscBool integrity_check, PetscBool print_stats, AppCtx *options, DM *dm)
 {
   PetscFunctionBeginUser;
 
   // Generate the mesh stored in a parallel DM 
-  *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
-                           final_smooths, integrity_check, print_stats);
+  if (mesh_dim == 3) {
+    *dm = GenerateBoxMeshDM3D(comm, target_edge_length, width, height, depth,
+                             final_smooths, integrity_check, print_stats);
+  } else {
+    *dm = GenerateBoxMeshDM(comm, target_edge_length, width, height, 
+                             final_smooths, integrity_check, print_stats);
+  }
 
   PetscCall(DMSetFromOptions(*dm));
   // Give the DM access to the application context (which includes diffusion coefficient and advection velocity)
@@ -534,6 +537,14 @@ int main(int argc, char **argv)
    
   double domain_height = 1.0;
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_height", &domain_height, &set));
+
+  // 2D triangles or 3D tetrahedra
+  PetscInt mesh_dim = 2;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-dim", &mesh_dim, &set));
+  PetscCheck(mesh_dim == 2 || mesh_dim == 3, PETSC_COMM_WORLD, PETSC_ERR_ARG_OUTOFRANGE, "-dim must be 2 or 3");
+
+  double domain_depth = 1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-domain_depth", &domain_depth, &set));
   
   PetscBool integrity_check = PETSC_TRUE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-integrity_check", &integrity_check, NULL));    
@@ -544,7 +555,7 @@ int main(int argc, char **argv)
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
   PetscCall(PetscLogStagePush(mesh_build));
-  PetscCall(CreateMesh(PETSC_COMM_WORLD,target_len, domain_width, domain_height, 
+  PetscCall(CreateMesh(PETSC_COMM_WORLD, mesh_dim, target_len, domain_width, domain_height, domain_depth,
                      final_smooths, integrity_check, print_stats, &options, &dm));
   PetscCall(PetscLogStagePop());
   PetscCall(SNESSetDM(snes, dm));
