@@ -37,6 +37,13 @@ int main(int argc, char **args)
   PetscBool check_copies = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
   if (check_copies) second_solve = PETSC_TRUE;
+  // Use a central difference advection operator (skew-symmetric off-diagonals) with
+  // a shifted diagonal, rather than the upwind operator
+  PetscBool skew = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-skew", &skew, NULL));
+  // Error if AIR builds fewer than this many levels
+  PetscInt min_levels = 0, num_levels;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-min_levels", &min_levels, NULL));
 
   // Register the pflare types
   PCRegister_PFLARE();
@@ -83,8 +90,8 @@ int main(int argc, char **args)
 
   // Going to do assembly in the COO interface so assembly happens on the gpu when needed
   // Allocate memory for the coordinates
-  PetscCall(PetscMalloc2(2 * local_size, &oor, 2 * local_size, &ooc));
-  PetscCall(PetscMalloc1(2 * local_size, &v));
+  PetscCall(PetscMalloc2(3 * local_size, &oor, 3 * local_size, &ooc));
+  PetscCall(PetscMalloc1(3 * local_size, &v));
 
   counter = 0;
   // Dirichlet condition on left boundary
@@ -112,6 +119,17 @@ int main(int argc, char **args)
     v[counter + 1] = 1.0;
 
     counter = counter + 2;
+
+    if (skew) {
+      // Central difference, a_{i,i-1} = -1, a_{i,i+1} = 1, with a diagonal shift
+      v[counter - 1] = 3.0;
+      if (i < n - 1) {
+        oor[counter] = i;
+        ooc[counter] = i + 1;
+        v[counter] = 1.0;
+        counter = counter + 1;
+      }
+    }
   }
 
   // Set the indices
@@ -187,6 +205,10 @@ int main(int argc, char **args)
   }
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
+
+  PetscCall(PCAIRGetNumLevels(pc, &num_levels));
+  PetscCheck(num_levels >= min_levels, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+             "AIR built %" PetscInt_FMT " levels, expected at least %" PetscInt_FMT, num_levels, min_levels);
 
 #if PetscDefined(HAVE_DEVICE)
   // The preliminary solve has already moved everything the solve needs onto the

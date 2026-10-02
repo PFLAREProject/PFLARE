@@ -302,6 +302,11 @@ run_tests_no_load_short_serial:
 	./reuse_preconditioner
 #
 	@echo ""
+	@echo "Test assembled PCPFLAREINV and PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+#
+	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact"
 	./operator_refcount -ksp_max_it 3
 	./operator_refcount -ksp_max_it 3 -pc_air_full_smoothing_up_and_down
@@ -342,6 +347,19 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting"
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+	@echo ""
+	@echo "Test AIRG with advection and PMIS then aggregation CF splitting"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type pmis_agg
+	@echo ""
+	@echo "Test AIRG with advection and distance 2 PMIS CF splitting"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
+#
+	@echo ""
+	@echo "Test AIRG with advection, zero strong threshold and PMIS CF splitting (Aff not diagonal)"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type pmis -pc_air_strong_threshold 0.0
+	@echo ""
+	@echo "Test AIRG with advection, zero strong threshold and aggregation CF splitting (Aff not diagonal)"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type agg -pc_air_strong_threshold 0.0
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
@@ -623,6 +641,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5
+#
+	@echo ""
+	@echo "Test distance 2 PMIS on 1D central difference advection - skew-symmetric off-diagonals must not cancel in the strength matrix"
+	./adv_1d -n 1000 -skew -pc_type air -pc_air_cf_splitting_type pmis_dist2 -min_levels 3 -ksp_max_it 5
 	@echo "Test multiple RHS block solve with a Newton polynomial PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV"
@@ -757,6 +779,18 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -n 5000 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
 #
 	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros, assembled and matrix-free"
+	./poly_zero_coeffs
+	./poly_zero_coeffs -pc_pflareinv_matrix_free
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
+# Skipped in single as there the roots' real parts are not below the zero tolerance
+	$(SKIP_SINGLE) ./newton_imag_roots
+#
+	@echo ""
 	@echo "Test 3D upwind finite-difference"
 	./adv_diff_fd -dim 3 -da_grid_x 10 -da_grid_y 10 -da_grid_z 10 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 4
@@ -795,6 +829,8 @@ run_tests_no_load_short_serial:
 	./mat_diag -ksp_max_it 1
 	@echo "Test Arnoldi GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type arnoldi -ksp_max_it 1
+	@echo "Test Arnoldi GMRES polynomial doesn't stop Arnoldi early on a well-conditioned diagonal matrix"
+	$(SKIP_SINGLE) ./mat_diag -pc_pflareinv_type arnoldi -pc_pflareinv_poly_order 10 -ksp_max_it 1 -check_rel_res 2e-14
 	@echo "Test Power GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type power -ksp_max_it 1
 #
@@ -813,6 +849,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix"
 	./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test the modified Leja ordering of the Newton basis roots is invariant to scaling"
+	./leja_ordering
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -1003,6 +1043,17 @@ else
 	$(MPIEXEC) -n 2 ./reuse_preconditioner
 #
 	@echo ""
+	@echo "Test assembled PCPFLAREINV set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type isai
+	@echo "Test PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups reusing the sparsity"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type arnoldi -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type isai -pc_air_z_type lair \
+	 -pc_air_reuse_sparsity
+#
+	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact in parallel"
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3
 	$(MPIEXEC) -n 2 ./operator_refcount -ksp_max_it 3 -pc_air_max_levels 1
@@ -1015,6 +1066,11 @@ else
 	@echo ""
 	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
 	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
+#
+	@echo ""
+	@echo "Test PMIS_AGG keeps boundary C points whose strong neighbours are all off-process in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -da_grid_x 4 -da_grid_y 64 -da_processors_x 4 -da_processors_y 1 -u 1 -v 0 \
+	 -pc_type air -pc_air_cf_splitting_type pmis_agg -ksp_max_it 1
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
@@ -1034,6 +1090,12 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+	@echo ""
+	@echo "Test AIRG with advection and PMIS then aggregation CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type pmis_agg
+	@echo ""
+	@echo "Test AIRG with advection and distance 2 PMIS CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -1265,6 +1327,8 @@ else
 	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
+	@echo "Test distance 2 PMIS on 1D central difference advection in parallel - skew-symmetric off-diagonals must not cancel in the strength matrix"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -skew -pc_type air -pc_air_cf_splitting_type pmis_dist2 -min_levels 3 -ksp_max_it 5
 	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
 	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
@@ -1329,6 +1393,15 @@ else
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
 	 -transpose_solve -ksp_max_it 100
+#
+	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros in parallel, assembled and matrix-free"
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"

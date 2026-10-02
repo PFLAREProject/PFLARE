@@ -91,6 +91,32 @@ for earlier changes please see the git history.
 - Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
   and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
   routines match their definitions exactly (`PetscBool`, `int` by value)
+- Fixed a crash when an assembled GMRES polynomial or SAI/ISAI inverse (in
+  PCPFLAREINV or PCAIR) was set up in parallel after one had been set up on a
+  single rank in the same program, eg as a block Jacobi sub-PC
+- Behaviour change: the Arnoldi basis GMRES polynomial (the default PCAIR
+  inverse type) now includes every entry of the least-squares residual in its
+  early termination test, so it no longer stops before reaching its tolerance
+  and iteration counts may change slightly
+- Fixed monomial GMRES polynomials with exactly zero interior coefficients
+  (eg set with `PCPFLAREINVSetPolyCoeffs`) applying the wrong polynomial, both
+  assembled and matrix-free
+- Newton basis GMRES polynomials: the modified Leja ordering of the roots no
+  longer depends on the scaling of the spectrum, and purely imaginary roots now
+  receive extra roots for stability, so results may change for tightly
+  clustered, small magnitude or skew-symmetric spectra
+- Fixed PCAIR with `-pc_air_strong_threshold 0` assuming Aff is diagonal for
+  every CF splitting type; this only holds for `pmisr_ddc` and `diag_dom`, so
+  other splittings (e.g., `pmis`, `agg`) silently dropped the off-diagonal
+  entries of Aff, degrading or breaking convergence
+- Fixed the `pmis_agg` CF splitting: in parallel, boundary C points whose
+  strong neighbours were all off-process were turned into F points (which
+  could remove every C point), and with Kokkos matrices the aggregation read
+  uninitialised PMIS markers from the host
+- Fixed the `pmis_dist2` CF splitting cancelling signed connections when
+  squaring the strength matrix (e.g., skew-symmetric advection gave almost no
+  connections and coarsening failed), and leaking an IS on every setup. The
+  coarse grids from `pmis_dist2` may change
 
 ## [v1.27.0]
 

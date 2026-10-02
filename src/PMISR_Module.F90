@@ -154,10 +154,13 @@ module pmisr_module
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
-      logical :: zero_measure_c = .FALSE.  
+      logical :: zero_measure_c
 
       ! ~~~~~~           
 
+      ! Set here rather than with an initialiser in the declaration, which would give it
+      ! an implicit save and keep the value from a previous call
+      zero_measure_c = .FALSE.
       if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
 
       ! Get the comm size 
@@ -310,11 +313,14 @@ module pmisr_module
       PetscInt, dimension(:), pointer :: ad_ia, ad_ja, ao_ia, ao_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
-      logical :: zero_measure_c = .FALSE.
+      logical :: zero_measure_c
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
 
       ! ~~~~~~
 
+      ! Set here rather than with an initialiser in the declaration, which would give it
+      ! an implicit save and keep the value from a previous call
+      zero_measure_c = .FALSE.
       if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
 
       ! Get the comm size
@@ -737,13 +743,16 @@ module pmisr_module
       PetscInt, dimension(:), pointer :: spst_ia, spst_ja, aot_ia, aot_ja
       PetscInt :: shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
-      logical :: zero_measure_c = .FALSE.
+      logical :: zero_measure_c
       logical :: destroy_spst, destroy_aot
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       PetscReal :: petsc_one = 1d0
 
       ! ~~~~~~
 
+      ! Set here rather than with an initialiser in the declaration, which would give it
+      ! an implicit save and keep the value from a previous call
+      zero_measure_c = .FALSE.
       if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
 
       ! Get the comm size
