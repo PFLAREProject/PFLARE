@@ -69,6 +69,12 @@ Solve-selection flags (at most one -only_* may be given):\n\
   -only_pcilu               : run ONLY the exact-PCILU baseline Ax=b solve plus\n\
                               the ILU factorisation and the LU_Exact_{L,U}\n\
                               level-set setup timings (cheap baseline refresh)\n\
+  -pcilu_mat_type <type>    : with -only_pcilu, run the exact-PCILU baseline on a\n\
+                              copy of A of this matrix type (e.g. seqaijhipsparse)\n\
+                              instead of the Kokkos A; single rank only\n\
+  -pcilu_solver_type <type> : with -pcilu_mat_type, the baseline ILU factor\n\
+                              package (e.g. hipsparse); 'hipsparse' also times the\n\
+                              LU_Exact_{L,U} setup as hipSPARSE SpSV analysis\n\
   -jac_max_it <int>         : inner Jacobi sweeps per factor apply in the\n\
                               Jacobi-inner Ax=b solve (default: ceil of the max\n\
                               AIR cycle complexity over L and U)\n\n";
@@ -86,10 +92,28 @@ Solve-selection flags (at most one -only_* may be given):\n\
 #include <KokkosSparse_SortCrs.hpp>
 #include <exception>
 #include <stdexcept>
+#include <climits>
+#if defined(PETSC_HAVE_HIP)
+  #include <hip/hip_runtime.h>
+  #include <hipsparse/hipsparse.h>
+#endif
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /*  Helpers                                                                    */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+
+/* Wait for ALL outstanding device work before reading a wall clock. Kokkos::fence()
+   only covers Kokkos' own execution space instance; the hipSPARSE exact-PCILU
+   baseline (-pcilu_mat_type seqaijhipsparse) runs on PETSc's HIP stream and the
+   hipSPARSE handle's stream, so the device as a whole is synchronised too. On the
+   Kokkos-only paths this is the same fence as before plus a no-op device sync. */
+static void DeviceSync(void)
+{
+  Kokkos::fence();
+#if defined(PETSC_HAVE_HIP)
+  (void)hipDeviceSynchronize();
+#endif
+}
 
 /* Create an AIJ-like matrix of the requested type with per-row d/o nonzero
    counts. Mirrors the helper of the same name in ilu_factors.c — used to
@@ -258,10 +282,10 @@ static PetscErrorCode TimedKSPSetUp(KSP ksp, const char *label)
 {
   PetscLogDouble t0, t1;
   PetscFunctionBeginUser;
-  Kokkos::fence();
+  DeviceSync();
   PetscCall(PetscTime(&t0));
   PetscCall(KSPSetUp(ksp));
-  Kokkos::fence();
+  DeviceSync();
   PetscCall(PetscTime(&t1));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME %s = %.6e\n",
                         label, (double)(t1 - t0)));
@@ -281,10 +305,10 @@ static PetscErrorCode TimedKSPSolve(KSP ksp, Vec b, Vec x, const char *label)
 {
   PetscLogDouble t0, t1;
   PetscFunctionBeginUser;
-  Kokkos::fence();
+  DeviceSync();
   PetscCall(PetscTime(&t0));
   PetscCall(KSPSolve(ksp, b, x));
-  Kokkos::fence();
+  DeviceSync();
   PetscCall(PetscTime(&t1));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SOLVE_TIME %s = %.6e\n",
                         label, (double)(t1 - t0)));
@@ -341,6 +365,134 @@ static PetscErrorCode TimeSptrsvSymbolic(Mat F, PetscBool lower_tri, const char 
   PetscCall(MatSeqAIJRestoreKokkosView(F, &F_values));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME %s = %.6e\n",
                         label, (double)(t1 - t0)));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* hipSPARSE analogue of TimeSptrsvSymbolic, for the hipSPARSE exact-PCILU
+   baseline (-pcilu_solver_type hipsparse): time the SpSV setup an exact
+   hipSPARSE triangular solve of one of OUR factors pays before its first apply,
+   and print it as `SETUP_TIME <label> = <seconds>` (the same LU_Exact_{L,U}
+   labels, so the driver fills the same columns of the separate hipSPARSE CSV).
+
+   It mirrors what PETSc's aijhipsparse factor path does per factorisation:
+   create the CSR / dense-vector / SpSV descriptors, query and allocate the SpSV
+   buffer, then hipsparseSpSV_analysis. The index width follows PETSc's two
+   paths: 32-bit for ILU(0) (its device csrilu02 path), PetscInt for ILU(k>0)
+   (its host-factorisation path), selected by `int32_idx`. L is described as
+   UNIT-diagonal and U as NON_UNIT, as PETSc does; both of our factors store a
+   unit diagonal (U after the 1/diag scaling), so the solves are the same either
+   way. Excluded from the interval, like the handle in PETSc (created once and
+   shared): the hipSPARSE handle and the int32 index copy. As a correctness check
+   one SpSV solve with the analysed descriptors is applied to a vector of ones and
+   the residual ||F y - 1|| / ||1|| printed (should be ~1e-14 or so). */
+#if defined(PETSC_HAVE_HIP)
+  #define PFLARE_CHKHIPSPARSE(call) \
+    do { \
+      hipsparseStatus_t st_ = (call); \
+      PetscCheck(st_ == HIPSPARSE_STATUS_SUCCESS, PETSC_COMM_SELF, PETSC_ERR_LIB, "hipSPARSE error %d in %s", (int)st_, #call); \
+    } while (0)
+  #define PFLARE_CHKHIP(call) \
+    do { \
+      hipError_t e_ = (call); \
+      PetscCheck(e_ == hipSuccess, PETSC_COMM_SELF, PETSC_ERR_LIB, "HIP error %d (%s) in %s", (int)e_, hipGetErrorString(e_), #call); \
+    } while (0)
+#endif
+static PetscErrorCode TimeHipsparseSpSVAnalysis(Mat F, PetscBool lower_tri, PetscBool int32_idx, const char *label)
+{
+  PetscFunctionBeginUser;
+#if defined(PETSC_HAVE_HIP)
+  PetscInt       m, n;
+  PetscLogDouble t0, t1;
+  PetscCall(MatGetLocalSize(F, &m, &n));
+
+  Kokkos::View<const PetscScalar *> F_values;
+  PetscCall(MatSeqAIJGetKokkosView(F, &F_values));
+  const PetscInt *device_i = nullptr, *device_j = nullptr;
+  PetscMemType    memtype;
+  PetscCall(MatSeqAIJGetCSRAndMemType(F, &device_i, &device_j, NULL, &memtype));
+  const PetscInt nnz = (PetscInt)F_values.extent(0);
+
+  /* 32-bit index copies for the ILU(0) path (untimed, see above) */
+  Kokkos::View<int *> rowptr32, colind32;
+  void               *rowptr = (void *)device_i, *colind = (void *)device_j;
+  hipsparseIndexType_t itype = (sizeof(PetscInt) == 8) ? HIPSPARSE_INDEX_64I : HIPSPARSE_INDEX_32I;
+  if (int32_idx) {
+    PetscCheck(nnz <= (PetscInt)INT_MAX, PETSC_COMM_SELF, PETSC_ERR_SUP, "nnz too large for 32-bit indices");
+    rowptr32 = Kokkos::View<int *>("rowptr32", m + 1);
+    colind32 = Kokkos::View<int *>("colind32", nnz);
+    auto rp  = rowptr32;
+    auto ci  = colind32;
+    Kokkos::parallel_for("rowptr32", Kokkos::RangePolicy<>(0, m + 1), KOKKOS_LAMBDA(const PetscInt i) { rp(i) = (int)device_i[i]; });
+    Kokkos::parallel_for("colind32", Kokkos::RangePolicy<>(0, nnz), KOKKOS_LAMBDA(const PetscInt i) { ci(i) = (int)device_j[i]; });
+    rowptr = (void *)rowptr32.data();
+    colind = (void *)colind32.data();
+    itype  = HIPSPARSE_INDEX_32I;
+  }
+  Kokkos::View<PetscScalar *> X("spsv_X", m), Y("spsv_Y", m);
+  Kokkos::deep_copy(X, 1.0);
+
+  hipsparseHandle_t handle;
+  PFLARE_CHKHIPSPARSE(hipsparseCreate(&handle));
+  const PetscScalar     one = 1.0;
+  hipsparseSpMatDescr_t matF;
+  hipsparseDnVecDescr_t vecX, vecY;
+  hipsparseSpSVDescr_t  spsv;
+  size_t                bufsize = 0;
+  void                 *buf     = NULL;
+  hipsparseFillMode_t   fill    = lower_tri ? HIPSPARSE_FILL_MODE_LOWER : HIPSPARSE_FILL_MODE_UPPER;
+  hipsparseDiagType_t   diag    = lower_tri ? HIPSPARSE_DIAG_TYPE_UNIT : HIPSPARSE_DIAG_TYPE_NON_UNIT;
+
+  DeviceSync();
+  PetscCall(PetscTime(&t0));
+  PFLARE_CHKHIPSPARSE(hipsparseCreateCsr(&matF, m, m, nnz, rowptr, colind, (void *)F_values.data(), itype, itype, HIPSPARSE_INDEX_BASE_ZERO, HIP_R_64F));
+  PFLARE_CHKHIPSPARSE(hipsparseSpMatSetAttribute(matF, HIPSPARSE_SPMAT_FILL_MODE, &fill, sizeof(fill)));
+  PFLARE_CHKHIPSPARSE(hipsparseSpMatSetAttribute(matF, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
+  PFLARE_CHKHIPSPARSE(hipsparseCreateDnVec(&vecX, m, X.data(), HIP_R_64F));
+  PFLARE_CHKHIPSPARSE(hipsparseCreateDnVec(&vecY, m, Y.data(), HIP_R_64F));
+  PFLARE_CHKHIPSPARSE(hipsparseSpSV_createDescr(&spsv));
+  PFLARE_CHKHIPSPARSE(hipsparseSpSV_bufferSize(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, &one, matF, vecX, vecY, HIP_R_64F, HIPSPARSE_SPSV_ALG_DEFAULT, spsv, &bufsize));
+  PFLARE_CHKHIP(hipMalloc(&buf, bufsize > 0 ? bufsize : 1));
+  PFLARE_CHKHIPSPARSE(hipsparseSpSV_analysis(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, &one, matF, vecX, vecY, HIP_R_64F, HIPSPARSE_SPSV_ALG_DEFAULT, spsv, buf));
+  DeviceSync();
+  PetscCall(PetscTime(&t1));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME %s = %.6e\n", label, (double)(t1 - t0)));
+
+  /* Correctness check: Y = F^{-1} ones with the analysed descriptors, then
+     ||F Y - ones|| / ||ones|| through PETSc's own (Kokkos) MatMult on F. */
+  PFLARE_CHKHIPSPARSE(hipsparseSpSV_solve(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, &one, matF, vecX, vecY, HIP_R_64F, HIPSPARSE_SPSV_ALG_DEFAULT, spsv));
+  DeviceSync();
+  {
+    Vec          vy, vr;
+    PetscScalar *py;
+    PetscMemType ymt;
+    PetscReal    rn;
+    PetscCall(MatCreateVecs(F, &vy, &vr));
+    PetscCall(VecGetArrayWriteAndMemType(vy, &py, &ymt));
+    PetscCheck(PetscMemTypeDevice(ymt), PETSC_COMM_SELF, PETSC_ERR_SUP, "expected a device vector for the hipSPARSE check");
+    PFLARE_CHKHIP(hipMemcpy(py, Y.data(), sizeof(PetscScalar) * m, hipMemcpyDeviceToDevice));
+    PetscCall(VecRestoreArrayWriteAndMemType(vy, &py));
+    PetscCall(MatMult(F, vy, vr));
+    PetscCall(VecShift(vr, -1.0));
+    PetscCall(VecNorm(vr, NORM_2, &rn));
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD, "HIPSPARSE_SPSV_CHECK %s: ||F y - 1||/||1|| = %.3e\n", label,
+                          (double)(m > 0 ? rn / PetscSqrtReal((PetscReal)m) : rn)));
+    PetscCall(VecDestroy(&vy));
+    PetscCall(VecDestroy(&vr));
+  }
+
+  PFLARE_CHKHIPSPARSE(hipsparseSpSV_destroyDescr(spsv));
+  PFLARE_CHKHIPSPARSE(hipsparseDestroyDnVec(vecX));
+  PFLARE_CHKHIPSPARSE(hipsparseDestroyDnVec(vecY));
+  PFLARE_CHKHIPSPARSE(hipsparseDestroySpMat(matF));
+  PFLARE_CHKHIP(hipFree(buf));
+  PFLARE_CHKHIPSPARSE(hipsparseDestroy(handle));
+  PetscCall(MatSeqAIJRestoreKokkosView(F, &F_values));
+#else
+  (void)F;
+  (void)lower_tri;
+  (void)int32_idx;
+  SETERRQ(PETSC_COMM_SELF, PETSC_ERR_SUP, "%s: hipSPARSE SpSV timing needs a PETSc built with HIP", label);
+#endif
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1236,6 +1388,29 @@ int main(int argc, char **args)
      cells and re-running them would just burn GPU time. */
   PetscBool only_pcilu = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-only_pcilu", &only_pcilu, NULL));
+  /* -pcilu_mat_type / -pcilu_solver_type: run that exact-PCILU baseline on a copy
+     of A of another matrix type with another ILU factor package, e.g.
+     seqaijhipsparse + hipsparse for a hipSPARSE (rocSPARSE) triangular solve
+     instead of the Kokkos Kernels one. Only the baseline changes: the spiluk
+     factorisation and the LU_Exact_{L,U} setup still run, and with
+     -pcilu_solver_type hipsparse the latter is timed as hipSPARSE SpSV analysis.
+     Both are REJECTED without -only_pcilu (read by nothing else), and the type
+     without a solver package (MatGetFactor's default for the type could silently
+     be a host package). */
+  char      pcilu_mat_type[64] = "", pcilu_solver_type[64] = "";
+  PetscBool pcilu_alt = PETSC_FALSE, pcilu_solver_set = PETSC_FALSE;
+  PetscCall(PetscOptionsGetString(NULL, NULL, "-pcilu_mat_type", pcilu_mat_type, sizeof(pcilu_mat_type), &pcilu_alt));
+  PetscCall(PetscOptionsGetString(NULL, NULL, "-pcilu_solver_type", pcilu_solver_type, sizeof(pcilu_solver_type), &pcilu_solver_set));
+  if ((pcilu_alt || pcilu_solver_set) && !(only_pcilu && pcilu_alt && pcilu_solver_set && npe == 1)) {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "-pcilu_mat_type and -pcilu_solver_type must be given together, with -only_pcilu, "
+              "on a single rank.\n"));
+    PetscCall(MatDestroy(&A));
+    PetscCall(PetscFinalize());
+    return 1;
+  }
+  PetscBool pcilu_hipsparse = PETSC_FALSE;
+  PetscCall(PetscStrcmp(pcilu_solver_type, "hipsparse", &pcilu_hipsparse));
   /* -only_inner_axb <isai|gmres_poly>: the ISAI / GMRES-poly analogue of
      -only_jac_axb. Run ONLY the ILU factorisation, that method's two standalone
      L/U factor solves (a per-matrix reference, and a check against the
@@ -1319,11 +1494,73 @@ int main(int argc, char **args)
     {
       KSP ksp_Apc;
       PC  pc_Apc;
+      /* The baseline's operator and vectors: A itself, or (-pcilu_mat_type) a
+         copy of the already reordered and 1/diag-scaled A converted to that
+         type, with vectors of the matching type carrying the SAME random rhs.
+         The conversion goes through MATSEQAIJ (a plain host copy that keeps
+         every stored entry, explicit zeros included, so the ILU(k) pattern is
+         unchanged) and is untimed. */
+      Mat Apc  = A;
+      Vec b_pc = b_rand, x_pc = x_sol;
+      if (pcilu_alt) {
+        Mat                Aseq;
+        const PetscScalar *pb;
+        PetscScalar       *pw;
+        PetscReal          nb_k, nb_alt;
+        MatInfo            info_k, info_alt;
+        MatType            alt_type;
+        VecType            alt_vtype;
+        PetscCall(MatConvert(A, MATSEQAIJ, MAT_INITIAL_MATRIX, &Aseq));
+        PetscCall(MatConvert(Aseq, pcilu_mat_type, MAT_INITIAL_MATRIX, &Apc));
+        PetscCall(MatDestroy(&Aseq));
+        PetscCall(MatCreateVecs(Apc, &x_pc, &b_pc));
+        PetscCall(VecGetArrayRead(b_rand, &pb));
+        PetscCall(VecGetArrayWrite(b_pc, &pw));
+        PetscCall(PetscArraycpy(pw, pb, m));
+        PetscCall(VecRestoreArrayWrite(b_pc, &pw));
+        PetscCall(VecRestoreArrayRead(b_rand, &pb));
+        /* Sanity: same stored entries and the same rhs as the Kokkos baseline. */
+        PetscCall(MatGetInfo(A, MAT_LOCAL, &info_k));
+        PetscCall(MatGetInfo(Apc, MAT_LOCAL, &info_alt));
+        PetscCall(VecNorm(b_rand, NORM_2, &nb_k));
+        PetscCall(VecNorm(b_pc, NORM_2, &nb_alt));
+        PetscCall(MatGetType(Apc, &alt_type));
+        PetscCall(VecGetType(b_pc, &alt_vtype));
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+                  "PCILU baseline on %s (vec %s): nnz %.0f (A: %.0f), ||b|| %.15e (A: %.15e)\n",
+                  alt_type, alt_vtype, (double)info_alt.nz_used, (double)info_k.nz_used,
+                  (double)nb_alt, (double)nb_k));
+        PetscCheck(info_alt.nz_used == info_k.nz_used, PETSC_COMM_SELF, PETSC_ERR_PLIB,
+                   "-pcilu_mat_type copy of A changed the number of stored entries");
+        /* The rhs must be bit-identical: compare the host arrays entry by entry
+           (the two norms above come from different device reductions, so they
+           may legitimately differ in the last bits and are printed only). */
+        {
+          const PetscScalar *pa, *pk;
+          PetscBool          same_b = PETSC_TRUE;
+          PetscCall(VecGetArrayRead(b_pc, &pa));
+          PetscCall(VecGetArrayRead(b_rand, &pk));
+          for (PetscInt i = 0; i < m; i++) {
+            if (pa[i] != pk[i]) {
+              same_b = PETSC_FALSE;
+              break;
+            }
+          }
+          PetscCall(VecRestoreArrayRead(b_rand, &pk));
+          PetscCall(VecRestoreArrayRead(b_pc, &pa));
+          PetscCheck(same_b, PETSC_COMM_SELF, PETSC_ERR_PLIB, "-pcilu_mat_type rhs differs from the Kokkos rhs");
+        }
+        /* The factor package of the baseline's sub-PC (an explicit command-line
+           value still wins, as for the fill level below). */
+        PetscBool has_sub_solver = PETSC_FALSE;
+        PetscCall(PetscOptionsHasName(NULL, NULL, "-Apc_sub_pc_factor_mat_solver_type", &has_sub_solver));
+        if (!has_sub_solver) PetscCall(PetscOptionsSetValue(NULL, "-Apc_sub_pc_factor_mat_solver_type", pcilu_solver_type));
+      }
       PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_Apc));
       PetscCall(KSPSetType(ksp_Apc, KSPGMRES));
       PetscCall(KSPGMRESSetRestart(ksp_Apc, 30));
       PetscCall(KSPSetNormType(ksp_Apc, KSP_NORM_UNPRECONDITIONED));
-      PetscCall(KSPSetOperators(ksp_Apc, A, A));
+      PetscCall(KSPSetOperators(ksp_Apc, Apc, Apc));
       PetscCall(KSPSetTolerances(ksp_Apc, 1e-6, 1e-50, PETSC_DEFAULT, 2000));
       PetscCall(KSPGetPC(ksp_Apc, &pc_Apc));
       /* PCBJACOBI's default sub-PC for AIJ blocks is PCILU(0). In serial that's
@@ -1358,13 +1595,36 @@ int main(int argc, char **args)
          (host-side for k>0 on aijkokkos, then copied to device). */
       {
         PetscLogDouble tb0, tb1;
-        Kokkos::fence();
+        DeviceSync();
         PetscCall(PetscTime(&tb0));
         PetscCall(KSPSetUpOnBlocks(ksp_Apc));
-        Kokkos::fence();
+        DeviceSync();
         PetscCall(PetscTime(&tb1));
         PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME Ax=b_PC_ILU_blocks = %.6e\n",
                               (double)(tb1 - tb0)));
+      }
+      /* Record which factorisation actually ran (matrix type of the factor and
+         the package), so a log can be checked against the intended baseline. */
+      {
+        KSP          *sub_ksp;
+        PC            sub_pc;
+        Mat           F_pc;
+        MatType       f_type;
+        MatSolverType f_pkg;
+        PetscInt      n_local, first_local;
+        PetscCall(PCBJacobiGetSubKSP(pc_Apc, &n_local, &first_local, &sub_ksp));
+        PetscCall(KSPGetPC(sub_ksp[0], &sub_pc));
+        PetscCall(PCFactorGetMatSolverType(sub_pc, &f_pkg));
+        PetscCall(PCFactorGetMatrix(sub_pc, &F_pc));
+        PetscCall(MatGetType(F_pc, &f_type));
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "PCILU baseline factor: type %s, package %s\n",
+                              f_type, f_pkg ? f_pkg : "(default)"));
+        if (pcilu_alt) {
+          PetscBool same_pkg = PETSC_FALSE;
+          PetscCall(PetscStrcmp(f_pkg, pcilu_solver_type, &same_pkg));
+          PetscCheck(same_pkg, PETSC_COMM_SELF, PETSC_ERR_PLIB, "baseline factor package is %s, not the requested %s",
+                     f_pkg ? f_pkg : "(default)", pcilu_solver_type);
+        }
       }
       /* The sptrsv level-set analysis of the baseline's factors is deferred
          one step further still, to the first MatSolve (MatSeqAIJKokkosSolveCheck).
@@ -1374,19 +1634,42 @@ int main(int argc, char **args)
       {
         PetscLogDouble tw0, tw1;
         Vec            warm;
-        PetscCall(VecDuplicate(x_sol, &warm));
-        Kokkos::fence();
+        PetscCall(VecDuplicate(x_pc, &warm));
+        DeviceSync();
         PetscCall(PetscTime(&tw0));
-        PetscCall(PCApply(pc_Apc, b_rand, warm));
-        Kokkos::fence();
+        PetscCall(PCApply(pc_Apc, b_pc, warm));
+        DeviceSync();
         PetscCall(PetscTime(&tw1));
         PetscCall(PetscPrintf(PETSC_COMM_WORLD, "SETUP_TIME Ax=b_PC_ILU_levelsets = %.6e\n",
                               (double)(tw1 - tw0)));
         PetscCall(VecDestroy(&warm));
       }
-      PetscCall(TimedKSPSolve(ksp_Apc, b_rand, x_sol, "Ax=b_PC_ILU"));
-      PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, A, b_rand, x_sol, &solves_converged));
+      /* Untimed WARM-UP solve capped at 5 outer iterations, exactly as in
+         RunAxbShellInner: this is the first GMRES solve in the process, and its
+         first orthogonalisation absorbs the one-time GPU library/kernel
+         initialisation (tens of ms, comparable to a whole solve on the small
+         matrices), which the PCApply above does not reach. The -log_view stage
+         is deactivated around it so the stage's KSPSolve event (the driver's
+         canonical time) counts only the real solve; KSPSolve zeroes x on entry,
+         so the timed solve below is identical to a cold one. */
+      {
+        PetscReal wu_rtol, wu_atol, wu_dtol;
+        PetscInt  wu_maxits;
+        PetscCall(KSPGetTolerances(ksp_Apc, &wu_rtol, &wu_atol, &wu_dtol, &wu_maxits));
+        PetscCall(KSPSetTolerances(ksp_Apc, wu_rtol, wu_atol, wu_dtol, 5));
+        PetscCall(PetscLogStageSetActive(stage_A_pcilu, PETSC_FALSE));
+        PetscCall(KSPSolve(ksp_Apc, b_pc, x_pc));
+        PetscCall(PetscLogStageSetActive(stage_A_pcilu, PETSC_TRUE));
+        PetscCall(KSPSetTolerances(ksp_Apc, wu_rtol, wu_atol, wu_dtol, wu_maxits));
+      }
+      PetscCall(TimedKSPSolve(ksp_Apc, b_pc, x_pc, "Ax=b_PC_ILU"));
+      PetscCall(ReportSolve("A x = b solve (gmres(30) + PCBJACOBI/ILU)", ksp_Apc, Apc, b_pc, x_pc, &solves_converged));
       PetscCall(KSPDestroy(&ksp_Apc));
+      if (pcilu_alt) {
+        PetscCall(VecDestroy(&b_pc));
+        PetscCall(VecDestroy(&x_pc));
+        PetscCall(MatDestroy(&Apc));
+      }
     }
     PetscCall(PetscLogStagePop());
   } else {
@@ -1445,8 +1728,15 @@ int main(int argc, char **args)
   if (npe == 1) {
     PetscErrorCode ierr_sym = PETSC_SUCCESS;
     try {
-      ierr_sym = TimeSptrsvSymbolic(L, PETSC_TRUE, "LU_Exact_L");
-      if (!ierr_sym) ierr_sym = TimeSptrsvSymbolic(U, PETSC_FALSE, "LU_Exact_U");
+      if (pcilu_hipsparse) {
+        /* hipSPARSE baseline: its SpSV analysis on our factors instead (32-bit
+           indices for ILU(0) as in PETSc's device ILU(0) path). */
+        ierr_sym = TimeHipsparseSpSVAnalysis(L, PETSC_TRUE, fill_lev == 0 ? PETSC_TRUE : PETSC_FALSE, "LU_Exact_L");
+        if (!ierr_sym) ierr_sym = TimeHipsparseSpSVAnalysis(U, PETSC_FALSE, fill_lev == 0 ? PETSC_TRUE : PETSC_FALSE, "LU_Exact_U");
+      } else {
+        ierr_sym = TimeSptrsvSymbolic(L, PETSC_TRUE, "LU_Exact_L");
+        if (!ierr_sym) ierr_sym = TimeSptrsvSymbolic(U, PETSC_FALSE, "LU_Exact_U");
+      }
     } catch (const std::exception &e) {
       ierr_sym = PETSC_ERR_LIB;
       PetscCall(PetscPrintf(PETSC_COMM_WORLD,
