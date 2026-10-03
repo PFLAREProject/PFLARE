@@ -70,8 +70,9 @@ Solve-selection flags (at most one -only_* may be given):\n\
                               the ILU factorisation and the LU_Exact_{L,U}\n\
                               level-set setup timings (cheap baseline refresh)\n\
   -pcilu_mat_type <type>    : with -only_pcilu, run the exact-PCILU baseline on a\n\
-                              copy of A of this matrix type (e.g. seqaijhipsparse)\n\
-                              instead of the Kokkos A; single rank only\n\
+                              copy of A of this matrix type (e.g. aijhipsparse;\n\
+                              in parallel each rank's block-Jacobi block is then\n\
+                              of that type) instead of the Kokkos A\n\
   -pcilu_solver_type <type> : with -pcilu_mat_type, the baseline ILU factor\n\
                               package (e.g. hipsparse); 'hipsparse' also times the\n\
                               LU_Exact_{L,U} setup as hipSPARSE SpSV analysis\n\
@@ -1396,15 +1397,16 @@ int main(int argc, char **args)
      -pcilu_solver_type hipsparse the latter is timed as hipSPARSE SpSV analysis.
      Both are REJECTED without -only_pcilu (read by nothing else), and the type
      without a solver package (MatGetFactor's default for the type could silently
-     be a host package). */
+     be a host package). In parallel the baseline is PCBJACOBI with one block per
+     rank, so each rank's exact ILU solve of its diagonal block uses that type and
+     package; the LU_Exact_{L,U} timings are single-rank only, as before. */
   char      pcilu_mat_type[64] = "", pcilu_solver_type[64] = "";
   PetscBool pcilu_alt = PETSC_FALSE, pcilu_solver_set = PETSC_FALSE;
   PetscCall(PetscOptionsGetString(NULL, NULL, "-pcilu_mat_type", pcilu_mat_type, sizeof(pcilu_mat_type), &pcilu_alt));
   PetscCall(PetscOptionsGetString(NULL, NULL, "-pcilu_solver_type", pcilu_solver_type, sizeof(pcilu_solver_type), &pcilu_solver_set));
-  if ((pcilu_alt || pcilu_solver_set) && !(only_pcilu && pcilu_alt && pcilu_solver_set && npe == 1)) {
+  if ((pcilu_alt || pcilu_solver_set) && !(only_pcilu && pcilu_alt && pcilu_solver_set)) {
     PetscCall(PetscPrintf(PETSC_COMM_WORLD,
-              "-pcilu_mat_type and -pcilu_solver_type must be given together, with -only_pcilu, "
-              "on a single rank.\n"));
+              "-pcilu_mat_type and -pcilu_solver_type must be given together, with -only_pcilu.\n"));
     PetscCall(MatDestroy(&A));
     PetscCall(PetscFinalize());
     return 1;
@@ -1497,9 +1499,9 @@ int main(int argc, char **args)
       /* The baseline's operator and vectors: A itself, or (-pcilu_mat_type) a
          copy of the already reordered and 1/diag-scaled A converted to that
          type, with vectors of the matching type carrying the SAME random rhs.
-         The conversion goes through MATSEQAIJ (a plain host copy that keeps
-         every stored entry, explicit zeros included, so the ILU(k) pattern is
-         unchanged) and is untimed. */
+         The conversion goes through MATAIJ (seq or mpi: a plain host copy
+         that keeps every stored entry, explicit zeros included, so the ILU(k)
+         pattern is unchanged) and is untimed. */
       Mat Apc  = A;
       Vec b_pc = b_rand, x_pc = x_sol;
       if (pcilu_alt) {
@@ -1510,7 +1512,7 @@ int main(int argc, char **args)
         MatInfo            info_k, info_alt;
         MatType            alt_type;
         VecType            alt_vtype;
-        PetscCall(MatConvert(A, MATSEQAIJ, MAT_INITIAL_MATRIX, &Aseq));
+        PetscCall(MatConvert(A, MATAIJ, MAT_INITIAL_MATRIX, &Aseq));
         PetscCall(MatConvert(Aseq, pcilu_mat_type, MAT_INITIAL_MATRIX, &Apc));
         PetscCall(MatDestroy(&Aseq));
         PetscCall(MatCreateVecs(Apc, &x_pc, &b_pc));
