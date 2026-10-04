@@ -117,6 +117,17 @@ for earlier changes please see the git history.
   squaring the strength matrix (e.g., skew-symmetric advection gave almost no
   connections and coarsening failed), and leaking an IS on every setup. The
   coarse grids from `pmis_dist2` may change
+- Fixed the CPU ISAI exact dense solve wrongly permuting the solution returned
+  by LAPACK `gesv`, which gave an incorrect ISAI (and lAIR Z) whenever a local
+  submatrix needed row pivoting; a singular local submatrix now aborts rather
+  than silently returning the right-hand side
+- Fixed the Kokkos dense direct solve used to build lAIR/SAI Z and ISAI
+  rows not pivoting, which gave Inf/NaN or inaccurate rows when a local block
+  had a zero or small leading pivot (e.g. matrices with zero diagonals); it now
+  uses LU with partial pivoting like the CPU LAPACK solve
+- Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z
+  and ISAI rows dividing by zero (giving Inf/NaN) when a local block has a
+  zero diagonal; zero diagonals are now replaced by 1, matching the CPU PCJACOBI
 
 ## [v1.27.0]
 

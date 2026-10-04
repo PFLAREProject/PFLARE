@@ -162,6 +162,9 @@ run_tests_load_serial:
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26
 	@echo "Test AIRG with Newton GMRES polynomials in indefinite problem with zero diagonals"
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -ksp_max_it 26			
+	@echo "Test single level ISAI in indefinite problem with zero diagonals (Jacobi local solves hit zero diagonals, direct local solves need pivoting)"
+	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_type pflareinv -pc_pflareinv_type isai \
+	 -ksp_max_it 20 -ksp_converged_maxits
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order"
@@ -258,6 +261,9 @@ else
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26		
+	@echo "Test single level ISAI in indefinite problem with zero diagonals (Jacobi local solves hit zero diagonals, direct local solves need pivoting) in parallel"
+	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_type pflareinv -pc_pflareinv_type isai \
+	 -ksp_max_it 20 -ksp_converged_maxits
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order in parallel"
@@ -789,6 +795,11 @@ run_tests_no_load_short_serial:
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
 # Skipped in single as there the roots' real parts are not below the zero tolerance
 	$(SKIP_SINGLE) ./newton_imag_roots
+#
+	@echo ""
+	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
+	./pflareinv_exact_inverse -pc_pflareinv_type isai
+	./pflareinv_exact_inverse -pc_pflareinv_type sai
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
@@ -1402,6 +1413,11 @@ else
 	@echo ""
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
+#
+	@echo ""
+	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_exact_inverse -pc_pflareinv_type isai
+	$(MPIEXEC) -n 2 ./pflareinv_exact_inverse -pc_pflareinv_type sai
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"

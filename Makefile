@@ -182,6 +182,7 @@ export TEST_TARGETS = ex12f \
 		  pflareinv_apply_transpose \
 		  poly_zero_coeffs \
 		  newton_imag_roots \
+		  pflareinv_exact_inverse \
 		  adv_diff_fd \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \
