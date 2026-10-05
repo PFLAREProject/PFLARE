@@ -7,7 +7,7 @@ module gmres_poly
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
          PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
-         PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
+         PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
          PFLARE_REAL_KIND
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_apply, only: petsc_matvec_poly_mf, petsc_matvec_right_scale_poly_mf, &
@@ -304,17 +304,59 @@ module gmres_poly
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine arnoldi(matrix, poly_order, lucky_tol, V_n, w_j, beta, H_n, m, C_n, y, user_rel_tol)
+   subroutine arnoldi(matrix, poly_order, lucky_tol, V_n, beta, H_n, m, C_n, y, user_rel_tol)
 
       ! Arnoldi to compute H_n and optionally C_n (although computing C_n 
       ! won't be stable at high order)
+      ! V_n must have poly_order + 2 vectors, with the starting vector in V_n(1)
+      !
+      ! This does one reduction per order, as the norm of each new vector is lagged 
+      ! and computed in the same reduction as the dot products of the next order
+      ! (with the petsc split-phase VecNormBegin/VecMDotBegin). The previous version
+      ! did a VecMDot and then a VecNorm of the orthogonalised vector in every order
+      !
+      ! The norm cannot come from <w,w> - sum_i h_i^2 in the one VecMDot instead, as 
+      ! we don't reorthogonalise and that is wrong by large factors after only a few 
+      ! orders (e.g., the adv_dg_upwind -curved_velocity test diverges)
+      !
+      ! Advantages of the lagged norm over the previous version:
+      ! - poly_order + 2 reductions instead of 2 * poly_order + 3, e.g., 8 instead of 
+      !   15 at order 6. This should matter with many ranks and on the coarse levels
+      ! - The norm is still computed directly, so the results only differ at roundoff
+      ! - No extra work vector, as A v_j goes straight into V_n(m+1)
+      !
+      ! Disadvantages:
+      ! - This has not been timed, only the reduction count has been checked
+      ! - Both early exits (lucky and rel tol) are detected one order late, as the norm 
+      !   that finishes column m only arrives with the reduction for column m+1. An early 
+      !   exit therefore wastes a matvec and the local part of a VecMDot
+      ! - Only the MPI reduction is saved. The local norm and the dot products are still
+      !   two kernels (and two device to host copies on a gpu), so there is nothing 
+      !   to gain in serial or on a single gpu
+      ! - The matvec is done with the unnormalised v_j, so both v_j and A v_j have to be 
+      !   scaled afterwards. That is two VecScale instead of the one VecAXPBY
+      ! - Not bit-identical to the previous version, as the scaling happens after the 
+      !   matvec and the diagonal of H_n is divided by the norm twice
+      ! - Needs the vec type to have the local norm and mdot kernels used by the 
+      !   split-phase reductions. The standard and kokkos types do
+      ! - In -log_view the reductions show up as VecReduceComm/VecReduceArith and not 
+      !   VecMDot/VecNorm
+      ! - The loop is harder to follow, as iteration m finishes column m-1 before 
+      !   starting column m and there is an extra iteration that only computes a norm
+      ! - A zero starting vector would divide by zero (VecNormalize previously did 
+      !   nothing with a zero norm). The starting vector is always random at the moment
+      !
+      ! Note the rel tol check (and so the least-squares solve in every order) only
+      ! happens when computing the arnoldi coefficients, where the tolerance is always
+      ! PFLARE_TOL_ARNOLDI as nothing passes in user_rel_tol. The newton roots never 
+      ! check it. y is only needed once at the end, so the solves in the earlier orders 
+      ! are only there for that early exit
 
       ! ~~~~~~
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: poly_order
       PetscReal, intent(in)                                  :: lucky_tol
       type(tVec), dimension(:), intent(in)              :: V_n
-      type(tVec), intent(in)                            :: w_j
       PetscReal, intent(out)                                 :: beta
       PetscReal, dimension(:,:), intent(inout)               :: H_n
       PetscReal, dimension(:,:), optional, intent(inout)     :: C_n
@@ -327,8 +369,8 @@ module gmres_poly
       PetscErrorCode :: ierr
       PetscReal, dimension(poly_order+2) :: c_j, g0
       PetscReal, dimension(poly_order+1) :: neg_h
-      logical :: compute_cn
-      PetscReal :: rel_tol
+      logical :: compute_cn, last_vec
+      PetscReal :: rel_tol, norm_v
       PetscInt :: m_petscint
       ! Kind-correct BLAS integer/real arguments for the dgemv call
       PetscBLASInt :: m_bl, n_bl, lda_bl, one_bl
@@ -354,26 +396,105 @@ module gmres_poly
       ! Now time for a GMRES
       ! ~~~~~~~~~
 
-      ! Compute the norm of the initial residual
-      call VecNorm(V_n(1), NORM_2, beta, ierr)
-      ! Now normalise to create the first orthogonal vector in V_n(1)
-      call VecNormalize(V_n(1), beta, ierr)
-
-      ! The first entry in C_n - As V_n = K_n C_n
-      ! the first orthogonalised vector in V_n is just r0/beta, 
-      ! and we know r0 is the first vector in our krylov subspace
-      if (compute_cn) C_n(1,1) = PFLARE_ONE/beta
-
       ! Now loop through and do the iterations up to the max order of the polynomial
       ! we want to build
-      do m = 1, subspace_size
+      ! On entry to iteration m, V_n(m) has been orthogonalised but not normalised
+      ! (V_n(1) is the initial residual). Its norm is beta if m = 1, or the hessenberg 
+      ! entry H_n(m, m-1) that finishes column m-1 otherwise
+      ! We compute that norm in the same reduction as the dot products for column m,
+      ! which means we do the matvec with the unnormalised V_n(m) and scale afterwards
+      ! The extra iteration at the end only computes the norm of the last vector
+      do m = 1, subspace_size + 1
 
-         m_petscint = m    
+         m_petscint = m
+         last_vec = m == subspace_size + 1
 
-         ! Compute w_j = A v_j
-         call MatMult(matrix, &
-                  V_n(m), &
-                  w_j, ierr)  
+         if (.NOT. last_vec) then
+
+            ! Compute w_j = A v_j, stored directly in V_n(m+1)
+            call MatMult(matrix, &
+                     V_n(m), &
+                     V_n(m + 1), ierr)
+
+            ! Compute the norm of V_n(m) and all the dot products <w_j, V_n(i)> 
+            ! for column m in one reduction
+            ! neg_h is used as a contiguous temporary since H_n is an assumed-shape 2D array
+            call VecNormBegin(V_n(m), NORM_2, norm_v, ierr)
+            call VecMDotBegin(V_n(m + 1), m_petscint, V_n, neg_h, ierr)
+            call VecNormEnd(V_n(m), NORM_2, norm_v, ierr)
+            call VecMDotEnd(V_n(m + 1), m_petscint, V_n, neg_h, ierr)
+
+         else
+            call VecNorm(V_n(m), NORM_2, norm_v, ierr)
+         end if
+
+         ! The norm of the initial residual
+         if (m == 1) then
+
+            beta = norm_v
+
+            ! The first entry in C_n - As V_n = K_n C_n
+            ! the first orthogonalised vector in V_n is just r0/beta, 
+            ! and we know r0 is the first vector in our krylov subspace
+            if (compute_cn) C_n(1,1) = PFLARE_ONE/beta
+
+         ! Otherwise we have the new hessenberg entry that finishes column m-1
+         else
+
+            H_n(m, m-1) = norm_v
+
+            ! GMRES lucky tolerance, we're fully converged
+            if (H_n(m, m-1) < lucky_tol) then
+               ! Don't forget to update the ls solution if you exit early
+               if (rel_tol > 0) call ls_solve_arnoldi(beta, m-1, H_n, y)
+               exit
+            end if
+
+            ! Now we've taken out the H_n(m, m-1) factor from below
+            if (compute_cn) C_n(1:m, m) = c_j(1:m)/H_n(m, m-1)
+
+            ! ~~~~~~
+            ! Compute the residual if the user requested only solving to a specific 
+            ! relative residual - we don't need it otherwise
+            ! The residual is just ||H_m y - e_1 beta||_2, so we have to solve that least squares problem to find 
+            ! y and then just compute 
+            ! ~~~~~~
+            if (rel_tol > 0) then
+
+               call ls_solve_arnoldi(beta, m-1, H_n, y)
+
+               ! Compute H_n y
+               m_bl = m
+               n_bl = m-1
+               lda_bl = size(H_n,1)
+               one_bl = 1
+               blas_one = 1d0
+               blas_zero = 0d0
+               call PFLAREgemv("N", m_bl, n_bl, &
+                     blas_one, H_n, lda_bl, &
+                     y, one_bl, &
+                     blas_zero, g0(1), one_bl)
+
+               ! Minus away e1 beta
+               g0(1) = g0(1) - beta
+               ! This is the relative residual - H_n is m x (m-1) so the residual
+               ! has m entries (the last is typically the largest)
+               user_rel_tol = norm2(g0(1:m))/beta
+               !print *, m-1, "rel residual", user_rel_tol
+               if (user_rel_tol < rel_tol) exit
+            end if
+         end if
+
+         if (last_vec) exit
+
+         ! Normalise to get v_j, and as w_j was computed with the unnormalised v_j
+         ! we have to scale it and the dot products
+         call VecScale(V_n(m), PFLARE_ONE/norm_v, ierr)
+         call VecScale(V_n(m + 1), PFLARE_ONE/norm_v, ierr)
+         ! The other vectors in the dot products were already normalised
+         H_n(1:m-1, m) = neg_h(1:m-1)/norm_v
+         ! This is <A v_j, v_j> computed with the unnormalised v_j on both sides
+         H_n(m, m) = (neg_h(m)/norm_v)/norm_v
 
          ! Now compute the updated relationship between K_n and V_n
          if (compute_cn) then
@@ -381,15 +502,10 @@ module gmres_poly
             ! This is [0 c1..cn] for column m
             c_j(2:m + 1) = C_n(1:m, m)  
          end if
-                  
-         ! Compute all hessenberg entries H_n(1:m, m) = <w_j, V_n(i)> in one reduction
-         ! neg_h is used as a contiguous temporary since H_n is an assumed-shape 2D array
-         call VecMDot(w_j, m_petscint, V_n, neg_h, ierr)
-         H_n(1:m, m) = neg_h(1:m)
 
          ! w_j = w_j - sum_i H_n(i,m) * V_n(i)  (all at once)
-         neg_h(1:m) = -neg_h(1:m)
-         call VecMAXPY(w_j, m_petscint, neg_h, V_n, ierr)
+         neg_h(1:m) = -H_n(1:m, m)
+         call VecMAXPY(V_n(m + 1), m_petscint, neg_h, V_n, ierr)
 
          ! This is doing -C_n * h_n
          if (compute_cn) then
@@ -398,60 +514,10 @@ module gmres_poly
             end do
          end if
 
-         ! Now compute new hessenberg entry
-         call VecNorm(w_j, NORM_2, H_n(m+1, m), ierr)
-
-         ! GMRES lucky tolerance, we're fully converged
-         if (H_n(m+1, m) < lucky_tol) then
-            ! Don't forget to update the ls solution if you exit early
-            if (rel_tol > 0) call ls_solve_arnoldi(beta, m, H_n, y)
-            exit
-         end if
-
-         ! v_j+1 = w_j / h_j+1,j
-         call VecAXPBY(V_n(m + 1), &
-                  PFLARE_ONE/H_n(m+1, m), &
-                  PFLARE_ZERO, &
-                  w_j, ierr)           
-
-         ! Now we've taken out the H_n(m+1, m) factor from above
-         if (compute_cn) C_n(1:m+1, m + 1) = c_j(1:m+1)/H_n(m+1, m)
-
-         ! ~~~~~~
-         ! Compute the residual if the user requested only solving to a specific 
-         ! relative residual - we don't need it otherwise
-         ! The residual is just ||H_m y - e_1 beta||_2, so we have to solve that least squares problem to find 
-         ! y and then just compute 
-         ! ~~~~~~
-         if (rel_tol > 0) then
-
-            call ls_solve_arnoldi(beta, m, H_n, y)
-
-            ! Compute H_n y
-            m_bl = m+1
-            n_bl = m
-            lda_bl = size(H_n,1)
-            one_bl = 1
-            blas_one = 1d0
-            blas_zero = 0d0
-            call PFLAREgemv("N", m_bl, n_bl, &
-                  blas_one, H_n, lda_bl, &
-                  y, one_bl, &
-                  blas_zero, g0(1), one_bl)
-
-            ! Minus away e1 beta
-            g0(1) = g0(1) - beta
-            ! This is the relative residual - H_n is (m+1) x m so the residual
-            ! has m+1 entries (the last is typically the largest)
-            user_rel_tol = norm2(g0(1:m+1))/beta
-            !print *, m, "rel residual", user_rel_tol
-            if (user_rel_tol < rel_tol) exit
-         end if
-
       end do
 
-      ! Fortran allocates loop variables one bigger if we get to the end of the loop
-      if (m == subspace_size + 1) m = m - 1
+      ! In every exit above m is one bigger than the number of columns of H_n we finished
+      m = m - 1
 
    end subroutine arnoldi      
 
@@ -482,7 +548,6 @@ module gmres_poly
       PetscReal, dimension(poly_order+2,poly_order+2) :: C_n
       PetscReal, dimension(poly_order+1) :: y
       PetscReal :: beta
-      type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       PetscReal :: rel_tol
       ! Kind-correct BLAS integer/real arguments for the dgemv call
@@ -514,16 +579,13 @@ module gmres_poly
       ! The first vec has random numbers in it
       ! ~~~~~~~~~~ 
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
-      
-      ! Create an extra vector for storage
-      call VecDuplicate(V_n(1), w_j, ierr)         
 
       ! Do the Arnoldi and compute H_n and C_n
       ! We only compute H_n until we hit a relative residual of 1e-14 against the random rhs
       ! or we hit the given poly_order
       rel_tol = PFLARE_TOL_ARNOLDI
       if (present(user_rel_tol)) rel_tol = user_rel_tol
-      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m, C_n, y, rel_tol)
+      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, beta, H_n, m, C_n, y, rel_tol)
       if (present(user_rel_tol)) user_rel_tol = rel_tol
 
       ! ~~~~~~~~~~~~~
@@ -543,7 +605,6 @@ module gmres_poly
 
       vecs_needed = subspace_size + 1
       call VecDestroyVecs(vecs_needed, V_n, ierr)
-      call VecDestroy(w_j, ierr)
 
    end subroutine calculate_gmres_polynomial_coefficients_arnoldi   
 

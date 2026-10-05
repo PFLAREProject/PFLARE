@@ -424,7 +424,6 @@ module gmres_poly_newton
       PetscReal, dimension(:,:), allocatable :: VL, VR
       PetscReal :: beta
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
-      type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
       PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm
@@ -456,12 +455,9 @@ module gmres_poly_newton
       ! ~~~~~~~~~~ 
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
-      ! Create an extra vector for storage
-      call VecDuplicate(V_n(1), w_j, ierr)      
-      
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, beta, H_n, m)
 
       ! ~~~~~~~~~~~
       ! Now the Ritz values are just the eigenvalues of the square part of H_n
@@ -716,7 +712,6 @@ module gmres_poly_newton
       ! Cleanup
       vecs_needed = subspace_size + 1
       call VecDestroyVecs(vecs_needed, V_n, ierr)
-      call VecDestroy(w_j, ierr)       
 
    end subroutine calculate_gmres_polynomial_roots_newton   
 
