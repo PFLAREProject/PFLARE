@@ -128,6 +128,10 @@ for earlier changes please see the git history.
 - Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z
   and ISAI rows dividing by zero (giving Inf/NaN) when a local block has a
   zero diagonal; zero diagonals are now replaced by 1, matching the CPU PCJACOBI
+- PCAIR now implements `PCApplyTranspose`, so it can be used as the
+  preconditioner in a `KSPSolveTranspose`. It applies the exact transpose of the
+  cycle `PCApply` applies, so the two are adjoints. `PCMatApplyTranspose` falls
+  back to applying `PCApplyTranspose` column by column
 
 ## [v1.27.0]
 

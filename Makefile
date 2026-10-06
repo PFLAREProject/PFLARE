@@ -180,6 +180,7 @@ export TEST_TARGETS = ex12f \
 		  adv_1d_multi_rhs \
 		  shell_block_apply \
 		  pflareinv_apply_transpose \
+		  pcair_apply_transpose \
 		  poly_zero_coeffs \
 		  newton_imag_roots \
 		  pflareinv_exact_inverse \
