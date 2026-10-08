@@ -497,6 +497,58 @@ static PetscErrorCode TimeHipsparseSpSVAnalysis(Mat F, PetscBool lower_tri, Pets
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+/* Replace *M by a copy of matrix type `type` (through MATAIJ: a plain host
+   copy keeping every stored entry, explicit zeros included), checking that the
+   number of stored entries is unchanged. Untimed. */
+static PetscErrorCode ConvertMatToType(Mat *M, const char *type, const char *what)
+{
+  Mat     Maij, Mnew;
+  MatInfo info_old, info_new;
+  MatType t;
+  PetscFunctionBeginUser;
+  PetscCall(MatGetInfo(*M, MAT_LOCAL, &info_old));
+  PetscCall(MatConvert(*M, MATAIJ, MAT_INITIAL_MATRIX, &Maij));
+  PetscCall(MatConvert(Maij, type, MAT_INITIAL_MATRIX, &Mnew));
+  PetscCall(MatDestroy(&Maij));
+  PetscCall(MatGetInfo(Mnew, MAT_LOCAL, &info_new));
+  PetscCheck(info_new.nz_used == info_old.nz_used, PETSC_COMM_SELF, PETSC_ERR_PLIB,
+             "%s: conversion to %s changed the number of stored entries", what, type);
+  PetscCall(MatGetType(Mnew, &t));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "-inner_mat_type: %s is now %s (nnz %.0f)\n", what, t, (double)info_new.nz_used));
+  PetscCall(MatDestroy(M));
+  *M = Mnew;
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* Replace *v by a vector compatible with M (MatCreateVecs) holding bit-identical
+   values, checked entry by entry on the host. Untimed. */
+static PetscErrorCode ConvertVecLike(Mat M, Vec *v, const char *what)
+{
+  Vec                vnew;
+  const PetscScalar *po, *pn;
+  PetscScalar       *pw;
+  PetscInt           n_old, n_new;
+  VecType            t;
+  PetscFunctionBeginUser;
+  PetscCall(MatCreateVecs(M, &vnew, NULL));
+  PetscCall(VecGetLocalSize(*v, &n_old));
+  PetscCall(VecGetLocalSize(vnew, &n_new));
+  PetscCheck(n_old == n_new, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%s: local sizes differ", what);
+  PetscCall(VecGetArrayRead(*v, &po));
+  PetscCall(VecGetArrayWrite(vnew, &pw));
+  PetscCall(PetscArraycpy(pw, po, n_old));
+  PetscCall(VecRestoreArrayWrite(vnew, &pw));
+  PetscCall(VecGetArrayRead(vnew, &pn));
+  for (PetscInt i = 0; i < n_old; i++) PetscCheck(pn[i] == po[i], PETSC_COMM_SELF, PETSC_ERR_PLIB, "%s: copy differs at %" PetscInt_FMT, what, i);
+  PetscCall(VecRestoreArrayRead(vnew, &pn));
+  PetscCall(VecRestoreArrayRead(*v, &po));
+  PetscCall(VecGetType(vnew, &t));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "-inner_mat_type: %s is now %s\n", what, t));
+  PetscCall(VecDestroy(v));
+  *v = vnew;
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 /* Standalone Richardson + <kind> solve on `factor`. rtol=1e-6, max_it=2000,
    unpreconditioned residual norm, explicit setup so -log_view sees setup vs
    solve separately. Reports iteration count via ReportSolve.
@@ -1468,6 +1520,26 @@ int main(int argc, char **args)
     return 1;
   }
   if (only_pcilu || only_inner_axb) skip_airg = PETSC_TRUE;
+  /* -inner_mat_type <type>: run the inner-solve part of -only_inner_axb
+     gmres_poly or -only_jac_axb on copies of A, L, U (and the vectors) of
+     another matrix type, e.g. aijhipsparse so every MatMult of the matrix-free
+     GMRES polynomial / Jacobi sweeps and of the outer GMRES is a hipSPARSE SpMV
+     instead of a Kokkos Kernels one. The ILU factorisation and the
+     LU_Exact_{L,U} timings still run on the Kokkos matrices; the conversion
+     happens after them, is untimed, and is checked (same stored entries, a
+     bit-identical rhs). Only these two methods: both are plain PETSc MatMult /
+     Vec operations (PCJACOBI, and PCPFLAREINV's matrix-free Newton polynomial),
+     whereas AIRG and ISAI have Kokkos-specific setups. */
+  char      inner_mat_type[64] = "";
+  PetscBool inner_alt          = PETSC_FALSE;
+  PetscCall(PetscOptionsGetString(NULL, NULL, "-inner_mat_type", inner_mat_type, sizeof(inner_mat_type), &inner_alt));
+  if (inner_alt && !(only_jac_axb || (only_inner_axb && inner_axb_kind == INNER_PC_GMRES_POLY))) {
+    PetscCall(PetscPrintf(PETSC_COMM_WORLD,
+              "-inner_mat_type is only supported with -only_inner_axb gmres_poly or -only_jac_axb.\n"));
+    PetscCall(MatDestroy(&A));
+    PetscCall(PetscFinalize());
+    return 1;
+  }
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-jac_max_it", &jac_max_it, NULL));
 
   /* Left-scale A by 1/diag(A) before the factorisation (mirrors test_ilu.py scale_mode=1).
@@ -1767,6 +1839,16 @@ int main(int argc, char **args)
      callback frees it). The PCJACOBI-inner Ax=b shell solve added later also
      needs the raw-diagonal compensation between L and U solves, so duplicate
      the vec up-front and hand the copy to that shell. */
+  if (inner_alt) {
+    /* -inner_mat_type: from here on every solve works on copies of the other
+       type (see where the option is read). */
+    PetscCall(ConvertMatToType(&A, inner_mat_type, "A"));
+    PetscCall(ConvertMatToType(&L, inner_mat_type, "L"));
+    PetscCall(ConvertMatToType(&U, inner_mat_type, "U"));
+    PetscCall(ConvertVecLike(A, &b_rand, "b"));
+    PetscCall(ConvertVecLike(A, &x_sol, "x"));
+    PetscCall(ConvertVecLike(U, &inv_diag_U_raw, "1/diag(U_raw)"));
+  }
   Vec inv_diag_U_raw_for_jac;
   PetscCall(VecDuplicate(inv_diag_U_raw, &inv_diag_U_raw_for_jac));
   PetscCall(VecCopy(inv_diag_U_raw, inv_diag_U_raw_for_jac));
