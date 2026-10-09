@@ -26,6 +26,8 @@
      Can control the direction of advection with -theta (pi/4 default), or by giving the -u and -v and -w directly
      If any of u,v,w are set then they will override the velocity and unit velocity will be disabled
      Can specify inflow of 1 on bottom face with -bottom_only_inflow_one (default false)
+     Can also do a block solve of k right-hand sides with KSPMatSolve with -nrhs k,
+       column j is the rhs + j, checked against a column-by-column solve (see multi_rhs.h)
 
 */
 
@@ -38,6 +40,7 @@ static char help[] = "Solves steady advection-diffusion FEM problem with SUPG st
 #include <math.h>
 
 #include "pflare.h"
+#include "multi_rhs.h"
 
 typedef struct {
   PetscReal alpha;                   // Diffusion coefficient
@@ -515,6 +518,11 @@ int main(int argc, char **argv)
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
+  // Block solve of nrhs right-hand sides after the single solve
+  PetscInt nrhs = 0;
+  PetscBool multi_rhs;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-nrhs", &nrhs, &multi_rhs));
+
   /* Primal system */
   PetscCall(SNESCreate(PETSC_COMM_WORLD, &snes));
   PetscCall(CreateMesh(PETSC_COMM_WORLD, &options, &dm));
@@ -569,6 +577,14 @@ int main(int argc, char **argv)
   }
   
   PetscCall(KSPGetConvergedReason(ksp,&reason));  
+
+  // As above, the block solve calls the KSP directly rather than going through
+  // another SNESSolve, with the rhs built by the first SNESSolve
+  if (multi_rhs && reason >= 0)
+  {
+   PetscCall(SNESGetFunction(snes, &F, NULL, NULL));
+   PetscCall(MultiRhsSolve(ksp, F, nrhs, &reason));
+  }
   if (reason < 0)
   {
    return 1;

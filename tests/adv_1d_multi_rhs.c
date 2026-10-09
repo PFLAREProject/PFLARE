@@ -21,57 +21,7 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
 */
 #include <petscksp.h>
 #include "pflare.h"
-
-// Tolerance for the comparison against the column-by-column reference solve
-#if defined(PETSC_USE_REAL_SINGLE)
-  #define DEFAULT_CHECK_TOL 1e-5
-#else
-  #define DEFAULT_CHECK_TOL 1e-10
-#endif
-
-/*
-  Check the block solve in X against a column-by-column reference solve of the
-  same systems. At preonly this is comparing PCMatApply against PCApply.
-*/
-static PetscErrorCode CheckBlockSolve(KSP ksp, Mat B, Mat X, PetscReal check_tol)
-{
-  Mat       A, Xref;
-  Vec       b, x;
-  PetscInt  j, nrhs;
-  PetscReal diff_norm, x_norm;
-
-  PetscFunctionBeginUser;
-  PetscCall(MatGetSize(B, NULL, &nrhs));
-  PetscCall(MatDuplicate(X, MAT_DO_NOT_COPY_VALUES, &Xref));
-
-  // The single rhs solves use vecs of the operator's type, as with -host_blocks
-  // the columns of the blocks are host vecs regardless of the operator's type
-  PetscCall(KSPGetOperators(ksp, &A, NULL));
-  PetscCall(MatCreateVecs(A, &x, &b));
-  for (j = 0; j < nrhs; j++) {
-    Vec cb, cx;
-    PetscCall(MatDenseGetColumnVecRead(B, j, &cb));
-    PetscCall(VecCopy(cb, b));
-    PetscCall(MatDenseRestoreColumnVecRead(B, j, &cb));
-    PetscCall(VecSet(x, 0.0));
-    PetscCall(KSPSolve(ksp, b, x));
-    PetscCall(MatDenseGetColumnVecWrite(Xref, j, &cx));
-    PetscCall(VecCopy(x, cx));
-    PetscCall(MatDenseRestoreColumnVecWrite(Xref, j, &cx));
-  }
-  PetscCall(VecDestroy(&x));
-  PetscCall(VecDestroy(&b));
-
-  PetscCall(MatNorm(X, NORM_FROBENIUS, &x_norm));
-  PetscCall(MatAXPY(Xref, -1.0, X, SAME_NONZERO_PATTERN));
-  PetscCall(MatNorm(Xref, NORM_FROBENIUS, &diff_norm));
-  PetscCheck(diff_norm <= check_tol * x_norm, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
-             "Block solve differs from the column-by-column solve: ||X - Xref||_F = %g, ||X||_F = %g, tolerance %g",
-             (double)diff_norm, (double)x_norm, (double)check_tol);
-
-  PetscCall(MatDestroy(&Xref));
-  PetscFunctionReturn(PETSC_SUCCESS);
-}
+#include "multi_rhs.h"
 
 int main(int argc, char **args)
 {

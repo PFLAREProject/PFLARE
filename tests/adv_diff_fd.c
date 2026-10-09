@@ -42,6 +42,8 @@
      Can control domain size in each direction with -L_x, -L_y, -L_z (default 1.0)
      Can write the solution to a VTK structured grid file with -vec_view vtk:solution.vts
        (note: DMDA is a structured mesh so PETSc produces .vts, not .vtu)
+     Can also do a block solve of k right-hand sides with KSPMatSolve with -nrhs k,
+       column j is the rhs + j, checked against a column-by-column solve (see multi_rhs.h)
 
 */
 
@@ -54,6 +56,7 @@ static char help[] = "Solves steady advection-diffusion with finite-difference o
 #include <petscvec.h>
 
 #include "pflare.h"
+#include "multi_rhs.h"
 
 // Helper function to compute velocity at a point.
 // dim: spatial dimension (2 or 3)
@@ -185,6 +188,11 @@ int main(int argc,char **argv)
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
 
+  // Block solve of nrhs right-hand sides after the single solve
+  PetscInt nrhs = 0;
+  PetscBool multi_rhs;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-nrhs", &nrhs, &multi_rhs));
+
   // Advection velocities
   // Default in 2D/3D: (1,1,1), normalised when unit_velocity is true
   // If -theta is provided, set (u,v,w) = (cos(theta), sin(theta), 0)
@@ -304,7 +312,8 @@ int main(int argc,char **argv)
   // Set the operator and options
   PetscCall(KSPSetOperators(ksp,A,A));
   PetscCall(KSPSetFromOptions(ksp));
-  PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
+  // The block solve needs a zero initial guess so -ksp_type preonly works
+  if (!multi_rhs) PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
 
   // Diagonally scale our matrix 
   if (diag_scale) {
@@ -341,6 +350,8 @@ int main(int argc,char **argv)
 
   // Write out the iteration count
   PetscCall(KSPGetConvergedReason(ksp,&reason));
+
+  if (multi_rhs && reason >= 0) PetscCall(MultiRhsSolve(ksp, b, nrhs, &reason));
 
   // Optionally write the solution to a VTK structured grid file.
   // Use -vec_view vtk:solution.vts on the command line to enable.

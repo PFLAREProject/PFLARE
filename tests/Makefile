@@ -738,6 +738,32 @@ run_tests_no_load_short_serial:
 	@echo "Test multiple RHS block solve with Richardson KSP and PCAIR"
 	$(SKIP_SINGLE) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol 1e-10 \
 	 -check_tol 1e-8
+	@echo "Test multiple RHS block solve with PCAIR on 2D finite difference advection"
+	./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -nrhs 5 -pc_type air -ksp_type preonly
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 2D finite difference advection"
+	./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -nrhs 5 -pc_type air -ksp_type richardson -ksp_norm_type none \
+	 -ksp_max_it 5
+	@echo "Test multiple RHS block solve with host blocks and PCAIR on 2D finite difference advection"
+	./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -nrhs 5 -pc_type air -ksp_type preonly -host_blocks
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 3D finite difference advection"
+	./adv_diff_fd -dim 3 -da_grid_x 8 -da_grid_y 8 -da_grid_z 8 -nrhs 5 -pc_type air -ksp_type richardson \
+	 -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with PCAIR on 2D SUPG CG FEM"
+	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 1 -nrhs 5 -pc_type air -ksp_type preonly
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 2D SUPG CG FEM"
+	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 1 -nrhs 5 -pc_type air -ksp_type richardson \
+	 -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 3D SUPG CG FEM"
+	./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 4,4,4 -nrhs 5 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with PCAIR on 2D upwind DG FEM"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 1 -nrhs 5 -pc_type air -ksp_type preonly
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 2D upwind DG FEM"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 1 -nrhs 5 -pc_type air -ksp_type richardson \
+	 -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 3D upwind DG FEM"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 4,4,4 -nrhs 5 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type none -ksp_max_it 5
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly, plain and diagonally scaled"
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly, plain and diagonally scaled"
@@ -1395,6 +1421,23 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -second_solve
 	@echo "Test multiple RHS block solve with assembled PCPFLAREINV rebuilt after a change in operator values in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 1000 -nrhs 5 -rebuild_solve
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 2D finite difference advection in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 20 -da_grid_y 20 -nrhs 5 -pc_type air -ksp_type richardson \
+	 -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 3D finite difference advection in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -dim 3 -da_grid_x 8 -da_grid_y 8 -da_grid_z 8 -nrhs 5 -pc_type air \
+	 -ksp_type richardson -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with PCAIR on 2D SUPG CG FEM in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 1 -nrhs 5 -pc_type air -ksp_type preonly
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 3D SUPG CG FEM in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 4,4,4 -nrhs 5 \
+	 -pc_type air -ksp_type richardson -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 2D upwind DG FEM in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 1 -nrhs 5 -pc_type air -ksp_type richardson \
+	 -ksp_norm_type none -ksp_max_it 5
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR on 3D upwind DG FEM in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_plex_dim 3 -dm_plex_box_faces 4,4,4 -nrhs 5 \
+	 -pc_type air -ksp_type richardson -ksp_norm_type none -ksp_max_it 5
 	@echo "Test the block apply of the matrix-free Arnoldi matshell directly in parallel, plain and diagonally scaled"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"

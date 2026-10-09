@@ -16,6 +16,9 @@
       Specify inflow of 1 on bottom face -bottom_only_inflow_one
       Can write out vtk solution with    -write_vtk
       Time dependent solve               -time_depend
+      Block solve of k rhs (steady only) -nrhs k
+        with KSPMatSolve, column j is the rhs + j, checked against
+        a column-by-column solve (see multi_rhs.h)
 
       The time dependent solve does backward-Euler TS integration
         instead of the steady KSP solve
@@ -100,6 +103,7 @@ static char help[] = "Solves steady advection with upwinded DG FEM.\n\n";
 #include <math.h>
 
 #include "pflare.h"
+#include "multi_rhs.h"
 
 /* -----------------------------------------------------------------------
    Application context
@@ -1984,6 +1988,13 @@ int main(int argc, char **argv)
 
   PetscCall(PetscLogStagePop());
 
+  // Block solve of nrhs right-hand sides after the single solve
+  PetscInt  nrhs = 0;
+  PetscBool multi_rhs;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-nrhs", &nrhs, &multi_rhs));
+  PetscCheck(!(multi_rhs && ctx.time_depend), PETSC_COMM_WORLD, PETSC_ERR_ARG_INCOMP,
+             "-nrhs is only supported for the steady solve, not with -time_depend");
+
   if (ctx.time_depend) {
 
     /* -time_depend: no KSPSolve is performed here. The TS below is the
@@ -2081,7 +2092,8 @@ int main(int argc, char **argv)
     PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp));
     PetscCall(KSPSetOperators(ksp, A, A));
     PetscCall(KSPSetFromOptions(ksp));
-    PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
+    /* The block solve needs a zero initial guess so -ksp_type preonly works */
+    if (!multi_rhs) PetscCall(KSPSetInitialGuessNonzero(ksp, PETSC_TRUE));
     PetscCall(KSPSolve(ksp, b_rhs, x));
     PetscCall(PetscLogStagePop());
 
@@ -2096,6 +2108,14 @@ int main(int argc, char **argv)
       PetscCall(VecSet(x, 1.0));
       PetscCall(KSPSolve(ksp, b_rhs, x));
       PetscCall(KSPGetConvergedReason(ksp, &reason));
+      if (reason < 0) {
+        return 1;
+      }
+    }
+
+    /* ---- Optional block solve of nrhs right-hand sides ---- */
+    if (multi_rhs) {
+      PetscCall(MultiRhsSolve(ksp, b_rhs, nrhs, &reason));
       if (reason < 0) {
         return 1;
       }
