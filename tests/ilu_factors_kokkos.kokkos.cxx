@@ -1072,7 +1072,8 @@ static PetscErrorCode ComputeILUFactors(Mat A, int npe, const char *algorithm,
    half-built objects leak, which is acceptable for a single failed matrix. */
 static PetscErrorCode RunAxbShellAIR(Mat A, Mat L, KSP ksp_L_air, KSP ksp_U_air,
                                      Vec inv_diag_U_raw, Vec b, Vec x,
-                                     PetscBool *all_converged, PetscInt *jac_max_it)
+                                     PetscBool *all_converged, PetscInt *jac_max_it,
+                                     PetscLogStage stage)
 {
   KSP         ksp_A;
   PC          pc_A, pcL_inner, pcU_inner;
@@ -1126,6 +1127,24 @@ static PetscErrorCode RunAxbShellAIR(Mat A, Mat L, KSP ksp_L_air, KSP ksp_U_air,
   PetscCall(KSPSetOptionsPrefix(ksp_A, "A_"));
   PetscCall(KSPSetFromOptions(ksp_A));
   PetscCall(KSPSetUp(ksp_A));
+  {
+    /* Untimed WARM-UP solve capped at 5 outer iterations, exactly as in
+       RunAxbShellInner and the exact-PCILU baseline. Under -only_airg this is
+       the first GMRES solve in the process, so its first orthogonalisation
+       would otherwise absorb the one-time GPU library/kernel initialisation
+       (tens of ms) inside the timed solve. The caller's -log_view stage is
+       deactivated around it so the stage's KSPSolve event counts only the real
+       solve; KSPSolve zeroes x on entry, so the timed solve below is identical
+       to a cold one. Tolerances are saved/restored in case options changed them. */
+    PetscReal wu_rtol, wu_atol, wu_dtol;
+    PetscInt  wu_maxits;
+    PetscCall(KSPGetTolerances(ksp_A, &wu_rtol, &wu_atol, &wu_dtol, &wu_maxits));
+    PetscCall(KSPSetTolerances(ksp_A, wu_rtol, wu_atol, wu_dtol, 5));
+    PetscCall(PetscLogStageSetActive(stage, PETSC_FALSE));
+    PetscCall(KSPSolve(ksp_A, b, x));
+    PetscCall(PetscLogStageSetActive(stage, PETSC_TRUE));
+    PetscCall(KSPSetTolerances(ksp_A, wu_rtol, wu_atol, wu_dtol, wu_maxits));
+  }
   PetscCall(TimedKSPSolve(ksp_A, b, x, "Ax=b_approx_PC_ILU"));
   PetscCall(ReportSolve("A x = b solve (gmres(30) + LU shell PC, AIRG inner)", ksp_A, A, b, x, all_converged));
   /* KSPDestroy triggers the PCSHELL destroy callback which tears down shell_ctx
@@ -1895,7 +1914,7 @@ int main(int argc, char **args)
     PetscCall(PetscLogStagePush(stage_A_shell));
     try {
       ierr_shell = RunAxbShellAIR(A, L, ksp_L_air, ksp_U_air, inv_diag_U_raw,
-                                  b_rand, x_sol, &solves_converged, &jac_max_it);
+                                  b_rand, x_sol, &solves_converged, &jac_max_it, stage_A_shell);
     } catch (const std::exception &e) {
       ierr_shell = PETSC_ERR_LIB;
       PetscCall(PetscPrintf(PETSC_COMM_WORLD,
