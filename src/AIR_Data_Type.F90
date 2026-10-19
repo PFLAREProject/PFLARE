@@ -346,6 +346,13 @@ module air_data_type
       ! Temporary storage
       type(petsc_vec_array), dimension(4) :: temp_vecs_fine, temp_vecs_coarse
       type(petsc_vec_array), dimension(1) :: temp_vecs
+      ! The temporary vectors above are only ever scratch space within a single smooth 
+      ! (or residual) on one level, so on every level each slot is a subvector of one pool,
+      ! sized for the biggest level - the IS's are the (contiguous) subsets of the pools 
+      ! each level uses
+      type(tVec), dimension(4) :: temp_vecs_fine_pool, temp_vecs_coarse_pool
+      type(tVec), dimension(1) :: temp_vecs_pool
+      type(tIS), allocatable, dimension(:) :: temp_vecs_fine_is, temp_vecs_coarse_is, temp_vecs_is
 
       ! Temporary dense storage used during a multiple rhs (block) smooth
       ! These are the block twins of temp_vecs_fine/temp_vecs_coarse/temp_vecs,

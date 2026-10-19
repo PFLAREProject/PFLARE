@@ -116,6 +116,120 @@ module fc_smooth
 
    !------------------------------------------------------------------------------------------------------------------------
 
+   subroutine create_smooth_temp_vecs(air_data)
+
+      ! Creates the temporary vectors we use during smoothing on every level that doesn't have them
+      ! These are only ever scratch space within a single smooth (or residual) on one level,
+      ! and we only smooth one level at a time, so rather than give every level its own memory
+      ! each slot (e.g., temp_vecs_fine(2)) is a subvector of one pool shared across all the
+      ! levels, sized for the biggest level on this rank
+      ! The pools must not exist yet, ie they are destroyed whenever the temporary vectors are
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(air_multigrid_data), intent(inout) :: air_data
+
+      integer :: our_level, i_loc, n_coarse, first_level, errorcode
+      PetscInt :: local_rows, local_cols, max_fine, max_coarse, max_full
+      PetscInt :: pool_start, pool_end_plus_one
+      PetscInt, parameter :: one = 1
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vec_type
+      type(tVec) :: temp_vec
+      ! ~~~~~~~~~~
+
+      ! Find the biggest local sizes on the levels we have to build
+      first_level = -1
+      max_fine = 0
+      max_coarse = 0
+      max_full = 0
+      do our_level = 1, air_data%no_levels-1
+         if (air_data%allocated_matrices_A_ff(our_level)) cycle
+         if (first_level == -1) first_level = our_level
+
+         call MatGetLocalSize(air_data%A_ff(our_level), local_rows, local_cols, ierr)
+         max_fine = max(max_fine, local_cols)
+         call MatGetLocalSize(air_data%A_fc(our_level), local_rows, local_cols, ierr)
+         max_coarse = max(max_coarse, local_cols)
+         if (.NOT. air_data%fast_veciscopy_exists) then
+            call MatGetLocalSize(air_data%coarse_matrix(our_level), local_rows, local_cols, ierr)
+            max_full = max(max_full, local_cols)
+         end if
+      end do
+      if (first_level == -1) return
+
+      ! The temporary vectors on every level are subvectors of the pools, so we can only
+      ! build them when no level has them, ie the pools don't exist
+      temp_vec = air_data%temp_vecs_fine_pool(1)
+      if (.NOT. PetscObjectIsNull(temp_vec)) then
+         print *, "The smoothing temporaries can only be created when no level has them"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! If we're doing C point smoothing we need some extra temporaries
+      ! The transposed smooth and residual don't need any more than the
+      ! forward ones do
+      n_coarse = 1
+      if (air_data%options%any_c_smooths .AND. &
+               .NOT. air_data%options%full_smoothing_up_and_down) n_coarse = 4
+
+      ! Create the pools with the vec type the matrices use
+      call PetscObjectGetComm(air_data%A_fc(first_level), MPI_COMM_MATRIX, ierr)
+      call MatGetVecType(air_data%A_fc(first_level), vec_type, ierr)
+      do i_loc = 1, 4
+         call VecCreate(MPI_COMM_MATRIX, air_data%temp_vecs_fine_pool(i_loc), ierr)
+         call VecSetSizes(air_data%temp_vecs_fine_pool(i_loc), max_fine, PETSC_DECIDE, ierr)
+         call VecSetType(air_data%temp_vecs_fine_pool(i_loc), vec_type, ierr)
+      end do
+      do i_loc = 1, n_coarse
+         call VecCreate(MPI_COMM_MATRIX, air_data%temp_vecs_coarse_pool(i_loc), ierr)
+         call VecSetSizes(air_data%temp_vecs_coarse_pool(i_loc), max_coarse, PETSC_DECIDE, ierr)
+         call VecSetType(air_data%temp_vecs_coarse_pool(i_loc), vec_type, ierr)
+      end do
+      if (.NOT. air_data%fast_veciscopy_exists) then
+         call VecCreate(MPI_COMM_MATRIX, air_data%temp_vecs_pool(1), ierr)
+         call VecSetSizes(air_data%temp_vecs_pool(1), max_full, PETSC_DECIDE, ierr)
+         call VecSetType(air_data%temp_vecs_pool(1), vec_type, ierr)
+      end if
+
+      ! On each level take the start of each pool as the temporary vectors
+      ! The IS is contiguous so the subvector shares the pool's memory
+      do our_level = 1, air_data%no_levels-1
+         if (air_data%allocated_matrices_A_ff(our_level)) cycle
+
+         call MatGetLocalSize(air_data%A_ff(our_level), local_rows, local_cols, ierr)
+         call VecGetOwnershipRange(air_data%temp_vecs_fine_pool(1), pool_start, pool_end_plus_one, ierr)
+         call ISCreateStride(MPI_COMM_MATRIX, local_cols, pool_start, one, &
+                  air_data%temp_vecs_fine_is(our_level), ierr)
+         do i_loc = 1, 4
+            call VecGetSubVector(air_data%temp_vecs_fine_pool(i_loc), air_data%temp_vecs_fine_is(our_level), &
+                     air_data%temp_vecs_fine(i_loc)%array(our_level), ierr)
+         end do
+
+         call MatGetLocalSize(air_data%A_fc(our_level), local_rows, local_cols, ierr)
+         call VecGetOwnershipRange(air_data%temp_vecs_coarse_pool(1), pool_start, pool_end_plus_one, ierr)
+         call ISCreateStride(MPI_COMM_MATRIX, local_cols, pool_start, one, &
+                  air_data%temp_vecs_coarse_is(our_level), ierr)
+         do i_loc = 1, n_coarse
+            call VecGetSubVector(air_data%temp_vecs_coarse_pool(i_loc), air_data%temp_vecs_coarse_is(our_level), &
+                     air_data%temp_vecs_coarse(i_loc)%array(our_level), ierr)
+         end do
+
+         if (.NOT. air_data%fast_veciscopy_exists) then
+            call MatGetLocalSize(air_data%coarse_matrix(our_level), local_rows, local_cols, ierr)
+            call VecGetOwnershipRange(air_data%temp_vecs_pool(1), pool_start, pool_end_plus_one, ierr)
+            call ISCreateStride(MPI_COMM_MATRIX, local_cols, pool_start, one, &
+                     air_data%temp_vecs_is(our_level), ierr)
+            call VecGetSubVector(air_data%temp_vecs_pool(1), air_data%temp_vecs_is(our_level), &
+                     air_data%temp_vecs(1)%array(our_level), ierr)
+         end if
+      end do
+
+   end subroutine create_smooth_temp_vecs
+
+   !------------------------------------------------------------------------------------------------------------------------
+
    subroutine create_VecISCopyLocalWrapper(air_data, our_level, mat_type, input_mat)
 
       ! Creates any data we might need in VecISCopyLocalWrapper for a given level
