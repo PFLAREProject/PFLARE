@@ -8,7 +8,7 @@ module petsc_helper
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
-         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE
+         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -220,25 +220,26 @@ logical, protected :: kokkos_debug_global = .FALSE.
       logical, intent(in), optional :: lump
       integer, intent(in), optional :: drop_diagonal_int, relative_max_row_tol_int, diag_strength_int
 
-      PetscInt :: col, ncols, ifree, max_nnzs
+      PetscInt :: col, ncols, ifree, row_n, diag_pos, target_col, i_loc, max_ncols
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start
-      PetscInt :: global_row_end_plus_one, max_nnzs_total, diag_index
-      PetscCount :: counter
+      PetscInt :: global_row_end_plus_one, diag_index
+      PetscInt :: global_col_start, global_col_end_plus_one
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
       ! Matrix entries filled by MatGetRow are PetscScalar
       PetscScalar, dimension(:), pointer :: vals => null()
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      ! The output row
+      PetscInt, allocatable, dimension(:) :: row_cols, d_nnz, o_nnz
+      PetscScalar, allocatable, dimension(:) :: row_vals
+      PetscInt, dimension(1) :: row_array
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       logical :: lump_entries
-      integer :: drop_diag_int, diag_stren_int, errorcode, rel_max_row_tol_int
+      integer :: drop_diag_int, diag_stren_int, errorcode, rel_max_row_tol_int, pass
       ! Derived magnitude/tolerance stays PetscReal
       PetscReal :: rel_row_tol
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
-      PetscScalar :: abs_biggest_entry
+      PetscScalar :: abs_biggest_entry, value
       
       ! ~~~~~~~~~~
       ! If the tolerance is 0 we still want to go through this routine and drop the zeros
@@ -275,24 +276,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetSize(input_mat, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
-      
-      max_nnzs = 0
-      max_nnzs_total = 0
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-
-         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         if (ncols > max_nnzs) max_nnzs = ncols
-         max_nnzs_total = max_nnzs_total + ncols
-         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-      end do
-
-      ! We know we never have more to do than the original nnzs
-      allocate(row_indices(max_nnzs_total))
-      allocate(col_indices(max_nnzs_total))
-      ! By default drop everything
-      row_indices = -1
-      col_indices = -1
-      allocate(v(max_nnzs_total))      
+      call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)  
 
       call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
       call MatSetSizes(output_mat, local_rows, local_cols, &
@@ -300,114 +284,152 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Match the output type
       call MatGetType(input_mat, mat_type, ierr)
       call MatSetType(output_mat, mat_type, ierr)
-      call MatSetUp(output_mat, ierr) 
-       
-      ! Just in case there are some zeros in the input mat, ignore them
-      call MatSetOption(output_mat, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE, ierr)     
-      ! Don't set any off processor entries so no need for a reduction when assembling
-      call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)      
-      call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)     
-      
-      ! Now go and fill the new matrix
-      ! These loops just set the row and col indices to not be -1
-      ! if we are including it in the matrix
-      ! Loop over global row indices
-      counter = 1
-      do ifree = global_row_start, global_row_end_plus_one-1                  
-      
-         ! Get the row
-         call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)     
-         ! Copy in all the values
-         v(counter:counter + ncols - 1) = vals(1:ncols)
 
-         ! Find where the diagonal is
-         diag_index = -1
-         if (diag_stren_int == 1) then
-            do col = 1, ncols
-               if (cols(col) == ifree) then
-                  diag_index = col
-               end if 
-            end do              
-         end if
+      allocate(d_nnz(local_rows), o_nnz(local_rows))
+      d_nnz = 0
+      o_nnz = 0
+      ! The output row is never longer than the input row plus a diagonal
+      max_ncols = 0
+      do ifree = global_row_start, global_row_end_plus_one-1
+         call MatGetRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         max_ncols = max(max_ncols, ncols)
+         call MatRestoreRow(input_mat, ifree, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+      end do
+      allocate(row_cols(max_ncols + 1), row_vals(max_ncols + 1))
+      
+      ! We go through the rows twice, the first time to count the entries we keep so we 
+      ! can exactly preallocate, the second to set them
+      do pass = 1, 2
+         do ifree = global_row_start, global_row_end_plus_one-1                  
+         
+            ! Get the row
+            call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)     
 
-         ! If we want a relative row tolerance
-         if (rel_max_row_tol_int /= 0) then
-            ! Include the diagonal in the relative row tolerance
-            if (rel_max_row_tol_int == 1) then
-               if (diag_stren_int == 1) then
-                  ! If there is a zero diagonal
-                  if (diag_index == -1) then
-                     rel_row_tol = 0d0
+            ! Find where the diagonal is
+            diag_index = -1
+            if (diag_stren_int == 1) then
+               do col = 1, ncols
+                  if (cols(col) == ifree) then
+                     diag_index = col
+                  end if 
+               end do              
+            end if
+
+            ! If we want a relative row tolerance
+            if (rel_max_row_tol_int /= 0) then
+               ! Include the diagonal in the relative row tolerance
+               if (rel_max_row_tol_int == 1) then
+                  if (diag_stren_int == 1) then
+                     ! If there is a zero diagonal
+                     if (diag_index == -1) then
+                        rel_row_tol = 0d0
+                     else
+                        ! We are measuring relative to the strength of the diagonal
+                        rel_row_tol = tol * abs(vals(diag_index))
+                     end if
                   else
-                     ! We are measuring relative to the strength of the diagonal
-                     rel_row_tol = tol * abs(vals(diag_index))
+                     rel_row_tol = tol * maxval(abs(vals(1:ncols)))
+                  end if
+
+               ! Don't include the diagonal in the relative row tolerance
+               else if (rel_max_row_tol_int == -1) then
+                  
+                  ! If the user has specified they don't want to include the diagonal in the 
+                  ! relative row tolerance, but also have said they want to measure
+                  ! everything by the strength of the diagonal, it doesn't make
+                  ! sense to exclude the diagonal!
+                  if (diag_stren_int == 1) then
+                     ! If there is a zero diagonal
+                     if (diag_index == -1) then
+                        rel_row_tol = 0d0
+                     else
+                        ! We are measuring relative to the strength of the diagonal
+                        rel_row_tol = tol * abs(vals(diag_index))
+                     end if                  
+                  else
+                     ! Be careful to take huge() of the typed target (not 0d0) so
+                     ! single builds get the representable -huge, not -Inf
+                     abs_biggest_entry = -huge(abs_biggest_entry)
+                     ! Find the biggest entry in the row thats not the diagonal
+                     do col = 1, ncols
+                        if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
+                           abs_biggest_entry = abs(vals(col))
+                        end if 
+                     end do  
+                     rel_row_tol = tol * abs_biggest_entry
+                  end if
+               end if
+            end if 
+                     
+            ! Build the output row - anything that ends up on the diagonal (the diagonal itself 
+            ! and any lumped entries) is summed into a single diagonal entry
+            row_n = 0
+            diag_pos = 0
+            do col = 1, ncols
+
+               ! Keep it if it is bigger than the tolerance
+               if (abs(vals(col)) .ge. rel_row_tol) then
+
+                  ! If this is the diagonal and we are always dropping it, then don't add it
+                  if (drop_diag_int == -1 .AND. cols(col) == ifree) cycle
+                  target_col = cols(col)
+
+               ! If the entry is small and we are lumping, then add it to the diagonal
+               ! or if this is the diagonal and it's small but we are not dropping it
+               else if (lump_entries .OR. (drop_diag_int == 0 .AND. cols(col) == ifree)) then
+                  target_col = ifree
+               else
+                  cycle
+               end if
+
+               value = vals(col)
+               if (target_col == ifree) then
+                  if (diag_pos == 0) then
+                     row_n = row_n + 1
+                     diag_pos = row_n
+                     row_cols(row_n) = ifree
+                     row_vals(row_n) = value
+                  else
+                     row_vals(diag_pos) = row_vals(diag_pos) + value
                   end if
                else
-                  rel_row_tol = tol * maxval(abs(vals(1:ncols)))
+                  row_n = row_n + 1
+                  row_cols(row_n) = target_col
+                  row_vals(row_n) = value
                end if
+            end do                       
 
-            ! Don't include the diagonal in the relative row tolerance
-            else if (rel_max_row_tol_int == -1) then
-               
-               ! If the user has specified they don't want to include the diagonal in the 
-               ! relative row tolerance, but also have said they want to measure
-               ! everything by the strength of the diagonal, it doesn't make
-               ! sense to exclude the diagonal!
-               if (diag_stren_int == 1) then
-                  ! If there is a zero diagonal
-                  if (diag_index == -1) then
-                     rel_row_tol = 0d0
+            ! Must call otherwise petsc leaks memory
+            call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)   
+
+            if (pass == 1) then
+               i_loc = ifree - global_row_start + 1
+               do col = 1, row_n
+                  if (row_cols(col) >= global_col_start .AND. row_cols(col) < global_col_end_plus_one) then
+                     d_nnz(i_loc) = d_nnz(i_loc) + 1
                   else
-                     ! We are measuring relative to the strength of the diagonal
-                     rel_row_tol = tol * abs(vals(diag_index))
-                  end if                  
-               else
-                  ! Be careful to take huge() of the typed target (not 0d0) so
-                  ! single builds get the representable -huge, not -Inf
-                  abs_biggest_entry = -huge(abs_biggest_entry)
-                  ! Find the biggest entry in the row thats not the diagonal
-                  do col = 1, ncols
-                     if (cols(col) /= ifree .AND. abs(vals(col)) > abs_biggest_entry) then
-                        abs_biggest_entry = abs(vals(col))
-                     end if 
-                  end do  
-                  rel_row_tol = tol * abs_biggest_entry
-               end if
+                     o_nnz(i_loc) = o_nnz(i_loc) + 1
+                  end if
+               end do
+            else if (row_n > 0) then
+               row_array(1) = ifree
+               call MatSetValues(output_mat, one, row_array, row_n, row_cols(1:row_n), row_vals(1:row_n), &
+                        INSERT_VALUES, ierr)
             end if
-         end if 
-                  
-         do col = 1, ncols
+         end do
 
-            ! Set the row/col to be included (ie not -1) 
-            ! if it is bigger than the tolerance
-            if (abs(vals(col)) .ge. rel_row_tol) then
+         if (pass == 1) then
+            call MatXAIJSetPreallocation(output_mat, one, d_nnz, o_nnz, &
+                     PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+            ! Don't set any off processor entries so no need for a reduction when assembling
+            call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)      
+            call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)     
+         end if
+      end do
+      deallocate(d_nnz, o_nnz, row_cols, row_vals)
 
-               ! If this is the diagonal and we are always dropping it, then don't add it
-               if (drop_diag_int == -1 .AND. cols(col) == ifree) cycle
-                                 
-               row_indices(counter + col - 1) = ifree
-               col_indices(counter + col - 1) = cols(col)
-
-            ! If the entry is small and we are lumping, then add it to the diagonal
-            ! or if this is the diagonal and it's small but we are not dropping it
-            else if (lump_entries .OR. (drop_diag_int == 0 .AND. cols(col) == ifree)) then
-
-               row_indices(counter + col - 1) = ifree
-               col_indices(counter + col - 1) = ifree
-
-            end if
-         end do                       
-         counter = counter + ncols
-
-         ! Must call otherwise petsc leaks memory
-         call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)   
-      end do           
-
-      ! Set the values
-      call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
-      deallocate(row_indices, col_indices)
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
-      deallocate(v)        
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
          
    end subroutine remove_small_from_sparse_cpu   
 
@@ -901,11 +923,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
+            ! If we're doing reuse and debug, then the cpu version reuses the output
+            ! matrix itself (as that has the sparsity the cpu version expects) and so
+            ! we compare against a copy of the kokkos result
             if (reuse) then
                temp_mat = output_mat
                call MatConvert(output_mat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
@@ -968,54 +988,32 @@ logical, protected :: kokkos_debug_global = .FALSE.
       logical, intent(in) :: reuse
       type(tMat), intent(inout) :: output_mat
 
-      PetscInt :: ncols, ifree, max_nnzs, max_nnzs_total
+      PetscInt :: ncols, ifree, col, i_loc
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscCount :: counter
+      PetscInt :: global_col_start, global_col_end_plus_one
       PetscErrorCode :: ierr
-      integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null()
       ! Matrix entries filled by MatGetRow are PetscScalar
       PetscScalar, dimension(:), pointer :: vals => null()
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
+      PetscInt, dimension(1) :: row_array
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
+      logical :: diag_present
       
       ! ~~~~~~~~~~
-      ! If the tolerance is 0 we still want to go through this routine and drop the zeros
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)    
-      ! Get the comm size 
-      call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)
 
       ! Get the local sizes
       call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
       call MatGetSize(input_mat, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
+      call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)  
       
-      ! Get the max number of nnzs
-      max_nnzs_total = 0
-      max_nnzs = -1
-      do ifree = global_row_start, global_row_end_plus_one-1
-         call MatGetRow(input_mat, ifree, &
-                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         max_nnzs_total = max_nnzs_total + ncols
-         if (ncols > max_nnzs) max_nnzs = ncols                  
-         call MatRestoreRow(input_mat, ifree, &
-                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)          
-      end do
-      ! Adding for potential missing diagonals
-      max_nnzs_total = max_nnzs_total + local_rows
-      max_nnzs = max_nnzs + 1
-
-      allocate(row_indices(max_nnzs_total))
-      allocate(col_indices(max_nnzs_total))
-      allocate(v(max_nnzs_total))
-
       ! We may be reusing with the same sparsity
       if (.NOT. reuse) then
          call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
@@ -1024,7 +1022,29 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! Match the output type
          call MatGetType(input_mat, mat_type, ierr)
          call MatSetType(output_mat, mat_type, ierr)
-         call MatSetUp(output_mat, ierr)   
+
+         ! Count the entries in each row, plus the diagonal if it's absent, so we can exactly preallocate
+         allocate(d_nnz(local_rows), o_nnz(local_rows))
+         d_nnz = 0
+         o_nnz = 0
+         do ifree = global_row_start, global_row_end_plus_one-1
+            call MatGetRow(input_mat, ifree, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
+            i_loc = ifree - global_row_start + 1
+            diag_present = .FALSE.
+            do col = 1, ncols
+               if (cols(col) == ifree) diag_present = .TRUE.
+               if (cols(col) >= global_col_start .AND. cols(col) < global_col_end_plus_one) then
+                  d_nnz(i_loc) = d_nnz(i_loc) + 1
+               else
+                  o_nnz(i_loc) = o_nnz(i_loc) + 1
+               end if
+            end do
+            if (.NOT. diag_present) d_nnz(i_loc) = d_nnz(i_loc) + 1
+            call MatRestoreRow(input_mat, ifree, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
+         end do
+         call MatXAIJSetPreallocation(output_mat, one, d_nnz, o_nnz, &
+                  PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+         deallocate(d_nnz, o_nnz)
       end if          
        
       ! Don't set any off processor entries so no need for a reduction when assembling
@@ -1033,39 +1053,29 @@ logical, protected :: kokkos_debug_global = .FALSE.
       
       ! Now go and fill the new matrix
       ! Loop over global row indices
-      counter = 1
       do ifree = global_row_start, global_row_end_plus_one-1                  
       
          ! Get the row
          call MatGetRow(input_mat, ifree, ncols, cols, vals, ierr)  
-
-         row_indices(counter:counter+ncols-1) = ifree
-         col_indices(counter:counter+ncols-1) = cols(1:ncols)
-         v(counter:counter+ncols-1) = vals(1:ncols)    
-         counter = counter + ncols           
+         row_array(1) = ifree
+         if (ncols > 0) then
+            call MatSetValues(output_mat, one, row_array, ncols, cols(1:ncols), vals(1:ncols), INSERT_VALUES, ierr)
+         end if
+         ! Add a zero on the diagonal if it's not present
+         diag_present = .FALSE.
+         do col = 1, ncols
+            if (cols(col) == ifree) diag_present = .TRUE.
+         end do
+         if (.NOT. diag_present) then
+            call MatSetValue(output_mat, ifree, ifree, PFLARE_ZERO, INSERT_VALUES, ierr)
+         end if
 
          ! Must call otherwise petsc leaks memory
          call MatRestoreRow(input_mat, ifree, ncols, cols, vals, ierr)   
       end do      
-      
-      ! Go and add a zero on the diagonal just in case it's not present
-      do ifree = global_row_start, global_row_end_plus_one-1 
-         row_indices(counter) = ifree
-         col_indices(counter) = ifree
-         v(counter) = 0d0
-         counter = counter + 1
-      end do
 
-      ! Set the values
-      if (.NOT. reuse) then
-         call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
-      end if
-      deallocate(row_indices, col_indices)
-      ! Remember the COO format does the add of all the values in v that share an index
-      ! So zero gets added to every diagonal entry (that way they're always present)
-      ! even though we're calling INSERT_VALUES
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
-      deallocate(v)       
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
          
    end subroutine mat_duplicate_copy_plus_diag_cpu   
 
@@ -1282,14 +1292,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       
-      PetscInt :: i_loc, local_rows, local_cols, global_rows, global_cols
+      PetscInt :: ifree, local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscCount :: counter
-      PetscInt, allocatable, dimension(:) :: indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
+      PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       
@@ -1309,24 +1316,24 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Match the output type
       call MatGetType(input_mat, mat_type, ierr)
       call MatSetType(output_mat, mat_type, ierr)
-      call MatSetUp(output_mat, ierr) 
+      ! One entry in the diagonal block of each row
+      allocate(d_nnz(local_rows), o_nnz(local_rows))
+      d_nnz = 1
+      o_nnz = 0
+      call MatXAIJSetPreallocation(output_mat, one, d_nnz, o_nnz, &
+               PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+      deallocate(d_nnz, o_nnz)
       
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
       call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)    
       
-      allocate(indices(local_rows))
-      allocate(v(local_rows))
-      do i_loc = 1, local_rows
-         indices(i_loc) = global_row_start + i_loc-1
-      end do
-      v = 1d0
       ! Set the diagonal
-      counter = local_rows
-      call MatSetPreallocationCOO(output_mat, counter, indices, indices, ierr)
-      deallocate(indices)
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
-      deallocate(v)
+      do ifree = global_row_start, global_row_end_plus_one-1
+         call MatSetValue(output_mat, ifree, ifree, PFLARE_ONE, INSERT_VALUES, ierr)
+      end do
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
          
    end subroutine generate_identity   
    
@@ -1345,15 +1352,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       type(tMat), intent(inout) :: output_mat
       
       PetscInt :: i_loc, local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one
+      PetscInt :: global_col_start, global_col_end_plus_one
       PetscInt :: global_row_start_rect, global_row_end_plus_one_rect
       PetscInt :: local_indices_size, global_indices_size
-      PetscCount :: counter
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
+      PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: is_pointer
@@ -1365,8 +1369,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Get the local sizes
       call MatGetLocalSize(full_mat, local_rows, local_cols, ierr)
       call MatGetSize(full_mat, global_rows, global_cols, ierr)
-      ! This returns the global index of the local portion of the matrix
-      call MatGetOwnershipRange(full_mat, global_row_start, global_row_end_plus_one, ierr)  
+      call MatGetOwnershipRangeColumn(full_mat, global_col_start, global_col_end_plus_one, ierr)  
 
       ! Get the local and global sizes of the rows we're pulling out
       call ISGetLocalSize(rect_indices, local_indices_size, ierr)
@@ -1379,7 +1382,24 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Match the output type
       call MatGetType(full_mat, mat_type, ierr)
       call MatSetType(output_mat, mat_type, ierr)
-      call MatSetUp(output_mat, ierr) 
+
+      ! Get the indices we need
+      call ISGetIndices(rect_indices, is_pointer, ierr)
+
+      ! One entry in each row
+      allocate(d_nnz(local_indices_size), o_nnz(local_indices_size))
+      d_nnz = 0
+      o_nnz = 0
+      do i_loc = 1, local_indices_size
+         if (is_pointer(i_loc) >= global_col_start .AND. is_pointer(i_loc) < global_col_end_plus_one) then
+            d_nnz(i_loc) = 1
+         else
+            o_nnz(i_loc) = 1
+         end if
+      end do
+      call MatXAIJSetPreallocation(output_mat, one, d_nnz, o_nnz, &
+               PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+      deallocate(d_nnz, o_nnz)
       ! This returns the global index of the local portion of the output
       call MatGetOwnershipRange(output_mat, global_row_start_rect, global_row_end_plus_one_rect, ierr)       
       
@@ -1387,24 +1407,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
       call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)          
 
-      ! Get the indices we need
-      call ISGetIndices(rect_indices, is_pointer, ierr)
-
-      allocate(row_indices(local_indices_size))
-      allocate(col_indices(local_indices_size))
-      allocate(v(local_indices_size))
       do i_loc = 1, local_indices_size
-         row_indices(i_loc) = global_row_start_rect + i_loc-1
+         call MatSetValue(output_mat, global_row_start_rect + i_loc-1, is_pointer(i_loc), &
+                  PFLARE_ONE, INSERT_VALUES, ierr)
       end do
-      v = 1d0
-      ! MatSetPreallocationCOO could modify the values in is_pointer
-      col_indices = is_pointer
-      ! Set the diagonal
-      counter = local_indices_size
-      call MatSetPreallocationCOO(output_mat, counter, row_indices, col_indices, ierr)
-      deallocate(row_indices, col_indices)
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
-      deallocate(v)      
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
 
       call ISRestoreIndices(rect_indices, is_pointer, ierr)    
          
@@ -1427,16 +1435,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
       
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
-      PetscInt :: local_indices_size
-      PetscCount :: counter
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      PetscInt :: local_indices_size, i_loc
       PetscErrorCode :: ierr
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
+      PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
       PetscInt, dimension(:), pointer :: is_pointer
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
       
       ! ~~~~~~~~~~
 
@@ -1456,32 +1461,35 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! Match the output type
       call MatGetType(input_mat, mat_type, ierr)
       call MatSetType(output_mat, mat_type, ierr)
-      call MatSetUp(output_mat, ierr) 
-      
-      ! Don't set any off processor entries so no need for a reduction when assembling
-      call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
-      call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)  
       
       ! Get the indices we need
       call ISGetIndices(indices, is_pointer, ierr)
 
-      allocate(v(local_indices_size))
-      allocate(row_indices(local_indices_size))
-      allocate(col_indices(local_indices_size))
-      ! MatSetPreallocationCOO could modify the values in is_pointer
-      row_indices = is_pointer
-      col_indices = row_indices
-      v = 1d0
+      ! One entry in the diagonal block of each row in the IS
+      allocate(d_nnz(local_rows), o_nnz(local_rows))
+      d_nnz = 0
+      o_nnz = 0
+      do i_loc = 1, local_indices_size
+         d_nnz(is_pointer(i_loc) - global_row_start + 1) = 1
+      end do
+      call MatXAIJSetPreallocation(output_mat, one, d_nnz, o_nnz, &
+               PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+      deallocate(d_nnz, o_nnz)
+      
+      ! Don't set any off processor entries so no need for a reduction when assembling
+      call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
+      call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)  
+
       ! Set the diagonal
-      counter = local_indices_size
-      call MatSetPreallocationCOO(output_mat, counter, row_indices, col_indices, ierr)
-      deallocate(row_indices, col_indices)
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
-      deallocate(v)  
+      do i_loc = 1, local_indices_size
+         call MatSetValue(output_mat, is_pointer(i_loc), is_pointer(i_loc), PFLARE_ONE, INSERT_VALUES, ierr)
+      end do
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
 
       call ISRestoreIndices(indices, is_pointer, ierr)       
          
-   end subroutine generate_identity_is   
+   end subroutine generate_identity_is
 
    !------------------------------------------------------------------------------------------------------------------------
    
