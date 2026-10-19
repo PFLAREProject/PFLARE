@@ -1,6 +1,9 @@
 # Removing Fortran from the PFLARE core: feasibility and staged plan
 
-Status: proposal (not started). Written against commit `4e1f347` (PFLARE 1.27.0, PETSc >= 3.26).
+Status: proposal (not started). Written against branch
+`claude/beautiful-davinci-gxkf35` at `85b4f7f` (PFLARE 1.27.0, PETSc >= 3.26),
+which is about to be merged into `main`. Every stage branches from that
+branch (or from `main` once it carries it) plus the previously merged stages.
 
 Goal: `libpflare` is built from C/C++ only, so PFLARE can be built and used
 without a Fortran compiler. Every existing Fortran interface survives unchanged
@@ -19,8 +22,8 @@ parses, Spack, and PETSc's `--download-pflare` all keep working.
 
 Feasible, but it is a full rewrite of the algorithmic core, not a refactor.
 
-- `src/` holds 28.3k lines of Fortran. About 6.1k of that is interface and
-  binding glue that either disappears or is inverted (section 2). About 22.2k
+- `src/` holds 28.5k lines of Fortran. About 6.3k of that is interface and
+  binding glue that either disappears or is inverted (section 2). About 22.1k
   lines of algorithms have to be ported to C.
 - The 14k lines of Kokkos C++ are untouched apart from call-site cleanups:
   their `PETSC_INTERN void <name>_kokkos(...)` entry points are already C
@@ -28,45 +31,61 @@ Feasible, but it is a full rewrite of the algorithmic core, not a refactor.
   goes away.
 - Nothing in the Fortran uses a feature without a direct C equivalent. There is
   no OpenMP, no coarrays, no OOP (no `class`, `procedure` pointers or
-  finalizers), one `recursive` routine (`Binary_Tree.F90`), and BLAS/LAPACK is
-  already reached through a precision dispatch header that PETSc's
-  `petscblaslapack.h` replaces one for one. MPI is used directly in only seven
-  distinct calls (`MPI_Allreduce`, `MPI_Iallreduce`, `MPI_Ibcast`,
-  `MPI_Op_create`, `MPI_Comm_rank/size`, `MPI_Abort`).
+  finalizers), one `recursive` routine (`Binary_Tree.F90`, which is replaced
+  by PETSc's sort utilities anyway), and BLAS/LAPACK is already reached through
+  a precision dispatch header that PETSc's `petscblaslapack.h` replaces one
+  for one. MPI is used directly in only seven distinct calls (`MPI_Allreduce`,
+  `MPI_Iallreduce`, `MPI_Ibcast`, `MPI_Op_create`, `MPI_Comm_rank/size`,
+  `MPI_Abort`).
 - `PCPFLAREINV` already has the target shape: its C file owns the context, and
   `PCPFLAREINV_Interfaces.F90` is a pure `bind(C)` wrapper over the C API. The
   work is to bring `PCAIR` (whose Fortran interface reaches directly into
-  Fortran data) and the algorithms to the same shape.
+  Fortran data) and the algorithms to the same shape. The comment in
+  `PCCreate_AIR` says why the `PCShell` layer exists: there was no reliable
+  way to hand a Fortran context to `pc->data`. In C there is, so the shell
+  layer and the Fortran-only accessors that reached through it go.
 - PETSc's package file for `--download-pflare` (`config/BuildSystem/config/packages/PFLARE.py`)
   declares no Fortran requirement and does nothing with `.mod` files, so it
   needs no change.
 
-Four things cannot be literally bit-identical after a port, and need to be
-accepted up front (section 9 lists the decisions):
+Decisions already taken by the maintainer, which this plan follows:
 
-1. **Random numbers.** PMISR, DDC, CR and the GMRES polynomial start vector use
-   the Fortran intrinsic `random_number` seeded by `random_seed(put=)`. That
-   sequence is defined by the Fortran runtime, not by PFLARE. Stage 0 settles
-   this: gfortran's generator is xoshiro256** with a documented seeding
-   scramble, and a 40-line C reimplementation can be checked bitwise against
-   gfortran. If it matches, C builds reproduce today's gfortran builds exactly
-   and become compiler independent. If it does not, the migration uses a
-   Fortran shim to stay bitwise during verification and switches to a C
-   generator in one clearly labelled stage.
-2. **Printed output.** The stats and timings are printed with list-directed
+1. **Random numbers stay in Fortran until the very end.** PMISR, DDC, CR and
+   the GMRES polynomial start vector draw from the Fortran intrinsic
+   `random_number`, seeded by `random_seed(put=)`. That sequence is defined by
+   the Fortran runtime, so a C generator would move every random-dependent
+   result. Stage 0 wraps the four draws in one small `bind(C)` Fortran routine
+   that the C ports call; it is the last piece of core Fortran and is removed
+   in stage 9, after everything else has been verified against the Fortran
+   with results that are bit-identical up to summation order.
+2. **Error handling.** Today `ierr` is mostly ignored and PFLARE's own checks
+   are `print` + `MPI_Abort`. The C port wraps every PETSc call in `PetscCall`
+   and turns the checks into `PetscCheck`/`SETERRQ`, so errors propagate with
+   a PETSc traceback.
+3. **Fortran-only accessors.** `PCAIRGetOptions`, `PCAIRGetOptionsAndShell`,
+   `PCAIRGetPCShell` and `PCAIRGetPolyCoeffsPointer` (all public in
+   `pcair_interfaces`, none documented, none used by tests, Python or docs)
+   existed only to make the Fortran implementation reachable from the
+   interface layer. They are removed, together with the `PCShell` layer and
+   the C symbol `c_PCAIRGetPCShell`. The `PCAIRGet*/Set*` routines are the
+   API.
+4. **Printed output.** The stats and timings are printed with list-directed
    `print *`, whose number formatting is compiler defined. The C port prints
    with explicit formats that keep every label and field that
    `tools/parse_pflare_output.py` reads. Byte-identical stdout is not a goal;
-   parser compatibility is.
-3. **Error handling.** The Fortran mostly ignores `ierr` and uses
-   `print` + `MPI_Abort` for its own checks. The C port uses `PetscCall` and
-   `PetscCheck`/`SETERRQ`, so PETSc errors now propagate with a traceback
-   instead of being ignored or aborting. This is the direction recent changes
-   already took (see `CHANGELOG.md`, "PETSc errors inside the C routines ...
-   now abort, rather than being ignored").
-4. **Floating-point summation order.** Replacing `matmul`, `sum` and array
-   expressions with loops can change the order of a few reductions. Expect
-   last-bit differences, verified by tolerance, never by eye.
+   parser compatibility is. The `-ksp_view` output loses the inner
+   `PC Object: ... type: shell` block when the shell layer goes; the
+   `The underlying PCMG:` line and the PCMG view stay.
+5. **Floating-point summation order.** Replacing `matmul`, `sum` and array
+   expressions with loops can change the order of a few reductions. Last-bit
+   differences are expected and verified by tolerance.
+6. **No external libraries.** Only PETSc (with the BLAS/LAPACK and MPI it was
+   configured with) and the C standard library. Modules that only existed
+   because Fortran has no standard containers (`Binary_Tree.F90`, parts of
+   `Sorting.F90`) are replaced by PETSc's `PetscSort*` utilities, not by a
+   third-party library.
+7. **The C mirrors the Fortran.** Same files, same routine names and order,
+   same argument order, same local variable names, same comments (section 5).
 
 ## 2. Inventory
 
@@ -79,10 +98,25 @@ Fortran in `src/`, grouped by what happens to it:
 | Fortran user API, reaches into Fortran data | `PCAIR_Interfaces.F90` | 2810 | rewritten as thin `bind(C)` wrappers (~900 lines) |
 | Fortran user API, already thin over C | `PCPFLAREINV_Interfaces.F90`, `PFLARE.F90` | 517 | kept, moved to `src/fortran/` |
 | Constants | `Pflare_Parameters.F90` | 269 | becomes a shared cpp header plus a Fortran module that includes it |
-| Algorithms | the other 35 files | 22.2k | ported to C |
+| Fortran-only containers | `Binary_Tree.F90` | 552 | replaced by `PetscSortInt`/`PetscSortedRemoveDupsInt` |
+| Algorithms | the other 34 files | 21.6k | ported to C |
 
 C and C++ in `src/`: `PCAIR.c` (3780), `PCPFLAREINV.c` (1167),
 `C_PETSc_Routines.c` (411), ten `*k.kokkos.cxx` (10.7k).
+
+Fortran dependency order (from `Makefile.deps`), which fixes the stage order:
+
+```
+Pflare_Parameters, Binary_Tree, TSQR, Aggregation, Sorting, C_PETSc_Interfaces
+  -> Gmres_Poly_Data_Type, AIR_Data_Type, Timers, PETSc_Helper, Weighted_Jacobi
+  -> Matshell_Data_Type, Gmres_Poly_Apply, SAbs, Constrain_Z_or_W, Grid_Transfer(_Improve),
+     MatDiagDom, PMISR_Module, Repartition, SAI_Z
+  -> Gmres_Poly, DDC_Module, FC_Smooth, FC_Smooth_Block, AIR_MG_Stats
+  -> Gmres_Poly_Newton, Neumann_Poly, Approx_Inverse_Setup
+  -> CR_Splitting -> CF_Splitting -> MatDiagDomSubmatrix
+  -> AIR_Data_Type_Routines, AIR_Operators_Setup, AIR_MG_Setup, PCAIR_Shell
+  -> PCAIR_Interfaces, PFLARE, C_Fortran_Bindings, PCAIR_C_Fortran_Bindings
+```
 
 Things outside `src/` that mention Fortran and are affected:
 
@@ -119,16 +153,14 @@ framework of section 6.
 
 - `include/pflare.h` is unchanged except for additions.
 - All Fortran public names listed in section 2 keep their module, name,
-  arguments, kinds and intents. `PCAIRGetOptions`, `PCAIRGetOptionsAndShell`
-  and `PCAIRGetPCShell` are public in `pcair_interfaces` today; see decision
-  D3 for what happens to them.
+  arguments, kinds and intents.
 - `make`, `make check`, `make tests`, `make python`, `make install`,
   `make tests_search TEST_MATCH=...` keep their names and exit-code contract.
 - The whole CI matrix in `docs/dev/ci.md` stays green: GNU debug/opt, 64-bit
   indices, single precision, Kokkos (serial, OpenMP, no-MPI), valgrind,
   `-malloc_dump`, Intel, macOS, notebook, PETSc `--download-pflare` plus its
-  doc build (the `/*E ... E*/` and `/*@ ... @*/` doctext in the C files must be
-  kept, PETSc's Sphinx build scans them).
+  doc build (the `/*E ... E*/`, `/*MC ... M*/` and `/*@ ... @*/` doctext in
+  the C files must be kept, PETSc's Sphinx build scans them).
 - Test iteration counts are identical to the baseline, residual histories agree
   to tolerance, `tools/parse_pflare_output.py` still parses the stats block.
 - Compile with `-Wall -Werror` (and `-Wunused-result -std=c++20` on Kokkos).
@@ -138,25 +170,28 @@ framework of section 6.
 ```
 src/
   pflareimpl.h            private structs shared across modules
-                          (PCAIR_Options, PCAIR_Data, PFLAREPolyData, PFLAREMatShellCtx, ...)
+                          (air_options, air_multigrid_data, gmres_poly_data, mat_ctxtype, ...)
   pflare_parameters.h     magic constants and enum values as #defines; included by
                           C and by the Fortran parameter module (cpp runs on .F90)
   X.c / X.h               one C file per former Fortran module, same stem, PETSC_INTERN
                           prototypes in X.h (Xk.kokkos.cxx keeps its name, so the
                           "X / Xk" sibling convention of docs/dev/kokkos.md survives)
-  PCAIR.c, PCPFLAREINV.c  own their contexts directly, no Fortran externs
+  PCAIR.c, PCPFLAREINV.c  own their contexts directly, no Fortran externs, no PCShell
+  Pflare_Random.F90       (stages 0 to 8 only) the four random_number draws behind one
+                          bind(C) routine; the last core Fortran, removed in stage 9
   fortran/                compiled only when PETSC_USE_FORTRAN_BINDINGS=1
     Pflare_Parameters.F90   module pflare_parameters (parameters taken from pflare_parameters.h)
     PCPFLAREINV_Interfaces.F90, PCAIR_Interfaces.F90, PFLARE.F90
     CF_Splitting.F90        module cf_splitting: compute_cf_splitting wrapper for the C routine
     Gmres_Poly_Newton.F90   module gmres_poly_newton: modified_leja wrapper
+  fref/                   (stages 2 to 7 only) the retired Fortran implementations,
+                          compiled under PFLARE_PORT_DEBUG=1 for the differential tests
 ```
 
 The remaining Fortran lives in `src/fortran/` so that its file stems cannot
 collide with the C objects of the same name (`src/CF_Splitting.o` is the C
-object; `src/fortran/CF_Splitting.o` the wrapper module). During the migration
-a second directory `src/fref/` holds the retired Fortran implementations that
-the differential tests still call (section 6); it is deleted in stage 8.
+object; `src/fortran/CF_Splitting.o` the wrapper module). `src/fref/` is
+deleted in stage 8 and `src/Pflare_Random.F90` in stage 9.
 
 Build gating, all in the top `Makefile` with the existing `_have_conf` helper:
 
@@ -164,11 +199,13 @@ Build gating, all in the top `Makefile` with the existing `_have_conf` helper:
 export PETSC_USE_FORTRAN_BINDINGS := $(if $(call _have_conf,PETSC_USE_FORTRAN_BINDINGS),1,0)
 ```
 
-- `OBJS` is split into `COBJS` (always), `KOBJS` (Kokkos) and `FOBJS`
+- `OBJS` is split into `COBJS` (always), `KOBJS` (Kokkos), `FCORE_OBJS`
+  (core Fortran still being ported, empty after stage 9) and `FOBJS`
   (`src/fortran/*.o`, only when the flag is 1).
 - The shared library is linked with `$(CLINKER)` (or `$(CXXLINKER)` when
   Kokkos objects are present, so the C++ runtime is pulled in) instead of
-  `$(LINK.F)`. The Darwin and static branches keep their current logic.
+  `$(LINK.F)`; both variables come from `lib/petsc/conf/variables`. The
+  Darwin and static branches keep their current logic.
 - C header dependencies are generated with `$(CC) -MM` into `Makefile.deps`
   next to the `makedepf90` output; `make depend` produces both.
 - The Fortran test drivers and the `matrandom` entry of `CHECK_TARGETS` are
@@ -179,84 +216,130 @@ export PETSC_USE_FORTRAN_BINDINGS := $(if $(call _have_conf,PETSC_USE_FORTRAN_BI
 
 ## 5. Porting conventions (every stage follows these)
 
-1. One C file per Fortran module, same stem, module-level `use` lists become
-   `#include "X.h"`. Everything not in `include/pflare.h` is `PETSC_INTERN`.
-   Function names keep the Fortran snake_case names so `git log -S` and the
-   Kokkos siblings still line up (`compute_cf_splitting`, `setup_air_pcmg`, ...).
-2. Every routine returns `PetscErrorCode`, starts with `PetscFunctionBegin`
-   and ends with `PetscFunctionReturn(PETSC_SUCCESS)`. Every PETSc call is
-   wrapped in `PetscCall`. Fortran `print "..."; MPI_Abort` becomes
-   `PetscCheck(cond, comm, PETSC_ERR_..., "same message")` or `SETERRQ`.
-   Keep the message text.
-3. Derived types become structs in `pflareimpl.h` with explicit
-   `..._init`, `..._reset`, `..._destroy` functions mirroring the Fortran
-   `create_air_data`/`reset_air_data`/`destroy_air_data` trio. Allocatable
-   arrays become pointer plus size, `allocated(x)` becomes `x != NULL`. Use
-   `PetscMalloc1`/`PetscCalloc1`/`PetscFree`; memory handed to users through
-   the public API (polynomial coefficients) keeps today's contract (documented
-   in `PCPFLAREINV.c`: freed with C `free`, so use `malloc` there).
-4. Indices: internal loops are 0-based. Level numbering keeps PFLARE's
-   convention (`our_level` 1-based in the Fortran) only where it is visible to
-   the user, i.e. the stats print and the `petsc_level` arithmetic in
-   `PCAIRGetPolyCoeffs`; document each place the two conventions meet.
-   Integers: `PetscInt` for everything that can index a matrix, `int` only
-   where the public API already says `int`. Options fields take the type of the
-   corresponding public getter in `pflare.h`.
-5. Two-dimensional coefficient arrays stay column-major
-   (`coeffs[i + j*rows]`); `PCPFLAREINVGetPolyCoeffs` documents column-major.
-6. BLAS/LAPACK through `petscblaslapack.h`: `LAPACKgels_`, `LAPACKgelsd_`,
+1. **Mirror the Fortran.** One C file per Fortran module with the same stem;
+   routines appear in the same order with the same names (`compute_cf_splitting`,
+   `setup_air_pcmg`, `calculate_and_build_approximate_inverse`, ...), the
+   same argument order, and the same local variable names. The Fortran
+   comments are carried over verbatim (the `! ~~~~~~~~` section separators
+   become `// ~~~~~~~~`, the routine header comments become the C routine's
+   header comment). Where a routine's control flow is restructured (for
+   instance a `where` becoming a loop), keep the comment that explains why the
+   code is there. A reviewer should be able to read `X.F90` and `X.c` side by
+   side. Module-level `use` lists become `#include "X.h"` lines in the same
+   order. Everything not in `include/pflare.h` is `PETSC_INTERN`.
+2. **Errors.** Every routine returns `PetscErrorCode`, starts with
+   `PetscFunctionBegin` and ends with `PetscFunctionReturn(PETSC_SUCCESS)`.
+   Every PETSc call is wrapped in `PetscCall` (`PetscCallMPI` for MPI,
+   `PetscCallBLAS` for BLAS/LAPACK). Fortran `print "..."; MPI_Abort` becomes
+   `PetscCheck(cond, comm, PETSC_ERR_..., "same message")` or `SETERRQ`,
+   keeping the message text. Kokkos entry points that return `void` are
+   called as today.
+3. **Data.** Derived types become structs in `pflareimpl.h` with the same
+   type and field names, and explicit `create`/`reset`/`destroy` functions
+   mirroring `create_air_data`/`reset_air_data`/`destroy_air_data`.
+   Allocatable arrays become pointer plus size, `allocated(x)` becomes
+   `x != NULL`. Use `PetscMalloc1`/`PetscCalloc1`/`PetscFree`; memory handed
+   to users through the public API (polynomial coefficients) keeps today's
+   contract (documented in `PCPFLAREINV.c`: freed with C `free`, so use
+   `malloc` there). The Fortran idiom "`MatDestroy` nulls the local copy of
+   the handle, copy it back into the slot" is reproduced where the comments
+   point it out, because the reuse logic depends on which slots are null.
+4. **Indices and integer kinds.** Internal loops are 0-based. Level numbering
+   keeps PFLARE's 1-based `our_level` only where it is visible to the user
+   (the stats print and the `petsc_level` arithmetic in `PCAIRGetPolyCoeffs`);
+   document each place the two conventions meet. `PetscInt` for everything
+   that can index a matrix, `int` only where the public API already says
+   `int`. Options fields take the type of the corresponding public getter in
+   `pflare.h`.
+5. **Coefficient arrays** stay column-major (`coeffs[i + j*rows]`);
+   `PCPFLAREINVGetPolyCoeffs` documents column-major.
+6. **BLAS/LAPACK** through `petscblaslapack.h`: `LAPACKgels_`, `LAPACKgelsd_`,
    `BLASgemv_`, `BLASgemm_`, `LAPACKgeev_`, `LAPACKgesvd_`, `LAPACKgeqrf_`,
-   `LAPACKgesv_` with `PetscBLASInt` and `PetscCallBLAS`/`PetscCheck` on
-   `info`. `include/finclude/pflare_blaslapack.h` is deleted once no Fortran
-   algorithm remains. Complex builds stay unsupported (`#error` moves to
+   `LAPACKgesv_` with `PetscBLASInt` and `PetscCallBLAS`, checking `info` as
+   the Fortran does. Complex builds stay unsupported (the `#error` moves to
    `pflareimpl.h`).
-7. `matmul`, `where`, `sum`, array sections and `reshape` become explicit
-   loops; when a `matmul` is on dense blocks larger than a few tens of entries,
-   use `BLASgemm_`. Keep the arithmetic order where it is cheap to do so.
-8. Printing: `PetscPrintf(comm, ...)` on rank 0 using the exact labels in
+7. **Array intrinsics.** `matmul`, `where`, `sum`, array sections and
+   `reshape` become explicit loops in the same place in the routine; a dense
+   `matmul` already surrounded by BLAS calls may become `BLASgemm_`. Keep the
+   arithmetic order where it is cheap to do so.
+8. **Printing.** `PetscPrintf(comm, ...)` on rank 0 using the exact labels in
    `tools/parse_pflare_output.py` (`~~~~~~~~~~~~ Level %d`, `Global rows %d
    Global F-points %d Global C-points %d`, `<timer label> : %.15g`, the five
    complexity lines, `Total cumulative setup time : %.15g`).
-9. Kokkos: C calls `*_kokkos` directly; the signatures in `src/*.kokkos.cxx`
+9. **Kokkos.** C calls `*_kokkos` directly; the signatures in `src/*.kokkos.cxx`
    are already C and already take `Mat *`, `IS *`, `Vec *`. The
    `PFLARE_KOKKOS_DEBUG` compare paths are ported verbatim (`kokkos_debug()`
    becomes a C function in `PETSc_Helper.c`). The Kokkos test sequence of
    `AGENTS.md` runs for every stage that touches a module with a Kokkos sibling.
-10. Fortran module variables (`Timers.F90` arrays, `TSQR.F90` custom MPI op,
-    `PETSc_Helper.F90` debug flag) become file-static variables with the same
-    lifetime semantics.
-11. No behaviour "improvements" during a port stage. A bug found while porting
-    is recorded in the stage's PR description and fixed in a separate PR
-    against both implementations (or after stage 8 against the C only), so
+10. **Module state.** Fortran module variables (`Timers.F90` arrays,
+    `TSQR.F90` custom MPI op, `PETSc_Helper.F90` debug flag) become
+    file-static variables with the same lifetime semantics.
+11. **Standard containers.** Where the Fortran hand-rolled something the C
+    standard library or PETSc provides (binary tree used as a sorted set,
+    Knuth shuffle to balance it), use `PetscSortInt`, `PetscSortedRemoveDupsInt`,
+    `PetscSortIntWithArray`, `qsort` and friends. The result must be the same
+    (a sorted unique set is unique). Nothing outside PETSc and libc.
+12. **No behaviour improvements during a port stage.** A bug found while
+    porting is recorded in the stage's PR description and fixed in a separate
+    PR against both implementations (or after stage 8 against the C only), so
     the differential tests stay meaningful.
-12. Doctext: the `/*@ ... @*/` manual-page comments stay in `PCAIR.c` and
-    `PCPFLAREINV.c`; new C files do not need them (they are `PETSC_INTERN`).
+13. **Doctext.** The `/*MC M*/` and `/*@ @*/` manual-page comments stay in
+    `PCAIR.c` and `PCPFLAREINV.c`; new C files do not need them.
 
 ## 6. Verification framework
 
-Each stage ships with evidence, not a claim. Three layers, cheapest first.
+Each stage ships with evidence, not a claim. Everything is built and run
+inside the CI Docker images, which is also how a subagent gets PETSc,
+gfortran, MPI and Kokkos without installing anything.
+
+**Build environment.** Pull before every use (`docker pull`, the images track
+PETSc `main`). The working tree is mounted over the image's copy of PFLARE:
+
+```sh
+# GNU, non-Kokkos; PETSC_ARCH=arch-linux-c-debug or arch-linux-c-opt
+docker pull stevendargaville/petsc:latest
+docker run --rm -v "$PWD":/build/PFLARE -w /build/PFLARE -e PETSC_ARCH=arch-linux-c-debug \
+  stevendargaville/petsc:latest bash -c '
+    FL="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132 -fcheck=all -g"
+    make -j3 build_tests FFLAGS="$FL" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" &&
+    make python && make check && make tests'
+# Kokkos (PFLARE_KOKKOS_DEBUG=1 and the aijkokkos/kokkos PETSC_OPTIONS are set in the image)
+docker pull stevendargaville/petsc_kokkos:latest
+docker run --rm -v "$PWD":/build/PFLARE -w /build/PFLARE stevendargaville/petsc_kokkos:latest bash -c '
+    make -j3 build_tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" \
+      CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror" &&
+    make check && make tests'
+```
+
+`docs/dev/ci.md` lists the other variants (64-bit, single precision, no-MPI,
+valgrind, `-malloc_dump`) and the `dockerfiles/` build arguments that select
+them; a stage runs the variants its section names, and the PR runs all of
+them. The `-fcheck=all` flags matter while Fortran reference code is still
+compiled; `-fsanitize=address,undefined` on `CFLAGS` is the C equivalent and
+is used from stage 2 on in the debug image.
+
+Three layers of checks, cheapest first.
 
 **Layer A: the existing suite, on the CI matrix.** `make check`,
-`make tests_short`, `make tests` (which includes the Python tests) locally and
-the full workflow on the PR. For stages that touch a module with a Kokkos
-sibling, additionally the two Kokkos environment runs in `AGENTS.md`
-(`PETSC_OPTIONS="-mat_type aijkokkos ..."` and `PFLARE_KOKKOS_DEBUG=1`).
-Valgrind and `-malloc_dump` jobs catch leaks in the new manual memory
-management; they already exist in CI.
+`make tests_short`, `make tests` (which includes the Python tests) in the
+image, and the full workflow on the PR. For stages that touch a module with a
+Kokkos sibling, additionally the Kokkos image with and without
+`PFLARE_KOKKOS_DEBUG` (`AGENTS.md`, Tests 6 to 8). Valgrind and `-malloc_dump`
+catch leaks in the new manual memory management; they already exist in CI.
 
 **Layer B: golden logs (added in stage 0).** `tools/capture_test_logs.sh` runs
 the `run_tests_*` groups with `-ksp_converged_reason -ksp_monitor` appended
 through `PETSC_OPTIONS`, and `tools/compare_test_logs.py` extracts, per test
 command, the iteration count, the residual history, and the parsed stats block
 (via `parse_pflare_output.py`). Baselines are captured once per CI
-configuration from the pre-port commit and stored outside the repo (a CI
-artifact keyed by Docker image tag and commit; the GNU debug baseline is also
-committed under `tests/golden/` as it is small text). The comparison rule:
-iteration counts and converged reasons must be identical; residual norms agree
-to a relative tolerance (default 1e-8 double, 1e-4 single); stats fields
-`global_rows`, `global_f_points`, `global_c_points`, `n_levels` identical;
-complexities to 1e-10. Any miss is a stage failure until explained and signed
-off. Stage 8 (RNG swap, if needed) is the only stage allowed to re-baseline.
+configuration from the base commit and stored as a CI artifact keyed by image
+and commit; the GNU debug baseline is also committed under `tests/golden/`
+since it is small text. The comparison rule: iteration counts and converged
+reasons must be identical; residual norms agree to a relative tolerance
+(default 1e-8 double, 1e-4 single); stats fields `global_rows`,
+`global_f_points`, `global_c_points`, `n_levels` identical; complexities to
+1e-10. Any miss is a stage failure until explained and signed off. Stage 9
+(the random generator) is the only stage allowed to re-baseline.
 
 **Layer C: in-process differential tests.** This is the repo's own
 `PFLARE_KOKKOS_DEBUG` idea applied to the port. While a stage is in flight,
@@ -265,7 +348,7 @@ the retired Fortran implementation is kept compiled under `src/fref/`
 mangled by the compiler and do not clash). With `make PFLARE_PORT_DEBUG=1`
 the C code runs both itself and the Fortran reference and compares:
 
-- leaf stages (2, 3): the call site that was switched to C also calls the
+- leaf stages (2, 3, 6): the call site that was switched to C also calls the
   `_fref` routine and compares outputs (`ISEqual`, `MatEqual`, `VecEqual`,
   or elementwise with the `PFLARE_TOL_*` tolerances from `pflare_parameters.h`),
   exactly as the Kokkos debug paths do;
@@ -277,34 +360,32 @@ the C code runs both itself and the Fortran reference and compares:
   operator for every inverse type and compares coefficients bitwise (or to
   tolerance where a reduction order changed), the assembled inverse with
   `MatEqual`/`MatAXPY`+`MatNorm`, and the matrix-free apply on random vectors;
-- stage 7 (AIR hierarchy): a reference PC type `air_fref` built from the
-  Fortran `PCAIR_Shell` path; `tests/port_compare_pc.c -pc_type air` compares
-  level by level: `IS_fine`/`IS_coarse` (`ISEqual`), restrictors,
-  prolongators, `A_ff`, `A_cc`, coarse matrices (`MatEqual`, then norm of the
-  difference), polynomial coefficients, and the result of `PCApply`,
-  `PCApplyTranspose` and `PCMatApply`.
+- stage 7 (AIR hierarchy): a reference PC type `air_fref` built from today's
+  `PCAIR.c` shell plumbing plus the Fortran `PCAIR_Shell` path;
+  `tests/port_compare_pc.c -pc_type air` compares level by level:
+  `IS_fine`/`IS_coarse` (`ISEqual`), restrictors, prolongators, `A_ff`,
+  `A_cc`, coarse matrices (`MatEqual`, then norm of the difference),
+  polynomial coefficients, and the result of `PCApply`, `PCApplyTranspose`
+  and `PCMatApply`.
 
-The differential drivers are part of `TEST_TARGETS` only while
-`PFLARE_PORT_DEBUG=1`, and are deleted with `src/fref/` in stage 8.
-
-**Random numbers during verification.** If the stage 0 experiment shows the C
-xoshiro256** matches gfortran bitwise, layers B and C compare exactly on GNU
-builds. If not, stage 0 provides `pflare_random_fortran_c(rank, n, out)` in
-`src/fref/` which the C port calls until stage 8, so layer C still compares
-bitwise, and stage 8 swaps in the C generator and re-baselines layer B.
+Because the random draws stay in Fortran until stage 9 (section 1, decision
+1), layers B and C compare bit-for-bit except where a reduction order changed,
+which keeps the differential tests sharp. The differential drivers are part
+of `TEST_TARGETS` only while `PFLARE_PORT_DEBUG=1`, and are deleted with
+`src/fref/` in stage 8.
 
 ## 7. Stages
 
 Dependency graph (an arrow means "must be merged first"):
 
 ```
-0 harness ──> 1 build ──> 2 leaves ──> 3 helpers ──┬──> 4 CF splitting ──┐
-                                                   ├──> 5 inverses ──────┼──> 7 AIR core ──> 8 cleanup/RNG ──> 9 gating/CI/docs
-                                                   └──> 6 grid transfer ─┘
+0 harness ─> 1 build ─> 2 leaves ─> 3 helpers ─┬─> 4 CF splitting ─┐
+                                               ├─> 5 inverses ─────┼─> 7 AIR core ─> 8 drop fref ─> 9 RNG ─> 10 gating/CI/docs
+                                               └─> 6 grid transfer ┘
 ```
 
 Stages 4, 5 and 6 are independent of each other and can run concurrently on
-separate branches; their only shared edits are the `OBJS` list and the
+separate branches; their only shared edits are the `OBJS` lists and the
 `C_Fortran_Bindings.F90` extern block, so merge them smallest first
 (6, 4, 5). Everything else is sequential. Each stage is one PR from one
 subagent, reviewed and merged before the next starts, and the subagent's
@@ -312,12 +393,12 @@ brief is the stage section below plus sections 3, 5 and 6 of this file.
 Sizes are lines of Fortran going in; the C coming out is usually 1.1 to 1.3
 times that.
 
-Every stage brief has the same closing requirement: build with
-`make -j3 build_tests` warning-free, run layer A (plus the Kokkos runs where
-applicable), run layers B and C where listed, and report the results verbatim
-in the PR description. A stage is not done while any CI job is red.
+Every stage brief has the same closing requirement: build warning-free in the
+debug and opt GNU images (and the Kokkos image where the stage says so), run
+layer A, run layers B and C where listed, and report the results verbatim in
+the PR description. A stage is not done while any CI job is red.
 
-### Stage 0: verification harness and RNG experiment (no library change)
+### Stage 0: verification harness and the random-number wrapper (no algorithm change)
 
 Deliverables
 
@@ -329,27 +410,27 @@ Deliverables
   as `-DPFLARE_PORT_DEBUG`, the `src/fref/` directory added to the build when
   set (empty for now), and `tests/port_compare_pc.c`, `tests/port_compare_cf.c`
   skeletons that build and exit 0.
-- `src/Pflare_Random.c` + `src/Pflare_Random.h`: xoshiro256** with gfortran's
-  `random_seed(put=)` scramble, a function
-  `pflare_random_fill(PetscMPIInt rank, PetscInt n, PetscReal *out)` that
-  reproduces the seeding loop used in `PMISR_Module.F90`, `DDC_Module.F90`,
-  `CR_Splitting.F90` and `Gmres_Poly.F90` (`seed(i) = rank + 1 + i`), and a
-  test `tests/random_compare.F90` that fills the same arrays with
-  `random_number` and compares bitwise. Record the outcome (match or not) in
-  this file, section 9, D1. If it does not match, add
-  `src/fref/Pflare_Random_Fortran.F90` exporting `pflare_random_fortran_c`.
-- Baseline golden logs captured from the current `main` for every CI image.
+- `src/Pflare_Random.F90`: module `pflare_random` with one routine
+  `pflare_random_fill(comm_rank, n, out) bind(C)` that does exactly what the
+  four call sites do today (`random_seed(size=)`, `seed(i) = comm_rank + 1 + i`,
+  `random_seed(put=)`, `random_number(out)`), and the four call sites in
+  `PMISR_Module.F90` (two), `DDC_Module.F90`, `CR_Splitting.F90` and
+  `Gmres_Poly.F90` switched to call it. Bitwise identical by construction
+  (same calls in the same order; the Box-Muller transform in `Gmres_Poly.F90`
+  stays at the call site). A header `src/Pflare_Random.h` declares the C
+  prototype for the later C ports.
+- Baseline golden logs captured from the base commit for every CI image.
 
-Verification: the harness compares `main` against itself with zero
-differences; the RNG test result is recorded.
+Verification: layer A on the full matrix, layer B identical (the random
+wrapper must not move a single iteration count).
 
 ### Stage 1: build system restructure (no behaviour change)
 
-- Split `OBJS` into `COBJS`, `KOBJS`, `FOBJS`; add the
-  `PETSC_USE_FORTRAN_BINDINGS` detection; add `src/fortran/` and `src/fref/`
-  to the search path and `clean`; add `$(CC) -MM` dependency generation to
-  `make depend`; keep linking with `LINK.F` for now (switching the linker is
-  stage 9, when no Fortran object remains).
+- Split `OBJS` into `COBJS`, `KOBJS`, `FCORE_OBJS`, `FOBJS`; add the
+  `PETSC_USE_FORTRAN_BINDINGS` detection (unused until stage 10); add
+  `src/fortran/` and `src/fref/` to the search path and `clean`; add
+  `$(CC) -MM` dependency generation to `make depend`; keep linking with
+  `LINK.F` for now (switching the linker is stage 10).
 - Move `PFLARE.F90`, `PCPFLAREINV_Interfaces.F90`, `PCAIR_Interfaces.F90`,
   `PCAIR_C_Fortran_Bindings.F90` and `Pflare_Parameters.F90` to
   `src/fortran/` (git renames). Update `Makefile.deps` and the `INCLUDE`
@@ -365,29 +446,37 @@ differences; the RNG test result is recorded.
 Verification: full CI matrix, layer B identical, `make install` output
 directory listing identical to before (compare with `diff -r`).
 
-### Stage 2: leaf modules (1.8k lines)
+### Stage 2: leaf modules (1.5k lines ported, 0.5k replaced)
 
-Port `Timers.F90`, `Binary_Tree.F90`, `Sorting.F90`, `Aggregation.F90`,
-`Weighted_Jacobi.F90`, `TSQR.F90` to `src/<Stem>.c` + `.h`. These depend only
-on `pflare_parameters` and PETSc. For each, the Fortran callers are switched to
-the C version through a `bind(C)` interface block placed in a new
-`src/fortran/Port_Interfaces.F90` (this file grows through stages 2 to 6 and
-is deleted in stage 7). The retired Fortran file moves to `src/fref/` and
-keeps compiling.
+Port `Timers.F90`, `Sorting.F90`, `Aggregation.F90`, `Weighted_Jacobi.F90`,
+`TSQR.F90` to `src/<Stem>.c` + `.h`. These depend only on `pflare_parameters`
+and PETSc. For each, the Fortran callers are switched to the C version through
+a `bind(C)` interface block placed in a new `src/fortran/Port_Interfaces.F90`
+(this file grows through stages 2 to 6 and is deleted in stage 7). The retired
+Fortran file moves to `src/fref/` and keeps compiling.
 
 Notes for the subagent
 
+- `Binary_Tree.F90` is not ported. Its only use is
+  `create_knuth_shuffle_tree_array` + `itree2vector` in `SAI_Z.F90`, which
+  builds a sorted set of unique column indices (the shuffle only balances the
+  tree). `Sorting.c` provides `sorted_unique(array, n, out, nout)` on
+  `PetscSortInt` + `PetscSortedRemoveDupsInt`; `SAI_Z.F90` calls it through
+  `Port_Interfaces.F90` from this stage on, and `Binary_Tree.F90` goes to
+  `src/fref/` with the rest. `merge_pre_sorted` and
+  `intersect_pre_sorted_indices_only` are ported as they are (PETSc has no
+  merge/intersect helpers); `create_knuth_shuffle` has no remaining caller
+  and is dropped.
 - `TSQR.F90` holds a custom `MPI_Op` created once (`built_custom_op_tsqr`) and
   uses `MPI_Iallreduce`/`MPI_Ibcast` with request handles stored in
-  `tsqr_buffers`; the C struct `PFLARETSQRBuffers` must keep the asynchronous
-  protocol (start in one routine, wait in another) exactly.
+  `tsqr_buffers`; the C struct must keep the asynchronous protocol (start in
+  one routine, wait in another) exactly.
 - `Timers.F90` module arrays become `static PetscReal` arrays; the ids in
   `pflare_parameters.h`.
-- `Binary_Tree.F90` is the only recursive code; port as is.
 - `gmres_poly_data_type` holds a `tsqr_buffers` component. Until stage 5 that
-  component must stay usable from Fortran: make the C `PFLARETSQRBuffers`
-  opaque behind a `type(c_ptr)` in `gmres_poly_data` and give
-  `Gmres_Poly.F90` the `bind(C)` create/destroy/start/finish calls it needs.
+  component must stay usable from Fortran: make the C `tsqr_buffers` opaque
+  behind a `type(c_ptr)` in `gmres_poly_data` and give `Gmres_Poly.F90` the
+  `bind(C)` create/destroy/start/finish calls it needs.
 
 Verification: layers A and C (call-site compare under `PFLARE_PORT_DEBUG`),
 layer B identical.
@@ -400,14 +489,15 @@ Port `PETSc_Helper.F90` and `Repartition.F90` to C and fold
 `MatCreateSubMatrixWrapper`, `destroy_matrix_reuse` and the rest become
 `PETSC_INTERN` C functions returning `PetscErrorCode`. The public
 `remove_from_sparse_match` in `PCAIR.c` calls the C version directly and
-drops `PetscInitializeFortran`. All 21 helper routines get `bind(C)`
-interfaces in `Port_Interfaces.F90` for the Fortran callers that remain
-(nearly every module uses `petsc_helper`), so this stage is mostly plumbing
-and must be done before 4, 5 and 6.
+drops `PetscInitializeFortran`. All helper routines get `bind(C)` interfaces in
+`Port_Interfaces.F90` for the Fortran callers that remain (nearly every
+module uses `petsc_helper`), so this stage is mostly plumbing and must be done
+before 4, 5 and 6.
 
 Notes: `PETSc_Helperk.kokkos.cxx` is the sibling; the `PFLARE_KOKKOS_DEBUG`
 compare paths in the helper move with it. `MatMPICreateNonemptySubcomm_c`
-already returns `PetscErrorCode`.
+already returns `PetscErrorCode`. The base branch rewrote `PETSc_Helper.F90`
+to build CPU matrices with `MatSetValues` rather than COO; port that version.
 
 Verification: A (with both Kokkos runs), B identical, C for every ported
 helper that has a Kokkos sibling (CPU vs `_fref` vs Kokkos).
@@ -428,8 +518,8 @@ arguments, implemented as a wrapper over a new `PETSC_INTERN` C function that
 takes the full argument list (`pflare.h`'s `compute_cf_splitting` has the
 shorter list and stays as is).
 
-Random numbers: `pmisr`, `ddc` and `cr` draw their measures with the stage 0
-generator (or the Fortran shim, per D1).
+Random numbers: `pmisr`, `ddc` and `cr` call `pflare_random_fill` from
+`Pflare_Random.h` at the same point and with the same sizes as the Fortran.
 
 Verification: A with both Kokkos runs (PMISR, DDC and MatDiagDom have Kokkos
 siblings and `PFLARE_KOKKOS_DEBUG` paths), B identical,
@@ -447,27 +537,28 @@ Port `Gmres_Poly_Data_Type.F90`, `Matshell_Data_Type.F90`,
 `pflareinv_shell_block_matapply` are C functions, and the `PetscInitializeFortran`
 call goes. The matrix-free polynomial `MatShell` operations (`MATOP_MULT`,
 `MATOP_MULT_TRANSPOSE`, the block applies, the lazily built transpose twin)
-are C callbacks on a `PFLAREMatShellCtx` whose layout mirrors `mat_ctxtype`
-(including `void *air_data` and `our_level`, which the Fortran `FC_Smooth`
-still sets until stage 7).
+are C callbacks on a `mat_ctxtype` struct with the same fields as today
+(including `air_data` and `our_level`, which the Fortran `FC_Smooth` still
+sets until stage 7; `air_data` is a `void *` until then).
 
 Data crossing the boundary until stage 7: `air_multigrid_data` holds arrays of
 `gmres_poly_data` and the AIR Fortran modules reference `%coefficients` and
 `%buffers` in about 110 places. Make the Fortran `gmres_poly_data` a
-`type, bind(C)` mirror of the C `PFLAREPolyData` (`type(c_ptr) :: coefficients;
-PetscInt :: rows, cols; integer(c_int) :: inverse_type, poly_order,
-sparsity_order; type(c_ptr) :: tsqr`) and give the AIR modules a small helper
-`poly_coeffs(pd)` returning a contiguous 2D Fortran pointer via `c_f_pointer`,
-so the existing `%coefficients` expressions become one-line edits. The 18
-`mat_ctx%` references in `FC_Smooth*.F90` and `AIR_MG_Setup.F90` go through
-`bind(C)` accessors.
+`type, bind(C)` mirror of the C struct (`type(c_ptr) :: coefficients;
+PetscInt :: rows, cols; integer(c_int) :: inverse_type, gmres_poly_order,
+gmres_poly_sparsity_order; type(c_ptr) :: buffers`) and give the AIR modules
+a small helper `poly_coeffs(pd)` returning a contiguous 2D Fortran pointer via
+`c_f_pointer`, so the existing `%coefficients` expressions become one-line
+edits. The 18 `mat_ctx%` references in `FC_Smooth*.F90` and `AIR_MG_Setup.F90`
+go through `bind(C)` accessors.
 
 `modified_leja` keeps its Fortran name in `src/fortran/Gmres_Poly_Newton.F90`
 as a wrapper that passes the three assumed-shape arrays by base address and
 size to the C `modified_leja`.
 
-Random numbers: the GMRES polynomial start vector in `Gmres_Poly.F90`
-(`random_data(:,1:2)` then Box-Muller) uses the stage 0 generator.
+Random numbers: the GMRES polynomial start vector calls `pflare_random_fill`
+for the two uniform columns and does the Box-Muller transform in C, in the
+same order as `Gmres_Poly.F90`.
 
 Verification: A with both Kokkos runs (`Gmres_Polyk`, `Gmres_Poly_Newtonk`,
 `SAI_Zk` siblings), B identical, `tests/port_compare_pc.c -pc_type pflareinv`
@@ -482,35 +573,41 @@ the coefficient memory contract.
 Port `Grid_Transfer.F90`, `Grid_Transfer_Improve.F90`, `Constrain_Z_or_W.F90`.
 They take matrices, index sets and scalars only (no `air_data`), so the
 boundary is clean. `Grid_Transferk.kokkos.cxx` is the sibling. The dense BLAS
-calls in `Constrain_Z_or_W.F90` use `BLASgemv_`/`BLASgemm_`.
+calls in `Constrain_Z_or_W.F90` use `BLASgemv_`/`BLASgemm_`. The base branch
+rewrote `Grid_Transfer.F90` to build with `MatSetValues`; port that version.
 
 Verification: A with both Kokkos runs, B identical, C call-site compare
 (`MatEqual` on the produced R/P/W/Z, elementwise tolerance after `improve`).
 
-### Stage 7: AIR hierarchy and the PCAIR Fortran interface (6.1k lines ported, 2.8k rewritten, 2.3k deleted)
+### Stage 7: AIR hierarchy and the PCAIR Fortran interface (6.2k lines ported, 2.8k rewritten, 2.3k deleted)
 
 Port `AIR_Data_Type.F90`, `AIR_Data_Type_Routines.F90`, `FC_Smooth.F90`,
 `FC_Smooth_Block.F90`, `AIR_MG_Stats.F90`, `AIR_Operators_Setup.F90`,
 `AIR_MG_Setup.F90`, `PCAIR_Shell.F90`, `PCAIR_Data_Type.F90`. Then:
 
-- `PCAIR.c` owns `PCAIR_Data` (`air_multigrid_data` + the inner `PCMG`)
-  directly. Keep the inner `PCShell` layer so `-ksp_view` output and
-  `PCAIRGetPCShell` are unchanged (decision D3); the shell's apply, apply
-  transpose, setup, view and destroy callbacks are the C ports of
-  `PCAIR_Shell.F90`, and reset is done as today by calling
-  `PCReset` on the shell plus the data reset. All 53 getters and 47 setters in
-  `PCAIR.c` read and write the C options struct directly, with the same
-  "reset the hierarchy if the value changed" logic that
-  `PCAIR_Interfaces.F90` has today (`PCAIRSetMaxLevels` is the template:
-  compare, `PCReset` the shell, reset the data, mark the outer PC not set up).
-  Delete the `_c` externs.
+- `PCAIR.c` owns `pc_air_multigrid_data` (`air_multigrid_data` + the inner
+  `PCMG`) directly in `pc->data`; the `PCShell` layer is removed. The
+  setup logic of `PCSetUp_AIR_Shell` (first setup, `DIFFERENT_NONZERO_PATTERN`
+  reset, `SAME_NONZERO_PATTERN` with or without `reuse_sparsity`) moves into
+  `PCSetUp_AIR_c` reading `pc->flag` and `pc->setupcalled` directly, so
+  `c_PCGetStructureFlag`, `PCGetSetupCalled_c`, `PCMarkNotSetUp_c` and the
+  shell's `reusepreconditioner` sync disappear. `PCReset_AIR_c` becomes
+  `reset_pc_air_data`; apply, apply transpose, mat apply, view and destroy
+  call the ported shell routines directly. The options prefix is passed to
+  the PCMG as today.
+- All 53 getters and 47 setters in `PCAIR.c` read and write the C options
+  struct directly, with the same "reset the hierarchy if the value changed"
+  logic that `PCAIR_Interfaces.F90` has today (`PCAIRSetMaxLevels` is the
+  template: compare, reset the data, mark the PC not set up). Delete the
+  `_c` externs and `c_PCAIRGetPCShell`.
 - `src/fortran/PCAIR_Interfaces.F90` is rewritten in the style of
-  `PCPFLAREINV_Interfaces.F90`: every public routine keeps its signature and
-  calls the C function through a `bind(C)` interface, converting `PetscBool`
-  and `PetscEnum` as that file does. `PCAIRGetPolyCoeffs` and
-  `PCAIRSetPolyCoeffs` keep their allocatable-array semantics by copying
-  through the C getter/setter. `PCAIRGetOptions`/`PCAIRGetOptionsAndShell`
-  follow D3.
+  `PCPFLAREINV_Interfaces.F90`: every remaining public routine keeps its
+  signature and calls the C function through a `bind(C)` interface,
+  converting `PetscBool` and `PetscEnum` as that file does.
+  `PCAIRGetPolyCoeffs` and `PCAIRSetPolyCoeffs` keep their allocatable-array
+  semantics by copying through the C getter/setter. `PCAIRGetOptions`,
+  `PCAIRGetOptionsAndShell`, `PCAIRGetPCShell` and `PCAIRGetPolyCoeffsPointer`
+  are removed (decision 3).
 - Delete `C_Fortran_Bindings.F90`, `PCAIR_C_Fortran_Bindings.F90`,
   `C_PETSc_Interfaces.F90`, `Port_Interfaces.F90`; drop every remaining
   `PetscInitializeFortran`.
@@ -520,15 +617,20 @@ Notes for the subagent
 
 - `air_multigrid_data` has 22 reuse matrix slots and 2 IS slots with the
   `REUSE_MAT_ACTIVE`/`REUSE_IS_ACTIVE` tables; keep them as `static const`
-  tables in `pflareimpl.h` with the same indices.
+  tables in `pflareimpl.h` with the same indices and the same row comments.
 - `fast_veciscopy_exists` and `kokkos_is_views_handle` wire into
   `VecISCopyLocalk.kokkos.cxx`; the handle is already a `void *`.
+- The base branch pools the smoothing temporaries across levels and stops
+  creating a distinct up smoother when FC smoothing; port those versions.
 - The timers (`Timers.c`) and stats (`AIR_MG_Stats.c`) are the only places the
   1-based `our_level` is user visible.
 - `tests/reuse_preconditioner.c`, `pcair_reuse_amount_range.c`,
   `operator_refcount.c`, `comm_self_then_world.c` and the `-check_copies`
   drivers are the sharpest tests of lifetime and reuse handling; run
-  `make tests` (not just `tests_short`) locally before pushing.
+  `make tests` (not just `tests_short`) in the image before pushing.
+- The reference type `air_fref` for layer C is today's `PCAIR.c` shell
+  plumbing copied to `src/fref/PCAIR_fref.c` and registered under that name,
+  so both hierarchies can be built in one process.
 
 Verification: A with both Kokkos runs, B identical (iteration counts and stats
 fields) on every image, `tests/port_compare_pc.c -pc_type air` against
@@ -541,25 +643,38 @@ the Fortran `ex6f*`/`ex12f*` drivers and the notebook job all pass unchanged.
 The valgrind and `-malloc_dump` jobs are the leak check for the new struct
 lifetimes.
 
-### Stage 8: remove the reference Fortran, finalise the random generator
+### Stage 8: remove the reference Fortran
 
 - Delete `src/fref/`, the `PFLARE_PORT_DEBUG` plumbing, and
-  `tests/port_compare_*.c`. The compare drivers are not kept: `PFLARE_KOKKOS_DEBUG`
-  remains the only in-process compare mode.
-- Per D1: if the C generator already matches gfortran, nothing to do. If the
-  Fortran shim was used, switch `pmisr`, `ddc`, `cr` and the polynomial start
-  vector to `Pflare_Random.c`, re-capture the layer B baselines, and adjust
-  any `-ksp_max_it` in `tests/Makefile` that no longer bounds the iteration
-  count (expected to be rare and by at most one or two iterations; list each
-  change in the PR).
+  `tests/port_compare_*.c`. `PFLARE_KOKKOS_DEBUG` remains the only
+  in-process compare mode.
 - Delete `include/finclude/pflare_blaslapack.h`.
+- At this point `src/Pflare_Random.F90` is the only core Fortran file.
+
+Verification: A on the full matrix, B identical.
+
+### Stage 9: the random generator, the last core Fortran
+
+- Replace `src/Pflare_Random.F90` with `src/Pflare_Random.c`. Preferred
+  generator: xoshiro256** with gfortran's `random_seed(put=)` scramble,
+  which can be checked bitwise against the Fortran module before it is
+  deleted (a throwaway `tests/random_compare.F90` fills the same arrays with
+  both and compares). If it matches, the GNU baselines do not move and Intel
+  and Cray builds become identical to GNU. If it does not match, use
+  `PetscRandom` (`PETSCRANDER48`) seeded from `comm_rank + 1` as the Fortran
+  seeds are, and re-capture the layer B baselines; adjust any `-ksp_max_it`
+  in `tests/Makefile` that no longer bounds the iteration count (expected to
+  be rare and by one or two iterations; list each change in the PR).
+- Empty `FCORE_OBJS`.
 - `CHANGELOG.md`: one entry describing the C core, the error-handling change
-  (convention 2) and, if applicable, the RNG change.
+  (decision 2), the removed Fortran-only accessors and shell layer
+  (decision 3), the `-ksp_view` change (decision 4) and, if applicable, the
+  random generator change.
 
 Verification: A on the full matrix, B identical to the (possibly new)
-baseline.
+baseline, and `grep -rl random_number src/` is empty.
 
-### Stage 9: gating, CI, docs
+### Stage 10: gating, CI, docs
 
 - `Makefile`: the `PETSC_USE_FORTRAN_BINDINGS` gate on `FOBJS`, the Fortran
   `TEST_TARGETS`, `matrandom` in `CHECK_TARGETS`, `makedepf90` in `depend`,
@@ -572,14 +687,16 @@ baseline.
   (`--with-fortran-bindings=0` with a Fortran compiler present, which is the
   case where PETSc's `.mod` files are absent but `FC` is set). The
   `EXTRA_FFLAGS=-fcheck=all` job becomes `-fsanitize=address,undefined` on
-  the C core (same purpose: runtime bounds and lifetime checks).
-  `dockerfiles/Dockerfile_no_fortran`. The `FFLAGS=-Werror ...` arguments stay
-  for the Fortran-enabled jobs.
+  the C core. `dockerfiles/Dockerfile_no_fortran` plus a base image built
+  without Fortran. The `FFLAGS=-Werror ...` arguments stay for the
+  Fortran-enabled jobs.
 - Docs: `docs/installation.md` gains "Building without a Fortran compiler";
   `docs/dev/kokkos.md` conventions say `X.c` / `Xk.kokkos.cxx`;
   `docs/dev/testing.md` and `docs/dev/ci.md` describe the gate and the new
-  jobs; `AGENTS.md` codebase map updated; `python/pflare_defs.pyx` comments
-  updated. `README.md` still lists the Fortran interface.
+  jobs; `AGENTS.md` codebase map updated (C is the bulk of the algorithms,
+  `src/fortran/` is the interface layer, magic constants in
+  `src/pflare_parameters.h`); `python/pflare_defs.pyx` comments updated.
+  `README.md` still lists the Fortran interface.
 - Spack: `PFLARE_spack/package.py` (separate repository) can later drop its
   Fortran requirement; note it in the CHANGELOG, no change here.
 
@@ -592,40 +709,24 @@ _gfortran` is empty.
 
 | Risk | Where | Mitigation |
 |---|---|---|
-| Lifetime bugs (double destroy, leak, use after reset) in the hand-managed C structs | stages 5, 7 | explicit init/reset/destroy trio, valgrind + `-malloc_dump` CI, `operator_refcount` and reuse tests, `MatDestroy`-nulls-the-handle semantics reproduced (several Fortran comments rely on copying handles back) |
+| Lifetime bugs (double destroy, leak, use after reset) in the hand-managed C structs | stages 5, 7 | explicit create/reset/destroy trio, valgrind + `-malloc_dump` CI, `-fsanitize` in the debug image, `operator_refcount` and reuse tests, the handle-nulling idiom reproduced (convention 3) |
 | `PetscInt`/`int` width mix on 64-bit index builds | everywhere | convention 4, the `gnu_opt_64_bit` and `gnu_opt_64_bit_kokkos` jobs |
 | Single precision | everywhere | PETSc BLAS macros, `PetscReal` only, the `gnu_debug_kokkos_single_prefix` job and the `SKIP_SINGLE` gates stay |
-| Summation-order drift masquerading as a bug, or hiding one | stages 5, 6, 7 | layer C compares with named tolerances; any difference above `PFLARE_TOL_*` is investigated, not widened |
-| The in-process reference (`src/fref/`) drifting from `main` while a stage is open | stages 4 to 7 | the reference is never edited; bug fixes land after the stage or in both (convention 11) |
+| Summation-order drift masquerading as a bug, or hiding one | stages 5, 6, 7 | layer C compares with named tolerances; any difference above `PFLARE_TOL_*` is investigated, not widened; random draws are shared so they cannot be the cause |
+| The in-process reference (`src/fref/`) drifting from the base while a stage is open | stages 2 to 7 | the reference is never edited; bug fixes land after the stage or in both (convention 12) |
 | Output parser contract | stage 7 | `make tests_python` runs `run_parse_tests.py`; convention 8 |
-| Stage 7 is large | stage 7 | the brief orders it: data type + routines, smoothers, stats, operators setup, MG setup, shell, PCAIR.c getters/setters, Fortran interface; `air_fref` gives level-by-level diagnosis |
-| PETSc doc build in the `gnu_petsc_config` job breaking on moved doctext | stages 4, 5, 7 | keep `/*@ @*/` blocks in `PCAIR.c`/`PCPFLAREINV.c`; the job already checks the rendered pages exist |
-| macOS link of a C++-containing shared library without the Fortran driver | stage 9 | use `$(CXXLINKER)` when `KOBJS` is non-empty; the `macos_64_bit_kokkos` job covers it |
+| Stage 7 is large | stage 7 | the brief orders it: data type + routines, smoothers, stats, operators setup, MG setup, shell routines into `PCAIR.c`, getters/setters, Fortran interface; `air_fref` gives level-by-level diagnosis |
+| PETSc doc build in the `gnu_petsc_config` job breaking on moved doctext | stages 4, 5, 7 | keep the `/*MC M*/` and `/*@ @*/` blocks in `PCAIR.c`/`PCPFLAREINV.c`; the job already checks the rendered pages exist |
+| macOS link of a C++-containing shared library without the Fortran driver | stage 10 | use `$(CXXLINKER)` when `KOBJS` is non-empty; the `macos_64_bit_kokkos` job covers it |
+| Base branch moves under the plan (PETSc `main` changes, PFLARE fixes) | all | each stage branches from the current `main` plus merged stages; the Docker images are re-pulled before every build |
 
-## 9. Decisions needed from the maintainer
+## 9. Open decisions
 
-- **D1 Random numbers.** Preferred: the C xoshiro256** reimplementation with
-  gfortran seeding, if the stage 0 bitwise test passes (then nothing changes
-  for GNU builds and Intel/Cray builds become identical to GNU, which is a
-  behaviour change only for them). Fallback: `PetscRandom` (`PETSCRANDER48`)
-  seeded `rank + 1`, accepted as a one-off re-baseline in stage 8. Record the
-  stage 0 result here.
-- **D2 Error handling.** Confirm that PETSc errors propagating (and PFLARE's
-  own checks becoming `PetscCheck`) is acceptable in place of ignored `ierr`
-  and `MPI_Abort`. Tests already run with `-on_error_abort` where it matters.
-- **D3 Fortran-only accessors.** `PCAIRGetOptions`, `PCAIRGetOptionsAndShell`
-  (return a pointer to the internal `air_options` derived type) and
-  `PCAIRGetPCShell` are public in `pcair_interfaces` but undocumented and
-  unused by tests and Python. Preferred: keep `PCAIRGetPCShell` (the shell
-  layer is kept anyway), and keep `PCAIRGetOptions`/`PCAIRGetOptionsAndShell`
-  by declaring `air_options` as a `type, bind(C)` mirror of the C
-  `PCAIR_Options` struct with the same field names (`logical` fields become
-  `logical(c_bool)`, which plain Fortran assignments still accept). Alternative:
-  drop the two options accessors with a CHANGELOG note. Either way the
-  `PCAIRGet*/Set*` routines are the supported API.
-- **D4 Printed number format.** `%.15g` for reals in the stats block (section
-  5, convention 8). The parser accepts any non-space token.
-- **D5 Stage parallelism.** Whether to run stages 4, 5 and 6 concurrently
-  (three subagents, three branches, merge order 6, 4, 5) or strictly
-  sequentially. Sequential is simpler to review; concurrent saves wall-clock
-  time at the cost of two small rebases.
+- **Stage parallelism.** Whether to run stages 4, 5 and 6 concurrently (three
+  subagents, three branches, merge order 6, 4, 5) or strictly sequentially.
+  Sequential is simpler to review; concurrent saves wall-clock time at the
+  cost of two small rebases.
+- **Stage 9 generator** if the xoshiro256** reimplementation does not match
+  gfortran bitwise: `PetscRandom` as written above, or keep the xoshiro code
+  anyway for compiler independence. Either way the re-baseline happens once,
+  in stage 9, and nowhere else.
