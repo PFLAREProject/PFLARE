@@ -65,6 +65,24 @@ override HIPC_FLAGS += $(HIPC_FLAGS_INPUT) $(INCLUDE)
 override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
+# Port debugging - make PFLARE_PORT_DEBUG=1
+# While the Fortran core is being ported to C, this defines PFLARE_PORT_DEBUG,
+# builds the Fortran reference implementations in src/fref alongside the C ports
+# and adds the drivers that compare the two to the tests
+# See docs/dev/fortran_removal_plan.md
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+PFLARE_PORT_DEBUG ?=
+FREFDIR := $(SRCDIR)/fref
+ifeq ($(PFLARE_PORT_DEBUG),1)
+override CPPFLAGS += -DPFLARE_PORT_DEBUG
+override FPPFLAGS += -DPFLARE_PORT_DEBUG
+override CXXPPFLAGS += -DPFLARE_PORT_DEBUG
+FREF_OBJS := $(patsubst %.F90,%.o,$(wildcard $(FREFDIR)/*.F90))
+else
+FREF_OBJS :=
+endif
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Read petscconf.h via awk (portable on macOS)
@@ -169,6 +187,9 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o	
 
+# The Fortran reference implementations (only with PFLARE_PORT_DEBUG=1)
+OBJS := $(OBJS) $(FREF_OBJS)
+
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
 		  ex6f \
@@ -203,6 +224,11 @@ export TEST_TARGETS = ex12f \
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
+endif
+# Include the drivers that compare the C ports against the Fortran reference
+PORT_TEST_TARGETS := port_compare_pc port_compare_cf
+ifeq ($(PFLARE_PORT_DEBUG),1)
+export TEST_TARGETS := $(TEST_TARGETS) $(PORT_TEST_TARGETS)
 endif
 # Define a variable containing all the tests that the make check runs
 export CHECK_TARGETS = adv_diff_fd matrandom
@@ -393,8 +419,10 @@ clean::
 	$(RM) $(INCLUDEDIR)/*.mod
 	$(RM) $(SRCDIR)/*.mod
 	$(RM) $(SRCDIR)/*.o
+	$(RM) $(FREFDIR)/*.o
 	$(RM) $(CURDIR)/*.mod
 	$(MAKE) -C tests clean
+	$(RM) $(addprefix tests/,$(PORT_TEST_TARGETS))
 	$(MAKE) -C python clean	
 
 # Make install

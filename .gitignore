@@ -53,6 +53,8 @@ tests/newton_imag_roots
 tests/pflareinv_exact_inverse
 tests/pmisr_nonsymmetric
 tests/poly_zero_coeffs
+tests/port_compare_cf
+tests/port_compare_pc
 tests/leja_ordering
 tests/reuse_preconditioner
 tests/shell_block_apply
