@@ -132,6 +132,13 @@ for earlier changes please see the git history.
   preconditioner in a `KSPSolveTranspose`. It applies the exact transpose of the
   cycle `PCApply` applies, so the two are adjoints. `PCMatApplyTranspose` falls
   back to applying `PCApplyTranspose` column by column
+- Reduced the memory PCAIR uses during and after setup, with no change to the
+  hierarchy (#299). The CPU matrix builders now use `MatSetValues` with exact
+  preallocation rather than the COO interface, whose maps PETSc kept attached
+  to R, P and the coarse matrices. F-point and FC smoothing no longer create a
+  distinct (unused) up smoother on each level. The product data of the setup
+  temporaries is cleared when they aren't reused, and the smoothing temporary
+  vectors on every level share one pool sized for the largest level
 
 ## [v1.27.0]
 
