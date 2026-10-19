@@ -9,6 +9,7 @@ Read only when the task needs it
 - `docs/dev/testing.md` — before adding or modifying tests
 - `docs/dev/kokkos.md` — before touching `*.kokkos.cxx` or CPU/Kokkos debug-compare paths
 - `docs/dev/ci.md` — when checking or reproducing a CI pipeline
+- `docs/dev/fortran_removal_plan.md` — when working on the staged port of the Fortran core to C
 
 Build
 1. In top repo directory: `make -j3 build_tests`
