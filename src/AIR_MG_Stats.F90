@@ -189,8 +189,10 @@ module air_mg_stats
          ! Make sure to use the petsc level
          ! Now being careful here to actually pull out the down smoother from petsc
          ! as the kaskade cycle only calls the "down" smoother on the way up
+         ! PCMGGetSmoother returns the down smoother without creating a distinct
+         ! up smoother, which PCMGGetSmootherDown would
          petsc_level = air_data%no_levels-our_level
-         call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp, ierr)      
+         call PCMGGetSmoother(pcmg_input, petsc_level, ksp, ierr)      
          ! Get the number of F&C up smooths
          call KSPGetTolerances(ksp, rtol, atol, dtol, maxits, ierr)   
 

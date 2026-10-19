@@ -20,7 +20,7 @@ module air_mg_setup
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
-   use fc_smooth, only: create_VecISCopyLocalWrapper, mg_FC_point_richardson, mg_coarse_shell_apply, &
+   use fc_smooth, only: create_VecISCopyLocalWrapper, create_smooth_temp_vecs, mg_FC_point_richardson, mg_coarse_shell_apply, &
          mg_smooth_shell_apply, mg_coarse_shell_apply_transpose, mg_smooth_shell_apply_transpose, &
          mg_FC_point_apply_transpose, mg_FC_point_residual_transpose
    use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
@@ -1069,10 +1069,18 @@ module air_mg_setup
             call PCMGSetInterpolation(pcmg_input, petsc_level, air_data%prolongators(our_level), ierr)
 
             ! Get smoother for this level
-            ! The up smoother is never used or called when doing kaskade, but we set it as a richardson so that petsc doesn't default
-            ! to chebychev and hence try and calculate eigenvalues on each grid
-            call PCMGGetSmootherUp(pcmg_input, petsc_level, ksp_smoother_up, ierr)
-            call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp_smoother_down, ierr)                                
+            ! Kaskade only ever calls the down smoother, so don't create a distinct up smoother
+            ! (and its work vectors) when we're fc smoothing - PCMGGetSmootherDown would
+            ! When fc smoothing the up and down smoothers are then the same ksp, which
+            ! we set up below as a richardson so that petsc doesn't default to chebychev
+            ! and hence try and calculate eigenvalues on each grid
+            if (air_data%options%full_smoothing_up_and_down) then
+               call PCMGGetSmootherUp(pcmg_input, petsc_level, ksp_smoother_up, ierr)
+               call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp_smoother_down, ierr)                                
+            else
+               call PCMGGetSmoother(pcmg_input, petsc_level, ksp_smoother_down, ierr)
+               ksp_smoother_up = ksp_smoother_down
+            end if
             
             ! Set the operators for smoothing on this level
             if (.NOT. air_data%options%full_smoothing_up_and_down) then
@@ -1300,34 +1308,8 @@ module air_mg_setup
       ! ~~~~~~~~~
       ! Build the temporary data we use during smoothing
       ! ~~~~~~~~~   
+      call create_smooth_temp_vecs(air_data)
       do our_level = 1, air_data%no_levels-1
-
-         ! Build the temporary vectors we need for smoothing
-         if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
-            call MatCreateVecs(air_data%A_ff(our_level), &
-                     air_data%temp_vecs_fine(1)%array(our_level), PETSC_NULL_VEC, ierr)
-            call MatCreateVecs(air_data%A_fc(our_level), &
-                     air_data%temp_vecs_coarse(1)%array(our_level), PETSC_NULL_VEC, ierr)  
-            if (.NOT. air_data%fast_veciscopy_exists) then
-               call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                        air_data%temp_vecs(1)%array(our_level), PETSC_NULL_VEC, ierr)
-            end if
-     
-            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(2)%array(our_level), ierr)
-            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(3)%array(our_level), ierr)
-            call VecDuplicate(air_data%temp_vecs_fine(1)%array(our_level), air_data%temp_vecs_fine(4)%array(our_level), ierr)        
-
-            ! If we're doing C point smoothing we need some extra temporaries
-            ! The transposed smooth and residual don't need any more than the
-            ! forward ones do
-            if (air_data%options%any_c_smooths .AND. &
-                     .NOT. air_data%options%full_smoothing_up_and_down) then
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(3)%array(our_level), ierr)
-               call VecDuplicate(air_data%temp_vecs_coarse(1)%array(our_level), air_data%temp_vecs_coarse(4)%array(our_level), ierr)
-            end if
-         end if              
-         
          air_data%allocated_matrices_A_ff(our_level) = .TRUE.
 
       end do

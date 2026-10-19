@@ -35,6 +35,9 @@ module air_data_type_routines
       ! Allocate the AIR specific data structures
       allocate(air_data%IS_fine_index(air_data%options%max_levels))
       allocate(air_data%IS_coarse_index(air_data%options%max_levels)) 
+      allocate(air_data%temp_vecs_fine_is(air_data%options%max_levels))
+      allocate(air_data%temp_vecs_coarse_is(air_data%options%max_levels))
+      allocate(air_data%temp_vecs_is(air_data%options%max_levels))
 
       allocate(air_data%restrictors(air_data%options%max_levels))
       allocate(air_data%prolongators(air_data%options%max_levels))
@@ -130,6 +133,7 @@ module air_data_type_routines
       integer :: i_loc
       logical :: reuse
       type(tMat) :: temp_mat
+      type(tVec) :: temp_vec
       type(tIS)  :: temp_is
       ! ~~~~~~    
 
@@ -169,19 +173,31 @@ module air_data_type_routines
 
                ! temp_vecs are sized from A_ff/A_fc; they must be destroyed whenever
                ! A_ff/A_fc are destroyed (amounts 1 and 2 destroy them even when reusing)
+               ! They are subvectors of the pools, so restore them
                if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
-                  call VecDestroy(air_data%temp_vecs(1)%array(our_level), ierr)
-                  call VecDestroy(air_data%temp_vecs_fine(1)%array(our_level), ierr)
-                  call VecDestroy(air_data%temp_vecs_fine(2)%array(our_level), ierr)
-                  call VecDestroy(air_data%temp_vecs_fine(3)%array(our_level), ierr)
-                  call VecDestroy(air_data%temp_vecs_fine(4)%array(our_level), ierr)
-                  call VecDestroy(air_data%temp_vecs_coarse(1)%array(our_level), ierr)
-                  if (air_data%options%any_c_smooths .AND. &
-                        .NOT. air_data%options%full_smoothing_up_and_down) then
-                     call VecDestroy(air_data%temp_vecs_coarse(2)%array(our_level), ierr)
-                     call VecDestroy(air_data%temp_vecs_coarse(3)%array(our_level), ierr)
-                     call VecDestroy(air_data%temp_vecs_coarse(4)%array(our_level), ierr)
+                  do i_loc = 1, size(air_data%temp_vecs_fine)
+                     temp_vec = air_data%temp_vecs_fine(i_loc)%array(our_level)
+                     if (.NOT. PetscObjectIsNull(temp_vec)) then
+                        call VecRestoreSubVector(air_data%temp_vecs_fine_pool(i_loc), &
+                                 air_data%temp_vecs_fine_is(our_level), &
+                                 air_data%temp_vecs_fine(i_loc)%array(our_level), ierr)
+                     end if
+                     temp_vec = air_data%temp_vecs_coarse(i_loc)%array(our_level)
+                     if (.NOT. PetscObjectIsNull(temp_vec)) then
+                        call VecRestoreSubVector(air_data%temp_vecs_coarse_pool(i_loc), &
+                                 air_data%temp_vecs_coarse_is(our_level), &
+                                 air_data%temp_vecs_coarse(i_loc)%array(our_level), ierr)
+                     end if
+                  end do
+                  temp_vec = air_data%temp_vecs(1)%array(our_level)
+                  if (.NOT. PetscObjectIsNull(temp_vec)) then
+                     call VecRestoreSubVector(air_data%temp_vecs_pool(1), &
+                              air_data%temp_vecs_is(our_level), &
+                              air_data%temp_vecs(1)%array(our_level), ierr)
                   end if
+                  call ISDestroy(air_data%temp_vecs_fine_is(our_level), ierr)
+                  call ISDestroy(air_data%temp_vecs_coarse_is(our_level), ierr)
+                  call ISDestroy(air_data%temp_vecs_is(our_level), ierr)
                end if          
                
                ! Only amount=3 preserves A_ff/A_fc/A_cf and grid-transfer operators
@@ -270,6 +286,16 @@ module air_data_type_routines
                end do
             end if
          end do
+
+         ! The pools the temporary vectors are subvectors of - these go
+         ! whenever the temporary vectors do, which have been restored above
+         if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
+            do i_loc = 1, size(air_data%temp_vecs_fine_pool)
+               call VecDestroy(air_data%temp_vecs_fine_pool(i_loc), ierr)
+               call VecDestroy(air_data%temp_vecs_coarse_pool(i_loc), ierr)
+            end do
+            call VecDestroy(air_data%temp_vecs_pool(1), ierr)
+         end if
 
          if (air_data%no_levels /= -1) then
             ! Coarse grid solver
@@ -385,6 +411,9 @@ module air_data_type_routines
          ! Deallocate the allocated structures
          deallocate(air_data%IS_fine_index)
          deallocate(air_data%IS_coarse_index) 
+         deallocate(air_data%temp_vecs_fine_is)
+         deallocate(air_data%temp_vecs_coarse_is)
+         deallocate(air_data%temp_vecs_is)
 
          deallocate(air_data%restrictors)
          deallocate(air_data%prolongators)  
