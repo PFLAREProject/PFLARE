@@ -344,6 +344,33 @@ tests: build_tests
 	($(MAKE) tests_python || (echo "Python tests failed" && exit 1)) && \
 	echo "All tests passed: OK"
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+# Golden logs - see docs/dev/testing.md
+# tests_golden_capture runs every test command with -ksp_converged_reason -ksp_monitor
+# and keeps a log per command in GOLDEN_DIR
+# tests_golden also compares that capture against the baseline in tests/golden/<config>.json
+# GOLDEN_JOBS runs that many test commands at once
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+GOLDEN_DIR ?= $(CURDIR)/tests/golden_logs
+GOLDEN_JOBS ?= 1
+GOLDEN_BASELINE_DIR ?= $(CURDIR)/tests/golden
+
+.PHONY: tests_golden_capture
+tests_golden_capture: build_tests
+	MAKE="$(MAKE)" $(CURDIR)/tools/capture_test_logs.sh -j $(GOLDEN_JOBS) $(GOLDEN_DIR)
+
+.PHONY: tests_golden
+tests_golden: build_tests
+	-MAKE="$(MAKE)" $(CURDIR)/tools/capture_test_logs.sh -j $(GOLDEN_JOBS) $(GOLDEN_DIR)
+	@config="$$(sed -n 's/^config=//p' $(GOLDEN_DIR)/meta.txt)"; \
+	baseline="$(GOLDEN_BASELINE_DIR)/$$config.json"; \
+	if [ ! -f "$$baseline" ]; then \
+		echo "ERROR: no golden baseline $$baseline for configuration $$config"; \
+		exit 1; \
+	fi; \
+	echo "Comparing against $$baseline"; \
+	$(PYTHON) $(CURDIR)/tools/compare_test_logs.py compare "$$baseline" $(GOLDEN_DIR)
+
 # A quick sanity check with simple tests
 .PHONY: check
 check: build_tests_check
