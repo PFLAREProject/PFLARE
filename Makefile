@@ -375,7 +375,8 @@ tests: build_tests
 # Golden logs - see docs/dev/testing.md
 # tests_golden_capture runs every test command with -ksp_converged_reason -ksp_monitor
 # and keeps a log per command in GOLDEN_DIR
-# tests_golden also compares that capture against the baseline in tests/golden/<config>.json
+# tests_golden also compares that capture against a locally produced baseline
+# GOLDEN_BASELINE_DIR/<config>.json (see docs/dev/testing.md; baselines are not committed)
 # GOLDEN_JOBS runs that many test commands at once
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 GOLDEN_DIR ?= $(CURDIR)/tests/golden_logs

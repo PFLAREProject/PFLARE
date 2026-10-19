@@ -331,10 +331,10 @@ catch leaks in the new manual memory management; they already exist in CI.
 the `run_tests_*` groups with `-ksp_converged_reason -ksp_monitor` appended
 through `PETSC_OPTIONS`, and `tools/compare_test_logs.py` extracts, per test
 command, the iteration count, the residual history, and the parsed stats block
-(via `parse_pflare_output.py`). Baselines are captured once per CI
-configuration from the base commit and stored as a CI artifact keyed by image
-and commit; the GNU debug baseline is also committed under `tests/golden/`
-since it is small text. The comparison rule: iteration counts and converged
+(via `parse_pflare_output.py`). No baselines are committed: a stage captures
+the previous stage's branch and its own branch in the same image and compares
+the two directly, and the `gnu_opt_golden_logs` CI job does the same for the
+merge-base of the umbrella PR (`main`) and its head. The comparison rule: iteration counts and converged
 reasons must be identical; residual norms agree to a relative tolerance
 (default 1e-8 double, 1e-4 single); stats fields `global_rows`,
 `global_f_points`, `global_c_points`, `n_levels` identical; complexities to
@@ -384,28 +384,34 @@ Dependency graph (an arrow means "must be merged first"):
                                                └─> 6 grid transfer ┘
 ```
 
-Stages 4, 5 and 6 are independent of each other and can run concurrently on
-separate branches; their only shared edits are the `OBJS` lists and the
-`C_Fortran_Bindings.F90` extern block, so merge them smallest first
-(6, 4, 5). Everything else is sequential. Each stage is one PR from one
-subagent, reviewed and merged before the next starts, and the subagent's
-brief is the stage section below plus sections 3, 5 and 6 of this file.
-Sizes are lines of Fortran going in; the C coming out is usually 1.1 to 1.3
-times that.
+Branch workflow: nothing reaches `main` until the port is complete. Each
+stage is developed by one subagent on its own branch,
+`claude/fortran-port-stage-N`, created from the previous stage's branch (with
+`main` merged in first). When a stage is reviewed, its branch is force-pushed
+over `claude/loving-volta-ap1rin`, the head of the single umbrella PR
+(PFLAREProject/PFLARE#300), so CI runs on the cumulative port and the PR's
+commit list shows the stage; the PR is only merged after the last stage. The
+stage branches stay as the record of each step. Stages 4, 5 and 6 are
+independent of each other and could run concurrently off the stage 3 branch;
+their only shared edits are the `OBJS` lists and the `C_Fortran_Bindings.F90`
+extern block. Everything else is sequential. The subagent's brief is the
+stage section below plus sections 3, 5 and 6 of this file. Sizes are lines
+of Fortran going in; the C coming out is usually 1.1 to 1.3 times that.
 
 Every stage brief has the same closing requirement: build warning-free in the
 debug and opt GNU images (and the Kokkos image where the stage says so), run
 layer A, run layers B and C where listed, and report the results verbatim in
-the PR description. A stage is not done while any CI job is red.
+its report (which becomes the stage's entry in the umbrella PR description).
+A stage is not done while any CI job on the umbrella PR is red.
 
 ### Stage 0: verification harness and the random-number wrapper (no algorithm change)
 
 Deliverables
 
-- `tools/capture_test_logs.sh`, `tools/compare_test_logs.py` and
-  `tests/golden/` as described in section 6, wired into a `make tests_golden`
-  target and a CI step that runs it on every job (comparing against the
-  baseline artifact for that job's image) and uploads the fresh logs.
+- `tools/capture_test_logs.sh` and `tools/compare_test_logs.py` as described
+  in section 6, wired into a `make tests_golden_capture` target and a CI job
+  that captures the merge-base and the head in the same container, compares
+  them and uploads the head capture.
 - `PFLARE_PORT_DEBUG` make variable plumbed through to `CPPFLAGS`/`FPPFLAGS`
   as `-DPFLARE_PORT_DEBUG`, the `src/fref/` directory added to the build when
   set (empty for now), and `tests/port_compare_pc.c`, `tests/port_compare_cf.c`
@@ -419,7 +425,6 @@ Deliverables
   (same calls in the same order; the Box-Muller transform in `Gmres_Poly.F90`
   stays at the call site). A header `src/Pflare_Random.h` declares the C
   prototype for the later C ports.
-- Baseline golden logs captured from the base commit for every CI image.
 
 Verification: layer A on the full matrix, layer B identical (the random
 wrapper must not move a single iteration count).
