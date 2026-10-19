@@ -16,6 +16,7 @@ module gmres_poly
    use gmres_poly_data_type, only: gmres_poly_data
    use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
          kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
+   use pflare_random, only: pflare_random_fill
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -151,9 +152,8 @@ module gmres_poly
       PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
       PetscCount :: vec_size
       PetscInt, allocatable, dimension(:) :: indices
-      integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
+      integer :: comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
-      integer, dimension(:), allocatable :: seed
       ! Kept PetscReal: the intrinsic random_number requires a real array. Its use
       ! in VecSetValuesCOO below is an identity conversion in all real builds.
       PetscReal, dimension(:, :), allocatable, target   :: random_data
@@ -185,27 +185,21 @@ module gmres_poly
       ! make sure the seed is different than when random is used to evaluate 
       ! the auto truncation in AIR_MG_Setup
 
-      call random_seed(size=seed_size)
-      allocate(seed(seed_size))
-      ! Ensure we seed the same so subsequent runs get the same random
-      ! Seed different on each process so we don't have the same random numbers on each processor      
-      do i_loc = 1, seed_size
-         seed(i_loc) = comm_rank + 1 + i_loc
-      end do   
-      call random_seed(put=seed)    
-
       ! Gives random numbers between 0 <= u < 1  
+      ! The seed is the same so subsequent runs get the same random, but
+      ! different on each process so we don't have the same random numbers on each processor
       allocate(random_data(local_rows, 2))
       ! Random numbers returned in fortran don't include one so don't have to 
       ! remove 1 
-      call random_number(random_data(:, 1:2))
+      ! random_data(:, 1:2) is contiguous, so it is filled column by column as one
+      ! array of 2 * local_rows, in the same order random_number(random_data(:, 1:2)) does
+      call pflare_random_fill(comm_rank, 2 * local_rows, random_data)
 
       ! We want our random rhs to be a normal distribution with zero mean as that preserves
       ! white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
       ! Do a box-muller to take two numbers with uniform distribution and produce a number
       ! that is normally distributed       
       random_data(:, 1) = sqrt(-2 * log(random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
-      deallocate(seed)
 
       ! ~~~~~~~~~~
       ! Create a single template vec, set the random values into it, then use

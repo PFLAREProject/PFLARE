@@ -5,6 +5,7 @@ module pmisr_module
    use petsc_helper, only: kokkos_debug
    use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h
    use pflare_parameters, only: C_POINT, F_POINT
+   use pflare_random, only: pflare_random_fill
 
 #include "petsc/finclude/petscmat.h"
 
@@ -34,8 +35,7 @@ module pmisr_module
       MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array
       MatType :: mat_type
-      integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank
-      integer, dimension(:), allocatable :: seed
+      integer :: pmis_int, zero_measure_c_point_int, comm_rank
       PetscReal, dimension(:), allocatable, target :: measure_local
       PetscInt :: local_rows, local_cols
       type(c_ptr)  :: measure_local_ptr, cf_markers_local_ptr
@@ -69,15 +69,8 @@ module pmisr_module
          ! for comparisons with pmisr_cpu
          call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
          allocate(measure_local(local_rows))
-         call random_seed(size=seed_size)
-         allocate(seed(seed_size))
-         do kfree = 1, seed_size
-            seed(kfree) = comm_rank + 1 + kfree
-         end do
-         call random_seed(put=seed)
          ! Fill the measure with random numbers
-         call random_number(measure_local)
-         deallocate(seed)
+         call pflare_random_fill(comm_rank, local_rows, measure_local)
 
          measure_local_ptr = c_loc(measure_local)
 
@@ -142,12 +135,10 @@ module pmisr_module
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one, ifree, ncols
       PetscInt :: rows_ao, cols_ao, n_ad, n_ao
-      integer :: comm_size, seed_size
+      integer :: comm_size
       integer :: comm_rank, errorcode       
-      integer :: kfree
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
-      integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable :: measure_local
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
@@ -207,12 +198,6 @@ module pmisr_module
       ! ~~~~~~~~~~~~
       ! Seed the measure_local between 0 and 1
       ! ~~~~~~~~~~~~
-      call random_seed(size=seed_size)
-      allocate(seed(seed_size))
-      do kfree = 1, seed_size
-         seed(kfree) = comm_rank + 1 + kfree
-      end do   
-      call random_seed(put=seed) 
 
       ! To get the same results regardless of number of processors, you can 
       ! force the random number on each node to match across all processors
@@ -222,8 +207,7 @@ module pmisr_module
       ! so I'm fairly confident things are correct
 
       ! Fill the measure with random numbers
-      call random_number(measure_local)
-      deallocate(seed)
+      call pflare_random_fill(comm_rank, local_rows, measure_local)
   
       ! ~~~~~~~~~~      
 

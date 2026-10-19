@@ -8,6 +8,7 @@ module ddc_module
    use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
    use pflare_parameters, only: C_POINT, F_POINT
    use matdiagdom, only: MatDiagDomRatio
+   use pflare_random, only: pflare_random_fill
 
 #include "petsc/finclude/petscmat.h"
 
@@ -41,8 +42,7 @@ module ddc_module
       logical :: trigger_dd_ratio_compute_local
       PetscInt :: local_rows, local_cols
       PetscReal :: max_dd_ratio_achieved
-      integer :: seed_size_ddc, comm_rank_ddc, errorcode_ddc, i_loc
-      integer, dimension(:), allocatable :: seed_ddc
+      integer :: comm_rank_ddc, errorcode_ddc
       PetscReal, dimension(:), allocatable :: diag_dom_ratio
       PetscReal, dimension(:), allocatable, target :: diag_dom_ratio_random
       type(c_ptr) :: random_numbers_ptr
@@ -93,16 +93,8 @@ module ddc_module
          ! on the host yet
          allocate(diag_dom_ratio_random(local_rows))
          
-         call random_seed(size=seed_size_ddc)
-         allocate(seed_ddc(seed_size_ddc))
-         
-         do i_loc = 1, seed_size_ddc
-            seed_ddc(i_loc) = comm_rank_ddc + 1 + i_loc
-         end do
-         call random_seed(put=seed_ddc)
-         call random_number(diag_dom_ratio_random)
+         call pflare_random_fill(comm_rank_ddc, local_rows, diag_dom_ratio_random)
 
-         deallocate(seed_ddc)
          random_numbers_ptr = c_loc(diag_dom_ratio_random)
       end if
 

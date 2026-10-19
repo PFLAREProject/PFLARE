@@ -8,6 +8,7 @@ module cr_splitting
             PFLARE_CR_NU_POLY, PFLARE_CR_POLY_ORDER, &
             PFLAREINV_WJACOBI, PFLAREINV_JACOBI, &
             PFLARE_CR_CANDIDATE, PFLARE_MINUS_ONE, PFLARE_ONE, PFLARE_REAL_KIND
+   use pflare_random, only: pflare_random_fill
 
 #include "petsc/finclude/petscmat.h"
 
@@ -80,9 +81,8 @@ module cr_splitting
       logical, dimension(:), allocatable :: forced_c
       logical :: extracted
       PetscReal :: norm_inf, weight, norm_e0, norm_enu, e_norm_inf
-      integer :: seed_size, comm_rank, errorcode, i_loc, sweep, max_luby_steps, nu
+      integer :: comm_rank, errorcode, sweep, max_luby_steps, nu
       logical :: use_poly
-      integer, dimension(:), allocatable :: seed
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
 
@@ -200,14 +200,7 @@ module cr_splitting
       ! port of this routine is bit-identical
       ! ~~~~~~~~
       allocate(rand_full(input_row_end_plus_one - input_row_start))
-      call random_seed(size=seed_size)
-      allocate(seed(seed_size))
-      do i_loc = 1, seed_size
-         seed(i_loc) = comm_rank + 1 + i_loc
-      end do
-      call random_seed(put=seed)
-      call random_number(rand_full)
-      deallocate(seed)
+      call pflare_random_fill(comm_rank, input_row_end_plus_one - input_row_start, rand_full)
 
       call MatCreateVecs(Aff, e_vec, work_vec, ierr)
       call VecDuplicate(e_vec, work2_vec, ierr)

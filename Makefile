@@ -127,6 +127,7 @@ endif
 
 # All the files required by PFLARE
 OBJS := $(SRCDIR)/Pflare_Parameters.o \
+		  $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/Binary_Tree.o \
 		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
