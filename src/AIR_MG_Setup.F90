@@ -1069,10 +1069,18 @@ module air_mg_setup
             call PCMGSetInterpolation(pcmg_input, petsc_level, air_data%prolongators(our_level), ierr)
 
             ! Get smoother for this level
-            ! The up smoother is never used or called when doing kaskade, but we set it as a richardson so that petsc doesn't default
-            ! to chebychev and hence try and calculate eigenvalues on each grid
-            call PCMGGetSmootherUp(pcmg_input, petsc_level, ksp_smoother_up, ierr)
-            call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp_smoother_down, ierr)                                
+            ! Kaskade only ever calls the down smoother, so don't create a distinct up smoother
+            ! (and its work vectors) when we're fc smoothing - PCMGGetSmootherDown would
+            ! When fc smoothing the up and down smoothers are then the same ksp, which
+            ! we set up below as a richardson so that petsc doesn't default to chebychev
+            ! and hence try and calculate eigenvalues on each grid
+            if (air_data%options%full_smoothing_up_and_down) then
+               call PCMGGetSmootherUp(pcmg_input, petsc_level, ksp_smoother_up, ierr)
+               call PCMGGetSmootherDown(pcmg_input, petsc_level, ksp_smoother_down, ierr)                                
+            else
+               call PCMGGetSmoother(pcmg_input, petsc_level, ksp_smoother_down, ierr)
+               ksp_smoother_up = ksp_smoother_down
+            end if
             
             ! Set the operators for smoothing on this level
             if (.NOT. air_data%options%full_smoothing_up_and_down) then
