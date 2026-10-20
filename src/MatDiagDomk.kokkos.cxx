@@ -1,5 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+// The prototype MatDiagDom.c calls this kernel through
+#include "MatDiagDomk.h"
 #include <iostream>
 
 // The definition of the device copy of the cf markers on a given level 

@@ -1,5 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+// The prototypes the C ports (PMISR_Module.c, DDC_Module.c, MatDiagDom.c, CF_Splitting.c) call these through
+#include "Device_Datak.h"
 #include <iostream>
 
 // This is a device copy of the cf markers on a given level

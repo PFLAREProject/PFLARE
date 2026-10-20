@@ -55,13 +55,13 @@ src/Repartition.o : src/Repartition.c src/pflareimpl.h src/pflare_parameters.h s
 src/Sorting.o : src/Sorting.c src/pflareimpl.h src/pflare_parameters.h src/Sorting.h 
 src/Timers.o : src/Timers.c src/pflareimpl.h src/pflare_parameters.h src/Timers.h 
 src/Weighted_Jacobi.o : src/Weighted_Jacobi.c src/pflareimpl.h src/pflare_parameters.h src/Weighted_Jacobi.h 
-src/DDC_Modulek.o : src/DDC_Modulek.kokkos.cxx include/kokkos_helper.hpp 
-src/Device_Datak.o : src/Device_Datak.kokkos.cxx include/kokkos_helper.hpp 
+src/DDC_Modulek.o : src/DDC_Modulek.kokkos.cxx include/kokkos_helper.hpp src/DDC_Modulek.h 
+src/Device_Datak.o : src/Device_Datak.kokkos.cxx include/kokkos_helper.hpp src/Device_Datak.h 
 src/Gmres_Poly_Newtonk.o : src/Gmres_Poly_Newtonk.kokkos.cxx include/kokkos_helper.hpp 
 src/Gmres_Polyk.o : src/Gmres_Polyk.kokkos.cxx include/kokkos_helper.hpp 
 src/Grid_Transferk.o : src/Grid_Transferk.kokkos.cxx include/kokkos_helper.hpp 
-src/MatDiagDomk.o : src/MatDiagDomk.kokkos.cxx include/kokkos_helper.hpp 
+src/MatDiagDomk.o : src/MatDiagDomk.kokkos.cxx include/kokkos_helper.hpp src/MatDiagDomk.h 
 src/PETSc_Helperk.o : src/PETSc_Helperk.kokkos.cxx include/kokkos_helper.hpp src/PETSc_Helperk.h 
-src/PMISR_Modulek.o : src/PMISR_Modulek.kokkos.cxx include/kokkos_helper.hpp 
+src/PMISR_Modulek.o : src/PMISR_Modulek.kokkos.cxx include/kokkos_helper.hpp src/PMISR_Modulek.h 
 src/SAI_Zk.o : src/SAI_Zk.kokkos.cxx include/kokkos_helper.hpp 
 src/VecISCopyLocalk.o : src/VecISCopyLocalk.kokkos.cxx include/kokkos_helper.hpp 
