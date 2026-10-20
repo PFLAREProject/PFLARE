@@ -760,6 +760,48 @@ the Fortran `ex6f*`/`ex12f*` drivers and the notebook job all pass unchanged.
 The valgrind and `-malloc_dump` jobs are the leak check for the new struct
 lifetimes.
 
+As done (part a; part b moves the data into `pc->data` and removes the `PCShell`): the nine
+modules are C files with the module stems, the Fortran moved unchanged to `src/fref` and built
+only with `PFLARE_PORT_DEBUG=1`. The structs are in `pflareimpl.h` (`air_options` with the
+public getter types, `air_multigrid_data` with 0-based levels and per-level arrays of
+`levels_size` entries, `air_reuse_data`, `pc_air_multigrid_data`, the `REUSE_*_ACTIVE` tables
+indexed `[MAT_*][reuse_amount - 1]`), and `mat_ctxtype.air_data` is a typed pointer. For part a
+`pc->data` is still the `PCShell`, whose context is the C `pc_air_multigrid_data` and whose
+callbacks are the C ports of `PCAIR_Shell.F90` (`PCSetUp_AIR_Shell` reads `pc->flag` and
+`pc->setupcalled` of the shell). The five entry points `PCAIR.c` reached through
+`C_Fortran_Bindings.F90` keep their names in `PCAIR_Shell.c` (`create_pc_air_data_c`,
+`PCReset_AIR_Shell_c`, `create_pc_air_shell_c`, `pcair_shell_get_pcmg_c`,
+`pcair_shell_block_matapply_c`) and return a `PetscErrorCode` (the last loses its
+`error_code` argument). The getters and setters mirror the Fortran ones, except that the C
+errors with `PetscCheck` where the Fortran printed and called `MPI_Abort` (`PCAIRSetSmoothType`,
+`PCAIRGet/SetPolyCoeffs`); the Fortran `PCAIRSetPolyCoeffs` still aborts on an unassociated
+`coeffs`. `C_Fortran_Bindings.F90`, `C_PETSc_Interfaces.F90`, `PCAIR_C_Fortran_Bindings.F90`
+and a copy of the old `PCAIR_Interfaces.F90` (module `pcair_interfaces_fref`) are in `src/fref`
+with `_fref` bind names, under the reference PC type `air_fref` (`src/fref/PCAIR_fref.c`, the
+old `PCAIR.c`); `c_PCGetStructureFlag`, `PCGetSetupCalled_c`, `PCMarkNotSetUp_c` and the stage 5
+matshell context accessors are `PFLARE_PORT_DEBUG` only. `src/fortran/Port_Interfaces*.F90` and
+`Gmres_Poly_Data_Type.F90` stay (no live Fortran uses them outside `PFLARE_PORT_DEBUG`) and go
+with the reference in stage 8; `FCORE_OBJS` is `Pflare_Random.o`. Layer C is a second driver,
+`tests/port_compare_air.c`, comparing `air` against `air_fref` bitwise over a list of option
+sets (every getter, the coefficients of every level and `COEFFS_INV_*`, `PCApply`,
+`PCApplyTranspose`, `PCMatApply`) after the first setup, a `SAME_NONZERO_PATTERN` setup with the
+reuse of the sparsity off and with each reuse amount, `PCAIRSetPolyCoeffs` with
+`PCAIRSetReusePolyCoeffs`, `PCReset`, and options changed by the setters (every option set in serial on the generated
+operators, subsets of them in parallel and on `mat_stream_2364`, through `-configs`). Two option sets fail
+with a reuse amount of 3 in the Fortran too (symmetric, and auto truncation once the
+coefficients are reused), so they stop at 2; the coefficients of the non-GMRES inverses and of
+the unused dropped `Aff` inverse are left uninitialised by both, so only their sizes are compared.
+It runs on the generated operators and `mat_stream_2364`, not `e05r0100`: on that matrix the
+stage 3 and 5 checks inside the reference stack (`remove_from_sparse_match`,
+`finish_approximate_inverse`) stop some option sets, and ISAI and lAIR hit singular local
+systems in both. `-pc_air_subcomm` is compared with the PMIS splitting and the Arnoldi basis,
+as it errors in parallel on the `MATDIAGONAL` `Aff` of the PMISR DDC splitting (in the Fortran
+before the port too), and not on Kokkos matrices, where it errors in both
+(`MatMPICreateNonemptySubcomm_c` calls `MatMPIAIJGetSeqAIJ` on a `MATMPIAIJKOKKOS`).
+`-pc_air_symmetric` is compared in serial only: its `MatPtAP` is not deterministic in parallel
+(the Fortran before the port gives different roundoff from run to run too), and its
+`MAT_REUSE_MATRIX` `MatPtAP` errors in the C where the Fortran ignored the error.
+
 ### Stage 8: remove the reference Fortran
 
 - Delete `src/fref/`, the `PFLARE_PORT_DEBUG` plumbing, and
