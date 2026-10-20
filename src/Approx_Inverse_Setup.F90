@@ -45,7 +45,7 @@ module approx_inverse_setup
       ! PFLAREINV_NEUMANN - Neumann polynomial
       ! PFLAREINV_SAI - SAI
       ! PFLAREINV_ISAI - Incomplete SAI (ie a restricted additive schwartz)
-      ! PFLAREINV_WJACOBI - Weighted Jacobi with weight 3 / ( 4 * || D^(-1/2) * A * D^(-1/2) ||_inf )
+      ! PFLAREINV_WJACOBI - Weighted Jacobi with weight 4 / ( 3 * || D^(-1/2) * A * D^(-1/2) ||_inf )
       ! PFLAREINV_JACOBI - Unweighted Jacobi                  
       ! This is just a wrapper around the start and finish routines below
       ! No opportunity to put work between the async comms

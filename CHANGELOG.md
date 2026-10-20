@@ -6,6 +6,11 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Behaviour change: the weighted Jacobi (`wjacobi`) weight is now
+  4 / (3 ||D^{-1/2} A D^{-1/2}||_inf), which is what hypre BoomerAMG computes
+  with a relaxation weight of 0, rather than 3 / (4 ||D^{-1/2} A D^{-1/2}||_inf)
+  as quoted in the hypre documentation; the weight is larger by a factor of 16/9.
+  The CR splitting (`-pc_air_cf_splitting_type cr`) relaxation uses the same weight
 - Minimum PETSc version is now 3.26.0
 - Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
   from a level that failed the truncation test, which gave the wrong coarse

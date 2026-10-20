@@ -60,9 +60,12 @@ module weighted_jacobi
 
          call MatGetDiagonal(matrix, diag_vec, ierr)
 
-         ! This is the weight that hypre uses, even in assymetric problems
-         ! 3 / ( 4 * || D^(-1/2) * A * D^(-1/2) ||_inf )
-         weight = 3.0/(4.0 * norm_inf)
+         ! This is the weight that hypre's BoomerAMG computes with relax_weight = 0
+         ! (see par_amg_setup.c), even in asymmetric problems
+         ! 4 / ( 3 * || D^(-1/2) * A * D^(-1/2) ||_inf )
+         ! Note the hypre docs for HYPRE_BoomerAMGSetRelaxWt quote 3 / (4 * ||.||)
+         ! but the code uses 4 / (3 * ||.||)
+         weight = 4.0/(3.0 * norm_inf)
 
       ! Unweighted
       else

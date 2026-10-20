@@ -178,7 +178,7 @@ module air_data_type
       ! 3 - Neumann polynomial
       ! 4 - SAI
       ! 5 - Incomplete SAI (ie a restricted additive schwartz)
-      ! 6 - Weighted Jacobi with weight 3 / ( 4 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
+      ! 6 - Weighted Jacobi with weight 4 / ( 3 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
       ! 7 - Unweighted Jacobi
       ! -pc_air_inverse_type
       integer :: inverse_type = 1      
