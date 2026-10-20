@@ -185,6 +185,10 @@ src/
     CF_Splitting.F90        module cf_splitting: compute_cf_splitting wrapper for the C routine
     MatDiagDomSubmatrix.F90 module matdiagdomsubmatrix: compute_diag_dom_submatrix wrapper
     Gmres_Poly_Newton.F90   module gmres_poly_newton: modified_leja wrapper
+    Gmres_Poly_Data_Type.F90 (stages 5 to 7) bind(C) mirror of gmres_poly_data
+    Port_Interfaces_Poly.F90 (stages 5 to 7) wrappers for the AIR Fortran to call
+                            the stage 5 C ports (port_interfaces cannot use the fref
+                            modules, which use port_interfaces)
   fref/                   (stages 2 to 7 only) the retired Fortran implementations,
                           compiled under PFLARE_PORT_DEBUG=1 for the differential tests
 ```
@@ -630,6 +634,31 @@ matrix-free, with and without diagonal scaling and `-pc_pflareinv_subcomm`,
 serial and parallel, plus `PCApplyTranspose` and `PCMatApply`. The Python
 PFLAREINV tests (`ex_pcpflareinv_options.py`, `ex6f_getcoeffs.py`) exercise
 the coefficient memory contract.
+
+As done: the AIR Fortran calls the C through `src/fortran/Port_Interfaces_Poly.F90`
+(same names and arguments, except that `start/finish_approximate_inverse` take the
+`gmres_poly_data` instead of its `%buffers` and `%coefficients`); the coefficients
+are `PetscMalloc`'d by the C, the TSQR buffers are created on first use, and
+`reset_poly_data`/`destroy_poly_data` replace the Fortran deallocations. The
+placeholder matshells of the FC smoothers get a C `mat_ctxtype` from
+`mat_ctx_create_shell` (on the comm of a matrix, as a Fortran comm handle would
+need converting) and are read back through `mat_ctx_get_our_level`/`_air_data`.
+`PCPFLAREINV.c` keeps the old binding's coefficient contract in a static helper
+(a `malloc`'d copy freed with `free`), and the C entry points
+`tests/shell_block_apply.c` used (`calculate_and_build_approximate_inverse_c`,
+`reset_inverse_mat_c`, `pflareinv_shell_block_matapply_c`) stay exported from it in
+C. The fref modules with a live namesake are `gmres_poly_data_type_fref` and
+`gmres_poly_newton_fref`; the old bindings are kept with an `_fref` suffix for
+`pflareinv_fref` (`src/fref/PCPFLAREINV_fref.c`, the pre-port PC, registered only
+under `PFLARE_PORT_DEBUG`). Layer C is in the wrappers (coefficients bitwise,
+inverses row by row or, matrix-free, by applying both and their transposes) and
+in `tests/port_compare_pc.c`, which covers diagonal scaling and the subcomm
+through the `_c`/`_c_fref` entry points, as PCPFLAREINV has neither option (there
+is no `-pc_pflareinv_subcomm`). Everything compares bitwise. The kernel
+prototypes are in `Gmres_Polyk.h`, `Gmres_Poly_Newtonk.h` and `SAI_Zk.h`. `make depend`
+still cannot tell `src/fortran/X.F90` and `src/fref/X.F90` apart, so the Fortran
+lines of `Makefile.deps` were taken from `makedepf90` without `-b` (which has the
+right objects), in the order `make depend` gives them.
 
 ### Stage 6: grid transfer and constraints (1.8k lines)
 
