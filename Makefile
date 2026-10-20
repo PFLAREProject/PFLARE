@@ -137,6 +137,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
 		  $(SRCDIR)/Gmres_Poly_Apply.o \
 		  $(SRCDIR)/Gmres_Poly.o \
+		  $(SRCDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
@@ -178,7 +179,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCAIR_Data_Type.o \
 		  $(FREFDIR)/Gmres_Poly.o \
-		  $(SRCDIR)/Gmres_Poly_Newton.o \
+		  $(FREFDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/FC_Smooth.o \
 		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
