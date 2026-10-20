@@ -191,11 +191,11 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/C_Fortran_Bindings.o
 
 # The Fortran interface layer
-FOBJS := $(SRCDIR)/Pflare_Parameters.o \
-		  $(SRCDIR)/PCPFLAREINV_Interfaces.o \
-		  $(SRCDIR)/PCAIR_Interfaces.o \
-		  $(SRCDIR)/PFLARE.o \
-		  $(SRCDIR)/PCAIR_C_Fortran_Bindings.o
+FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
+		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
+		  $(FORTRANDIR)/PCAIR_Interfaces.o \
+		  $(FORTRANDIR)/PFLARE.o \
+		  $(FORTRANDIR)/PCAIR_C_Fortran_Bindings.o
 
 # All the files required by PFLARE, plus the Fortran reference implementations
 # (only with PFLARE_PORT_DEBUG=1)
