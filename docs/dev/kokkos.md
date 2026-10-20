@@ -8,7 +8,7 @@ Conventions
 
 Debug-compare mode (`PFLARE_KOKKOS_DEBUG=1`)
 - Read once and cached by `kokkos_debug()` in `src/PETSc_Helper.F90` — restart the process to change it.
-- When set, code paths in `CF_Splitting.F90`, `FC_Smooth.F90`, `DDC_Module.F90`, `Grid_Transfer.F90`, `Gmres_Poly_Newton.F90`, `SAI_Z.F90` run both the CPU and Kokkos implementations and compare results against the precision-dependent `PFLARE_TOL_MATFREE_*` tolerances in `src/Pflare_Parameters.F90`. A mismatch aborts with an error.
+- When set, code paths in `CF_Splitting.F90`, `FC_Smooth.F90`, `DDC_Module.F90`, `Grid_Transfer.F90`, `Gmres_Poly_Newton.F90`, `SAI_Z.F90` run both the CPU and Kokkos implementations and compare results against the precision-dependent `PFLARE_TOL_MATFREE_*` tolerances in `src/pflare_parameters.h`. A mismatch aborts with an error.
 - When adding a new Kokkos kernel, wire its CPU/Kokkos comparison into the calling Fortran routine under `if (kokkos_debug())`, following the existing patterns in those files.
 
 Test sequence after any Kokkos change (each step must pass `make check` + `make tests_short`):

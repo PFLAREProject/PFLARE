@@ -1,7 +1,7 @@
 Codebase map
 - `src/`: Fortran `.F90` (one module per file; module name = lowercase filename) is the bulk of the algorithms. C is only the PETSc PC plumbing (`PCAIR.c`, `PCPFLAREINV.c`, `C_PETSc_Routines.c`). Kokkos kernels: `X.F90` has a sibling `Xk.kokkos.cxx` exporting `<snake_case>_kokkos()` functions, called from Fortran via ISO-C bindings in `C_PETSc_Interfaces.F90`/`C_Fortran_Bindings.F90`.
 - `tests/`: test drivers + a Makefile of literal run commands. `python/`: Cython bindings. `include/pflare.h`: public C API. `docs/`: user docs.
-- Magic tolerances/constants: `src/Pflare_Parameters.F90`. Fortran module dependency order: `OBJS` in the top `Makefile`.
+- Magic tolerances/constants: `src/pflare_parameters.h` (shared by C and Fortran), exposed to Fortran as module `pflare_parameters` in `src/fortran/Pflare_Parameters.F90`. `src/fortran/` holds the Fortran interface layer (public modules). Object lists `COBJS`/`KOBJS`/`FCORE_OBJS`/`FOBJS` in the top `Makefile`; build order comes from `Makefile.deps` (`make depend`).
 - Root dir contains gitignored `*.mod` build artifacts — ignore them in listings.
 - PETSc source is at `$PETSC_DIR/$PETSC_ARCH`; Kokkos source at `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos{,-kernels}`. Both env variables must be set.
 
