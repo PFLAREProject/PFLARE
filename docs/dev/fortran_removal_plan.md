@@ -211,8 +211,9 @@ export PETSC_USE_FORTRAN_BINDINGS := $(if $(call _have_conf,PETSC_USE_FORTRAN_BI
 - The Fortran test drivers and the `matrandom` entry of `CHECK_TARGETS` are
   listed only when the flag is 1; the `run_tests_*` lines that invoke them are
   prefixed with a `$(SKIP_FORTRAN)` guard that works like `SKIP_SINGLE`.
-- `install` already tolerates a missing `*.mod`; it copies `src/fortran/*.mod`
-  when present.
+- `install` already tolerates a missing `*.mod`; it copies the `*.mod` files
+  when present (the compiler writes them to the top directory, those of
+  `src/fortran/` included).
 
 ## 5. Porting conventions (every stage follows these)
 
@@ -299,13 +300,16 @@ PETSc `main`). The working tree is mounted over the image's copy of PFLARE:
 # GNU, non-Kokkos; PETSC_ARCH=arch-linux-c-debug or arch-linux-c-opt
 docker pull stevendargaville/petsc:latest
 docker run --rm -v "$PWD":/build/PFLARE -w /build/PFLARE -e PETSC_ARCH=arch-linux-c-debug \
-  stevendargaville/petsc:latest bash -c '
+  -e PETSC_OPTIONS="-on_error_abort -fp_trap on" stevendargaville/petsc:latest bash -c '
     FL="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132 -fcheck=all -g"
     make -j3 build_tests FFLAGS="$FL" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" &&
     make python && make check && make tests'
-# Kokkos (PFLARE_KOKKOS_DEBUG=1 and the aijkokkos/kokkos PETSC_OPTIONS are set in the image)
+# Kokkos (the base image sets neither PETSC_OPTIONS nor PFLARE_KOKKOS_DEBUG; pass what
+# dockerfiles/Dockerfile_kokkos sets)
 docker pull stevendargaville/petsc_kokkos:latest
-docker run --rm -v "$PWD":/build/PFLARE -w /build/PFLARE stevendargaville/petsc_kokkos:latest bash -c '
+docker run --rm -v "$PWD":/build/PFLARE -w /build/PFLARE -e PFLARE_KOKKOS_DEBUG=1 -e OMP_NUM_THREADS=1 \
+  -e PETSC_OPTIONS="-mat_type aijkokkos -vec_type kokkos -dm_mat_type aijkokkos -dm_vec_type kokkos -on_error_abort" \
+  stevendargaville/petsc_kokkos:latest bash -c '
     make -j3 build_tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" \
       CFLAGS="-Wall -Werror -Wunused-result" CXXFLAGS="-Wall -Werror -Wunused-result -std=c++20" CPPFLAGS="-Wall -Werror" &&
     make check && make tests'
@@ -438,8 +442,8 @@ wrapper must not move a single iteration count).
   `LINK.F` for now (switching the linker is stage 10).
 - Move `PFLARE.F90`, `PCPFLAREINV_Interfaces.F90`, `PCAIR_Interfaces.F90`,
   `PCAIR_C_Fortran_Bindings.F90` and `Pflare_Parameters.F90` to
-  `src/fortran/` (git renames). Update `Makefile.deps` and the `INCLUDE`
-  paths so `.mod` files still land where `tests/` and `python/` find them.
+  `src/fortran/` (git renames). Update `Makefile.deps`; the `.mod` files
+  still land in the top directory, where `tests/` and `python/` find them.
 - Add `src/pflare_parameters.h` with every constant and enum value from
   `Pflare_Parameters.F90` as `#define`s, and rewrite the Fortran module to
   take its values from that header (the Fortran `parameter` statements stay,
