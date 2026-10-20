@@ -132,6 +132,7 @@ endif
 
 # The C objects
 COBJS := $(SRCDIR)/C_PETSc_Routines.o \
+		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
 
@@ -181,7 +182,6 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/CR_Splitting.o \
 		  $(SRCDIR)/CF_Splitting.o \
 		  $(SRCDIR)/MatDiagDomSubmatrix.o \
-		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \
@@ -192,6 +192,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
+		  $(FORTRANDIR)/Port_Interfaces.o \
 		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
 		  $(FORTRANDIR)/PCAIR_Interfaces.o \
 		  $(FORTRANDIR)/PFLARE.o \

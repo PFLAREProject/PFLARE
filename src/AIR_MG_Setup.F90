@@ -17,7 +17,7 @@ module air_mg_setup
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
          destroy_matrix_reuse
-   use timers, only: timer_start, timer_finish, timer_time, print_timers
+   use port_interfaces, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, create_smooth_temp_vecs, mg_FC_point_richardson, mg_coarse_shell_apply, &

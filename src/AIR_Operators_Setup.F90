@@ -15,7 +15,7 @@ module air_operators_setup
          MAT_Z, MAT_Z_AFF, MAT_Z_DROP, MAT_Z_NO_SPARSITY, &
          AIR_Z_PRODUCT, AIR_Z_LAIR, &
          PFLARE_MINUS_ONE, PFLARE_PTAP_FILL
-   use timers, only: timer_start, timer_finish
+   use port_interfaces, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
          compute_P_from_W, compute_R_from_Z
