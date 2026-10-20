@@ -41,6 +41,9 @@ int main(int argc, char **args)
   // a shifted diagonal, rather than the upwind operator
   PetscBool skew = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-skew", &skew, NULL));
+  // Negate the matrix, so it has a negative diagonal
+  PetscBool negate = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-negate", &negate, NULL));
   // Error if AIR builds fewer than this many levels
   PetscInt min_levels = 0, num_levels;
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-min_levels", &min_levels, NULL));
@@ -139,6 +142,9 @@ int main(int argc, char **args)
   // Can delete oor and ooc now
   PetscCall(PetscFree2(oor, ooc));
   // Set the values
+  if (negate) {
+    for (i = 0; i < (PetscInt)counter; i++) v[i] = -v[i];
+  }
   PetscCall(MatSetValuesCOO(A, v, INSERT_VALUES));
   PetscCall(PetscFree(v));
 

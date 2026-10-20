@@ -4,7 +4,7 @@ module approx_inverse_setup
    use tsqr, only: tsqr_buffers
    use pflare_parameters, only: &
          PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
-         PFLAREINV_NEUMANN, PFLAREINV_WJACOBI, PFLAREINV_JACOBI, &
+         PFLAREINV_NEUMANN, PFLAREINV_WJACOBI, PFLAREINV_JACOBI, PFLAREINV_L1JACOBI, &
          PFLAREINV_SAI, PFLAREINV_ISAI, AIR_Z_PRODUCT, &
          MF_VEC_DIAG, MF_VEC_TEMP, MF_VEC_RHS, MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE
    use gmres_poly, only: &
@@ -45,8 +45,9 @@ module approx_inverse_setup
       ! PFLAREINV_NEUMANN - Neumann polynomial
       ! PFLAREINV_SAI - SAI
       ! PFLAREINV_ISAI - Incomplete SAI (ie a restricted additive schwartz)
-      ! PFLAREINV_WJACOBI - Weighted Jacobi with weight 3 / ( 4 * || D^(-1/2) * A * D^(-1/2) ||_inf )
-      ! PFLAREINV_JACOBI - Unweighted Jacobi                  
+      ! PFLAREINV_WJACOBI - Weighted Jacobi with weight 4 / ( 3 * || D^(-1/2) * A * D^(-1/2) ||_inf )
+      ! PFLAREINV_JACOBI - Unweighted Jacobi
+      ! PFLAREINV_L1JACOBI - l1 Jacobi with inverse sign(a_ii) / sum_j |a_ij|
       ! This is just a wrapper around the start and finish routines below
       ! No opportunity to put work between the async comms
       ! If you want to do that, you will have to call the individual routines
@@ -63,7 +64,7 @@ module approx_inverse_setup
       !     caller takes ownership via the returned pointer).
       !   - If absent: existing behaviour. The matshell takes ownership of heap-allocated
       !     coefficients (matrix-free case) or stack storage is used (assembled case).
-      !   - Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI) have no coefficients:
+      !   - Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI, L1JACOBI) have no coefficients:
       !     supplied coefficients are ignored and none are allocated or returned, so
       !     coefficients is left unassociated if it was not associated on entry.
 
@@ -93,7 +94,7 @@ module approx_inverse_setup
 
       ! ~~~~~~  
 
-      ! Only the polynomial types have coefficients. The other types (SAI, ISAI, WJACOBI, JACOBI)
+      ! Only the polynomial types have coefficients. The other types (SAI, ISAI, WJACOBI, JACOBI, L1JACOBI)
       ! don't allocate, return or take ownership of any
       poly_type = inverse_type_is_polynomial(inverse_type)
       ! Only the polynomial types build a matshell when applied matrix-free
@@ -243,7 +244,7 @@ module approx_inverse_setup
 
       ! Returns true if the inverse type is a polynomial, ie one that has coefficients
       ! and builds a matshell when applied matrix-free. The other types (SAI, ISAI,
-      ! WJACOBI, JACOBI) have no coefficients and are always assembled
+      ! WJACOBI, JACOBI, L1JACOBI) have no coefficients and are always assembled
       ! Also called from C through inverse_type_is_polynomial_c
 
       ! ~~~~~~
@@ -541,12 +542,17 @@ module approx_inverse_setup
       ! Weighted jacobi
       else if (inverse_type == PFLAREINV_WJACOBI) then
 
-         call calculate_and_build_weighted_jacobi_inverse(matrix, .TRUE., inv_matrix)          
+         call calculate_and_build_weighted_jacobi_inverse(matrix, PFLAREINV_WJACOBI, inv_matrix)
 
       ! Unweighted jacobi
       else if (inverse_type == PFLAREINV_JACOBI) then
 
-         call calculate_and_build_weighted_jacobi_inverse(matrix, .FALSE., inv_matrix)           
+         call calculate_and_build_weighted_jacobi_inverse(matrix, PFLAREINV_JACOBI, inv_matrix)
+
+      ! l1 jacobi
+      else if (inverse_type == PFLAREINV_L1JACOBI) then
+
+         call calculate_and_build_weighted_jacobi_inverse(matrix, PFLAREINV_L1JACOBI, inv_matrix)
 
       end if
 
