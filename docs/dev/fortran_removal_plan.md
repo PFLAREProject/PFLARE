@@ -189,6 +189,7 @@ src/
     Port_Interfaces_Poly.F90 (stages 5 to 7) wrappers for the AIR Fortran to call
                             the stage 5 C ports (port_interfaces cannot use the fref
                             modules, which use port_interfaces)
+    Port_Interfaces_Grid.F90 (stages 6 to 7) the same for the stage 6 C ports
   fref/                   (stages 2 to 7 only) the retired Fortran implementations,
                           compiled under PFLARE_PORT_DEBUG=1 for the differential tests
 ```
@@ -670,6 +671,30 @@ rewrote `Grid_Transfer.F90` to build with `MatSetValues`; port that version.
 
 Verification: A with both Kokkos runs, B identical, C call-site compare
 (`MatEqual` on the produced R/P/W/Z, elementwise tolerance after `improve`).
+
+As done: the C files keep the module stems and the routine names (none clashes with
+`include/pflare.h`). `AIR_MG_Setup.F90` and `AIR_Operators_Setup.F90` call them through
+`src/fortran/Port_Interfaces_Grid.F90` (module `port_interfaces_grid`, separate from
+`port_interfaces` for the reason `port_interfaces_poly` is) with the Fortran signatures
+unchanged; arrays of Vecs cross as arrays of handles with their size, and the two arrays
+`get_near_nullspace` returns are allocated by the C (`PetscCalloc1`, NULL for a Vec it does
+not create) and copied into the Fortran allocatables. No live Fortran module keeps the names,
+so the fref modules are not renamed. The kernels are declared in `Grid_Transferk.h` and their
+Fortran interfaces compiled for the reference only. Layer C is in the wrappers, bitwise
+everywhere (no arithmetic order changed: `improve_w`/`improve_z` are PETSc calls, the BLAS
+calls take the Fortran arguments): every matrix produced (the one-point W, P, R, the improved
+W/Z, the reuse matrices `improve_*` created, the constrained W/Z) row by row, the
+`orig_fine_col_indices` the C created with `ISEqualUnsorted`, the near nullspace vectors with
+`VecEqual`. The reference runs on copies of what the C refills (P and R when reusing, W/Z in
+`improve_*`, the matrix and vectors `constrain_grid_transfer` takes, the smoothed vectors),
+taken before the C runs (its `VecGetArray` drops the cached norms of the vectors only on the
+ranks with rows, so a later `VecNorm` aborts on norms cached on some ranks); the reference of
+`improve_*` starts without the reuse matrices, as a copy cannot carry the `MatProduct` the C
+reuses and reusing it gives the same values. `constrain_grid_transfer` compares the type name
+of `row_mat` once, before it may be destroyed: the Fortran compares it again at the end, but a
+C `MatType` points into the object. `MatNullSpaceRestoreVecs` is Fortran only. The stage 6
+lines of `Makefile.deps` are those `make depend` gives; the lines of the same-stem files stay
+as stage 5 left them.
 
 ### Stage 7: AIR hierarchy and the PCAIR Fortran interface (6.2k lines ported, 2.8k rewritten, 2.3k deleted)
 
