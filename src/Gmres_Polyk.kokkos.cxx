@@ -1,5 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+// The prototype Gmres_Poly.c calls this kernel through
+#include "Gmres_Polyk.h"
 #include <iostream>
 
 //------------------------------------------------------------------------------------------------------------------------
