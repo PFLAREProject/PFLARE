@@ -143,6 +143,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
 		  $(SRCDIR)/Grid_Transfer.o \
+		  $(SRCDIR)/Grid_Transfer_Improve.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
@@ -185,7 +186,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(FREFDIR)/Grid_Transfer.o \
-		  $(SRCDIR)/Grid_Transfer_Improve.o \
+		  $(FREFDIR)/Grid_Transfer_Improve.o \
 		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
 		  $(SRCDIR)/PCAIR_Shell.o \
