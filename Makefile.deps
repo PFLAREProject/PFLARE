@@ -86,7 +86,7 @@ src/DDC_Modulek.o : src/DDC_Modulek.kokkos.cxx include/kokkos_helper.hpp src/DDC
 src/Device_Datak.o : src/Device_Datak.kokkos.cxx include/kokkos_helper.hpp src/Device_Datak.h 
 src/Gmres_Poly_Newtonk.o : src/Gmres_Poly_Newtonk.kokkos.cxx include/kokkos_helper.hpp src/Gmres_Poly_Newtonk.h 
 src/Gmres_Polyk.o : src/Gmres_Polyk.kokkos.cxx include/kokkos_helper.hpp src/Gmres_Polyk.h 
-src/Grid_Transferk.o : src/Grid_Transferk.kokkos.cxx include/kokkos_helper.hpp 
+src/Grid_Transferk.o : src/Grid_Transferk.kokkos.cxx include/kokkos_helper.hpp src/Grid_Transferk.h 
 src/MatDiagDomk.o : src/MatDiagDomk.kokkos.cxx include/kokkos_helper.hpp src/MatDiagDomk.h 
 src/PETSc_Helperk.o : src/PETSc_Helperk.kokkos.cxx include/kokkos_helper.hpp src/PETSc_Helperk.h 
 src/PMISR_Modulek.o : src/PMISR_Modulek.kokkos.cxx include/kokkos_helper.hpp src/PMISR_Modulek.h 
