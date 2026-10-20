@@ -513,6 +513,26 @@ compare paths in the helper move with it. `MatMPICreateNonemptySubcomm_c`
 already returns `PetscErrorCode`. The base branch rewrote `PETSc_Helper.F90`
 to build CPU matrices with `MatSetValues` rather than COO; port that version.
 
+As done: `C_PETSc_Routines.c` is not folded into `PETSc_Helper.c`. The three
+helpers only the repartitioning used (`MatPartitioning_c`,
+`GenerateIS_ProcAgglomeration_c`, `MatMPICreateNonemptySubcomm_c`) moved to
+the end of `Repartition.c` and return `PetscErrorCode`; the ones the Fortran
+still calls (`c_PCGetStructureFlag`, `PCGetSetupCalled_c`, `PCMarkNotSetUp_c`,
+`MatGetDiagonalOnly_c`, `PetscFree_c`) stay in `C_PETSc_Routines.c` until
+stage 7. The C port of `remove_from_sparse_match` is called
+`remove_from_sparse_match_c`, as `include/pflare.h` already has a public
+`remove_from_sparse_match` (stage 4 meets the same clash with
+`compute_cf_splitting` and `compute_diag_dom_submatrix`). Optional Fortran
+arguments are pointers in C, NULL when absent. The Kokkos kernel prototypes
+the C calls are in `src/PETSc_Helperk.h`, which the kernel file includes too.
+The Fortran interfaces that only `src/fref` still uses (the six kernels and the
+three repartitioning helpers) are compiled in `C_PETSc_Interfaces.F90` under
+`PFLARE_PORT_DEBUG` only. For the call-site compares, a copy of a parallel AIJ
+matrix that the reference sets values in has to be rebuilt with `MatSetValues`:
+`MatDuplicate` does not mark the duplicate as assembled before
+(`was_assembled`), so `MatSetValues` reads the global columns of the
+off-diagonal block as the local ones of its compressed storage.
+
 Verification: A (with both Kokkos runs), B identical, C for every ported
 helper that has a Kokkos sibling (CPU vs `_fref` vs Kokkos).
 
