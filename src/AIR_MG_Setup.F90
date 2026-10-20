@@ -2,7 +2,7 @@ module air_mg_setup
 
    use petscksp
    use iso_c_binding, only: c_loc
-   use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
+   use port_interfaces_grid, only: get_near_nullspace, smooth_near_nullspace
    use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
    use pflare_parameters, only: &
          PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &

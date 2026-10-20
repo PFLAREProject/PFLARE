@@ -312,6 +312,10 @@ module c_petsc_interfaces
    end interface
 #endif
 
+#if defined(PFLARE_PORT_DEBUG)
+   ! Only the Fortran reference in src/fref/Grid_Transfer.F90 (built with PFLARE_PORT_DEBUG=1)
+   ! uses these, the C port calls the kernels directly
+
    interface   
       
       subroutine compute_P_from_W_kokkos(A_array, global_row_start, indices_fine, &
@@ -349,6 +353,7 @@ module c_petsc_interfaces
       end subroutine compute_R_from_Z_kokkos         
  
    end interface
+#endif
 
 #if defined(PFLARE_PORT_DEBUG)
    ! Only the Fortran references in src/fref/Gmres_Poly.F90, Gmres_Poly_Newton.F90 and
