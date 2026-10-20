@@ -214,14 +214,18 @@ run_tests_load_serial:
 #
 	@echo "Test Newton AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing"
 	./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -pc_air_matrix_free_polys -ksp_max_it 5	
-# The C ports of the CF splittings against their Fortran reference (only built with
-# PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
+# The C ports of the CF splittings and approximate inverses against their Fortran
+# reference (only built with PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
 ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo ""
 	@echo "Compare the C CF splittings against the Fortran reference for hyperbolic streaming problem"
 	./port_compare_cf -f data/mat_stream_2364
 	@echo "Compare the C CF splittings against the Fortran reference for market matrix problem e05r0100"
 	./port_compare_cf -f data/e05r0100_petsc
+	@echo "Compare the C approximate inverses against the Fortran reference for hyperbolic streaming problem"
+	./port_compare_pc -f data/mat_stream_2364
+	@echo "Compare the C approximate inverses against the Fortran reference for market matrix problem e05r0100"
+	./port_compare_pc -f data/e05r0100_petsc
 endif
 
 # ~~~~~~~~~~~
@@ -297,8 +301,8 @@ else
 #
 	@echo "Test Newton AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in parallel"
 	$(MPIEXEC) -n 2 ./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -pc_air_matrix_free_polys -ksp_max_it 5
-# The C ports of the CF splittings against their Fortran reference (only built with
-# PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
+# The C ports of the CF splittings and approximate inverses against their Fortran
+# reference (only built with PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
 ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo ""
 	@echo "Compare the C CF splittings against the Fortran reference for hyperbolic streaming problem in parallel"
@@ -309,6 +313,14 @@ ifeq ($(PFLARE_PORT_DEBUG),1)
 	$(MPIEXEC) -n 4 ./port_compare_cf -f data/e05r0100_petsc
 	@echo "Compare the C CF splittings against the Fortran reference for hyperbolic streaming problem with a rank without rows"
 	$(MPIEXEC) -n 4 ./port_compare_cf -f data/mat_stream_2364 -empty_last_rank
+	@echo "Compare the C approximate inverses against the Fortran reference for hyperbolic streaming problem in parallel"
+	$(MPIEXEC) -n 2 ./port_compare_pc -f data/mat_stream_2364
+	$(MPIEXEC) -n 4 ./port_compare_pc -f data/mat_stream_2364
+	@echo "Compare the C approximate inverses against the Fortran reference for market matrix problem e05r0100 in parallel"
+	$(MPIEXEC) -n 2 ./port_compare_pc -f data/e05r0100_petsc
+	$(MPIEXEC) -n 4 ./port_compare_pc -f data/e05r0100_petsc
+	@echo "Compare the C approximate inverses against the Fortran reference for hyperbolic streaming problem with a rank without rows"
+	$(MPIEXEC) -n 4 ./port_compare_pc -f data/mat_stream_2364 -empty_last_rank
 endif
 endif
 
@@ -1066,14 +1078,18 @@ run_tests_no_load_serial:
 				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 		done; \
 	done
-# The C ports of the CF splittings against their Fortran reference (only built with
-# PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
+# The C ports of the CF splittings and approximate inverses against their Fortran
+# reference (only built with PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
 ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo ""
 	@echo "Compare the C CF splittings against the Fortran reference for 2D advection"
 	./port_compare_cf
 	@echo "Compare the C CF splittings against the Fortran reference for 2D advection-diffusion"
 	./port_compare_cf -alpha 1.0 -theta 0.3
+	@echo "Compare the C approximate inverses against the Fortran reference for 2D advection"
+	./port_compare_pc
+	@echo "Compare the C approximate inverses against the Fortran reference for 2D advection-diffusion"
+	./port_compare_pc -alpha 1.0 -theta 0.3
 endif
 
 # ~~~~~~~~~~~
@@ -1651,8 +1667,8 @@ else
 				-pc_air_inverse_sparsity_order $$sparsity -ksp_norm_type unpreconditioned -ksp_max_it 5; \
 		done; \
 	done
-# The C ports of the CF splittings against their Fortran reference (only built with
-# PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
+# The C ports of the CF splittings and approximate inverses against their Fortran
+# reference (only built with PFLARE_PORT_DEBUG=1, see docs/dev/fortran_removal_plan.md)
 ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo ""
 	@echo "Compare the C CF splittings against the Fortran reference for 2D advection in parallel"
@@ -1664,6 +1680,15 @@ ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo "Compare the C CF splittings against the Fortran reference for 2D advection-diffusion with a rank without rows"
 	$(MPIEXEC) -n 2 ./port_compare_cf -alpha 1.0 -theta 0.3 -empty_last_rank
 	$(MPIEXEC) -n 4 ./port_compare_cf -alpha 1.0 -theta 0.3 -empty_last_rank
+	@echo "Compare the C approximate inverses against the Fortran reference for 2D advection in parallel"
+	$(MPIEXEC) -n 2 ./port_compare_pc
+	$(MPIEXEC) -n 4 ./port_compare_pc
+	@echo "Compare the C approximate inverses against the Fortran reference for 2D advection-diffusion in parallel"
+	$(MPIEXEC) -n 2 ./port_compare_pc -alpha 1.0 -theta 0.3
+	$(MPIEXEC) -n 4 ./port_compare_pc -alpha 1.0 -theta 0.3
+	@echo "Compare the C approximate inverses against the Fortran reference for 2D advection-diffusion with a rank without rows"
+	$(MPIEXEC) -n 2 ./port_compare_pc -alpha 1.0 -theta 0.3 -empty_last_rank
+	$(MPIEXEC) -n 4 ./port_compare_pc -alpha 1.0 -theta 0.3 -empty_last_rank
 endif
 endif
 
