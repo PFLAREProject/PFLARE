@@ -1,7 +1,7 @@
 module gmres_poly
 
    use petscmat
-   use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
+   use port_interfaces, only: intersect_pre_sorted_indices_only, merge_pre_sorted
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &

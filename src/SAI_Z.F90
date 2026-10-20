@@ -2,9 +2,14 @@ module sai_z
 
    use iso_c_binding
    use petscksp
+   use port_interfaces, only: sorted_unique, intersect_pre_sorted_indices_only, merge_pre_sorted
+#ifdef PFLARE_PORT_DEBUG
+   ! The binary tree the Fortran built the shadow I with, as the reference for the
+   ! port debug comparison of sorted_unique (#ifdef rather than #if defined so
+   ! make depend only sees these uses in the port debug build)
    use binary_tree, only: itree, itree2vector, flush_tree
-   use sorting, only: create_knuth_shuffle_tree_array, intersect_pre_sorted_indices_only, &
-         merge_pre_sorted
+   use sorting, only: create_knuth_shuffle_tree_array
+#endif
    use c_petsc_interfaces, only: calculate_and_build_sai_z_kokkos
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
          mat_mat_symbolic
@@ -63,7 +68,13 @@ module sai_z
       PetscScalar, dimension(:), pointer :: vals => null()
       PetscScalar, dimension(:), allocatable :: e_row, j_vals
       PetscScalar, dimension(:,:), allocatable :: submat_vals
+      ! The columns of the rows in the shadow I, before sorted_unique
+      PetscInt, dimension(:), allocatable :: i_rows_unsorted, i_rows_grow
+      PetscInt :: i_rows_count
+#if defined(PFLARE_PORT_DEBUG)
       type(itree) :: i_rows_tree
+      PetscInt, dimension(:), allocatable :: i_rows_fref
+#endif
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs
       logical :: approx_solve, disable_approx_solve
@@ -284,6 +295,8 @@ module sai_z
 
       ! Pre-allocate arrays that are sized by ncols from sparsity_mat_cf
       allocate(j_rows(ncols_sparsity_max), j_vals(ncols_sparsity_max), j_indices(ncols_sparsity_max))
+      ! Grown as needed
+      allocate(i_rows_unsorted(0))
 
       ! Now go through each of the rows
       ! GetRow has to happen over the global indices
@@ -342,6 +355,9 @@ module sai_z
 
             ! Loop over all the non zero column indices, and get the nonzero columns in those rows
             ! ie get the shadow I
+            ! The columns of all the rows are collected in i_rows_unsorted and the sorted
+            ! set of them (without duplicates) is taken after the loop
+            i_rows_count = 0
             row_index_into_submatrix = 1
             do j_loc = 1, j_size
 
@@ -358,7 +374,17 @@ module sai_z
                   ! Cols are GLOBAL (all_cols_indices preserves them)
                   call MatGetRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
                            cols, PETSC_NULL_SCALAR_POINTER, ierr)
+                  ! Append the columns of this row to i_rows_unsorted, growing it if needed
+                  if (i_rows_count + ncols > size(i_rows_unsorted)) then
+                     allocate(i_rows_grow(max(2 * size(i_rows_unsorted, kind=kind(i_rows_count)), i_rows_count + ncols)))
+                     i_rows_grow(1:i_rows_count) = i_rows_unsorted(1:i_rows_count)
+                     call move_alloc(i_rows_grow, i_rows_unsorted)
+                  end if
+                  i_rows_unsorted(i_rows_count+1:i_rows_count+ncols) = cols(1:ncols)
+                  i_rows_count = i_rows_count + ncols
+#if defined(PFLARE_PORT_DEBUG)
                   call create_knuth_shuffle_tree_array(cols(1:ncols), i_rows_tree)
+#endif
                   call MatRestoreRow(reuse_submatrices(1), row_index_into_submatrix - 1, ncols, &
                            cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
@@ -367,7 +393,17 @@ module sai_z
                   ! Local row: get directly from A_ff - cols are global
                   call MatGetRow(A_ff, j_rows(j_loc), ncols, &
                            cols, PETSC_NULL_SCALAR_POINTER, ierr)
+                  ! Append the columns of this row to i_rows_unsorted, growing it if needed
+                  if (i_rows_count + ncols > size(i_rows_unsorted)) then
+                     allocate(i_rows_grow(max(2 * size(i_rows_unsorted, kind=kind(i_rows_count)), i_rows_count + ncols)))
+                     i_rows_grow(1:i_rows_count) = i_rows_unsorted(1:i_rows_count)
+                     call move_alloc(i_rows_grow, i_rows_unsorted)
+                  end if
+                  i_rows_unsorted(i_rows_count+1:i_rows_count+ncols) = cols(1:ncols)
+                  i_rows_count = i_rows_count + ncols
+#if defined(PFLARE_PORT_DEBUG)
                   call create_knuth_shuffle_tree_array(cols(1:ncols), i_rows_tree)
+#endif
                   call MatRestoreRow(A_ff, j_rows(j_loc), ncols, &
                            cols, PETSC_NULL_SCALAR_POINTER, ierr)
 
@@ -375,9 +411,26 @@ module sai_z
 
             end do
 
-            allocate(i_rows(i_rows_tree%length))
-            call itree2vector(i_rows_tree, i_rows)
+            ! The sorted set of the columns, without duplicates
+            call sorted_unique(i_rows_unsorted, i_rows_count)
+            allocate(i_rows(i_rows_count))
+            i_rows = i_rows_unsorted(1:i_rows_count)
+
+#if defined(PFLARE_PORT_DEBUG)
+            ! Compare with the sorted set the binary tree gives
+            allocate(i_rows_fref(i_rows_tree%length))
+            call itree2vector(i_rows_tree, i_rows_fref)
             call flush_tree(i_rows_tree)
+            if (size(i_rows) /= size(i_rows_fref)) then
+               print *, "C sorted_unique and Fortran reference binary tree do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            if (any(i_rows /= i_rows_fref)) then
+               print *, "C sorted_unique and Fortran reference binary tree do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            deallocate(i_rows_fref)
+#endif
 
          end if
 
@@ -636,7 +689,7 @@ module sai_z
       end do
 
       ! Deallocate pre-allocated arrays
-      deallocate(j_rows, j_vals, j_indices)
+      deallocate(j_rows, j_vals, j_indices, i_rows_unsorted)
       if (allocated(col_indices_off_proc_array)) deallocate(col_indices_off_proc_array)
 
       if (comm_size /= 1 .AND. mat_type /= "mpiaij") then

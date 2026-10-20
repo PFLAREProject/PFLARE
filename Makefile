@@ -132,6 +132,7 @@ endif
 
 # The C objects
 COBJS := $(SRCDIR)/C_PETSc_Routines.o \
+		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
@@ -153,13 +154,11 @@ endif
 
 # The core Fortran that is still being ported to C (see docs/dev/fortran_removal_plan.md)
 FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
-		  $(SRCDIR)/Binary_Tree.o \
 		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
 		  $(SRCDIR)/Gmres_Poly_Apply.o \
-		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCAIR_Data_Type.o \
 		  $(SRCDIR)/PETSc_Helper.o \
@@ -264,6 +263,9 @@ endif
 # The Fortran module dependencies come from makedepf90 and the C/C++ header
 # dependencies from the compilers (-MM). Run it in a build with Kokkos so the
 # Kokkos objects are included
+# The Fortran that uses the reference implementations in src/fref does so under
+# #ifdef PFLARE_PORT_DEBUG, which makedepf90 only follows with -D PFLARE_PORT_DEBUG,
+# so the dependency lines that differ in that case are added for PFLARE_PORT_DEBUG=1 only
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 DEPFILE = Makefile.deps
 
@@ -320,6 +322,10 @@ depend:
 	@echo "Generating dependencies..."
 	@makedepf90 -b $(SRCDIR) $(FSRC) > $(DEPFILE).tmp
 	@$(if $(FDEP_RELOCATE),sed $(FDEP_RELOCATE),cat) $(DEPFILE).tmp > $(DEPFILE)
+	@makedepf90 -D PFLARE_PORT_DEBUG -b $(SRCDIR) $(FSRC) > $(DEPFILE).tmp
+	@echo 'ifeq ($$(PFLARE_PORT_DEBUG),1)' >> $(DEPFILE)
+	@$(if $(FDEP_RELOCATE),sed $(FDEP_RELOCATE),cat) $(DEPFILE).tmp | grep -vxF -f $(DEPFILE) >> $(DEPFILE) || true
+	@echo 'endif' >> $(DEPFILE)
 	@for f in $(CSRC); do \
 		$(PCC) -MM -MT $${f%.c}.o $(DEP_CPPFLAGS) $$f > $(DEPFILE).tmp || exit 1; \
 		$(DEP_TIDY) $(DEPFILE).tmp >> $(DEPFILE); \
