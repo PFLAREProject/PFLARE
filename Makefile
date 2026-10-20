@@ -163,6 +163,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
+		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
 
@@ -190,7 +191,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(FREFDIR)/FC_Smooth_Block.o \
 		  $(FREFDIR)/AIR_MG_Stats.o \
 		  $(FREFDIR)/AIR_Data_Type_Routines.o \
-		  $(SRCDIR)/AIR_Operators_Setup.o \
+		  $(FREFDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
 		  $(SRCDIR)/PCAIR_Shell.o \
 		  $(SRCDIR)/C_Fortran_Bindings.o
