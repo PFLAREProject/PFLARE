@@ -4,9 +4,10 @@ module cr_splitting
    use petsc_helper, only: MatCreateSubMatrixWrapper
    use pmisr_module, only: pmisr_existing_measure_implicit_transpose
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse
+   use weighted_jacobi, only: calculate_l1_jacobi_inverse_diagonal
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_NU, &
             PFLARE_CR_NU_POLY, PFLARE_CR_POLY_ORDER, &
-            PFLAREINV_WJACOBI, PFLAREINV_JACOBI, &
+            PFLAREINV_WJACOBI, PFLAREINV_JACOBI, PFLAREINV_L1JACOBI, &
             PFLARE_CR_CANDIDATE, PFLARE_MINUS_ONE, PFLARE_ONE, PFLARE_REAL_KIND
 
 #include "petsc/finclude/petscmat.h"
@@ -123,6 +124,7 @@ module cr_splitting
       ! polynomial order
       use_poly = cr_inverse_type /= PFLAREINV_WJACOBI .AND. &
                  cr_inverse_type /= PFLAREINV_JACOBI .AND. &
+                 cr_inverse_type /= PFLAREINV_L1JACOBI .AND. &
                  fine_global > cr_poly_order + 1
       nu = PFLARE_CR_NU
       if (use_poly) nu = PFLARE_CR_NU_POLY
@@ -167,8 +169,9 @@ module cr_splitting
          ! Note the hypre docs for HYPRE_BoomerAMGSetRelaxWt quote 3 / (4 * ||.||)
          ! but the code uses 4 / (3 * ||.||)
          ! Unweighted plain Jacobi if that's what the hierarchy smooths with
+         ! and l1 Jacobi has its own weight on each row
          weight = 1.0
-         if (cr_inverse_type /= PFLAREINV_JACOBI) then
+         if (cr_inverse_type == PFLAREINV_WJACOBI) then
             call MatDuplicate(Aff, MAT_COPY_VALUES, temp_mat, ierr)
             call VecDuplicate(diag_vec, scale_vec, ierr)
             call VecCopy(diag_vec, scale_vec, ierr)
@@ -182,8 +185,13 @@ module cr_splitting
          end if
 
          ! Invert and apply the weight, zeroing the rows we can't relax
-         call VecReciprocal(diag_vec, ierr)
-         call VecScale(diag_vec, weight, ierr)
+         if (cr_inverse_type == PFLAREINV_L1JACOBI) then
+            ! This recomputes the diagonal from Aff, zero diagonals give zero
+            call calculate_l1_jacobi_inverse_diagonal(Aff, diag_vec)
+         else
+            call VecReciprocal(diag_vec, ierr)
+            call VecScale(diag_vec, weight, ierr)
+         end if
          if (any(forced_c)) then
             call VecGetArray(diag_vec, vec_array, ierr)
             do ifree = 1, fine_local

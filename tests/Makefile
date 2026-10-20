@@ -470,6 +470,8 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with Weighted Jacobi for 2D finite difference stencil"
 	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -pc_air_inverse_type wjacobi -ksp_max_it 8 -pc_air_a_drop 1e-3
+	@echo "Test AIRG with l1 Jacobi for 2D finite difference stencil"
+	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -pc_air_inverse_type l1jacobi -ksp_max_it 6 -pc_air_a_drop 1e-3
 # 
 	@echo ""
 	@echo "Test AIRG with Unweighted Jacobi for 2D finite difference stencil"
@@ -608,6 +610,7 @@ run_tests_no_load_short_serial:
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type isai
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type wjacobi
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type l1jacobi
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
@@ -634,6 +637,10 @@ run_tests_no_load_short_serial:
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
 	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 28
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi -ksp_max_it 11
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse on a negated matrix - checks the sign of the l1 Jacobi weight"
+	./adv_1d -n 1000 -negate -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi -ksp_max_it 11
 	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
@@ -759,6 +766,7 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -pc_pflareinv_type isai
 	./pflareinv_apply_transpose -pc_pflareinv_type wjacobi
 	./pflareinv_apply_transpose -pc_pflareinv_type jacobi
+	./pflareinv_apply_transpose -pc_pflareinv_type l1jacobi
 	@echo "Test PCApplyTranspose with a matrix-free PCPFLAREINV - builds the transposed matshell twin"
 	$(SKIP_SINGLE) ./pflareinv_apply_transpose -pc_pflareinv_matrix_free
 	@echo "Test PCApplyTranspose with a matrix-free Arnoldi PCPFLAREINV"
@@ -960,6 +968,10 @@ run_tests_no_load_serial:
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_z_type lair -pc_air_inverse_type wjacobi -ksp_max_it 10
+	@echo "Test lAIR with l1 Jacobi smoothing on 2D advection"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -pc_air_z_type lair -pc_air_inverse_type l1jacobi -ksp_max_it 6
 #
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
@@ -1006,6 +1018,10 @@ run_tests_no_load_serial:
 	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
 	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 18
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and compatible relaxation CF splitting with l1 Jacobi"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -pc_air_inverse_type l1jacobi -ksp_max_it 12
 #
 	@echo ""
 	@echo "Test AIRG with poorly scaled SUPG CG FEM, compatible relaxation CF splitting and diagonal scaling"
@@ -1234,6 +1250,8 @@ else
 	@echo ""
 	@echo "Test AIRG with Weighted Jacobi for 2D finite difference stencil in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air  -pc_air_inverse_type wjacobi -ksp_max_it 8 -pc_air_a_drop 1e-3
+	@echo "Test AIRG with l1 Jacobi for 2D finite difference stencil in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -pc_air_inverse_type l1jacobi -ksp_max_it 6 -pc_air_a_drop 1e-3
 # 
 	@echo ""
 	@echo "Test AIRG with Unweighted Jacobi for 2D finite difference stencil in parallel"
@@ -1354,6 +1372,12 @@ else
 	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi \
 	 -ksp_max_it 28
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi \
+	 -ksp_max_it 11
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse on a negated matrix in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -negate -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi \
+	 -ksp_max_it 11
 	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
@@ -1408,6 +1432,7 @@ else
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type neumann
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type wjacobi
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type l1jacobi
 	@echo "Test PCApplyTranspose with a matrix-free PCPFLAREINV in parallel - builds the transposed matshell twin"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type arnoldi
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton
@@ -1557,6 +1582,10 @@ else
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
 	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 18
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and compatible relaxation CF splitting with l1 Jacobi in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -pc_air_inverse_type l1jacobi -ksp_max_it 12
 #
 	@echo ""
 	@echo "Test AIRG with poorly scaled SUPG CG FEM, compatible relaxation CF splitting and diagonal scaling in parallel"
@@ -1806,6 +1835,7 @@ run_tests_medium_serial:
 	./pcair_apply_transpose -pc_air_inverse_type isai
 	./pcair_apply_transpose -pc_air_inverse_type wjacobi
 	./pcair_apply_transpose -pc_air_inverse_type jacobi
+	./pcair_apply_transpose -pc_air_inverse_type l1jacobi
 	@echo "Test PCApplyTranspose with a PCAIR coarse grid inverse type of its own"
 	./pcair_apply_transpose -pc_air_coarsest_inverse_type newton
 	./pcair_apply_transpose -pc_air_coarsest_inverse_type jacobi
@@ -1950,6 +1980,7 @@ else
 	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type newton
 	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type neumann
 	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type wjacobi
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type l1jacobi
 	@echo "Test PCApplyTranspose with the PCAIR Z types in parallel"
 	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair
 	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 3

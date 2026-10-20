@@ -174,12 +174,14 @@ module air_data_type
       ! These are defined by PCPFLAREINVType 
       ! 0 - GMRES polynomial with the power basis 
       ! 1 - GMRES polynomial with the arnoldi basis 
-      ! 2 - GMRES polynomial with the newton basis - can only be used matrix-free atm      
-      ! 3 - Neumann polynomial
-      ! 4 - SAI
-      ! 5 - Incomplete SAI (ie a restricted additive schwartz)
-      ! 6 - Weighted Jacobi with weight 4 / ( 3 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
-      ! 7 - Unweighted Jacobi
+      ! 2 - GMRES polynomial with the newton basis with extra roots for stability
+      ! 3 - GMRES polynomial with the newton basis without extra roots
+      ! 4 - Neumann polynomial
+      ! 5 - SAI
+      ! 6 - Incomplete SAI (ie a restricted additive schwartz)
+      ! 7 - Weighted Jacobi with weight 4 / ( 3 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
+      ! 8 - Unweighted Jacobi
+      ! 9 - l1 Jacobi with inverse sign(a_ii) / sum_j |a_ij|
       ! -pc_air_inverse_type
       integer :: inverse_type = 1      
 

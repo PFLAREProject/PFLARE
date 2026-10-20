@@ -23,12 +23,13 @@
 . `PFLAREINV_SAI`             - sparse approximate inverse; cannot be applied matrix-free
 . `PFLAREINV_ISAI`            - incomplete sparse approximate inverse; cannot be applied matrix-free
 . `PFLAREINV_WJACOBI`         - weighted Jacobi
-- `PFLAREINV_JACOBI`          - unweighted Jacobi
+. `PFLAREINV_JACOBI`          - unweighted Jacobi
+- `PFLAREINV_L1JACOBI`        - l1 Jacobi
 
   Level: intermediate
 
   Note:
-  The two Jacobi types exist mainly for use as smoothers in `PCAIR`; for a standalone Jacobi
+  The Jacobi types exist mainly for use as smoothers in `PCAIR`; for a standalone Jacobi
   preconditioner use PETSc's `PCJACOBI`.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCAIR`, `PCPFLAREINVSetType()`, `PCPFLAREINVGetType()`, `PCAIRSetInverseType()`, `PCAIRGetInverseType()`
@@ -43,6 +44,7 @@ typedef enum {
    PFLAREINV_ISAI,
    PFLAREINV_WJACOBI,
    PFLAREINV_JACOBI,
+   PFLAREINV_L1JACOBI,
 }  PCPFLAREINVType;
 
 /*E

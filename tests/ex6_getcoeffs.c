@@ -193,7 +193,8 @@ int main(int argc, char **args)
     PCPFLAREINVType pflare_type;
     PetscCall(PCPFLAREINVGetType(pc, &pflare_type));
     nonpoly = (PetscBool)(pflare_type == PFLAREINV_SAI || pflare_type == PFLAREINV_ISAI ||
-                          pflare_type == PFLAREINV_WJACOBI || pflare_type == PFLAREINV_JACOBI);
+                          pflare_type == PFLAREINV_WJACOBI || pflare_type == PFLAREINV_JACOBI ||
+                          pflare_type == PFLAREINV_L1JACOBI);
   }
 
   if (!skip) {

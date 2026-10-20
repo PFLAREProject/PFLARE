@@ -29,6 +29,7 @@ class PCPFLAREINVType(IntEnum):
     PFLAREINV_ISAI            = 6
     PFLAREINV_WJACOBI         = 7
     PFLAREINV_JACOBI          = 8
+    PFLAREINV_L1JACOBI        = 9
 
 class PCAIRZType(IntEnum):
     """Z / restrictor types for PCAIR (PCAIRZType in C)"""
