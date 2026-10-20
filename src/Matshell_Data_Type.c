@@ -250,7 +250,8 @@ PETSC_INTERN PetscErrorCode mat_ctx_create_shell(Mat comm_mat, PetscInt local_ro
    PetscCall(PetscObjectGetComm((PetscObject)comm_mat, &comm));
    PetscCall(create_mat_ctx(&mat_ctx));
    mat_ctx->our_level = our_level;
-   mat_ctx->air_data = air_data;
+   // The Fortran air_multigrid_data, held in the typed pointer of the C context
+   mat_ctx->air_data = (air_multigrid_data *)air_data;
    PetscCall(MatCreateShell(comm, local_rows, local_cols, global_rows, global_cols, mat_ctx, mat));
 
    PetscFunctionReturn(PETSC_SUCCESS);
@@ -287,7 +288,7 @@ PETSC_INTERN PetscErrorCode mat_ctx_get_air_data(Mat mat, void **air_data)
    PetscFunctionBegin;
 
    PetscCall(MatShellGetContext(mat, &mat_ctx));
-   *air_data = mat_ctx->air_data;
+   *air_data = (void *)mat_ctx->air_data;
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }

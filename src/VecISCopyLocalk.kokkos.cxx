@@ -1,14 +1,15 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+#include "VecISCopyLocalk.h"
 #include <iostream>
 
 // Per-PCAIR storage for the device-side fine/coarse index views, indexed by
 // multigrid level. Previously these arrays were file-scope globals, which
 // caused two concurrent PCAIR instances to collide on the same level slot
 // (overwriting each other's shared_ptr to the view, leading to use-after-free
-// in the older PCAIR's apply path). The handle is now owned by the air_data
-// structure on the Fortran side and threaded through every kokkos call that
-// needs it.
+// in the older PCAIR's apply path). The handle is now owned by the
+// air_multigrid_data struct (pflareimpl.h) and threaded through every kokkos
+// call that needs it.
 struct VecISCopyLocalKokkosCtx {
    ViewPetscIntPtr* IS_fine_views_local   = nullptr;
    ViewPetscIntPtr* IS_coarse_views_local = nullptr;
@@ -17,8 +18,8 @@ struct VecISCopyLocalKokkosCtx {
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Destroys the data. handle is a pointer to a void* (Fortran c_ptr by ref);
-// sets it to NULL on exit so the caller's c_ptr field becomes c_null_ptr.
+// Destroys the data. handle is a pointer to a void* (a Fortran c_ptr by ref in
+// the reference Fortran); sets it to NULL on exit so the caller's handle becomes NULL.
 PETSC_INTERN void destroy_VecISCopyLocal_kokkos(void **handle)
 {
    if (!handle || !*handle) return;
@@ -40,8 +41,8 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos(void **handle)
 //------------------------------------------------------------------------------------------------------------------------
 
 // Creates the per-PCAIR data we need to do the equivalent of veciscopy on
-// local data in kokkos. handle is a pointer to a void* (Fortran c_ptr by
-// ref); on entry, if *handle is NULL we allocate fresh; if it is already
+// local data in kokkos. handle is a pointer to a void* (a Fortran c_ptr by
+// ref in the reference Fortran); on entry, if *handle is NULL we allocate fresh; if it is already
 // allocated with a matching max_levels we keep it; if max_levels differs we
 // destroy and re-create.
 PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input, void **handle)

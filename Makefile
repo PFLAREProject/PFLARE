@@ -158,6 +158,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/CF_Splitting.o \
 		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/Timers.o \
+		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
 
@@ -178,7 +179,7 @@ endif
 
 # The core Fortran that is still being ported to C (see docs/dev/fortran_removal_plan.md)
 FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
-		  $(SRCDIR)/AIR_Data_Type.o \
+		  $(FREFDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCAIR_Data_Type.o \
 		  $(SRCDIR)/FC_Smooth.o \
@@ -208,7 +209,7 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 # (only with PFLARE_PORT_DEBUG=1)
 # Each list above is in Fortran module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(FREF_OBJS)
+OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(filter-out $(FCORE_OBJS),$(FREF_OBJS))
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
