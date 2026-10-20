@@ -9,6 +9,7 @@
 // Include the petsc header files
 #include <petsc.h>
 #include <petsc/private/pcimpl.h>
+#include "C_PETSc_Routines.h"
 
 // Returns pc->flag so we can have access to the structure flag
 // for re-use

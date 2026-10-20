@@ -1,8 +1,7 @@
-src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/fortran/Gmres_Poly_Data_Type.o src/fref/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/fref/FC_Smooth_Block.o src/fref/FC_Smooth.o src/fref/AIR_MG_Stats.o src/fref/AIR_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Pflare_Parameters.o src/fortran/CF_Splitting.o src/fortran/Port_Interfaces_Grid.o 
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/fref/FC_Smooth_Block.o src/fref/AIR_Data_Type_Routines.o src/PCAIR_Shell.o src/PCAIR_Data_Type.o 
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.F90 src/fref/AIR_Data_Type.o 
-src/PCAIR_Shell.o : src/PCAIR_Shell.F90 src/fref/AIR_Data_Type_Routines.o src/AIR_MG_Setup.o src/PCAIR_Data_Type.o src/C_PETSc_Interfaces.o 
+src/PCAIR_Shell.o : src/PCAIR_Shell.F90 src/fref/AIR_Data_Type_Routines.o src/fref/AIR_MG_Setup.o src/PCAIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/Pflare_Random.o : src/Pflare_Random.F90 
 src/fortran/CF_Splitting.o : src/fortran/CF_Splitting.F90 
 src/fortran/Gmres_Poly_Data_Type.o : src/fortran/Gmres_Poly_Data_Type.F90 
@@ -18,6 +17,7 @@ src/fortran/Port_Interfaces_Grid.o : src/fortran/Port_Interfaces_Grid.F90 src/fo
 src/fortran/Port_Interfaces_Poly.o : src/fortran/Port_Interfaces_Poly.F90 src/fortran/Port_Interfaces.o src/fortran/Gmres_Poly_Data_Type.o 
 src/fref/AIR_Data_Type.o : src/fref/AIR_Data_Type.F90 src/fortran/Pflare_Parameters.o src/fortran/Gmres_Poly_Data_Type.o 
 src/fref/AIR_Data_Type_Routines.o : src/fref/AIR_Data_Type_Routines.F90 src/fref/FC_Smooth_Block.o src/fref/FC_Smooth.o src/fortran/Gmres_Poly_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Pflare_Parameters.o src/fref/AIR_Data_Type.o 
+src/fref/AIR_MG_Setup.o : src/fref/AIR_MG_Setup.F90 src/fortran/Gmres_Poly_Data_Type.o src/fref/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/fref/FC_Smooth_Block.o src/fref/FC_Smooth.o src/fref/AIR_MG_Stats.o src/fref/AIR_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Pflare_Parameters.o src/fortran/CF_Splitting.o src/fortran/Port_Interfaces_Grid.o 
 src/fref/AIR_MG_Stats.o : src/fref/AIR_MG_Stats.F90 src/fortran/Gmres_Poly_Data_Type.o src/fortran/Port_Interfaces_Poly.o src/fref/AIR_Data_Type.o src/fortran/Port_Interfaces.o 
 src/fref/AIR_Operators_Setup.o : src/fref/AIR_Operators_Setup.F90 src/fref/AIR_Data_Type.o src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Port_Interfaces_Grid.o 
 src/fref/Aggregation.o : src/fref/Aggregation.F90 
@@ -60,13 +60,14 @@ src/fref/SAI_Z.o : src/fref/SAI_Z.F90 src/fortran/Pflare_Parameters.o src/C_PETS
 endif
 src/AIR_Data_Type.o : src/AIR_Data_Type.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/AIR_Data_Type.h 
 src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Approx_Inverse_Setup.h src/PETSc_Helper.h src/Gmres_Poly_Data_Type.h src/FC_Smooth.h src/FC_Smooth_Block.h src/AIR_Data_Type_Routines.h 
+src/AIR_MG_Setup.o : src/AIR_MG_Setup.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Constrain_Z_or_W.h src/CF_Splitting.h src/Approx_Inverse_Setup.h src/PETSc_Helper.h src/Timers.h src/AIR_MG_Stats.h src/FC_Smooth.h src/FC_Smooth_Block.h src/C_PETSc_Routines.h src/AIR_Operators_Setup.h src/Gmres_Poly.h src/Gmres_Poly_Apply.h src/Matshell_Data_Type.h src/Gmres_Poly_Data_Type.h src/Repartition.h src/AIR_MG_Setup.h 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Gmres_Poly.h src/AIR_MG_Stats.h 
 src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Constrain_Z_or_W.h src/Approx_Inverse_Setup.h src/Gmres_Poly_Data_Type.h src/SAI_Z.h src/PETSc_Helper.h src/Timers.h src/Grid_Transfer.h src/Grid_Transfer_Improve.h src/AIR_Operators_Setup.h 
 src/Aggregation.o : src/Aggregation.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Aggregation.h 
 src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/TSQR.h src/Gmres_Poly.h src/Gmres_Poly_Apply.h src/Gmres_Poly_Newton.h src/Neumann_Poly.h src/Weighted_Jacobi.h src/SAI_Z.h src/Repartition.h src/PETSc_Helper.h src/Matshell_Data_Type.h src/Approx_Inverse_Setup.h 
 src/CF_Splitting.o : src/CF_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PMISR_Module.h src/DDC_Module.h src/CR_Splitting.h src/SAbs.h src/Device_Datak.h src/Aggregation.h src/PETSc_Helper.h src/CF_Splitting.h 
 src/CR_Splitting.o : src/CR_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Module.h src/Pflare_Random.h src/Approx_Inverse_Setup.h src/CR_Splitting.h 
-src/C_PETSc_Routines.o : src/C_PETSc_Routines.c 
+src/C_PETSc_Routines.o : src/C_PETSc_Routines.c src/C_PETSc_Routines.h 
 src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Constrain_Z_or_W.h 
 src/DDC_Module.o : src/DDC_Module.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Device_Datak.h src/DDC_Modulek.h src/MatDiagDomk.h src/PMISR_Module.h src/MatDiagDom.h src/Pflare_Random.h src/DDC_Module.h 
 src/FC_Smooth.o : src/FC_Smooth.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/VecISCopyLocalk.h src/PETSc_Helper.h src/FC_Smooth.h 
