@@ -183,6 +183,7 @@ src/
     Pflare_Parameters.F90   module pflare_parameters (parameters taken from pflare_parameters.h)
     PCPFLAREINV_Interfaces.F90, PCAIR_Interfaces.F90, PFLARE.F90
     CF_Splitting.F90        module cf_splitting: compute_cf_splitting wrapper for the C routine
+    MatDiagDomSubmatrix.F90 module matdiagdomsubmatrix: compute_diag_dom_submatrix wrapper
     Gmres_Poly_Newton.F90   module gmres_poly_newton: modified_leja wrapper
   fref/                   (stages 2 to 7 only) the retired Fortran implementations,
                           compiled under PFLARE_PORT_DEBUG=1 for the differential tests
@@ -560,6 +561,33 @@ siblings and `PFLARE_KOKKOS_DEBUG` paths), B identical,
 `tests/port_compare_cf.c` under `PFLARE_PORT_DEBUG` for every
 `CFSplittingType` on `tests/data` matrices and on the generated advection
 problems, serial and `mpiexec -n 2`/`-n 4`.
+
+As done: the C files keep the module stems, and the C names of the two public
+routines are `compute_cf_splitting_c` and `compute_diag_dom_submatrix_c` (the
+stage 3 clash rule). Besides `cf_splitting`, `matdiagdomsubmatrix` stays a
+Fortran module, as `docs/new_methods.md` documents `compute_diag_dom_submatrix`
+for Fortran users: both are wrappers in `src/fortran/` (the `CF_*` parameters stay
+in `cf_splitting`), and their `src/fref/` copies are renamed `cf_splitting_fref`
+and `matdiagdomsubmatrix_fref`, the only edits to `src/fref`, since one build
+cannot hold two modules of the same name. No other remaining Fortran called the
+ported routines, so the call-site compare is in the two wrappers (`ISEqual`, and
+`port_compare_mats` row by row), and `tests/port_compare_cf.c` compares the public
+C API against the old bindings, kept as `compute_cf_splitting_c_fref` and
+`compute_diag_dom_submatrix_c_fref`. The kernel prototypes are in
+`PMISR_Modulek.h`, `DDC_Modulek.h`, `MatDiagDomk.h` and `Device_Datak.h`, and
+their Fortran interfaces are compiled for the reference only. `cr_pass` passes
+NULL coefficients to `calculate_and_build_approximate_inverse_c` and frees the
+copy it returns, and calls `PetscInitializeFortran` first, because the Fortran it
+reaches needs the Fortran PETSc constants and the public `compute_cf_splitting`
+no longer sets them; stage 5 removes both. The arrays handed to
+`pflare_random_fill` are allocated with at least one entry: `PetscMalloc1`
+gives NULL for zero entries where a Fortran zero-size array has an address, and
+UBSan reports the NULL in the Fortran on a rank without rows (stage 5's GMRES
+start vector needs the same). `make depend` cannot produce the
+Fortran lines any more: `makedepf90 -b src` gives `src/fortran/CF_Splitting.F90`
+and `src/fref/CF_Splitting.F90` the same object, which `FDEP_RELOCATE` cannot
+tell apart (stage 5 meets the same with `Gmres_Poly_Newton.F90`), so they are
+edited by hand, as before.
 
 ### Stage 5: polynomials and approximate inverses (7.5k lines)
 
