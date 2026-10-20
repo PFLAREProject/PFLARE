@@ -2,8 +2,8 @@ src/AIR_Data_Type.o : src/AIR_Data_Type.F90 src/fortran/Pflare_Parameters.o src/
 src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.F90 src/FC_Smooth_Block.o src/FC_Smooth.o src/Approx_Inverse_Setup.o src/fortran/Pflare_Parameters.o src/AIR_Data_Type.o 
 src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/fortran/Port_Interfaces.o src/fref/Gmres_Poly_Apply.o src/fref/Gmres_Poly.o src/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/FC_Smooth_Block.o src/FC_Smooth.o src/AIR_MG_Stats.o src/AIR_Data_Type.o src/Approx_Inverse_Setup.o src/fortran/Pflare_Parameters.o src/fref/Matshell_Data_Type.o src/fortran/CF_Splitting.o src/Constrain_Z_or_W.o 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.F90 src/fref/Gmres_Poly.o src/AIR_Data_Type.o src/fortran/Port_Interfaces.o 
-src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/fortran/Port_Interfaces.o src/SAI_Z.o src/Grid_Transfer_Improve.o src/Grid_Transfer.o src/AIR_Data_Type.o src/fortran/Pflare_Parameters.o src/Approx_Inverse_Setup.o src/Constrain_Z_or_W.o 
-src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/fref/Matshell_Data_Type.o src/fortran/Port_Interfaces.o src/SAI_Z.o src/fref/Neumann_Poly.o src/fref/Gmres_Poly_Newton.o src/fref/Gmres_Poly_Apply.o src/fref/Gmres_Poly.o src/fortran/Pflare_Parameters.o src/fref/TSQR.o 
+src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/fortran/Port_Interfaces.o src/fref/SAI_Z.o src/Grid_Transfer_Improve.o src/Grid_Transfer.o src/AIR_Data_Type.o src/fortran/Pflare_Parameters.o src/Approx_Inverse_Setup.o src/Constrain_Z_or_W.o 
+src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/fref/Matshell_Data_Type.o src/fortran/Port_Interfaces.o src/fref/SAI_Z.o src/fref/Neumann_Poly.o src/fref/Gmres_Poly_Newton.o src/fref/Gmres_Poly_Apply.o src/fref/Gmres_Poly.o src/fortran/Pflare_Parameters.o src/fref/TSQR.o 
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/FC_Smooth_Block.o src/AIR_Data_Type_Routines.o src/fref/Gmres_Poly_Apply.o src/Approx_Inverse_Setup.o src/PCAIR_Shell.o src/PCAIR_Data_Type.o 
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
 src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o 
@@ -20,7 +20,7 @@ src/fref/Neumann_Poly.o : src/fref/Neumann_Poly.F90 src/fortran/Pflare_Parameter
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.F90 src/AIR_Data_Type.o 
 src/PCAIR_Shell.o : src/PCAIR_Shell.F90 src/AIR_Data_Type_Routines.o src/AIR_MG_Setup.o src/PCAIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/Pflare_Random.o : src/Pflare_Random.F90 
-src/SAI_Z.o : src/SAI_Z.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/C_PETSc_Interfaces.o 
+src/fref/SAI_Z.o : src/fref/SAI_Z.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/C_PETSc_Interfaces.o 
 src/fortran/CF_Splitting.o : src/fortran/CF_Splitting.F90 
 src/fortran/MatDiagDomSubmatrix.o : src/fortran/MatDiagDomSubmatrix.F90 src/fortran/CF_Splitting.o 
 src/fortran/PCAIR_C_Fortran_Bindings.o : src/fortran/PCAIR_C_Fortran_Bindings.F90 src/fortran/PCAIR_Interfaces.o 
@@ -46,7 +46,7 @@ src/fref/Timers.o : src/fref/Timers.F90 src/fortran/Pflare_Parameters.o
 src/fref/Weighted_Jacobi.o : src/fref/Weighted_Jacobi.F90 src/fortran/Pflare_Parameters.o 
 ifeq ($(PFLARE_PORT_DEBUG),1)
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/FC_Smooth_Block.o src/AIR_Data_Type_Routines.o src/fref/Gmres_Poly_Apply.o src/Approx_Inverse_Setup.o src/PCAIR_Shell.o src/PCAIR_Data_Type.o src/fref/MatDiagDomSubmatrix.o src/fref/CF_Splitting.o 
-src/SAI_Z.o : src/SAI_Z.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/C_PETSc_Interfaces.o src/fref/Sorting.o src/fref/Binary_Tree.o 
+src/fref/SAI_Z.o : src/fref/SAI_Z.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/C_PETSc_Interfaces.o src/fref/Sorting.o src/fref/Binary_Tree.o 
 src/fortran/CF_Splitting.o : src/fortran/CF_Splitting.F90 src/fref/CF_Splitting.o 
 src/fortran/MatDiagDomSubmatrix.o : src/fortran/MatDiagDomSubmatrix.F90 src/fortran/Port_Interfaces.o src/fref/MatDiagDomSubmatrix.o src/fortran/CF_Splitting.o 
 src/fortran/Port_Interfaces.o : src/fortran/Port_Interfaces.F90 src/fref/Repartition.o src/fref/PETSc_Helper.o src/fref/Weighted_Jacobi.o src/fref/Aggregation.o src/fref/Sorting.o 
@@ -69,6 +69,7 @@ src/PCPFLAREINV.o : src/PCPFLAREINV.c include/pflare.h
 src/PETSc_Helper.o : src/PETSc_Helper.c src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/PETSc_Helperk.h 
 src/PMISR_Module.o : src/PMISR_Module.c src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Modulek.h src/Device_Datak.h src/Pflare_Random.h src/PMISR_Module.h 
 src/Repartition.o : src/Repartition.c src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/Repartition.h 
+src/SAI_Z.o : src/SAI_Z.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/Sorting.h src/SAI_Zk.h src/PETSc_Helper.h src/SAI_Z.h 
 src/SAbs.o : src/SAbs.c src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/SAbs.h 
 src/Sorting.o : src/Sorting.c src/pflareimpl.h src/pflare_parameters.h src/Sorting.h 
 src/TSQR.o : src/TSQR.c src/pflareimpl.h src/pflare_parameters.h src/TSQR.h 
@@ -82,5 +83,5 @@ src/Grid_Transferk.o : src/Grid_Transferk.kokkos.cxx include/kokkos_helper.hpp
 src/MatDiagDomk.o : src/MatDiagDomk.kokkos.cxx include/kokkos_helper.hpp src/MatDiagDomk.h 
 src/PETSc_Helperk.o : src/PETSc_Helperk.kokkos.cxx include/kokkos_helper.hpp src/PETSc_Helperk.h 
 src/PMISR_Modulek.o : src/PMISR_Modulek.kokkos.cxx include/kokkos_helper.hpp src/PMISR_Modulek.h 
-src/SAI_Zk.o : src/SAI_Zk.kokkos.cxx include/kokkos_helper.hpp 
+src/SAI_Zk.o : src/SAI_Zk.kokkos.cxx include/kokkos_helper.hpp src/SAI_Zk.h 
 src/VecISCopyLocalk.o : src/VecISCopyLocalk.kokkos.cxx include/kokkos_helper.hpp 

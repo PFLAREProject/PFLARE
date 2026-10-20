@@ -139,6 +139,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/Gmres_Poly.o \
 		  $(SRCDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/Neumann_Poly.o \
+		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
@@ -184,7 +185,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/FC_Smooth.o \
 		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
-		  $(SRCDIR)/SAI_Z.o \
+		  $(FREFDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
 		  $(FREFDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
