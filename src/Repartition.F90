@@ -3,7 +3,7 @@ module repartition
    use petscmat
    use c_petsc_interfaces, only: GenerateIS_ProcAgglomeration_c, &
          MatPartitioning_c, MatMPICreateNonemptySubcomm_c
-   use petsc_helper, only: MatAXPYWrapper, MatGetNNZs_both
+   use port_interfaces, only: MatAXPYWrapper, MatGetNNZs_both
    use pflare_parameters, only: PFLARE_ONE
 
 #include "petsc/finclude/petscmat.h"

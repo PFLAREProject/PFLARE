@@ -28,6 +28,18 @@ module port_interfaces
    use aggregation, only: generate_serial_aggregation_fref => generate_serial_aggregation
    use weighted_jacobi, only: &
          calculate_and_build_weighted_jacobi_inverse_fref => calculate_and_build_weighted_jacobi_inverse
+   use petsc_helper, only: kokkos_debug_fref => kokkos_debug, &
+         remove_small_from_sparse_fref => remove_small_from_sparse, &
+         remove_from_sparse_match_fref => remove_from_sparse_match, &
+         MatSetAllValues_fref => MatSetAllValues, &
+         mat_duplicate_copy_plus_diag_fref => mat_duplicate_copy_plus_diag, &
+         MatCreateSubMatrixWrapper_fref => MatCreateSubMatrixWrapper, &
+         generate_identity_fref => generate_identity, &
+         generate_identity_rect_fref => generate_identity_rect, &
+         generate_identity_is_fref => generate_identity_is, &
+         get_nnzs_petsc_sparse_fref => get_nnzs_petsc_sparse, &
+         MatGetNNZs_both_fref => MatGetNNZs_both, &
+         svd_fref => svd, pseudo_inv_fref => pseudo_inv
 #endif
 
 #include "petsc/finclude/petscmat.h"
@@ -44,6 +56,11 @@ module port_interfaces
    public :: generate_serial_aggregation
    ! Weighted_Jacobi.c
    public :: calculate_and_build_weighted_jacobi_inverse
+   ! PETSc_Helper.c
+   public :: kokkos_debug, destroy_matrix_reuse, remove_small_from_sparse, remove_from_sparse_match, &
+         MatSetAllValues, mat_duplicate_copy_plus_diag, MatAXPYWrapper, MatCreateSubMatrixWrapper, &
+         generate_identity, generate_identity_rect, generate_identity_is, get_nnzs_petsc_sparse, &
+         MatGetNNZs_both, svd, pseudo_inv, mat_mat_symbolic
 
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! C_PETSc_Routines.c
@@ -185,6 +202,183 @@ module port_interfaces
       end function calculate_and_build_weighted_jacobi_inverse_c
    end interface
 
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! PETSc_Helper.c
+   ! The optional arguments are passed as pointers, null when absent
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   interface
+      function kokkos_debug_c() &
+         bind(c, name="kokkos_debug")
+         use iso_c_binding
+         PetscBool :: kokkos_debug_c
+      end function kokkos_debug_c
+   end interface
+
+   interface
+      function destroy_matrix_reuse_c(mat, submatrices) &
+         bind(c, name="destroy_matrix_reuse")
+         use iso_c_binding
+         integer(c_long_long) :: mat
+         type(c_ptr) :: submatrices
+         PetscErrorCode :: destroy_matrix_reuse_c
+      end function destroy_matrix_reuse_c
+   end interface
+
+   interface
+      function remove_small_from_sparse_c(input_mat, tol, output_mat, relative_max_row_tol_int, &
+                  lump, drop_diagonal_int, diag_strength_int) &
+         bind(c, name="remove_small_from_sparse")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscReal, value :: tol
+         integer(c_long_long) :: output_mat
+         type(c_ptr), value :: relative_max_row_tol_int, lump, drop_diagonal_int, diag_strength_int
+         PetscErrorCode :: remove_small_from_sparse_c
+      end function remove_small_from_sparse_c
+   end interface
+
+   ! The C is called remove_from_sparse_match_c, as remove_from_sparse_match is the
+   ! public C API in include/pflare.h
+   interface
+      function remove_from_sparse_match_c(input_mat, output_mat, lump, alpha) &
+         bind(c, name="remove_from_sparse_match_c")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat, output_mat
+         type(c_ptr), value :: lump, alpha
+         PetscErrorCode :: remove_from_sparse_match_c
+      end function remove_from_sparse_match_c
+   end interface
+
+   interface
+      function MatSetAllValues_c(input_mat, val) &
+         bind(c, name="MatSetAllValues")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscScalar, value :: val
+         PetscErrorCode :: MatSetAllValues_c
+      end function MatSetAllValues_c
+   end interface
+
+   interface
+      function mat_duplicate_copy_plus_diag_c(input_mat, reuse, output_mat) &
+         bind(c, name="mat_duplicate_copy_plus_diag")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscBool, value :: reuse
+         integer(c_long_long) :: output_mat
+         PetscErrorCode :: mat_duplicate_copy_plus_diag_c
+      end function mat_duplicate_copy_plus_diag_c
+   end interface
+
+   interface
+      function MatAXPYWrapper_c(y_mat, alpha, x_mat) &
+         bind(c, name="MatAXPYWrapper")
+         use iso_c_binding
+         integer(c_long_long), value :: y_mat, x_mat
+         PetscScalar, value :: alpha
+         PetscErrorCode :: MatAXPYWrapper_c
+      end function MatAXPYWrapper_c
+   end interface
+
+   interface
+      function MatCreateSubMatrixWrapper_c(input_mat, is_row, is_col, reuse, output_mat, &
+                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle) &
+         bind(c, name="MatCreateSubMatrixWrapper")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat, is_row, is_col
+         ! The value of the MatReuse
+         integer(c_int), value :: reuse
+         integer(c_long_long) :: output_mat
+         type(c_ptr), value :: our_level, is_row_fine, is_col_fine, kokkos_is_views_handle
+         PetscErrorCode :: MatCreateSubMatrixWrapper_c
+      end function MatCreateSubMatrixWrapper_c
+   end interface
+
+   interface
+      function generate_identity_c(input_mat, output_mat) &
+         bind(c, name="generate_identity")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         integer(c_long_long) :: output_mat
+         PetscErrorCode :: generate_identity_c
+      end function generate_identity_c
+   end interface
+
+   interface
+      function generate_identity_rect_c(full_mat, rect_indices, output_mat) &
+         bind(c, name="generate_identity_rect")
+         use iso_c_binding
+         integer(c_long_long), value :: full_mat, rect_indices
+         integer(c_long_long) :: output_mat
+         PetscErrorCode :: generate_identity_rect_c
+      end function generate_identity_rect_c
+   end interface
+
+   interface
+      function generate_identity_is_c(input_mat, indices, output_mat) &
+         bind(c, name="generate_identity_is")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat, indices
+         integer(c_long_long) :: output_mat
+         PetscErrorCode :: generate_identity_is_c
+      end function generate_identity_is_c
+   end interface
+
+   interface
+      function get_nnzs_petsc_sparse_c(input_mat, nnzs) &
+         bind(c, name="get_nnzs_petsc_sparse")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         integer(c_int64_t) :: nnzs
+         PetscErrorCode :: get_nnzs_petsc_sparse_c
+      end function get_nnzs_petsc_sparse_c
+   end interface
+
+   interface
+      function MatGetNNZs_both_c(input_mat, nnzs_local, nnzs_nonlocal) &
+         bind(c, name="MatGetNNZs_both")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscInt :: nnzs_local, nnzs_nonlocal
+         PetscErrorCode :: MatGetNNZs_both_c
+      end function MatGetNNZs_both_c
+   end interface
+
+   interface
+      function svd_c(input, input_rows, input_cols, U, sigma, VT) &
+         bind(c, name="svd")
+         use iso_c_binding
+         PetscInt, value :: input_rows, input_cols
+         PetscScalar, dimension(input_rows, input_cols) :: input
+         PetscScalar, dimension(input_rows, input_rows) :: U
+         PetscReal, dimension(min(input_rows, input_cols)) :: sigma
+         PetscScalar, dimension(input_cols, input_cols) :: VT
+         PetscErrorCode :: svd_c
+      end function svd_c
+   end interface
+
+   interface
+      function pseudo_inv_c(input, input_rows, input_cols, output) &
+         bind(c, name="pseudo_inv")
+         use iso_c_binding
+         PetscInt, value :: input_rows, input_cols
+         PetscScalar, dimension(input_rows, input_cols) :: input
+         PetscScalar, dimension(input_cols, input_rows) :: output
+         PetscErrorCode :: pseudo_inv_c
+      end function pseudo_inv_c
+   end interface
+
+   interface
+      function mat_mat_symbolic_c(A, B, C) &
+         bind(c, name="mat_mat_symbolic")
+         use iso_c_binding
+         integer(c_long_long), value :: A, B
+         integer(c_long_long) :: C
+         PetscErrorCode :: mat_mat_symbolic_c
+      end function mat_mat_symbolic_c
+   end interface
+
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
@@ -208,6 +402,180 @@ module port_interfaces
       end if
 
    end subroutine port_check
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   function mat_to_c(mat) result(handle)
+
+      ! The handle of a matrix to pass to the C: a null Fortran object (0 for
+      ! PETSC_NULL_MAT, or PETSC_FORTRAN_TYPE_INITIALIZE when it was never created
+      ! or has been destroyed) is NULL in C
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: mat
+      integer(c_long_long)   :: handle
+      ! ~~~~~~
+
+      if (PetscObjectIsNull(mat)) then
+         handle = 0
+      else
+         handle = mat%v
+      end if
+
+   end function mat_to_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_from_c(handle, mat)
+
+      ! Sets a matrix from a handle the C returned. A NULL handle leaves a null
+      ! Fortran object as it is and otherwise sets it to the destroyed state, which
+      ! is what the Fortran MatDestroy does
+
+      ! ~~~~~~
+      integer(c_long_long), intent(in) :: handle
+      type(tMat), intent(inout)        :: mat
+      ! ~~~~~~
+
+      if (handle == 0) then
+         if (.NOT. PetscObjectIsNull(mat)) then
+            PetscObjectNullify(mat)
+         end if
+      else
+         mat%v = handle
+      end if
+
+   end subroutine mat_from_c
+
+#if defined(PFLARE_PORT_DEBUG)
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine port_copy_mat(mat, mat_copy)
+
+      ! Returns a copy of mat with the same entries (explicit zeros included), built with
+      ! MatSetValues and assembled, for a reference that sets values in a matrix it is given
+      ! MatDuplicate does not do here: the duplicate of a parallel AIJ matrix is not marked as
+      ! assembled before (was_assembled), so MatSetValues then takes the global column indices
+      ! of the off-diagonal block as the local ones of its compressed storage
+
+      ! ~~~~~~
+      type(tMat), intent(in)    :: mat
+      type(tMat), intent(inout) :: mat_copy
+
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      MatType :: mat_type
+      PetscInt :: local_rows, local_cols, global_rows, global_cols
+      PetscInt :: global_row_start, global_row_end_plus_one, global_col_start, global_col_end_plus_one
+      PetscInt :: ifree, ncols, col, i_loc
+      PetscInt, parameter :: one = 1
+      PetscInt, dimension(:), pointer :: cols => null()
+      PetscScalar, dimension(:), pointer :: vals => null()
+      PetscInt, dimension(:), allocatable :: d_nnz, o_nnz
+      ! ~~~~~~
+
+      call PetscObjectGetComm(mat, MPI_COMM_MATRIX, ierr)
+      call MatGetLocalSize(mat, local_rows, local_cols, ierr)
+      call MatGetSize(mat, global_rows, global_cols, ierr)
+      call MatGetOwnershipRange(mat, global_row_start, global_row_end_plus_one, ierr)
+      call MatGetOwnershipRangeColumn(mat, global_col_start, global_col_end_plus_one, ierr)
+
+      call MatCreate(MPI_COMM_MATRIX, mat_copy, ierr)
+      call MatSetSizes(mat_copy, local_rows, local_cols, global_rows, global_cols, ierr)
+      call MatGetType(mat, mat_type, ierr)
+      call MatSetType(mat_copy, mat_type, ierr)
+
+      allocate(d_nnz(local_rows), o_nnz(local_rows))
+      d_nnz = 0
+      o_nnz = 0
+      do ifree = global_row_start, global_row_end_plus_one-1
+         call MatGetRow(mat, ifree, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
+         i_loc = ifree - global_row_start + 1
+         do col = 1, ncols
+            if (cols(col) >= global_col_start .AND. cols(col) < global_col_end_plus_one) then
+               d_nnz(i_loc) = d_nnz(i_loc) + 1
+            else
+               o_nnz(i_loc) = o_nnz(i_loc) + 1
+            end if
+         end do
+         call MatRestoreRow(mat, ifree, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
+      end do
+      call MatXAIJSetPreallocation(mat_copy, one, d_nnz, o_nnz, &
+               PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+      deallocate(d_nnz, o_nnz)
+
+      do ifree = global_row_start, global_row_end_plus_one-1
+         call MatGetRow(mat, ifree, ncols, cols, vals, ierr)
+         if (ncols > 0) then
+            call MatSetValues(mat_copy, one, [ifree], ncols, cols(1:ncols), vals(1:ncols), INSERT_VALUES, ierr)
+         end if
+         call MatRestoreRow(mat, ifree, ncols, cols, vals, ierr)
+      end do
+      call MatAssemblyBegin(mat_copy, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(mat_copy, MAT_FINAL_ASSEMBLY, ierr)
+
+   end subroutine port_copy_mat
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine port_compare_mats(mat, mat_fref, routine)
+
+      ! Aborts unless the matrices the C and the Fortran reference built are the same:
+      ! the same sizes and, row by row, the same global column indices (explicit zeros
+      ! included) and bitwise the same values
+      ! This is compared through MatGetRow rather than with MatEqual, which compares the
+      ! compressed off-diagonal block of a parallel AIJ matrix without its column map
+
+      ! ~~~~~~
+      type(tMat), intent(in)       :: mat, mat_fref
+      character(len=*), intent(in) :: routine
+
+      PetscErrorCode :: ierr
+      PetscInt :: local_rows, local_cols, global_rows, global_cols
+      PetscInt :: local_rows_fref, local_cols_fref, global_rows_fref, global_cols_fref
+      PetscInt :: global_row_start, global_row_end_plus_one, ifree, ncols, ncols_fref
+      PetscInt, dimension(:), pointer :: cols => null(), cols_fref => null()
+      PetscScalar, dimension(:), pointer :: vals => null(), vals_fref => null()
+      logical :: mats_equal
+      integer :: errorcode
+      ! ~~~~~~
+
+      ! Both can be the same matrix (eg MatMPICreateNonemptySubcomm returns a reference
+      ! to its input when no rank is empty), which only one MatGetRow can be active on
+      if (mat%v == mat_fref%v) return
+
+      call MatGetLocalSize(mat, local_rows, local_cols, ierr)
+      call MatGetSize(mat, global_rows, global_cols, ierr)
+      call MatGetLocalSize(mat_fref, local_rows_fref, local_cols_fref, ierr)
+      call MatGetSize(mat_fref, global_rows_fref, global_cols_fref, ierr)
+      mats_equal = local_rows == local_rows_fref .AND. local_cols == local_cols_fref .AND. &
+                   global_rows == global_rows_fref .AND. global_cols == global_cols_fref
+
+      if (mats_equal) then
+         call MatGetOwnershipRange(mat, global_row_start, global_row_end_plus_one, ierr)
+         do ifree = global_row_start, global_row_end_plus_one-1
+            call MatGetRow(mat, ifree, ncols, cols, vals, ierr)
+            call MatGetRow(mat_fref, ifree, ncols_fref, cols_fref, vals_fref, ierr)
+            if (ncols /= ncols_fref) then
+               mats_equal = .FALSE.
+            else if (ncols > 0) then
+               if (any(cols(1:ncols) /= cols_fref(1:ncols)) .OR. any(vals(1:ncols) /= vals_fref(1:ncols))) then
+                  mats_equal = .FALSE.
+               end if
+            end if
+            call MatRestoreRow(mat_fref, ifree, ncols_fref, cols_fref, vals_fref, ierr)
+            call MatRestoreRow(mat, ifree, ncols, cols, vals, ierr)
+            if (.NOT. mats_equal) exit
+         end do
+      end if
+
+      if (.NOT. mats_equal) then
+         print *, "C and Fortran reference versions of ", routine, " do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine port_compare_mats
+#endif
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 ! Timers.c
@@ -551,6 +919,562 @@ module port_interfaces
 #endif
 
    end subroutine calculate_and_build_weighted_jacobi_inverse
+
+! -------------------------------------------------------------------------------------------------------------------------------
+! PETSc_Helper.c
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   function kokkos_debug()
+
+      ! The C reads the environment variable once and caches it, as the Fortran did
+
+      ! ~~~~~~
+      logical :: kokkos_debug
+
+#if defined(PFLARE_PORT_DEBUG)
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      kokkos_debug = kokkos_debug_c()
+
+#if defined(PFLARE_PORT_DEBUG)
+      if (kokkos_debug .neqv. kokkos_debug_fref()) then
+         print *, "C and Fortran reference versions of kokkos_debug do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+#endif
+
+   end function kokkos_debug
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine destroy_matrix_reuse(mat, submatrices)
+
+      ! The array of submatrices is the C array that MatCreateSubMatrices allocated
+      ! (the Fortran pointer is created over it without a copy), so the C gets its
+      ! address and destroys it with MatDestroySubMatrices
+      ! No port debug comparison, this is a sequence of PETSc calls
+
+      ! ~~~~~~
+      type(tMat), intent(inout)                          :: mat
+      type(tMat), dimension(:), pointer, intent(inout)   :: submatrices
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: mat_handle
+      type(c_ptr) :: submatrices_ptr
+      logical :: submatrices_associated
+      ! ~~~~~~
+
+      submatrices_associated = associated(submatrices)
+      if (submatrices_associated) then
+         submatrices_ptr = c_loc(submatrices(1))
+      else
+         submatrices_ptr = c_null_ptr
+      end if
+      mat_handle = mat_to_c(mat)
+
+      ierr = destroy_matrix_reuse_c(mat_handle, submatrices_ptr)
+      call port_check(ierr, "destroy_matrix_reuse")
+
+      if (submatrices_associated) then
+         submatrices => null()
+         ! MatDestroySubMatrices doesn't leave the mat in the same null state
+         ! as calling matdestroy
+         PetscObjectNullify(mat)
+      else
+         call mat_from_c(mat_handle, mat)
+      end if
+
+   end subroutine destroy_matrix_reuse
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tol_int, &
+                  lump, drop_diagonal_int, diag_strength_int)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: input_mat
+      type(tMat), intent(inout) :: output_mat
+      PetscReal, intent(in) :: tol
+      logical, intent(in), optional :: lump
+      integer, intent(in), optional :: relative_max_row_tol_int, drop_diagonal_int, diag_strength_int
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: output_mat_handle
+      integer(c_int), target :: relative_max_row_tol_int_c, drop_diagonal_int_c, diag_strength_int_c
+      PetscBool, target :: lump_c
+      type(c_ptr) :: relative_max_row_tol_int_ptr, lump_ptr, drop_diagonal_int_ptr, diag_strength_int_ptr
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+      relative_max_row_tol_int_ptr = c_null_ptr
+      lump_ptr = c_null_ptr
+      drop_diagonal_int_ptr = c_null_ptr
+      diag_strength_int_ptr = c_null_ptr
+      if (present(relative_max_row_tol_int)) then
+         relative_max_row_tol_int_c = relative_max_row_tol_int
+         relative_max_row_tol_int_ptr = c_loc(relative_max_row_tol_int_c)
+      end if
+      if (present(lump)) then
+         lump_c = lump
+         lump_ptr = c_loc(lump_c)
+      end if
+      if (present(drop_diagonal_int)) then
+         drop_diagonal_int_c = drop_diagonal_int
+         drop_diagonal_int_ptr = c_loc(drop_diagonal_int_c)
+      end if
+      if (present(diag_strength_int)) then
+         diag_strength_int_c = diag_strength_int
+         diag_strength_int_ptr = c_loc(diag_strength_int_c)
+      end if
+
+      output_mat_handle = mat_to_c(output_mat)
+      ierr = remove_small_from_sparse_c(input_mat%v, tol, output_mat_handle, relative_max_row_tol_int_ptr, &
+                  lump_ptr, drop_diagonal_int_ptr, diag_strength_int_ptr)
+      call port_check(ierr, "remove_small_from_sparse")
+      call mat_from_c(output_mat_handle, output_mat)
+
+#if defined(PFLARE_PORT_DEBUG)
+      call remove_small_from_sparse_fref(input_mat, tol, output_mat_fref, relative_max_row_tol_int, &
+                  lump, drop_diagonal_int, diag_strength_int)
+      call port_compare_mats(output_mat, output_mat_fref, "remove_small_from_sparse")
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine remove_small_from_sparse
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine remove_from_sparse_match(input_mat, output_mat, lump, alpha)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: input_mat
+      type(tMat), intent(inout) :: output_mat
+      logical, intent(in), optional :: lump
+      PetscReal, intent(in), optional :: alpha
+
+      PetscErrorCode :: ierr
+      PetscBool, target :: lump_c
+      PetscReal, target :: alpha_c
+      type(c_ptr) :: lump_ptr, alpha_ptr
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+#if defined(PFLARE_PORT_DEBUG)
+      ! The C changes the values of output_mat, so give the reference a copy of the input
+      call port_copy_mat(output_mat, output_mat_fref)
+#endif
+
+      lump_ptr = c_null_ptr
+      alpha_ptr = c_null_ptr
+      if (present(lump)) then
+         lump_c = lump
+         lump_ptr = c_loc(lump_c)
+      end if
+      if (present(alpha)) then
+         alpha_c = alpha
+         alpha_ptr = c_loc(alpha_c)
+      end if
+
+      ierr = remove_from_sparse_match_c(input_mat%v, output_mat%v, lump_ptr, alpha_ptr)
+      call port_check(ierr, "remove_from_sparse_match")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call remove_from_sparse_match_fref(input_mat, output_mat_fref, lump, alpha)
+      call port_compare_mats(output_mat, output_mat_fref, "remove_from_sparse_match")
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine remove_from_sparse_match
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatSetAllValues(input_mat, val)
+
+      ! ~~~~~~
+      type(tMat), intent(in)  :: input_mat
+      PetscScalar, intent(in) :: val
+
+      PetscErrorCode :: ierr
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: input_mat_fref
+#endif
+      ! ~~~~~~
+
+#if defined(PFLARE_PORT_DEBUG)
+      ! The C changes the values of input_mat, so give the reference a copy of the input
+      call port_copy_mat(input_mat, input_mat_fref)
+#endif
+
+      ierr = MatSetAllValues_c(input_mat%v, val)
+      call port_check(ierr, "MatSetAllValues")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call MatSetAllValues_fref(input_mat_fref, val)
+      call port_compare_mats(input_mat, input_mat_fref, "MatSetAllValues")
+      call MatDestroy(input_mat_fref, ierr)
+#endif
+
+   end subroutine MatSetAllValues
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_duplicate_copy_plus_diag(input_mat, reuse, output_mat)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: input_mat
+      logical, intent(in) :: reuse
+      type(tMat), intent(inout) :: output_mat
+
+      PetscErrorCode :: ierr
+      PetscBool :: reuse_c
+      integer(c_long_long) :: output_mat_handle
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+#if defined(PFLARE_PORT_DEBUG)
+      ! When reusing the C changes the values of output_mat, so give the reference a copy
+      PetscObjectNullify(output_mat_fref)
+      if (reuse) call port_copy_mat(output_mat, output_mat_fref)
+#endif
+
+      reuse_c = reuse
+      output_mat_handle = mat_to_c(output_mat)
+      ierr = mat_duplicate_copy_plus_diag_c(input_mat%v, reuse_c, output_mat_handle)
+      call port_check(ierr, "mat_duplicate_copy_plus_diag")
+      call mat_from_c(output_mat_handle, output_mat)
+
+#if defined(PFLARE_PORT_DEBUG)
+      call mat_duplicate_copy_plus_diag_fref(input_mat, reuse, output_mat_fref)
+      call port_compare_mats(output_mat, output_mat_fref, "mat_duplicate_copy_plus_diag")
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine mat_duplicate_copy_plus_diag
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatAXPYWrapper(y_mat, alpha, x_mat)
+
+      ! No port debug comparison, this is a wrapper around MatAXPY
+
+      ! ~~~~~~
+      type(tMat), intent(inout) :: y_mat
+      type(tMat), intent(in)    :: x_mat
+      PetscScalar, intent(in)   :: alpha
+
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      ierr = MatAXPYWrapper_c(y_mat%v, alpha, x_mat%v)
+      call port_check(ierr, "MatAXPYWrapper")
+
+   end subroutine MatAXPYWrapper
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, &
+                  reuse, output_mat, &
+                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle)
+
+      ! With PFLARE_PORT_DEBUG the result is compared with the Fortran reference only
+      ! when a new matrix is created, as reusing needs the matrix that MatCreateSubMatrix
+      ! created before (it is a wrapper around MatCreateSubMatrix and its Kokkos version)
+
+      ! ~~~~~~
+      type(tMat), intent(in)        :: input_mat
+      IS, intent(in)                :: is_row, is_col
+      integer, intent(in), optional :: our_level
+      logical, intent(in), optional :: is_row_fine, is_col_fine
+      type(c_ptr), intent(in), optional :: kokkos_is_views_handle
+      MatReuse, intent(in)          :: reuse
+      type(tMat), intent(inout)     :: output_mat
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: output_mat_handle
+      integer(c_int), target :: our_level_c
+      PetscBool, target :: is_row_fine_c, is_col_fine_c
+      type(c_ptr) :: our_level_ptr, is_row_fine_ptr, is_col_fine_ptr, handle_local
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+      our_level_ptr = c_null_ptr
+      is_row_fine_ptr = c_null_ptr
+      is_col_fine_ptr = c_null_ptr
+      handle_local = c_null_ptr
+      if (present(our_level)) then
+         our_level_c = our_level
+         our_level_ptr = c_loc(our_level_c)
+      end if
+      if (present(is_row_fine)) then
+         is_row_fine_c = is_row_fine
+         is_row_fine_ptr = c_loc(is_row_fine_c)
+      end if
+      if (present(is_col_fine)) then
+         is_col_fine_c = is_col_fine
+         is_col_fine_ptr = c_loc(is_col_fine_c)
+      end if
+      if (present(kokkos_is_views_handle)) then
+         handle_local = kokkos_is_views_handle
+      end if
+
+      output_mat_handle = mat_to_c(output_mat)
+      ierr = MatCreateSubMatrixWrapper_c(input_mat%v, is_row%v, is_col%v, reuse%v, output_mat_handle, &
+                  our_level_ptr, is_row_fine_ptr, is_col_fine_ptr, handle_local)
+      call port_check(ierr, "MatCreateSubMatrixWrapper")
+      call mat_from_c(output_mat_handle, output_mat)
+
+#if defined(PFLARE_PORT_DEBUG)
+      if (reuse == MAT_INITIAL_MATRIX) then
+         call MatCreateSubMatrixWrapper_fref(input_mat, is_row, is_col, &
+                  reuse, output_mat_fref, &
+                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle)
+         call port_compare_mats(output_mat, output_mat_fref, "MatCreateSubMatrixWrapper")
+         call MatDestroy(output_mat_fref, ierr)
+      end if
+#endif
+
+   end subroutine MatCreateSubMatrixWrapper
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine generate_identity(input_mat, output_mat)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: input_mat
+      type(tMat), intent(inout) :: output_mat
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: output_mat_handle
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+      output_mat_handle = mat_to_c(output_mat)
+      ierr = generate_identity_c(input_mat%v, output_mat_handle)
+      call port_check(ierr, "generate_identity")
+      call mat_from_c(output_mat_handle, output_mat)
+
+#if defined(PFLARE_PORT_DEBUG)
+      call generate_identity_fref(input_mat, output_mat_fref)
+      call port_compare_mats(output_mat, output_mat_fref, "generate_identity")
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine generate_identity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine generate_identity_rect(full_mat, rect_indices, output_mat)
+
+      ! ~~~~~~
+      type(tMat), intent(in)    :: full_mat
+      type(tIS), intent(in)     :: rect_indices
+      type(tMat), intent(inout) :: output_mat
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: output_mat_handle
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+      output_mat_handle = mat_to_c(output_mat)
+      ierr = generate_identity_rect_c(full_mat%v, rect_indices%v, output_mat_handle)
+      call port_check(ierr, "generate_identity_rect")
+      call mat_from_c(output_mat_handle, output_mat)
+
+#if defined(PFLARE_PORT_DEBUG)
+      call generate_identity_rect_fref(full_mat, rect_indices, output_mat_fref)
+      call port_compare_mats(output_mat, output_mat_fref, "generate_identity_rect")
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine generate_identity_rect
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine generate_identity_is(input_mat, indices, output_mat)
+
+      ! ~~~~~~
+      type(tMat), intent(in)     :: input_mat
+      type(tIS), intent(in)      :: indices
+      type(tMat), intent(inout)  :: output_mat
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: output_mat_handle
+#if defined(PFLARE_PORT_DEBUG)
+      type(tMat) :: output_mat_fref
+#endif
+      ! ~~~~~~
+
+      output_mat_handle = mat_to_c(output_mat)
+      ierr = generate_identity_is_c(input_mat%v, indices%v, output_mat_handle)
+      call port_check(ierr, "generate_identity_is")
+      call mat_from_c(output_mat_handle, output_mat)
+
+#if defined(PFLARE_PORT_DEBUG)
+      call generate_identity_is_fref(input_mat, indices, output_mat_fref)
+      call port_compare_mats(output_mat, output_mat_fref, "generate_identity_is")
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine generate_identity_is
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine get_nnzs_petsc_sparse(input_mat, nnzs)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: input_mat
+      integer(kind=8), intent(out) :: nnzs
+
+      PetscErrorCode :: ierr
+      integer(c_int64_t) :: nnzs_c
+#if defined(PFLARE_PORT_DEBUG)
+      integer(kind=8) :: nnzs_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      ierr = get_nnzs_petsc_sparse_c(input_mat%v, nnzs_c)
+      call port_check(ierr, "get_nnzs_petsc_sparse")
+      nnzs = nnzs_c
+
+#if defined(PFLARE_PORT_DEBUG)
+      call get_nnzs_petsc_sparse_fref(input_mat, nnzs_fref)
+      if (nnzs /= nnzs_fref) then
+         print *, "C and Fortran reference versions of get_nnzs_petsc_sparse do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+#endif
+
+   end subroutine get_nnzs_petsc_sparse
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatGetNNZs_both(input_mat, nnzs_local, nnzs_nonlocal)
+
+      ! ~~~~~~
+      type(tMat), intent(in)  :: input_mat
+      PetscInt, intent(out)   :: nnzs_local, nnzs_nonlocal
+
+      PetscErrorCode :: ierr
+#if defined(PFLARE_PORT_DEBUG)
+      PetscInt :: nnzs_local_fref, nnzs_nonlocal_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      ierr = MatGetNNZs_both_c(input_mat%v, nnzs_local, nnzs_nonlocal)
+      call port_check(ierr, "MatGetNNZs_both")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call MatGetNNZs_both_fref(input_mat, nnzs_local_fref, nnzs_nonlocal_fref)
+      if (nnzs_local /= nnzs_local_fref .OR. nnzs_nonlocal /= nnzs_nonlocal_fref) then
+         print *, "C and Fortran reference versions of MatGetNNZs_both do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+#endif
+
+   end subroutine MatGetNNZs_both
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine svd(input, U, sigma, VT)
+
+      ! ~~~~~~
+      PetscScalar, dimension(:, :), intent(in) :: input
+      PetscScalar, dimension(size(input, 1), size(input, 1)), intent(out) :: U
+      PetscReal, dimension(min(size(input, 1), size(input, 2))), intent(out) :: sigma
+      PetscScalar, dimension(size(input, 2), size(input, 2)), intent(out) :: VT
+
+      PetscErrorCode :: ierr
+      PetscInt :: input_rows, input_cols
+#if defined(PFLARE_PORT_DEBUG)
+      PetscScalar, dimension(size(input, 1), size(input, 1)) :: U_fref
+      PetscReal, dimension(min(size(input, 1), size(input, 2))) :: sigma_fref
+      PetscScalar, dimension(size(input, 2), size(input, 2)) :: VT_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      input_rows = size(input, 1)
+      input_cols = size(input, 2)
+      ierr = svd_c(input, input_rows, input_cols, U, sigma, VT)
+      call port_check(ierr, "svd")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call svd_fref(input, U_fref, sigma_fref, VT_fref)
+      if (any(U /= U_fref) .OR. any(sigma /= sigma_fref) .OR. any(VT /= VT_fref)) then
+         print *, "C and Fortran reference versions of svd do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+#endif
+
+   end subroutine svd
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pseudo_inv(input, output)
+
+      ! ~~~~~~
+      PetscScalar, dimension(:, :), intent(in) :: input
+      PetscScalar, dimension(size(input, 2), size(input, 1)), intent(out) :: output
+
+      PetscErrorCode :: ierr
+      PetscInt :: input_rows, input_cols
+#if defined(PFLARE_PORT_DEBUG)
+      PetscScalar, dimension(size(input, 2), size(input, 1)) :: output_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      input_rows = size(input, 1)
+      input_cols = size(input, 2)
+      ierr = pseudo_inv_c(input, input_rows, input_cols, output)
+      call port_check(ierr, "pseudo_inv")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call pseudo_inv_fref(input, output_fref)
+      if (any(output /= output_fref)) then
+         print *, "C and Fortran reference versions of pseudo_inv do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+#endif
+
+   end subroutine pseudo_inv
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mat_symbolic(A, B, C)
+
+      ! No port debug comparison, this is a sequence of PETSc calls
+
+      ! ~~~~~~
+      type(tMat), intent(in)  :: A, B
+      type(tMat), intent(out) :: C
+
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: C_handle
+      ! ~~~~~~
+
+      C_handle = 0
+      ierr = mat_mat_symbolic_c(A%v, B%v, C_handle)
+      call port_check(ierr, "mat_mat_symbolic")
+      call mat_from_c(C_handle, C)
+
+   end subroutine mat_mat_symbolic
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

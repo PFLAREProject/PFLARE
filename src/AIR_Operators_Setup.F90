@@ -21,7 +21,7 @@ module air_operators_setup
          compute_P_from_W, compute_R_from_Z
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
-   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
+   use port_interfaces, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
          remove_from_sparse_match, mat_mat_symbolic
 
 #include "petsc/finclude/petscksp.h"

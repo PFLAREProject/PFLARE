@@ -99,6 +99,10 @@ module c_petsc_interfaces
  
    end interface   
 
+#if defined(PFLARE_PORT_DEBUG)
+   ! Only the Fortran reference in src/fref/PETSc_Helper.F90 (built with PFLARE_PORT_DEBUG=1)
+   ! uses these, the C port in PETSc_Helper.c calls the kernels directly
+
    interface   
       
       subroutine remove_small_from_sparse_kokkos(A_array, tol, B_array, &
@@ -140,7 +144,8 @@ module c_petsc_interfaces
       end subroutine MatSetAllValues_kokkos
  
    end interface
-   
+#endif
+
    interface
 
       subroutine create_VecISCopyLocal_kokkos(max_levels_input, handle) &
@@ -379,6 +384,10 @@ module c_petsc_interfaces
 
    end interface
 
+#if defined(PFLARE_PORT_DEBUG)
+   ! Only the Fortran reference in src/fref/PETSc_Helper.F90 (built with PFLARE_PORT_DEBUG=1)
+   ! uses these, the C port in PETSc_Helper.c calls the kernels directly
+
    interface
 
       subroutine mat_duplicate_copy_plus_diag_kokkos(A_array, reuse_int, B_array) &
@@ -420,6 +429,7 @@ module c_petsc_interfaces
       end subroutine MatCreateSubMatrix_kokkos
 
    end interface
+#endif
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

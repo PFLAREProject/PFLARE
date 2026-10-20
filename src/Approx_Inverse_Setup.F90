@@ -19,7 +19,7 @@ module approx_inverse_setup
    use port_interfaces, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
    use repartition, only: MatMPICreateNonemptySubcomm
-   use petsc_helper, only: destroy_matrix_reuse
+   use port_interfaces, only: destroy_matrix_reuse
    use matshell_data_type, only: mat_ctxtype
 
 #include "petsc/finclude/petscmat.h"

@@ -9,7 +9,6 @@ module c_fortran_bindings
    use gmres_poly_apply, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
-   use petsc_helper, only: remove_from_sparse_match
    use air_data_type_routines, only: create_air_data
    use fc_smooth_block, only: ensure_air_block_temps
 
@@ -414,45 +413,6 @@ module c_fortran_bindings
       output_mat_ptr = output_mat%v
 
    end subroutine compute_diag_dom_submatrix_c
-
-   !------------------------------------------------------------------------------------------------------------------------
-
-   subroutine remove_from_sparse_match_c(input_mat_ptr, output_mat_ptr, lump_int, alpha_int, alpha) &
-         bind(C, name='remove_from_sparse_match_c')
-
-      ! Restrict input_mat onto output_mat's sparsity pattern. The underlying
-      ! Fortran remove_from_sparse_match auto-dispatches between the CPU and
-      ! Kokkos implementations based on the matrix type, so this C entry point
-      ! works for both paths.
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(in)    :: input_mat_ptr
-      integer(c_long_long), intent(inout) :: output_mat_ptr
-      integer(c_int), value, intent(in)   :: lump_int
-      integer(c_int), value, intent(in)   :: alpha_int
-      ! PetscReal by public-API contract (pflare.h / PCAIR.c already commit to it)
-      PetscReal, value, intent(in)         :: alpha
-
-      type(tMat) :: input_mat, output_mat
-      logical    :: lump
-      ! ~~~~~~~~
-
-      input_mat%v  = input_mat_ptr
-      output_mat%v = output_mat_ptr
-      lump         = (lump_int /= 0)
-
-      if (alpha_int /= 0) then
-         call remove_from_sparse_match(input_mat, output_mat, lump, alpha)
-      else
-         call remove_from_sparse_match(input_mat, output_mat, lump)
-      end if
-
-      ! The matrix's identity isn't replaced by remove_from_sparse_match (only
-      ! its values), but pass the handle back through anyway to match the
-      ! pattern used by the other C wrappers in this module.
-      output_mat_ptr = output_mat%v
-
-   end subroutine remove_from_sparse_match_c
 
    !------------------------------------------------------------------------------------------------------------------------
 

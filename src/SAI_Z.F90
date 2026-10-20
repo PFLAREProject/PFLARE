@@ -11,7 +11,7 @@ module sai_z
    use sorting, only: create_knuth_shuffle_tree_array
 #endif
    use c_petsc_interfaces, only: calculate_and_build_sai_z_kokkos
-   use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
+   use port_interfaces, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
          mat_mat_symbolic
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
          PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11

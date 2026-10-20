@@ -3,7 +3,7 @@ module fc_smooth_block
    use petscksp
    use c_petsc_interfaces, only: mat_iscopy_local_kokkos
    use air_data_type, only: air_multigrid_data
-   use petsc_helper, only: kokkos_debug
+   use port_interfaces, only: kokkos_debug
    use matshell_data_type, only: mat_ctxtype, attach_mat_product
    use gmres_poly_apply, only: shell_poly_block_apply
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &

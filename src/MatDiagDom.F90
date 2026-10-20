@@ -2,7 +2,7 @@ module matdiagdom
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug
+   use port_interfaces, only: kokkos_debug
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos
    use pflare_parameters, only: C_POINT, F_POINT, &
          PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL

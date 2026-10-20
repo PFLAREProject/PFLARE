@@ -2,7 +2,7 @@ module constrain_z_or_w
 
    use iso_c_binding
    use petscksp
-   use petsc_helper, only: pseudo_inv
+   use port_interfaces, only: pseudo_inv
    use pflare_parameters, only: PFLARE_KSP_RTOL_CONSTRAIN, PFLARE_ZERO, PFLARE_KSP_ATOL_OFF, &
          PFLARE_ONE, PFLARE_TOL_CONSTRAIN_REL, PFLARE_TOL_CONSTRAIN_ABS
 

@@ -1,5 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+// The prototypes PETSc_Helper.c calls these kernels through
+#include "PETSc_Helperk.h"
 #include <cmath>
 #include <iostream>
 #include <limits>

@@ -2,7 +2,7 @@ module matdiagdomsubmatrix
 
    use petscmat
    use cf_splitting, only: compute_cf_splitting, CF_DIAG_DOM
-   use petsc_helper, only: MatCreateSubMatrixWrapper
+   use port_interfaces, only: MatCreateSubMatrixWrapper
    use pflare_parameters, only: 
 
 #include "petsc/finclude/petscmat.h"

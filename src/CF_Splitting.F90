@@ -11,7 +11,7 @@ module cf_splitting
    use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio, &
             copy_cf_markers_d2h
    use port_interfaces, only: generate_serial_aggregation
-   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
+   use port_interfaces, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
 
 #include "petsc/finclude/petscmat.h"
 

@@ -8,6 +8,7 @@
 #include <petsc/private/pcimpl.h>
 #include "pflare.h"
 #include "pflareimpl.h"
+#include "PETSc_Helper.h"
 #include <string.h>
 /* SUBMANSEC = PC */
 
@@ -22,8 +23,6 @@ PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int
    int ddc_its, PetscReal fraction_swap,
    IS *is_fine, IS *is_coarse);
 PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, PetscReal max_dd_ratio, Mat *output_mat);
-PETSC_EXTERN void remove_from_sparse_match_c(Mat *input_mat, Mat *output_mat,
-   int lump_int, int alpha_int, PetscReal alpha);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
 // External users should use the get/set routines without _c which have 
 // PetscErrorCode defined as return type, those routines are defined below this
@@ -346,10 +345,10 @@ PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, PetscReal max_dd_rat
 PETSC_EXTERN void remove_from_sparse_match(Mat input_mat, Mat output_mat,
    int lump_int, int alpha_int, PetscReal alpha)
 {
-   // We call petsc fortran routines in remove_from_sparse_match_c, so have to make
-   // sure this is called, otherwise things like PETSC_NULL_INTEGER_POINTER aren't defined
-   PetscCallVoid(PetscInitializeFortran());
-   remove_from_sparse_match_c(&input_mat, &output_mat, lump_int, alpha_int, alpha);
+   // lump is always given, alpha only if alpha_int is not zero
+   PetscBool lump = lump_int != 0 ? PETSC_TRUE : PETSC_FALSE;
+
+   PetscCallVoid(remove_from_sparse_match_c(input_mat, output_mat, &lump, alpha_int != 0 ? &alpha : NULL));
 }
 
 // Get routines

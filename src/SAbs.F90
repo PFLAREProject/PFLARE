@@ -1,7 +1,7 @@
 module sabs
 
    use petscmat
-   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, remove_small_from_sparse
+   use port_interfaces, only: MatAXPYWrapper, MatSetAllValues, remove_small_from_sparse
    use pflare_parameters, only: PFLARE_SENTINEL_DROP, PFLARE_ONE, PFLARE_ZERO
 
 #include "petsc/finclude/petscmat.h"

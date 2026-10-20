@@ -3,7 +3,7 @@ module grid_transfer_improve
    use petscmat
    use port_interfaces, only: timer_start, timer_finish
    use pflare_parameters, only: TIMER_ID_AIR_DROP, PFLARE_ONE, PFLARE_MINUS_ONE
-   use petsc_helper, only: MatAXPYWrapper, remove_from_sparse_match
+   use port_interfaces, only: MatAXPYWrapper, remove_from_sparse_match
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"

@@ -2,7 +2,7 @@ module pmisr_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug
+   use port_interfaces, only: kokkos_debug
    use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h
    use pflare_parameters, only: C_POINT, F_POINT
    use pflare_random, only: pflare_random_fill

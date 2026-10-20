@@ -14,7 +14,7 @@ module gmres_poly
          petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf, highest_nonzero_coeff
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
-   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
+   use port_interfaces, only: MatAXPYWrapper, destroy_matrix_reuse, &
          kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
    use pflare_random, only: pflare_random_fill
 

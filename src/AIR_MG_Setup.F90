@@ -34,7 +34,7 @@ module air_mg_setup
          petsc_matvec_right_scale_poly_newton_residual_mf, &
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
-   use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper
+   use port_interfaces, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper
 
 #include "petsc/finclude/petscksp.h"
 

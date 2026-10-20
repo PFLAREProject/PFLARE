@@ -2,7 +2,7 @@ module ddc_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
+   use port_interfaces, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
       use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
          MatDiagDomRatio_kokkos, create_cf_is_kokkos
    use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose

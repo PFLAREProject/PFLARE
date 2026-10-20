@@ -1,7 +1,7 @@
 module cr_splitting
 
    use petscmat
-   use petsc_helper, only: MatCreateSubMatrixWrapper
+   use port_interfaces, only: MatCreateSubMatrixWrapper
    use pmisr_module, only: pmisr_existing_measure_implicit_transpose
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_NU, &

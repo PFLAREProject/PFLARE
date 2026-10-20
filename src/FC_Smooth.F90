@@ -5,7 +5,7 @@ module fc_smooth
          set_VecISCopyLocal_kokkos_our_level, &
          destroy_VecISCopyLocal_kokkos, VecISCopyLocal_kokkos
    use air_data_type, only: air_multigrid_data
-   use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
+   use port_interfaces, only: generate_identity_rect, generate_identity_is, kokkos_debug
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO, &
          PFLARE_ONE
