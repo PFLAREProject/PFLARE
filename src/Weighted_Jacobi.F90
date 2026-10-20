@@ -47,14 +47,12 @@ module weighted_jacobi
          call MatDuplicate(matrix, MAT_COPY_VALUES, temp_mat, ierr)          
 
          ! D^(1/2)
-         ! Currently happens on the host
          call VecSqrtAbs(diag_vec, ierr)
          ! D^(-1/2)
          call VecReciprocal(diag_vec, ierr)
          ! D^(-1/2) * A * D^(-1/2)
          call MatDiagonalScale(temp_mat, diag_vec, diag_vec, ierr)          
          ! || D^(-1/2) * A * D^(-1/2) ||_inf
-         ! Currently happens on the host
          call MatNorm(temp_mat, NORM_INFINITY, norm_inf, ierr)
          call MatDestroy(temp_mat, ierr)
 

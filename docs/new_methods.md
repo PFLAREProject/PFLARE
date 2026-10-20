@@ -15,7 +15,7 @@ PCPFLAREINV contains methods for computing approximate inverses, most of which c
    | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  | Yes |
    | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  | No |
    | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | Yes |
-   | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi  | Partial |
+   | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi, with weight 4 / (3 ‖D^(-1/2) A D^(-1/2)‖_inf), as computed by hypre  | Yes |
    | jacobi  |  PFLAREINV_JACOBI  | Jacobi  | Yes |
 
 ### PCAIR - A new PETSc PC type
