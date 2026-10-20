@@ -40,6 +40,10 @@ module port_interfaces
          get_nnzs_petsc_sparse_fref => get_nnzs_petsc_sparse, &
          MatGetNNZs_both_fref => MatGetNNZs_both, &
          svd_fref => svd, pseudo_inv_fref => pseudo_inv
+   use repartition, only: &
+         compute_mat_ratio_local_nonlocal_nnzs_fref => compute_mat_ratio_local_nonlocal_nnzs, &
+         calculate_repartition_fref => calculate_repartition, &
+         MatMPICreateNonemptySubcomm_fref => MatMPICreateNonemptySubcomm
 #endif
 
 #include "petsc/finclude/petscmat.h"
@@ -61,6 +65,8 @@ module port_interfaces
          MatSetAllValues, mat_duplicate_copy_plus_diag, MatAXPYWrapper, MatCreateSubMatrixWrapper, &
          generate_identity, generate_identity_rect, generate_identity_is, get_nnzs_petsc_sparse, &
          MatGetNNZs_both, svd, pseudo_inv, mat_mat_symbolic
+   ! Repartition.c
+   public :: compute_mat_ratio_local_nonlocal_nnzs, calculate_repartition, MatMPICreateNonemptySubcomm
 
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! C_PETSc_Routines.c
@@ -377,6 +383,47 @@ module port_interfaces
          integer(c_long_long) :: C
          PetscErrorCode :: mat_mat_symbolic_c
       end function mat_mat_symbolic_c
+   end interface
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Repartition.c
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   interface
+      function compute_mat_ratio_local_nonlocal_nnzs_c(input_mat, no_active_cores, ratio) &
+         bind(c, name="compute_mat_ratio_local_nonlocal_nnzs")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscInt, value :: no_active_cores
+         PetscReal :: ratio
+         PetscErrorCode :: compute_mat_ratio_local_nonlocal_nnzs_c
+      end function compute_mat_ratio_local_nonlocal_nnzs_c
+   end interface
+
+   interface
+      function calculate_repartition_c(input_mat, proc_stride, no_active_cores, simple, index) &
+         bind(c, name="calculate_repartition")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscInt, value :: proc_stride
+         PetscInt :: no_active_cores
+         PetscBool, value :: simple
+         integer(c_long_long) :: index
+         PetscErrorCode :: calculate_repartition_c
+      end function calculate_repartition_c
+   end interface
+
+   ! Binds to the C MatMPICreateNonemptySubcomm, which calls the helper whose C name
+   ! is MatMPICreateNonemptySubcomm_c
+   interface
+      function MatMPICreateNonemptySubcomm_c(input_mat, on_subcomm, output_mat) &
+         bind(c, name="MatMPICreateNonemptySubcomm")
+         use iso_c_binding
+         integer(c_long_long), value :: input_mat
+         PetscBool :: on_subcomm
+         integer(c_long_long) :: output_mat
+         PetscErrorCode :: MatMPICreateNonemptySubcomm_c
+      end function MatMPICreateNonemptySubcomm_c
    end interface
 
    contains
@@ -1475,6 +1522,130 @@ module port_interfaces
       call mat_from_c(C_handle, C)
 
    end subroutine mat_mat_symbolic
+
+! -------------------------------------------------------------------------------------------------------------------------------
+! Repartition.c
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine compute_mat_ratio_local_nonlocal_nnzs(input_mat, no_active_cores, ratio)
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)      :: input_mat
+      PetscInt, intent(in)                :: no_active_cores
+      PetscReal, intent(out)              :: ratio
+
+      PetscErrorCode :: ierr
+#if defined(PFLARE_PORT_DEBUG)
+      PetscReal :: ratio_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      ierr = compute_mat_ratio_local_nonlocal_nnzs_c(input_mat%v, no_active_cores, ratio)
+      call port_check(ierr, "compute_mat_ratio_local_nonlocal_nnzs")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call compute_mat_ratio_local_nonlocal_nnzs_fref(input_mat, no_active_cores, ratio_fref)
+      if (ratio /= ratio_fref) then
+         print *, "C and Fortran reference versions of compute_mat_ratio_local_nonlocal_nnzs do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+#endif
+
+   end subroutine compute_mat_ratio_local_nonlocal_nnzs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine calculate_repartition(input_mat, proc_stride, no_active_cores, simple, index)
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)      :: input_mat
+      PetscInt, intent(in)                :: proc_stride
+      PetscInt, intent(inout)             :: no_active_cores
+      logical, intent(in)                 :: simple
+      type(tIS), intent(out)              :: index
+
+      PetscErrorCode :: ierr
+      PetscBool :: simple_c
+      integer(c_long_long) :: index_handle
+#if defined(PFLARE_PORT_DEBUG)
+      PetscInt :: no_active_cores_fref
+      type(tIS) :: index_fref
+      PetscBool :: is_equal
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+#if defined(PFLARE_PORT_DEBUG)
+      ! no_active_cores is inout, so give the reference a copy of the input
+      no_active_cores_fref = no_active_cores
+#endif
+
+      simple_c = simple
+      index_handle = 0
+      ierr = calculate_repartition_c(input_mat%v, proc_stride, no_active_cores, simple_c, index_handle)
+      call port_check(ierr, "calculate_repartition")
+      index%v = index_handle
+
+#if defined(PFLARE_PORT_DEBUG)
+      call calculate_repartition_fref(input_mat, proc_stride, no_active_cores_fref, simple, index_fref)
+      if (no_active_cores /= no_active_cores_fref) then
+         print *, "C and Fortran reference versions of calculate_repartition do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      ! The order of the indices is the new ordering, so it has to match too
+      call ISEqualUnsorted(index, index_fref, is_equal, ierr)
+      if (ierr /= 0 .OR. .NOT. is_equal) then
+         print *, "C and Fortran reference versions of calculate_repartition do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      call ISDestroy(index_fref, ierr)
+#endif
+
+   end subroutine calculate_repartition
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatMPICreateNonemptySubcomm(input_mat, on_subcomm, output_mat)
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)      :: input_mat
+      logical, intent(out)                :: on_subcomm
+      type(tMat), target, intent(inout)   :: output_mat
+
+      PetscErrorCode :: ierr
+      PetscBool :: on_subcomm_c
+      integer(c_long_long) :: B_array
+#if defined(PFLARE_PORT_DEBUG)
+      logical :: on_subcomm_fref, output_mat_null, output_mat_fref_null
+      type(tMat) :: output_mat_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      ierr = MatMPICreateNonemptySubcomm_c(input_mat%v, on_subcomm_c, B_array)
+      call port_check(ierr, "MatMPICreateNonemptySubcomm")
+      on_subcomm = on_subcomm_c
+      ! Assign the index to the mat we get back from c, which is NULL on the ranks
+      ! that are not on the subcomm, as the Fortran did
+      output_mat%v = B_array
+
+#if defined(PFLARE_PORT_DEBUG)
+      call MatMPICreateNonemptySubcomm_fref(input_mat, on_subcomm_fref, output_mat_fref)
+      output_mat_null = PetscObjectIsNull(output_mat)
+      output_mat_fref_null = PetscObjectIsNull(output_mat_fref)
+      if ((on_subcomm .neqv. on_subcomm_fref) .OR. (output_mat_null .neqv. output_mat_fref_null)) then
+         print *, "C and Fortran reference versions of MatMPICreateNonemptySubcomm do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      ! Only the ranks on the subcomm have a matrix
+      if (.NOT. output_mat_null) then
+         call port_compare_mats(output_mat, output_mat_fref, "MatMPICreateNonemptySubcomm")
+      end if
+      call MatDestroy(output_mat_fref, ierr)
+#endif
+
+   end subroutine MatMPICreateNonemptySubcomm
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

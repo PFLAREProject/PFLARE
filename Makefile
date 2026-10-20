@@ -136,6 +136,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/PETSc_Helper.o \
+		  $(SRCDIR)/Repartition.o \
 		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
@@ -175,7 +176,6 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/SAbs.o \
 		  $(SRCDIR)/DDC_Module.o \
 		  $(SRCDIR)/PMISR_Module.o \
-		  $(SRCDIR)/Repartition.o \
 		  $(SRCDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
 		  $(SRCDIR)/CR_Splitting.o \

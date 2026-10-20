@@ -16,10 +16,17 @@ module c_petsc_interfaces
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
+#if defined(PFLARE_PORT_DEBUG)
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Only the Fortran reference in src/fref/Repartition.F90 (built with PFLARE_PORT_DEBUG=1)
+   ! uses these three. The helpers are in Repartition.c and return a PetscErrorCode, so the
+   ! two subroutines bind to the void versions kept there for the reference
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
    interface
 
       subroutine GenerateIS_ProcAgglomeration_c(proc_stride, global_size, local_size_reduced, start) &
-         bind(c, name="GenerateIS_ProcAgglomeration_c")
+         bind(c, name="GenerateIS_ProcAgglomeration_c_fref")
          use iso_c_binding
          PetscInt, value :: proc_stride
          PetscInt, value :: global_size
@@ -32,7 +39,7 @@ module c_petsc_interfaces
    interface   
       
       subroutine MatPartitioning_c(A_array, n_parts, proc_stride, index) &
-         bind(c, name="MatPartitioning_c")
+         bind(c, name="MatPartitioning_c_fref")
          use iso_c_binding
          integer(c_long_long) :: A_array
          PetscInt, value :: n_parts
@@ -54,6 +61,7 @@ module c_petsc_interfaces
       end function MatMPICreateNonemptySubcomm_c         
  
    end interface
+#endif
 
    interface   
       
