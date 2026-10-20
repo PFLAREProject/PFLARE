@@ -142,6 +142,7 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
+		  $(SRCDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
@@ -183,7 +184,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
-		  $(SRCDIR)/Grid_Transfer.o \
+		  $(FREFDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \
 		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
@@ -207,7 +208,9 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 # (only with PFLARE_PORT_DEBUG=1)
 # Each list above is in Fortran module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(FREF_OBJS)
+# While a stage is in flight a file can already be in src/fref but still be live
+# Fortran (FCORE_OBJS), so it is only listed once
+OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(filter-out $(FCORE_OBJS),$(FREF_OBJS))
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
