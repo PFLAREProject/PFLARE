@@ -1,7 +1,9 @@
 /*
   Definition and registration of the PC AIR type
-  Largely just a wrapper around all the fortran 
-  using PCShell
+  A wrapper around a PCShell (PCAIR_Shell.c) whose context is the
+  pc_air_multigrid_data struct of pflareimpl.h, which holds the air_options and
+  the AIR hierarchy (air_multigrid_data) and the PCMG it is built into
+  The PCAIRGet/Set routines read and write that struct directly
 */
 
 // Include the petsc header files
@@ -11,120 +13,16 @@
 #include "PETSc_Helper.h"
 #include "CF_Splitting.h"
 #include "MatDiagDomSubmatrix.h"
+#include "PCAIR_Shell.h"
+#include "AIR_MG_Stats.h"
 #include <string.h>
 /* SUBMANSEC = PC */
 
-// Defined in C_Fortran_Bindings.F90
-PETSC_EXTERN void PCReset_AIR_Shell_c(PC *pc);
-PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
-PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
-PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied, int *error_code);
-PETSC_EXTERN void pcair_shell_get_pcmg_c(PC *pc, PC *pcmg);
-// Defined in PCAIR_C_Fortran_Bindings.F90 
-// External users should use the get/set routines without _c which have 
-// PetscErrorCode defined as return type, those routines are defined below this
-// e.g., PCAIRGetPrintStatsTimings 
-PETSC_EXTERN void PCAIRGetPrintStatsTimings_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetMaxLevels_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCoarseEqLimit_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetAutoTruncateStartLevel_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetAutoTruncateTol_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetNumLevels_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetProcessorAgglom_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetProcessorAgglomRatio_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetProcessorAgglomFactor_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetProcessEqLimit_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetSubcomm_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetStrongThreshold_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetDDCIts_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetDDCFraction_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetCFSplittingType_c(PC *pc, CFSplittingType *cf_splitting_type);
-PETSC_EXTERN void PCAIRGetMaxLubySteps_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetSmoothType_c(PC *pc, char* input_string);
-PETSC_EXTERN void PCAIRGetDiagScalePolys_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetOnePointClassicalProlong_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetFullSmoothingUpAndDown_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetSymmetric_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetConstrainW_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetConstrainZ_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetImproveWIts_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetImproveZIts_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetStrongRThreshold_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
-PETSC_EXTERN void PCAIRGetCInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
-PETSC_EXTERN void PCAIRGetZType_c(PC *pc, PCAIRZType *z_type);
-PETSC_EXTERN void PCAIRGetPolyOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetLairDistance_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCPolyOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCoarsestInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
-PETSC_EXTERN void PCAIRGetCoarsestPolyOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetCoarsestMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetCoarsestDiagScalePolys_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetCoarsestSubcomm_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetRDrop_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetADrop_c(PC *pc, PetscReal *input_real);
-PETSC_EXTERN void PCAIRGetALump_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetReuseSparsity_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
-PETSC_EXTERN void PCAIRGetGridComplexity_c(PC *pc, PetscReal *complexity);
-PETSC_EXTERN void PCAIRGetOperatorComplexity_c(PC *pc, PetscReal *complexity);
-PETSC_EXTERN void PCAIRGetCycleComplexity_c(PC *pc, PetscReal *complexity);
-PETSC_EXTERN void PCAIRGetStorageComplexity_c(PC *pc, PetscReal *complexity);
-PETSC_EXTERN void PCAIRGetReuseStorageComplexity_c(PC *pc, PetscReal *complexity);
-
-// Setters
-PETSC_EXTERN void PCAIRSetPrintStatsTimings_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetMaxLevels_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCoarseEqLimit_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetAutoTruncateStartLevel_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetAutoTruncateTol_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetProcessorAgglom_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetProcessorAgglomRatio_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetProcessorAgglomFactor_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetProcessEqLimit_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetSubcomm_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetStrongThreshold_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetDDCIts_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetDDCFraction_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetCFSplittingType_c(PC *pc, CFSplittingType cf_splitting_type);
-PETSC_EXTERN void PCAIRSetMaxLubySteps_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetSmoothType_c(PC *pc, const char* input_string);
-PETSC_EXTERN void PCAIRSetDiagScalePolys_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetMatrixFreePolys_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetOnePointClassicalProlong_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetFullSmoothingUpAndDown_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetSymmetric_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetConstrainW_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetConstrainZ_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetImproveWIts_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetImproveZIts_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetStrongRThreshold_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
-PETSC_EXTERN void PCAIRSetZType_c(PC *pc, PCAIRZType z_type);
-PETSC_EXTERN void PCAIRSetLairDistance_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetPolyOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetInverseSparsityOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
-PETSC_EXTERN void PCAIRSetCPolyOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCInverseSparsityOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCoarsestInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
-PETSC_EXTERN void PCAIRSetCoarsestPolyOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetCoarsestMatrixFreePolys_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetCoarsestDiagScalePolys_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetCoarsestSubcomm_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetRDrop_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
-PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
+#if defined(PFLARE_PORT_DEBUG)
+// The reference PC type air_fref in src/fref/PCAIR_fref.c, which is this PC
+// as it was before the port to C, for tests/port_compare_pc.c to compare against
+PETSC_INTERN void PCRegister_AIR_fref(void);
+#endif
 
 // ~~~~~~~~~~~~~
 
@@ -139,7 +37,7 @@ static PetscErrorCode PCReset_AIR_c(PC pc)
    PetscCall(PCReset(*pc_air_shell));
 
    // So now we manually reset the underlying data
-   PCReset_AIR_Shell_c(pc_air_shell);  
+   PetscCall(PCReset_AIR_Shell_c(pc_air_shell));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -187,7 +85,7 @@ static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
 {
    PetscFunctionBegin;
    PC *pc_air_shell = (PC *)pc->data;
-   int applied = 0, error_code = 0;
+   int applied = 0;
 
    // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
    // so it has to see the reusepreconditioner flag
@@ -197,8 +95,7 @@ static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
    // straight to the underlying PCMG so we have to set the shell up ourselves
    PetscCall(PCSetUp(*pc_air_shell));
 
-   pcair_shell_block_matapply_c(pc_air_shell, &X, &Y, &applied, &error_code);
-   PetscCall((PetscErrorCode)error_code);
+   PetscCall(pcair_shell_block_matapply_c(pc_air_shell, &X, &Y, &applied));
 
    if (applied) {
       PetscCall(PetscInfo(pc, "PCMatApply used the block air multigrid\n"));
@@ -252,7 +149,7 @@ static PetscErrorCode PCSetUp_AIR_c(PC pc)
    // rather than the unprefixed -mg_coarse_* hitting every PCAIR
    PetscCall(PCGetOptionsPrefix(pc, &prefix));
    PetscCall(PCSetOptionsPrefix(*pc_air_shell, prefix));
-   pcair_shell_get_pcmg_c(pc_air_shell, &pcmg);
+   PetscCall(pcair_shell_get_pcmg_c(pc_air_shell, &pcmg));
    PetscCall(PCSetOptionsPrefix(pcmg, prefix));
 
    // Keep the shell's reusepreconditioner flag in sync - if the flag has
@@ -266,17 +163,8 @@ static PetscErrorCode PCSetUp_AIR_c(PC pc)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Get the underlying PCShell
-PETSC_EXTERN PetscErrorCode c_PCAIRGetPCShell(PC *pc, PC *pc_air_shell)
-{
-   PetscFunctionBegin;
-   PC *pc_shell = (PC *)(*pc)->data;
-   *pc_air_shell = *pc_shell;
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-// The PCAIRGet/Set routines below forward to Fortran routines that cast
-// pc->data unconditionally, so the type must be checked here on the way in
+// The PCAIRGet/Set routines below cast pc->data unconditionally, so the type
+// must be checked here on the way in
 static PetscErrorCode PCAIRCheckType(PC pc)
 {
    PetscBool is_air;
@@ -288,21 +176,124 @@ static PetscErrorCode PCAIRCheckType(PC pc)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Returns the context of the PCShell that implements the PCAIR, and the PCShell
+// itself if pc_air_shell is not NULL
+static PetscErrorCode PCAIRGetData_Private(PC pc, PC *pc_air_shell, pc_air_multigrid_data **pc_air_data)
+{
+   PC *pc_shell = (PC *)pc->data;
+
+   PetscFunctionBegin;
+   if (pc_air_shell) *pc_air_shell = *pc_shell;
+   PetscCall(PCShellGetContext(*pc_shell, pc_air_data));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Throws away the hierarchy when an option it was built with changes, and marks the
+// outer PC as not set up so the next PCSetUp builds it again
+static PetscErrorCode PCAIRResetHierarchy_Private(PC pc, pc_air_multigrid_data **pc_air_data)
+{
+   PC pc_air_shell;
+
+   PetscFunctionBegin;
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_shell, pc_air_data));
+   // Call the underlying reset - this won't touch the context
+   // in our pcshell though as pcshell doesn't offer a way to
+   // give a custom reset function
+   PetscCall(PCReset(pc_air_shell));
+   // Call the destroy routine
+   PetscCall(PCReset_AIR_Shell(pc_air_shell));
+   // Have to mark that the outer setup must be called again
+   pc->setupcalled = PETSC_FALSE;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Retrieve all 5 AIR multigrid complexities for a PCAIR preconditioner.
+// Returns -1.0 for all values if PCSetUp has not yet been called (detected
+// via no_levels == -1).  Otherwise calls compute_stats, which performs the
+// necessary parallel reductions.
+static PetscErrorCode PCAIRGetComplexitiesInternal(PC pc, PetscReal *grid_complx, PetscReal *op_complx, PetscReal *cycle_complx,
+   PetscReal *storage_complx, PetscReal *reuse_storage_complx)
+{
+   pc_air_multigrid_data *pc_air_data;
+
+   PetscFunctionBegin;
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+
+   if (pc_air_data->air_data.no_levels == -1) {
+      *grid_complx          = -1.0;
+      *op_complx            = -1.0;
+      *cycle_complx         = -1.0;
+      *storage_complx       = -1.0;
+      *reuse_storage_complx = -1.0;
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+
+   PetscCall(compute_stats(&pc_air_data->air_data, pc_air_data->pcmg,
+                      grid_complx, op_complx, cycle_complx,
+                      storage_complx, reuse_storage_complx));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // Returns a pointer to the polynomial coefficients stored internally by PCAIR for a given
 // level and inverse, erroring if there are none. Used by both PCAIRGetPolyCoeffs and
 // PCAIRSetPolyCoeffs; petsc_level is ignored for COEFFS_INV_COARSE
+// The petsc_level counts from the coarsest level (0) and the levels of the hierarchy
+// are 0-based from the top grid, so the level of petsc_level is num_levels - 1 - petsc_level
 static PetscErrorCode PCAIRGetPolyCoeffsPointer_Private(PC pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 {
-   PetscInt num_levels;
+   PetscInt num_levels, our_level;
+   pc_air_multigrid_data *pc_air_data;
+   gmres_poly_data *poly_data = NULL;
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PetscCheck(which_inverse == COEFFS_INV_AFF || which_inverse == COEFFS_INV_AFF_DROPPED || which_inverse == COEFFS_INV_ACC || which_inverse == COEFFS_INV_COARSE, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "Unknown which_inverse %d", which_inverse);
    // The number of levels is -1 before PCSetUp() and after the hierarchy is reset
-   PCAIRGetNumLevels_c(&pc, &num_levels);
+   PetscCall(PCAIRGetNumLevels(pc, &num_levels));
    PetscCheck(num_levels > 0, PETSC_COMM_SELF, PETSC_ERR_ORDER, "PCAIR has no multigrid hierarchy; call PCSetUp() first");
    PetscCheck(which_inverse == COEFFS_INV_COARSE || (petsc_level >= 0 && petsc_level < num_levels), PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "petsc_level %" PetscInt_FMT " out of range [0, %" PetscInt_FMT "]", petsc_level, num_levels - 1);
-   PCAIRGetPolyCoeffs_c(&pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size);
+
+   // The coefficients stored internally in the PC for the given level and inverse,
+   // or none (a NULL pointer with zero sizes) if the requested inverse is not stored
+   // as a polynomial on that level (e.g. COEFFS_INV_ACC when there is no C point smoothing)
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *coeffs_ptr = NULL;
+   *row_size = 0;
+   *col_size = 0;
+
+   // Coarsest grid matrix
+   if (which_inverse == COEFFS_INV_COARSE) {
+      poly_data = &pc_air_data->air_data.inv_coarsest_poly_data;
+
+   // Check the level is in range before indexing any of the level data
+   } else if (petsc_level >= 0 && petsc_level < num_levels) {
+
+      // We order our levels from 0 (the top grid) to num_levels - 1
+      our_level = num_levels - 1 - petsc_level;
+
+      // Inverse Aff
+      if (which_inverse == COEFFS_INV_AFF) {
+         if (pc_air_data->air_data.inv_A_ff_poly_data && our_level < pc_air_data->air_data.levels_size) {
+            poly_data = &pc_air_data->air_data.inv_A_ff_poly_data[our_level];
+         }
+      // Inverse dropped Aff
+      } else if (which_inverse == COEFFS_INV_AFF_DROPPED) {
+         if (pc_air_data->air_data.inv_A_ff_poly_data_dropped && our_level < pc_air_data->air_data.levels_size) {
+            poly_data = &pc_air_data->air_data.inv_A_ff_poly_data_dropped[our_level];
+         }
+      // Inverse Acc
+      } else if (which_inverse == COEFFS_INV_ACC) {
+         if (pc_air_data->air_data.inv_A_cc_poly_data && our_level < pc_air_data->air_data.levels_size) {
+            poly_data = &pc_air_data->air_data.inv_A_cc_poly_data[our_level];
+         }
+      }
+   }
+
+   if (poly_data && poly_data->coefficients) {
+      *coeffs_ptr = poly_data->coefficients;
+      *row_size = poly_data->coefficients_rows;
+      *col_size = poly_data->coefficients_cols;
+   }
    PetscCheck(*coeffs_ptr, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONG, "PCAIR stores no polynomial coefficients for which_inverse %d on petsc_level %" PetscInt_FMT "; that inverse is not built as a polynomial there with the current options", which_inverse, petsc_level);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -365,9 +356,12 @@ PETSC_EXTERN void remove_from_sparse_match(Mat input_mat, Mat output_mat,
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPrintStatsTimings(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetPrintStatsTimings_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.print_stats_timings;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -387,9 +381,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPrintStatsTimings(PC pc, PetscBool *input_bo
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLevels(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetMaxLevels_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.max_levels;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -409,9 +406,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMaxLevels(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarseEqLimit(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarseEqLimit_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.coarse_eq_limit;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -431,9 +431,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarseEqLimit(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateStartLevel(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetAutoTruncateStartLevel_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.auto_truncate_start_level;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -453,9 +456,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateStartLevel(PC pc, PetscInt *inpu
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateTol(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetAutoTruncateTol_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.auto_truncate_tol;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -475,9 +481,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateTol(PC pc, PetscReal *input_real
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetNumLevels(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetNumLevels_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.no_levels;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -497,9 +506,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetNumLevels(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglom(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetProcessorAgglom_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.processor_agglom;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -519,9 +531,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglom(PC pc, PetscBool *input_bool
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomRatio(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetProcessorAgglomRatio_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.processor_agglom_ratio;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -541,9 +556,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomRatio(PC pc, PetscReal *input
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomFactor(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetProcessorAgglomFactor_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.processor_agglom_factor;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -563,9 +581,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomFactor(PC pc, PetscInt *input
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetProcessEqLimit_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.process_eq_limit;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -585,9 +606,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetSubcomm_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.subcomm;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -607,9 +631,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetStrongThreshold_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.strong_threshold;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -629,9 +656,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC pc, PetscReal *input_real
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetDDCFraction_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.ddc_fraction;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -651,9 +681,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *cf_splitting_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCFSplittingType_c(&pc, cf_splitting_type);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *cf_splitting_type = pc_air_data->air_data.options.cf_splitting_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -673,9 +706,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *cf_s
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetDDCIts_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.ddc_its;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -695,9 +731,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetMaxLubySteps_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.max_luby_steps;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@C
@@ -721,9 +760,34 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt i, j, idx, n, absval;
+   char ch;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetSmoothType_c(&pc, input_string);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   // Each nonzero entry of smooth_order gives that many f (positive) or c
+   // (negative) characters, so the string has at most 10 characters
+   n = AIR_SMOOTH_ORDER_SIZE;
+   idx = 0;
+   for (i = 0; i < n; i++) {
+      if (pc_air_data->air_data.options.smooth_order[i] > 0) {
+         ch = 'f';
+         absval = pc_air_data->air_data.options.smooth_order[i];
+      } else if (pc_air_data->air_data.options.smooth_order[i] < 0) {
+         ch = 'c';
+         absval = -pc_air_data->air_data.options.smooth_order[i];
+      } else {
+         continue;
+      }
+      for (j = 0; j < absval; j++) {
+         input_string[idx] = ch;
+         idx = idx + 1;
+      }
+   }
+   // Null-terminate - only idx+1 characters are written
+   input_string[idx] = '\0';
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -746,9 +810,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetDiagScalePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   // Return the stored value, even if the inverse type is neumann
+   // Neumann polynomials always diagonally scale regardless of this flag,
+   // but it is still used by the other inverses (e.g., C point smoothing)
+   // and must survive a later change of inverse type
+   *input_bool = pc_air_data->air_data.options.diag_scale_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -768,9 +839,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetMatrixFreePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.matrix_free_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -790,9 +864,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetOnePointClassicalProlong(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetOnePointClassicalProlong_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.one_point_classical_prolong;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -812,9 +889,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetOnePointClassicalProlong(PC pc, PetscBool *i
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetFullSmoothingUpAndDown(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetFullSmoothingUpAndDown_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.full_smoothing_up_and_down;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -834,9 +914,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetFullSmoothingUpAndDown(PC pc, PetscBool *inp
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetSymmetric(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetSymmetric_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.symmetric;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -856,9 +939,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSymmetric(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetConstrainW(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetConstrainW_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.constrain_w;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -878,9 +964,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetConstrainW(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetConstrainZ(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetConstrainZ_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.constrain_z;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -900,9 +989,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetConstrainZ(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetImproveWIts(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetImproveWIts_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.improve_w_its;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -922,9 +1014,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetImproveWIts(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetImproveZIts(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetImproveZIts_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.improve_z_its;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -944,9 +1039,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetImproveZIts(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetStrongRThreshold_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.strong_r_threshold;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -966,9 +1064,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_rea
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetInverseType_c(&pc, inverse_type);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *inverse_type = pc_air_data->air_data.options.inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -988,9 +1089,17 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *inverse_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCInverseType_c(&pc, inverse_type);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   // If unset (-1) this defaults to the F point smoother value
+   if (pc_air_data->air_data.options.c_inverse_type == -1) {
+      *inverse_type = pc_air_data->air_data.options.inverse_type;
+   } else {
+      *inverse_type = (PCPFLAREINVType)pc_air_data->air_data.options.c_inverse_type;
+   }
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1010,9 +1119,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *inverse
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC pc, PCAIRZType *z_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetZType_c(&pc, z_type);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *z_type = pc_air_data->air_data.options.z_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1032,9 +1144,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC pc, PCAIRZType *z_type)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyOrder(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetPolyOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.poly_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1054,9 +1169,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPolyOrder(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetLairDistance(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetLairDistance_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.lair_distance;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1076,9 +1194,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetLairDistance(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseSparsityOrder(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetInverseSparsityOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.inverse_sparsity_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1098,9 +1219,17 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseSparsityOrder(PC pc, PetscInt *input_
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCPolyOrder(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCPolyOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   // If unset (-1) this defaults to the F point smoother value
+   if (pc_air_data->air_data.options.c_poly_order == -1) {
+      *input_int = pc_air_data->air_data.options.poly_order;
+   } else {
+      *input_int = pc_air_data->air_data.options.c_poly_order;
+   }
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1120,9 +1249,17 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCPolyOrder(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCInverseSparsityOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   // If unset (-1) this defaults to the F point smoother value
+   if (pc_air_data->air_data.options.c_inverse_sparsity_order == -1) {
+      *input_int = pc_air_data->air_data.options.inverse_sparsity_order;
+   } else {
+      *input_int = pc_air_data->air_data.options.c_inverse_sparsity_order;
+   }
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1142,9 +1279,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC pc, PCPFLAREINVType *inverse_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarsestInverseType_c(&pc, inverse_type);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *inverse_type = pc_air_data->air_data.options.coarsest_inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1164,9 +1304,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC pc, PCPFLAREINVType *
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestPolyOrder(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarsestPolyOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.coarsest_poly_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1186,9 +1329,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestPolyOrder(PC pc, PetscInt *input_int
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarsestInverseSparsityOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.coarsest_inverse_sparsity_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1208,9 +1354,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PC pc, PetscInt
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarsestMatrixFreePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.coarsest_matrix_free_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1230,9 +1379,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PC pc, PetscBool *in
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarsestDiagScalePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.coarsest_diag_scale_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1252,9 +1404,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC pc, PetscBool *inp
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestSubcomm(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCoarsestSubcomm_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.coarsest_subcomm;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1274,9 +1429,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestSubcomm(PC pc, PetscBool *input_bool
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetRDrop(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetRDrop_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.r_drop;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1296,9 +1454,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetRDrop(PC pc, PetscReal *input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetADrop(PC pc, PetscReal *input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetADrop_c(&pc, input_real);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_real = pc_air_data->air_data.options.a_drop;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1318,9 +1479,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetADrop(PC pc, PetscReal *input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetALump(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetALump_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.a_lump;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1340,9 +1504,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetALump(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetReuseSparsity_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.reuse_sparsity;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1362,9 +1529,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC pc, PetscBool *input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetReusePolyCoeffs_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_bool = pc_air_data->air_data.options.reuse_poly_coeffs;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@C
@@ -1425,9 +1595,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC pc, PetscInt petsc_level, int 
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC pc, PetscReal *complexity)
 {
+   PetscReal grid_c, op_c, cycle_c, storage_c, reuse_c;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetGridComplexity_c(&pc, complexity);
+   PetscCall(PCAIRGetComplexitiesInternal(pc, &grid_c, &op_c, &cycle_c, &storage_c, &reuse_c));
+   *complexity = grid_c;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1451,9 +1624,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC pc, PetscReal *complexity)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetOperatorComplexity(PC pc, PetscReal *complexity)
 {
+   PetscReal grid_c, op_c, cycle_c, storage_c, reuse_c;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetOperatorComplexity_c(&pc, complexity);
+   PetscCall(PCAIRGetComplexitiesInternal(pc, &grid_c, &op_c, &cycle_c, &storage_c, &reuse_c));
+   *complexity = op_c;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1477,9 +1653,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetOperatorComplexity(PC pc, PetscReal *complex
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetCycleComplexity(PC pc, PetscReal *complexity)
 {
+   PetscReal grid_c, op_c, cycle_c, storage_c, reuse_c;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetCycleComplexity_c(&pc, complexity);
+   PetscCall(PCAIRGetComplexitiesInternal(pc, &grid_c, &op_c, &cycle_c, &storage_c, &reuse_c));
+   *complexity = cycle_c;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1503,9 +1682,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCycleComplexity(PC pc, PetscReal *complexity
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetStorageComplexity(PC pc, PetscReal *complexity)
 {
+   PetscReal grid_c, op_c, cycle_c, storage_c, reuse_c;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetStorageComplexity_c(&pc, complexity);
+   PetscCall(PCAIRGetComplexitiesInternal(pc, &grid_c, &op_c, &cycle_c, &storage_c, &reuse_c));
+   *complexity = storage_c;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1529,9 +1711,12 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStorageComplexity(PC pc, PetscReal *complexi
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseStorageComplexity(PC pc, PetscReal *complexity)
 {
+   PetscReal grid_c, op_c, cycle_c, storage_c, reuse_c;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetReuseStorageComplexity_c(&pc, complexity);
+   PetscCall(PCAIRGetComplexitiesInternal(pc, &grid_c, &op_c, &cycle_c, &storage_c, &reuse_c));
+   *complexity = reuse_c;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1558,10 +1743,13 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseStorageComplexity(PC pc, PetscReal *com
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPrintStatsTimings(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    // No need to reset if this changes
-   PCAIRSetPrintStatsTimings_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   pc_air_data->air_data.options.print_stats_timings = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1588,9 +1776,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPrintStatsTimings(PC pc, PetscBool input_boo
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLevels(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetMaxLevels_c(&pc, input_int);
+   PetscCall(PCAIRGetMaxLevels(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.max_levels = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1616,9 +1812,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLevels(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarseEqLimit(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCoarseEqLimit_c(&pc, input_int);
+   PetscCall(PCAIRGetCoarseEqLimit(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.coarse_eq_limit = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1642,9 +1846,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarseEqLimit(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetAutoTruncateStartLevel(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetAutoTruncateStartLevel_c(&pc, input_int);
+   PetscCall(PCAIRGetAutoTruncateStartLevel(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.auto_truncate_start_level = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1670,9 +1882,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetAutoTruncateStartLevel(PC pc, PetscInt input
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetAutoTruncateTol(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetAutoTruncateTol_c(&pc, input_real);
+   PetscCall(PCAIRGetAutoTruncateTol(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.auto_truncate_tol = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1699,9 +1919,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetAutoTruncateTol(PC pc, PetscReal input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglom(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetProcessorAgglom_c(&pc, input_bool);
+   PetscCall(PCAIRGetProcessorAgglom(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.processor_agglom = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1727,9 +1955,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglom(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomRatio(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetProcessorAgglomRatio_c(&pc, input_real);
+   PetscCall(PCAIRGetProcessorAgglomRatio(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.processor_agglom_ratio = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1755,9 +1991,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomRatio(PC pc, PetscReal input_
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomFactor(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetProcessorAgglomFactor_c(&pc, input_int);
+   PetscCall(PCAIRGetProcessorAgglomFactor(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.processor_agglom_factor = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1783,9 +2027,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomFactor(PC pc, PetscInt input_
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetProcessEqLimit_c(&pc, input_int);
+   PetscCall(PCAIRGetProcessEqLimit(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.process_eq_limit = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1812,10 +2064,13 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    // No need to reset if this changes
-   PCAIRSetSubcomm_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   pc_air_data->air_data.options.subcomm = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1844,9 +2099,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetStrongThreshold_c(&pc, input_real);
+   PetscCall(PCAIRGetStrongThreshold(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.strong_threshold = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1870,9 +2133,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongThreshold(PC pc, PetscReal input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetDDCIts_c(&pc, input_int);
+   PetscCall(PCAIRGetDDCIts(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.ddc_its = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1896,9 +2167,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetDDCFraction_c(&pc, input_real);
+   PetscCall(PCAIRGetDDCFraction(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.ddc_fraction = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1928,9 +2207,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType(PC pc, CFSplittingType cf_splitting_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+   CFSplittingType old_type;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCFSplittingType_c(&pc, cf_splitting_type);
+   PetscCall(PCAIRGetCFSplittingType(pc, &old_type));
+   if (old_type == cf_splitting_type) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.cf_splitting_type = cf_splitting_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1956,9 +2243,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCFSplittingType(PC pc, CFSplittingType cf_sp
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetMaxLubySteps_c(&pc, input_int);
+   PetscCall(PCAIRGetMaxLubySteps(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.max_luby_steps = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@C
@@ -1984,11 +2279,53 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLubySteps(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 {
+   pc_air_multigrid_data *pc_air_data;
+   char old_string[PETSC_MAX_PATH_LEN], current_char, old_char;
+   PetscInt smooth_order_index, i, n, old_n;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   // The Fortran side only stores (and reads) at most 10 characters
-   PetscCheck(strlen(input_string) <= 10, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Smooth type %s has %d characters, at most 10 are supported", input_string, (int)strlen(input_string));
-   PCAIRSetSmoothType_c(&pc, input_string);
+   // Each block of consecutive f or c characters takes one entry of smooth_order,
+   // so limit the length to the size of smooth_order
+   PetscCheck(strlen(input_string) <= AIR_SMOOTH_ORDER_SIZE, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Smooth type %s has %d characters, at most 10 are supported", input_string, (int)strlen(input_string));
+
+   // The length without any trailing blanks, which are ignored
+   n = (PetscInt)strlen(input_string);
+   while (n > 0 && input_string[n - 1] == ' ') n--;
+
+   PetscCall(PCAIRGetSmoothType(pc, old_string));
+   old_n = (PetscInt)strlen(old_string);
+   if (old_n == n && strncmp(old_string, input_string, (size_t)n) == 0) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+
+   PetscCheck(n != 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Smooth order must be non-zero length");
+
+   old_char = '0';
+   smooth_order_index = 0;
+   for (i = 0; i < AIR_SMOOTH_ORDER_SIZE; i++) pc_air_data->air_data.options.smooth_order[i] = 0;
+   pc_air_data->air_data.options.any_c_smooths = PETSC_FALSE;
+   for (i = 0; i < n; i++) {
+      current_char = input_string[i];
+      if (current_char != old_char && i != 0) {
+         smooth_order_index = smooth_order_index + 1;
+      }
+      switch (current_char) {
+         case 'f':
+         case 'F':
+            pc_air_data->air_data.options.smooth_order[smooth_order_index] = pc_air_data->air_data.options.smooth_order[smooth_order_index] + 1;
+            break;
+         case 'c':
+         case 'C':
+            pc_air_data->air_data.options.smooth_order[smooth_order_index] = pc_air_data->air_data.options.smooth_order[smooth_order_index] - 1;
+            pc_air_data->air_data.options.any_c_smooths = PETSC_TRUE;
+            break;
+         default:
+            SETERRQ(PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Smooth order must be only f or c characters");
+      }
+      old_char = current_char;
+   }
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2015,9 +2352,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSmoothType(PC pc, const char* input_string)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDiagScalePolys(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetDiagScalePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetDiagScalePolys(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.diag_scale_polys = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2043,9 +2388,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDiagScalePolys(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetMatrixFreePolys(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetMatrixFreePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetMatrixFreePolys(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.matrix_free_polys = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2070,9 +2423,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMatrixFreePolys(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetOnePointClassicalProlong(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetOnePointClassicalProlong_c(&pc, input_bool);
+   PetscCall(PCAIRGetOnePointClassicalProlong(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.one_point_classical_prolong = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2098,9 +2459,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetOnePointClassicalProlong(PC pc, PetscBool in
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetFullSmoothingUpAndDown(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetFullSmoothingUpAndDown_c(&pc, input_bool);
+   PetscCall(PCAIRGetFullSmoothingUpAndDown(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.full_smoothing_up_and_down = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2126,9 +2495,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetFullSmoothingUpAndDown(PC pc, PetscBool inpu
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetSymmetric(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetSymmetric_c(&pc, input_bool);
+   PetscCall(PCAIRGetSymmetric(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.symmetric = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2153,9 +2530,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSymmetric(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetConstrainW(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetConstrainW_c(&pc, input_bool);
+   PetscCall(PCAIRGetConstrainW(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.constrain_w = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2180,9 +2565,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetConstrainW(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetConstrainZ(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetConstrainZ_c(&pc, input_bool);
+   PetscCall(PCAIRGetConstrainZ(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.constrain_z = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2206,9 +2599,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetConstrainZ(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetImproveWIts(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetImproveWIts_c(&pc, input_int);
+   PetscCall(PCAIRGetImproveWIts(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.improve_w_its = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2232,9 +2633,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetImproveWIts(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetImproveZIts(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetImproveZIts_c(&pc, input_int);
+   PetscCall(PCAIRGetImproveZIts(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.improve_z_its = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2260,9 +2669,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetImproveZIts(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetStrongRThreshold_c(&pc, input_real);
+   PetscCall(PCAIRGetStrongRThreshold(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.strong_r_threshold = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2287,9 +2704,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType inverse_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PCPFLAREINVType old_type;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetInverseType_c(&pc, inverse_type);
+   PetscCall(PCAIRGetInverseType(pc, &old_type));
+   if (old_type == inverse_type) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.inverse_type = inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2315,9 +2740,23 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType inverse_t
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType inverse_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PCPFLAREINVType old_type;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCInverseType_c(&pc, inverse_type);
+   PetscCall(PCAIRGetCInverseType(pc, &old_type));
+   if (old_type == inverse_type) {
+      // Still record the value as explicitly set, so it no longer
+      // follows the F point smoother value, but no reset is needed
+      PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+      pc_air_data->air_data.options.c_inverse_type = (int)inverse_type;
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.c_inverse_type = (int)inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2342,9 +2781,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType inverse_
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetZType(PC pc, PCAIRZType z_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PCAIRZType old_type;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetZType_c(&pc, z_type);
+   PetscCall(PCAIRGetZType(pc, &old_type));
+   if (old_type == z_type) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.z_type = z_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2370,9 +2817,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetZType(PC pc, PCAIRZType z_type)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetLairDistance(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetLairDistance_c(&pc, input_int);
+   PetscCall(PCAIRGetLairDistance(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.lair_distance = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2398,9 +2853,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetLairDistance(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetPolyOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetPolyOrder(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.poly_order = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2425,9 +2888,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetInverseSparsityOrder(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetInverseSparsityOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetInverseSparsityOrder(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.inverse_sparsity_order = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2453,9 +2924,23 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseSparsityOrder(PC pc, PetscInt input_i
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCPolyOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetCPolyOrder(pc, &old_int));
+   if (old_int == input_int) {
+      // Still record the value as explicitly set, so it no longer
+      // follows the F point smoother value, but no reset is needed
+      PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+      pc_air_data->air_data.options.c_poly_order = input_int;
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.c_poly_order = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2481,9 +2966,23 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCInverseSparsityOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetCInverseSparsityOrder(pc, &old_int));
+   if (old_int == input_int) {
+      // Still record the value as explicitly set, so it no longer
+      // follows the F point smoother value, but no reset is needed
+      PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+      pc_air_data->air_data.options.c_inverse_sparsity_order = input_int;
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.c_inverse_sparsity_order = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2508,9 +3007,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseType(PC pc, PCPFLAREINVType inverse_type)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PCPFLAREINVType old_type;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCoarsestInverseType_c(&pc, inverse_type);
+   PetscCall(PCAIRGetCoarsestInverseType(pc, &old_type));
+   if (old_type == inverse_type) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.coarsest_inverse_type = inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2535,9 +3042,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseType(PC pc, PCPFLAREINVType i
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCoarsestPolyOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetCoarsestPolyOrder(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.coarsest_poly_order = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2563,9 +3078,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC pc, PetscInt input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCoarsestInverseSparsityOrder_c(&pc, input_int);
+   PetscCall(PCAIRGetCoarsestInverseSparsityOrder(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.coarsest_inverse_sparsity_order = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2591,9 +3114,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PC pc, PetscInt
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCoarsestMatrixFreePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetCoarsestMatrixFreePolys(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.coarsest_matrix_free_polys = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2618,9 +3149,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PC pc, PetscBool inp
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetCoarsestDiagScalePolys_c(&pc, input_bool);
+   PetscCall(PCAIRGetCoarsestDiagScalePolys(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.coarsest_diag_scale_polys = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2646,10 +3185,13 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PC pc, PetscBool inpu
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestSubcomm(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    // No need to reset if this changes
-   PCAIRSetCoarsestSubcomm_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   pc_air_data->air_data.options.coarsest_subcomm = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2675,9 +3217,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestSubcomm(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetRDrop(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetRDrop_c(&pc, input_real);
+   PetscCall(PCAIRGetRDrop(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.r_drop = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2704,9 +3254,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetRDrop(PC pc, PetscReal input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetADrop(PC pc, PetscReal input_real)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscReal old_real;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetADrop_c(&pc, input_real);
+   PetscCall(PCAIRGetADrop(pc, &old_real));
+   if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.a_drop = input_real;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2731,9 +3289,17 @@ PETSC_EXTERN PetscErrorCode PCAIRSetADrop(PC pc, PetscReal input_real)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscBool old_bool;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetALump_c(&pc, input_bool);
+   PetscCall(PCAIRGetALump(pc, &old_bool));
+   if (old_bool == input_bool) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.a_lump = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2756,11 +3322,14 @@ PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC pc, PetscBool input_bool)
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReuseSparsity()`, `PCAIRSetReusePolyCoeffs()`, `PCAIRSetReuseAmount()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
-{  
-   PetscFunctionBegin; 
+{
+   pc_air_multigrid_data *pc_air_data;
+
+   PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetReuseSparsity_c(&pc, input_bool);
-   PetscFunctionReturn(PETSC_SUCCESS); 
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   pc_air_data->air_data.options.reuse_sparsity = input_bool;
+   PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
   PCAIRSetReusePolyCoeffs - Sets whether `PCAIR` also reuses the GMRES polynomial coefficients when reusing the sparsity of the hierarchy
@@ -2784,9 +3353,12 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRSetReusePolyCoeffs_c(&pc, input_bool);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   pc_air_data->air_data.options.reuse_poly_coeffs = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2806,9 +3378,12 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PCAIRGetReuseAmount_c(&pc, input_int);
+   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   *input_int = pc_air_data->air_data.options.reuse_amount;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2834,11 +3409,19 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 {
+   pc_air_multigrid_data *pc_air_data;
+   PetscInt old_int;
+
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   // The amount indexes the reuse tables in AIR_Data_Type.F90 so must be 1, 2 or 3
+   // The amount indexes the reuse tables in pflareimpl.h so must be 1, 2 or 3
    PetscCheck(input_int >= 1 && input_int <= 3, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Reuse amount %" PetscInt_FMT " must be 1, 2 or 3", input_int);
-   PCAIRSetReuseAmount_c(&pc, input_int);
+   PetscCall(PCAIRGetReuseAmount(pc, &old_int));
+   if (old_int == input_int) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Reset the hierarchy and mark the PC as not set up
+   PetscCall(PCAIRResetHierarchy_Private(pc, &pc_air_data));
+   pc_air_data->air_data.options.reuse_amount = input_int;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@C
@@ -3706,10 +4289,6 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
 {
    PetscFunctionBegin;
 
-   // Now we call petsc fortran routines from this PC
-   // so we have to have made sure this is called
-   PetscCall(PetscInitializeFortran());
-      
    // This is annoying, as our PCAIR type is just a wrapper
    // around a PCShell that implements everything
    // I tried to just write a PCAIR that called (basically) the 
@@ -3718,7 +4297,9 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
    // into the pc->data pointer (given name mangling etc)
    // So instead that is just defined as the context in a pcshell
    // and PCShellSetContext/PCShellGetContext handles everything
-   void *pc_air_data;
+   // (the context is now the C pc_air_multigrid_data, the shell is removed in
+   // a later stage of docs/dev/fortran_removal_plan.md)
+   pc_air_multigrid_data *pc_air_data;
    PC *pc_air_shell;
    // Create a pointer on the heap
    PetscCall(PetscNew(&pc_air_shell));
@@ -3729,10 +4310,10 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
    PetscCall(PCCreate(comm, pc_air_shell));
 
    // Create the memory for our pc_air_data which holds all the air data
-   create_pc_air_data_c(&pc_air_data);
+   PetscCall(create_pc_air_data_c(&pc_air_data));
    // The type and rest of the creation of the pcshell
    // is done in here
-   create_pc_air_shell_c(&pc_air_data, pc_air_shell);
+   PetscCall(create_pc_air_shell_c(&pc_air_data, pc_air_shell));
    // Set the pc data
    pc->data = (void*)pc_air_shell;
 
@@ -3757,6 +4338,9 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
 PETSC_EXTERN void PCRegister_AIR()
 {
    PetscCallVoid(PCRegister("air", PCCreate_AIR));
+#if defined(PFLARE_PORT_DEBUG)
+   PCRegister_AIR_fref();
+#endif
 }
 
 // This is called automatically when libpflare is loaded by 

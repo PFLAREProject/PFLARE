@@ -24,7 +24,7 @@ static char help[] = "Compares PCPFLAREINV and the approximate inverses against 
      polynomial type, assembled and matrix-free, with and without diagonal scaling
      and with and without the subcomm, this builds the inverse with
      calculate_and_build_approximate_inverse_c (PCPFLAREINV.c, the C port) and
-     calculate_and_build_approximate_inverse_c_fref (C_Fortran_Bindings.F90, the
+     calculate_and_build_approximate_inverse_c_fref (src/fref/C_Fortran_Bindings.F90, the
      Fortran reference) and checks the coefficients and the inverse as above, with
      the matrix-free inverses compared through MatMult, MatMultTranspose and the
      block apply (pflareinv_shell_block_matapply_c and its _fref).
@@ -48,7 +48,7 @@ static char help[] = "Compares PCPFLAREINV and the approximate inverses against 
 #include "pflare.h"
 
 // The C entry points of the C port in PCPFLAREINV.c and of the Fortran reference in
-// C_Fortran_Bindings.F90 (only built with PFLARE_PORT_DEBUG=1). The int arguments
+// src/fref/C_Fortran_Bindings.F90 (only built with PFLARE_PORT_DEBUG=1). The int arguments
 // are 1 for true
 PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int inverse_type, int order,
    int sparsity_order, int matrix_free_int, int diag_scale_polys_int, int subcomm_int,

@@ -19,4 +19,11 @@ PETSC_INTERN PetscErrorCode PCDestroy_AIR_Shell(PC pc);
 PETSC_INTERN PetscErrorCode PCReset_AIR_Shell(PC pc);
 PETSC_INTERN PetscErrorCode PCView_AIR_Shell(PC pc, PetscViewer viewer);
 
+// The entry points src/PCAIR.c used to reach through C_Fortran_Bindings.F90
+PETSC_INTERN PetscErrorCode create_pc_air_data_c(pc_air_multigrid_data **pc_air_data);
+PETSC_INTERN PetscErrorCode PCReset_AIR_Shell_c(PC *pc);
+PETSC_INTERN PetscErrorCode create_pc_air_shell_c(pc_air_multigrid_data **pc_air_data, PC *pc);
+PETSC_INTERN PetscErrorCode pcair_shell_get_pcmg_c(PC *pc, PC *pcmg);
+PETSC_INTERN PetscErrorCode pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied);
+
 #endif

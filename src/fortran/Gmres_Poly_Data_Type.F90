@@ -3,9 +3,9 @@ module gmres_poly_data_type
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! The gmres polynomial data is the C struct gmres_poly_data in src/pflareimpl.h
-   ! (see docs/dev/fortran_removal_plan.md). Until the AIR hierarchy is ported, the
-   ! Fortran air_multigrid_data holds these, so the Fortran type here is a bind(C)
-   ! mirror of the C struct: the same memory is read and written by both languages
+   ! (see docs/dev/fortran_removal_plan.md). The Fortran reference of the AIR hierarchy
+   ! in src/fref (PFLARE_PORT_DEBUG only) holds these, so the Fortran type here is a
+   ! bind(C) mirror of the C struct: the same memory is read and written by both languages
    ! The two definitions must stay in step - the same fields, in the same order,
    ! with the same types
    ! The coefficients are column-major (coefficients_rows x coefficients_cols),

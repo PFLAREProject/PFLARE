@@ -1,6 +1,6 @@
 '''
 Tests the direct Python API for PCAIR get/set option functions introduced in
-pflare.py (backed by PCAIR_C_Fortran_Bindings.F90).
+pflare.py (backed by the C get/set routines in src/PCAIR.c).
 
 Three checks are performed:
   1. Round-trip: set a value via the direct API, get it back, verify it matches.

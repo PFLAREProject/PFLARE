@@ -48,8 +48,8 @@ typedef struct {
 // ~~~~~~~~
 // Stores the data needed for gmres polynomials (Gmres_Poly_Data_Type.c,
 // gmres_poly_data in Gmres_Poly_Data_Type.F90)
-// Until the AIR hierarchy is ported (stage 7 of docs/dev/fortran_removal_plan.md)
-// the Fortran air_multigrid_data holds these, through the bind(C) Fortran type
+// air_multigrid_data below holds these. The Fortran reference of the AIR hierarchy
+// in src/fref (PFLARE_PORT_DEBUG only) holds them through the bind(C) Fortran type
 // gmres_poly_data in src/fortran/Gmres_Poly_Data_Type.F90, which reads and writes
 // this same memory: the two definitions must stay in step (the same fields, in the
 // same order, with the same types)

@@ -7,10 +7,10 @@
   The slots of mf_temp_vec and mf_temp_mat are the 0-based MF_VEC_* and
   MF_MAT_* of pflareimpl.h
 
-  The three accessors at the end are for the Fortran that is still to be
-  ported (AIR_MG_Setup.F90 and the FC smoothers), which used to allocate the
-  context of its level matshells and read our_level and air_data from it
-  directly
+  The three accessors at the end are for the reference Fortran in src/fref
+  (AIR_MG_Setup.F90 and the FC smoothers), which used to allocate the context of
+  its level matshells and read our_level and air_data from it directly, so they
+  are only built with PFLARE_PORT_DEBUG
 */
 
 #include <petscmat.h>
@@ -226,8 +226,9 @@ PETSC_INTERN PetscErrorCode ensure_block_kernel_products(mat_ctxtype *mat_ctx, P
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+#if defined(PFLARE_PORT_DEBUG)
 // -------------------------------------------------------------------------------------------------------------------------------
-// The accessors for the Fortran that is still to be ported
+// The accessors for the reference Fortran in src/fref
 // -------------------------------------------------------------------------------------------------------------------------------
 
 PETSC_INTERN PetscErrorCode mat_ctx_create_shell(Mat comm_mat, PetscInt local_rows, PetscInt local_cols, PetscInt global_rows, PetscInt global_cols,
@@ -292,3 +293,4 @@ PETSC_INTERN PetscErrorCode mat_ctx_get_air_data(Mat mat, void **air_data)
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+#endif

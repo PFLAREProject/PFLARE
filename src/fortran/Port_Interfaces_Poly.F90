@@ -60,7 +60,12 @@ module port_interfaces_poly
    public :: shell_poly_block_apply, petsc_matvec_poly_newton_residual_mf, &
          petsc_matvec_right_scale_poly_newton_residual_mf
    ! Matshell_Data_Type.c
-   public :: attach_mat_product, mat_ctx_create_shell, mat_ctx_get_our_level, mat_ctx_get_air_data
+   public :: attach_mat_product
+#if defined(PFLARE_PORT_DEBUG)
+   ! The matshell context accessors are only used by the Fortran reference
+   ! implementations in src/fref, so they are only built with PFLARE_PORT_DEBUG
+   public :: mat_ctx_create_shell, mat_ctx_get_our_level, mat_ctx_get_air_data
+#endif
 
 #if defined(PFLARE_PORT_DEBUG)
    ! The gmres_poly_data whose coefficients a start_approximate_inverse has started,
@@ -242,6 +247,7 @@ module port_interfaces_poly
       end function attach_mat_product_c
    end interface
 
+#if defined(PFLARE_PORT_DEBUG)
    interface
       function mat_ctx_create_shell_c(comm_mat, local_rows, local_cols, global_rows, global_cols, &
                   our_level, air_data, mat) &
@@ -275,6 +281,7 @@ module port_interfaces_poly
          PetscErrorCode :: mat_ctx_get_air_data_c
       end function mat_ctx_get_air_data_c
    end interface
+#endif
 
    contains
 
@@ -917,6 +924,7 @@ module port_interfaces_poly
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+#if defined(PFLARE_PORT_DEBUG)
    subroutine mat_ctx_create_shell(comm_mat, local_rows, local_cols, global_rows, global_cols, &
                   our_level, air_data, mat)
 
@@ -981,6 +989,7 @@ module port_interfaces_poly
       call port_check(ierr, "mat_ctx_get_air_data")
 
    end subroutine mat_ctx_get_air_data
+#endif
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

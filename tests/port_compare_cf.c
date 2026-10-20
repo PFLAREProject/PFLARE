@@ -9,7 +9,7 @@ static char help[] = "Compares the CF splittings against their Fortran reference
   For every CFSplittingType and both values of skip_symmetrize (plus a few
   variants of the PMISR DDC options), this computes the CF splitting with the
   public compute_cf_splitting, which calls the C port, and with the Fortran
-  reference through compute_cf_splitting_c_fref (C_Fortran_Bindings.F90), and
+  reference through compute_cf_splitting_c_fref (src/fref/C_Fortran_Bindings.F90), and
   checks the fine and coarse ISs are the same. It then compares the matrix from
   compute_diag_dom_submatrix against compute_diag_dom_submatrix_c_fref row by row
   (global columns and bitwise values). Any difference is an error.
@@ -33,7 +33,7 @@ static char help[] = "Compares the CF splittings against their Fortran reference
 #include <petscdmda.h>
 #include "pflare.h"
 
-// The C bindings of the Fortran reference implementations in C_Fortran_Bindings.F90
+// The C bindings of the Fortran reference implementations in src/fref/C_Fortran_Bindings.F90
 // (only built with PFLARE_PORT_DEBUG=1)
 PETSC_EXTERN void compute_cf_splitting_c_fref(Mat *input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,

@@ -5,12 +5,17 @@
   of pflareimpl.h, and the setup reads the structure flag and whether the setup
   has been called straight from the PC (pc->flag, pc->setupcalled), which the
   Fortran got through C helpers
+  The entry points PCAIR.c used to reach through C_Fortran_Bindings.F90 (module
+  c_fortran_bindings) are at the end, with the same names and arguments, returning
+  a PetscErrorCode
 */
 
 #include <petsc/private/pcimpl.h>
 #include "pflareimpl.h"
 #include "AIR_MG_Setup.h"
 #include "AIR_Data_Type_Routines.h"
+#include "PCAIR_Data_Type.h"
+#include "FC_Smooth_Block.h"
 #include "PCAIR_Shell.h"
 
 // -------------------------------------------------------------------------------------------------------------------------------
@@ -257,6 +262,107 @@ PETSC_INTERN PetscErrorCode PCView_AIR_Shell(PC pc, PetscViewer viewer)
    PetscCall(PCShellGetContext(pc, &pc_air_data));
    // Just call the pcmg view
    PetscCall(PCView(pc_air_data->pcmg, viewer));
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// -------------------------------------------------------------------------------------------------------------------------------
+// The entry points src/PCAIR.c used to reach through C_Fortran_Bindings.F90
+// -------------------------------------------------------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN PetscErrorCode create_pc_air_data_c(pc_air_multigrid_data **pc_air_data)
+{
+   // Creates an air_data object, calls setup and returns a C pointer
+
+   PetscFunctionBegin;
+
+   PetscCall(create_pc_air_multigrid_data(pc_air_data));
+   PetscCall(create_air_data(&(*pc_air_data)->air_data));
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN PetscErrorCode PCReset_AIR_Shell_c(PC *pc)
+{
+   // Calls the reset of our shell PC
+
+   PetscFunctionBegin;
+
+   // Call the destroy routine
+   PetscCall(PCReset_AIR_Shell(*pc));
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN PetscErrorCode create_pc_air_shell_c(pc_air_multigrid_data **pc_air_data, PC *pc)
+{
+   // Calls the setup routine for air and makes pc the PC Shell
+   // pc_air_data should have been created by create_pc_air_data_c
+
+   PetscFunctionBegin;
+
+   // Call the setup routine
+   PetscCall(create_pc_air_shell(*pc_air_data, *pc));
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN PetscErrorCode pcair_shell_get_pcmg_c(PC *pc, PC *pcmg)
+{
+   // Returns the PCMG underneath our PCShell
+
+   // ~~~~~~~~
+   pc_air_multigrid_data *pc_air_data = NULL;
+   // ~~~~~~~~
+
+   PetscFunctionBegin;
+
+   PetscCall(PCShellGetContext(*pc, &pc_air_data));
+   *pcmg = pc_air_data->pcmg;
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN PetscErrorCode pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied)
+{
+   // Applies the air multigrid to a whole dense block of right hand sides
+   // The pc handed in is our underlying PCShell (which must already have been
+   // set up, as this doesn't go through PCApply on the shell)
+   // applied comes back as 0 if we couldn't do a block apply, in which case
+   // the caller has to apply column by column instead
+   // Any petsc error is returned, where the Fortran handed it back in an argument
+
+   // ~~~~~~~~
+   pc_air_multigrid_data *pc_air_data = NULL;
+   // ~~~~~~~~
+
+   PetscFunctionBegin;
+
+   *applied = 0;
+   PetscCall(PCShellGetContext(*pc, &pc_air_data));
+
+   // Defensive - the hierarchy hasn't been built so we have nothing to apply
+   if (pc_air_data->air_data.no_levels == -1) PetscFunctionReturn(PETSC_SUCCESS);
+   if (!pc_air_data->pcmg) PetscFunctionReturn(PETSC_SUCCESS);
+
+   // Build the dense scratch the block smooths need - we only know the number
+   // of columns (and the type of block) once we get here
+   PetscCall(ensure_air_block_temps(&pc_air_data->air_data, *X));
+
+   // PCMG (or the single level PCMAT/PCJACOBI) does the rest
+   PetscCall(PCMatApply(pc_air_data->pcmg, *X, *Y));
+
+   *applied = 1;
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }

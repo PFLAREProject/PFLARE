@@ -1,0 +1,2814 @@
+module pcair_interfaces_fref
+
+   use iso_c_binding
+   use petscksp
+   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
+   use air_mg_stats, only: compute_stats
+   use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
+   use gmres_poly_data_type, only: poly_coeffs
+
+#include "petsc/finclude/petscksp.h"
+#include "finclude/pflare_types.h"
+
+   implicit none
+
+   public
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+   ! -------------------------------------------------------------------------------------------------------------------------------
+   ! Contains Fortran interfaces to the PCAIR options 
+   ! Only built with PFLARE_PORT_DEBUG=1: this is src/fortran/PCAIR_Interfaces.F90 as it
+   ! was before the AIR hierarchy was ported to C, reaching into the reference Fortran
+   ! of src/fref for the reference PC type air_fref (src/fref/PCAIR_fref.c)
+   ! -------------------------------------------------------------------------------------------------------------------------------
+   ! -------------------------------------------------------------------------------------------------------------------------------      
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Get routines - interfaces to the C routines in PCAIR
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   interface   
+      
+      function c_PCAIRGetPCShell(A_array, B_array) &
+         bind(c, name="c_PCAIRGetPCShell_fref")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+         PetscErrorCode       :: c_PCAIRGetPCShell
+      end function c_PCAIRGetPCShell         
+ 
+   end interface   
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Set routines - interfaces to the C routines in PCAIR
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   ! ~~~~~~~~~~~~~~~~
+
+   contains
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Get routines - Fortran versions of the C routines in PCAIR
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPCShell(pc, pc_shell) 
+
+      ! Gets the PCShell that lives in our PCAIR
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout) :: pc, pc_shell
+
+      integer(c_long_long) :: pc_ptr, pc_shell_ptr
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc_ptr = pc%v
+
+      ! Call the c routine - this can't fail
+      ierr = c_PCAIRGetPCShell(pc_ptr, pc_shell_ptr)
+      pc_shell%v = pc_shell_ptr
+
+   end subroutine PCAIRGetPCShell
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOptions(pc, options) 
+
+      ! Gets the air options that lives in our PCAIR
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                  :: pc
+      type(air_options), pointer, intent(inout) :: options
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+      
+      ! Return the options
+      options => pc_air_data%air_data%options
+
+   end subroutine PCAIRGetOptions
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOptionsAndShell(pc, options, pc_shell) 
+
+      ! Gets the air options and PCSHELL that lives in our PCAIR
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                  :: pc
+      type(air_options), pointer, intent(inout) :: options
+      type(tPC), intent(inout)                    :: pc_shell
+
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+      
+      ! Return the options
+      options => pc_air_data%air_data%options
+
+   end subroutine PCAIRGetOptionsAndShell    
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPrintStatsTimings(pc, print_stats, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: print_stats
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      print_stats = options%print_stats_timings
+      ierr = 0
+
+   end subroutine PCAIRGetPrintStatsTimings   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetMaxLevels(pc, max_levels, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: max_levels
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      max_levels = options%max_levels
+      ierr = 0
+
+   end subroutine PCAIRGetMaxLevels
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarseEqLimit(pc, coarse_eq_limit, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: coarse_eq_limit
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      coarse_eq_limit = options%coarse_eq_limit
+      ierr = 0
+
+   end subroutine PCAIRGetCoarseEqLimit   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetAutoTruncateStartLevel(pc, start_level, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: start_level
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      start_level = options%auto_truncate_start_level
+      ierr = 0
+
+   end subroutine PCAIRGetAutoTruncateStartLevel   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetAutoTruncateTol(pc, tol, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: tol
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      tol = options%auto_truncate_tol
+      ierr = 0
+
+   end subroutine PCAIRGetAutoTruncateTol   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetNumLevels(pc, num_levels, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: num_levels
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      ! ~~~~~~~~
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+  
+      num_levels = pc_air_data%air_data%no_levels
+      ierr = 0
+
+   end subroutine PCAIRGetNumLevels
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetComplexitiesInternal(pc, grid_complx, op_complx, cycle_complx, &
+                                            storage_complx, reuse_storage_complx, ierr)
+
+      ! Retrieve all 5 AIR multigrid complexities for a PCAIR preconditioner.
+      ! Returns -1.0 for all values if PCSetUp has not yet been called (detected
+      ! via no_levels == -1).  Otherwise calls compute_stats, which performs the
+      ! necessary parallel reductions.
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: grid_complx, op_complx, cycle_complx
+      PetscReal, intent(out)        :: storage_complx, reuse_storage_complx
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      ! ~~~~~~~~
+
+      call PCAIRGetPCShell(pc, pc_shell)
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+
+      if (pc_air_data%air_data%no_levels == -1) then
+         grid_complx          = -1.0d0
+         op_complx            = -1.0d0
+         cycle_complx         = -1.0d0
+         storage_complx       = -1.0d0
+         reuse_storage_complx = -1.0d0
+         ierr = 0
+         return
+      end if
+
+      call compute_stats(pc_air_data%air_data, pc_air_data%pcmg, &
+                         grid_complx, op_complx, cycle_complx, &
+                         storage_complx, reuse_storage_complx)
+      ierr = 0
+
+   end subroutine PCAIRGetComplexitiesInternal
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetGridComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = grid_c
+
+   end subroutine PCAIRGetGridComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOperatorComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = op_c
+
+   end subroutine PCAIRGetOperatorComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCycleComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = cycle_c
+
+   end subroutine PCAIRGetCycleComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetStorageComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = storage_c
+
+   end subroutine PCAIRGetStorageComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseStorageComplexity(pc, complexity, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: complexity
+      PetscErrorCode, intent(out)   :: ierr
+
+      PetscReal :: grid_c, op_c, cycle_c, storage_c, reuse_c
+      ! ~~~~~~~~
+
+      call PCAIRGetComplexitiesInternal(pc, grid_c, op_c, cycle_c, storage_c, reuse_c, ierr)
+      complexity = reuse_c
+
+   end subroutine PCAIRGetReuseStorageComplexity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
+
+      ! Returns a pointer to the polynomial coefficients stored internally in the PC
+      ! for the given level and inverse, or a null pointer if there are none. That is
+      ! the case if which_inverse is unknown, petsc_level is out of range, PCSetUp
+      ! has not been called (or the PC has been reset since), or the requested
+      ! inverse is not stored as a polynomial on that level (e.g. COEFFS_INV_ACC when
+      ! there is no C point smoothing)
+      ! petsc_level is ignored for COEFFS_INV_COARSE
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                        :: pc
+      PetscInt, intent(in)                            :: petsc_level
+      integer, intent(in)                             :: which_inverse
+      PetscReal, dimension(:,:), pointer, contiguous, intent(out) :: coeffs_internal
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      PetscInt                              :: num_levels
+      PetscErrorCode                        :: ierr
+      integer                               :: our_level
+      ! ~~~~~~~~
+
+      coeffs_internal => null()
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+
+      ! Coarsest grid matrix
+      if (which_inverse == COEFFS_INV_COARSE) then
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_coarsest_poly_data)
+         return
+      end if
+
+      ! Get the number of levels in our mg - this is -1 before setup
+      call PCAIRGetNumLevels(pc, num_levels, ierr)
+
+      ! Check the level is in range before indexing any of the level data
+      if (petsc_level < 0 .OR. petsc_level >= num_levels) return
+
+      ! We order our levels from 1 to num_levels
+      our_level = int(num_levels - petsc_level)
+
+      ! Inverse Aff
+      if (which_inverse == COEFFS_INV_AFF) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data)) return
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_A_ff_poly_data(our_level))
+
+      ! Inverse dropped Aff
+      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level))
+
+      ! Inverse Acc
+      else if (which_inverse == COEFFS_INV_ACC) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_cc_poly_data)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_cc_poly_data)) return
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_A_cc_poly_data(our_level))
+      end if
+
+   end subroutine PCAIRGetPolyCoeffsPointer
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr)
+
+      ! This routine returns a copy of the polynomial coefficients stored in the PC.
+      ! coeffs is allocated/reallocated as needed; it is safe to keep and use after
+      ! the next PCSetUp or PCReset call (unlike the C interface, which returns a
+      ! raw pointer into internal storage that is only valid until the next setup).
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                           :: pc
+      PetscInt, intent(in)                               :: petsc_level
+      integer, intent(in)                                :: which_inverse
+      PetscReal, dimension(:,:), pointer, intent(inout)       :: coeffs
+      PetscErrorCode, intent(out)                        :: ierr
+
+      PetscReal, dimension(:,:), pointer, contiguous :: coeffs_internal
+      integer                               :: errorcode
+      ! ~~~~~~~~
+
+      call PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
+
+      if (.NOT. associated(coeffs_internal)) then
+         print *, "PCAIRGetPolyCoeffs: no coefficients stored for this petsc_level and which_inverse;", &
+                  " check both are valid and that PCSetUp has been called"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Check sizes
+      if (associated(coeffs)) then
+         if (.NOT. (size(coeffs,1) == size(coeffs_internal, 1) .AND. &
+             size(coeffs,2) == size(coeffs_internal, 2))) then
+
+            deallocate(coeffs)
+            coeffs => null()
+         end if
+      end if
+
+      if (.NOT. associated(coeffs)) then
+         allocate(coeffs(size(coeffs_internal, 1), size(coeffs_internal, 2)))
+      end if
+
+      coeffs = coeffs_internal
+
+      ierr = 0
+
+   end subroutine PCAIRGetPolyCoeffs 
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetPolyCoeffs(pc, petsc_level, which_inverse, coeffs, ierr) 
+
+      ! This routine copies coeffs into the PC's internal storage.
+      ! The caller's array is not referenced after this call and can be
+      ! deallocated or modified freely.
+      ! Does not trigger a rebuild; after setting these coefficients call
+      ! PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE) and then KSPSolve to apply them.
+      type(tPC), intent(inout)                           :: pc
+      PetscInt, intent(in)                               :: petsc_level
+      integer, intent(in)                                :: which_inverse
+      PetscReal, dimension(:,:), pointer, intent(in)          :: coeffs
+      PetscErrorCode, intent(out)                        :: ierr
+
+      PetscReal, dimension(:,:), pointer, contiguous :: coeffs_internal
+      integer                               :: errorcode
+      ! ~~~~~~~~
+
+      call PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
+
+      if (.NOT. associated(coeffs_internal)) then
+         print *, "PCAIRSetPolyCoeffs: no coefficients stored for this petsc_level and which_inverse;", &
+                  " check both are valid and that PCSetUp has been called"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      if (.NOT. associated(coeffs)) then
+         print *, "PCAIRSetPolyCoeffs: coeffs is not associated"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Check sizes
+      if (.NOT. (size(coeffs,1) == size(coeffs_internal, 1) .AND. &
+            size(coeffs,2) == size(coeffs_internal, 2))) then
+
+         print *, "Sizes wrong in PCAIRSetPolyCoeffs"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      coeffs_internal = coeffs
+
+      ierr = 0
+
+   end subroutine PCAIRSetPolyCoeffs     
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetProcessorAgglom(pc, processor_agglom, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: processor_agglom
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      processor_agglom = options%processor_agglom
+      ierr = 0
+
+   end subroutine PCAIRGetProcessorAgglom
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetProcessorAgglomRatio(pc, ratio, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: ratio
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ratio = options%processor_agglom_ratio
+      ierr = 0
+
+   end subroutine PCAIRGetProcessorAgglomRatio
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetProcessorAgglomFactor(pc, factor, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: factor
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      factor = options%processor_agglom_factor
+      ierr = 0
+
+   end subroutine PCAIRGetProcessorAgglomFactor  
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetProcessEqLimit(pc, limit, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: limit
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      limit = options%process_eq_limit
+      ierr = 0
+
+   end subroutine PCAIRGetProcessEqLimit      
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetSubcomm(pc, subcomm, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: subcomm
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      subcomm = options%subcomm
+      ierr = 0
+
+   end subroutine PCAIRGetSubcomm   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetStrongThreshold(pc, thresh, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: thresh
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      thresh = options%strong_threshold
+      ierr = 0
+
+   end subroutine PCAIRGetStrongThreshold   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDDCIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      its = options%ddc_its
+      ierr = 0
+
+   end subroutine PCAIRGetDDCIts 
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDDCFraction(pc, frac, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: frac
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      frac = options%ddc_fraction
+      ierr = 0
+
+   end subroutine PCAIRGetDDCFraction
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCFSplittingType(pc, algo, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      CFSplittingType, intent(out)  :: algo
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      algo = options%cf_splitting_type
+      ierr = 0
+
+   end subroutine PCAIRGetCFSplittingType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetMaxLubySteps(pc, steps, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: steps
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      steps = options%max_luby_steps
+      ierr = 0
+
+   end subroutine PCAIRGetMaxLubySteps
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! Return the stored value, even if the inverse type is neumann
+      ! Neumann polynomials always diagonally scale regardless of this flag,
+      ! but it is still used by the other inverses (e.g., C point smoothing)
+      ! and must survive a later change of inverse type
+      scale = options%diag_scale_polys
+      ierr = 0
+
+   end subroutine PCAIRGetDiagScalePolys   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetMatrixFreePolys(pc, mf, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: mf
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      mf = options%matrix_free_polys
+      ierr = 0
+
+   end subroutine PCAIRGetMatrixFreePolys
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetOnePointClassicalProlong(pc, onep, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: onep
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      onep = options%one_point_classical_prolong
+      ierr = 0
+
+   end subroutine PCAIRGetOnePointClassicalProlong
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetFullSmoothingUpAndDown(pc, full, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: full
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      full = options%full_smoothing_up_and_down
+      ierr = 0
+
+   end subroutine PCAIRGetFullSmoothingUpAndDown
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetSymmetric(pc, sym, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: sym
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      sym = options%symmetric
+      ierr = 0
+
+   end subroutine PCAIRGetSymmetric
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetConstrainW(pc, constrain, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: constrain
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      constrain = options%constrain_w
+      ierr = 0
+
+   end subroutine PCAIRGetConstrainW
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetConstrainZ(pc, constrain, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: constrain
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      constrain = options%constrain_z
+      ierr = 0
+
+   end subroutine PCAIRGetConstrainZ
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetImproveWIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      its = options%improve_w_its
+      ierr = 0
+
+   end subroutine PCAIRGetImproveWIts     
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetImproveZIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      its = options%improve_z_its
+      ierr = 0
+
+   end subroutine PCAIRGetImproveZIts   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetStrongRThreshold(pc, thresh, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: thresh
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      thresh = options%strong_r_threshold
+      ierr = 0
+
+   end subroutine PCAIRGetStrongRThreshold
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetInverseType(pc, inv_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCPFLAREINVType, intent(out)         :: inv_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      inv_type = options%inverse_type
+      ierr = 0
+
+   end subroutine PCAIRGetInverseType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCInverseType(pc, inv_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCPFLAREINVType, intent(out)         :: inv_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_inverse_type == -1) then
+         inv_type = options%inverse_type
+      else
+         inv_type = options%c_inverse_type
+      end if
+      ierr = 0
+
+   end subroutine PCAIRGetCInverseType   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetZType(pc, z_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCAIRZType, intent(out)         :: z_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      z_type = options%z_type
+      ierr = 0
+
+   end subroutine PCAIRGetZType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetLairDistance(pc, distance, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: distance
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      distance = options%lair_distance
+      ierr = 0
+
+   end subroutine PCAIRGetLairDistance
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCPolyOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_poly_order == -1) then
+         order = options%poly_order
+      else
+         order = options%c_poly_order
+      end if
+      ierr = 0
+
+   end subroutine PCAIRGetCPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCInverseSparsityOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_inverse_sparsity_order == -1) then
+         order = options%inverse_sparsity_order
+      else
+         order = options%c_inverse_sparsity_order
+      end if
+      ierr = 0
+
+   end subroutine PCAIRGetCInverseSparsityOrder   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetPolyOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      order = options%poly_order
+      ierr = 0
+
+   end subroutine PCAIRGetPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetInverseSparsityOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      order = options%inverse_sparsity_order
+      ierr = 0
+
+   end subroutine PCAIRGetInverseSparsityOrder
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestInverseType(pc, inv_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCPFLAREINVType, intent(out)         :: inv_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      inv_type = options%coarsest_inverse_type
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestInverseType   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestPolyOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      order = options%coarsest_poly_order
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestInverseSparsityOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      order = options%coarsest_inverse_sparsity_order
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestInverseSparsityOrder 
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestMatrixFreePolys(pc, mf, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: mf
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      mf = options%coarsest_matrix_free_polys
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestMatrixFreePolys
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      scale = options%coarsest_diag_scale_polys
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestDiagScalePolys   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestSubcomm(pc, subcomm, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: subcomm
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      subcomm = options%coarsest_subcomm
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestSubcomm
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetRDrop(pc, rdrop, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: rdrop
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      rdrop = options%r_drop
+      ierr = 0
+
+   end subroutine PCAIRGetRDrop  
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetADrop(pc, adrop, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(out)        :: adrop
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      adrop = options%a_drop
+      ierr = 0
+
+   end subroutine PCAIRGetADrop 
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetALump(pc, lump, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: lump
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      lump = options%a_lump
+      ierr = 0
+
+   end subroutine PCAIRGetALump
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseSparsity(pc, reuse, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: reuse
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      reuse = options%reuse_sparsity
+      ierr = 0
+
+   end subroutine PCAIRGetReuseSparsity
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReusePolyCoeffs(pc, reuse, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: reuse
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      reuse = options%reuse_poly_coeffs
+      ierr = 0
+
+   end subroutine PCAIRGetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetReuseAmount(pc, amount, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: amount
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)
+      amount = options%reuse_amount
+      ierr = 0
+
+   end subroutine PCAIRGetReuseAmount
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Set routines - Fortran versions of the C routines in PCAIR
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetPrintStatsTimings(pc, print_stats, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: print_stats
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%print_stats_timings = print_stats
+      ierr = 0
+
+   end subroutine PCAIRSetPrintStatsTimings   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetMaxLevels(pc, max_levels, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: max_levels
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetMaxLevels(pc, old_int, ierr)
+      if (old_int == max_levels) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      ! Call the underlying reset - this won't touch the context 
+      ! in our pcshell though as pcshell doesn't offer a way to 
+      ! give a custom reset function     
+      call PCReset(pc_shell, ierr)
+      ! Call the destroy routine
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      ! Have to mark that the outer setup must be called again
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%max_levels = int(max_levels)
+      ierr = 0
+
+   end subroutine PCAIRSetMaxLevels
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarseEqLimit(pc, coarse_eq_limit, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: coarse_eq_limit
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarseEqLimit(pc, old_int, ierr)
+      if (old_int == coarse_eq_limit) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)    
+      call PCMarkNotSetUp_c(pc%v)        
+
+      options%coarse_eq_limit = coarse_eq_limit
+      ierr = 0
+
+   end subroutine PCAIRSetCoarseEqLimit   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetAutoTruncateStartLevel(pc, start_level, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: start_level
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetAutoTruncateStartLevel(pc, old_int, ierr)
+      if (old_int == start_level) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%auto_truncate_start_level = int(start_level)
+      ierr = 0
+
+   end subroutine PCAIRSetAutoTruncateStartLevel   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetAutoTruncateTol(pc, tol, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: tol
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetAutoTruncateTol(pc, old_real, ierr)
+      if (old_real == tol) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%auto_truncate_tol = tol
+      ierr = 0
+
+   end subroutine PCAIRSetAutoTruncateTol   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetProcessorAgglom(pc, processor_agglom, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: processor_agglom
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetProcessorAgglom(pc, old_bool, ierr)
+      if (old_bool .eqv. processor_agglom) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%processor_agglom = processor_agglom
+      ierr = 0
+
+   end subroutine PCAIRSetProcessorAgglom
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetProcessorAgglomRatio(pc, ratio, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: ratio
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetProcessorAgglomRatio(pc, old_real, ierr)
+      if (old_real == ratio) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%processor_agglom_ratio = ratio
+      ierr = 0
+
+   end subroutine PCAIRSetProcessorAgglomRatio
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetProcessorAgglomFactor(pc, factor, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: factor
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetProcessorAgglomFactor(pc, old_int, ierr)
+      if (old_int == factor) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)
+
+      options%processor_agglom_factor = int(factor)
+      ierr = 0
+
+   end subroutine PCAIRSetProcessorAgglomFactor
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetProcessEqLimit(pc, limit, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: limit
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetProcessEqLimit(pc, old_int, ierr)
+      if (old_int == limit) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%process_eq_limit = limit
+      ierr = 0
+
+   end subroutine PCAIRSetProcessEqLimit    
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetSubcomm(pc, subcomm, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: subcomm
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%subcomm = subcomm
+      ierr = 0
+
+   end subroutine PCAIRSetSubcomm   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetStrongThreshold(pc, thresh, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: thresh
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetStrongThreshold(pc, old_real, ierr)
+      if (old_real == thresh) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%strong_threshold = thresh
+      ierr = 0
+
+   end subroutine PCAIRSetStrongThreshold   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDDCIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetDDCIts(pc, old_int, ierr)
+      if (old_int == its) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%ddc_its = int(its)
+      ierr = 0
+
+   end subroutine PCAIRSetDDCIts
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDDCFraction(pc, frac, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: frac
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetDDCFraction(pc, old_real, ierr)
+      if (old_real == frac) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%ddc_fraction = frac
+      ierr = 0
+
+   end subroutine PCAIRSetDDCFraction
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCFSplittingType(pc, algo, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      CFSplittingType, intent(in)   :: algo
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      CFSplittingType            :: old_type
+      ! ~~~~~~~~
+
+      call PCAIRGetCFSplittingType(pc, old_type, ierr)
+      if (old_type == algo) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%cf_splitting_type = int(algo)
+      ierr = 0
+
+   end subroutine PCAIRSetCFSplittingType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetMaxLubySteps(pc, steps, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: steps
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetMaxLubySteps(pc, old_int, ierr)
+      if (old_int == steps) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%max_luby_steps = int(steps)
+      ierr = 0
+
+   end subroutine PCAIRSetMaxLubySteps
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetSmoothType(pc, input_string, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)       :: pc
+      character(len = *), intent(in) :: input_string
+      PetscErrorCode, intent(out)    :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      character(len = 1) :: current_char, old_char
+      character(len = PETSC_MAX_PATH_LEN) :: old_string
+      integer :: smooth_order_index
+      integer :: errorcode, n, i
+      ! ~~~~~~~~
+
+      ! Each block of consecutive f or c characters takes one entry of smooth_order
+      ! and the C interfaces only pass 10 characters, so limit the length
+      ! to the size of smooth_order
+      call PCAIRGetOptions(pc, options)
+      if (len_trim(input_string) > size(options%smooth_order)) then
+         print *, "Smooth order must be at most ", size(options%smooth_order), " characters"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      call PCAIRGetSmoothType(pc, old_string, ierr)
+      if (trim(old_string) == trim(input_string)) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      n = len_trim(input_string)
+      if (n == 0) then
+         print *, "Smooth order must be non-zero length"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
+      end if
+      
+      old_char = "0"
+      smooth_order_index = 1
+      options%smooth_order = 0
+      options%any_c_smooths = .FALSE.
+      do i = 1, n
+
+         current_char = input_string(i:i)
+
+         if (current_char /= old_char .AND. i /= 1) then
+            smooth_order_index = smooth_order_index + 1
+         end if
+
+         select case (current_char)
+         case ('f', 'F')
+            options%smooth_order(smooth_order_index) = options%smooth_order(smooth_order_index) + 1
+         case ('c', 'C')
+            options%smooth_order(smooth_order_index) = options%smooth_order(smooth_order_index) - 1
+            options%any_c_smooths = .TRUE.
+         case default
+            print *, "Smooth order must be only f or c characters"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode) 
+         end select           
+
+         old_char = current_char
+      end do      
+
+      ierr = 0
+
+   end subroutine PCAIRSetSmoothType   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetSmoothType(pc, output_string, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)         :: pc
+      character(len=*), intent(out)    :: output_string
+      PetscErrorCode, intent(out)      :: ierr
+   
+      type(air_options), pointer :: options
+      integer :: i, j, idx, n, absval, total_len
+      character(len=1) :: ch
+      character(len=:), allocatable :: temp_string
+      ! ~~~~~~~~
+   
+      call PCAIRGetOptions(pc, options)
+   
+      ! First, compute the total length needed
+      total_len = 0
+      n = size(options%smooth_order)
+      do i = 1, n
+         if (options%smooth_order(i) /= 0) then
+            total_len = total_len + abs(options%smooth_order(i))
+         end if
+      end do
+   
+      ! Allocate a temporary string of the exact needed length
+      if (total_len > 0) then
+         allocate(character(len=total_len) :: temp_string)
+         idx = 1
+         do i = 1, n
+            if (options%smooth_order(i) > 0) then
+               ch = 'f'
+               absval = options%smooth_order(i)
+            else if (options%smooth_order(i) < 0) then
+               ch = 'c'
+               absval = -options%smooth_order(i)
+            else
+               cycle
+            end if
+            do j = 1, absval
+               temp_string(idx:idx) = ch
+               idx = idx + 1
+            end do
+         end do
+         ! Copy to output, trimming or padding as needed
+         output_string = temp_string
+         deallocate(temp_string)
+      else
+         output_string = ''
+      end if
+   
+      ierr = 0
+   end subroutine PCAIRGetSmoothType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetDiagScalePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. scale) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_scale_polys = scale
+      ierr = 0
+
+   end subroutine PCAIRSetDiagScalePolys   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetMatrixFreePolys(pc, mf, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: mf
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetMatrixFreePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. mf) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%matrix_free_polys = mf
+      ierr = 0
+
+   end subroutine PCAIRSetMatrixFreePolys
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetOnePointClassicalProlong(pc, onep, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: onep
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetOnePointClassicalProlong(pc, old_bool, ierr)
+      if (old_bool .eqv. onep) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%one_point_classical_prolong = onep
+      ierr = 0
+
+   end subroutine PCAIRSetOnePointClassicalProlong
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetFullSmoothingUpAndDown(pc, full, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: full
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetFullSmoothingUpAndDown(pc, old_bool, ierr)
+      if (old_bool .eqv. full) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%full_smoothing_up_and_down = full
+      ierr = 0
+
+   end subroutine PCAIRSetFullSmoothingUpAndDown
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetSymmetric(pc, sym, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: sym
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetSymmetric(pc, old_bool, ierr)
+      if (old_bool .eqv. sym) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%symmetric = sym
+      ierr = 0
+
+   end subroutine PCAIRSetSymmetric
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetConstrainW(pc, constrain, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: constrain
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetConstrainW(pc, old_bool, ierr)
+      if (old_bool .eqv. constrain) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%constrain_w = constrain
+      ierr = 0
+
+   end subroutine PCAIRSetConstrainW
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetConstrainZ(pc, constrain, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: constrain
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetConstrainZ(pc, old_bool, ierr)
+      if (old_bool .eqv. constrain) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%constrain_z = constrain
+      ierr = 0
+
+   end subroutine PCAIRSetConstrainZ
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetImproveWIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetImproveWIts(pc, old_int, ierr)
+      if (old_int == its) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%improve_w_its = int(its)
+      ierr = 0
+
+   end subroutine PCAIRSetImproveWIts    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetImproveZIts(pc, its, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: its
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetImproveZIts(pc, old_int, ierr)
+      if (old_int == its) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%improve_z_its = int(its)
+      ierr = 0
+
+   end subroutine PCAIRSetImproveZIts   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetStrongRThreshold(pc, thresh, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: thresh
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetStrongRThreshold(pc, old_real, ierr)
+      if (old_real == thresh) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%strong_r_threshold = thresh
+      ierr = 0
+
+   end subroutine PCAIRSetStrongRThreshold
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetInverseType(pc, inv_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCPFLAREINVType, intent(in)          :: inv_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCPFLAREINVType            :: old_type
+      ! ~~~~~~~~
+
+      call PCAIRGetInverseType(pc, old_type, ierr)
+      if (old_type == inv_type) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%inverse_type = inv_type
+      ierr = 0
+
+   end subroutine PCAIRSetInverseType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCInverseType(pc, inv_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCPFLAREINVType, intent(in)          :: inv_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCPFLAREINVType            :: old_type
+      ! ~~~~~~~~
+
+      call PCAIRGetCInverseType(pc, old_type, ierr)
+      if (old_type == inv_type) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_inverse_type = inv_type
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%c_inverse_type = inv_type
+      ierr = 0
+
+   end subroutine PCAIRSetCInverseType   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetZType(pc, z_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCAIRZType, intent(in)          :: z_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCAIRZType                 :: old_type
+      ! ~~~~~~~~
+
+      call PCAIRGetZType(pc, old_type, ierr)
+      if (old_type == z_type) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%z_type = z_type
+      ierr = 0
+
+   end subroutine PCAIRSetZType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetLairDistance(pc, distance, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: distance
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetLairDistance(pc, old_int, ierr)
+      if (old_int == distance) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%lair_distance = int(distance)
+      ierr = 0
+
+   end subroutine PCAIRSetLairDistance   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetPolyOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetPolyOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%poly_order = int(order)
+      ierr = 0
+
+   end subroutine PCAIRSetPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetInverseSparsityOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetInverseSparsityOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%inverse_sparsity_order = int(order)
+      ierr = 0
+
+   end subroutine PCAIRSetInverseSparsityOrder
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCPolyOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetCPolyOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_poly_order = int(order)
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%c_poly_order = int(order)
+      ierr = 0
+
+   end subroutine PCAIRSetCPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCInverseSparsityOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetCInverseSparsityOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_inverse_sparsity_order = int(order)
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%c_inverse_sparsity_order = int(order)
+      ierr = 0
+
+   end subroutine PCAIRSetCInverseSparsityOrder   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestInverseType(pc, inv_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PCPFLAREINVType, intent(in)          :: inv_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PCPFLAREINVType            :: old_type
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarsestInverseType(pc, old_type, ierr)
+      if (old_type == inv_type) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_inverse_type = inv_type
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestInverseType   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestPolyOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarsestPolyOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_poly_order = int(order)
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestInverseSparsityOrder(pc, order, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: order
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarsestInverseSparsityOrder(pc, old_int, ierr)
+      if (old_int == order) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_inverse_sparsity_order = int(order)
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestInverseSparsityOrder 
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestMatrixFreePolys(pc, mf, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: mf
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarsestMatrixFreePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. mf) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_matrix_free_polys = mf
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestMatrixFreePolys
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestDiagScalePolys(pc, scale, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: scale
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetCoarsestDiagScalePolys(pc, old_bool, ierr)
+      if (old_bool .eqv. scale) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_diag_scale_polys = scale
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestDiagScalePolys   
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestSubcomm(pc, subcomm, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: subcomm
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%coarsest_subcomm = subcomm
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestSubcomm
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetRDrop(pc, rdrop, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: rdrop
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetRDrop(pc, old_real, ierr)
+      if (old_real == rdrop) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%r_drop = rdrop
+      ierr = 0
+
+   end subroutine PCAIRSetRDrop  
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetADrop(pc, adrop, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscReal, intent(in)         :: adrop
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscReal                  :: old_real
+      ! ~~~~~~~~
+
+      call PCAIRGetADrop(pc, old_real, ierr)
+      if (old_real == adrop) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%a_drop = adrop
+      ierr = 0
+
+   end subroutine PCAIRSetADrop 
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetALump(pc, lump, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: lump
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetALump(pc, old_bool, ierr)
+      if (old_bool .eqv. lump) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%a_lump = lump
+      ierr = 0
+
+   end subroutine PCAIRSetALump
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetReuseSparsity(pc, reuse, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: reuse
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%reuse_sparsity = reuse
+      ierr = 0
+
+   end subroutine PCAIRSetReuseSparsity
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetReusePolyCoeffs(pc, reuse, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: reuse
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)    
+      options%reuse_poly_coeffs = reuse
+      ierr = 0
+
+   end subroutine PCAIRSetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetReuseAmount(pc, amount, ierr)
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: amount
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt :: old_int
+      ! ~~~~~~~~
+
+      ! The amount is used as an index into REUSE_MAT_ACTIVE/REUSE_IS_ACTIVE
+      ! so only 1, 2 and 3 are valid
+      if (amount < 1 .OR. amount > 3) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Reuse amount must be 1, 2 or 3")
+         return
+      end if
+
+      call PCAIRGetReuseAmount(pc, old_int, ierr)
+      if (old_int == amount) then
+         ierr = 0
+         return
+      end if     
+      
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)         
+
+      ! Set the options
+      call PCAIRGetOptions(pc, options)
+      options%reuse_amount = int(amount)
+      ierr = 0
+
+   end subroutine PCAIRSetReuseAmount
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+end module pcair_interfaces_fref
+

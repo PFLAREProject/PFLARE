@@ -3,7 +3,10 @@
 
   The helpers for the repartitioning (MatPartitioning_c, GenerateIS_ProcAgglomeration_c
   and MatMPICreateNonemptySubcomm_c) are now in Repartition.c, the C port of the
-  Fortran that called them. What is left is called from Fortran that is not ported yet
+  Fortran that called them. MatGetDiagonalOnly_c is called by AIR_MG_Setup.c (and by
+  the reference Fortran) and PetscFree_c by the Fortran wrappers in src/fortran. The
+  PC helpers are only called by the reference Fortran in src/fref, so are only built
+  with PFLARE_PORT_DEBUG (the C reads pc->flag and pc->setupcalled directly)
 */
 
 // Include the petsc header files
@@ -11,6 +14,7 @@
 #include <petsc/private/pcimpl.h>
 #include "C_PETSc_Routines.h"
 
+#if defined(PFLARE_PORT_DEBUG)
 // Returns pc->flag so we can have access to the structure flag
 // for re-use
 PETSC_INTERN void c_PCGetStructureFlag(PC *pc, int *flag)
@@ -29,6 +33,7 @@ PETSC_INTERN void PCMarkNotSetUp_c(PC *pc)
 {
    (*pc)->setupcalled = PETSC_FALSE;
 }
+#endif
 
 PETSC_EXTERN PetscErrorCode MatGetDiagonalMarkers_SeqAIJ(Mat, const PetscInt **, PetscBool *);
 // Returns true if a matrix is only the diagonal
@@ -114,7 +119,8 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 }
 
 // Frees memory allocated with PetscMalloc in the C ports of the Fortran modules, for the
-// Fortran callers in Port_Interfaces.F90 that copy such an array into a Fortran allocatable
+// Fortran callers (src/fortran/Gmres_Poly_Newton.F90 and Port_Interfaces*.F90) that copy
+// such an array into a Fortran allocatable
 // *ptr is NULL on return
 PETSC_INTERN PetscErrorCode PetscFree_c(void **ptr)
 {

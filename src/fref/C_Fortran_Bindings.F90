@@ -26,6 +26,10 @@ module c_fortran_bindings
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! Iso C bindings for PFLARE routines  
+   ! Only built with PFLARE_PORT_DEBUG=1: these are the bindings the reference
+   ! implementations in src/fref are reached through. The AIR bindings were called by
+   ! src/PCAIR.c before the AIR hierarchy was ported to C and are now called by the
+   ! reference PC type air_fref (src/fref/PCAIR_fref.c), with an _fref suffix
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
@@ -33,7 +37,7 @@ module c_fortran_bindings
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine create_pc_air_data_c(pc_air_data_c_ptr) bind(C,name='create_pc_air_data_c')
+   subroutine create_pc_air_data_c_fref(pc_air_data_c_ptr) bind(C,name='create_pc_air_data_c_fref')
 
       ! Creates an air_data object, calls setup and returns a C pointer
 
@@ -48,11 +52,11 @@ module c_fortran_bindings
       ! Pass the setup pc_air_data object back into C 
       pc_air_data_c_ptr = c_loc(pc_air_data)
 
-   end subroutine create_pc_air_data_c 
+   end subroutine create_pc_air_data_c_fref 
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCReset_AIR_Shell_c(pc_ptr) bind(C,name='PCReset_AIR_Shell_c')
+   subroutine PCReset_AIR_Shell_c_fref(pc_ptr) bind(C,name='PCReset_AIR_Shell_c_fref')
 
       ! Calls the Fortran routine
 
@@ -68,11 +72,11 @@ module c_fortran_bindings
       ! Call the destroy routine
       call PCReset_AIR_Shell(pc, ierr)
 
-   end subroutine PCReset_AIR_Shell_c  
+   end subroutine PCReset_AIR_Shell_c_fref  
    
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine create_pc_air_shell_c(pc_air_data_c_ptr, pc_ptr) bind(C,name='create_pc_air_shell_c')
+   subroutine create_pc_air_shell_c_fref(pc_air_data_c_ptr, pc_ptr) bind(C,name='create_pc_air_shell_c_fref')
 
       ! Calls the setup routine for air and returns a PC Shell as a long long
       ! The longlong pointer is defined in PC%v to pass in
@@ -98,11 +102,11 @@ module c_fortran_bindings
       ! Now the PC has been modified so make sure to copy the pointer back
       pc_ptr = pc%v
 
-   end subroutine create_pc_air_shell_c
+   end subroutine create_pc_air_shell_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pcair_shell_get_pcmg_c(pc_ptr, pcmg_ptr) bind(C,name='pcair_shell_get_pcmg_c')
+   subroutine pcair_shell_get_pcmg_c_fref(pc_ptr, pcmg_ptr) bind(C,name='pcair_shell_get_pcmg_c_fref')
 
       ! Returns the PCMG underneath our PCShell as a long long
 
@@ -119,12 +123,12 @@ module c_fortran_bindings
       call PCShellGetContext(pc, pc_air_data, ierr)
       pcmg_ptr = pc_air_data%pcmg%v
 
-   end subroutine pcair_shell_get_pcmg_c
+   end subroutine pcair_shell_get_pcmg_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pcair_shell_block_matapply_c(pc_ptr, x_ptr, y_ptr, applied_int, error_int) &
-         bind(C,name='pcair_shell_block_matapply_c')
+   subroutine pcair_shell_block_matapply_c_fref(pc_ptr, x_ptr, y_ptr, applied_int, error_int) &
+         bind(C,name='pcair_shell_block_matapply_c_fref')
 
       ! Applies the air multigrid to a whole dense block of right hand sides
       ! The pc handed in is our underlying PCShell (which must already have been
@@ -174,7 +178,7 @@ module c_fortran_bindings
 
       applied_int = 1
 
-   end subroutine pcair_shell_block_matapply_c
+   end subroutine pcair_shell_block_matapply_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 

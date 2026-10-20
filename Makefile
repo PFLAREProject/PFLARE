@@ -185,19 +185,9 @@ KOBJS := $(SRCDIR)/PETSc_Helperk.o \
 		  $(SRCDIR)/SAI_Zk.o
 endif
 
-# The core Fortran that is still being ported to C (see docs/dev/fortran_removal_plan.md)
-FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
-		  $(FREFDIR)/AIR_Data_Type.o \
-		  $(SRCDIR)/C_PETSc_Interfaces.o \
-		  $(FREFDIR)/PCAIR_Data_Type.o \
-		  $(FREFDIR)/FC_Smooth.o \
-		  $(FREFDIR)/FC_Smooth_Block.o \
-		  $(FREFDIR)/AIR_MG_Stats.o \
-		  $(FREFDIR)/AIR_Data_Type_Routines.o \
-		  $(FREFDIR)/AIR_Operators_Setup.o \
-		  $(FREFDIR)/AIR_MG_Setup.o \
-		  $(FREFDIR)/PCAIR_Shell.o \
-		  $(SRCDIR)/C_Fortran_Bindings.o
+# The only core Fortran left outside of the Fortran interface layer
+# (see docs/dev/fortran_removal_plan.md)
+FCORE_OBJS := $(SRCDIR)/Pflare_Random.o
 
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
@@ -210,14 +200,13 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 		  $(FORTRANDIR)/MatDiagDomSubmatrix.o \
 		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
 		  $(FORTRANDIR)/PCAIR_Interfaces.o \
-		  $(FORTRANDIR)/PFLARE.o \
-		  $(FORTRANDIR)/PCAIR_C_Fortran_Bindings.o
+		  $(FORTRANDIR)/PFLARE.o
 
 # All the files required by PFLARE, plus the Fortran reference implementations
 # (only with PFLARE_PORT_DEBUG=1)
 # Each list above is in Fortran module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(filter-out $(FCORE_OBJS),$(FREF_OBJS))
+OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(FREF_OBJS)
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \

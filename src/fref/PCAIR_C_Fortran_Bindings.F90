@@ -2,7 +2,7 @@ module pcair_c_fortran_bindings
 
    use iso_c_binding
    use petscksp
-   use pcair_interfaces
+   use pcair_interfaces_fref
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -16,12 +16,15 @@ module pcair_c_fortran_bindings
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! Contains C bindings to the PCAIR options 
+   ! Only built with PFLARE_PORT_DEBUG=1: these are the bindings src/PCAIR.c called
+   ! before the AIR hierarchy was ported to C, now with an _fref suffix, which the
+   ! reference PC type air_fref (src/fref/PCAIR_fref.c) calls
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------      
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetPrintStatsTimings_c(pc_ptr, print_stats) bind(C, name='PCAIRGetPrintStatsTimings_c')
+   subroutine PCAIRGetPrintStatsTimings_c(pc_ptr, print_stats) bind(C, name='PCAIRGetPrintStatsTimings_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -41,7 +44,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetMaxLevels_c(pc_ptr, max_levels) bind(C, name='PCAIRGetMaxLevels_c')
+   subroutine PCAIRGetMaxLevels_c(pc_ptr, max_levels) bind(C, name='PCAIRGetMaxLevels_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -58,7 +61,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarseEqLimit_c(pc_ptr, coarse_eq_limit) bind(C, name='PCAIRGetCoarseEqLimit_c')
+   subroutine PCAIRGetCoarseEqLimit_c(pc_ptr, coarse_eq_limit) bind(C, name='PCAIRGetCoarseEqLimit_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -75,7 +78,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetAutoTruncateStartLevel_c(pc_ptr, start_level) bind(C, name='PCAIRGetAutoTruncateStartLevel_c')
+   subroutine PCAIRGetAutoTruncateStartLevel_c(pc_ptr, start_level) bind(C, name='PCAIRGetAutoTruncateStartLevel_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -92,7 +95,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetAutoTruncateTol_c(pc_ptr, tol) bind(C, name='PCAIRGetAutoTruncateTol_c')
+   subroutine PCAIRGetAutoTruncateTol_c(pc_ptr, tol) bind(C, name='PCAIRGetAutoTruncateTol_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -109,7 +112,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetNumLevels_c(pc_ptr, num_levels) bind(C, name='PCAIRGetNumLevels_c')
+   subroutine PCAIRGetNumLevels_c(pc_ptr, num_levels) bind(C, name='PCAIRGetNumLevels_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -126,7 +129,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetProcessorAgglom_c(pc_ptr, processor_agglom) bind(C, name='PCAIRGetProcessorAgglom_c')
+   subroutine PCAIRGetProcessorAgglom_c(pc_ptr, processor_agglom) bind(C, name='PCAIRGetProcessorAgglom_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -146,7 +149,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetProcessorAgglomRatio_c(pc_ptr, ratio) bind(C, name='PCAIRGetProcessorAgglomRatio_c')
+   subroutine PCAIRGetProcessorAgglomRatio_c(pc_ptr, ratio) bind(C, name='PCAIRGetProcessorAgglomRatio_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -163,7 +166,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetProcessorAgglomFactor_c(pc_ptr, factor) bind(C, name='PCAIRGetProcessorAgglomFactor_c')
+   subroutine PCAIRGetProcessorAgglomFactor_c(pc_ptr, factor) bind(C, name='PCAIRGetProcessorAgglomFactor_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -180,7 +183,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetProcessEqLimit_c(pc_ptr, limit) bind(C, name='PCAIRGetProcessEqLimit_c')
+   subroutine PCAIRGetProcessEqLimit_c(pc_ptr, limit) bind(C, name='PCAIRGetProcessEqLimit_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -197,7 +200,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRGetSubcomm_c')
+   subroutine PCAIRGetSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRGetSubcomm_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -217,7 +220,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetStrongThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRGetStrongThreshold_c')
+   subroutine PCAIRGetStrongThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRGetStrongThreshold_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -234,7 +237,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetDDCIts_c(pc_ptr, its) bind(C, name='PCAIRGetDDCIts_c')
+   subroutine PCAIRGetDDCIts_c(pc_ptr, its) bind(C, name='PCAIRGetDDCIts_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -251,7 +254,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetDDCFraction_c(pc_ptr, frac) bind(C, name='PCAIRGetDDCFraction_c')
+   subroutine PCAIRGetDDCFraction_c(pc_ptr, frac) bind(C, name='PCAIRGetDDCFraction_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -268,7 +271,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCFSplittingType_c(pc_ptr, algo) bind(C, name='PCAIRGetCFSplittingType_c')
+   subroutine PCAIRGetCFSplittingType_c(pc_ptr, algo) bind(C, name='PCAIRGetCFSplittingType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -285,7 +288,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetMaxLubySteps_c(pc_ptr, steps) bind(C, name='PCAIRGetMaxLubySteps_c')
+   subroutine PCAIRGetMaxLubySteps_c(pc_ptr, steps) bind(C, name='PCAIRGetMaxLubySteps_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -302,7 +305,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetDiagScalePolys_c')
+   subroutine PCAIRGetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetDiagScalePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -323,7 +326,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRGetMatrixFreePolys_c')
+   subroutine PCAIRGetMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRGetMatrixFreePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -343,7 +346,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetOnePointClassicalProlong_c(pc_ptr, onep) bind(C, name='PCAIRGetOnePointClassicalProlong_c')
+   subroutine PCAIRGetOnePointClassicalProlong_c(pc_ptr, onep) bind(C, name='PCAIRGetOnePointClassicalProlong_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -363,7 +366,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetFullSmoothingUpAndDown_c(pc_ptr, full) bind(C, name='PCAIRGetFullSmoothingUpAndDown_c')
+   subroutine PCAIRGetFullSmoothingUpAndDown_c(pc_ptr, full) bind(C, name='PCAIRGetFullSmoothingUpAndDown_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -383,7 +386,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetSymmetric_c(pc_ptr, sym) bind(C, name='PCAIRGetSymmetric_c')
+   subroutine PCAIRGetSymmetric_c(pc_ptr, sym) bind(C, name='PCAIRGetSymmetric_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -403,7 +406,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetConstrainW_c(pc_ptr, constrain) bind(C, name='PCAIRGetConstrainW_c')
+   subroutine PCAIRGetConstrainW_c(pc_ptr, constrain) bind(C, name='PCAIRGetConstrainW_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -423,7 +426,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetConstrainZ_c(pc_ptr, constrain) bind(C, name='PCAIRGetConstrainZ_c')
+   subroutine PCAIRGetConstrainZ_c(pc_ptr, constrain) bind(C, name='PCAIRGetConstrainZ_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -443,7 +446,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetImproveWIts_c(pc_ptr, its) bind(C, name='PCAIRGetImproveWIts_c')
+   subroutine PCAIRGetImproveWIts_c(pc_ptr, its) bind(C, name='PCAIRGetImproveWIts_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -460,7 +463,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetImproveZIts_c(pc_ptr, its) bind(C, name='PCAIRGetImproveZIts_c')
+   subroutine PCAIRGetImproveZIts_c(pc_ptr, its) bind(C, name='PCAIRGetImproveZIts_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -477,7 +480,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetStrongRThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRGetStrongRThreshold_c')
+   subroutine PCAIRGetStrongRThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRGetStrongRThreshold_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -494,7 +497,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRGetInverseType_c')
+   subroutine PCAIRGetInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRGetInverseType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -511,7 +514,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRGetCInverseType_c')
+   subroutine PCAIRGetCInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRGetCInverseType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -528,7 +531,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetZType_c(pc_ptr, z_type) bind(C, name='PCAIRGetZType_c')
+   subroutine PCAIRGetZType_c(pc_ptr, z_type) bind(C, name='PCAIRGetZType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -545,7 +548,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetLairDistance_c(pc_ptr, distance) bind(C, name='PCAIRGetLairDistance_c')
+   subroutine PCAIRGetLairDistance_c(pc_ptr, distance) bind(C, name='PCAIRGetLairDistance_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -562,7 +565,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRGetPolyOrder_c')
+   subroutine PCAIRGetPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRGetPolyOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -579,7 +582,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetInverseSparsityOrder_c')
+   subroutine PCAIRGetInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetInverseSparsityOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -596,7 +599,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCPolyOrder_c')
+   subroutine PCAIRGetCPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCPolyOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -613,7 +616,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCInverseSparsityOrder_c')
+   subroutine PCAIRGetCInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCInverseSparsityOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -630,7 +633,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarsestInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRGetCoarsestInverseType_c')
+   subroutine PCAIRGetCoarsestInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRGetCoarsestInverseType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -647,7 +650,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarsestPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCoarsestPolyOrder_c')
+   subroutine PCAIRGetCoarsestPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCoarsestPolyOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -664,7 +667,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarsestInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCoarsestInverseSparsityOrder_c')
+   subroutine PCAIRGetCoarsestInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetCoarsestInverseSparsityOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -681,7 +684,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarsestMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRGetCoarsestMatrixFreePolys_c')
+   subroutine PCAIRGetCoarsestMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRGetCoarsestMatrixFreePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -701,7 +704,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarsestDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetCoarsestDiagScalePolys_c')
+   subroutine PCAIRGetCoarsestDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetCoarsestDiagScalePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -721,7 +724,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCoarsestSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRGetCoarsestSubcomm_c')
+   subroutine PCAIRGetCoarsestSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRGetCoarsestSubcomm_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -741,7 +744,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetRDrop_c(pc_ptr, rdrop) bind(C, name='PCAIRGetRDrop_c')
+   subroutine PCAIRGetRDrop_c(pc_ptr, rdrop) bind(C, name='PCAIRGetRDrop_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -758,7 +761,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetADrop_c(pc_ptr, adrop) bind(C, name='PCAIRGetADrop_c')
+   subroutine PCAIRGetADrop_c(pc_ptr, adrop) bind(C, name='PCAIRGetADrop_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -775,7 +778,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetGridComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetGridComplexity_c')
+   subroutine PCAIRGetGridComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetGridComplexity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -792,7 +795,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetOperatorComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetOperatorComplexity_c')
+   subroutine PCAIRGetOperatorComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetOperatorComplexity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -809,7 +812,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetCycleComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetCycleComplexity_c')
+   subroutine PCAIRGetCycleComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetCycleComplexity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -826,7 +829,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetStorageComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetStorageComplexity_c')
+   subroutine PCAIRGetStorageComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetStorageComplexity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -843,7 +846,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetReuseStorageComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetReuseStorageComplexity_c')
+   subroutine PCAIRGetReuseStorageComplexity_c(pc_ptr, complexity) bind(C, name='PCAIRGetReuseStorageComplexity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -860,7 +863,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetALump_c(pc_ptr, lump) bind(C, name='PCAIRGetALump_c')
+   subroutine PCAIRGetALump_c(pc_ptr, lump) bind(C, name='PCAIRGetALump_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -880,7 +883,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetReuseSparsity_c(pc_ptr, reuse) bind(C, name='PCAIRGetReuseSparsity_c')
+   subroutine PCAIRGetReuseSparsity_c(pc_ptr, reuse) bind(C, name='PCAIRGetReuseSparsity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -900,7 +903,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetReusePolyCoeffs_c(pc_ptr, reuse) bind(C, name='PCAIRGetReusePolyCoeffs_c')
+   subroutine PCAIRGetReusePolyCoeffs_c(pc_ptr, reuse) bind(C, name='PCAIRGetReusePolyCoeffs_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -921,7 +924,7 @@ module pcair_c_fortran_bindings
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine PCAIRGetPolyCoeffs_c(pc_ptr, petsc_level, which_inverse, &   
-      coeffs_ptr, row_size, col_size) bind(C, name='PCAIRGetPolyCoeffs_c')
+      coeffs_ptr, row_size, col_size) bind(C, name='PCAIRGetPolyCoeffs_c_fref')
 
       ! The C interface to this differs by sending out a pointer, rather than a copy of the coefficients
       ! in an allocatable array - hence you will have to take a copy of the values externally if you want 
@@ -966,7 +969,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetPrintStatsTimings_c(pc_ptr, print_stats) bind(C, name='PCAIRSetPrintStatsTimings_c')
+   subroutine PCAIRSetPrintStatsTimings_c(pc_ptr, print_stats) bind(C, name='PCAIRSetPrintStatsTimings_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -986,7 +989,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetMaxLevels_c(pc_ptr, max_levels) bind(C, name='PCAIRSetMaxLevels_c')
+   subroutine PCAIRSetMaxLevels_c(pc_ptr, max_levels) bind(C, name='PCAIRSetMaxLevels_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1003,7 +1006,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarseEqLimit_c(pc_ptr, coarse_eq_limit) bind(C, name='PCAIRSetCoarseEqLimit_c')
+   subroutine PCAIRSetCoarseEqLimit_c(pc_ptr, coarse_eq_limit) bind(C, name='PCAIRSetCoarseEqLimit_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1020,7 +1023,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetAutoTruncateStartLevel_c(pc_ptr, start_level) bind(C, name='PCAIRSetAutoTruncateStartLevel_c')
+   subroutine PCAIRSetAutoTruncateStartLevel_c(pc_ptr, start_level) bind(C, name='PCAIRSetAutoTruncateStartLevel_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1037,7 +1040,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetAutoTruncateTol_c(pc_ptr, tol) bind(C, name='PCAIRSetAutoTruncateTol_c')
+   subroutine PCAIRSetAutoTruncateTol_c(pc_ptr, tol) bind(C, name='PCAIRSetAutoTruncateTol_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1054,7 +1057,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetProcessorAgglom_c(pc_ptr, processor_agglom) bind(C, name='PCAIRSetProcessorAgglom_c')
+   subroutine PCAIRSetProcessorAgglom_c(pc_ptr, processor_agglom) bind(C, name='PCAIRSetProcessorAgglom_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1074,7 +1077,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetProcessorAgglomRatio_c(pc_ptr, ratio) bind(C, name='PCAIRSetProcessorAgglomRatio_c')
+   subroutine PCAIRSetProcessorAgglomRatio_c(pc_ptr, ratio) bind(C, name='PCAIRSetProcessorAgglomRatio_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1091,7 +1094,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetProcessorAgglomFactor_c(pc_ptr, factor) bind(C, name='PCAIRSetProcessorAgglomFactor_c')
+   subroutine PCAIRSetProcessorAgglomFactor_c(pc_ptr, factor) bind(C, name='PCAIRSetProcessorAgglomFactor_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1108,7 +1111,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetProcessEqLimit_c(pc_ptr, limit) bind(C, name='PCAIRSetProcessEqLimit_c')
+   subroutine PCAIRSetProcessEqLimit_c(pc_ptr, limit) bind(C, name='PCAIRSetProcessEqLimit_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1125,7 +1128,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRSetSubcomm_c')
+   subroutine PCAIRSetSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRSetSubcomm_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1145,7 +1148,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetStrongThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRSetStrongThreshold_c')
+   subroutine PCAIRSetStrongThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRSetStrongThreshold_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1162,7 +1165,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetDDCIts_c(pc_ptr, its) bind(C, name='PCAIRSetDDCIts_c')
+   subroutine PCAIRSetDDCIts_c(pc_ptr, its) bind(C, name='PCAIRSetDDCIts_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1179,7 +1182,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetDDCFraction_c(pc_ptr, frac) bind(C, name='PCAIRSetDDCFraction_c')
+   subroutine PCAIRSetDDCFraction_c(pc_ptr, frac) bind(C, name='PCAIRSetDDCFraction_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1196,7 +1199,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCFSplittingType_c(pc_ptr, algo) bind(C, name='PCAIRSetCFSplittingType_c')
+   subroutine PCAIRSetCFSplittingType_c(pc_ptr, algo) bind(C, name='PCAIRSetCFSplittingType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1213,7 +1216,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetMaxLubySteps_c(pc_ptr, steps) bind(C, name='PCAIRSetMaxLubySteps_c')
+   subroutine PCAIRSetMaxLubySteps_c(pc_ptr, steps) bind(C, name='PCAIRSetMaxLubySteps_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1230,7 +1233,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetSmoothType_c(pc_ptr, input_string ) bind (C, name="PCAIRSetSmoothType_c")
+   subroutine PCAIRSetSmoothType_c(pc_ptr, input_string ) bind (C, name="PCAIRSetSmoothType_c_fref")
 
       use iso_c_binding, only: C_CHAR, c_null_char
       implicit none
@@ -1263,7 +1266,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetSmoothType_c(pc_ptr, output_string) bind(C, name="PCAIRGetSmoothType_c")
+   subroutine PCAIRGetSmoothType_c(pc_ptr, output_string) bind(C, name="PCAIRGetSmoothType_c_fref")
       use iso_c_binding, only: c_char, c_null_char
       implicit none
    
@@ -1293,7 +1296,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetDiagScalePolys_c')
+   subroutine PCAIRSetDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetDiagScalePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1313,7 +1316,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRSetMatrixFreePolys_c')
+   subroutine PCAIRSetMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRSetMatrixFreePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1333,7 +1336,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetOnePointClassicalProlong_c(pc_ptr, onep) bind(C, name='PCAIRSetOnePointClassicalProlong_c')
+   subroutine PCAIRSetOnePointClassicalProlong_c(pc_ptr, onep) bind(C, name='PCAIRSetOnePointClassicalProlong_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1353,7 +1356,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetFullSmoothingUpAndDown_c(pc_ptr, full) bind(C, name='PCAIRSetFullSmoothingUpAndDown_c')
+   subroutine PCAIRSetFullSmoothingUpAndDown_c(pc_ptr, full) bind(C, name='PCAIRSetFullSmoothingUpAndDown_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1373,7 +1376,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetSymmetric_c(pc_ptr, sym) bind(C, name='PCAIRSetSymmetric_c')
+   subroutine PCAIRSetSymmetric_c(pc_ptr, sym) bind(C, name='PCAIRSetSymmetric_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1393,7 +1396,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetConstrainW_c(pc_ptr, constrain) bind(C, name='PCAIRSetConstrainW_c')
+   subroutine PCAIRSetConstrainW_c(pc_ptr, constrain) bind(C, name='PCAIRSetConstrainW_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1413,7 +1416,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetConstrainZ_c(pc_ptr, constrain) bind(C, name='PCAIRSetConstrainZ_c')
+   subroutine PCAIRSetConstrainZ_c(pc_ptr, constrain) bind(C, name='PCAIRSetConstrainZ_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1433,7 +1436,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetImproveWIts_c(pc_ptr, its) bind(C, name='PCAIRSetImproveWIts_c')
+   subroutine PCAIRSetImproveWIts_c(pc_ptr, its) bind(C, name='PCAIRSetImproveWIts_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1450,7 +1453,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetImproveZIts_c(pc_ptr, its) bind(C, name='PCAIRSetImproveZIts_c')
+   subroutine PCAIRSetImproveZIts_c(pc_ptr, its) bind(C, name='PCAIRSetImproveZIts_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1467,7 +1470,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetStrongRThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRSetStrongRThreshold_c')
+   subroutine PCAIRSetStrongRThreshold_c(pc_ptr, thresh) bind(C, name='PCAIRSetStrongRThreshold_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1484,7 +1487,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRSetInverseType_c')
+   subroutine PCAIRSetInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRSetInverseType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1501,7 +1504,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRSetCInverseType_c')
+   subroutine PCAIRSetCInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRSetCInverseType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1518,7 +1521,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetZType_c(pc_ptr, z_type) bind(C, name='PCAIRSetZType_c')
+   subroutine PCAIRSetZType_c(pc_ptr, z_type) bind(C, name='PCAIRSetZType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1535,7 +1538,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetLairDistance_c(pc_ptr, distance) bind(C, name='PCAIRSetLairDistance_c')
+   subroutine PCAIRSetLairDistance_c(pc_ptr, distance) bind(C, name='PCAIRSetLairDistance_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1552,7 +1555,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRSetPolyOrder_c')
+   subroutine PCAIRSetPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRSetPolyOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1569,7 +1572,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetInverseSparsityOrder_c')
+   subroutine PCAIRSetInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetInverseSparsityOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1586,7 +1589,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCPolyOrder_c')
+   subroutine PCAIRSetCPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCPolyOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1603,7 +1606,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCInverseSparsityOrder_c')
+   subroutine PCAIRSetCInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCInverseSparsityOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1620,7 +1623,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarsestInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRSetCoarsestInverseType_c')
+   subroutine PCAIRSetCoarsestInverseType_c(pc_ptr, inv_type) bind(C, name='PCAIRSetCoarsestInverseType_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1637,7 +1640,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarsestPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCoarsestPolyOrder_c')
+   subroutine PCAIRSetCoarsestPolyOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCoarsestPolyOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1654,7 +1657,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarsestInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCoarsestInverseSparsityOrder_c')
+   subroutine PCAIRSetCoarsestInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetCoarsestInverseSparsityOrder_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1671,7 +1674,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarsestMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRSetCoarsestMatrixFreePolys_c')
+   subroutine PCAIRSetCoarsestMatrixFreePolys_c(pc_ptr, mf) bind(C, name='PCAIRSetCoarsestMatrixFreePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1691,7 +1694,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarsestDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetCoarsestDiagScalePolys_c')
+   subroutine PCAIRSetCoarsestDiagScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetCoarsestDiagScalePolys_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1711,7 +1714,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetCoarsestSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRSetCoarsestSubcomm_c')
+   subroutine PCAIRSetCoarsestSubcomm_c(pc_ptr, subcomm) bind(C, name='PCAIRSetCoarsestSubcomm_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1731,7 +1734,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetRDrop_c(pc_ptr, rdrop) bind(C, name='PCAIRSetRDrop_c')
+   subroutine PCAIRSetRDrop_c(pc_ptr, rdrop) bind(C, name='PCAIRSetRDrop_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1748,7 +1751,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetADrop_c(pc_ptr, adrop) bind(C, name='PCAIRSetADrop_c')
+   subroutine PCAIRSetADrop_c(pc_ptr, adrop) bind(C, name='PCAIRSetADrop_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1765,7 +1768,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetALump_c(pc_ptr, lump) bind(C, name='PCAIRSetALump_c')
+   subroutine PCAIRSetALump_c(pc_ptr, lump) bind(C, name='PCAIRSetALump_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1785,7 +1788,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetReuseSparsity_c(pc_ptr, reuse) bind(C, name='PCAIRSetReuseSparsity_c')
+   subroutine PCAIRSetReuseSparsity_c(pc_ptr, reuse) bind(C, name='PCAIRSetReuseSparsity_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1805,7 +1808,7 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetReusePolyCoeffs_c(pc_ptr, reuse) bind(C, name='PCAIRSetReusePolyCoeffs_c')
+   subroutine PCAIRSetReusePolyCoeffs_c(pc_ptr, reuse) bind(C, name='PCAIRSetReusePolyCoeffs_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr
@@ -1825,7 +1828,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetReuseAmount_c(pc_ptr, amount) bind(C, name='PCAIRGetReuseAmount_c')
+   subroutine PCAIRGetReuseAmount_c(pc_ptr, amount) bind(C, name='PCAIRGetReuseAmount_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout)              :: pc_ptr
@@ -1844,7 +1847,7 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetReuseAmount_c(pc_ptr, amount) bind(C, name='PCAIRSetReuseAmount_c')
+   subroutine PCAIRSetReuseAmount_c(pc_ptr, amount) bind(C, name='PCAIRSetReuseAmount_c_fref')
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout)                     :: pc_ptr
