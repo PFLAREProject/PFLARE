@@ -15,7 +15,7 @@ module weighted_jacobi
    subroutine calculate_and_build_weighted_jacobi_inverse(matrix, inverse_type, inv_matrix)
 
 
-      ! Builds an assembled weighted jacobi approximate inverse
+      ! Builds an assembled Jacobi approximate inverse, either weighted, unweighted or l1
       ! inverse_type is one of PFLAREINV_WJACOBI, PFLAREINV_JACOBI or PFLAREINV_L1JACOBI
 
       ! ~~~~~~
@@ -31,6 +31,9 @@ module weighted_jacobi
       logical :: reuse_triggered
 
       ! ~~~~~~    
+
+      ! Unweighted by default
+      weight = 1d0
 
       ! Let's create a matrix to represent the inverse diagonal
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
@@ -71,11 +74,6 @@ module weighted_jacobi
          ! but the code uses 4 / (3 * ||.||)
          weight = 4.0/(3.0 * norm_inf)
 
-      ! Unweighted
-      else
-
-         weight = 1d0
-
       end if
 
       if (inverse_type /= PFLAREINV_L1JACOBI) then
@@ -98,7 +96,8 @@ module weighted_jacobi
 
    subroutine calculate_l1_jacobi_inverse_diagonal(matrix, diag_vec)
 
-      ! Overwrites diag_vec with the l1 Jacobi inverse diagonal
+      ! On entry diag_vec holds the diagonal of matrix, on exit it is overwritten
+      ! with the l1 Jacobi inverse diagonal
       ! sign(a_ii) / sum_j |a_ij|, where the sum is over the whole (parallel) row
       ! This is hypre's hypre_ParCSRComputeL1Norms with option 1, which also
       ! flips the sign of the l1 norm on rows with a negative diagonal
@@ -114,8 +113,6 @@ module weighted_jacobi
       MatType :: mat_type
 
       ! ~~~~~~
-
-      call MatGetDiagonal(matrix, diag_vec, ierr)
 
       ! MATDIAGONAL has no MatGetRowSumAbs, but there sum_j |a_ij| = |a_ii|
       ! so the l1 Jacobi inverse is just the inverse of the diagonal

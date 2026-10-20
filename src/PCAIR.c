@@ -3687,7 +3687,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 
   Options Database Keys:
 + -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type; defaults to product
-. -pc_air_inverse_type      (power|arnoldi|newton|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
+. -pc_air_inverse_type      (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
 . -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc

@@ -8,7 +8,7 @@ for earlier changes please see the git history.
 
 - Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
   inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
-  wherever the other inverse types can, including the CR splitting relaxation
+  wherever the other Jacobi types can, including the CR splitting relaxation
 - Behaviour change: the weighted Jacobi (`wjacobi`) weight is now
   4 / (3 ||D^{-1/2} A D^{-1/2}||_inf), which is what hypre BoomerAMG computes
   with a relaxation weight of 0, rather than 3 / (4 ||D^{-1/2} A D^{-1/2}||_inf)

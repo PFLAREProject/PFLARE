@@ -146,11 +146,11 @@ module cr_splitting
       else
 
          ! ~~~~~~~~
-         ! Build the weighted Jacobi inverse of the diagonal of Aff
-         ! This uses the same weight as calculate_and_build_weighted_jacobi_inverse
-         ! (ie the weight hypre computes) but we sanitize exactly zero diagonals so they can't
-         ! poison the weight with infs/nans - those rows can never be relaxed so they
-         ! are force promoted to C below
+         ! Build the Jacobi inverse (weighted, unweighted or l1) of the diagonal of Aff
+         ! This uses the same weights as calculate_and_build_weighted_jacobi_inverse
+         ! but we sanitize exactly zero diagonals so they can't poison the weights
+         ! with infs/nans - those rows can never be relaxed so they are force
+         ! promoted to C (and their inverse zeroed) below
          ! ~~~~~~~~
          call MatCreateVecs(Aff, PETSC_NULL_VEC, diag_vec, ierr)
          call MatGetDiagonal(Aff, diag_vec, ierr)
@@ -186,7 +186,6 @@ module cr_splitting
 
          ! Invert and apply the weight, zeroing the rows we can't relax
          if (cr_inverse_type == PFLAREINV_L1JACOBI) then
-            ! This recomputes the diagonal from Aff, zero diagonals give zero
             call calculate_l1_jacobi_inverse_diagonal(Aff, diag_vec)
          else
             call VecReciprocal(diag_vec, ierr)
