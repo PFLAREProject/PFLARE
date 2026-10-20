@@ -1,11 +1,11 @@
 src/AIR_Data_Type.o : src/AIR_Data_Type.F90 src/fortran/Pflare_Parameters.o src/fortran/Gmres_Poly_Data_Type.o 
 src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.F90 src/FC_Smooth_Block.o src/FC_Smooth.o src/fortran/Gmres_Poly_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Pflare_Parameters.o src/AIR_Data_Type.o 
-src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/fortran/Gmres_Poly_Data_Type.o src/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/FC_Smooth_Block.o src/FC_Smooth.o src/AIR_MG_Stats.o src/AIR_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Pflare_Parameters.o src/fortran/CF_Splitting.o src/Constrain_Z_or_W.o 
+src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/fortran/Gmres_Poly_Data_Type.o src/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/FC_Smooth_Block.o src/FC_Smooth.o src/AIR_MG_Stats.o src/AIR_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fortran/Pflare_Parameters.o src/fortran/CF_Splitting.o src/fref/Constrain_Z_or_W.o 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.F90 src/fortran/Gmres_Poly_Data_Type.o src/fortran/Port_Interfaces_Poly.o src/AIR_Data_Type.o src/fortran/Port_Interfaces.o 
-src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/fref/Grid_Transfer_Improve.o src/fref/Grid_Transfer.o src/AIR_Data_Type.o src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/Constrain_Z_or_W.o 
+src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/fref/Grid_Transfer_Improve.o src/fref/Grid_Transfer.o src/AIR_Data_Type.o src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/fortran/Port_Interfaces_Poly.o src/fref/Constrain_Z_or_W.o 
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/FC_Smooth_Block.o src/AIR_Data_Type_Routines.o src/PCAIR_Shell.o src/PCAIR_Data_Type.o 
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
-src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o 
+src/fref/Constrain_Z_or_W.o : src/fref/Constrain_Z_or_W.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o 
 src/FC_Smooth.o : src/FC_Smooth.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces_Poly.o src/fortran/Port_Interfaces.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/FC_Smooth_Block.o : src/FC_Smooth_Block.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces_Poly.o src/fortran/Port_Interfaces.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/fref/Grid_Transfer.o : src/fref/Grid_Transfer.F90 src/fortran/Pflare_Parameters.o src/fortran/Port_Interfaces.o src/C_PETSc_Interfaces.o 
@@ -61,6 +61,7 @@ src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.c include/pflare.h src/pfl
 src/CF_Splitting.o : src/CF_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PMISR_Module.h src/DDC_Module.h src/CR_Splitting.h src/SAbs.h src/Device_Datak.h src/Aggregation.h src/PETSc_Helper.h src/CF_Splitting.h 
 src/CR_Splitting.o : src/CR_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Module.h src/Pflare_Random.h src/Approx_Inverse_Setup.h src/CR_Splitting.h 
 src/C_PETSc_Routines.o : src/C_PETSc_Routines.c 
+src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.c src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/Constrain_Z_or_W.h 
 src/DDC_Module.o : src/DDC_Module.c src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/Device_Datak.h src/DDC_Modulek.h src/MatDiagDomk.h src/PMISR_Module.h src/MatDiagDom.h src/Pflare_Random.h src/DDC_Module.h 
 src/Gmres_Poly.o : src/Gmres_Poly.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/Sorting.h src/Gmres_Polyk.h src/Matshell_Data_Type.h src/Gmres_Poly_Apply.h src/TSQR.h src/Gmres_Poly_Data_Type.h src/PETSc_Helper.h src/Pflare_Random.h src/Gmres_Poly.h 
 src/Gmres_Poly_Apply.o : src/Gmres_Poly_Apply.c src/pflareimpl.h src/pflare_parameters.h src/Matshell_Data_Type.h src/Gmres_Poly_Apply.h 
