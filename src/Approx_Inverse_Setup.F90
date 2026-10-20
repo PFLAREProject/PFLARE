@@ -16,7 +16,7 @@ module approx_inverse_setup
          build_gmres_polynomial_newton_inverse, &
          calculate_gmres_polynomial_roots_newton
    use neumann_poly, only: calculate_and_build_neumann_polynomial_inverse
-   use weighted_jacobi, only: calculate_and_build_weighted_jacobi_inverse
+   use port_interfaces, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
    use repartition, only: MatMPICreateNonemptySubcomm
    use petsc_helper, only: destroy_matrix_reuse
