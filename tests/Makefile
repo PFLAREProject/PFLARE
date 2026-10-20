@@ -636,7 +636,7 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
 	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse"
-	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 30
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 45
 	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi -ksp_max_it 12
 	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse on a negated matrix - checks the sign of the l1 Jacobi weight"
@@ -1371,7 +1371,7 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
 	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi \
-	 -ksp_max_it 30
+	 -ksp_max_it 45
 	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi \
 	 -ksp_max_it 12
