@@ -9,6 +9,8 @@
 #include "pflare.h"
 #include "pflareimpl.h"
 #include "PETSc_Helper.h"
+#include "CF_Splitting.h"
+#include "MatDiagDomSubmatrix.h"
 #include <string.h>
 /* SUBMANSEC = PC */
 
@@ -18,11 +20,6 @@ PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
 PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied, int *error_code);
 PETSC_EXTERN void pcair_shell_get_pcmg_c(PC *pc, PC *pcmg);
-PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int,
-   PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
-   int ddc_its, PetscReal fraction_swap,
-   IS *is_fine, IS *is_coarse);
-PETSC_EXTERN void compute_diag_dom_submatrix_c(Mat *input_mat, PetscReal max_dd_ratio, Mat *output_mat);
 // Defined in PCAIR_C_Fortran_Bindings.F90 
 // External users should use the get/set routines without _c which have 
 // PetscErrorCode defined as return type, those routines are defined below this
@@ -321,22 +318,20 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int skip_symmetrize_int,
    int ddc_its, PetscReal fraction_swap,
    IS *is_fine, IS *is_coarse)
 {
-   // Now we call petsc fortran routines in compute_cf_splitting_c from this C file
-   // so we have to have made sure this is called
-   // Otherwise things like PETSC_NULL_INTEGER_ARRAY aren't defined
-   PetscCallVoid(PetscInitializeFortran());
-   compute_cf_splitting_c(&input_mat, skip_symmetrize_int, strong_threshold,
+   // The C port of the Fortran compute_cf_splitting, which takes the optional cr_*
+   // arguments too (absent here, so the CR splitting uses its defaults)
+   // skip_symmetrize_int skips symmetrizing the strength matrix when it is 1
+   PetscBool skip_symmetrize = skip_symmetrize_int == 1 ? PETSC_TRUE : PETSC_FALSE;
+
+   PetscCallVoid(compute_cf_splitting_c(input_mat, skip_symmetrize, strong_threshold,
       max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
-      is_fine, is_coarse);
+      is_fine, is_coarse, NULL, NULL, NULL, NULL));
 }
 
 PETSC_EXTERN void compute_diag_dom_submatrix(Mat input_mat, PetscReal max_dd_ratio, Mat *output_mat)
 {
-   // Now we call petsc fortran routines in compute_cf_splitting_c from this C file
-   // so we have to have made sure this is called
-   // Otherwise things like PETSC_NULL_INTEGER_ARRAY aren't defined
-   PetscCallVoid(PetscInitializeFortran());
-   compute_diag_dom_submatrix_c(&input_mat, max_dd_ratio, output_mat);
+   // The C port of the Fortran compute_diag_dom_submatrix
+   PetscCallVoid(compute_diag_dom_submatrix_c(input_mat, max_dd_ratio, output_mat));
 }
 
 // Restrict input_mat onto output_mat's existing sparsity pattern.

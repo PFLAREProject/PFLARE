@@ -1,7 +1,10 @@
-module matdiagdomsubmatrix
+module matdiagdomsubmatrix_fref
+
+   ! The Fortran reference of module matdiagdomsubmatrix, renamed (as is the cf_splitting it uses)
+   ! as src/fortran/MatDiagDomSubmatrix.F90 defines matdiagdomsubmatrix
 
    use petscmat
-   use cf_splitting, only: compute_cf_splitting, CF_DIAG_DOM
+   use cf_splitting_fref, only: compute_cf_splitting, CF_DIAG_DOM
    use port_interfaces, only: MatCreateSubMatrixWrapper
    use pflare_parameters, only: 
 
@@ -77,5 +80,5 @@ module matdiagdomsubmatrix
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-end module matdiagdomsubmatrix
+end module matdiagdomsubmatrix_fref
 

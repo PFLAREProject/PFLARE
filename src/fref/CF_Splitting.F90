@@ -1,4 +1,6 @@
-module cf_splitting
+module cf_splitting_fref
+
+   ! The Fortran reference of module cf_splitting, renamed as src/fortran/CF_Splitting.F90 defines cf_splitting
 
    use petscmat
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_MAX_ITS, &
@@ -485,5 +487,5 @@ module cf_splitting
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-end module cf_splitting
+end module cf_splitting_fref
 

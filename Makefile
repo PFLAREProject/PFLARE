@@ -137,6 +137,13 @@ COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Repartition.o \
+		  $(SRCDIR)/SAbs.o \
+		  $(SRCDIR)/MatDiagDom.o \
+		  $(SRCDIR)/PMISR_Module.o \
+		  $(SRCDIR)/DDC_Module.o \
+		  $(SRCDIR)/CR_Splitting.o \
+		  $(SRCDIR)/CF_Splitting.o \
+		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
@@ -172,15 +179,8 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
-		  $(SRCDIR)/MatDiagDom.o \
-		  $(SRCDIR)/SAbs.o \
-		  $(SRCDIR)/DDC_Module.o \
-		  $(SRCDIR)/PMISR_Module.o \
 		  $(SRCDIR)/Neumann_Poly.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
-		  $(SRCDIR)/CR_Splitting.o \
-		  $(SRCDIR)/CF_Splitting.o \
-		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \
@@ -192,6 +192,8 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 		  $(FORTRANDIR)/Port_Interfaces.o \
+		  $(FORTRANDIR)/CF_Splitting.o \
+		  $(FORTRANDIR)/MatDiagDomSubmatrix.o \
 		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
 		  $(FORTRANDIR)/PCAIR_Interfaces.o \
 		  $(FORTRANDIR)/PFLARE.o \

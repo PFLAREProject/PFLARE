@@ -216,6 +216,11 @@ module c_petsc_interfaces
 
    end interface
 
+#if defined(PFLARE_PORT_DEBUG)
+   ! Only the Fortran reference in src/fref (PMISR_Module, MatDiagDom, DDC_Module and
+   ! CF_Splitting, built with PFLARE_PORT_DEBUG=1) uses these, the C ports call the
+   ! kernels and the device data routines directly
+
    interface   
       
       subroutine create_cf_is_kokkos(A_array, index_fine, index_coarse) &
@@ -305,6 +310,7 @@ module c_petsc_interfaces
       end subroutine delete_device_diag_dom_ratio
  
    end interface
+#endif
 
    interface   
       

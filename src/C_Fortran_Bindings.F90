@@ -7,8 +7,13 @@ module c_fortran_bindings
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
          inverse_type_is_polynomial
    use gmres_poly_apply, only: shell_poly_block_apply
-   use cf_splitting, only: compute_cf_splitting
-   use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
+#ifdef PFLARE_PORT_DEBUG
+   ! The Fortran reference implementations in src/fref, for the _fref bindings below
+   ! (under #ifdef rather than #if defined so that make depend sees these uses only
+   ! in the port debug build)
+   use cf_splitting_fref, only: compute_cf_splitting
+   use matdiagdomsubmatrix_fref, only: compute_diag_dom_submatrix
+#endif
    use air_data_type_routines, only: create_air_data
    use fc_smooth_block, only: ensure_air_block_temps
 
@@ -352,13 +357,22 @@ module c_fortran_bindings
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine compute_cf_splitting_c(input_mat_ptr, skip_symmetrize_int, &
+#if defined(PFLARE_PORT_DEBUG)
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! The C binding of the Fortran reference implementations of compute_cf_splitting and
+   ! compute_diag_dom_submatrix in src/fref (built with PFLARE_PORT_DEBUG=1), which
+   ! tests/port_compare_cf.c compares against the C ports that the public C API calls
+   ! These were the bindings compute_cf_splitting_c and compute_diag_dom_submatrix_c
+   ! that the public C API called before the port, now with an _fref suffix
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   subroutine compute_cf_splitting_c_fref(input_mat_ptr, skip_symmetrize_int, &
          strong_threshold, max_luby_steps, &
          cf_splitting_type, ddc_its, fraction_swap, &
          is_fine_ptr, is_coarse_ptr) &
-         bind(C,name='compute_cf_splitting_c')
+         bind(C,name='compute_cf_splitting_c_fref')
 
-      ! Computes a CF splitting
+      ! Computes a CF splitting with the Fortran reference implementation
       ! skip_symmetrize_int skips symmetrizing the strength matrix
 
       ! ~~~~~~~~
@@ -387,14 +401,14 @@ module c_fortran_bindings
       is_fine_ptr = is_fine%v
       is_coarse_ptr = is_coarse%v
 
-   end subroutine compute_cf_splitting_c
+   end subroutine compute_cf_splitting_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine compute_diag_dom_submatrix_c(input_mat_ptr, max_dd_ratio, output_mat_ptr) &
-         bind(C,name='compute_diag_dom_submatrix_c')
+   subroutine compute_diag_dom_submatrix_c_fref(input_mat_ptr, max_dd_ratio, output_mat_ptr) &
+         bind(C,name='compute_diag_dom_submatrix_c_fref')
 
-      ! Computes a diagonally dominant submatrix
+      ! Computes a diagonally dominant submatrix with the Fortran reference implementation
 
       ! ~~~~~~~~
       integer(c_long_long), intent(in)       :: input_mat_ptr
@@ -412,7 +426,8 @@ module c_fortran_bindings
       ! Pass out the resulting submatrix handle
       output_mat_ptr = output_mat%v
 
-   end subroutine compute_diag_dom_submatrix_c
+   end subroutine compute_diag_dom_submatrix_c_fref
+#endif
 
    !------------------------------------------------------------------------------------------------------------------------
 
