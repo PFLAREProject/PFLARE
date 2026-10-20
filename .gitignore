@@ -55,6 +55,7 @@ tests/pmisr_nonsymmetric
 tests/poly_zero_coeffs
 tests/port_compare_cf
 tests/port_compare_pc
+tests/port_compare_air
 tests/leja_ordering
 tests/reuse_preconditioner
 tests/shell_block_apply

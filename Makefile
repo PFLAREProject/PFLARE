@@ -244,7 +244,7 @@ ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
 # Include the drivers that compare the C ports against the Fortran reference
-PORT_TEST_TARGETS := port_compare_pc port_compare_cf
+PORT_TEST_TARGETS := port_compare_pc port_compare_cf port_compare_air
 ifeq ($(PFLARE_PORT_DEBUG),1)
 export TEST_TARGETS := $(TEST_TARGETS) $(PORT_TEST_TARGETS)
 endif
