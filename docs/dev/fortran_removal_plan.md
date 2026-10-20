@@ -349,7 +349,10 @@ reasons must be identical; residual norms agree to a relative tolerance
 `PFLARE_KOKKOS_DEBUG` idea applied to the port. While a stage is in flight,
 the retired Fortran implementation is kept compiled under `src/fref/`
 (renamed `bind(C)` exports get an `_fref` suffix; module procedure names are
-mangled by the compiler and do not clash). With `make PFLARE_PORT_DEBUG=1`
+mangled by the compiler and do not clash). Fortran that uses a `src/fref`
+module does so under `#ifdef PFLARE_PORT_DEBUG` (makedepf90 evaluates `#ifdef`
+but not `#if defined`), and `make depend` writes the extra dependency lines of
+that build inside `ifeq ($(PFLARE_PORT_DEBUG),1)`. With `make PFLARE_PORT_DEBUG=1`
 the C code runs both itself and the Fortran reference and compares:
 
 - leaf stages (2, 3, 6): the call site that was switched to C also calls the
@@ -463,14 +466,16 @@ and PETSc. For each, the Fortran callers are switched to the C version through
 a `bind(C)` interface block placed in a new `src/fortran/Port_Interfaces.F90`
 (this file grows through stages 2 to 6 and is deleted in stage 7). The retired
 Fortran file moves to `src/fref/` and keeps compiling.
+`TSQR.F90` was moved out of this stage into stage 5, because its `tsqr_buffers`
+live inside `gmres_poly_data`, which stage 5 owns; the TSQR notes below apply there.
 
 Notes for the subagent
 
 - `Binary_Tree.F90` is not ported. Its only use is
   `create_knuth_shuffle_tree_array` + `itree2vector` in `SAI_Z.F90`, which
   builds a sorted set of unique column indices (the shuffle only balances the
-  tree). `Sorting.c` provides `sorted_unique(array, n, out, nout)` on
-  `PetscSortInt` + `PetscSortedRemoveDupsInt`; `SAI_Z.F90` calls it through
+  tree). `Sorting.c` provides `sorted_unique(array, n)` (in place, `n`
+  in/out) on `PetscSortInt` + `PetscSortedRemoveDupsInt`; `SAI_Z.F90` calls it through
   `Port_Interfaces.F90` from this stage on, and `Binary_Tree.F90` goes to
   `src/fref/` with the rest. `merge_pre_sorted` and
   `intersect_pre_sorted_indices_only` are ported as they are (PETSc has no
@@ -540,7 +545,8 @@ problems, serial and `mpiexec -n 2`/`-n 4`.
 
 Port `Gmres_Poly_Data_Type.F90`, `Matshell_Data_Type.F90`,
 `Gmres_Poly_Apply.F90`, `Gmres_Poly.F90`, `Gmres_Poly_Newton.F90`,
-`Neumann_Poly.F90`, `SAI_Z.F90`, `Approx_Inverse_Setup.F90`. After this stage
+`Neumann_Poly.F90`, `SAI_Z.F90`, `Approx_Inverse_Setup.F90`, plus `TSQR.F90`
+(moved here from stage 2, see the TSQR notes there). After this stage
 `PCPFLAREINV.c` is pure C: `calculate_and_build_approximate_inverse`,
 `reset_inverse_mat`, `inverse_type_is_polynomial` and
 `pflareinv_shell_block_matapply` are C functions, and the `PetscInitializeFortran`
