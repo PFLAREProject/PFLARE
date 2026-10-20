@@ -25,6 +25,7 @@ module port_interfaces
 #ifdef PFLARE_PORT_DEBUG
    use sorting, only: intersect_pre_sorted_indices_only_fref => intersect_pre_sorted_indices_only, &
          merge_pre_sorted_fref => merge_pre_sorted
+   use aggregation, only: generate_serial_aggregation_fref => generate_serial_aggregation
 #endif
 
 #include "petsc/finclude/petscmat.h"
@@ -37,6 +38,21 @@ module port_interfaces
    public :: timer_start, timer_finish, timer_reset, timer_clear, timer_time, print_timers
    ! Sorting.c
    public :: sorted_unique, intersect_pre_sorted_indices_only, merge_pre_sorted
+   ! Aggregation.c
+   public :: generate_serial_aggregation
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! C_PETSc_Routines.c
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   interface
+      function PetscFree_c(ptr) &
+         bind(c, name="PetscFree_c")
+         use iso_c_binding
+         type(c_ptr) :: ptr
+         PetscErrorCode :: PetscFree_c
+      end function PetscFree_c
+   end interface
 
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ! Timers.c
@@ -134,6 +150,20 @@ module port_interfaces
          PetscInt, dimension(size_array1 + size_array2) :: sorted_array
          PetscErrorCode :: merge_pre_sorted_c
       end function merge_pre_sorted_c
+   end interface
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! Aggregation.c
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   interface
+      function generate_serial_aggregation_c(strength_mat, cf_markers, aggregates) &
+         bind(c, name="generate_serial_aggregation")
+         use iso_c_binding
+         integer(c_long_long), value :: strength_mat
+         type(c_ptr) :: cf_markers, aggregates
+         PetscErrorCode :: generate_serial_aggregation_c
+      end function generate_serial_aggregation_c
    end interface
 
    contains
@@ -346,6 +376,88 @@ module port_interfaces
 #endif
 
    end subroutine merge_pre_sorted
+
+! -------------------------------------------------------------------------------------------------------------------------------
+! Aggregation.c
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine generate_serial_aggregation(strength_mat, cf_markers, aggregates)
+
+      ! The C takes cf_markers as input if it is allocated, and otherwise allocates it,
+      ! and always allocates aggregates (with PetscMalloc). The arrays the C allocates
+      ! are copied into the Fortran allocatables and freed
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)      :: strength_mat
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers
+      PetscInt, dimension(:), allocatable, intent(inout) :: aggregates
+
+      PetscInt :: local_rows, local_cols
+      PetscErrorCode :: ierr
+      logical :: cf_markers_allocated
+      type(c_ptr) :: cf_markers_ptr, aggregates_ptr
+      integer, dimension(:), pointer :: cf_markers_c
+      PetscInt, dimension(:), pointer :: aggregates_c
+#if defined(PFLARE_PORT_DEBUG)
+      integer, dimension(:), allocatable :: cf_markers_fref
+      PetscInt, dimension(:), allocatable :: aggregates_fref
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+      call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
+
+#if defined(PFLARE_PORT_DEBUG)
+      ! The C modifies cf_markers in place, so give the reference a copy of the input
+      if (allocated(cf_markers)) then
+         allocate(cf_markers_fref(size(cf_markers)))
+         cf_markers_fref = cf_markers
+      end if
+      call generate_serial_aggregation_fref(strength_mat, cf_markers_fref, aggregates_fref)
+#endif
+
+      cf_markers_allocated = allocated(cf_markers)
+      if (cf_markers_allocated) then
+         cf_markers_ptr = c_loc(cf_markers)
+      else
+         cf_markers_ptr = c_null_ptr
+      end if
+      aggregates_ptr = c_null_ptr
+
+      ierr = generate_serial_aggregation_c(strength_mat%v, cf_markers_ptr, aggregates_ptr)
+      call port_check(ierr, "generate_serial_aggregation")
+
+      ! Copy what the C allocated into the Fortran allocatables
+      if (.NOT. cf_markers_allocated) then
+         allocate(cf_markers(local_rows))
+         if (local_rows > 0) then
+            call c_f_pointer(cf_markers_ptr, cf_markers_c, [local_rows])
+            cf_markers = cf_markers_c
+         end if
+         ierr = PetscFree_c(cf_markers_ptr)
+         call port_check(ierr, "PetscFree_c")
+      end if
+      allocate(aggregates(local_rows))
+      if (local_rows > 0) then
+         call c_f_pointer(aggregates_ptr, aggregates_c, [local_rows])
+         aggregates = aggregates_c
+      end if
+      ierr = PetscFree_c(aggregates_ptr)
+      call port_check(ierr, "PetscFree_c")
+
+#if defined(PFLARE_PORT_DEBUG)
+      if (size(cf_markers) /= size(cf_markers_fref) .OR. size(aggregates) /= size(aggregates_fref)) then
+         print *, "C and Fortran reference versions of generate_serial_aggregation do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      if (any(cf_markers /= cf_markers_fref) .OR. any(aggregates /= aggregates_fref)) then
+         print *, "C and Fortran reference versions of generate_serial_aggregation do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      deallocate(cf_markers_fref, aggregates_fref)
+#endif
+
+   end subroutine generate_serial_aggregation
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

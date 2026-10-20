@@ -3,9 +3,8 @@ src/AIR_Data_Type_Routines.o : src/AIR_Data_Type_Routines.F90 src/FC_Smooth_Bloc
 src/AIR_MG_Setup.o : src/AIR_MG_Setup.F90 src/PETSc_Helper.o src/Repartition.o src/Gmres_Poly_Apply.o src/Gmres_Poly.o src/AIR_Operators_Setup.o src/C_PETSc_Interfaces.o src/FC_Smooth_Block.o src/FC_Smooth.o src/AIR_MG_Stats.o src/AIR_Data_Type.o src/fortran/Port_Interfaces.o src/Approx_Inverse_Setup.o src/fortran/Pflare_Parameters.o src/Matshell_Data_Type.o src/CF_Splitting.o src/Constrain_Z_or_W.o 
 src/AIR_MG_Stats.o : src/AIR_MG_Stats.F90 src/Gmres_Poly.o src/AIR_Data_Type.o src/PETSc_Helper.o 
 src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.F90 src/PETSc_Helper.o src/SAI_Z.o src/Grid_Transfer_Improve.o src/Grid_Transfer.o src/AIR_Data_Type.o src/fortran/Port_Interfaces.o src/fortran/Pflare_Parameters.o src/Approx_Inverse_Setup.o src/Constrain_Z_or_W.o 
-src/Aggregation.o : src/Aggregation.F90 
 src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.F90 src/Matshell_Data_Type.o src/PETSc_Helper.o src/Repartition.o src/SAI_Z.o src/Weighted_Jacobi.o src/Neumann_Poly.o src/Gmres_Poly_Newton.o src/Gmres_Poly_Apply.o src/Gmres_Poly.o src/fortran/Pflare_Parameters.o src/TSQR.o 
-src/CF_Splitting.o : src/CF_Splitting.F90 src/PETSc_Helper.o src/Aggregation.o src/C_PETSc_Interfaces.o src/SAbs.o src/CR_Splitting.o src/DDC_Module.o src/PMISR_Module.o src/fortran/Pflare_Parameters.o 
+src/CF_Splitting.o : src/CF_Splitting.F90 src/PETSc_Helper.o src/fortran/Port_Interfaces.o src/C_PETSc_Interfaces.o src/SAbs.o src/CR_Splitting.o src/DDC_Module.o src/PMISR_Module.o src/fortran/Pflare_Parameters.o 
 src/CR_Splitting.o : src/CR_Splitting.F90 src/Pflare_Random.o src/fortran/Pflare_Parameters.o src/Approx_Inverse_Setup.o src/PMISR_Module.o src/PETSc_Helper.o 
 src/C_Fortran_Bindings.o : src/C_Fortran_Bindings.F90 src/FC_Smooth_Block.o src/AIR_Data_Type_Routines.o src/PETSc_Helper.o src/MatDiagDomSubmatrix.o src/CF_Splitting.o src/Gmres_Poly_Apply.o src/Approx_Inverse_Setup.o src/PCAIR_Shell.o src/PCAIR_Data_Type.o 
 src/C_PETSc_Interfaces.o : src/C_PETSc_Interfaces.F90 
@@ -39,13 +38,15 @@ src/fortran/PCPFLAREINV_Interfaces.o : src/fortran/PCPFLAREINV_Interfaces.F90
 src/fortran/PFLARE.o : src/fortran/PFLARE.F90 src/fortran/Pflare_Parameters.o src/fortran/PCAIR_Interfaces.o src/fortran/PCPFLAREINV_Interfaces.o 
 src/fortran/Pflare_Parameters.o : src/fortran/Pflare_Parameters.F90 src/pflare_parameters.h 
 src/fortran/Port_Interfaces.o : src/fortran/Port_Interfaces.F90 
+src/fref/Aggregation.o : src/fref/Aggregation.F90 
 src/fref/Binary_Tree.o : src/fref/Binary_Tree.F90 
 src/fref/Sorting.o : src/fref/Sorting.F90 src/fref/Binary_Tree.o 
 src/fref/Timers.o : src/fref/Timers.F90 src/fortran/Pflare_Parameters.o 
 ifeq ($(PFLARE_PORT_DEBUG),1)
 src/SAI_Z.o : src/SAI_Z.F90 src/fortran/Pflare_Parameters.o src/PETSc_Helper.o src/C_PETSc_Interfaces.o src/fref/Sorting.o src/fref/Binary_Tree.o src/fortran/Port_Interfaces.o 
-src/fortran/Port_Interfaces.o : src/fortran/Port_Interfaces.F90 src/fref/Sorting.o 
+src/fortran/Port_Interfaces.o : src/fortran/Port_Interfaces.F90 src/fref/Aggregation.o src/fref/Sorting.o 
 endif
+src/Aggregation.o : src/Aggregation.c src/pflareimpl.h src/pflare_parameters.h src/Aggregation.h 
 src/C_PETSc_Routines.o : src/C_PETSc_Routines.c 
 src/PCAIR.o : src/PCAIR.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h 
 src/PCPFLAREINV.o : src/PCPFLAREINV.c include/pflare.h 

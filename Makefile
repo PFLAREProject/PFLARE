@@ -133,6 +133,7 @@ endif
 # The C objects
 COBJS := $(SRCDIR)/C_PETSc_Routines.o \
 		  $(SRCDIR)/Sorting.o \
+		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Timers.o \
 		  $(SRCDIR)/PCAIR.o \
 		  $(SRCDIR)/PCPFLAREINV.o
@@ -173,7 +174,6 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/SAbs.o \
 		  $(SRCDIR)/DDC_Module.o \
 		  $(SRCDIR)/PMISR_Module.o \
-		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Repartition.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/Neumann_Poly.o \

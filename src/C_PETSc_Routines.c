@@ -409,3 +409,13 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+// Frees memory allocated with PetscMalloc in the C ports of the Fortran modules, for the
+// Fortran callers in Port_Interfaces.F90 that copy such an array into a Fortran allocatable
+// *ptr is NULL on return
+PETSC_INTERN PetscErrorCode PetscFree_c(void **ptr)
+{
+   PetscFunctionBegin;
+   PetscCall(PetscFree(*ptr));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
