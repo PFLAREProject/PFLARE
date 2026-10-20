@@ -132,6 +132,7 @@ endif
 
 # The C objects
 COBJS := $(SRCDIR)/C_PETSc_Routines.o \
+		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Sorting.o \
 		  $(SRCDIR)/Aggregation.o \
 		  $(SRCDIR)/Weighted_Jacobi.o \
@@ -165,7 +166,7 @@ endif
 
 # The core Fortran that is still being ported to C (see docs/dev/fortran_removal_plan.md)
 FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
-		  $(SRCDIR)/TSQR.o \
+		  $(FREFDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
@@ -203,7 +204,9 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 # (only with PFLARE_PORT_DEBUG=1)
 # Each list above is in Fortran module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(FREF_OBJS)
+# While a stage is in flight a file can already be in src/fref but still be live
+# Fortran (FCORE_OBJS), so it is only listed once
+OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(filter-out $(FCORE_OBJS),$(FREF_OBJS))
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
