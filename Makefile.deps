@@ -40,9 +40,9 @@ src/fortran/PCAIR_C_Fortran_Bindings.o : src/fortran/PCAIR_C_Fortran_Bindings.F9
 src/fortran/PCAIR_Interfaces.o : src/fortran/PCAIR_Interfaces.F90 src/fortran/Pflare_Parameters.o src/AIR_MG_Stats.o src/PCAIR_Shell.o 
 src/fortran/PCPFLAREINV_Interfaces.o : src/fortran/PCPFLAREINV_Interfaces.F90 
 src/fortran/PFLARE.o : src/fortran/PFLARE.F90 src/fortran/Pflare_Parameters.o src/fortran/PCAIR_Interfaces.o src/fortran/PCPFLAREINV_Interfaces.o 
-src/fortran/Pflare_Parameters.o : src/fortran/Pflare_Parameters.F90 
+src/fortran/Pflare_Parameters.o : src/fortran/Pflare_Parameters.F90 src/pflare_parameters.h 
 src/C_PETSc_Routines.o : src/C_PETSc_Routines.c 
-src/PCAIR.o : src/PCAIR.c include/pflare.h 
+src/PCAIR.o : src/PCAIR.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h 
 src/PCPFLAREINV.o : src/PCPFLAREINV.c include/pflare.h 
 src/DDC_Modulek.o : src/DDC_Modulek.kokkos.cxx include/kokkos_helper.hpp 
 src/Device_Datak.o : src/Device_Datak.kokkos.cxx include/kokkos_helper.hpp 

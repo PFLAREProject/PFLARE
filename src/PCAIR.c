@@ -7,8 +7,8 @@
 // Include the petsc header files
 #include <petsc/private/pcimpl.h>
 #include "pflare.h"
+#include "pflareimpl.h"
 #include <string.h>
-
 /* SUBMANSEC = PC */
 
 // Defined in C_Fortran_Bindings.F90
