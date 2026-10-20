@@ -67,9 +67,12 @@ module port_interfaces
          MatGetNNZs_both, svd, pseudo_inv, mat_mat_symbolic
    ! Repartition.c
    public :: compute_mat_ratio_local_nonlocal_nnzs, calculate_repartition, MatMPICreateNonemptySubcomm
+   ! The handle conversions and error check, which the wrappers in
+   ! src/fortran/Port_Interfaces_Poly.F90 use too
+   public :: port_check, mat_to_c, mat_from_c
 #if defined(PFLARE_PORT_DEBUG)
-   ! The row by row matrix comparison, which the Fortran wrappers in src/fortran use too
-   public :: port_compare_mats
+   ! The row by row matrix comparison and copy, which the Fortran wrappers in src/fortran use too
+   public :: port_compare_mats, port_copy_mat
 #endif
 
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

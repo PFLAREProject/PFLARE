@@ -79,7 +79,8 @@ ifeq ($(PFLARE_PORT_DEBUG),1)
 override CPPFLAGS += -DPFLARE_PORT_DEBUG
 override FPPFLAGS += -DPFLARE_PORT_DEBUG
 override CXXPPFLAGS += -DPFLARE_PORT_DEBUG
-FREF_OBJS := $(patsubst %.F90,%.o,$(wildcard $(FREFDIR)/*.F90))
+FREF_OBJS := $(patsubst %.F90,%.o,$(wildcard $(FREFDIR)/*.F90)) \
+		  $(patsubst %.c,%.o,$(wildcard $(FREFDIR)/*.c))
 else
 FREF_OBJS :=
 endif
@@ -174,22 +175,13 @@ endif
 
 # The core Fortran that is still being ported to C (see docs/dev/fortran_removal_plan.md)
 FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
-		  $(FREFDIR)/TSQR.o \
-		  $(FREFDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/AIR_Data_Type.o \
-		  $(FREFDIR)/Matshell_Data_Type.o \
-		  $(FREFDIR)/Gmres_Poly_Apply.o \
 		  $(SRCDIR)/C_PETSc_Interfaces.o \
 		  $(SRCDIR)/PCAIR_Data_Type.o \
-		  $(FREFDIR)/Gmres_Poly.o \
-		  $(FREFDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/FC_Smooth.o \
 		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_MG_Stats.o \
-		  $(FREFDIR)/SAI_Z.o \
 		  $(SRCDIR)/Constrain_Z_or_W.o \
-		  $(FREFDIR)/Neumann_Poly.o \
-		  $(FREFDIR)/Approx_Inverse_Setup.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
 		  $(SRCDIR)/Grid_Transfer.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \
@@ -201,6 +193,9 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o \
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 		  $(FORTRANDIR)/Port_Interfaces.o \
+		  $(FORTRANDIR)/Gmres_Poly_Data_Type.o \
+		  $(FORTRANDIR)/Gmres_Poly_Newton.o \
+		  $(FORTRANDIR)/Port_Interfaces_Poly.o \
 		  $(FORTRANDIR)/CF_Splitting.o \
 		  $(FORTRANDIR)/MatDiagDomSubmatrix.o \
 		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
@@ -212,9 +207,7 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 # (only with PFLARE_PORT_DEBUG=1)
 # Each list above is in Fortran module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-# While a stage is in flight a file can already be in src/fref but still be live
-# Fortran (FCORE_OBJS), so it is only listed once
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(filter-out $(FCORE_OBJS),$(FREF_OBJS))
+OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(FREF_OBJS)
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
@@ -291,7 +284,7 @@ FSRC := $(sort $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)) $(FSRC_S
 FDEP_RELOCATE := $(foreach f,$(basename $(FSRC_SUBDIRS)),-e 's|$(SRCDIR)/$(notdir $(f))\.o |$(f).o |g')
 
 # Find C and Kokkos source files for the compilers
-CSRC := $(sort $(wildcard $(SRCDIR)/*.c))
+CSRC := $(sort $(wildcard $(SRCDIR)/*.c) $(wildcard $(FREFDIR)/*.c))
 KSRC := $(if $(filter 1,$(PETSC_HAVE_KOKKOS)),$(sort $(wildcard $(SRCDIR)/*.kokkos.cxx)))
 # PFLARE's headers are found through relative paths and PETSc's (with those of
 # MPI and Kokkos) are system headers, so -MM lists only PFLARE's own headers

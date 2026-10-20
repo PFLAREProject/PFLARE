@@ -3,7 +3,9 @@ module air_data_type_routines
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP, MAT_INV_AFF, &
          PFLARE_TOL_AUTO_TRUNCATE
-   use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
+   use port_interfaces_poly, only: reset_inverse_mat
+   use port_interfaces, only: destroy_matrix_reuse
+   use gmres_poly_data_type, only: reset_poly_data, destroy_poly_data
    use fc_smooth, only: destroy_VecISCopyLocalWrapper
    use fc_smooth_block, only: destroy_air_block_temps
    
@@ -161,14 +163,8 @@ module air_data_type_routines
                ! remain valid across setups when reusing)
                if (.NOT. reuse) then
                   call destroy_VecISCopyLocalWrapper(air_data, our_level)
-                  if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
-                     deallocate(air_data%inv_A_ff_poly_data(our_level)%coefficients)
-                     air_data%inv_A_ff_poly_data(our_level)%coefficients => null()
-                  end if
-                  if (associated(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
-                     deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
-                     air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
-                  end if
+                  call reset_poly_data(air_data%inv_A_ff_poly_data(our_level))
+                  call reset_poly_data(air_data%inv_A_ff_poly_data_dropped(our_level))
                end if
 
                ! temp_vecs are sized from A_ff/A_fc; they must be destroyed whenever
@@ -235,10 +231,7 @@ module air_data_type_routines
                if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
                   call MatDestroy(air_data%A_cc(our_level), ierr)
                   call reset_inverse_mat(air_data%inv_A_cc(our_level))
-                  if (associated(air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
-                     deallocate(air_data%inv_A_cc_poly_data(our_level)%coefficients)
-                     air_data%inv_A_cc_poly_data(our_level)%coefficients => null()
-                  end if
+                  call reset_poly_data(air_data%inv_A_cc_poly_data(our_level))
                   air_data%allocated_matrices_A_cc(our_level) = .FALSE.
                end if
             end if
@@ -306,10 +299,7 @@ module air_data_type_routines
             if (.NOT. reuse .OR. &
                  .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
                call reset_inverse_mat(air_data%inv_A_ff(air_data%no_levels))
-               if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
-                  deallocate(air_data%inv_coarsest_poly_data%coefficients)
-                  air_data%inv_coarsest_poly_data%coefficients => null()
-               end if
+               call reset_poly_data(air_data%inv_coarsest_poly_data)
             end if
          end if
       end if 
@@ -342,6 +332,9 @@ module air_data_type_routines
       ! ~~~~~~
 
       call reset_air_data(air_data)
+      ! The coarsest grid gmres_poly_data is C memory (the TSQR buffers), which the
+      ! Fortran type used to deallocate with air_data
+      call destroy_poly_data(air_data%inv_coarsest_poly_data)
 
       ! Now set the options back to the default
       air_data%options%print_stats_timings = .FALSE.
@@ -426,6 +419,13 @@ module air_data_type_routines
          deallocate(air_data%coarse_matrix)
          deallocate(air_data%A_ff)
          deallocate(air_data%inv_A_ff)
+         ! The gmres_poly_data are C memory (the TSQR buffers), which the Fortran
+         ! type used to deallocate with the arrays
+         do our_level = 1, size(air_data%inv_A_ff_poly_data)
+            call destroy_poly_data(air_data%inv_A_ff_poly_data(our_level))
+            call destroy_poly_data(air_data%inv_A_ff_poly_data_dropped(our_level))
+            call destroy_poly_data(air_data%inv_A_cc_poly_data(our_level))
+         end do
          deallocate(air_data%inv_A_ff_poly_data)
          deallocate(air_data%inv_A_ff_poly_data_dropped)         
          deallocate(air_data%inv_A_cc)

@@ -2,8 +2,9 @@ module air_operators_setup
 
    use petscksp
    use constrain_z_or_w, only: constrain_grid_transfer
-   use approx_inverse_setup, only: &
-         start_approximate_inverse, finish_approximate_inverse, destroy_matrix_reuse
+   use port_interfaces_poly, only: &
+         start_approximate_inverse, finish_approximate_inverse, calculate_and_build_sai_z
+   use port_interfaces, only: destroy_matrix_reuse
    use pflare_parameters, only: &
          TIMER_ID_AIR_DROP, TIMER_ID_AIR_EXTRACT, TIMER_ID_AIR_INVERSE, &
          TIMER_ID_AIR_CONSTRAIN, TIMER_ID_AIR_PROLONG, TIMER_ID_AIR_RAP, &
@@ -20,7 +21,6 @@ module air_operators_setup
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
          compute_P_from_W, compute_R_from_Z
    use grid_transfer_improve, only: improve_w, improve_z
-   use sai_z, only: calculate_and_build_sai_z
    use port_interfaces, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
          remove_from_sparse_match, mat_mat_symbolic
 
@@ -127,8 +127,7 @@ module air_operators_setup
                   air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                   air_data%options%diag_scale_polys, &
-                  air_data%inv_A_ff_poly_data(our_level)%buffers, &
-                  air_data%inv_A_ff_poly_data(our_level)%coefficients)        
+                  air_data%inv_A_ff_poly_data(our_level))        
       end if
 
       ! If we are doing AIRG
@@ -145,8 +144,7 @@ module air_operators_setup
                   air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_order, &
                   air_data%options%diag_scale_polys, &
-                  air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
-                  air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)          
+                  air_data%inv_A_ff_poly_data_dropped(our_level))          
          end if
       end if
 
@@ -184,8 +182,7 @@ module air_operators_setup
                   air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
                   air_data%options%diag_scale_polys, &
-                  air_data%inv_A_cc_poly_data(our_level)%buffers, &
-                  air_data%inv_A_cc_poly_data(our_level)%coefficients)  
+                  air_data%inv_A_cc_poly_data(our_level))  
          end if
 
          call timer_finish(TIMER_ID_AIR_INVERSE)
@@ -386,8 +383,7 @@ module air_operators_setup
             air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
             air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
             air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
-            air_data%inv_A_ff_poly_data(our_level)%buffers, &
-            air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+            air_data%inv_A_ff_poly_data(our_level), &
             air_data%options%matrix_free_polys, &
             air_data%options%diag_scale_polys, &
             air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
@@ -419,8 +415,7 @@ module air_operators_setup
                      air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_order, &
                      air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_sparsity_order, &
-                     air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
-                     air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, &
+                     air_data%inv_A_ff_poly_data_dropped(our_level), &
                      .FALSE., &
                      air_data%options%diag_scale_polys, &
                      air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
@@ -449,8 +444,7 @@ module air_operators_setup
                         air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
-                        air_data%inv_A_ff_poly_data(our_level)%buffers, &
-                        air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                        air_data%inv_A_ff_poly_data(our_level), &
                         .FALSE., &
                         air_data%options%diag_scale_polys, &
                         air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
@@ -944,8 +938,7 @@ module air_operators_setup
                   air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_sparsity_order, &
-                  air_data%inv_A_cc_poly_data(our_level)%buffers, &
-                  air_data%inv_A_cc_poly_data(our_level)%coefficients, &
+                  air_data%inv_A_cc_poly_data(our_level), &
                   air_data%options%matrix_free_polys, &
                   air_data%options%diag_scale_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_ACC), &

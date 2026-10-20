@@ -1,4 +1,6 @@
-module gmres_poly_newton
+module gmres_poly_newton_fref
+
+   ! The Fortran reference of module gmres_poly_newton, renamed as src/fortran/Gmres_Poly_Newton.F90 defines gmres_poly_newton
 
    use petscmat
    use gmres_poly
@@ -2366,5 +2368,5 @@ end if
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-end module gmres_poly_newton
+end module gmres_poly_newton_fref
 

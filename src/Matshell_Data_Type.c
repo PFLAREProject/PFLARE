@@ -230,20 +230,24 @@ PETSC_INTERN PetscErrorCode ensure_block_kernel_products(mat_ctxtype *mat_ctx, P
 // The accessors for the Fortran that is still to be ported
 // -------------------------------------------------------------------------------------------------------------------------------
 
-PETSC_INTERN PetscErrorCode mat_ctx_create_shell(MPI_Comm comm, PetscInt local_rows, PetscInt local_cols, PetscInt global_rows, PetscInt global_cols,
+PETSC_INTERN PetscErrorCode mat_ctx_create_shell(Mat comm_mat, PetscInt local_rows, PetscInt local_cols, PetscInt global_rows, PetscInt global_cols,
    int our_level, void *air_data, Mat *mat)
 {
    // Creates an (empty) matshell whose context records the level it is on and
    // the Fortran air_multigrid_data, which is what AIR_MG_Setup.F90 gives the
    // FC smoothers to tell what level they're on
    // This replaces the Fortran allocate of the context and MatCreateShell
+   // The shell is created on the comm of comm_mat (the Fortran passed the comm,
+   // which would need converting from a Fortran handle)
 
    // ~~~~~~
    mat_ctxtype *mat_ctx;
+   MPI_Comm comm;
    // ~~~~~~
 
    PetscFunctionBegin;
 
+   PetscCall(PetscObjectGetComm((PetscObject)comm_mat, &comm));
    PetscCall(create_mat_ctx(&mat_ctx));
    mat_ctx->our_level = our_level;
    mat_ctx->air_data = air_data;

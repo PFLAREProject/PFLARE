@@ -1,4 +1,6 @@
-module gmres_poly_data_type
+module gmres_poly_data_type_fref
+
+   ! The Fortran reference of module gmres_poly_data_type, renamed as src/fortran/Gmres_Poly_Data_Type.F90 defines gmres_poly_data_type
 
    use tsqr
    use petscsys
@@ -39,4 +41,4 @@ module gmres_poly_data_type
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~       
    
    
-end module gmres_poly_data_type
+end module gmres_poly_data_type_fref

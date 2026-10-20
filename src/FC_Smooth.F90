@@ -6,7 +6,8 @@ module fc_smooth
          destroy_VecISCopyLocal_kokkos, VecISCopyLocal_kokkos
    use air_data_type, only: air_multigrid_data
    use port_interfaces, only: generate_identity_rect, generate_identity_is, kokkos_debug
-   use matshell_data_type, only: mat_ctxtype
+   use iso_c_binding, only: c_ptr, c_f_pointer
+   use port_interfaces_poly, only: mat_ctx_get_our_level, mat_ctx_get_air_data
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO, &
          PFLARE_ONE
 
@@ -625,7 +626,7 @@ module fc_smooth
 
       type(tMat) :: mat, pmat
       integer :: our_level, errorcode, i, smooth_its
-      type(mat_ctxtype), pointer :: mat_ctx=>null()
+      type(c_ptr) :: air_data_ptr
       type(air_multigrid_data), pointer :: air_data
       PetscBool :: first_smooth
 
@@ -645,9 +646,9 @@ module fc_smooth
       ! Get the level 
       call PCGetOperators(pc, mat, pmat, ierr)
       ! Get what level we are on
-      call MatShellGetContext(mat, mat_ctx, ierr)
-      our_level = mat_ctx%our_level
-      air_data => mat_ctx%air_data  
+      call mat_ctx_get_our_level(mat, our_level)
+      call mat_ctx_get_air_data(mat, air_data_ptr)
+      call c_f_pointer(air_data_ptr, air_data)
 
       ! The first time we go through any smooth, we need to pull out x_f and/or x_c
       first_smooth = PETSC_TRUE
@@ -858,7 +859,7 @@ module fc_smooth
 
       type(tMat) :: mat, pmat
       integer :: our_level, i, no_blocks, smooth_its
-      type(mat_ctxtype), pointer :: mat_ctx=>null()
+      type(c_ptr) :: air_data_ptr
       type(air_multigrid_data), pointer :: air_data
       logical :: x_f_zero, x_c_zero
 
@@ -866,9 +867,9 @@ module fc_smooth
 
       ! Get the level, exactly as mg_FC_point_richardson does
       call PCGetOperators(pc, mat, pmat, ierr)
-      call MatShellGetContext(mat, mat_ctx, ierr)
-      our_level = mat_ctx%our_level
-      air_data => mat_ctx%air_data
+      call mat_ctx_get_our_level(mat, our_level)
+      call mat_ctx_get_air_data(mat, air_data_ptr)
+      call c_f_pointer(air_data_ptr, air_data)
 
       ! How many blocks of smooths we do on this level - the ordering stops at
       ! the first zero entry
@@ -1081,7 +1082,7 @@ module fc_smooth
       PetscErrorCode, intent(out)   :: ierr
 
       integer :: our_level
-      type(mat_ctxtype), pointer :: mat_ctx=>null()
+      type(c_ptr) :: air_data_ptr
       type(air_multigrid_data), pointer :: air_data
 
       ! ~~~~~~
@@ -1089,9 +1090,9 @@ module fc_smooth
       ierr = 0
 
       ! Get the level out of the placeholder matshell
-      call MatShellGetContext(mat, mat_ctx, ierr)
-      our_level = mat_ctx%our_level
-      air_data => mat_ctx%air_data
+      call mat_ctx_get_our_level(mat, our_level)
+      call mat_ctx_get_air_data(mat, air_data_ptr)
+      call c_f_pointer(air_data_ptr, air_data)
 
       ! We negate x and use MatMultTransposeAdd throughout, which keeps us to the
       ! temporaries the forward smooth already has

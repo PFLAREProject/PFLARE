@@ -84,3 +84,26 @@ PETSC_INTERN PetscErrorCode destroy_poly_data(gmres_poly_data *poly_data)
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+#if defined(PFLARE_PORT_DEBUG)
+// -------------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN PetscErrorCode poly_data_get_subcomm(gmres_poly_data *poly_data, PetscBool *subcomm)
+{
+   // Returns whether the user has asked for the TSQR buffers to be on a subcomm
+   // Only for the comparison against the Fortran reference in
+   // src/fortran/Port_Interfaces_Poly.F90, which has to start the reference with the
+   // same buffers
+
+   // ~~~~~~
+   tsqr_buffers *buffers = NULL;
+   // ~~~~~~
+
+   PetscFunctionBegin;
+
+   PetscCall(poly_data_buffers(poly_data, &buffers));
+   *subcomm = buffers->subcomm;
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+#endif

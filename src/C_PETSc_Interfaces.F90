@@ -349,7 +349,11 @@ module c_petsc_interfaces
       end subroutine compute_R_from_Z_kokkos         
  
    end interface
-   
+
+#if defined(PFLARE_PORT_DEBUG)
+   ! Only the Fortran references in src/fref/Gmres_Poly.F90, Gmres_Poly_Newton.F90 and
+   ! SAI_Z.F90 (built with PFLARE_PORT_DEBUG=1) use these, the C ports call the kernels directly
+
    interface   
       
       subroutine mat_mult_powers_share_sparsity_kokkos(A_array, poly_order, poly_sparsity_order, &
@@ -397,6 +401,7 @@ module c_petsc_interfaces
       end subroutine calculate_and_build_sai_z_kokkos
 
    end interface
+#endif
 
 #if defined(PFLARE_PORT_DEBUG)
    ! Only the Fortran reference in src/fref/PETSc_Helper.F90 (built with PFLARE_PORT_DEBUG=1)

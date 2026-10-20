@@ -4,8 +4,9 @@ module fc_smooth_block
    use c_petsc_interfaces, only: mat_iscopy_local_kokkos
    use air_data_type, only: air_multigrid_data
    use port_interfaces, only: kokkos_debug
-   use matshell_data_type, only: mat_ctxtype, attach_mat_product
-   use gmres_poly_apply, only: shell_poly_block_apply
+   use iso_c_binding, only: c_ptr, c_f_pointer
+   use port_interfaces_poly, only: attach_mat_product, shell_poly_block_apply, &
+         mat_ctx_get_our_level, mat_ctx_get_air_data
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
          AIR_MAT_SOL, AIR_MAT_TEMP, AIR_MAT_RESIDUAL, AIR_MAT_RHS, AIR_MAT_OFF_DIAG
 
@@ -688,7 +689,7 @@ module fc_smooth_block
 
       type(tMat) :: mat, pmat
       integer :: our_level, errorcode, i, smooth_its
-      type(mat_ctxtype), pointer :: mat_ctx=>null()
+      type(c_ptr) :: air_data_ptr
       type(air_multigrid_data), pointer :: air_data
       PetscBool :: first_smooth
 
@@ -710,9 +711,9 @@ module fc_smooth_block
       ! Get the level
       call PCGetOperators(pc, mat, pmat, ierr)
       ! Get what level we are on
-      call MatShellGetContext(mat, mat_ctx, ierr)
-      our_level = mat_ctx%our_level
-      air_data => mat_ctx%air_data
+      call mat_ctx_get_our_level(mat, our_level)
+      call mat_ctx_get_air_data(mat, air_data_ptr)
+      call c_f_pointer(air_data_ptr, air_data)
 
       ! The first time we go through any smooth, we need to pull out x_f and/or x_c
       first_smooth = PETSC_TRUE

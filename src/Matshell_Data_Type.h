@@ -18,7 +18,7 @@ PETSC_INTERN PetscErrorCode attach_mat_product(Mat mat, Mat x_mat, PetscBool tra
 PETSC_INTERN PetscErrorCode ensure_block_kernel_products(mat_ctxtype *mat_ctx, PetscInt second_target, PetscBool *attached);
 
 // The accessors the Fortran FC smoothers and AIR setup use until stage 7
-PETSC_INTERN PetscErrorCode mat_ctx_create_shell(MPI_Comm comm, PetscInt local_rows, PetscInt local_cols, PetscInt global_rows, PetscInt global_cols,
+PETSC_INTERN PetscErrorCode mat_ctx_create_shell(Mat comm_mat, PetscInt local_rows, PetscInt local_cols, PetscInt global_rows, PetscInt global_cols,
    int our_level, void *air_data, Mat *mat);
 PETSC_INTERN PetscErrorCode mat_ctx_get_our_level(Mat mat, int *our_level);
 PETSC_INTERN PetscErrorCode mat_ctx_get_air_data(Mat mat, void **air_data);

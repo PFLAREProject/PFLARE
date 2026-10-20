@@ -1,36 +1,25 @@
 /*
   Definition and registration of the PC PFLARE INV type
-  Largely just a wrapper around all the fortran 
-  using a Mat
+  Largely just a wrapper around the approximate inverses in
+  Approx_Inverse_Setup.c using a Mat
 */
 
 // Include the petsc header files
 #include <petsc/private/pcimpl.h>
+#include <stdlib.h>
+#include <string.h>
 #include "pflare.h"
+#include "pflareimpl.h"
+#include "Approx_Inverse_Setup.h"
+#include "Gmres_Poly_Apply.h"
 
 /* SUBMANSEC = PC */
 
-// Defined in C_Fortran_Bindings.F90
-PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
-// Whether an inverse type is a polynomial, ie has coefficients and builds a matshell when
-// applied matrix-free - the non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no
-// coefficients and are always assembled. *is_polynomial comes back as 1 or 0
-PETSC_EXTERN void inverse_type_is_polynomial_c(int inverse_type, int *is_polynomial);
-// coeffs_ptr/row_size/col_size are in/out:
-//   *coeffs_ptr == NULL on entry  -> fresh: Fortran allocates, writes c_loc to *coeffs_ptr on return
-//   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
-// The by-value arguments are integer(c_int) on the Fortran side, so must be int here
-// (not PetscInt, which is 64-bit with --with-64-bit-indices)
-PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int inverse_type, int order, \
-                     int sparsity_order, int matrix_free_int, int diag_scale_polys_int, \
-                     int subcomm_int, \
-                     PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
-                     Mat *inv_matrix);
-// Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.
-// *applied comes back 0 if no block apply was possible and the caller has to apply
-// column by column instead - that includes being handed a matshell whose context
-// isn't one of the polynomials shell_poly_block_apply (Gmres_Poly_Newton.F90) knows.
-PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int *applied);
+#if defined(PFLARE_PORT_DEBUG)
+// The reference PC type pflareinv_fref in src/fref/PCPFLAREINV_fref.c, which is this PC
+// as it was before the port to C, for tests/port_compare_pc.c to compare against
+PETSC_INTERN void PCRegister_PFLAREINV_fref(void);
+#endif
 
 // The types available as approximate inverses are (see include/pflare.h):
 //
@@ -66,9 +55,9 @@ typedef struct {
    int subcomm_int;
 
    // Stored polynomial coefficients (column-major).
-   // Populated after every PCSetUp call. Memory is either Fortran-allocated (from
-   // calculate_and_build_approximate_inverse_c) or C-malloc'd (from SetPolyCoeffs);
-   // in both cases a plain C free() is correct because Fortran allocate uses the C heap.
+   // Populated after every PCSetUp call. Memory is C-malloc'd, either the copy
+   // PCPFLAREINVBuildInverse_Private returns or the one SetPolyCoeffs takes, so a
+   // plain C free() is correct
    // Populated/updated after every PCSetUp call
    PetscReal *poly_coeffs;
    PetscInt   poly_coeffs_rows;
@@ -108,6 +97,68 @@ static PetscErrorCode PCPFLAREINVResetBlockWork_Private(PC_PFLAREINV *inv_data)
 
 // ~~~~~~~~~~
 
+// Builds the approximate inverse, with the coefficients passed in and out as the
+// Fortran binding calculate_and_build_approximate_inverse_c did before the port to C:
+//   *coeffs == NULL on entry -> fresh polynomial coefficients are computed, and on return
+//     *coeffs is a C-malloc'd copy of them the caller owns and frees with C free()
+//     (NULL with rows = cols = 0 for the non-polynomial types SAI, ISAI, WJACOBI, JACOBI)
+//   *coeffs != NULL on entry -> those coefficients are reused and the polynomial
+//     computation skipped (see calculate_and_build_approximate_inverse);
+//     coeffs/rows/cols are unchanged on return
+// For an assembled inverse the coefficients calculate_and_build_approximate_inverse
+// returns are no longer needed once copied. For a matrix-free one the matshell owns
+// them and frees them in reset_inverse_mat, and the copy is stored separately in
+// poly_coeffs and freed with free() in PCReset_PFLAREINV_c
+static PetscErrorCode PCPFLAREINVBuildInverse_Private(Mat input_mat, int inverse_type, int poly_order, \
+                     int sparsity_order, PetscBool matrix_free, PetscBool diag_scale_polys, \
+                     PetscBool subcomm, PetscReal **coeffs, PetscInt *rows, PetscInt *cols, \
+                     Mat *inv_matrix)
+{
+   PetscReal *coefficients;
+   PetscInt   coefficients_rows, coefficients_cols;
+   size_t     n_bytes;
+
+   PetscFunctionBegin;
+
+   if (*coeffs) {
+      // Reuse path: pass the caller's coefficients in
+      coefficients      = *coeffs;
+      coefficients_rows = *rows;
+      coefficients_cols = *cols;
+   } else {
+      // Fresh path: calculate_and_build_approximate_inverse allocates
+      coefficients      = NULL;
+      coefficients_rows = 0;
+      coefficients_cols = 0;
+   }
+
+   PetscCall(calculate_and_build_approximate_inverse(input_mat, inverse_type, \
+            poly_order, sparsity_order, \
+            matrix_free, diag_scale_polys, subcomm, \
+            inv_matrix, &coefficients, &coefficients_rows, &coefficients_cols));
+
+   if (!*coeffs && !coefficients) {
+      // Fresh path with a non-polynomial inverse type: no coefficients
+      *rows = 0;
+      *cols = 0;
+   } else if (!*coeffs) {
+      // Fresh path: copy the coefficients into a C-malloc'd buffer the caller frees with free()
+      n_bytes = (size_t)coefficients_rows * (size_t)coefficients_cols * sizeof(PetscReal);
+      *coeffs = (PetscReal *)malloc(n_bytes);
+      PetscCheck(*coeffs, PETSC_COMM_SELF, PETSC_ERR_MEM, "Could not allocate the polynomial coefficients");
+      memcpy(*coeffs, coefficients, n_bytes);
+      // Only the polynomial types reach here (the others return no coefficients), so
+      // matrix_free means there is a matshell, which owns coefficients
+      if (!matrix_free) PetscCall(PetscFree(coefficients));
+      *rows = coefficients_rows;
+      *cols = coefficients_cols;
+   }
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
 static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
 {
    PC_PFLAREINV *inv_data;
@@ -116,8 +167,8 @@ static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
    inv_data = (PC_PFLAREINV *)pc->data;    
    // The block work matrix's product references mat_inverse, so drop it first
    PetscCall(PCPFLAREINVResetBlockWork_Private(inv_data));
-   reset_inverse_mat_c(&(inv_data->mat_inverse));
-   // Free stored polynomial coefficients (Fortran-allocated or C-malloc'd, both freed with free())
+   PetscCall(reset_inverse_mat(&(inv_data->mat_inverse)));
+   // Free stored polynomial coefficients (C-malloc'd, freed with free())
    free(inv_data->poly_coeffs);
    inv_data->poly_coeffs      = NULL;
    inv_data->poly_coeffs_rows = 0;
@@ -727,18 +778,18 @@ static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
       // mat_inverse is a MatShell with only MATOP_MULT and MATOP_MULT_TRANSPOSE
       // registered, so MatMatMult on it
       // would fail. The polynomial matshells can however be applied blockwise by
-      // doing the products with the underlying matrix - the Fortran routine below does
+      // doing the products with the underlying matrix - shell_poly_block_apply does
       // that and reports whether it managed it.
       // The gate here is just the list of families that have a block kernel - it isn't
       // load bearing for correctness, shell_poly_block_apply works out which arithmetic
       // to use from the matshell's context and reports back if it can't do the apply
       // (the two Jacobi types are never matrix-free anyway).
-      int applied = 0;
+      PetscBool applied = PETSC_FALSE;
       if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
           inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || \
           inv_data->inverse_type == PFLAREINV_NEUMANN)
       {
-         pflareinv_shell_block_matapply_c(&(inv_data->mat_inverse), &X, &Y, &applied);
+         PetscCall(shell_poly_block_apply(inv_data->mat_inverse, X, Y, &applied));
       }
 
       if (applied) {
@@ -903,27 +954,26 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       PetscCheck(!inv_data->matrix_free, comm, PETSC_ERR_ARG_WRONGSTATE, "PFLARE SAI/ISAI inverses cannot be applied matrix-free - Use PCASM");
    }     
 
-   // We have to pass in an int
-   int matrix_free_int = inv_data->matrix_free == PETSC_TRUE;   
+   PetscBool matrix_free = inv_data->matrix_free;
    // We don't allow polynomail diagonal scaling through PCPFLAREINV
    // as the user could pass in a matshell as the matrix
    // It is the user's responsibility to have done the scaling beforehand
    // if they want
-   int diag_scale_polys_int = 0;
+   PetscBool diag_scale_polys = PETSC_FALSE;
    // Similarly for the subcomm
-   int subcomm_int = 0;
+   PetscBool subcomm = PETSC_FALSE;
 
    // If we haven't setup yet
    if (pc->setupcalled == 0)
    {
-      // Fresh setup: pass NULL to let Fortran allocate and return the coefficient pointer
+      // Fresh setup: pass NULL to have the coefficients computed and returned
       new_coeffs = NULL; new_rows = 0; new_cols = 0;
-      calculate_and_build_approximate_inverse_c(&(pc->pmat), \
-            type, \
+      PetscCall(PCPFLAREINVBuildInverse_Private(pc->pmat, \
+            (int)type, \
             inv_data->poly_order, inv_data->inverse_sparsity_order, \
-            matrix_free_int, diag_scale_polys_int, subcomm_int, \
+            matrix_free, diag_scale_polys, subcomm, \
             &new_coeffs, &new_rows, &new_cols, \
-            &(inv_data->mat_inverse));
+            &(inv_data->mat_inverse)));
       free(inv_data->poly_coeffs);
       inv_data->poly_coeffs      = new_coeffs;
       inv_data->poly_coeffs_rows = new_rows;
@@ -937,14 +987,14 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       {
          // PCReset also frees poly_coeffs
          PetscCall(PCReset_PFLAREINV_c(pc));
-         // Fresh: pass NULL to let Fortran allocate and return the coefficient pointer
+         // Fresh: pass NULL to have the coefficients computed and returned
          new_coeffs = NULL; new_rows = 0; new_cols = 0;
-         calculate_and_build_approximate_inverse_c(&(pc->pmat), \
-               type, \
+         PetscCall(PCPFLAREINVBuildInverse_Private(pc->pmat, \
+               (int)type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, diag_scale_polys_int, subcomm_int, \
+               matrix_free, diag_scale_polys, subcomm, \
                &new_coeffs, &new_rows, &new_cols, \
-               &(inv_data->mat_inverse));
+               &(inv_data->mat_inverse)));
          inv_data->poly_coeffs      = new_coeffs;
          inv_data->poly_coeffs_rows = new_rows;
          inv_data->poly_coeffs_cols = new_cols;
@@ -954,11 +1004,10 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          // We don't call reset on the pc here so it reuses the sparsity of mat_inverse
          // Optionally reuse stored polynomial coefficients:
          //   poly_coeffs != NULL and reuse flag set  ->  pass the existing pointer (reuse path)
-         //   otherwise                               ->  pass NULL so Fortran computes fresh ones
+         //   otherwise                               ->  pass NULL so fresh ones are computed
          // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no coefficients, so any
-         // stored ones are dropped and Fortran returns NULL
-         int is_polynomial;
-         inverse_type_is_polynomial_c((int)type, &is_polynomial);
+         // stored ones are dropped and NULL comes back
+         PetscBool is_polynomial = inverse_type_is_polynomial((int)type);
          if (!(is_polynomial && inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL)) {
             // Fresh: free old coefficients so poly_coeffs is NULL going into the call
             free(inv_data->poly_coeffs);
@@ -967,12 +1016,12 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
             inv_data->poly_coeffs_cols = 0;
          }
          // Pass poly_coeffs by address: NULL -> fresh allocation on return; non-NULL -> reuse
-         calculate_and_build_approximate_inverse_c(&(pc->pmat), \
-               type, \
+         PetscCall(PCPFLAREINVBuildInverse_Private(pc->pmat, \
+               (int)type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, diag_scale_polys_int, subcomm_int, \
+               matrix_free, diag_scale_polys, subcomm, \
                &inv_data->poly_coeffs, &inv_data->poly_coeffs_rows, &inv_data->poly_coeffs_cols, \
-               &(inv_data->mat_inverse));
+               &(inv_data->mat_inverse)));
       }
    }
 
@@ -1093,10 +1142,6 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
 
    PetscFunctionBegin;
 
-   // Now we call petsc fortran routines from this PC
-   // so we have to have made sure this is called
-   PetscCall(PetscInitializeFortran());
-
    PetscCall(PetscNew(&inv_data));
    pc->data = (void *)inv_data;   
 
@@ -1104,11 +1149,7 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    // Default options for the PCPFLAREINV
    // ~~~~~~~~~~~~
 
-   // Have to be very careful in the Fortran routines 
-   // with any matrix that has been set to null in C
-   // in petsc > 3.22
-   // See calculate_and_build_approximate_inverse in 
-   // Approx_Inverse_Setup.F90
+   // No inverse until PCSetUp
    inv_data->mat_inverse = NULL;   
    // What type of inverse to apply
    // Default to gmres polynomial with the Arnoldi basis
@@ -1160,9 +1201,54 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
 }
 
 // ~~~~~~~~~~
+// The C entry points tests/shell_block_apply.c (and tests/port_compare_pc.c) call to
+// drive the approximate inverses directly, without a PC. These were Fortran bindings
+// in C_Fortran_Bindings.F90 before the port to C and keep their names, arguments and
+// behaviour (including aborting on an error, as the Fortran did): they are not
+// intended for external use
+// ~~~~~~~~~~
+
+// Builds an approximate inverse, with the coefficients passed in and out as in
+// PCPFLAREINVBuildInverse_Private. The int arguments are 1 for true
+PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int inverse_type, int order, \
+                     int sparsity_order, int matrix_free_int, int diag_scale_polys_int, \
+                     int subcomm_int, \
+                     PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
+                     Mat *inv_matrix)
+{
+   PetscCallAbort(PetscObjectComm((PetscObject)*input_mat), PCPFLAREINVBuildInverse_Private(*input_mat, \
+            inverse_type, order, sparsity_order, \
+            matrix_free_int == 1 ? PETSC_TRUE : PETSC_FALSE, \
+            diag_scale_polys_int == 1 ? PETSC_TRUE : PETSC_FALSE, \
+            subcomm_int == 1 ? PETSC_TRUE : PETSC_FALSE, \
+            coeffs_ptr, row_size, col_size, inv_matrix));
+}
+
+// Destroys an approximate inverse (and the context of a matrix-free one)
+PETSC_EXTERN void reset_inverse_mat_c(Mat *mat)
+{
+   PetscCallAbort(PETSC_COMM_SELF, reset_inverse_mat(mat));
+}
+
+// Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.
+// *applied comes back 0 if no block apply was possible and the caller has to apply
+// column by column instead - that includes being handed a matshell whose context
+// isn't one of the polynomials shell_poly_block_apply knows
+PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int *applied)
+{
+   PetscBool block_applied = PETSC_FALSE;
+
+   PetscCallAbort(PetscObjectComm((PetscObject)*mat), shell_poly_block_apply(*mat, *X, *Y, &block_applied));
+   *applied = block_applied ? 1 : 0;
+}
+
+// ~~~~~~~~~~
 
 // Registers the PC type
 PETSC_EXTERN void PCRegister_PFLAREINV()
 {
    PetscCallVoid(PCRegister("pflareinv", PCCreate_PFLAREINV));
+#if defined(PFLARE_PORT_DEBUG)
+   PCRegister_PFLAREINV_fref();
+#endif
 }

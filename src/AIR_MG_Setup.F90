@@ -1,9 +1,9 @@
 module air_mg_setup
 
    use petscksp
+   use iso_c_binding, only: c_loc
    use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
    use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
-   use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: &
          PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
          PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_WJACOBI, &
@@ -14,9 +14,9 @@ module air_mg_setup
          MAT_P_REPARTITIONED, MAT_R_REPARTITIONED, &
          PFLARE_KSP_ATOL_SMOOTH, PFLARE_KSP_ATOL_COARSE, &
          PFLARE_KSP_RTOL_COARSE, PFLARE_MINUS_ONE
-   use approx_inverse_setup, only: &
-         start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
-         destroy_matrix_reuse
+   use port_interfaces_poly, only: &
+         start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat
+   use port_interfaces, only: destroy_matrix_reuse
    use port_interfaces, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
@@ -29,10 +29,10 @@ module air_mg_setup
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &
          finish_comms_compute_restrict_prolong, compute_coarse_matrix
-   use gmres_poly, only: setup_gmres_poly_data
-   use gmres_poly_apply, only: &
+   use port_interfaces_poly, only: setup_gmres_poly_data, &
          petsc_matvec_right_scale_poly_newton_residual_mf, &
-         petsc_matvec_poly_newton_residual_mf
+         petsc_matvec_poly_newton_residual_mf, mat_ctx_create_shell
+   use gmres_poly_data_type, only: reset_poly_data
    use port_interfaces, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
    use port_interfaces, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper
 
@@ -76,7 +76,6 @@ module air_mg_setup
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
       type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
       type(tIS)           :: is_unchanged, is_full, temp_is
-      type(mat_ctxtype), pointer :: mat_ctx => null()
       PetscInt, parameter :: one=1, zero=0
       type(tVec), dimension(:), allocatable :: left_null_vecs, right_null_vecs
       type(tVec), dimension(:), allocatable :: left_null_vecs_c, right_null_vecs_c
@@ -179,8 +178,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%options%coarsest_diag_scale_polys, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)                       
+                  air_data%inv_coarsest_poly_data)                       
 
             ! This will be a vec of randoms that differ from those used to create the gmres polynomials
             ! We will solve Ax = rand_vec to test how good our coarse solver is
@@ -200,8 +198,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients, &
+                  air_data%inv_coarsest_poly_data, &
                   air_data%options%coarsest_matrix_free_polys, &
                   air_data%options%coarsest_diag_scale_polys, &
                   air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
@@ -253,10 +250,7 @@ module air_mg_setup
                ! The coefficients were sized for this level, but the coarsest grid may be
                ! smaller than the polynomial order (setup_gmres_poly_data then lowers the order)
                ! so throw them away and let them be reallocated with the right size
-               if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
-                  deallocate(air_data%inv_coarsest_poly_data%coefficients)
-                  air_data%inv_coarsest_poly_data%coefficients => null()
-               end if
+               call reset_poly_data(air_data%inv_coarsest_poly_data)
             end if
 
             call VecDestroy(rand_vec, ierr)
@@ -655,12 +649,10 @@ module air_mg_setup
          ! we're on, so let's just create an empty matshell to pass in that has the right sizes           
          if (.NOT. air_data%options%full_smoothing_up_and_down) then
             
-            allocate(mat_ctx)
-            mat_ctx%our_level = our_level
-            mat_ctx%air_data => air_data  
-
-            call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
-                        mat_ctx, air_data%coarse_matrix(our_level), ierr)
+            ! The context is a C mat_ctxtype that records our level and air_data
+            ! (on the comm of pmat, which is MPI_COMM_MATRIX)
+            call mat_ctx_create_shell(pmat, local_rows, local_cols, global_rows, global_cols, &
+                        our_level, c_loc(air_data), air_data%coarse_matrix(our_level))
             call MatAssemblyBegin(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(air_data%coarse_matrix(our_level), MAT_FINAL_ASSEMBLY, ierr)   
             
@@ -1019,8 +1011,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%options%coarsest_diag_scale_polys, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)         
+                  air_data%inv_coarsest_poly_data)         
             call timer_finish(TIMER_ID_AIR_INVERSE)
          end if
       end if
@@ -1233,8 +1224,7 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%inverse_type, &
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients, &
+                  air_data%inv_coarsest_poly_data, &
                   air_data%options%coarsest_matrix_free_polys, &
                   air_data%options%coarsest_diag_scale_polys, &
                   air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &

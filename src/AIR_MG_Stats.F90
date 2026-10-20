@@ -3,7 +3,8 @@ module air_mg_stats
    use petscksp
    use port_interfaces, only: get_nnzs_petsc_sparse
    use air_data_type, only: air_multigrid_data
-   use gmres_poly, only: compute_mf_gmres_poly_num_matvecs
+   use port_interfaces_poly, only: compute_mf_gmres_poly_num_matvecs
+   use gmres_poly_data_type, only: poly_coeffs
 
 #include "petsc/finclude/petscksp.h"
       
@@ -116,7 +117,7 @@ module air_mg_stats
             call MatGetType(air_data%inv_A_ff(1), mat_type, ierr)
             if (mat_type==MATSHELL) then
                call compute_mf_gmres_poly_num_matvecs(air_data%options%coarsest_inverse_type, &
-                           air_data%inv_coarsest_poly_data%coefficients, &
+                           poly_coeffs(air_data%inv_coarsest_poly_data), &
                            non_zero_order)
                nnzs = int(non_zero_order, kind=8) * air_data%coarse_matrix_nnzs(1)
             else
@@ -143,7 +144,7 @@ module air_mg_stats
       ! Normally this is just the size of air_data%inv_coarsest_poly_data%coefficients, but for newton
       ! we may have zero roots that we skip
       call compute_mf_gmres_poly_num_matvecs(air_data%options%coarsest_inverse_type, &
-                  air_data%inv_coarsest_poly_data%coefficients, &
+                  poly_coeffs(air_data%inv_coarsest_poly_data), &
                   non_zero_order)
 
       gmres_size_long = int(non_zero_order, kind=8)
@@ -210,7 +211,7 @@ module air_mg_stats
 
             ! MF polynomial order may be different on each level
             call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
-                        air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                        poly_coeffs(air_data%inv_A_ff_poly_data(our_level)), &
                         non_zero_order)    
             gmres_size_long = int(non_zero_order, kind=8)
 
@@ -230,7 +231,7 @@ module air_mg_stats
 
                ! MF polynomial order may be different on each level
                call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
-                           air_data%inv_A_cc_poly_data(our_level)%coefficients, &
+                           poly_coeffs(air_data%inv_A_cc_poly_data(our_level)), &
                            non_zero_order)  
                gmres_size_long = int(non_zero_order, kind=8)
 
@@ -255,7 +256,7 @@ module air_mg_stats
 
             ! MF polynomial order may be different on each level
             call compute_mf_gmres_poly_num_matvecs(air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
-                        air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                        poly_coeffs(air_data%inv_A_ff_poly_data(our_level)), &
                         non_zero_order)   
             gmres_size_long = int(non_zero_order, kind=8)                                   
 

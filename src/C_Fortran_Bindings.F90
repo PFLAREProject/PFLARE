@@ -4,15 +4,15 @@ module c_fortran_bindings
    use iso_c_binding
    use pcair_data_type, only: pc_air_multigrid_data
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
-   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
-         inverse_type_is_polynomial
-   use gmres_poly_apply, only: shell_poly_block_apply
 #ifdef PFLARE_PORT_DEBUG
    ! The Fortran reference implementations in src/fref, for the _fref bindings below
    ! (under #ifdef rather than #if defined so that make depend sees these uses only
    ! in the port debug build)
    use cf_splitting_fref, only: compute_cf_splitting
    use matdiagdomsubmatrix_fref, only: compute_diag_dom_submatrix
+   use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
+         inverse_type_is_polynomial
+   use gmres_poly_apply, only: shell_poly_block_apply
 #endif
    use air_data_type_routines, only: create_air_data
    use fc_smooth_block, only: ensure_air_block_temps
@@ -178,12 +178,94 @@ module c_fortran_bindings
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_approximate_inverse_c(input_mat_ptr, inverse_type, &
+#if defined(PFLARE_PORT_DEBUG)
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! The C binding of the Fortran reference implementations of compute_cf_splitting and
+   ! compute_diag_dom_submatrix in src/fref (built with PFLARE_PORT_DEBUG=1), which
+   ! tests/port_compare_cf.c compares against the C ports that the public C API calls
+   ! These were the bindings compute_cf_splitting_c and compute_diag_dom_submatrix_c
+   ! that the public C API called before the port, now with an _fref suffix
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   subroutine compute_cf_splitting_c_fref(input_mat_ptr, skip_symmetrize_int, &
+         strong_threshold, max_luby_steps, &
+         cf_splitting_type, ddc_its, fraction_swap, &
+         is_fine_ptr, is_coarse_ptr) &
+         bind(C,name='compute_cf_splitting_c_fref')
+
+      ! Computes a CF splitting with the Fortran reference implementation
+      ! skip_symmetrize_int skips symmetrizing the strength matrix
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(in)       :: input_mat_ptr
+      integer(c_int), value, intent(in)      :: skip_symmetrize_int, max_luby_steps, cf_splitting_type, ddc_its
+      PetscReal, value, intent(in)           :: strong_threshold, fraction_swap
+      integer(c_long_long), intent(inout)    :: is_fine_ptr, is_coarse_ptr
+
+      type(tMat)  :: input_mat
+      type(tIS)   :: is_fine, is_coarse
+      logical     :: skip_symmetrize
+      ! ~~~~~~~~
+
+      ! Now the input mat long long just gets copied into input_mat%v
+      ! This works as the PETSc types are essentially just wrapped around
+      ! pointers stored in %v
+      input_mat%v = input_mat_ptr
+
+      skip_symmetrize = skip_symmetrize_int == 1
+      call compute_cf_splitting(input_mat, skip_symmetrize, &
+                        strong_threshold, max_luby_steps, &
+                        cf_splitting_type, ddc_its, fraction_swap, &
+                        is_fine, is_coarse)
+
+      ! Pass out the IS's
+      is_fine_ptr = is_fine%v
+      is_coarse_ptr = is_coarse%v
+
+   end subroutine compute_cf_splitting_c_fref
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine compute_diag_dom_submatrix_c_fref(input_mat_ptr, max_dd_ratio, output_mat_ptr) &
+         bind(C,name='compute_diag_dom_submatrix_c_fref')
+
+      ! Computes a diagonally dominant submatrix with the Fortran reference implementation
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(in)       :: input_mat_ptr
+      PetscReal, value, intent(in)           :: max_dd_ratio
+      integer(c_long_long), intent(inout)    :: output_mat_ptr
+
+      type(tMat)  :: input_mat, output_mat
+      ! ~~~~~~~~
+
+      ! Copy the input matrix pointer into the Fortran PETSc handle wrapper
+      input_mat%v = input_mat_ptr
+
+      call compute_diag_dom_submatrix(input_mat, max_dd_ratio, output_mat)
+
+      ! Pass out the resulting submatrix handle
+      output_mat_ptr = output_mat%v
+
+   end subroutine compute_diag_dom_submatrix_c_fref
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ! The C binding of the Fortran reference implementations of the approximate inverses
+   ! in src/fref, which the reference PC type pflareinv_fref (src/fref/PCPFLAREINV_fref.c)
+   ! calls and tests/port_compare_pc.c compares against the C ports
+   ! These were the bindings calculate_and_build_approximate_inverse_c, reset_inverse_mat_c,
+   ! inverse_type_is_polynomial_c and pflareinv_shell_block_matapply_c that
+   ! src/PCPFLAREINV.c called before the port, now with an _fref suffix
+   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   subroutine calculate_and_build_approximate_inverse_c_fref(input_mat_ptr, inverse_type, &
          poly_order, poly_sparsity_order, &
          matrix_free_int, diag_scale_polys_int, subcomm_int, &
          coeffs_ptr, row_size, col_size, &
          inv_matrix_ptr) &
-         bind(C, name='calculate_and_build_approximate_inverse_c')
+         bind(C, name='calculate_and_build_approximate_inverse_c_fref')
 
       ! Builds an approximate inverse, with optional coefficient passing.
       !
@@ -287,13 +369,13 @@ module c_fortran_bindings
       ! Pass out the new inverse matrix
       inv_matrix_ptr = inv_matrix%v
 
-   end subroutine calculate_and_build_approximate_inverse_c
+   end subroutine calculate_and_build_approximate_inverse_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine reset_inverse_mat_c(mat_ptr) bind(C,name='reset_inverse_mat_c')
+   subroutine reset_inverse_mat_c_fref(mat_ptr) bind(C,name='reset_inverse_mat_c_fref')
 
-      ! Calls the Fortran routine
+      ! Calls the Fortran reference routine
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: mat_ptr
@@ -305,14 +387,14 @@ module c_fortran_bindings
       call reset_inverse_mat(mat)
       mat_ptr = mat%v
 
-   end subroutine reset_inverse_mat_c
+   end subroutine reset_inverse_mat_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine inverse_type_is_polynomial_c(inverse_type, is_polynomial_int) &
-         bind(C,name='inverse_type_is_polynomial_c')
+   subroutine inverse_type_is_polynomial_c_fref(inverse_type, is_polynomial_int) &
+         bind(C,name='inverse_type_is_polynomial_c_fref')
 
-      ! Calls the Fortran routine
+      ! Calls the Fortran reference routine
       ! is_polynomial_int comes back as 1 if the inverse type is a polynomial, 0 otherwise
 
       ! ~~~~~~~~
@@ -323,12 +405,12 @@ module c_fortran_bindings
       is_polynomial_int = 0
       if (inverse_type_is_polynomial(int(inverse_type))) is_polynomial_int = 1
 
-   end subroutine inverse_type_is_polynomial_c
+   end subroutine inverse_type_is_polynomial_c_fref
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pflareinv_shell_block_matapply_c(shell_ptr, x_ptr, y_ptr, applied_int) &
-         bind(C,name='pflareinv_shell_block_matapply_c')
+   subroutine pflareinv_shell_block_matapply_c_fref(shell_ptr, x_ptr, y_ptr, applied_int) &
+         bind(C,name='pflareinv_shell_block_matapply_c_fref')
 
       ! Applies one of the matrix-free polynomial matshells to a block of
       ! right hand sides
@@ -353,80 +435,7 @@ module c_fortran_bindings
       applied_int = 0
       if (block_applied) applied_int = 1
 
-   end subroutine pflareinv_shell_block_matapply_c
-
-   !------------------------------------------------------------------------------------------------------------------------
-
-#if defined(PFLARE_PORT_DEBUG)
-   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   ! The C binding of the Fortran reference implementations of compute_cf_splitting and
-   ! compute_diag_dom_submatrix in src/fref (built with PFLARE_PORT_DEBUG=1), which
-   ! tests/port_compare_cf.c compares against the C ports that the public C API calls
-   ! These were the bindings compute_cf_splitting_c and compute_diag_dom_submatrix_c
-   ! that the public C API called before the port, now with an _fref suffix
-   ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-   subroutine compute_cf_splitting_c_fref(input_mat_ptr, skip_symmetrize_int, &
-         strong_threshold, max_luby_steps, &
-         cf_splitting_type, ddc_its, fraction_swap, &
-         is_fine_ptr, is_coarse_ptr) &
-         bind(C,name='compute_cf_splitting_c_fref')
-
-      ! Computes a CF splitting with the Fortran reference implementation
-      ! skip_symmetrize_int skips symmetrizing the strength matrix
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(in)       :: input_mat_ptr
-      integer(c_int), value, intent(in)      :: skip_symmetrize_int, max_luby_steps, cf_splitting_type, ddc_its
-      PetscReal, value, intent(in)           :: strong_threshold, fraction_swap
-      integer(c_long_long), intent(inout)    :: is_fine_ptr, is_coarse_ptr
-
-      type(tMat)  :: input_mat
-      type(tIS)   :: is_fine, is_coarse
-      logical     :: skip_symmetrize
-      ! ~~~~~~~~
-
-      ! Now the input mat long long just gets copied into input_mat%v
-      ! This works as the PETSc types are essentially just wrapped around
-      ! pointers stored in %v
-      input_mat%v = input_mat_ptr
-
-      skip_symmetrize = skip_symmetrize_int == 1
-      call compute_cf_splitting(input_mat, skip_symmetrize, &
-                        strong_threshold, max_luby_steps, &
-                        cf_splitting_type, ddc_its, fraction_swap, &
-                        is_fine, is_coarse)
-
-      ! Pass out the IS's
-      is_fine_ptr = is_fine%v
-      is_coarse_ptr = is_coarse%v
-
-   end subroutine compute_cf_splitting_c_fref
-
-   !------------------------------------------------------------------------------------------------------------------------
-
-   subroutine compute_diag_dom_submatrix_c_fref(input_mat_ptr, max_dd_ratio, output_mat_ptr) &
-         bind(C,name='compute_diag_dom_submatrix_c_fref')
-
-      ! Computes a diagonally dominant submatrix with the Fortran reference implementation
-
-      ! ~~~~~~~~
-      integer(c_long_long), intent(in)       :: input_mat_ptr
-      PetscReal, value, intent(in)           :: max_dd_ratio
-      integer(c_long_long), intent(inout)    :: output_mat_ptr
-
-      type(tMat)  :: input_mat, output_mat
-      ! ~~~~~~~~
-
-      ! Copy the input matrix pointer into the Fortran PETSc handle wrapper
-      input_mat%v = input_mat_ptr
-
-      call compute_diag_dom_submatrix(input_mat, max_dd_ratio, output_mat)
-
-      ! Pass out the resulting submatrix handle
-      output_mat_ptr = output_mat%v
-
-   end subroutine compute_diag_dom_submatrix_c_fref
+   end subroutine pflareinv_shell_block_matapply_c_fref
 #endif
 
    !------------------------------------------------------------------------------------------------------------------------

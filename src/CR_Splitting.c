@@ -3,34 +3,16 @@
 
   The CF markers are int arrays (the Fortran integer) with one entry per local
   row of input_mat. The loops over the fine rows are 0-based
-
-  Until the approximate inverses are ported to C (stage 5 of
-  docs/dev/fortran_removal_plan.md), the assembled approximate inverse is built
-  by the Fortran calculate_and_build_approximate_inverse, through its C binding
-  calculate_and_build_approximate_inverse_c in C_Fortran_Bindings.F90
 */
 
 #include <petscmat.h>
-#include <stdlib.h>
 #include "pflare.h"
 #include "pflareimpl.h"
 #include "PETSc_Helper.h"
 #include "PMISR_Module.h"
 #include "Pflare_Random.h"
+#include "Approx_Inverse_Setup.h"
 #include "CR_Splitting.h"
-
-// Defined in C_Fortran_Bindings.F90 (see PCPFLAREINV.c, which also calls it)
-// coeffs_ptr/row_size/col_size are in/out:
-//   *coeffs_ptr == NULL on entry  -> fresh: on return *coeffs_ptr is a copy of the coefficients
-//                                    the caller owns and frees with C free(), or NULL with
-//                                    row_size = col_size = 0 for the non-polynomial types
-//   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
-// The by-value arguments are integer(c_int) on the Fortran side, so must be int here
-PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int inverse_type, int order,
-                     int sparsity_order, int matrix_free_int, int diag_scale_polys_int,
-                     int subcomm_int,
-                     PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size,
-                     Mat *inv_matrix);
 
 // The CR relaxation whose error decides the splitting is the approximate
 // inverse of Aff built with the same inverse type, polynomial order, sparsity
@@ -92,10 +74,6 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
    int sweep, max_luby_steps, nu;
    PetscBool use_poly, any_forced_c;
    MPI_Comm MPI_COMM_MATRIX;
-   // The coefficients calculate_and_build_approximate_inverse_c returns, which the
-   // Fortran left inside calculate_and_build_approximate_inverse (absent argument)
-   PetscReal *coeffs_ptr;
-   PetscInt coeffs_rows, coeffs_cols;
 
    // ~~~~~~
 
@@ -149,21 +127,11 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
       // sparsity truncation
       // Always assembled, never matrix-free - see the module comment
       // ~~~~~~~~
-      // The Fortran called from C needs the Fortran PETSc constants (MPIU_REAL etc),
-      // which PetscInitializeFortran sets (PCAIR and PCPFLAREINV call it when created,
-      // but compute_cf_splitting can be called without either)
-      PetscCall(PetscInitializeFortran());
-      // The binding returns a copy of the coefficients (freed below), where the
-      // Fortran called without the optional coefficients argument
-      coeffs_ptr = NULL;
-      coeffs_rows = 0;
-      coeffs_cols = 0;
-      calculate_and_build_approximate_inverse_c(&Aff, cr_inverse_type,
+      // Without the optional coefficients argument, as the Fortran called it
+      PetscCall(calculate_and_build_approximate_inverse(Aff, cr_inverse_type,
                cr_poly_order, cr_sparsity_order,
-               0, cr_diag_scale ? 1 : 0, 0,
-               &coeffs_ptr, &coeffs_rows, &coeffs_cols,
-               &inv_Aff);
-      free(coeffs_ptr);
+               PETSC_FALSE, cr_diag_scale, PETSC_FALSE,
+               &inv_Aff, NULL, NULL, NULL));
 
    } else {
 

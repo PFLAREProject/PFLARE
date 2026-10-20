@@ -5,6 +5,7 @@ module pcair_interfaces
    use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
+   use gmres_poly_data_type, only: poly_coeffs
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -398,7 +399,7 @@ module pcair_interfaces
 
       ! Coarsest grid matrix
       if (which_inverse == COEFFS_INV_COARSE) then
-         coeffs_internal => pc_air_data%air_data%inv_coarsest_poly_data%coefficients
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_coarsest_poly_data)
          return
       end if
 
@@ -415,19 +416,19 @@ module pcair_interfaces
       if (which_inverse == COEFFS_INV_AFF) then
          if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data)) return
          if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data)) return
-         coeffs_internal => pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_A_ff_poly_data(our_level))
 
       ! Inverse dropped Aff
       else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
          if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
          if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
-         coeffs_internal => pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level))
 
       ! Inverse Acc
       else if (which_inverse == COEFFS_INV_ACC) then
          if (.NOT. allocated(pc_air_data%air_data%inv_A_cc_poly_data)) return
          if (our_level > size(pc_air_data%air_data%inv_A_cc_poly_data)) return
-         coeffs_internal => pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients
+         coeffs_internal => poly_coeffs(pc_air_data%air_data%inv_A_cc_poly_data(our_level))
       end if
 
    end subroutine PCAIRGetPolyCoeffsPointer
