@@ -1218,7 +1218,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c_fref(PC pc, PetscOptionItems PetscO
    PetscCall(PetscOptionsInt("-pc_air_auto_truncate_start_level", "Use auto truncation from this level", "PCAIRSetAutoTruncateStartLevel_fref", old_int, &input_int, NULL));
    PetscCall(PCAIRSetAutoTruncateStartLevel_fref(pc, input_int));
    // ~~~~ 
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PCAIRGetInverseType_fref(pc, &old_type));
    type = old_type;
    PetscCall(PetscOptionsEnum("-pc_air_inverse_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
@@ -1463,7 +1463,11 @@ static PetscErrorCode PCView_AIR_c_fref(PC pc, PetscViewer viewer)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    Unweighted Jacobi \n"));
          }
-         if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+         else if (input_type == PFLAREINV_L1JACOBI)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    l1 Jacobi \n"));
+         }
+         if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
          {
             // If matrix-free or not
             if (flg)
@@ -1558,8 +1562,12 @@ static PetscErrorCode PCView_AIR_c_fref(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_JACOBI)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: Unweighted Jacobi \n"));      
-            }                  
-            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+            }
+            else if (input_type == PFLAREINV_L1JACOBI)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: l1 Jacobi \n"));
+            }
+            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
             {
                // If matrix-free or not
                if (flg)
@@ -1645,7 +1653,11 @@ static PetscErrorCode PCView_AIR_c_fref(PC pc, PetscViewer viewer)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: Unweighted Jacobi \n"));
             }
-            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+            else if (input_type == PFLAREINV_L1JACOBI)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: l1 Jacobi \n"));
+            }
+            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
             {
                // If matrix-free or not
                if (flg)
@@ -1786,7 +1798,11 @@ static PetscErrorCode PCView_AIR_c_fref(PC pc, PetscViewer viewer)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    Unweighted Jacobi \n"));
       }
-      if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+      else if (input_type == PFLAREINV_L1JACOBI)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    l1 Jacobi \n"));
+      }
+      if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
       {
          // If matrix-free or not
          if (flg)

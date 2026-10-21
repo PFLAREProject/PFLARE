@@ -18,7 +18,7 @@
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void reset_inverse_mat_c_fref(Mat *mat);
 // Whether an inverse type is a polynomial, ie has coefficients and builds a matshell when
-// applied matrix-free - the non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no
+// applied matrix-free - the non-polynomial types (SAI, ISAI, WJacobi, Jacobi, L1Jacobi) have no
 // coefficients and are always assembled. *is_polynomial comes back as 1 or 0
 PETSC_EXTERN void inverse_type_is_polynomial_c_fref(int inverse_type, int *is_polynomial);
 // coeffs_ptr/row_size/col_size are in/out:
@@ -48,9 +48,10 @@ PETSC_EXTERN void pflareinv_shell_block_matapply_c_fref(Mat *mat, Mat *X, Mat *Y
 // PFLAREINV_ISAI       - Incomplete SAI - cannot be used matrix-free atm
 //                           ie a one-level restricted additive schwartz where each unknown is its own 
 //                           subdomain with overlap given by the connectivity of that unknown in matrix powers
-// PFLAREINV_WJACOBI    - Weighted Jacobi - The two Jacobi types really only exist for use in PCAIR, if you want to use 
+// PFLAREINV_WJACOBI    - Weighted Jacobi - The Jacobi types really only exist for use in PCAIR, if you want to use 
 //                           a Jacobi PC just use the existing one in petsc
 // PFLAREINV_JACOBI     - Unweighted Jacobi - 
+// PFLAREINV_L1JACOBI   - l1 Jacobi - 
 
  /*
     Private context (data structure) for the PFLAREINV preconditioner.
@@ -404,7 +405,7 @@ static PetscErrorCode PCMatApply_PFLAREINV_fref(PC pc, Mat X, Mat Y)
       // The gate here is just the list of families that have a block kernel - it isn't
       // load bearing for correctness, shell_poly_block_apply works out which arithmetic
       // to use from the matshell's context and reports back if it can't do the apply
-      // (the two Jacobi types are never matrix-free anyway).
+      // (the Jacobi types are never matrix-free anyway).
       int applied = 0;
       if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
           inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || \
@@ -534,7 +535,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_fref(PC pc, PetscOptionItems Pe
 
    PetscCall(PCPFLAREINVGetType(pc, &deflt));
    PetscOptionsHeadBegin(PetscOptionsObject, "PCPFLAREINV options");
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg));
    if (flg) PetscCall(PCPFLAREINVSetType(pc, type));
    // Go through the setter so a changed value resets the PC
@@ -627,7 +628,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_fref(PC pc)
          // Optionally reuse stored polynomial coefficients:
          //   poly_coeffs != NULL and reuse flag set  ->  pass the existing pointer (reuse path)
          //   otherwise                               ->  pass NULL so Fortran computes fresh ones
-         // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no coefficients, so any
+         // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi, L1Jacobi) have no coefficients, so any
          // stored ones are dropped and Fortran returns NULL
          int is_polynomial;
          inverse_type_is_polynomial_c_fref((int)type, &is_polynomial);
@@ -707,7 +708,11 @@ static PetscErrorCode PCView_PFLAREINV_fref(PC pc, PetscViewer viewer)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  Unweighted Jacobi \n"));
       }
-      if (type != PFLAREINV_WJACOBI && type != PFLAREINV_JACOBI)
+      else if (type == PFLAREINV_L1JACOBI)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  l1 Jacobi \n"));
+      }
+      if (type != PFLAREINV_WJACOBI && type != PFLAREINV_JACOBI && type != PFLAREINV_L1JACOBI)
       {
          // If matrix-free or not
          if (inv_data->matrix_free)
