@@ -55,6 +55,7 @@
 #define PFLARE_PFLAREINV_ISAI            6
 #define PFLARE_PFLAREINV_WJACOBI         7
 #define PFLARE_PFLAREINV_JACOBI          8
+#define PFLARE_PFLAREINV_L1JACOBI        9
 
 /* --------------------------------------------------------
    Z / restrictor construction types (PCAIRZType)

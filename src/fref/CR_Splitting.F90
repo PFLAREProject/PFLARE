@@ -4,9 +4,10 @@ module cr_splitting
    use port_interfaces, only: MatCreateSubMatrixWrapper
    use pmisr_module, only: pmisr_existing_measure_implicit_transpose
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse
+   use weighted_jacobi, only: calculate_l1_jacobi_inverse_diagonal
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_NU, &
             PFLARE_CR_NU_POLY, PFLARE_CR_POLY_ORDER, &
-            PFLAREINV_WJACOBI, PFLAREINV_JACOBI, &
+            PFLAREINV_WJACOBI, PFLAREINV_JACOBI, PFLAREINV_L1JACOBI, &
             PFLARE_CR_CANDIDATE, PFLARE_MINUS_ONE, PFLARE_ONE, PFLARE_REAL_KIND
    use pflare_random, only: pflare_random_fill
 
@@ -123,6 +124,7 @@ module cr_splitting
       ! polynomial order
       use_poly = cr_inverse_type /= PFLAREINV_WJACOBI .AND. &
                  cr_inverse_type /= PFLAREINV_JACOBI .AND. &
+                 cr_inverse_type /= PFLAREINV_L1JACOBI .AND. &
                  fine_global > cr_poly_order + 1
       nu = PFLARE_CR_NU
       if (use_poly) nu = PFLARE_CR_NU_POLY
@@ -144,11 +146,11 @@ module cr_splitting
       else
 
          ! ~~~~~~~~
-         ! Build the weighted Jacobi inverse of the diagonal of Aff
-         ! This uses the same weight as calculate_and_build_weighted_jacobi_inverse
-         ! (ie the hypre weight) but we sanitize exactly zero diagonals so they can't
-         ! poison the weight with infs/nans - those rows can never be relaxed so they
-         ! are force promoted to C below
+         ! Build the Jacobi inverse (weighted, unweighted or l1) of the diagonal of Aff
+         ! This uses the same weights as calculate_and_build_weighted_jacobi_inverse
+         ! but we sanitize exactly zero diagonals so they can't poison the weights
+         ! with infs/nans - those rows can never be relaxed so they are force
+         ! promoted to C (and their inverse zeroed) below
          ! ~~~~~~~~
          call MatCreateVecs(Aff, PETSC_NULL_VEC, diag_vec, ierr)
          call MatGetDiagonal(Aff, diag_vec, ierr)
@@ -161,10 +163,15 @@ module cr_splitting
          end do
          call VecRestoreArray(diag_vec, vec_array, ierr)
 
-         ! 3 / ( 4 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
+         ! This is the weight that hypre's BoomerAMG computes with relax_weight = 0
+         ! (see par_amg_setup.c)
+         ! 4 / ( 3 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
+         ! Note the hypre docs for HYPRE_BoomerAMGSetRelaxWt quote 3 / (4 * ||.||)
+         ! but the code uses 4 / (3 * ||.||)
          ! Unweighted plain Jacobi if that's what the hierarchy smooths with
+         ! and l1 Jacobi has its own weight on each row
          weight = 1.0
-         if (cr_inverse_type /= PFLAREINV_JACOBI) then
+         if (cr_inverse_type == PFLAREINV_WJACOBI) then
             call MatDuplicate(Aff, MAT_COPY_VALUES, temp_mat, ierr)
             call VecDuplicate(diag_vec, scale_vec, ierr)
             call VecCopy(diag_vec, scale_vec, ierr)
@@ -174,12 +181,16 @@ module cr_splitting
             call MatNorm(temp_mat, NORM_INFINITY, norm_inf, ierr)
             call MatDestroy(temp_mat, ierr)
             call VecDestroy(scale_vec, ierr)
-            if (norm_inf /= 0.0) weight = 3.0/(4.0 * norm_inf)
+            if (norm_inf /= 0.0) weight = 4.0/(3.0 * norm_inf)
          end if
 
          ! Invert and apply the weight, zeroing the rows we can't relax
-         call VecReciprocal(diag_vec, ierr)
-         call VecScale(diag_vec, weight, ierr)
+         if (cr_inverse_type == PFLAREINV_L1JACOBI) then
+            call calculate_l1_jacobi_inverse_diagonal(Aff, diag_vec)
+         else
+            call VecReciprocal(diag_vec, ierr)
+            call VecScale(diag_vec, weight, ierr)
+         end if
          if (any(forced_c)) then
             call VecGetArray(diag_vec, vec_array, ierr)
             do ifree = 1, fine_local

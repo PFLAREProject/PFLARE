@@ -32,9 +32,10 @@ PETSC_INTERN void PCRegister_PFLAREINV_fref(void);
 // PFLAREINV_ISAI       - Incomplete SAI - cannot be used matrix-free atm
 //                           ie a one-level restricted additive schwartz where each unknown is its own 
 //                           subdomain with overlap given by the connectivity of that unknown in matrix powers
-// PFLAREINV_WJACOBI    - Weighted Jacobi - The two Jacobi types really only exist for use in PCAIR, if you want to use 
+// PFLAREINV_WJACOBI    - Weighted Jacobi - The Jacobi types really only exist for use in PCAIR, if you want to use 
 //                           a Jacobi PC just use the existing one in petsc
 // PFLAREINV_JACOBI     - Unweighted Jacobi - 
+// PFLAREINV_L1JACOBI   - l1 Jacobi - 
 
  /*
     Private context (data structure) for the PFLAREINV preconditioner.
@@ -461,7 +462,7 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 - inverse_type - the approximate inverse type, one of the `PCPFLAREINVType` values
 
   Options Database Key:
-. -pc_pflareinv_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type; defaults to arnoldi
+. -pc_pflareinv_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type; defaults to arnoldi
 
   Level: intermediate
 
@@ -469,7 +470,7 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
   The polynomial types (`power`, `arnoldi`, `newton`, `newton_no_extra`, `neumann`) approximate the inverse with a
   polynomial in the matrix whose degree is set by `PCPFLAREINVSetPolyOrder()`. The `sai` and `isai` types instead
   assemble a sparse approximate inverse whose pattern is controlled by `PCPFLAREINVSetSparsityOrder()`, while
-  `wjacobi` and `jacobi` are cheap diagonal inverses.
+  `wjacobi`, `jacobi` and `l1jacobi` are cheap diagonal inverses.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetType()`, `PCPFLAREINVType`, `PCPFLAREINVSetPolyOrder()`
 @*/
@@ -565,7 +566,7 @@ static PetscErrorCode PCPFLAREINVSetMatrixFree_PFLAREINV(PC pc, PetscBool flg)
   `PCReset()` or `PCPFLAREINVSetPolyCoeffs()` call; copy the coefficients yourself if you need to save or restore
   them later. This differs from the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
-  The non-polynomial inverse types (`PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, and `PFLAREINV_JACOBI`)
+  The non-polynomial inverse types (`PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, and `PFLAREINV_L1JACOBI`)
   have no coefficients, so after `PCSetUp()` with one of them `coeffs` is `NULL` and `rows` and `cols` are 0, as they
   are before the first `PCSetUp()`.
 
@@ -693,7 +694,7 @@ static PetscErrorCode PCPFLAREINVGetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool *
   changed values, since computing the polynomial coefficients (for example the Arnoldi or Newton coefficients)
   requires parallel reductions that reuse then avoids. Only enable it when the stored coefficients remain a good
   approximation for the new matrix, as reusing stale coefficients can degrade convergence. It has no effect with the
-  non-polynomial inverse types (`PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, and `PFLAREINV_JACOBI`),
+  non-polynomial inverse types (`PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, and `PFLAREINV_L1JACOBI`),
   which discard any stored coefficients during setup.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetReusePolyCoeffs()`, `PCPFLAREINVSetPolyCoeffs()`, `PCPFLAREINVGetPolyCoeffs()`
@@ -783,7 +784,7 @@ static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
       // The gate here is just the list of families that have a block kernel - it isn't
       // load bearing for correctness, shell_poly_block_apply works out which arithmetic
       // to use from the matshell's context and reports back if it can't do the apply
-      // (the two Jacobi types are never matrix-free anyway).
+      // (the Jacobi types are never matrix-free anyway).
       PetscBool applied = PETSC_FALSE;
       if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
           inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || \
@@ -913,7 +914,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
 
    PetscCall(PCPFLAREINVGetType(pc, &deflt));
    PetscOptionsHeadBegin(PetscOptionsObject, "PCPFLAREINV options");
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg));
    if (flg) PetscCall(PCPFLAREINVSetType(pc, type));
    // Go through the setter so a changed value resets the PC
@@ -1005,7 +1006,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          // Optionally reuse stored polynomial coefficients:
          //   poly_coeffs != NULL and reuse flag set  ->  pass the existing pointer (reuse path)
          //   otherwise                               ->  pass NULL so fresh ones are computed
-         // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi) have no coefficients, so any
+         // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi, L1Jacobi) have no coefficients, so any
          // stored ones are dropped and NULL comes back
          PetscBool is_polynomial = inverse_type_is_polynomial((int)type);
          if (!(is_polynomial && inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL)) {
@@ -1084,7 +1085,11 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  Unweighted Jacobi \n"));
       }
-      if (type != PFLAREINV_WJACOBI && type != PFLAREINV_JACOBI)
+      else if (type == PFLAREINV_L1JACOBI)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  l1 Jacobi \n"));
+      }
+      if (type != PFLAREINV_WJACOBI && type != PFLAREINV_JACOBI && type != PFLAREINV_L1JACOBI)
       {
          // If matrix-free or not
          if (inv_data->matrix_free)
@@ -1109,7 +1114,7 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   approximate inverses, weighted Jacobi), applied assembled or matrix-free
 
   Options Database Keys:
-+ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - approximate inverse type; defaults to arnoldi
++ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse type; defaults to arnoldi
 . -pc_pflareinv_poly_order  poly_order - polynomial order if using a polynomial inverse type; defaults to 6
 - -pc_pflareinv_matrix_free (true|false) - apply matrix-free instead of assembling the inverse; defaults to false
 

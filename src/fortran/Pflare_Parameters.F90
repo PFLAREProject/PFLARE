@@ -30,6 +30,7 @@ module pflare_parameters
    PetscEnum, parameter :: PFLAREINV_ISAI              = PFLARE_PFLAREINV_ISAI
    PetscEnum, parameter :: PFLAREINV_WJACOBI           = PFLARE_PFLAREINV_WJACOBI
    PetscEnum, parameter :: PFLAREINV_JACOBI            = PFLARE_PFLAREINV_JACOBI
+   PetscEnum, parameter :: PFLAREINV_L1JACOBI          = PFLARE_PFLAREINV_L1JACOBI
 
    ! --------------------------------------------------------
    ! Z / restrictor construction types (PCAIRZType)

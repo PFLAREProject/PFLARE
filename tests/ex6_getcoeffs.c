@@ -10,8 +10,9 @@ Three solves are performed:\n\
 \n\
 The test passes when the residual norm of solve 3 equals that of solve 1\n\
 to within a relative tolerance of 1e-8.\n\
-For the non-polynomial PCPFLAREINV types (sai, isai, wjacobi, jacobi) it\n\
-instead checks that no coefficients are returned, even after some are set.\n\
+For the non-polynomial PCPFLAREINV types (sai, isai, wjacobi, jacobi,\n\
+l1jacobi) it instead checks that no coefficients are returned, even after\n\
+some are set.\n\
 For PCAIR it also checks that PCAIRGetPolyCoeffs/PCAIRSetPolyCoeffs return an\n\
 error (rather than corrupting memory) before setup, for an out of range level,\n\
 for an inverse with no stored coefficients and for mismatched sizes.\n\n";
@@ -101,7 +102,7 @@ int main(int argc, char **args)
   PetscBool   no_power = PETSC_FALSE;
   PetscBool   skip     = PETSC_FALSE;
 
-  /* PCPFLAREINV types without polynomial coefficients (sai, isai, wjacobi, jacobi) */
+  /* PCPFLAREINV types without polynomial coefficients (sai, isai, wjacobi, jacobi, l1jacobi) */
   PetscBool   nonpoly  = PETSC_FALSE;
   PetscReal   dummy_coeffs[1] = {1.0};
 
@@ -193,7 +194,8 @@ int main(int argc, char **args)
     PCPFLAREINVType pflare_type;
     PetscCall(PCPFLAREINVGetType(pc, &pflare_type));
     nonpoly = (PetscBool)(pflare_type == PFLAREINV_SAI || pflare_type == PFLAREINV_ISAI ||
-                          pflare_type == PFLAREINV_WJACOBI || pflare_type == PFLAREINV_JACOBI);
+                          pflare_type == PFLAREINV_WJACOBI || pflare_type == PFLAREINV_JACOBI ||
+                          pflare_type == PFLAREINV_L1JACOBI);
   }
 
   if (!skip) {
