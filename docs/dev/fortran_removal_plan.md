@@ -411,6 +411,33 @@ extern block. Everything else is sequential. The subagent's brief is the
 stage section below plus sections 3, 5 and 6 of this file. Sizes are lines
 of Fortran going in; the C coming out is usually 1.1 to 1.3 times that.
 
+Merges from main: when `main` moves while the port is open, the current port
+branch takes it with a merge commit (not a rebase) on a new branch,
+`claude/fortran-port-merge-main-N`, so the stage branches keep their history. Git
+follows the renames, so `main`'s hunks to the retired Fortran land in the
+`src/fref` copies and in `src/fortran`; a file the port replaced (for instance
+`src/Pflare_Parameters.F90`, now `src/pflare_parameters.h` plus
+`src/fortran/Pflare_Parameters.F90`) is resolved by moving `main`'s change into
+its replacement. The merge is followed by commits that re-port every Fortran
+hunk into the live C line for line (convention 1), and that apply `main`'s hunks to
+the C files the reference keeps as copies (`src/fref/PCPFLAREINV_fref.c`,
+`src/fref/PCAIR_fref.c`), so the reference stack is exactly `main`. New option
+values join the type lists of the `port_compare_*` drivers (new option sets are
+appended to `port_compare_air`, so the `-configs` indices of the run lines keep
+their meaning). The checks are layer C (`PFLARE_PORT_DEBUG=1` in the debug and
+Kokkos images, the C against the reference that now carries `main`'s Fortran)
+and layer B against `main` itself: a worktree of `origin/main` and the merge
+branch built and captured in the same image for `gnu_debug`, `gnu_opt` and
+Kokkos, with no differences, which is what the `gnu_opt_golden_logs` CI job
+checks on the umbrella PR. The first such merge brought in PR 301 (the
+`l1jacobi` inverse type and hypre's `4 / (3 ||D^-1/2 A D^-1/2||_inf)` weighted
+Jacobi weight): `calculate_and_build_weighted_jacobi_inverse` takes the inverse
+type instead of a flag, `calculate_l1_jacobi_inverse_diagonal` is new in
+`Weighted_Jacobi.c` (with a `Port_Interfaces.F90` wrapper that the reference
+`CR_Splitting.F90` calls), and `port_compare_air` options sets 59 to 63 cover
+`l1jacobi` as the Aff, C point and coarsest inverse and the CR splitting with
+`l1jacobi` and `wjacobi`.
+
 Every stage brief has the same closing requirement: build warning-free in the
 debug and opt GNU images (and the Kokkos image where the stage says so), run
 layer A, run layers B and C where listed, and report the results verbatim in
