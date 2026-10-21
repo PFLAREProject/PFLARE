@@ -49,7 +49,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image with debug PETSc and gfortran runtime checks
+      # The sanitizers are also on the Fortran flags so the Fortran tests link their
+      # runtime first, which the address sanitizer needs; the Python bindings are not
+      # built in a sanitizer build (gnu_opt tests them)
+      - name: Build Docker image with debug PETSc, gfortran runtime checks and the address and undefined behaviour sanitizers
         uses: docker/build-push-action@v6
         with:
           platforms: linux/amd64
@@ -58,7 +61,11 @@ jobs:
           file: ./dockerfiles/Dockerfile
           build-args: |
             ARCH=arch-linux-c-debug
-            EXTRA_FFLAGS=-fcheck=all -g -fbacktrace
+            EXTRA_FFLAGS=-fcheck=all -g -fbacktrace -fsanitize=address,undefined
+            EXTRA_CFLAGS=-fsanitize=address,undefined
+            EXTRA_CXXFLAGS=-fsanitize=address,undefined
+            ASAN_OPTIONS=detect_leaks=0
+            UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
   gnu_debug_malloc_dump:
     runs-on: ubuntu-22.04
@@ -260,6 +267,50 @@ jobs:
           tags: stevendargaville/pflare_64_bit:latest
           build-args: |
             ARCH=arch-linux-c-opt
+
+  # PETSc configured without a Fortran compiler (--with-fc=0) and gfortran removed from
+  # the image: PFLARE builds, tests and installs without its Fortran interface and Fortran
+  # tests. There is no such base image, so dockerfiles/Dockerfile_no_fortran configures
+  # PETSc again inside stevendargaville/petsc
+  gnu_opt_no_fortran:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image with PETSc configured without Fortran
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          push: false
+          context: .
+          file: ./dockerfiles/Dockerfile_no_fortran
+          build-args: |
+            BASE_ARCH=arch-linux-c-opt
+            ARCH=arch-linux-c-opt-no-fortran
+            FORTRAN=no_fortran
+
+  # PETSc configured with a Fortran compiler but --with-fortran-bindings=0, so FC is set
+  # but PETSc has no Fortran modules: PFLARE must not build its Fortran interface
+  gnu_debug_no_fortran_bindings:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image with debug PETSc configured without Fortran bindings
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          push: false
+          context: .
+          file: ./dockerfiles/Dockerfile_no_fortran
+          build-args: |
+            BASE_ARCH=arch-linux-c-debug
+            ARCH=arch-linux-c-debug-no-fortran-bindings
+            FORTRAN=no_fortran_bindings
 
   gnu_opt_kokkos:
     runs-on: ubuntu-22.04

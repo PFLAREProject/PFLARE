@@ -1,0 +1,112 @@
+ARG BASE_IMAGE=stevendargaville/petsc
+
+FROM ${BASE_IMAGE}
+ARG PETSC_DIR=/build/petsc
+# The arch of the base image whose configure options are reused
+ARG BASE_ARCH=arch-linux-c-opt
+# The new arch PETSc is configured into
+ARG ARCH=arch-linux-c-opt-no-fortran
+# Which PETSc without Fortran bindings to build:
+#   no_fortran           - configured without a Fortran compiler (--with-fc=0), with
+#                          gfortran removed from the image so any Fortran compile fails
+#   no_fortran_bindings  - configured with gfortran but --with-fortran-bindings=0, so
+#                          FC is set but PETSc has no Fortran modules
+ARG FORTRAN=no_fortran
+
+LABEL maintainer="Steven Dargaville"
+LABEL description="PFLARE built on a PETSc without Fortran bindings"
+
+ENV PETSC_ARCH=$ARCH
+ENV PETSC_DIR=$PETSC_DIR
+# -on_error_abort ensures any test failures are caught and the build fails
+# fp trap turns on floating point exception trapping in petsc
+ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"
+
+WORKDIR /build
+
+# Ensure pipelines fail if any stage fails
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# There is no base image without Fortran, so configure PETSc again into a new arch with
+# the configure options of an arch of the base image (its reconfigure script), changed
+# for Fortran:
+#   no_fortran: --with-fc=0, and the BLAS/LAPACK the base arch built with
+#               --download-fblaslapack is copied out and passed in as libraries (with
+#               the gfortran runtime they need), as it can't be built without a Fortran
+#               compiler; this also keeps the BLAS/LAPACK identical to the base arch
+#   no_fortran_bindings: the same options plus --with-fortran-bindings=0
+# The downloaded packages of the base arch are copied over, so nothing is downloaded
+# (PETSc reuses a git checkout that already has the commit it wants)
+RUN set -euo pipefail; \
+    cd ${PETSC_DIR}; \
+    if [ "${FORTRAN}" = "no_fortran" ]; then \
+        echo "Removing gfortran from the image"; \
+        rm -f /usr/bin/gfortran* /usr/bin/*-linux-gnu-gfortran* /usr/bin/f95 \
+              /usr/local/bin/mpif77 /usr/local/bin/mpif90 /usr/local/bin/mpifort; \
+        find /usr/lib/gcc /usr/libexec/gcc -name f951 -delete; \
+        if command -v gfortran > /dev/null; then echo "gfortran still found" >&2; exit 1; fi; \
+        echo "program t; end program t" > /tmp/t.f90; \
+        if gcc -c /tmp/t.f90 -o /tmp/t.o > /dev/null 2>&1; then echo "gcc can still compile Fortran" >&2; exit 1; fi; \
+    elif [ "${FORTRAN}" != "no_fortran_bindings" ]; then \
+        echo "Unknown FORTRAN=${FORTRAN}" >&2; exit 1; \
+    fi; \
+    opts=(); \
+    while IFS= read -r opt; do \
+        case "${opt}" in \
+            PETSC_ARCH=*) ;; \
+            --download-fblaslapack|FOPTFLAGS=*) if [ "${FORTRAN}" != "no_fortran" ]; then opts+=("${opt}"); fi ;; \
+            *) opts+=("${opt}") ;; \
+        esac; \
+    done < <(sed -n "s/^ *'\(.*\)',$/\1/p" ${BASE_ARCH}/lib/petsc/conf/reconfigure-${BASE_ARCH}.py); \
+    if [ "${FORTRAN}" = "no_fortran" ]; then \
+        mkdir -p /build/fblaslapack; \
+        cp ${BASE_ARCH}/lib/libflapack.a ${BASE_ARCH}/lib/libfblas.a /build/fblaslapack/; \
+        opts+=(--with-fc=0 "--with-blaslapack-lib=-L/build/fblaslapack -lflapack -lfblas -lgfortran -lquadmath"); \
+    else \
+        opts+=(--with-fortran-bindings=0); \
+    fi; \
+    mkdir -p ${ARCH}; \
+    cp -r ${BASE_ARCH}/externalpackages ${ARCH}/; \
+    echo "Configuring PETSc with: ${opts[*]} PETSC_ARCH=${ARCH}"; \
+    python3 ./configure "${opts[@]}" PETSC_ARCH=${ARCH}; \
+    make PETSC_DIR=${PETSC_DIR} PETSC_ARCH=${ARCH} all; \
+    if grep -q "define PETSC_USE_FORTRAN_BINDINGS 1" ${ARCH}/include/petscconf.h; then \
+        echo "PETSc still has its Fortran bindings" >&2; exit 1; \
+    fi; \
+    rm -rf ${ARCH}/externalpackages
+
+COPY . /build/PFLARE
+
+# Build and test PFLARE: the Fortran interface and the Fortran tests are not built, the
+# Fortran test commands print that they were skipped, and make install writes no Fortran
+# module file. The Python bindings are built, tested and run from the install
+RUN set -euo pipefail; \
+    echo "Using PETSC_OPTIONS=${PETSC_OPTIONS}"; \
+    cd PFLARE; \
+    make -j2 CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall"; \
+    make python; \
+    make -j2 check CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" 2>&1 | tee /tmp/check.log; \
+    grep -q "Fortran check skipped (PETSc configured without Fortran bindings)" /tmp/check.log; \
+    make -j2 tests CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall"; \
+    echo "Checking nothing Fortran was built"; \
+    if [ -n "$(find . -name '*.mod' -o -path './src/fortran/*.o')" ]; then echo "Fortran was built" >&2; exit 1; fi; \
+    for f in tests/*.F90; do \
+        if [ -e "${f%.F90}" ]; then echo "Fortran test ${f%.F90} was built" >&2; exit 1; fi; \
+    done; \
+    if nm -D lib/libpflare.so | grep -i gfortran; then echo "libpflare.so uses the gfortran runtime" >&2; exit 1; fi; \
+    echo "No Fortran objects, Fortran tests or gfortran symbols in libpflare.so"; \
+    make install PREFIX=/tmp/pflare_install; \
+    find /tmp/pflare_install | sort; \
+    if [ -n "$(find /tmp/pflare_install -name '*.mod')" ]; then echo "make install wrote a Fortran module" >&2; exit 1; fi; \
+    echo "make install wrote no Fortran module"; \
+    test -f /tmp/pflare_install/lib/libpflare.so; \
+    test -f /tmp/pflare_install/include/pflare.h; \
+    cd /tmp; \
+    PYTHONPATH=$(echo /tmp/pflare_install/lib/python*/site-packages):${PETSC_DIR}/${PETSC_ARCH}/lib \
+    LD_LIBRARY_PATH=/tmp/pflare_install/lib:${PETSC_DIR}/${PETSC_ARCH}/lib \
+        python3 -c "import pflare, os; assert pflare.__file__.startswith('/tmp/pflare_install'), pflare.__file__"; \
+    PYTHONPATH=$(echo /tmp/pflare_install/lib/python*/site-packages):${PETSC_DIR}/${PETSC_ARCH}/lib \
+    LD_LIBRARY_PATH=/tmp/pflare_install/lib:${PETSC_DIR}/${PETSC_ARCH}/lib \
+        python3 /build/PFLARE/python/ex2.py -ksp_max_it 5 -ksp_monitor
+
+WORKDIR /build/PFLARE
