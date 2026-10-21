@@ -12,6 +12,8 @@
 */
 
 #include <petscmat.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <petscblaslapack.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1735,3 +1737,28 @@ PETSC_INTERN PetscErrorCode mat_mat_symbolic(Mat A, Mat B, Mat *C)
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------
+
+// -------------------------------------------------------------------------------------------------------------------------------
+
+// Prints the stats and timings (the lines the Fortran printed with print *) to the
+// C stdout, ie file descriptor 1, and flushes it
+// This is deliberately not PetscPrintf: petsc4py replaces PetscVFPrintf with a
+// routine that writes through Python's sys.stdout, which in Jupyter is not file
+// descriptor 1, so output through PetscPrintf cannot be captured by redirecting
+// that descriptor (as the notebooks in notebooks/ do), whereas the Fortran print *
+// always wrote to it
+
+PETSC_INTERN PetscErrorCode pflare_print(const char format[], ...)
+{
+   va_list args;
+   int err;
+
+   PetscFunctionBegin;
+   va_start(args, format);
+   err = vfprintf(stdout, format, args);
+   va_end(args);
+   PetscCheck(err >= 0, PETSC_COMM_SELF, PETSC_ERR_FILE_WRITE, "vfprintf() returned error code %d", err);
+   err = fflush(stdout);
+   PetscCheck(err == 0, PETSC_COMM_SELF, PETSC_ERR_FILE_WRITE, "fflush() failed");
+   PetscFunctionReturn(PETSC_SUCCESS);
+}

@@ -35,4 +35,7 @@ PETSC_INTERN PetscErrorCode svd(const PetscScalar input[], PetscInt input_rows, 
 PETSC_INTERN PetscErrorCode pseudo_inv(const PetscScalar input[], PetscInt input_rows, PetscInt input_cols, PetscScalar output[]);
 PETSC_INTERN PetscErrorCode mat_mat_symbolic(Mat A, Mat B, Mat *C);
 
+// Prints to the C stdout like the Fortran print * did, see pflare_print in PETSc_Helper.c
+PETSC_INTERN PetscErrorCode pflare_print(const char format[], ...) PETSC_ATTRIBUTE_FORMAT(1, 2);
+
 #endif

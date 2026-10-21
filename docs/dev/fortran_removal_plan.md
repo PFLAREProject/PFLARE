@@ -269,7 +269,12 @@ export PETSC_USE_FORTRAN_BINDINGS := $(if $(call _have_conf,PETSC_USE_FORTRAN_BI
    `reshape` become explicit loops in the same place in the routine; a dense
    `matmul` already surrounded by BLAS calls may become `BLASgemm_`. Keep the
    arithmetic order where it is cheap to do so.
-8. **Printing.** `PetscPrintf(comm, ...)` on rank 0 using the exact labels in
+8. **Printing.** `pflare_print(...)` (PETSc_Helper.c: `vfprintf` to the C
+   stdout plus `fflush`, so the text reaches file descriptor 1 exactly as the
+   Fortran `print *` did; not `PetscPrintf`, because petsc4py replaces
+   `PetscVFPrintf` with a routine that writes through Python's `sys.stdout`,
+   which in Jupyter is not descriptor 1, and the notebooks capture the stats
+   by redirecting that descriptor) on rank 0 using the exact labels in
    `tools/parse_pflare_output.py` (`~~~~~~~~~~~~ Level %d`, `Global rows %d
    Global F-points %d Global C-points %d`, `<timer label> : %.15g`, the five
    complexity lines, `Total cumulative setup time : %.15g`).
