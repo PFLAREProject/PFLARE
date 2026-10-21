@@ -866,6 +866,28 @@ and `PCMarkNotSetUp_c` stay, `PFLARE_PORT_DEBUG` only, for the reference stack.
 
 Verification: A on the full matrix, B identical.
 
+As done: deleted `src/fref/` (the retired Fortran modules, the reference PC types
+`pflareinv_fref` and `air_fref`, and the reference copies of `C_Fortran_Bindings.F90`,
+`C_PETSc_Interfaces.F90`, `PCAIR_C_Fortran_Bindings.F90` and `PCAIR_Interfaces.F90`),
+the modules only the reference used (`src/fortran/Port_Interfaces.F90`,
+`Port_Interfaces_Grid.F90`, `Port_Interfaces_Poly.F90` and the `bind(C)` mirror
+`src/fortran/Gmres_Poly_Data_Type.F90`), `tests/port_compare_pc.c`, `port_compare_cf.c`
+and `port_compare_air.c` with their run lines and `.gitignore` entries, and
+`include/finclude/pflare_blaslapack.h`. Nothing in the build reads `PFLARE_PORT_DEBUG` any
+more: the top `Makefile` lost the `-D` flags, `FREF_OBJS`, `PORT_TEST_TARGETS`, the `src/fref`
+sources and `clean` lines and the second `makedepf90` pass of `make depend`, and
+`Makefile.deps` its `src/fref` lines and its `ifeq ($(PFLARE_PORT_DEBUG),1)` block. The
+`PFLARE_PORT_DEBUG` blocks of the live code went too: the reference calls and compares in
+`src/fortran/CF_Splitting.F90`, `MatDiagDomSubmatrix.F90` and `Gmres_Poly_Newton.F90`, the PC
+helpers `c_PCGetStructureFlag`, `PCGetSetupCalled_c` and `PCMarkNotSetUp_c`
+(`C_PETSc_Routines.c` stays for `MatGetDiagonalOnly_c` and `PetscFree_c`, which are still
+called), `poly_data_get_subcomm`, the matshell context accessors `mat_ctx_create_shell`,
+`mat_ctx_get_our_level` and `mat_ctx_get_air_data`, the `void` wrappers
+`GenerateIS_ProcAgglomeration_c_fref` and `MatPartitioning_c_fref`, and the registration of
+the two reference PC types. `make install` now installs only the modules of `src/fortran` and
+`pflare_random`. Layer C ends here; `PFLARE_KOKKOS_DEBUG` is the only in-process compare mode,
+and the golden logs (layer B) of `gnu_opt` and Kokkos are identical to stage 7.
+
 ### Stage 9: the random generator, the last core Fortran
 
 - Replace `src/Pflare_Random.F90` with `src/Pflare_Random.c`. Preferred
