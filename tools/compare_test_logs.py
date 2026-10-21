@@ -9,7 +9,7 @@ one log per command. Each log is reduced to a compact record:
     id          <group>.<n>, the n-th command of the group
     group       the tests/Makefile group
     cmd         the command line
-    status      exit code, or "skipped" (SKIP_SINGLE/SKIP_KOKKOS)
+    status      exit code, or "skipped" (SKIP_SINGLE/SKIP_KOKKOS/SKIP_FORTRAN)
     reasons     [[prefix, reason, iterations], ...] from the
                 "Linear [prefix] solve converged/did not converge due to" lines
     res         residual histories, one list per solve (a new solve starts

@@ -8,9 +8,7 @@
 # Can be overridden from the command line if needed
 PYTHON ?= python3
 CFLAGS   =
-FFLAGS   =
 CPPFLAGS =
-FPPFLAGS =
 
 # Read in the petsc compile/linking variables and makefile rules
 include ${PETSC_DIR}/lib/petsc/conf/variables
@@ -19,7 +17,6 @@ include ${PETSC_DIR}/lib/petsc/conf/rules
 # Make sure the setup.py can see the petsc compilers
 export CC
 export CXX
-export FC
 
 # Required during compilation to tell Cython where to look for libpflare
 export LIBRARY_PATH := $(if $(LIBRARY_PATH),$(LIBRARY_PATH):)$(LIBDIR)

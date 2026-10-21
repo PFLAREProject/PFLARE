@@ -82,8 +82,9 @@ export PETSC_HAVE_MPIUNI := $(if $(call _have_conf,PETSC_HAVE_MPIUNI),1,0)
 # Detect single-precision PETSc: the tests/data binary matrices are double-width
 # and cannot be loaded under PETSC_USE_REAL_SINGLE, so the load tests are gated off
 export PETSC_USE_REAL_SINGLE := $(if $(call _have_conf,PETSC_USE_REAL_SINGLE),1,0)
-# Detect if PETSc was configured with its Fortran bindings (only detected for now,
-# see docs/dev/fortran_removal_plan.md)
+# Detect if PETSc was configured with its Fortran bindings - the Fortran interface
+# (src/fortran) and the Fortran tests are only built when it has them. PETSc sets
+# this whenever it has a Fortran compiler, unless configured with --with-fortran-bindings=0
 export PETSC_USE_FORTRAN_BINDINGS := $(if $(call _have_conf,PETSC_USE_FORTRAN_BINDINGS),1,0)
 
 # The load tests read the double-width binaries in tests/data, so they only run
@@ -167,11 +168,9 @@ KOBJS := $(SRCDIR)/PETSc_Helperk.o \
 		  $(SRCDIR)/SAI_Zk.o
 endif
 
-# Core Fortran outside of the Fortran interface layer: none since the random
-# number generator moved to C (see docs/dev/fortran_removal_plan.md)
-FCORE_OBJS :=
-
-# The Fortran interface layer
+# The Fortran interface layer (only when PETSc has its Fortran bindings)
+FOBJS :=
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),1)
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 		  $(FORTRANDIR)/Gmres_Poly_Newton.o \
 		  $(FORTRANDIR)/CF_Splitting.o \
@@ -179,11 +178,12 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
 		  $(FORTRANDIR)/PCAIR_Interfaces.o \
 		  $(FORTRANDIR)/PFLARE.o
+endif
 
 # All the files required by PFLARE
-# Each list above is in Fortran module dependency order, but the build order
+# The Fortran list above is in module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS)
+OBJS := $(KOBJS) $(FOBJS) $(COBJS)
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
@@ -222,6 +222,22 @@ export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
 # Define a variable containing all the tests that the make check runs
 export CHECK_TARGETS = adv_diff_fd matrandom
+# The tests written in Fortran are only built when PETSc has its Fortran bindings
+# (tests/Makefile skips their commands with SKIP_FORTRAN otherwise)
+FORTRAN_TEST_TARGETS := ex12f \
+		  ex12f_gmres_poly \
+		  ex6f \
+		  ex6f_getcoeffs \
+		  ex6f_reuse_amount \
+		  leja_ordering \
+		  mat_diag \
+		  matrandom \
+		  matrandom_check_reset \
+		  pmisr_nonsymmetric
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),0)
+export TEST_TARGETS := $(filter-out $(FORTRAN_TEST_TARGETS),$(TEST_TARGETS))
+export CHECK_TARGETS := $(filter-out $(FORTRAN_TEST_TARGETS),$(CHECK_TARGETS))
+endif
 
 # Output the library - either static or dynamic
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
@@ -238,8 +254,9 @@ endif
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Dependency generation for the parallel build - make depend writes Makefile.deps
 # The Fortran module dependencies come from makedepf90 and the C/C++ header
-# dependencies from the compilers (-MM). Run it in a build with Kokkos so the
-# Kokkos objects are included
+# dependencies from the compilers (-MM). Run it in a build with Kokkos and the
+# Fortran bindings so the Kokkos and Fortran objects are included (without the
+# Fortran bindings the Fortran lines already in Makefile.deps are kept)
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 DEPFILE = Makefile.deps
 
@@ -270,6 +287,16 @@ DEP_TIDY := awk '{ line = line $$0 } /\\$$/ { sub(/\\$$/, "", line); next } \
 .DEFAULT_GOAL := all		  	
 all: $(OUT)
 
+# The shared library is linked with the C linker, or the C++ linker when the
+# Kokkos (C++) objects are in it, so no Fortran linker is needed. When the
+# Fortran interface is built, the Fortran runtime it needs is on PETSc's link
+# line (LDLIBS), as PETSc with Fortran bindings links it for its own Fortran
+ifeq ($(PETSC_HAVE_KOKKOS),1)
+LINK_SHARED = $(CXXLINKER) $(LDFLAGS)
+else
+LINK_SHARED = $(CLINKER) $(LDFLAGS)
+endif
+
 # # Create our directory structure and build the library
 # # (either static or dynamic depending on what petsc was configured with)
 $(OUT): $(OBJS)
@@ -281,10 +308,10 @@ ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 else
 ifeq ($(shell uname -s 2>/dev/null),Darwin)
 # macOS: Use -dynamiclib and set a relocatable @rpath install_name. Do not embed rpaths.
-	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS_NORPATH) -install_name @rpath/$(notdir $(OUT))
+	$(LINK_SHARED) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS_NORPATH) -install_name @rpath/$(notdir $(OUT))
 else	
 # Linux: Use -shared and set the soname.
-	$(LINK.F) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
+	$(LINK_SHARED) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
 endif
 endif
 
@@ -294,8 +321,14 @@ endif
 .PHONY: depend
 depend:
 	@echo "Generating dependencies..."
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),1)
 	@makedepf90 -b $(SRCDIR) $(FSRC) > $(DEPFILE).tmp
 	@$(if $(FDEP_RELOCATE),sed $(FDEP_RELOCATE),cat) $(DEPFILE).tmp > $(DEPFILE)
+else
+	@echo "PETSc has no Fortran bindings: keeping the Fortran lines of $(DEPFILE)"
+	@grep '^$(FORTRANDIR)/' $(DEPFILE) > $(DEPFILE).tmp 2>/dev/null || true
+	@mv $(DEPFILE).tmp $(DEPFILE)
+endif
 	@for f in $(CSRC); do \
 		$(PCC) -MM -MT $${f%.c}.o $(DEP_CPPFLAGS) $$f > $(DEPFILE).tmp || exit 1; \
 		$(DEP_TIDY) $(DEPFILE).tmp >> $(DEPFILE); \
@@ -476,9 +509,11 @@ install: all
 		find . -type d ! -name '.' -exec $(INSTALL) -d "$(INCLUDEDIR_INSTALL)/{}" \; && \
 		find . -type f -name "*.h" -exec $(INSTALL_DATA) "{}" "$(INCLUDEDIR_INSTALL)/{}" \; ; \
 	fi
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),1)
 	@for m in *.mod lib/*.mod; do \
 		if [ -f "$$m" ]; then $(INSTALL_DATA) "$$m" $(INCLUDEDIR_INSTALL)/; fi; \
 	done
+endif
 	@$(MAKE) --no-print-directory install_python PREFIX="$(PREFIX)" DESTDIR="$(DESTDIR)"
 	@printf 'prefix=%s\nexec_prefix=$${prefix}\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: pflare\nDescription: Library with parallel iterative methods for asymmetric linear systems built on PETSc.\nVersion: %s\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lpflare\nRequires: petsc\n' "$(PREFIX)" "$(PFLARE_VERSION)" > $(PKGCONFIGDIR_INSTALL)/pflare.pc
 	@echo '==> Install complete'

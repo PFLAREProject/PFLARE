@@ -12,8 +12,8 @@
 # The commands are enumerated the same way make tests_search does it (a make -n
 # dry run of the groups, with continuation lines joined), so the set of commands
 # is exactly the suite, with the same gates (RUN_LOAD_TESTS, SKIP_SINGLE,
-# SKIP_KOKKOS, MPIUNI). Commands that SKIP_SINGLE/SKIP_KOKKOS turn into echoes
-# are recorded as skipped.
+# SKIP_KOKKOS, SKIP_FORTRAN, MPIUNI). Commands that SKIP_SINGLE/SKIP_KOKKOS/
+# SKIP_FORTRAN turn into echoes are recorded as skipped.
 #
 # Usage:
 #   tools/capture_test_logs.sh [-r ROOT] [-j JOBS] OUTDIR [GROUP ...]
@@ -52,7 +52,7 @@ run_one() {
    (cd "$GOLDEN_ROOT/tests" && /bin/sh -c "$cmd") < /dev/null > "$log" 2>&1
    status=$?
    end=$(date +%s.%N)
-   # Commands that SKIP_SINGLE/SKIP_KOKKOS have turned into an echo
+   # Commands that SKIP_SINGLE/SKIP_KOKKOS/SKIP_FORTRAN have turned into an echo
    case "$cmd" in
       echo\ *) status=skipped ;;
    esac

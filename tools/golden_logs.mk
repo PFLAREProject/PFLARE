@@ -23,10 +23,11 @@ GOLDEN_GROUPS ?= $(FILTER_RUN_TARGETS_DEFAULT) run_check
 # ~~~~~~~~~~~~~~~~~
 # Name of the configuration, used to pick the baseline tests/golden/<config>.json.
 # Built to match the CI job names, e.g. gnu_debug, gnu_opt, gnu_opt_64_bit,
-# gnu_opt_kokkos, gnu_opt_omp_kokkos, gnu_debug_no_mpi_kokkos, gnu_debug_kokkos_single
+# gnu_opt_kokkos, gnu_opt_omp_kokkos, gnu_debug_no_mpi_kokkos, gnu_debug_kokkos_single,
+# gnu_opt_no_fortran (PETSc without its Fortran bindings)
 # Override with GOLDEN_CONFIG=<name>
 # ~~~~~~~~~~~~~~~~~
-_GOLDEN_COMPILER_VERSION := $(if $(strip $(FC_VERSION)),$(FC_VERSION),$(CC_VERSION))
+_GOLDEN_COMPILER_VERSION := $(if $(strip $(FC_VERSION)),$(FC_VERSION),$(C_VERSION))
 ifeq ($(shell uname -s 2>/dev/null),Darwin)
 _GOLDEN_COMPILER := macos
 else ifneq ($(findstring GNU,$(_GOLDEN_COMPILER_VERSION))$(findstring gcc,$(_GOLDEN_COMPILER_VERSION)),)
@@ -39,7 +40,7 @@ else
 _GOLDEN_COMPILER := other
 endif
 _GOLDEN_DEBUG := $(if $(call _golden_have_conf,PETSC_USE_DEBUG),debug,opt)
-GOLDEN_CONFIG ?= $(_GOLDEN_COMPILER)_$(_GOLDEN_DEBUG)$(if $(filter 1,$(PETSC_USE_64BIT_INDICES)),_64_bit)$(if $(call _golden_have_conf,PETSC_HAVE_OPENMP),_omp)$(if $(filter 1,$(PETSC_HAVE_MPIUNI)),_no_mpi)$(if $(filter 1,$(PETSC_HAVE_KOKKOS)),_kokkos)$(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),_single)
+GOLDEN_CONFIG ?= $(_GOLDEN_COMPILER)_$(_GOLDEN_DEBUG)$(if $(filter 1,$(PETSC_USE_64BIT_INDICES)),_64_bit)$(if $(call _golden_have_conf,PETSC_HAVE_OPENMP),_omp)$(if $(filter 1,$(PETSC_HAVE_MPIUNI)),_no_mpi)$(if $(filter 1,$(PETSC_HAVE_KOKKOS)),_kokkos)$(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),_single)$(if $(filter 0,$(PETSC_USE_FORTRAN_BINDINGS)),_no_fortran)
 
 .PHONY: golden_info golden_dry_run
 
@@ -54,6 +55,7 @@ golden_info:
 	@echo "64bit_indices=$(PETSC_USE_64BIT_INDICES)"
 	@echo "kokkos=$(PETSC_HAVE_KOKKOS)"
 	@echo "mpiuni=$(PETSC_HAVE_MPIUNI)"
+	@echo "fortran_bindings=$(PETSC_USE_FORTRAN_BINDINGS)"
 	@echo "groups=$(strip $(GOLDEN_GROUPS))"
 
 # Dry run each group in turn, with a marker line before each so the
