@@ -167,9 +167,9 @@ KOBJS := $(SRCDIR)/PETSc_Helperk.o \
 		  $(SRCDIR)/SAI_Zk.o
 endif
 
-# The only core Fortran left outside of the Fortran interface layer
-# (see docs/dev/fortran_removal_plan.md)
-FCORE_OBJS := $(SRCDIR)/Pflare_Random_Fortran.o
+# Core Fortran outside of the Fortran interface layer: none since the random
+# number generator moved to C (see docs/dev/fortran_removal_plan.md)
+FCORE_OBJS :=
 
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \

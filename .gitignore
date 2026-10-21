@@ -56,7 +56,6 @@ tests/poly_zero_coeffs
 tests/leja_ordering
 tests/reuse_preconditioner
 tests/shell_block_apply
-tests/random_compare
 
 # Golden test log captures (make tests_golden_capture)
 tests/golden_logs/
