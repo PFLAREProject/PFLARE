@@ -10,6 +10,7 @@
 #include <petscsys.h>
 #include <petsctime.h>
 #include "pflareimpl.h"
+#include "PETSc_Helper.h"
 #include "Timers.h"
 
 // -------------------------------------------------------------------------------------------------------------------------------
@@ -36,27 +37,27 @@ PETSC_INTERN PetscErrorCode print_timers(void)
    PetscFunctionBegin;
 
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_COARSEN, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " coarsen time     : %.15g\n", (double)time));
+   PetscCall(pflare_print(" coarsen time     : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_EXTRACT, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " extract time     : %.15g\n", (double)time));
+   PetscCall(pflare_print(" extract time     : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_PROC_AGGLOM, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " proc agglom time : %.15g\n", (double)time));
+   PetscCall(pflare_print(" proc agglom time : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_INVERSE, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " inverse time     : %.15g\n", (double)time));
+   PetscCall(pflare_print(" inverse time     : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_RESTRICT, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " restrict time    : %.15g\n", (double)time));
+   PetscCall(pflare_print(" restrict time    : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_PROLONG, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " prolong time     : %.15g\n", (double)time));
+   PetscCall(pflare_print(" prolong time     : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_CONSTRAIN, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " constrain time   : %.15g\n", (double)time));
+   PetscCall(pflare_print(" constrain time   : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_RAP, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " rap time         : %.15g\n", (double)time));
+   PetscCall(pflare_print(" rap time         : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_IDENTITY, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " identity time    : %.15g\n", (double)time));
+   PetscCall(pflare_print(" identity time    : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_DROP, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " drop time        : %.15g\n", (double)time));
+   PetscCall(pflare_print(" drop time        : %.15g\n", (double)time));
    PetscCall(timer_time(PFLARE_TIMER_ID_AIR_TRUNCATE, &time));
-   PetscCall(PetscPrintf(PETSC_COMM_SELF, " truncate time    : %.15g\n", (double)time));
+   PetscCall(pflare_print(" truncate time    : %.15g\n", (double)time));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }

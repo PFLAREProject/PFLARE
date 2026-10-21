@@ -94,7 +94,7 @@ src/SAI_Z.o : src/SAI_Z.c include/pflare.h src/pflareimpl.h src/pflare_parameter
 src/SAbs.o : src/SAbs.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/SAbs.h 
 src/Sorting.o : src/Sorting.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Sorting.h 
 src/TSQR.o : src/TSQR.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/TSQR.h 
-src/Timers.o : src/Timers.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Timers.h 
+src/Timers.o : src/Timers.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Timers.h 
 src/Weighted_Jacobi.o : src/Weighted_Jacobi.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Weighted_Jacobi.h 
 src/fref/PCAIR_fref.o : src/fref/PCAIR_fref.c include/pflare.h 
 src/fref/PCPFLAREINV_fref.o : src/fref/PCPFLAREINV_fref.c include/pflare.h 

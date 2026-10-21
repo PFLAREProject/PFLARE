@@ -467,13 +467,13 @@ PETSC_INTERN PetscErrorCode print_stats(air_multigrid_data *air_data, PC pcmg_in
 
    PetscCall(compute_stats(air_data, pcmg_input, &grid_complx, &op_complx, &cycle_complx, &storage_complx, &reuse_storage_complx));
 
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " ~~~~~~~~~~~~\n"));
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Grid complexity            : %.15g\n", (double)grid_complx));
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Operator complexity        : %.15g\n", (double)op_complx));
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Cycle complexity           : %.15g\n", (double)cycle_complx));
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Storage complexity         : %.15g\n", (double)storage_complx));
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Reuse storage complexity   : %.15g\n", (double)reuse_storage_complx));
-   if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " ~~~~~~~~~~~~\n"));
+   if (comm_rank == 0) PetscCall(pflare_print(" ~~~~~~~~~~~~\n"));
+   if (comm_rank == 0) PetscCall(pflare_print(" Grid complexity            : %.15g\n", (double)grid_complx));
+   if (comm_rank == 0) PetscCall(pflare_print(" Operator complexity        : %.15g\n", (double)op_complx));
+   if (comm_rank == 0) PetscCall(pflare_print(" Cycle complexity           : %.15g\n", (double)cycle_complx));
+   if (comm_rank == 0) PetscCall(pflare_print(" Storage complexity         : %.15g\n", (double)storage_complx));
+   if (comm_rank == 0) PetscCall(pflare_print(" Reuse storage complexity   : %.15g\n", (double)reuse_storage_complx));
+   if (comm_rank == 0) PetscCall(pflare_print(" ~~~~~~~~~~~~\n"));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }

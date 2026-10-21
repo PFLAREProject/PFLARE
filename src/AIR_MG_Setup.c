@@ -132,7 +132,7 @@ PETSC_INTERN PetscErrorCode setup_air_pcmg(Mat amat, Mat pmat, air_multigrid_dat
 
    // ~~~~~~~~~~~~~~~~~~~~~
 
-   if (air_data->options.print_stats_timings && comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Timers are cumulative\n"));
+   if (air_data->options.print_stats_timings && comm_rank == 0) PetscCall(pflare_print(" Timers are cumulative\n"));
 
    auto_truncated = PETSC_FALSE;
 
@@ -342,8 +342,8 @@ PETSC_INTERN PetscErrorCode setup_air_pcmg(Mat amat, Mat pmat, air_multigrid_dat
          // Output stats on the coarsening
          // The level printed is the 1-based level the user sees
          if (air_data->options.print_stats_timings && comm_rank == 0) {
-            PetscCall(PetscPrintf(PETSC_COMM_SELF, " ~~~~~~~~~~~~ Level %d\n", our_level + 1));
-            PetscCall(PetscPrintf(PETSC_COMM_SELF, " Global rows %" PetscInt_FMT " Global F-points %" PetscInt_FMT " Global C-points %" PetscInt_FMT "\n",
+            PetscCall(pflare_print(" ~~~~~~~~~~~~ Level %d\n", our_level + 1));
+            PetscCall(pflare_print(" Global rows %" PetscInt_FMT " Global F-points %" PetscInt_FMT " Global C-points %" PetscInt_FMT "\n",
                      global_rows, global_fine_is_size, global_coarse_is_size));
          }
 
@@ -538,7 +538,7 @@ PETSC_INTERN PetscErrorCode setup_air_pcmg(Mat amat, Mat pmat, air_multigrid_dat
             }
 
             if (air_data->options.print_stats_timings && comm_rank == 0) {
-               PetscCall(PetscPrintf(PETSC_COMM_SELF, " Detected diagonal Aff - setting any F smooth to 1 iteration on this level\n"));
+               PetscCall(pflare_print(" Detected diagonal Aff - setting any F smooth to 1 iteration on this level\n"));
             }
          }
       }
@@ -760,7 +760,7 @@ PETSC_INTERN PetscErrorCode setup_air_pcmg(Mat amat, Mat pmat, air_multigrid_dat
                }
 
                if (air_data->options.print_stats_timings && comm_rank == 0) {
-                  PetscCall(PetscPrintf(PETSC_COMM_SELF, " Doing processor agglomeration onto no cores: %" PetscInt_FMT "\n", no_active_cores));
+                  PetscCall(pflare_print(" Doing processor agglomeration onto no cores: %" PetscInt_FMT "\n", no_active_cores));
                }
 
                // ~~~~~~~~~~~~~~~~~~
@@ -1305,7 +1305,7 @@ PETSC_INTERN PetscErrorCode setup_air_pcmg(Mat amat, Mat pmat, air_multigrid_dat
          // If we've only got one level just precondition with jacobi
          PetscCall(PCSetOperators(pcmg_input, amat, pmat));
          PetscCall(PCSetType(pcmg_input, PCJACOBI));
-         if (comm_rank == 0) PetscCall(PetscPrintf(PETSC_COMM_SELF, " Only a single level, defaulting to Jacobi PC\n"));
+         if (comm_rank == 0) PetscCall(pflare_print(" Only a single level, defaulting to Jacobi PC\n"));
       }
    }
 
@@ -1329,13 +1329,13 @@ PETSC_INTERN PetscErrorCode setup_air_pcmg(Mat amat, Mat pmat, air_multigrid_dat
    // Print out the coarse grid info
    // The level printed is the 1-based level the user sees, ie no_levels
    if (air_data->options.print_stats_timings && comm_rank == 0) {
-      PetscCall(PetscPrintf(PETSC_COMM_SELF, " ~~~~~~~~~~~~ Coarse grid %d\n", no_levels));
-      PetscCall(PetscPrintf(PETSC_COMM_SELF, " Global rows %" PetscInt_FMT "\n", global_rows));
+      PetscCall(pflare_print(" ~~~~~~~~~~~~ Coarse grid %d\n", no_levels));
+      PetscCall(pflare_print(" Global rows %" PetscInt_FMT "\n", global_rows));
       PetscCall(print_timers());
-      PetscCall(PetscPrintf(PETSC_COMM_SELF, " ~~~~~~~~~~~~ \n"));
+      PetscCall(pflare_print(" ~~~~~~~~~~~~ \n"));
       PetscCall(timer_time(PFLARE_TIMER_ID_AIR_SETUP, &time));
-      PetscCall(PetscPrintf(PETSC_COMM_SELF, " Total cumulative setup time : %.15g\n", (double)time));
-      PetscCall(PetscPrintf(PETSC_COMM_SELF, " ~~~~~~~~~~~~ \n"));
+      PetscCall(pflare_print(" Total cumulative setup time : %.15g\n", (double)time));
+      PetscCall(pflare_print(" ~~~~~~~~~~~~ \n"));
    }
    // Print out stats on the hierarchy - collective so make sure to call
    // this on all ranks
