@@ -7,6 +7,7 @@
 
 #include <petscmat.h>
 
-PETSC_INTERN PetscErrorCode calculate_and_build_weighted_jacobi_inverse(Mat matrix, PetscBool weighted, Mat *inv_matrix);
+PETSC_INTERN PetscErrorCode calculate_and_build_weighted_jacobi_inverse(Mat matrix, int inverse_type, Mat *inv_matrix);
+PETSC_INTERN PetscErrorCode calculate_l1_jacobi_inverse_diagonal(Mat matrix, Vec diag_vec);
 
 #endif

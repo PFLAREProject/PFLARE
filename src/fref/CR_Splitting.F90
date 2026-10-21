@@ -1,10 +1,9 @@
 module cr_splitting
 
    use petscmat
-   use port_interfaces, only: MatCreateSubMatrixWrapper
+   use port_interfaces, only: MatCreateSubMatrixWrapper, calculate_l1_jacobi_inverse_diagonal
    use pmisr_module, only: pmisr_existing_measure_implicit_transpose
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse
-   use weighted_jacobi, only: calculate_l1_jacobi_inverse_diagonal
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_NU, &
             PFLARE_CR_NU_POLY, PFLARE_CR_POLY_ORDER, &
             PFLAREINV_WJACOBI, PFLAREINV_JACOBI, PFLAREINV_L1JACOBI, &

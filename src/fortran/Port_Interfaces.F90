@@ -27,7 +27,8 @@ module port_interfaces
          merge_pre_sorted_fref => merge_pre_sorted
    use aggregation, only: generate_serial_aggregation_fref => generate_serial_aggregation
    use weighted_jacobi, only: &
-         calculate_and_build_weighted_jacobi_inverse_fref => calculate_and_build_weighted_jacobi_inverse
+         calculate_and_build_weighted_jacobi_inverse_fref => calculate_and_build_weighted_jacobi_inverse, &
+         calculate_l1_jacobi_inverse_diagonal_fref => calculate_l1_jacobi_inverse_diagonal
    use petsc_helper, only: kokkos_debug_fref => kokkos_debug, &
          remove_small_from_sparse_fref => remove_small_from_sparse, &
          remove_from_sparse_match_fref => remove_from_sparse_match, &
@@ -59,7 +60,7 @@ module port_interfaces
    ! Aggregation.c
    public :: generate_serial_aggregation
    ! Weighted_Jacobi.c
-   public :: calculate_and_build_weighted_jacobi_inverse
+   public :: calculate_and_build_weighted_jacobi_inverse, calculate_l1_jacobi_inverse_diagonal
    ! PETSc_Helper.c
    public :: kokkos_debug, destroy_matrix_reuse, remove_small_from_sparse, remove_from_sparse_match, &
          MatSetAllValues, mat_duplicate_copy_plus_diag, MatAXPYWrapper, MatCreateSubMatrixWrapper, &
@@ -205,14 +206,23 @@ module port_interfaces
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
    interface
-      function calculate_and_build_weighted_jacobi_inverse_c(matrix, weighted, inv_matrix) &
+      function calculate_and_build_weighted_jacobi_inverse_c(matrix, inverse_type, inv_matrix) &
          bind(c, name="calculate_and_build_weighted_jacobi_inverse")
          use iso_c_binding
          integer(c_long_long), value :: matrix
-         PetscBool, value :: weighted
+         integer(c_int), value :: inverse_type
          integer(c_long_long) :: inv_matrix
          PetscErrorCode :: calculate_and_build_weighted_jacobi_inverse_c
       end function calculate_and_build_weighted_jacobi_inverse_c
+   end interface
+
+   interface
+      function calculate_l1_jacobi_inverse_diagonal_c(matrix, diag_vec) &
+         bind(c, name="calculate_l1_jacobi_inverse_diagonal")
+         use iso_c_binding
+         integer(c_long_long), value :: matrix, diag_vec
+         PetscErrorCode :: calculate_l1_jacobi_inverse_diagonal_c
+      end function calculate_l1_jacobi_inverse_diagonal_c
    end interface
 
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -904,15 +914,15 @@ module port_interfaces
 ! Weighted_Jacobi.c
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_and_build_weighted_jacobi_inverse(matrix, weighted, inv_matrix)
+   subroutine calculate_and_build_weighted_jacobi_inverse(matrix, inverse_type, inv_matrix)
 
       ! ~~~~~~
       type(tMat), target, intent(in)                    :: matrix
-      logical, intent(in)                               :: weighted
+      integer, intent(in)                               :: inverse_type
       type(tMat), intent(inout)                         :: inv_matrix
 
       PetscErrorCode :: ierr
-      PetscBool :: weighted_bool
+      integer(c_int) :: inverse_type_int
       integer(c_long_long) :: matrix_array, inv_matrix_array
 #if defined(PFLARE_PORT_DEBUG)
       type(tMat) :: inv_matrix_fref
@@ -944,7 +954,7 @@ module port_interfaces
       end if
 #endif
 
-      weighted_bool = weighted
+      inverse_type_int = inverse_type
       matrix_array = matrix%v
       ! A null Fortran handle is not necessarily 0, so pass NULL explicitly
       if (PetscObjectIsNull(inv_matrix)) then
@@ -952,12 +962,12 @@ module port_interfaces
       else
          inv_matrix_array = inv_matrix%v
       end if
-      ierr = calculate_and_build_weighted_jacobi_inverse_c(matrix_array, weighted_bool, inv_matrix_array)
+      ierr = calculate_and_build_weighted_jacobi_inverse_c(matrix_array, inverse_type_int, inv_matrix_array)
       call port_check(ierr, "calculate_and_build_weighted_jacobi_inverse")
       inv_matrix%v = inv_matrix_array
 
 #if defined(PFLARE_PORT_DEBUG)
-      call calculate_and_build_weighted_jacobi_inverse_fref(matrix, weighted, inv_matrix_fref)
+      call calculate_and_build_weighted_jacobi_inverse_fref(matrix, inverse_type, inv_matrix_fref)
       call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
       call VecDuplicate(diag_vec, diag_vec_fref, ierr)
       call MatGetDiagonal(inv_matrix, diag_vec, ierr)
@@ -973,6 +983,43 @@ module port_interfaces
 #endif
 
    end subroutine calculate_and_build_weighted_jacobi_inverse
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine calculate_l1_jacobi_inverse_diagonal(matrix, diag_vec)
+
+      ! ~~~~~~
+      type(tMat), intent(in)                            :: matrix
+      type(tVec), intent(inout)                         :: diag_vec
+
+      PetscErrorCode :: ierr
+#if defined(PFLARE_PORT_DEBUG)
+      type(tVec) :: diag_vec_fref
+      PetscBool :: vec_equal
+      integer :: errorcode
+#endif
+      ! ~~~~~~
+
+#if defined(PFLARE_PORT_DEBUG)
+      ! The C overwrites diag_vec in place, so give the reference a copy of the input
+      call VecDuplicate(diag_vec, diag_vec_fref, ierr)
+      call VecCopy(diag_vec, diag_vec_fref, ierr)
+#endif
+
+      ierr = calculate_l1_jacobi_inverse_diagonal_c(matrix%v, diag_vec%v)
+      call port_check(ierr, "calculate_l1_jacobi_inverse_diagonal")
+
+#if defined(PFLARE_PORT_DEBUG)
+      call calculate_l1_jacobi_inverse_diagonal_fref(matrix, diag_vec_fref)
+      call VecEqual(diag_vec, diag_vec_fref, vec_equal, ierr)
+      if (.NOT. vec_equal) then
+         print *, "C and Fortran reference versions of calculate_l1_jacobi_inverse_diagonal do not match"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      call VecDestroy(diag_vec_fref, ierr)
+#endif
+
+   end subroutine calculate_l1_jacobi_inverse_diagonal
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 ! PETSc_Helper.c

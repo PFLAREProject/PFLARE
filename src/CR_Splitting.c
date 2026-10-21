@@ -12,6 +12,7 @@
 #include "PMISR_Module.h"
 #include "Pflare_Random.h"
 #include "Approx_Inverse_Setup.h"
+#include "Weighted_Jacobi.h"
 #include "CR_Splitting.h"
 
 // The CR relaxation whose error decides the splitting is the approximate
@@ -114,6 +115,7 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
    // polynomial order
    use_poly = (cr_inverse_type != PFLAREINV_WJACOBI &&
               cr_inverse_type != PFLAREINV_JACOBI &&
+              cr_inverse_type != PFLAREINV_L1JACOBI &&
               fine_global > cr_poly_order + 1) ? PETSC_TRUE : PETSC_FALSE;
    nu = PFLARE_CR_NU;
    if (use_poly) nu = PFLARE_CR_NU_POLY;
@@ -136,11 +138,11 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
    } else {
 
       // ~~~~~~~~
-      // Build the weighted Jacobi inverse of the diagonal of Aff
-      // This uses the same weight as calculate_and_build_weighted_jacobi_inverse
-      // (ie the hypre weight) but we sanitize exactly zero diagonals so they can't
-      // poison the weight with infs/nans - those rows can never be relaxed so they
-      // are force promoted to C below
+      // Build the Jacobi inverse (weighted, unweighted or l1) of the diagonal of Aff
+      // This uses the same weights as calculate_and_build_weighted_jacobi_inverse
+      // but we sanitize exactly zero diagonals so they can't poison the weights
+      // with infs/nans - those rows can never be relaxed so they are force
+      // promoted to C (and their inverse zeroed) below
       // ~~~~~~~~
       PetscCall(MatCreateVecs(Aff, NULL, &diag_vec));
       PetscCall(MatGetDiagonal(Aff, diag_vec));
@@ -153,10 +155,15 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
       }
       PetscCall(VecRestoreArray(diag_vec, &vec_array));
 
-      // 3 / ( 4 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
+      // This is the weight that hypre's BoomerAMG computes with relax_weight = 0
+      // (see par_amg_setup.c)
+      // 4 / ( 3 * || D^(-1/2) * Aff * D^(-1/2) ||_inf )
+      // Note the hypre docs for HYPRE_BoomerAMGSetRelaxWt quote 3 / (4 * ||.||)
+      // but the code uses 4 / (3 * ||.||)
       // Unweighted plain Jacobi if that's what the hierarchy smooths with
+      // and l1 Jacobi has its own weight on each row
       weight = 1.0;
-      if (cr_inverse_type != PFLAREINV_JACOBI) {
+      if (cr_inverse_type == PFLAREINV_WJACOBI) {
          PetscCall(MatDuplicate(Aff, MAT_COPY_VALUES, &temp_mat));
          PetscCall(VecDuplicate(diag_vec, &scale_vec));
          PetscCall(VecCopy(diag_vec, scale_vec));
@@ -166,13 +173,17 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
          PetscCall(MatNorm(temp_mat, NORM_INFINITY, &norm_inf));
          PetscCall(MatDestroy(&temp_mat));
          PetscCall(VecDestroy(&scale_vec));
-         // In PetscReal, as the Fortran's 3.0 and 4.0 are default reals that are exact in any precision
-         if (norm_inf != 0.0) weight = (PetscReal)3.0 / ((PetscReal)4.0 * norm_inf);
+         // In PetscReal, as the Fortran's 4.0 and 3.0 are default reals that are exact in any precision
+         if (norm_inf != 0.0) weight = (PetscReal)4.0 / ((PetscReal)3.0 * norm_inf);
       }
 
       // Invert and apply the weight, zeroing the rows we can't relax
-      PetscCall(VecReciprocal(diag_vec));
-      PetscCall(VecScale(diag_vec, weight));
+      if (cr_inverse_type == PFLAREINV_L1JACOBI) {
+         PetscCall(calculate_l1_jacobi_inverse_diagonal(Aff, diag_vec));
+      } else {
+         PetscCall(VecReciprocal(diag_vec));
+         PetscCall(VecScale(diag_vec, weight));
+      }
       // any(forced_c)
       any_forced_c = PETSC_FALSE;
       for (ifree = 0; ifree < fine_local; ifree++) {

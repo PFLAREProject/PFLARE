@@ -67,7 +67,7 @@ src/AIR_Operators_Setup.o : src/AIR_Operators_Setup.c src/pflareimpl.h include/p
 src/Aggregation.o : src/Aggregation.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Aggregation.h 
 src/Approx_Inverse_Setup.o : src/Approx_Inverse_Setup.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/TSQR.h src/Gmres_Poly.h src/Gmres_Poly_Apply.h src/Gmres_Poly_Newton.h src/Neumann_Poly.h src/Weighted_Jacobi.h src/SAI_Z.h src/Repartition.h src/PETSc_Helper.h src/Matshell_Data_Type.h src/Approx_Inverse_Setup.h 
 src/CF_Splitting.o : src/CF_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PMISR_Module.h src/DDC_Module.h src/CR_Splitting.h src/SAbs.h src/Device_Datak.h src/Aggregation.h src/PETSc_Helper.h src/CF_Splitting.h 
-src/CR_Splitting.o : src/CR_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Module.h src/Pflare_Random.h src/Approx_Inverse_Setup.h src/CR_Splitting.h 
+src/CR_Splitting.o : src/CR_Splitting.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Module.h src/Pflare_Random.h src/Approx_Inverse_Setup.h src/Weighted_Jacobi.h src/CR_Splitting.h 
 src/C_PETSc_Routines.o : src/C_PETSc_Routines.c src/C_PETSc_Routines.h 
 src/Constrain_Z_or_W.o : src/Constrain_Z_or_W.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Constrain_Z_or_W.h 
 src/DDC_Module.o : src/DDC_Module.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Device_Datak.h src/DDC_Modulek.h src/MatDiagDomk.h src/PMISR_Module.h src/MatDiagDom.h src/Pflare_Random.h src/DDC_Module.h 
