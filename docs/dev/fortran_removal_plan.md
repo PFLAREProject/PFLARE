@@ -58,6 +58,11 @@ Decisions already taken by the maintainer, which this plan follows:
    that the C ports call; it is the last piece of core Fortran and is removed
    in stage 9, after everything else has been verified against the Fortran
    with results that are bit-identical up to summation order.
+   Result (stage 9): `src/Pflare_Random.c` reimplements gfortran's
+   xoshiro256** `random_seed(put=)` and `random_number` and fills bitwise the
+   same numbers in double and single precision, so the Fortran was replaced
+   without moving any result and no re-baselining was needed. The numbers no
+   longer depend on the compiler: Intel builds now draw the GNU sequence.
 2. **Error handling.** Today `ierr` is mostly ignored and PFLARE's own checks
    are `print` + `MPI_Abort`. The C port wraps every PETSc call in `PetscCall`
    and turns the checks into `PetscCheck`/`SETERRQ`, so errors propagate with
@@ -179,6 +184,8 @@ src/
   PCAIR.c, PCPFLAREINV.c  own their contexts directly, no Fortran externs, no PCShell
   Pflare_Random.F90       (stages 0 to 8 only) the four random_number draws behind one
                           bind(C) routine; the last core Fortran, removed in stage 9
+  Pflare_Random.c         (stage 9 on) the same draws from a C reimplementation of
+                          gfortran's random_number (xoshiro256**), bitwise identical
   fortran/                compiled only when PETSC_USE_FORTRAN_BINDINGS=1
     Pflare_Parameters.F90   module pflare_parameters (parameters taken from pflare_parameters.h)
     PCPFLAREINV_Interfaces.F90, PCAIR_Interfaces.F90, PFLARE.F90
@@ -354,7 +361,8 @@ reasons must be identical; residual norms agree to a relative tolerance
 (default 1e-8 double, 1e-4 single); stats fields `global_rows`,
 `global_f_points`, `global_c_points`, `n_levels` identical; complexities to
 1e-10. Any miss is a stage failure until explained and signed off. Stage 9
-(the random generator) is the only stage allowed to re-baseline.
+(the random generator) was the only stage allowed to re-baseline, and did not
+need to: its C generator reproduces gfortran's bitwise.
 
 **Layer C: in-process differential tests.** This is the repo's own
 `PFLARE_KOKKOS_DEBUG` idea applied to the port. While a stage is in flight,
@@ -909,6 +917,37 @@ and the golden logs (layer B) of `gnu_opt` and Kokkos are identical to stage 7.
 Verification: A on the full matrix, B identical to the (possibly new)
 baseline, and `grep -rl random_number src/` is empty.
 
+As done: the bitwise path. `src/Pflare_Random.c` implements what gfortran's
+runtime (`libgfortran/intrinsics/random.c`, GCC 13.3) does for
+`random_seed(put=)` followed by `random_number` on a `real(PetscReal)` array:
+the 8 default-integer seed values `comm_rank + 1 + i` are copied in reverse
+order into the 4-byte words of the 256-bit xoshiro256** state (with `memcpy`,
+so it follows the byte order as gfortran does), each 64-bit word is XORed with
+gfortran's key, and the state is used directly (gfortran copies the master
+state into the calling thread's state and only jumps the master). A double
+takes the top 53 bits of each output times 2^-64, a single the top 24 bits of
+the high 32 times 2^-32 (a `__float128` follows gfortran's real(16) path, two
+outputs per entry; untested, no quad image). Before the Fortran was deleted, a
+temporary driver (`tests/random_compare.c`, with the Fortran renamed
+`pflare_random_fill_fortran`) compared the two fills bit for bit for
+`comm_rank` 0 to 63 plus five large ranks and n in {1, 2, 3, 7, 100, 1000,
+10001, 65536}: identical in the petsc image (debug and opt), the Kokkos image
+`arch-linux-c-opt` (C compiled as C++) and the single precision Kokkos prefix
+build. So nothing was re-baselined: the layer B captures of `gnu_debug`,
+`gnu_opt` and `gnu_opt_kokkos` are identical to stage 8 (at `--res-rtol 0`
+only the documented 4-rank `adv_diff_fd ... agg` variation remains in the
+non-Kokkos images). `FCORE_OBJS` is empty, `pflare_random.mod` is no longer
+installed, and no Fortran calls `random_number` or `random_seed` any more
+(`grep -rl random_number src/` still lists the comments that describe what the
+C reproduces and the `random_numbers` variables of the DDC). Intel builds now
+draw the gfortran sequence instead of ifx's: in the Intel image (with the
+`tests/Makefile` edits of `dockerfiles/Dockerfile_intel`) `make check` and
+`make tests` pass, 101 of the 573 commands change iteration counts against
+stage 8 (most by one; the largest, the `e05r0100_petsc` load tests, go from 13
+or 14 to 24 against a cap of 26), and the iteration counts now equal the GNU
+build's on 320 of the 337 commands the two run identically (259 before). The CHANGELOG entry describing the C core and the error-handling change
+(decision 2) is left to stage 10 with the rest of the docs.
+
 ### Stage 10: gating, CI, docs
 
 - `Makefile`: the `PETSC_USE_FORTRAN_BINDINGS` gate on `FOBJS`, the Fortran
@@ -961,7 +1000,7 @@ _gfortran` is empty.
   subagents, three branches, merge order 6, 4, 5) or strictly sequentially.
   Sequential is simpler to review; concurrent saves wall-clock time at the
   cost of two small rebases.
-- **Stage 9 generator** if the xoshiro256** reimplementation does not match
-  gfortran bitwise: `PetscRandom` as written above, or keep the xoshiro code
-  anyway for compiler independence. Either way the re-baseline happens once,
-  in stage 9, and nowhere else.
+- **Stage 9 generator** (resolved in stage 9): the xoshiro256**
+  reimplementation matches gfortran bitwise, so neither fallback
+  (`PetscRandom`, or keeping the xoshiro code with a re-baseline) was needed
+  and nothing was re-baselined.
