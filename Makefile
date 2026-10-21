@@ -67,25 +67,6 @@ override HIPC_FLAGS += $(HIPC_FLAGS_INPUT) $(INCLUDE)
 override SYCLC_FLAGS += $(SYCLC_FLAGS_INPUT) $(INCLUDE)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~
-# Port debugging - make PFLARE_PORT_DEBUG=1
-# While the Fortran core is being ported to C, this defines PFLARE_PORT_DEBUG,
-# builds the Fortran reference implementations in src/fref alongside the C ports
-# and adds the drivers that compare the two to the tests
-# See docs/dev/fortran_removal_plan.md
-# ~~~~~~~~~~~~~~~~~~~~~~~~
-PFLARE_PORT_DEBUG ?=
-FREFDIR := $(SRCDIR)/fref
-ifeq ($(PFLARE_PORT_DEBUG),1)
-override CPPFLAGS += -DPFLARE_PORT_DEBUG
-override FPPFLAGS += -DPFLARE_PORT_DEBUG
-override CXXPPFLAGS += -DPFLARE_PORT_DEBUG
-FREF_OBJS := $(patsubst %.F90,%.o,$(wildcard $(FREFDIR)/*.F90)) \
-		  $(patsubst %.c,%.o,$(wildcard $(FREFDIR)/*.c))
-else
-FREF_OBJS :=
-endif
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~
 # Check if petsc has been configured with various options
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # Read petscconf.h via awk (portable on macOS)
@@ -198,11 +179,10 @@ FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
 		  $(FORTRANDIR)/PCAIR_Interfaces.o \
 		  $(FORTRANDIR)/PFLARE.o
 
-# All the files required by PFLARE, plus the Fortran reference implementations
-# (only with PFLARE_PORT_DEBUG=1)
+# All the files required by PFLARE
 # Each list above is in Fortran module dependency order, but the build order
 # comes from the dependencies in Makefile.deps
-OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS) $(FREF_OBJS)
+OBJS := $(FCORE_OBJS) $(KOBJS) $(FOBJS) $(COBJS)
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
@@ -239,11 +219,6 @@ export TEST_TARGETS = ex12f \
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
-# Include the drivers that compare the C ports against the Fortran reference
-PORT_TEST_TARGETS := port_compare_pc port_compare_cf port_compare_air
-ifeq ($(PFLARE_PORT_DEBUG),1)
-export TEST_TARGETS := $(TEST_TARGETS) $(PORT_TEST_TARGETS)
-endif
 # Define a variable containing all the tests that the make check runs
 export CHECK_TARGETS = adv_diff_fd matrandom
 
@@ -264,14 +239,11 @@ endif
 # The Fortran module dependencies come from makedepf90 and the C/C++ header
 # dependencies from the compilers (-MM). Run it in a build with Kokkos so the
 # Kokkos objects are included
-# The Fortran that uses the reference implementations in src/fref does so under
-# #ifdef PFLARE_PORT_DEBUG, which makedepf90 only follows with -D PFLARE_PORT_DEBUG,
-# so the dependency lines that differ in that case are added for PFLARE_PORT_DEBUG=1 only
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 DEPFILE = Makefile.deps
 
 # Find Fortran source files in the src directories for makedepf90
-FSRC_SUBDIRS := $(sort $(wildcard $(FORTRANDIR)/*.F90) $(wildcard $(FREFDIR)/*.F90))
+FSRC_SUBDIRS := $(sort $(wildcard $(FORTRANDIR)/*.F90))
 FSRC := $(sort $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)) $(FSRC_SUBDIRS)
 # makedepf90 has to see all the Fortran at once to find modules used across
 # directories, but it puts every object in the -b directory, so the objects
@@ -279,7 +251,7 @@ FSRC := $(sort $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)) $(FSRC_S
 FDEP_RELOCATE := $(foreach f,$(basename $(FSRC_SUBDIRS)),-e 's|$(SRCDIR)/$(notdir $(f))\.o |$(f).o |g')
 
 # Find C and Kokkos source files for the compilers
-CSRC := $(sort $(wildcard $(SRCDIR)/*.c) $(wildcard $(FREFDIR)/*.c))
+CSRC := $(sort $(wildcard $(SRCDIR)/*.c))
 KSRC := $(if $(filter 1,$(PETSC_HAVE_KOKKOS)),$(sort $(wildcard $(SRCDIR)/*.kokkos.cxx)))
 # PFLARE's headers are found through relative paths and PETSc's (with those of
 # MPI and Kokkos) are system headers, so -MM lists only PFLARE's own headers
@@ -323,10 +295,6 @@ depend:
 	@echo "Generating dependencies..."
 	@makedepf90 -b $(SRCDIR) $(FSRC) > $(DEPFILE).tmp
 	@$(if $(FDEP_RELOCATE),sed $(FDEP_RELOCATE),cat) $(DEPFILE).tmp > $(DEPFILE)
-	@makedepf90 -D PFLARE_PORT_DEBUG -b $(SRCDIR) $(FSRC) > $(DEPFILE).tmp
-	@echo 'ifeq ($$(PFLARE_PORT_DEBUG),1)' >> $(DEPFILE)
-	@$(if $(FDEP_RELOCATE),sed $(FDEP_RELOCATE),cat) $(DEPFILE).tmp | grep -vxF -f $(DEPFILE) >> $(DEPFILE) || true
-	@echo 'endif' >> $(DEPFILE)
 	@for f in $(CSRC); do \
 		$(PCC) -MM -MT $${f%.c}.o $(DEP_CPPFLAGS) $$f > $(DEPFILE).tmp || exit 1; \
 		$(DEP_TIDY) $(DEPFILE).tmp >> $(DEPFILE); \
@@ -478,11 +446,8 @@ clean::
 	$(RM) $(SRCDIR)/*.o
 	$(RM) $(FORTRANDIR)/*.mod
 	$(RM) $(FORTRANDIR)/*.o
-	$(RM) $(FREFDIR)/*.mod
-	$(RM) $(FREFDIR)/*.o
 	$(RM) $(CURDIR)/*.mod
 	$(MAKE) -C tests clean
-	$(RM) $(addprefix tests/,$(PORT_TEST_TARGETS))
 	$(MAKE) -C python clean	
 
 # Make install
