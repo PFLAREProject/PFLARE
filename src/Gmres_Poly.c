@@ -838,7 +838,7 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity(Mat matrix, int poly_
    if (is_kokkos) {
 
       // Finish off the non-blocking all reduce to compute our coefficients
-      // This is a fortran routine and we don't want to call this inside the kokkos
+      // This was a fortran routine, so it is called here rather than inside the kokkos
       PetscCall(finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients));
 
       A_array = matrix;

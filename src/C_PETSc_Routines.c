@@ -1,5 +1,5 @@
 /*
-  C routines that are used to get around a lack of some PETSc fortran interfaces
+  C routines that were used to get around a lack of some PETSc fortran interfaces
 
   The helpers for the repartitioning (MatPartitioning_c, GenerateIS_ProcAgglomeration_c
   and MatMPICreateNonemptySubcomm_c) are now in Repartition.c, the C port of the

@@ -552,9 +552,9 @@ PETSC_INTERN PetscErrorCode mat_iscopy_local_host(air_multigrid_data *air_data, 
    }
 
    // If we have no fine (or coarse) rows locally there is nothing to copy
-   // The reduced block then has no local rows, so petsc hands back an
-   // unassociated fortran pointer for it (the underlying storage is null)
-   // which we can't take the size of
+   // The reduced block then has no local rows, so petsc hands back a null
+   // array for it (in the Fortran an unassociated pointer, which we couldn't
+   // take the size of)
    PetscCall(ISGetLocalSize(is_local, &is_local_size));
    if (is_local_size == 0) PetscFunctionReturn(PETSC_SUCCESS);
 

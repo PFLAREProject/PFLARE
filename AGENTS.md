@@ -1,15 +1,15 @@
 Codebase map
-- `src/`: the algorithms are C `X.c`/`X.h`, ported from Fortran `.F90` modules with the same stem (`docs/dev/fortran_removal_plan.md`); no core Fortran is left (`src/Pflare_Random.c` is the random number generator, which reproduces gfortran's `random_number` bitwise). PETSc PC plumbing: `PCAIR.c` (its `pc->data` is the `pc_air_multigrid_data` of `pflareimpl.h`; the PC operations call the former `PCShell` callbacks in `PCAIR_Shell.c`), `PCPFLAREINV.c`, `C_PETSc_Routines.c`. Kokkos kernels: `X.c` has a sibling `Xk.kokkos.cxx` exporting `<snake_case>_kokkos()` functions through a prototype header `Xk.h`, called from C directly.
-- `tests/`: test drivers + a Makefile of literal run commands. `python/`: Cython bindings. `include/pflare.h`: public C API. `docs/`: user docs.
-- Magic tolerances/constants: `src/pflare_parameters.h` (shared by C and Fortran), exposed to Fortran as module `pflare_parameters` in `src/fortran/Pflare_Parameters.F90`. `src/fortran/` holds the Fortran interface layer (public modules). Object lists `COBJS`/`KOBJS`/`FCORE_OBJS`/`FOBJS` in the top `Makefile`; build order comes from `Makefile.deps` (`make depend`).
-- Root dir contains gitignored `*.mod` build artifacts — ignore them in listings.
+- `src/`: the algorithms are C `X.c`/`X.h` (C++ for Kokkos); a Fortran compiler is not needed. Many comments name the Fortran module each file was ported from (history in `docs/dev/fortran_removal_plan.md`). `src/Pflare_Random.c` is the random number generator (reproduces gfortran's `random_number` bitwise). PETSc PC plumbing: `PCAIR.c` (its `pc->data` is the `pc_air_multigrid_data` of `pflareimpl.h`; the PC operations call the former `PCShell` callbacks in `PCAIR_Shell.c`), `PCPFLAREINV.c`, `C_PETSc_Routines.c`. Kokkos kernels: `X.c` has a sibling `Xk.kokkos.cxx` exporting `<snake_case>_kokkos()` functions through a prototype header `Xk.h`, called from C directly.
+- `src/fortran/`: the Fortran interface layer (public Fortran modules over the C API), compiled only when PETSc has its Fortran bindings (`PETSC_USE_FORTRAN_BINDINGS` in `petscconf.h`, read by the top `Makefile`).
+- `tests/`: C test drivers, Fortran test drivers (`*.F90`, built and run only with PETSc's Fortran bindings; their run lines start with `$(SKIP_FORTRAN)`) + a Makefile of literal run commands. `python/`: Cython bindings. `include/pflare.h`: public C API. `docs/`: user docs.
+- Magic tolerances/constants: `src/pflare_parameters.h`, exposed to Fortran as module `pflare_parameters` in `src/fortran/Pflare_Parameters.F90`. Object lists `COBJS`/`KOBJS`/`FOBJS` in the top `Makefile`; build order comes from `Makefile.deps` (`make depend`, which needs `makedepf90` for its Fortran lines).
+- Root dir contains gitignored `*.mod` build artifacts (Fortran-enabled builds) — ignore them in listings.
 - PETSc source is at `$PETSC_DIR/$PETSC_ARCH`; Kokkos source at `$PETSC_DIR/$PETSC_ARCH/externalpackages/git.kokkos{,-kernels}`. Both env variables must be set.
 
 Read only when the task needs it
 - `docs/dev/testing.md` — before adding or modifying tests
 - `docs/dev/kokkos.md` — before touching `*.kokkos.cxx` or CPU/Kokkos debug-compare paths
 - `docs/dev/ci.md` — when checking or reproducing a CI pipeline
-- `docs/dev/fortran_removal_plan.md` — when working on the staged port of the Fortran core to C
 
 Build
 1. In top repo directory: `make -j3 build_tests`

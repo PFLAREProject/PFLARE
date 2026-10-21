@@ -34,7 +34,7 @@ PFLARE adds new methods to PETSc, including:
 - Block solves for multiple right-hand sides through `KSPMatSolve`, using sparse-dense products for improved throughput
 - Transposed solves through `KSPSolveTranspose`, e.g. for adjoint problems, with the exact transpose of the forward preconditioner
 - GPU support via Kokkos on Nvidia, AMD and Intel GPUs; solves run entirely on the device
-- C/C++, Fortran and Python interfaces
+- C/C++, Fortran and Python interfaces; a Fortran compiler is optional (the Fortran interface is built when PETSc has its Fortran bindings)
 
 ## Quick start
 

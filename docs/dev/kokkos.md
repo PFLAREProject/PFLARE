@@ -1,8 +1,8 @@
 # Kokkos development (agent reference)
 
 Conventions
-- A Fortran file `src/X.F90` (or its C port `src/X.c`) has its GPU/threaded sibling `src/Xk.kokkos.cxx` (trailing `k` on the stem; the `.kokkos.cxx` suffix triggers PETSc's Kokkos build rules). Existing pairs include `PMISR_Modulek`, `Grid_Transferk`, `Gmres_Polyk`, `Gmres_Poly_Newtonk`, `SAI_Zk`, `DDC_Modulek`, `MatDiagDomk`, `Device_Datak`, `PETSc_Helperk`, `VecISCopyLocalk`.
-- Kernels are exported as `PETSC_INTERN void <snake_case>_kokkos(...)`. The C ports call them through a prototype header `src/Xk.h` that the kernel file includes too (`PETSc_Helperk.h`, `PMISR_Modulek.h`, `DDC_Modulek.h`, `MatDiagDomk.h`, `Device_Datak.h`, `Gmres_Polyk.h`, `Gmres_Poly_Newtonk.h`, `SAI_Zk.h`, `Grid_Transferk.h`, `VecISCopyLocalk.h`). Shared typedefs/helpers live in `include/kokkos_helper.hpp`.
+- A C file `src/X.c` has its GPU/threaded sibling `src/Xk.kokkos.cxx` (trailing `k` on the stem; the `.kokkos.cxx` suffix triggers PETSc's Kokkos build rules). Existing pairs include `PMISR_Modulek`, `Grid_Transferk`, `Gmres_Polyk`, `Gmres_Poly_Newtonk`, `SAI_Zk`, `DDC_Modulek`, `MatDiagDomk`, `Device_Datak`, `PETSc_Helperk`, `VecISCopyLocalk`.
+- Kernels are exported as `PETSC_INTERN void <snake_case>_kokkos(...)`. The C files call them through a prototype header `src/Xk.h` that the kernel file includes too (`PETSc_Helperk.h`, `PMISR_Modulek.h`, `DDC_Modulek.h`, `MatDiagDomk.h`, `Device_Datak.h`, `Gmres_Polyk.h`, `Gmres_Poly_Newtonk.h`, `SAI_Zk.h`, `Grid_Transferk.h`, `VecISCopyLocalk.h`). Shared typedefs/helpers live in `include/kokkos_helper.hpp`.
 - Build constraints: C++20; CI compiles with `-Wall -Werror -Wunused-result`.
 - Kokkos has a hard 20MB limit on level-1 team scratch memory. Row-wise systems that can exceed it must fall back to a sparse/global-memory formulation (see `SAI_Zk.kokkos.cxx` and commit e49d5ec for the pattern).
 
