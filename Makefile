@@ -191,11 +191,7 @@ FCORE_OBJS := $(SRCDIR)/Pflare_Random.o
 
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
-		  $(FORTRANDIR)/Port_Interfaces.o \
-		  $(FORTRANDIR)/Gmres_Poly_Data_Type.o \
 		  $(FORTRANDIR)/Gmres_Poly_Newton.o \
-		  $(FORTRANDIR)/Port_Interfaces_Poly.o \
-		  $(FORTRANDIR)/Port_Interfaces_Grid.o \
 		  $(FORTRANDIR)/CF_Splitting.o \
 		  $(FORTRANDIR)/MatDiagDomSubmatrix.o \
 		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
