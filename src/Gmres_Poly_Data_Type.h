@@ -15,8 +15,5 @@ PETSC_INTERN PetscErrorCode create_poly_data(gmres_poly_data *poly_data);
 PETSC_INTERN PetscErrorCode poly_data_buffers(gmres_poly_data *poly_data, tsqr_buffers **buffers);
 PETSC_INTERN PetscErrorCode reset_poly_data(gmres_poly_data *poly_data);
 PETSC_INTERN PetscErrorCode destroy_poly_data(gmres_poly_data *poly_data);
-#if defined(PFLARE_PORT_DEBUG)
-PETSC_INTERN PetscErrorCode poly_data_get_subcomm(gmres_poly_data *poly_data, PetscBool *subcomm);
-#endif
 
 #endif

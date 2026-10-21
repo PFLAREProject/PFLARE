@@ -5,10 +5,8 @@
   intersect_pre_sorted_indices_only returns are 0-based. The dense block of a
   row is column-major (i_size x j_size). The Fortran also compared the sorted
   set of the shadow I from sorted_unique against the binary tree it used to
-  build it with (under PFLARE_PORT_DEBUG, a check from stage 2 of
-  docs/dev/fortran_removal_plan.md); the binary tree is Fortran only, so that
-  check is not carried over - the whole routine is compared against the
-  Fortran reference instead
+  build it with (a check from stage 2 of docs/dev/fortran_removal_plan.md);
+  the binary tree is Fortran only, so that check is not carried over
 */
 
 #include <petscksp.h>

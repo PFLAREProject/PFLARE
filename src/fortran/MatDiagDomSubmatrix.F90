@@ -6,8 +6,6 @@ module matdiagdomsubmatrix
    ! implemented in C in src/MatDiagDomSubmatrix.c (see docs/dev/fortran_removal_plan.md)
    ! compute_diag_dom_submatrix keeps its Fortran signature and calls
    ! compute_diag_dom_submatrix_c
-   ! With PFLARE_PORT_DEBUG it also runs the Fortran reference implementation in
-   ! src/fref/MatDiagDomSubmatrix.F90 on the same input and aborts if the matrices differ
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -15,13 +13,6 @@ module matdiagdomsubmatrix
    use petscmat
    ! The module this replaces also made these two available
    use cf_splitting, only: compute_cf_splitting, CF_DIAG_DOM
-   ! The Fortran reference implementation, under #ifdef rather than #if defined
-   ! so that make depend (makedepf90 -D PFLARE_PORT_DEBUG) sees these uses only
-   ! in the port debug build
-#ifdef PFLARE_PORT_DEBUG
-   use matdiagdomsubmatrix_fref, only: compute_diag_dom_submatrix_fref => compute_diag_dom_submatrix
-   use port_interfaces, only: port_compare_mats
-#endif
 
 #include "petsc/finclude/petscmat.h"
 
@@ -62,9 +53,6 @@ module matdiagdomsubmatrix
       PetscErrorCode :: ierr
       integer :: errorcode
       integer(c_long_long) :: output_mat_handle
-#if defined(PFLARE_PORT_DEBUG)
-      type(tMat) :: output_mat_fref
-#endif
       ! ~~~~~~
 
       ierr = compute_diag_dom_submatrix_c(input_mat%v, max_dd_ratio, output_mat_handle)
@@ -75,12 +63,6 @@ module matdiagdomsubmatrix
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
       output_mat%v = output_mat_handle
-
-#if defined(PFLARE_PORT_DEBUG)
-      call compute_diag_dom_submatrix_fref(input_mat, max_dd_ratio, output_mat_fref)
-      call port_compare_mats(output_mat, output_mat_fref, "compute_diag_dom_submatrix")
-      call MatDestroy(output_mat_fref, ierr)
-#endif
 
    end subroutine compute_diag_dom_submatrix
 

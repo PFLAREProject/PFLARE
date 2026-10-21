@@ -18,8 +18,8 @@ struct VecISCopyLocalKokkosCtx {
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Destroys the data. handle is a pointer to a void* (a Fortran c_ptr by ref in
-// the reference Fortran); sets it to NULL on exit so the caller's handle becomes NULL.
+// Destroys the data. handle is a pointer to a void*; sets it to NULL on exit so
+// the caller's handle becomes NULL.
 PETSC_INTERN void destroy_VecISCopyLocal_kokkos(void **handle)
 {
    if (!handle || !*handle) return;
@@ -41,8 +41,8 @@ PETSC_INTERN void destroy_VecISCopyLocal_kokkos(void **handle)
 //------------------------------------------------------------------------------------------------------------------------
 
 // Creates the per-PCAIR data we need to do the equivalent of veciscopy on
-// local data in kokkos. handle is a pointer to a void* (a Fortran c_ptr by
-// ref in the reference Fortran); on entry, if *handle is NULL we allocate fresh; if it is already
+// local data in kokkos. handle is a pointer to a void*; on entry, if *handle is
+// NULL we allocate fresh; if it is already
 // allocated with a matching max_levels we keep it; if max_levels differs we
 // destroy and re-create.
 PETSC_INTERN void create_VecISCopyLocal_kokkos(int max_levels_input, void **handle)

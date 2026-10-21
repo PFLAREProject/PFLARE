@@ -15,12 +15,6 @@
 
 /* SUBMANSEC = PC */
 
-#if defined(PFLARE_PORT_DEBUG)
-// The reference PC type pflareinv_fref in src/fref/PCPFLAREINV_fref.c, which is this PC
-// as it was before the port to C, for tests/port_compare_pc.c to compare against
-PETSC_INTERN void PCRegister_PFLAREINV_fref(void);
-#endif
-
 // The types available as approximate inverses are (see include/pflare.h):
 //
 // PFLAREINV_POWER      - GMRES polynomial with the power basis 
@@ -1206,7 +1200,7 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
 }
 
 // ~~~~~~~~~~
-// The C entry points tests/shell_block_apply.c (and tests/port_compare_pc.c) call to
+// The C entry points tests/shell_block_apply.c calls to
 // drive the approximate inverses directly, without a PC. These were Fortran bindings
 // in C_Fortran_Bindings.F90 before the port to C and keep their names, arguments and
 // behaviour (including aborting on an error, as the Fortran did): they are not
@@ -1253,7 +1247,4 @@ PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int
 PETSC_EXTERN void PCRegister_PFLAREINV()
 {
    PetscCallVoid(PCRegister("pflareinv", PCCreate_PFLAREINV));
-#if defined(PFLARE_PORT_DEBUG)
-   PCRegister_PFLAREINV_fref();
-#endif
 }

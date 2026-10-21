@@ -457,22 +457,3 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
   }
   PetscFunctionReturn(PETSC_SUCCESS);
 }
-
-#if defined(PFLARE_PORT_DEBUG)
-// -------------------------------------------------------------------------------------------------------------------------------
-// The Fortran reference in src/fref/Repartition.F90 calls GenerateIS_ProcAgglomeration_c and
-// MatPartitioning_c through the interfaces in src/fref/C_PETSc_Interfaces.F90, which declare them as
-// subroutines, so these keep that void signature for it (it calls MatMPICreateNonemptySubcomm_c
-// directly, which already returned a PetscErrorCode)
-// -------------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN void GenerateIS_ProcAgglomeration_c_fref(PetscInt proc_stride, PetscInt global_size, PetscInt *local_size_reduced, PetscInt *start)
-{
-   PetscCallVoid(GenerateIS_ProcAgglomeration_c(proc_stride, global_size, local_size_reduced, start));
-}
-
-PETSC_INTERN void MatPartitioning_c_fref(Mat *adj, PetscInt new_size, PetscInt *proc_stride, IS *index)
-{
-   PetscCallVoid(MatPartitioning_c(adj, new_size, proc_stride, index));
-}
-#endif

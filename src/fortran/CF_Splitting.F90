@@ -7,19 +7,11 @@ module cf_splitting
    ! compute_cf_splitting keeps its Fortran signature, including the optional cr_*
    ! arguments, and calls compute_cf_splitting_c, which takes the full argument list
    ! (the optional arguments are pointers, null when absent)
-   ! With PFLARE_PORT_DEBUG it also runs the Fortran reference implementation in
-   ! src/fref/CF_Splitting.F90 on the same input and aborts if the ISs differ
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------
 
    use iso_c_binding
    use petscmat
-   ! The Fortran reference implementation, under #ifdef rather than #if defined
-   ! so that make depend (makedepf90 -D PFLARE_PORT_DEBUG) sees this use only
-   ! in the port debug build
-#ifdef PFLARE_PORT_DEBUG
-   use cf_splitting_fref, only: compute_cf_splitting_fref => compute_cf_splitting
-#endif
 
 #include "petsc/finclude/petscmat.h"
 
@@ -97,10 +89,6 @@ module cf_splitting
       PetscBool, target :: cr_diag_scale_polys_c
       type(c_ptr) :: cr_inverse_type_ptr, cr_poly_order_ptr, cr_inverse_sparsity_order_ptr, &
             cr_diag_scale_polys_ptr
-#if defined(PFLARE_PORT_DEBUG)
-      type(tIS) :: is_fine_fref, is_coarse_fref
-      PetscBool :: fine_equal, coarse_equal
-#endif
       ! ~~~~~~
 
       cr_inverse_type_ptr = c_null_ptr
@@ -139,23 +127,6 @@ module cf_splitting
       end if
       is_fine%v = is_fine_handle
       is_coarse%v = is_coarse_handle
-
-#if defined(PFLARE_PORT_DEBUG)
-      call compute_cf_splitting_fref(input_mat, skip_symmetrize, &
-                  strong_threshold, max_luby_steps, &
-                  cf_splitting_type, ddc_its, fraction_swap, &
-                  is_fine_fref, is_coarse_fref, &
-                  cr_inverse_type, cr_poly_order, cr_inverse_sparsity_order, &
-                  cr_diag_scale_polys)
-      call ISEqual(is_fine, is_fine_fref, fine_equal, ierr)
-      call ISEqual(is_coarse, is_coarse_fref, coarse_equal, ierr)
-      if (.NOT. fine_equal .OR. .NOT. coarse_equal) then
-         print *, "C and Fortran reference versions of compute_cf_splitting do not match"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-      call ISDestroy(is_fine_fref, ierr)
-      call ISDestroy(is_coarse_fref, ierr)
-#endif
 
    end subroutine compute_cf_splitting
 

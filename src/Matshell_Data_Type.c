@@ -6,11 +6,6 @@
   allocate), and the context is freed with PetscFree (the Fortran deallocate).
   The slots of mf_temp_vec and mf_temp_mat are the 0-based MF_VEC_* and
   MF_MAT_* of pflareimpl.h
-
-  The three accessors at the end are for the reference Fortran in src/fref
-  (AIR_MG_Setup.F90 and the FC smoothers), which used to allocate the context of
-  its level matshells and read our_level and air_data from it directly, so they
-  are only built with PFLARE_PORT_DEBUG
 */
 
 #include <petscmat.h>
@@ -225,72 +220,3 @@ PETSC_INTERN PetscErrorCode ensure_block_kernel_products(mat_ctxtype *mat_ctx, P
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-
-#if defined(PFLARE_PORT_DEBUG)
-// -------------------------------------------------------------------------------------------------------------------------------
-// The accessors for the reference Fortran in src/fref
-// -------------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode mat_ctx_create_shell(Mat comm_mat, PetscInt local_rows, PetscInt local_cols, PetscInt global_rows, PetscInt global_cols,
-   int our_level, void *air_data, Mat *mat)
-{
-   // Creates an (empty) matshell whose context records the level it is on and
-   // the Fortran air_multigrid_data, which is what AIR_MG_Setup.F90 gives the
-   // FC smoothers to tell what level they're on
-   // This replaces the Fortran allocate of the context and MatCreateShell
-   // The shell is created on the comm of comm_mat (the Fortran passed the comm,
-   // which would need converting from a Fortran handle)
-
-   // ~~~~~~
-   mat_ctxtype *mat_ctx;
-   MPI_Comm comm;
-   // ~~~~~~
-
-   PetscFunctionBegin;
-
-   PetscCall(PetscObjectGetComm((PetscObject)comm_mat, &comm));
-   PetscCall(create_mat_ctx(&mat_ctx));
-   mat_ctx->our_level = our_level;
-   // The Fortran air_multigrid_data, held in the typed pointer of the C context
-   mat_ctx->air_data = (air_multigrid_data *)air_data;
-   PetscCall(MatCreateShell(comm, local_rows, local_cols, global_rows, global_cols, mat_ctx, mat));
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-// -------------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode mat_ctx_get_our_level(Mat mat, int *our_level)
-{
-   // Returns our_level from the context of a matshell
-
-   // ~~~~~~
-   mat_ctxtype *mat_ctx;
-   // ~~~~~~
-
-   PetscFunctionBegin;
-
-   PetscCall(MatShellGetContext(mat, &mat_ctx));
-   *our_level = mat_ctx->our_level;
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-// -------------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode mat_ctx_get_air_data(Mat mat, void **air_data)
-{
-   // Returns the air_data pointer from the context of a matshell
-
-   // ~~~~~~
-   mat_ctxtype *mat_ctx;
-   // ~~~~~~
-
-   PetscFunctionBegin;
-
-   PetscCall(MatShellGetContext(mat, &mat_ctx));
-   *air_data = (void *)mat_ctx->air_data;
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-#endif

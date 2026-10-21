@@ -21,12 +21,6 @@
 #include <string.h>
 /* SUBMANSEC = PC */
 
-#if defined(PFLARE_PORT_DEBUG)
-// The reference PC type air_fref in src/fref/PCAIR_fref.c, which is this PC
-// as it was before the port to C, for tests/port_compare_pc.c to compare against
-PETSC_INTERN void PCRegister_AIR_fref(void);
-#endif
-
 // ~~~~~~~~~~~~~
 
 static PetscErrorCode PCReset_AIR_c(PC pc)
@@ -4333,9 +4327,6 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
 PETSC_EXTERN void PCRegister_AIR()
 {
    PetscCallVoid(PCRegister("air", PCCreate_AIR));
-#if defined(PFLARE_PORT_DEBUG)
-   PCRegister_AIR_fref();
-#endif
 }
 
 // This is called automatically when libpflare is loaded by 

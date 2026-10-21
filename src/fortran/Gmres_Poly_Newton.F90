@@ -8,19 +8,11 @@ module gmres_poly_newton
    ! modified_leja keeps its Fortran signature: the roots are passed to the C by
    ! base address and size, and the 0-based indices the C returns are handed back
    ! 1-based in the allocatable indices
-   ! With PFLARE_PORT_DEBUG it also runs the Fortran reference implementation in
-   ! src/fref/Gmres_Poly_Newton.F90 on the same input and aborts if the orderings differ
    ! -------------------------------------------------------------------------------------------------------------------------------
    ! -------------------------------------------------------------------------------------------------------------------------------
 
    use iso_c_binding
    use petscsys
-   ! The Fortran reference implementation, under #ifdef rather than #if defined
-   ! so that make depend (makedepf90 -D PFLARE_PORT_DEBUG) sees this use only
-   ! in the port debug build
-#ifdef PFLARE_PORT_DEBUG
-   use gmres_poly_newton_fref, only: modified_leja_fref => modified_leja
-#endif
 
 #include "petsc/finclude/petscsys.h"
 
@@ -71,10 +63,6 @@ module gmres_poly_newton
       PetscInt :: roots_size
       PetscErrorCode :: ierr
       integer :: errorcode
-#if defined(PFLARE_PORT_DEBUG)
-      integer, dimension(:), allocatable :: indices_fref
-      PetscReal, dimension(size(real_roots)) :: real_fref, imag_fref
-#endif
       ! ~~~~~~
 
       roots_size = size(real_roots)
@@ -99,21 +87,6 @@ module gmres_poly_newton
          print *, "PetscFree_c failed"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
-
-#if defined(PFLARE_PORT_DEBUG)
-      real_fref = real_roots
-      imag_fref = imag_roots
-      call modified_leja_fref(real_fref, imag_fref, indices_fref)
-      if (size(indices_fref) /= size(indices)) then
-         print *, "C and Fortran reference versions of modified_leja do not match"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-      if (any(indices_fref /= indices)) then
-         print *, "C and Fortran reference versions of modified_leja do not match"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-      deallocate(indices_fref)
-#endif
 
    end subroutine modified_leja
 

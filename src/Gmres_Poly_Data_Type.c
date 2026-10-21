@@ -5,10 +5,7 @@
   in pflareimpl.h. What the Fortran did through default initialisation and the
   automatic deallocation of the allocatable components is done here explicitly,
   in the create/reset/destroy trio of convention 3 of
-  docs/dev/fortran_removal_plan.md. reset_poly_data and destroy_poly_data are also
-  called by the Fortran AIR code (through the bind(C) mirror of the struct in
-  src/fortran/Gmres_Poly_Data_Type.F90) where it used to deallocate the
-  coefficients itself
+  docs/dev/fortran_removal_plan.md
 */
 
 #include <petscmat.h>
@@ -84,26 +81,3 @@ PETSC_INTERN PetscErrorCode destroy_poly_data(gmres_poly_data *poly_data)
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
-
-#if defined(PFLARE_PORT_DEBUG)
-// -------------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode poly_data_get_subcomm(gmres_poly_data *poly_data, PetscBool *subcomm)
-{
-   // Returns whether the user has asked for the TSQR buffers to be on a subcomm
-   // Only for the comparison against the Fortran reference in
-   // src/fortran/Port_Interfaces_Poly.F90, which has to start the reference with the
-   // same buffers
-
-   // ~~~~~~
-   tsqr_buffers *buffers = NULL;
-   // ~~~~~~
-
-   PetscFunctionBegin;
-
-   PetscCall(poly_data_buffers(poly_data, &buffers));
-   *subcomm = buffers->subcomm;
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-#endif
