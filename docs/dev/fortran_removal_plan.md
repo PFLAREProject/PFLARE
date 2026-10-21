@@ -829,6 +829,28 @@ before the port too), and not on Kokkos matrices, where it errors in both
 (the Fortran before the port gives different roundoff from run to run too), and its
 `MAT_REUSE_MATRIX` `MatPtAP` errors in the C where the Fortran ignored the error.
 
+As done (part b): `pc->data` of a `PCAIR` is the `pc_air_multigrid_data` itself, allocated in
+`PCCreate_AIR` by `create_pc_air_multigrid_data` (the `PetscNew` plus the defaults of the type),
+with `create_air_data` called on it and the inner `PCMG` created on the PC's communicator, as
+`create_pc_air_shell` did. The setup logic of `PCSetUp_AIR_Shell` moved into `PCSetUp_AIR_c`,
+which hands the options prefix down to the `PCMG` and reads `pc->flag` and `pc->setupcalled` of
+the `PCAIR`; with only one `PCSetUp` left, the `PCSetReusePreconditioner` sync of the shell went.
+`src/PCAIR_Shell.c` keeps its name and the names of the former shell callbacks
+(`PCApply_AIR_Shell`, `PCApplyTranspose_AIR_Shell`, `PCDestroy_AIR_Shell`, `PCReset_AIR_Shell`,
+`PCView_AIR_Shell`, so it still reads side by side with `src/fref/PCAIR_Shell.F90`), which now take
+the `PCAIR` and read `pc->data`; the PC operations in `PCAIR.c` call them directly, and
+`PCReset_AIR_c` and `PCAIRResetHierarchy_Private` call `PCReset_AIR_Shell` (that is
+`reset_pc_air_data`, which also resets the `PCMG`; the shell's own `PCReset` only dropped its
+references to the operators). `create_pc_air_shell`, `PCSetUp_AIR_Shell` and the entry points
+`create_pc_air_data_c`, `create_pc_air_shell_c`, `PCReset_AIR_Shell_c` and `pcair_shell_get_pcmg_c`
+are deleted; `pcair_shell_block_matapply_c` is `pcair_shell_block_matapply`, taking the `PCAIR`.
+`-ksp_view` loses the inner `PC Object: ... type: shell` block (with the operators the shell
+printed after the `PCMG`), so the `PCMG` view that follows `The underlying PCMG:` is indented two
+levels less; nothing else in the output changes. `-log_view` no longer counts the nested `PCSetUp`
+and `PCApply` of the shell. `air_fref` keeps its shell, so `port_compare_air` now compares the
+shell-less `air` against the shell-based reference. `c_PCGetStructureFlag`, `PCGetSetupCalled_c`
+and `PCMarkNotSetUp_c` stay, `PFLARE_PORT_DEBUG` only, for the reference stack.
+
 ### Stage 8: remove the reference Fortran
 
 - Delete `src/fref/`, the `PFLARE_PORT_DEBUG` plumbing, and
