@@ -199,6 +199,13 @@ static const air_config configs[] = {
   {"-pc_air_ddc_its 2 -pc_air_ddc_fraction 0.2 -pc_air_max_luby_steps 3", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
   {"-pc_air_strong_threshold 0.3", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
   {"-pc_air_inverse_type newton -pc_air_matrix_free_polys -pc_air_smooth_type fcf -pc_air_z_type lair", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
+  // The l1 Jacobi as the Aff, C point and coarsest grid inverse, and in the CR splitting
+  // relaxation, which also builds the weighted Jacobi inverse with its own code
+  {"-pc_air_inverse_type l1jacobi", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
+  {"-pc_air_smooth_type fcf -pc_air_c_inverse_type l1jacobi", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
+  {"-pc_air_coarsest_inverse_type l1jacobi", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
+  {"-pc_air_cf_splitting_type cr -pc_air_inverse_type l1jacobi", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
+  {"-pc_air_cf_splitting_type cr -pc_air_inverse_type wjacobi", 3, PETSC_FALSE, PETSC_FALSE, PETSC_FALSE},
 };
 #define N_CONFIGS ((PetscInt)(sizeof(configs) / sizeof(configs[0])))
 

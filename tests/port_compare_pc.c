@@ -61,7 +61,7 @@ PETSC_EXTERN void calculate_and_build_approximate_inverse_c_fref(Mat *input_mat,
 PETSC_EXTERN void reset_inverse_mat_c_fref(Mat *mat);
 PETSC_EXTERN void pflareinv_shell_block_matapply_c_fref(Mat *mat, Mat *X, Mat *Y, int *applied);
 
-static const char *const inv_names[] = {"power", "arnoldi", "newton", "newton_no_extra", "neumann", "sai", "isai", "wjacobi", "jacobi"};
+static const char *const inv_names[] = {"power", "arnoldi", "newton", "newton_no_extra", "neumann", "sai", "isai", "wjacobi", "jacobi", "l1jacobi"};
 
 // The number of right hand sides in the blocks for PCMatApply
 #define N_RHS 3
@@ -551,11 +551,11 @@ int main(int argc, char **argv)
   // ~~~~~~~~~~~~
   // The PC, pflareinv against pflareinv_fref
   // ~~~~~~~~~~~~
-  for (inverse_type = PFLAREINV_POWER; inverse_type <= PFLAREINV_JACOBI; inverse_type = (PCPFLAREINVType)(inverse_type + 1)) {
+  for (inverse_type = PFLAREINV_POWER; inverse_type <= PFLAREINV_L1JACOBI; inverse_type = (PCPFLAREINVType)(inverse_type + 1)) {
     for (mf = 0; mf <= 1; mf++) {
       // SAI/ISAI can't be applied matrix-free
       if (mf && (inverse_type == PFLAREINV_SAI || inverse_type == PFLAREINV_ISAI)) continue;
-      if (inverse_type == PFLAREINV_WJACOBI || inverse_type == PFLAREINV_JACOBI) {
+      if (inverse_type == PFLAREINV_WJACOBI || inverse_type == PFLAREINV_JACOBI || inverse_type == PFLAREINV_L1JACOBI) {
         // Neither the order nor the sparsity matter
         PetscCall(CompareOnePC(A, inverse_type, 6, 1, mf ? PETSC_TRUE : PETSC_FALSE, &n_compared));
       } else if (inverse_type == PFLAREINV_SAI || inverse_type == PFLAREINV_ISAI) {

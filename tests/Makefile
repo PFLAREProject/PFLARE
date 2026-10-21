@@ -227,7 +227,7 @@ ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo "Compare the C approximate inverses against the Fortran reference for market matrix problem e05r0100"
 	./port_compare_pc -f data/e05r0100_petsc
 	@echo "Compare the C PCAIR against the Fortran reference for hyperbolic streaming problem"
-	./port_compare_air -f data/mat_stream_2364 -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
+	./port_compare_air -f data/mat_stream_2364 -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
 endif
 
 # ~~~~~~~~~~~
@@ -324,10 +324,10 @@ ifeq ($(PFLARE_PORT_DEBUG),1)
 	@echo "Compare the C approximate inverses against the Fortran reference for hyperbolic streaming problem with a rank without rows"
 	$(MPIEXEC) -n 4 ./port_compare_pc -f data/mat_stream_2364 -empty_last_rank
 	@echo "Compare the C PCAIR against the Fortran reference for hyperbolic streaming problem in parallel"
-	$(MPIEXEC) -n 2 ./port_compare_air -f data/mat_stream_2364 -configs 0,4,9,26,38,39,40,41
-	$(MPIEXEC) -n 4 ./port_compare_air -f data/mat_stream_2364 -configs 0,4,9,26,38,39,40,41
+	$(MPIEXEC) -n 2 ./port_compare_air -f data/mat_stream_2364 -configs 0,4,9,26,38,39,40,41,59,62
+	$(MPIEXEC) -n 4 ./port_compare_air -f data/mat_stream_2364 -configs 0,4,9,26,38,39,40,41,59,62
 	@echo "Compare the C PCAIR against the Fortran reference for hyperbolic streaming problem with a rank without rows"
-	$(MPIEXEC) -n 4 ./port_compare_air -f data/mat_stream_2364 -empty_last_rank -configs 0,4,9,26,38,39,40,41
+	$(MPIEXEC) -n 4 ./port_compare_air -f data/mat_stream_2364 -empty_last_rank -configs 0,4,9,26,38,39,40,41,59,62
 endif
 endif
 
@@ -1730,14 +1730,14 @@ ifeq ($(PFLARE_PORT_DEBUG),1)
 	$(MPIEXEC) -n 2 ./port_compare_pc -alpha 1.0 -theta 0.3 -empty_last_rank
 	$(MPIEXEC) -n 4 ./port_compare_pc -alpha 1.0 -theta 0.3 -empty_last_rank
 	@echo "Compare the C PCAIR against the Fortran reference for 2D advection in parallel"
-	$(MPIEXEC) -n 2 ./port_compare_air -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
-	$(MPIEXEC) -n 4 ./port_compare_air -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
+	$(MPIEXEC) -n 2 ./port_compare_air -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
+	$(MPIEXEC) -n 4 ./port_compare_air -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
 	@echo "Compare the C PCAIR against the Fortran reference for 2D advection-diffusion in parallel"
-	$(MPIEXEC) -n 2 ./port_compare_air -alpha 1.0 -theta 0.3 -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
-	$(MPIEXEC) -n 4 ./port_compare_air -alpha 1.0 -theta 0.3 -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
+	$(MPIEXEC) -n 2 ./port_compare_air -alpha 1.0 -theta 0.3 -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
+	$(MPIEXEC) -n 4 ./port_compare_air -alpha 1.0 -theta 0.3 -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
 	@echo "Compare the C PCAIR against the Fortran reference for 2D advection-diffusion with a rank without rows"
-	$(MPIEXEC) -n 2 ./port_compare_air -alpha 1.0 -theta 0.3 -empty_last_rank -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
-	$(MPIEXEC) -n 4 ./port_compare_air -alpha 1.0 -theta 0.3 -empty_last_rank -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48
+	$(MPIEXEC) -n 2 ./port_compare_air -alpha 1.0 -theta 0.3 -empty_last_rank -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
+	$(MPIEXEC) -n 4 ./port_compare_air -alpha 1.0 -theta 0.3 -empty_last_rank -configs 0,2,4,6,8,9,12,26,31,35,38,39,40,41,44,48,59,62
 endif
 endif
 
