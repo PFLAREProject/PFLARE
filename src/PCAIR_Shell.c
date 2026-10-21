@@ -1,61 +1,20 @@
 /*
   C port of PCAIR_Shell.F90 (module pcair_shell)
 
-  The PCShell that PCAIR.c wraps: its context is the pc_air_multigrid_data struct
-  of pflareimpl.h, and the setup reads the structure flag and whether the setup
-  has been called straight from the PC (pc->flag, pc->setupcalled), which the
-  Fortran got through C helpers
-  The entry points PCAIR.c used to reach through C_Fortran_Bindings.F90 (module
-  c_fortran_bindings) are at the end, with the same names and arguments, returning
-  a PetscErrorCode
+  This used to be the PCShell that PCAIR.c wrapped. The shell is gone: the
+  pc_air_multigrid_data struct of pflareimpl.h is now the pc->data of the PCAIR
+  itself, and the routines below that were the PCShell callbacks take that PCAIR
+  and are called directly by the PC operations in PCAIR.c. The setup logic of
+  PCSetUp_AIR_Shell (which read the structure flag and whether the setup has been
+  called from the PC) and the creation of the underlying PCMG moved into
+  PCSetUp_AIR_c and PCCreate_AIR
 */
 
 #include <petsc/private/pcimpl.h>
 #include "pflareimpl.h"
-#include "AIR_MG_Setup.h"
 #include "AIR_Data_Type_Routines.h"
-#include "PCAIR_Data_Type.h"
 #include "FC_Smooth_Block.h"
 #include "PCAIR_Shell.h"
-
-// -------------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode create_pc_air_shell(pc_air_multigrid_data *pc_air_data, PC pc)
-{
-   // Sets the PCShell that knows how to setup itself up and re-use
-   // pc should have been obtained from a call to KSPGetPC
-   // pc_air_data should have been created outside this routine
-
-   // ~~~~~~
-   MPI_Comm MPI_COMM_MATRIX;
-   // ~~~~~~
-
-   PetscFunctionBegin;
-
-   // Set the pc as a shell
-   PetscCall(PCSetType(pc, PCSHELL));
-   // Set the pc_air_data
-   PetscCall(PCShellSetContext(pc, pc_air_data));
-   // Set the apply routine
-   PetscCall(PCShellSetApply(pc, PCApply_AIR_Shell));
-   // Set the transposed apply routine
-   PetscCall(PCShellSetApplyTranspose(pc, PCApplyTranspose_AIR_Shell));
-   // Set the destroy routine
-   PetscCall(PCShellSetDestroy(pc, PCDestroy_AIR_Shell));
-   // Set the setup routine
-   PetscCall(PCShellSetSetUp(pc, PCSetUp_AIR_Shell));
-   // Set the view routine
-   PetscCall(PCShellSetView(pc, PCView_AIR_Shell));
-   // Annoyingly there is no ability to set a reset routine
-   // in fortran, so if we want to call the equivalent of a
-   // reset on our pcshell we need to manually call reset_pc_air_data
-
-   // Create our underlying PCMG object
-   PetscCall(PetscObjectGetComm((PetscObject)pc, &MPI_COMM_MATRIX));
-   PetscCall(PCCreate(MPI_COMM_MATRIX, &pc_air_data->pcmg));
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
 
 // -------------------------------------------------------------------------------------------------------------------------------
 
@@ -104,68 +63,9 @@ PETSC_INTERN PetscErrorCode reset_pc_air_data_reuse(pc_air_multigrid_data *pc_ai
 
 // -------------------------------------------------------------------------------------------------------------------------------
 
-PETSC_INTERN PetscErrorCode PCSetUp_AIR_Shell(PC pc)
-{
-   // Setup our shell PC
-
-   // ~~~~~~
-   Mat amat, pmat;
-   pc_air_multigrid_data *pc_air_data = NULL;
-   MatStructure structure_flag;
-   PetscBool setupcalled;
-   // ~~~~~~
-
-   PetscFunctionBegin;
-
-   // Get the preconditioner matrix
-   PetscCall(PCGetOperators(pc, &amat, &pmat));
-   // Get the PC structure flag, either SAME_NONZERO_PATTERN or DIFFERENT_NONZERO_PATTERN
-   structure_flag = pc->flag;
-   setupcalled = pc->setupcalled;
-   // Get the PC shell context
-   PetscCall(PCShellGetContext(pc, &pc_air_data));
-
-   // We need to call the setup routines
-   if (!setupcalled) {
-
-      PetscCall(setup_air_pcmg(amat, pmat, &pc_air_data->air_data, pc_air_data->pcmg));
-
-   // We can possibly re-use some of the setup
-   } else {
-
-      // If we've got a different non-zero pattern we've got to
-      // start again
-      if (structure_flag == DIFFERENT_NONZERO_PATTERN) {
-
-         // Reset the air data
-         PetscCall(reset_pc_air_data(pc_air_data));
-         // Set it up again
-         PetscCall(setup_air_pcmg(amat, pmat, &pc_air_data->air_data, pc_air_data->pcmg));
-
-      // We can re-use the sparsity
-      } else if (structure_flag == SAME_NONZERO_PATTERN) {
-
-         if (pc_air_data->air_data.options.reuse_sparsity) {
-            // Reset the air data but keep any reuse data we need
-            PetscCall(reset_pc_air_data_reuse(pc_air_data));
-         } else {
-            // Otherwise we can't reuse anything so reset the air data
-            PetscCall(reset_pc_air_data(pc_air_data));
-         }
-         // Set it up again
-         PetscCall(setup_air_pcmg(amat, pmat, &pc_air_data->air_data, pc_air_data->pcmg));
-
-      }
-   }
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-// -------------------------------------------------------------------------------------------------------------------------------
-
 PETSC_INTERN PetscErrorCode PCApply_AIR_Shell(PC pc, Vec x, Vec y)
 {
-   // Apply our shell PC
+   // Apply our PCAIR
 
    // ~~~~~~
    pc_air_multigrid_data *pc_air_data = NULL;
@@ -174,7 +74,7 @@ PETSC_INTERN PetscErrorCode PCApply_AIR_Shell(PC pc, Vec x, Vec y)
    PetscFunctionBegin;
 
    // Get the PC context
-   PetscCall(PCShellGetContext(pc, &pc_air_data));
+   pc_air_data = (pc_air_multigrid_data *)pc->data;
    // Just apply the pcmg
    PetscCall(PCApply(pc_air_data->pcmg, x, y));
 
@@ -185,7 +85,7 @@ PETSC_INTERN PetscErrorCode PCApply_AIR_Shell(PC pc, Vec x, Vec y)
 
 PETSC_INTERN PetscErrorCode PCApplyTranspose_AIR_Shell(PC pc, Vec x, Vec y)
 {
-   // Apply the transpose of our shell PC
+   // Apply the transpose of our PCAIR
    // Just like the forward apply we hand this straight to the pcmg - petsc's
    // transposed cycles are the transpose of the forward ones, given the
    // transposed smoother and transposed residual setup_air_pcmg registers
@@ -197,7 +97,7 @@ PETSC_INTERN PetscErrorCode PCApplyTranspose_AIR_Shell(PC pc, Vec x, Vec y)
    PetscFunctionBegin;
 
    // Get the PC context
-   PetscCall(PCShellGetContext(pc, &pc_air_data));
+   pc_air_data = (pc_air_multigrid_data *)pc->data;
    // Just apply the transpose of the pcmg
    PetscCall(PCApplyTranspose(pc_air_data->pcmg, x, y));
 
@@ -208,7 +108,7 @@ PETSC_INTERN PetscErrorCode PCApplyTranspose_AIR_Shell(PC pc, Vec x, Vec y)
 
 PETSC_INTERN PetscErrorCode PCDestroy_AIR_Shell(PC pc)
 {
-   // Destroy our shell PC
+   // Destroy our PCAIR
 
    // ~~~~~~
    pc_air_multigrid_data *pc_air_data = NULL;
@@ -217,11 +117,11 @@ PETSC_INTERN PetscErrorCode PCDestroy_AIR_Shell(PC pc)
    PetscFunctionBegin;
 
    // Get the PC context
-   PetscCall(PCShellGetContext(pc, &pc_air_data));
+   pc_air_data = (pc_air_multigrid_data *)pc->data;
    // Destroy the air data
    PetscCall(destroy_pc_air_data(pc_air_data));
    // Destroy the data structure
-   PetscCall(PetscFree(pc_air_data));
+   PetscCall(PetscFree(pc->data));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -230,7 +130,7 @@ PETSC_INTERN PetscErrorCode PCDestroy_AIR_Shell(PC pc)
 
 PETSC_INTERN PetscErrorCode PCReset_AIR_Shell(PC pc)
 {
-   // Reset our shell PC
+   // Reset our PCAIR
 
    // ~~~~~~
    pc_air_multigrid_data *pc_air_data = NULL;
@@ -239,7 +139,7 @@ PETSC_INTERN PetscErrorCode PCReset_AIR_Shell(PC pc)
    PetscFunctionBegin;
 
    // Get the PC context
-   PetscCall(PCShellGetContext(pc, &pc_air_data));
+   pc_air_data = (pc_air_multigrid_data *)pc->data;
    // Destroy the air data
    PetscCall(reset_pc_air_data(pc_air_data));
 
@@ -250,7 +150,7 @@ PETSC_INTERN PetscErrorCode PCReset_AIR_Shell(PC pc)
 
 PETSC_INTERN PetscErrorCode PCView_AIR_Shell(PC pc, PetscViewer viewer)
 {
-   // Views our shell PC
+   // Views our PCAIR
 
    // ~~~~~~
    pc_air_multigrid_data *pc_air_data = NULL;
@@ -259,85 +159,20 @@ PETSC_INTERN PetscErrorCode PCView_AIR_Shell(PC pc, PetscViewer viewer)
    PetscFunctionBegin;
 
    // Get the PC context
-   PetscCall(PCShellGetContext(pc, &pc_air_data));
+   pc_air_data = (pc_air_multigrid_data *)pc->data;
    // Just call the pcmg view
    PetscCall(PCView(pc_air_data->pcmg, viewer));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// -------------------------------------------------------------------------------------------------------------------------------
-// The entry points src/PCAIR.c used to reach through C_Fortran_Bindings.F90
-// -------------------------------------------------------------------------------------------------------------------------------
-
 //------------------------------------------------------------------------------------------------------------------------
 
-PETSC_INTERN PetscErrorCode create_pc_air_data_c(pc_air_multigrid_data **pc_air_data)
-{
-   // Creates an air_data object, calls setup and returns a C pointer
-
-   PetscFunctionBegin;
-
-   PetscCall(create_pc_air_multigrid_data(pc_air_data));
-   PetscCall(create_air_data(&(*pc_air_data)->air_data));
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode PCReset_AIR_Shell_c(PC *pc)
-{
-   // Calls the reset of our shell PC
-
-   PetscFunctionBegin;
-
-   // Call the destroy routine
-   PetscCall(PCReset_AIR_Shell(*pc));
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode create_pc_air_shell_c(pc_air_multigrid_data **pc_air_data, PC *pc)
-{
-   // Calls the setup routine for air and makes pc the PC Shell
-   // pc_air_data should have been created by create_pc_air_data_c
-
-   PetscFunctionBegin;
-
-   // Call the setup routine
-   PetscCall(create_pc_air_shell(*pc_air_data, *pc));
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode pcair_shell_get_pcmg_c(PC *pc, PC *pcmg)
-{
-   // Returns the PCMG underneath our PCShell
-
-   // ~~~~~~~~
-   pc_air_multigrid_data *pc_air_data = NULL;
-   // ~~~~~~~~
-
-   PetscFunctionBegin;
-
-   PetscCall(PCShellGetContext(*pc, &pc_air_data));
-   *pcmg = pc_air_data->pcmg;
-
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-
-PETSC_INTERN PetscErrorCode pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied)
+PETSC_INTERN PetscErrorCode pcair_shell_block_matapply(PC pc, Mat X, Mat Y, int *applied)
 {
    // Applies the air multigrid to a whole dense block of right hand sides
-   // The pc handed in is our underlying PCShell (which must already have been
-   // set up, as this doesn't go through PCApply on the shell)
+   // The pc handed in is our PCAIR (which must already have been set up, as
+   // this doesn't go through PCApply)
    // applied comes back as 0 if we couldn't do a block apply, in which case
    // the caller has to apply column by column instead
    // Any petsc error is returned, where the Fortran handed it back in an argument
@@ -349,7 +184,7 @@ PETSC_INTERN PetscErrorCode pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y,
    PetscFunctionBegin;
 
    *applied = 0;
-   PetscCall(PCShellGetContext(*pc, &pc_air_data));
+   pc_air_data = (pc_air_multigrid_data *)pc->data;
 
    // Defensive - the hierarchy hasn't been built so we have nothing to apply
    if (pc_air_data->air_data.no_levels == -1) PetscFunctionReturn(PETSC_SUCCESS);
@@ -357,10 +192,10 @@ PETSC_INTERN PetscErrorCode pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y,
 
    // Build the dense scratch the block smooths need - we only know the number
    // of columns (and the type of block) once we get here
-   PetscCall(ensure_air_block_temps(&pc_air_data->air_data, *X));
+   PetscCall(ensure_air_block_temps(&pc_air_data->air_data, X));
 
    // PCMG (or the single level PCMAT/PCJACOBI) does the rest
-   PetscCall(PCMatApply(pc_air_data->pcmg, *X, *Y));
+   PetscCall(PCMatApply(pc_air_data->pcmg, X, Y));
 
    *applied = 1;
 

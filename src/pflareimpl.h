@@ -641,7 +641,8 @@ static const PetscBool REUSE_IS_ACTIVE[2][3] = {
 };
 
 // ~~~~~~~~
-// This is our context type for pcshells (pc_air_multigrid_data in PCAIR_Data_Type.F90)
+// This is the pc->data of a PCAIR (pc_air_multigrid_data in PCAIR_Data_Type.F90, where
+// it was the context type of our pcshells)
 // Allocated by create_pc_air_multigrid_data (PCAIR_Data_Type.c) and freed with PetscFree
 // ~~~~~~~~
 typedef struct {

@@ -83,9 +83,9 @@ src/MatDiagDom.o : src/MatDiagDom.c src/pflareimpl.h include/pflare.h src/pflare
 src/MatDiagDomSubmatrix.o : src/MatDiagDomSubmatrix.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/CF_Splitting.h src/PETSc_Helper.h src/MatDiagDomSubmatrix.h 
 src/Matshell_Data_Type.o : src/Matshell_Data_Type.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Matshell_Data_Type.h 
 src/Neumann_Poly.o : src/Neumann_Poly.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/Gmres_Poly.h src/Gmres_Poly_Apply.h src/Matshell_Data_Type.h src/TSQR.h src/Neumann_Poly.h 
-src/PCAIR.o : src/PCAIR.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/CF_Splitting.h src/MatDiagDomSubmatrix.h src/PCAIR_Shell.h src/AIR_MG_Stats.h 
+src/PCAIR.o : src/PCAIR.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/PETSc_Helper.h src/CF_Splitting.h src/MatDiagDomSubmatrix.h src/AIR_Data_Type_Routines.h src/AIR_MG_Setup.h src/PCAIR_Data_Type.h src/PCAIR_Shell.h src/AIR_MG_Stats.h 
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/AIR_Data_Type.h src/PCAIR_Data_Type.h 
-src/PCAIR_Shell.o : src/PCAIR_Shell.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/AIR_MG_Setup.h src/AIR_Data_Type_Routines.h src/PCAIR_Data_Type.h src/FC_Smooth_Block.h src/PCAIR_Shell.h 
+src/PCAIR_Shell.o : src/PCAIR_Shell.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/AIR_Data_Type_Routines.h src/FC_Smooth_Block.h src/PCAIR_Shell.h 
 src/PCPFLAREINV.o : src/PCPFLAREINV.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/Approx_Inverse_Setup.h src/Gmres_Poly_Apply.h 
 src/PETSc_Helper.o : src/PETSc_Helper.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/PETSc_Helperk.h 
 src/PMISR_Module.o : src/PMISR_Module.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Modulek.h src/Device_Datak.h src/Pflare_Random.h src/PMISR_Module.h 

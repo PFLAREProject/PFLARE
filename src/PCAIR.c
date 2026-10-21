@@ -1,8 +1,8 @@
 /*
   Definition and registration of the PC AIR type
-  A wrapper around a PCShell (PCAIR_Shell.c) whose context is the
-  pc_air_multigrid_data struct of pflareimpl.h, which holds the air_options and
-  the AIR hierarchy (air_multigrid_data) and the PCMG it is built into
+  The pc->data is the pc_air_multigrid_data struct of pflareimpl.h, which holds
+  the air_options and the AIR hierarchy (air_multigrid_data) and the PCMG it is
+  built into; the PC operations call the routines of PCAIR_Shell.c on it
   The PCAIRGet/Set routines read and write that struct directly
 */
 
@@ -13,6 +13,9 @@
 #include "PETSc_Helper.h"
 #include "CF_Splitting.h"
 #include "MatDiagDomSubmatrix.h"
+#include "AIR_Data_Type_Routines.h"
+#include "AIR_MG_Setup.h"
+#include "PCAIR_Data_Type.h"
 #include "PCAIR_Shell.h"
 #include "AIR_MG_Stats.h"
 #include <string.h>
@@ -30,14 +33,8 @@ static PetscErrorCode PCReset_AIR_c(PC pc)
 {
    PetscFunctionBegin;
 
-   PC *pc_air_shell = (PC *)pc->data;
-   // Call the underlying reset - this won't touch the context 
-   // in our pcshell though as pcshell doesn't offer a way to 
-   // give a custom reset function
-   PetscCall(PCReset(*pc_air_shell));
-
-   // So now we manually reset the underlying data
-   PetscCall(PCReset_AIR_Shell_c(pc_air_shell));
+   // Reset the underlying data, which also resets the underlying PCMG
+   PetscCall(PCReset_AIR_Shell(pc));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -45,18 +42,9 @@ static PetscErrorCode PCReset_AIR_c(PC pc)
 static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
 {
    PetscFunctionBegin;
-   PC *pc_air_shell = (PC *)pc->data;
 
-   // The shell tracks the pmat state itself, so it must also see the
-   // reusepreconditioner flag: when it is set the outer PCSetUp is skipped
-   // entirely, but the PCApply below calls PCSetUp on the shell, which would
-   // otherwise rebuild the hierarchy after any change to the pmat
-   // This mirrors petsc semantics: once set up, a frozen pc stays frozen
-   // even if the sparsity pattern changes
-   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
-
-   // Just call the underlying pcshell apply
-   PetscCall(PCApply(*pc_air_shell, x, y));
+   // Just call the underlying apply, which applies the PCMG
+   PetscCall(PCApply_AIR_Shell(pc, x, y));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -65,14 +53,9 @@ static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
 static PetscErrorCode PCApplyTranspose_AIR_c(PC pc, Vec x, Vec y)
 {
    PetscFunctionBegin;
-   PC *pc_air_shell = (PC *)pc->data;
 
-   // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
-   // so it has to see the reusepreconditioner flag
-   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
-
-   // Just call the underlying pcshell transposed apply
-   PetscCall(PCApplyTranspose(*pc_air_shell, x, y));
+   // Just call the underlying transposed apply
+   PetscCall(PCApplyTranspose_AIR_Shell(pc, x, y));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -84,18 +67,11 @@ static PetscErrorCode PCApplyTranspose_AIR_c(PC pc, Vec x, Vec y)
 static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
 {
    PetscFunctionBegin;
-   PC *pc_air_shell = (PC *)pc->data;
    int applied = 0;
 
-   // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
-   // so it has to see the reusepreconditioner flag
-   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
-
-   // PCApply on the shell would do this for us, but the block path below goes
-   // straight to the underlying PCMG so we have to set the shell up ourselves
-   PetscCall(PCSetUp(*pc_air_shell));
-
-   PetscCall(pcair_shell_block_matapply_c(pc_air_shell, &X, &Y, &applied));
+   // PCMatApply has already called PCSetUp on us, so the block path below can
+   // go straight to the underlying PCMG
+   PetscCall(pcair_shell_block_matapply(pc, X, Y, &applied));
 
    if (applied) {
       PetscCall(PetscInfo(pc, "PCMatApply used the block air multigrid\n"));
@@ -108,7 +84,7 @@ static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
       for (j = 0; j < n_cols; j++) {
          PetscCall(MatDenseGetColumnVecRead(X, j, &cx));
          PetscCall(MatDenseGetColumnVecWrite(Y, j, &cy));
-         PetscCall(PCApply(*pc_air_shell, cx, cy));
+         PetscCall(PCApply_AIR_Shell(pc, cx, cy));
          PetscCall(MatDenseRestoreColumnVecWrite(Y, j, &cy));
          PetscCall(MatDenseRestoreColumnVecRead(X, j, &cx));
       }
@@ -119,12 +95,9 @@ static PetscErrorCode PCMatApply_AIR_c(PC pc, Mat X, Mat Y)
 static PetscErrorCode PCDestroy_AIR_c(PC pc)
 {
    PetscFunctionBegin;
-   PC *pc_air_shell = (PC *)pc->data;
-   // Just call the underlying pcshell destroy, this also 
-   // destroys the pc_air_data
-   PetscCall(PCDestroy(pc_air_shell));
-   // Then destroy the heap pointer
-   PetscCall(PetscFree(pc_air_shell));
+   // Just call the underlying destroy, this destroys the
+   // pc_air_data and frees pc->data
+   PetscCall(PCDestroy_AIR_Shell(pc));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -133,33 +106,61 @@ static PetscErrorCode PCDestroy_AIR_c(PC pc)
 static PetscErrorCode PCSetUp_AIR_c(PC pc)
 {
    PetscFunctionBegin;
-   PC *pc_air_shell = (PC *)pc->data;
-   PC pcmg;
+   pc_air_multigrid_data *pc_air_data = (pc_air_multigrid_data *)pc->data;
+   Mat amat, pmat;
+   MatStructure structure_flag;
+   PetscBool setupcalled;
    const char *prefix;
 
-   // The pc_air_shell doesn't have any operators yet
-   // as they are not available yet in pccreate
-   // so we have to set them
-   PetscCall(PCSetOperators(*pc_air_shell, pc->mat, pc->pmat));
-
-   // Pass our options prefix down to the shell and the underlying PCMG
+   // Pass our options prefix down to the underlying PCMG
    // PCMGSetLevels uses the prefix of the PCMG when it names the level KSPs
    // and PCSetUp_MG then calls KSPSetFromOptions on them, so this is what
    // makes -prefix_mg_coarse_* and -prefix_mg_levels_* reach this PCAIR only
    // rather than the unprefixed -mg_coarse_* hitting every PCAIR
    PetscCall(PCGetOptionsPrefix(pc, &prefix));
-   PetscCall(PCSetOptionsPrefix(*pc_air_shell, prefix));
-   PetscCall(pcair_shell_get_pcmg_c(pc_air_shell, &pcmg));
-   PetscCall(PCSetOptionsPrefix(pcmg, prefix));
+   PetscCall(PCSetOptionsPrefix(pc_air_data->pcmg, prefix));
 
-   // Keep the shell's reusepreconditioner flag in sync - if the flag has
-   // been unset after a frozen solve the shell must be allowed
-   // to rebuild again
-   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+   // Get the preconditioner matrix
+   PetscCall(PCGetOperators(pc, &amat, &pmat));
+   // Get the PC structure flag, either SAME_NONZERO_PATTERN or DIFFERENT_NONZERO_PATTERN
+   // PCSetUp only calls us if the pc has not been set up, or if the pmat has
+   // changed since it was (and the preconditioner is not being reused)
+   structure_flag = pc->flag;
+   setupcalled = pc->setupcalled;
 
-   // Now we should be able to call the pcshell setup
-   // that builds the air hierarchy
-   PetscCall(PCSetUp(*pc_air_shell));
+   // We need to call the setup routines
+   if (!setupcalled) {
+
+      PetscCall(setup_air_pcmg(amat, pmat, &pc_air_data->air_data, pc_air_data->pcmg));
+
+   // We can possibly re-use some of the setup
+   } else {
+
+      // If we've got a different non-zero pattern we've got to
+      // start again
+      if (structure_flag == DIFFERENT_NONZERO_PATTERN) {
+
+         // Reset the air data
+         PetscCall(reset_pc_air_data(pc_air_data));
+         // Set it up again
+         PetscCall(setup_air_pcmg(amat, pmat, &pc_air_data->air_data, pc_air_data->pcmg));
+
+      // We can re-use the sparsity
+      } else if (structure_flag == SAME_NONZERO_PATTERN) {
+
+         if (pc_air_data->air_data.options.reuse_sparsity) {
+            // Reset the air data but keep any reuse data we need
+            PetscCall(reset_pc_air_data_reuse(pc_air_data));
+         } else {
+            // Otherwise we can't reuse anything so reset the air data
+            PetscCall(reset_pc_air_data(pc_air_data));
+         }
+         // Set it up again
+         PetscCall(setup_air_pcmg(amat, pmat, &pc_air_data->air_data, pc_air_data->pcmg));
+
+      }
+   }
+
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -176,33 +177,23 @@ static PetscErrorCode PCAIRCheckType(PC pc)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Returns the context of the PCShell that implements the PCAIR, and the PCShell
-// itself if pc_air_shell is not NULL
-static PetscErrorCode PCAIRGetData_Private(PC pc, PC *pc_air_shell, pc_air_multigrid_data **pc_air_data)
+// Returns the pc_air_multigrid_data that is the pc->data of the PCAIR
+static PetscErrorCode PCAIRGetData_Private(PC pc, pc_air_multigrid_data **pc_air_data)
 {
-   PC *pc_shell = (PC *)pc->data;
-
    PetscFunctionBegin;
-   if (pc_air_shell) *pc_air_shell = *pc_shell;
-   PetscCall(PCShellGetContext(*pc_shell, pc_air_data));
+   *pc_air_data = (pc_air_multigrid_data *)pc->data;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
 // Throws away the hierarchy when an option it was built with changes, and marks the
-// outer PC as not set up so the next PCSetUp builds it again
+// PC as not set up so the next PCSetUp builds it again
 static PetscErrorCode PCAIRResetHierarchy_Private(PC pc, pc_air_multigrid_data **pc_air_data)
 {
-   PC pc_air_shell;
-
    PetscFunctionBegin;
-   PetscCall(PCAIRGetData_Private(pc, &pc_air_shell, pc_air_data));
-   // Call the underlying reset - this won't touch the context
-   // in our pcshell though as pcshell doesn't offer a way to
-   // give a custom reset function
-   PetscCall(PCReset(pc_air_shell));
-   // Call the destroy routine
-   PetscCall(PCReset_AIR_Shell(pc_air_shell));
-   // Have to mark that the outer setup must be called again
+   PetscCall(PCAIRGetData_Private(pc, pc_air_data));
+   // Call the reset routine
+   PetscCall(PCReset_AIR_Shell(pc));
+   // Have to mark that the setup must be called again
    pc->setupcalled = PETSC_FALSE;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -217,7 +208,7 @@ static PetscErrorCode PCAIRGetComplexitiesInternal(PC pc, PetscReal *grid_complx
    pc_air_multigrid_data *pc_air_data;
 
    PetscFunctionBegin;
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
 
    if (pc_air_data->air_data.no_levels == -1) {
       *grid_complx          = -1.0;
@@ -256,7 +247,7 @@ static PetscErrorCode PCAIRGetPolyCoeffsPointer_Private(PC pc, PetscInt petsc_le
    // The coefficients stored internally in the PC for the given level and inverse,
    // or none (a NULL pointer with zero sizes) if the requested inverse is not stored
    // as a polynomial on that level (e.g. COEFFS_INV_ACC when there is no C point smoothing)
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *coeffs_ptr = NULL;
    *row_size = 0;
    *col_size = 0;
@@ -360,7 +351,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPrintStatsTimings(PC pc, PetscBool *input_bo
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.print_stats_timings;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -385,7 +376,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMaxLevels(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.max_levels;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -410,7 +401,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarseEqLimit(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.coarse_eq_limit;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -435,7 +426,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateStartLevel(PC pc, PetscInt *inpu
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.auto_truncate_start_level;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -460,7 +451,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetAutoTruncateTol(PC pc, PetscReal *input_real
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.auto_truncate_tol;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -485,7 +476,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetNumLevels(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.no_levels;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -510,7 +501,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglom(PC pc, PetscBool *input_bool
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.processor_agglom;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -535,7 +526,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomRatio(PC pc, PetscReal *input
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.processor_agglom_ratio;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -560,7 +551,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessorAgglomFactor(PC pc, PetscInt *input
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.processor_agglom_factor;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -585,7 +576,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetProcessEqLimit(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.process_eq_limit;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -610,7 +601,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSubcomm(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.subcomm;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -635,7 +626,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongThreshold(PC pc, PetscReal *input_real
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.strong_threshold;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -660,7 +651,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDDCFraction(PC pc, PetscReal *input_real)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.ddc_fraction;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -685,7 +676,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCFSplittingType(PC pc, CFSplittingType *cf_s
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *cf_splitting_type = pc_air_data->air_data.options.cf_splitting_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -710,7 +701,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDDCIts(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.ddc_its;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -735,7 +726,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMaxLubySteps(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.max_luby_steps;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -766,7 +757,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSmoothType(PC pc, char *input_string)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    // Each nonzero entry of smooth_order gives that many f (positive) or c
    // (negative) characters, so the string has at most 10 characters
    n = AIR_SMOOTH_ORDER_SIZE;
@@ -814,7 +805,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDiagScalePolys(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    // Return the stored value, even if the inverse type is neumann
    // Neumann polynomials always diagonally scale regardless of this flag,
    // but it is still used by the other inverses (e.g., C point smoothing)
@@ -843,7 +834,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetMatrixFreePolys(PC pc, PetscBool *input_bool
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.matrix_free_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -868,7 +859,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetOnePointClassicalProlong(PC pc, PetscBool *i
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.one_point_classical_prolong;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -893,7 +884,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetFullSmoothingUpAndDown(PC pc, PetscBool *inp
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.full_smoothing_up_and_down;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -918,7 +909,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetSymmetric(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.symmetric;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -943,7 +934,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetConstrainW(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.constrain_w;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -968,7 +959,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetConstrainZ(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.constrain_z;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -993,7 +984,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetImproveWIts(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.improve_w_its;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1018,7 +1009,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetImproveZIts(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.improve_z_its;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1043,7 +1034,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_rea
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.strong_r_threshold;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1068,7 +1059,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *inverse_type = pc_air_data->air_data.options.inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1093,7 +1084,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC pc, PCPFLAREINVType *inverse
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    // If unset (-1) this defaults to the F point smoother value
    if (pc_air_data->air_data.options.c_inverse_type == -1) {
       *inverse_type = pc_air_data->air_data.options.inverse_type;
@@ -1123,7 +1114,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC pc, PCAIRZType *z_type)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *z_type = pc_air_data->air_data.options.z_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1148,7 +1139,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPolyOrder(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.poly_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1173,7 +1164,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetLairDistance(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.lair_distance;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1198,7 +1189,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseSparsityOrder(PC pc, PetscInt *input_
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.inverse_sparsity_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1223,7 +1214,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCPolyOrder(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    // If unset (-1) this defaults to the F point smoother value
    if (pc_air_data->air_data.options.c_poly_order == -1) {
       *input_int = pc_air_data->air_data.options.poly_order;
@@ -1253,7 +1244,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    // If unset (-1) this defaults to the F point smoother value
    if (pc_air_data->air_data.options.c_inverse_sparsity_order == -1) {
       *input_int = pc_air_data->air_data.options.inverse_sparsity_order;
@@ -1283,7 +1274,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC pc, PCPFLAREINVType *
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *inverse_type = pc_air_data->air_data.options.coarsest_inverse_type;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1308,7 +1299,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestPolyOrder(PC pc, PetscInt *input_int
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.coarsest_poly_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1333,7 +1324,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PC pc, PetscInt
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.coarsest_inverse_sparsity_order;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1358,7 +1349,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PC pc, PetscBool *in
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.coarsest_matrix_free_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1383,7 +1374,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC pc, PetscBool *inp
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.coarsest_diag_scale_polys;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1408,7 +1399,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestSubcomm(PC pc, PetscBool *input_bool
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.coarsest_subcomm;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1433,7 +1424,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetRDrop(PC pc, PetscReal *input_real)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.r_drop;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1458,7 +1449,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetADrop(PC pc, PetscReal *input_real)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_real = pc_air_data->air_data.options.a_drop;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1483,7 +1474,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetALump(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.a_lump;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1508,7 +1499,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC pc, PetscBool *input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.reuse_sparsity;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1533,7 +1524,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_bool = pc_air_data->air_data.options.reuse_poly_coeffs;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -1748,7 +1739,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPrintStatsTimings(PC pc, PetscBool input_boo
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    // No need to reset if this changes
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    pc_air_data->air_data.options.print_stats_timings = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2069,7 +2060,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetSubcomm(PC pc, PetscBool input_bool)
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    // No need to reset if this changes
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    pc_air_data->air_data.options.subcomm = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2749,7 +2740,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC pc, PCPFLAREINVType inverse_
    if (old_type == inverse_type) {
       // Still record the value as explicitly set, so it no longer
       // follows the F point smoother value, but no reset is needed
-      PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+      PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
       pc_air_data->air_data.options.c_inverse_type = (int)inverse_type;
       PetscFunctionReturn(PETSC_SUCCESS);
    }
@@ -2933,7 +2924,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC pc, PetscInt input_int)
    if (old_int == input_int) {
       // Still record the value as explicitly set, so it no longer
       // follows the F point smoother value, but no reset is needed
-      PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+      PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
       pc_air_data->air_data.options.c_poly_order = input_int;
       PetscFunctionReturn(PETSC_SUCCESS);
    }
@@ -2975,7 +2966,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
    if (old_int == input_int) {
       // Still record the value as explicitly set, so it no longer
       // follows the F point smoother value, but no reset is needed
-      PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+      PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
       pc_air_data->air_data.options.c_inverse_sparsity_order = input_int;
       PetscFunctionReturn(PETSC_SUCCESS);
    }
@@ -3190,7 +3181,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestSubcomm(PC pc, PetscBool input_bool)
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    // No need to reset if this changes
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    pc_air_data->air_data.options.coarsest_subcomm = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -3327,7 +3318,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    pc_air_data->air_data.options.reuse_sparsity = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -3357,7 +3348,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    pc_air_data->air_data.options.reuse_poly_coeffs = input_bool;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -3382,7 +3373,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC pc, PetscInt *input_int)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
-   PetscCall(PCAIRGetData_Private(pc, NULL, &pc_air_data));
+   PetscCall(PCAIRGetData_Private(pc, &pc_air_data));
    *input_int = pc_air_data->air_data.options.reuse_amount;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -3722,8 +3713,6 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
 static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 {
    PetscFunctionBegin;
-   
-   PC *pc_air_shell = (PC *)pc->data;
 
    PetscInt input_int, input_int_two, input_int_three, input_int_four;
    PetscBool flg, flg_f_smooth, flg_c_smooth, flg_diag_scale;
@@ -4250,8 +4239,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "   Polynomial coefficients calculated on subcomm \n"));
 
       PetscCall(PetscViewerASCIIPrintf(viewer, "The underlying PCMG: \n"));
-      // Call the underlying pcshell view
-      PetscCall(PCView(*pc_air_shell, viewer));
+      // Call the underlying view, which views the PCMG
+      PetscCall(PCView_AIR_Shell(pc, viewer));
    }
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -4305,33 +4294,23 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
 {
    PetscFunctionBegin;
 
-   // This is annoying, as our PCAIR type is just a wrapper
-   // around a PCShell that implements everything
-   // I tried to just write a PCAIR that called (basically) the 
-   // same routines as the PCShell, but I could not get a reliable
-   // way to give a void* representing the pc_air_data object from fortran
-   // into the pc->data pointer (given name mangling etc)
-   // So instead that is just defined as the context in a pcshell
-   // and PCShellSetContext/PCShellGetContext handles everything
-   // (the context is now the C pc_air_multigrid_data, the shell is removed in
-   // a later stage of docs/dev/fortran_removal_plan.md)
+   // Our PCAIR type used to be just a wrapper around a PCShell that implemented
+   // everything, as there was no reliable way to give a void* representing the
+   // Fortran pc_air_data object to the pc->data pointer (given name mangling etc)
+   // Now the pc_air_data is the C pc_air_multigrid_data, so it is the pc->data
    pc_air_multigrid_data *pc_air_data;
-   PC *pc_air_shell;
-   // Create a pointer on the heap
-   PetscCall(PetscNew(&pc_air_shell));
    MPI_Comm comm;
 
-   // We need to create our new pcshell
-   PetscCall(PetscObjectGetComm((PetscObject)pc, &comm));
-   PetscCall(PCCreate(comm, pc_air_shell));
-
    // Create the memory for our pc_air_data which holds all the air data
-   PetscCall(create_pc_air_data_c(&pc_air_data));
-   // The type and rest of the creation of the pcshell
-   // is done in here
-   PetscCall(create_pc_air_shell_c(&pc_air_data, pc_air_shell));
+   PetscCall(create_pc_air_multigrid_data(&pc_air_data));
+   PetscCall(create_air_data(&pc_air_data->air_data));
+
+   // Create our underlying PCMG object
+   PetscCall(PetscObjectGetComm((PetscObject)pc, &comm));
+   PetscCall(PCCreate(comm, &pc_air_data->pcmg));
+
    // Set the pc data
-   pc->data = (void*)pc_air_shell;
+   pc->data = (void*)pc_air_data;
 
    // Set the method functions
    pc->ops->apply               = PCApply_AIR_c;
