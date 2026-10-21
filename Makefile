@@ -114,6 +114,7 @@ endif
 
 # The C objects
 COBJS := $(SRCDIR)/C_PETSc_Routines.o \
+		  $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
@@ -168,7 +169,7 @@ endif
 
 # The only core Fortran left outside of the Fortran interface layer
 # (see docs/dev/fortran_removal_plan.md)
-FCORE_OBJS := $(SRCDIR)/Pflare_Random.o
+FCORE_OBJS := $(SRCDIR)/Pflare_Random_Fortran.o
 
 # The Fortran interface layer
 FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \

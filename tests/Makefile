@@ -2116,3 +2116,6 @@ run_tests_search:
 		echo "$$cmd"; \
 		eval "$$cmd" < /dev/null; \
 	done
+# TEMPORARY (stage 9): the generator comparison links the C object directly,
+# as pflare_random_fill is internal to libpflare
+random_compare: ../src/Pflare_Random.o

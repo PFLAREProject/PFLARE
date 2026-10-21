@@ -7,7 +7,7 @@
   the loops over polynomial orders keep the Fortran (1-based) order and index
   coefficients[order - 1]
 
-  The GMRES start vector draws its uniform random numbers from the Fortran
+  The GMRES start vector draws its uniform random numbers from
   pflare_random_fill (Pflare_Random.h), and the Box-Muller transform is
   evaluated here in the same order and with the same constant as the Fortran,
   so the start vector is bitwise the same. The Fortran norm2 intrinsic is
@@ -181,8 +181,8 @@ PETSC_INTERN PetscErrorCode create_temp_space_box_muller(Mat matrix, PetscInt su
    PetscCount vec_size;
    PetscInt *indices;
    PetscMPIInt comm_size, comm_rank;
-   // The random numbers are PetscReal, as the Fortran random_number requires a
-   // real array. Its use in VecSetValuesCOO below is an identity conversion in all
+   // The random numbers are PetscReal, as pflare_random_fill fills a real array
+   // (as the Fortran random_number did). Its use in VecSetValuesCOO below is an identity conversion in all
    // real builds
    // Column-major local_rows x 2
    PetscReal *random_data;
@@ -218,9 +218,9 @@ PETSC_INTERN PetscErrorCode create_temp_space_box_muller(Mat matrix, PetscInt su
    // Gives random numbers between 0 <= u < 1
    // The seed is the same so subsequent runs get the same random, but
    // different on each process so we don't have the same random numbers on each processor
-   // At least one entry, so the Fortran is never handed a NULL on a rank without rows
+   // At least one entry, so pflare_random_fill is never handed a NULL on a rank without rows
    PetscCall(PetscMalloc1(PetscMax(2 * local_rows, 1), &random_data));
-   // Random numbers returned in fortran don't include one so don't have to
+   // The random numbers returned don't include one so don't have to
    // remove 1
    // random_data(:, 1:2) is contiguous, so it is filled column by column as one
    // array of 2 * local_rows, in the same order random_number(random_data(:, 1:2)) does

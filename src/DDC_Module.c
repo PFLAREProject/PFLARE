@@ -91,7 +91,7 @@ PETSC_INTERN PetscErrorCode ddc(Mat input_mat, IS is_fine, PetscReal fraction_sw
       // just F points as if we are on the device the is_fine won't be allocated
       // on the host yet
       // At least one entry, so that like the Fortran's (possibly zero-size) allocation
-      // the array the Fortran pflare_random_fill is handed is never NULL, which
+      // the array pflare_random_fill is handed is never NULL, which
       // PetscMalloc1 gives for zero entries
       PetscCall(PetscMalloc1(PetscMax(local_rows, 1), &diag_dom_ratio_random));
 

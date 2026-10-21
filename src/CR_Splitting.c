@@ -209,7 +209,7 @@ PETSC_INTERN PetscErrorCode cr_pass(Mat input_mat, IS is_fine, PetscReal target_
    // port of this routine is bit-identical
    // ~~~~~~~~
    // At least one entry, so that like the Fortran's (possibly zero-size) allocation
-   // the array the Fortran pflare_random_fill is handed is never NULL, which
+   // the array pflare_random_fill is handed is never NULL, which
    // PetscMalloc1 gives for zero entries
    PetscCall(PetscMalloc1(PetscMax(input_row_end_plus_one - input_row_start, 1), &rand_full));
    pflare_random_fill(comm_rank, input_row_end_plus_one - input_row_start, rand_full);

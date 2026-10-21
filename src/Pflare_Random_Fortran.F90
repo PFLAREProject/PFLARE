@@ -1,3 +1,7 @@
+! TEMPORARY (stage 9 of docs/dev/fortran_removal_plan.md): the retired Fortran
+! generator, renamed so tests/random_compare.c can check src/Pflare_Random.c
+! against it bitwise. Deleted once the check has passed
+
 module pflare_random
 
    ! The random numbers used by PFLARE (the PMISR measure, the DDC tie-breaking,
@@ -19,7 +23,7 @@ module pflare_random
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine pflare_random_fill(comm_rank, n, out) bind(C, name='pflare_random_fill')
+   subroutine pflare_random_fill(comm_rank, n, out) bind(C, name='pflare_random_fill_fortran')
 
       ! Seeds the intrinsic random number generator with a seed that depends on
       ! comm_rank (so each rank gets different random numbers, but repeated runs

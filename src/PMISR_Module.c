@@ -65,7 +65,7 @@ PETSC_INTERN PetscErrorCode pmisr(Mat strength_mat, int max_luby_steps, PetscBoo
       // for comparisons with pmisr_cpu
       PetscCall(MatGetLocalSize(strength_mat, &local_rows, &local_cols));
       // At least one entry, so that like the Fortran's (possibly zero-size) allocation
-      // the array the Fortran pflare_random_fill is handed is never NULL, which
+      // the array pflare_random_fill is handed is never NULL, which
       // PetscMalloc1 gives for zero entries
       PetscCall(PetscMalloc1(PetscMax(local_rows, 1), &measure_local));
       // Fill the measure with random numbers
@@ -185,7 +185,7 @@ PETSC_INTERN PetscErrorCode pmisr_cpu(Mat strength_mat, int max_luby_steps, Pets
 
    // Get the number of connections in S
    // At least one entry, so that like the Fortran's (possibly zero-size) allocation
-   // the array the Fortran pflare_random_fill is handed is never NULL, which
+   // the array pflare_random_fill is handed is never NULL, which
    // PetscMalloc1 gives for zero entries
    PetscCall(PetscMalloc1(PetscMax(local_rows, 1), &measure_local));
    // Allocated and set to zero
