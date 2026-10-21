@@ -32,24 +32,20 @@ module pflare
       end subroutine PCRegister_PFLAREINV         
  
    end interface   
-   
-   contains  
 
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCRegister_PFLARE() bind(C,name='PCRegister_PFLARE')
+   interface   
       
       ! This routine should be called in external program
       ! This registers the PC types to PETSc
       ! Users can then just call PCSetType as normal 
-      ! with the different types offered by this library            
+      ! with the different types offered by this library
+      ! (PCRegister_PFLARE in PCAIR.c)
+      subroutine PCRegister_PFLARE() &
+         bind(c, name="PCRegister_PFLARE")
+         use iso_c_binding
+      end subroutine PCRegister_PFLARE         
  
-      ! Register the PC AIR as a new type
-      call PCRegister_AIR()
-      ! Register the PC approximate inverses as a new type
-      call PCRegister_PFLAREINV()      
-
-   end subroutine PCRegister_PFLARE 
+   end interface   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

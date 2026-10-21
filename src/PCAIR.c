@@ -4329,6 +4329,24 @@ PETSC_EXTERN void PCRegister_AIR()
    PetscCallVoid(PCRegister("air", PCCreate_AIR));
 }
 
+// ~~~~~~~~~~~~~~~~
+
+// In PCPFLAREINV.c
+PETSC_EXTERN void PCRegister_PFLAREINV();
+
+// This routine should be called in external program
+// This registers the PC types to PETSc
+// Users can then just call PCSetType as normal
+// with the different types offered by this library
+// (C port of PCRegister_PFLARE in the Fortran module pflare, which now binds to this)
+PETSC_EXTERN void PCRegister_PFLARE()
+{
+   // Register the PC AIR as a new type
+   PCRegister_AIR();
+   // Register the PC approximate inverses as a new type
+   PCRegister_PFLAREINV();
+}
+
 // This is called automatically when libpflare is loaded by 
 // petsc as a shared library - this enables --download-pflare in the petsc
 // configure to just work
