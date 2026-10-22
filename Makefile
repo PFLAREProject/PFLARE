@@ -183,6 +183,7 @@ export TEST_TARGETS = ex12f \
 		  pcair_apply_transpose \
 		  poly_zero_coeffs \
 		  newton_imag_roots \
+		  newton_zero_roots \
 		  pflareinv_exact_inverse \
 		  pflareinv_sai_rank_deficient \
 		  adv_diff_fd \

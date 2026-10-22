@@ -828,6 +828,8 @@ run_tests_no_load_short_serial:
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
 # Skipped in single as there the roots' real parts are not below the zero tolerance
 	$(SKIP_SINGLE) ./newton_imag_roots
+	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply"
+	./newton_zero_roots
 #
 	@echo ""
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
@@ -1484,6 +1486,8 @@ else
 	@echo ""
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
+	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply in parallel"
+	$(MPIEXEC) -n 2 ./newton_zero_roots
 #
 	@echo ""
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse in parallel"
