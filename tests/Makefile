@@ -351,6 +351,11 @@ run_tests_no_load_short_serial:
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
 	@echo "Test AIRG with coefficients calculated on subcomms with diagonal Aff"
 	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 2 -pc_air_subcomm -pc_air_strong_threshold 0 -pc_air_inverse_type arnoldi
+	@echo "Test AIRG improving W and Z with matrix-free and full smoothing inverses"
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 3 -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_z_its 1 -pc_air_improve_w_its 1 -pc_air_matrix_free_polys
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 3 -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_z_its 1 -pc_air_improve_w_its 1 -pc_air_full_smoothing_up_and_down
 #
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting"
