@@ -9,7 +9,7 @@ module sai_z
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
          mat_mat_symbolic
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
-         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11
+         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11, PFLARE_EPS
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -66,8 +66,8 @@ module sai_z
       PetscScalar, dimension(:,:), allocatable :: submat_vals, submat_vals_copy
       PetscScalar, dimension(:), allocatable :: e_row_copy
       PetscReal, dimension(:), allocatable :: sing_vals
-      ! Use machine precision to drop singular values in the minimum norm solve
-      PetscReal, parameter :: rcond = -1d0
+      ! Relative tolerance below which the dense least-squares system is treated as rank deficient
+      PetscReal :: rcond, r_diag_min, r_diag_max
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs
@@ -615,8 +615,20 @@ module sai_z
                ! The QR needs a full rank system with at least as many rows as columns
                ! If A_ff is singular that may not be the case, so we fall back
                ! to computing the minimum norm solution below
+               ! We use the same relative tolerance to decide if the QR is (numerically)
+               ! rank deficient as the minimum norm solve uses to drop singular values
+               rcond = PFLARE_EPS * max(i_size, j_size)
                info = 1
-               if (i_size >= j_size) then
+               if (i_size == 0) then
+
+                  ! If there are no rows (ie the rows A(J, :) have no entries) the minimum
+                  ! norm solution is zero, and LAPACK won't accept a leading dimension of zero
+                  deallocate(e_row)
+                  allocate(e_row(j_size))
+                  e_row = 0
+                  info = 0
+
+               else if (i_size >= j_size) then
 
                   ! gels overwrites these, so keep a copy in case it finds we are rank deficient
                   submat_vals_copy = submat_vals
@@ -638,8 +650,22 @@ module sai_z
                   if (info < 0) then
                      print *, "SAI dense least-squares solve failed"
                      call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+                  end if
+
+                  ! gels only reports an exactly zero diagonal in R, so also check if R is
+                  ! numerically rank deficient - R is in the upper triangle of submat_vals
+                  if (info == 0) then
+                     r_diag_min = huge(r_diag_min)
+                     r_diag_max = 0
+                     do j_loc = 1, j_size
+                        r_diag_min = min(r_diag_min, abs(submat_vals(j_loc, j_loc)))
+                        r_diag_max = max(r_diag_max, abs(submat_vals(j_loc, j_loc)))
+                     end do
+                     if (r_diag_min <= rcond * r_diag_max) info = 1
+                  end if
+
                   ! Rank deficient - restore the system for the minimum norm solve
-                  else if (info > 0) then
+                  if (info > 0) then
                      submat_vals = submat_vals_copy
                      e_row = e_row_copy
                   end if
