@@ -9,7 +9,7 @@ module sai_z
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
          mat_mat_symbolic
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
-         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11
+         PFLARE_MINUS_ONE, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_OFF, PFLARE_TOL_MATFREE_4EM11, PFLARE_EPS
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_blaslapack.h"
@@ -45,7 +45,8 @@ module sai_z
       integer :: intersect_count
       integer :: errorcode, comm_size
       ! BLAS/LAPACK integer arguments must be PetscBLASInt
-      PetscBLASInt :: lwork, info, m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
+      PetscBLASInt :: lwork, info, m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl, rank, iwork_size
+      PetscBLASInt, dimension(:), allocatable :: iwork
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       type(tMat) :: transpose_mat, A_ff
@@ -62,7 +63,11 @@ module sai_z
       ! solves) are PetscScalar
       PetscScalar, dimension(:), pointer :: vals => null()
       PetscScalar, dimension(:), allocatable :: e_row, j_vals
-      PetscScalar, dimension(:,:), allocatable :: submat_vals
+      PetscScalar, dimension(:,:), allocatable :: submat_vals, submat_vals_copy
+      PetscScalar, dimension(:), allocatable :: e_row_copy
+      PetscReal, dimension(:), allocatable :: sing_vals
+      ! Relative tolerance below which the dense least-squares system is treated as rank deficient
+      PetscReal :: rcond, r_diag_min, r_diag_max
       type(itree) :: i_rows_tree
       PetscReal, dimension(:), allocatable :: work
       type(tVec) :: solution, rhs
@@ -601,23 +606,106 @@ module sai_z
             ! ~~~~~~~~~~~~~
             else
 
-               allocate(work(1))
-               lwork = -1
                ! Kind-correct BLAS integer dimensions
                m_bl = int(i_size, kind=kind(m_bl))
                n_bl = int(j_size, kind=kind(n_bl))
                nrhs_bl = 1
                lda_bl = int(i_size, kind=kind(lda_bl))
-               ldb_bl = int(i_size, kind=kind(ldb_bl))
-               call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
-                           e_row, ldb_bl, work, lwork, info)
-               ! int() is exact for all plausible sizes < 2^24 even when work is single precision
-               lwork = int(work(1))
-               deallocate(work)
-               allocate(work(lwork))
-               call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
-                           e_row, ldb_bl, work, lwork, info)
-               deallocate(work)
+
+               ! The QR needs a full rank system with at least as many rows as columns
+               ! If A_ff is singular that may not be the case, so we fall back
+               ! to computing the minimum norm solution below
+               ! We use the same relative tolerance to decide if the QR is (numerically)
+               ! rank deficient as the minimum norm solve uses to drop singular values
+               rcond = PFLARE_EPS * max(i_size, j_size)
+               info = 1
+               if (i_size == 0) then
+
+                  ! If there are no rows (ie the rows A(J, :) have no entries) the minimum
+                  ! norm solution is zero, and LAPACK won't accept a leading dimension of zero
+                  deallocate(e_row)
+                  allocate(e_row(j_size))
+                  e_row = 0
+                  info = 0
+
+               else if (i_size >= j_size) then
+
+                  ! gels overwrites these, so keep a copy in case it finds we are rank deficient
+                  submat_vals_copy = submat_vals
+                  e_row_copy = e_row
+
+                  allocate(work(1))
+                  lwork = -1
+                  ldb_bl = int(i_size, kind=kind(ldb_bl))
+                  call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                              e_row, ldb_bl, work, lwork, info)
+                  ! int() is exact for all plausible sizes < 2^24 even when work is single precision
+                  lwork = int(work(1))
+                  deallocate(work)
+                  allocate(work(lwork))
+                  call PFLAREgels('N', m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                              e_row, ldb_bl, work, lwork, info)
+                  deallocate(work)
+
+                  if (info < 0) then
+                     print *, "SAI dense least-squares solve failed"
+                     call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+                  end if
+
+                  ! gels only reports an exactly zero diagonal in R, so also check if R is
+                  ! numerically rank deficient - R is in the upper triangle of submat_vals
+                  if (info == 0) then
+                     r_diag_min = huge(r_diag_min)
+                     r_diag_max = 0
+                     do j_loc = 1, j_size
+                        r_diag_min = min(r_diag_min, abs(submat_vals(j_loc, j_loc)))
+                        r_diag_max = max(r_diag_max, abs(submat_vals(j_loc, j_loc)))
+                     end do
+                     if (r_diag_min <= rcond * r_diag_max) info = 1
+                  end if
+
+                  ! Rank deficient - restore the system for the minimum norm solve
+                  if (info > 0) then
+                     submat_vals = submat_vals_copy
+                     e_row = e_row_copy
+                  end if
+                  deallocate(submat_vals_copy, e_row_copy)
+               end if
+
+               ! Minimum norm least-squares solution with an SVD
+               if (info /= 0) then
+
+                  ! The rhs must have space for the solution if there are more columns than rows
+                  ldb_bl = int(max(i_size, j_size), kind=kind(ldb_bl))
+                  allocate(e_row_copy(max(i_size, j_size)))
+                  e_row_copy = 0
+                  e_row_copy(1:i_size) = e_row
+                  allocate(sing_vals(min(i_size, j_size)))
+
+                  allocate(work(1), iwork(1))
+                  lwork = -1
+                  call PFLAREgelsd(m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                              e_row_copy, ldb_bl, sing_vals, rcond, rank, &
+                              work, lwork, iwork, info)
+                  ! Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
+                  ! for all plausible sizes < 2^24 even when work is single precision
+                  lwork = int(work(1))
+                  iwork_size = iwork(1)
+                  deallocate(work, iwork)
+                  allocate(work(lwork), iwork(iwork_size))
+                  call PFLAREgelsd(m_bl, n_bl, nrhs_bl, submat_vals, lda_bl, &
+                              e_row_copy, ldb_bl, sing_vals, rcond, rank, &
+                              work, lwork, iwork, info)
+                  deallocate(work, iwork, sing_vals)
+
+                  if (info /= 0) then
+                     print *, "SAI dense minimum norm least-squares solve failed"
+                     call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+                  end if
+
+                  ! The first j_size entries are the solution
+                  call move_alloc(e_row_copy, e_row)
+               end if
 
             end if
          end if

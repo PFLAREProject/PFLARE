@@ -1678,6 +1678,14 @@ module pcair_interfaces
       PetscReal                  :: old_real
       ! ~~~~~~~~
 
+      ! A positive value is a fraction of the local F points, so can't be more than all of them
+      if (frac > 1d0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "DDC fraction must be <= 1")
+         return
+      end if
+
       call PCAIRGetDDCFraction(pc, old_real, ierr)
       if (old_real == frac) then
          ierr = 0

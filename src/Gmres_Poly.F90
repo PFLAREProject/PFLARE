@@ -106,7 +106,7 @@ module gmres_poly
       matvecs = size(coefficients,1)
 
       ! We may have zero roots with newton that are skipped
-      if (inverse_type == PFLAREINV_NEWTON) then
+      if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
          do i_loc = 1, size(coefficients,1)
             zero_root = .FALSE.
             if (coefficients(i_loc,2) == 0d0) then

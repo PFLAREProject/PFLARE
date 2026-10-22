@@ -279,7 +279,7 @@ module approx_inverse_setup
       MPIU_Comm :: MPI_COMM_MATRIX, MPI_COMM_BUFFERS_MATRIX
       VecType :: vtype
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      integer :: errorcode
+      integer :: errorcode, n_roots
       type(mat_ctxtype), pointer :: mat_ctx_da=>null()
       ! ~~~~~~    
 
@@ -437,6 +437,15 @@ module approx_inverse_setup
 
          ! Gmres polynomial with Newton basis - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+
+            ! The ranks on the subcomm may have resized coefficients to hold extra roots
+            ! so the ranks not on the subcomm need to match that size before the broadcast
+            n_roots = size(coefficients, 1)
+            call MPI_Bcast(n_roots, 1, MPI_INTEGER, 0, MPI_COMM_MATRIX, errorcode)
+            if (n_roots /= size(coefficients, 1)) then
+               deallocate(coefficients)
+               allocate(coefficients(n_roots, 2))
+            end if
 
             ! Have to broadcast the 2D real and imaginary roots
             call MPI_Ibcast(coefficients, size(coefficients, 1) * size(coefficients, 2), MPIU_REAL, 0, &

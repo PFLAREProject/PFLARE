@@ -207,9 +207,9 @@ module air_data_type_routines
                if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
 
                   call MatDestroy(air_data%prolongators(our_level), ierr)
-                  if (.NOT. air_data%options%symmetric) then
-                     call MatDestroy(air_data%restrictors(our_level), ierr)
-                  end if                     
+                  ! When symmetric R is only kept between setups at amount=3,
+                  ! otherwise this is null already
+                  call MatDestroy(air_data%restrictors(our_level), ierr)
                   call reset_inverse_mat(air_data%inv_A_ff(our_level))
                   call MatDestroy(air_data%A_ff(our_level), ierr)
                   call MatDestroy(air_data%A_fc(our_level), ierr)

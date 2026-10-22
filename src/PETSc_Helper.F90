@@ -615,9 +615,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       PetscInt :: col, ncols, ifree, max_nnzs, ncols_mod, index1, index2
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start 
-      PetscInt :: global_row_end_plus_one, max_nnzs_total_two
-      PetscInt :: global_col_start, global_col_end_plus_one, max_nnzs_total
-      PetscCount :: counter
+      PetscInt :: global_row_end_plus_one
+      PetscInt :: global_col_start, global_col_end_plus_one
+      ! The total nnzs (and twice them) can overflow a 32-bit PetscInt
+      PetscCount :: counter, max_nnzs_total, max_nnzs_total_two
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null(), cols_mod
@@ -1515,7 +1516,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! Get nnzs without using getrow
       call MatGetNNZs_both(input_mat, local_nnzs_petsc, offdiag_nnzs_petsc)
-      local_nnzs = local_nnzs_petsc + offdiag_nnzs_petsc
+      ! Widen before adding so this can't overflow with 32-bit PetscInt
+      local_nnzs = int(local_nnzs_petsc, kind=8) + int(offdiag_nnzs_petsc, kind=8)
 
       ! Do an accumulate if in parallel
       if (comm_size/=1) then
@@ -1621,8 +1623,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! ~~~~~~~~~~~~~~~~
 
       ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
-      ! The pseudo inverse of an m x n matrix is n x m (this routine assumes
-      ! square input, see the gemm below)
+      ! The pseudo inverse of an m x n matrix is n x m
       PetscScalar, dimension(:, :), intent(in) :: input
       PetscScalar, dimension(size(input, 2), size(input, 1)), intent(out) :: output
 
@@ -1633,7 +1634,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer :: iloc, errorcode
       PetscReal :: sigma_max, sigma_cutoff
       ! Kind-correct BLAS integer/real arguments for the dgemm call
-      PetscBLASInt :: n_bl, lda_bl
+      PetscBLASInt :: m_bl, n_bl, k_bl
       PetscScalar :: blas_one, blas_zero
 
       ! ~~~~~~~~~~~~~~~~
@@ -1663,7 +1664,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do
       sigma_cutoff = max(PFLARE_TOL_SIGMA_DROP, &
                          PFLARE_TOL_SIGMA_DROP_REL * sigma_max)
-      do iloc = 1, size(input,1)
+      ! There are only min(m, n) singular values
+      do iloc = 1, size(sigma)
          if (abs(sigma(iloc)) > sigma_cutoff) then
             U(:, iloc) = U(:, iloc) / sigma(iloc)
          else
@@ -1672,14 +1674,17 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do
 
       ! Do the matmatmult, making sure to transpose both
-      n_bl = size(input,1)
-      lda_bl = size(input,1)
+      ! output = V(:, 1:k) * inv(sigma) * U(:, 1:k)^T, with k = min(m, n),
+      ! ie the first k rows of VT and the first k (scaled) columns of U
+      m_bl = size(input,1)
+      n_bl = size(input,2)
+      k_bl = size(sigma)
       blas_one = 1d0
       blas_zero = 0d0
-      call PFLAREgemm("T", "T", n_bl, n_bl, n_bl, &
-               blas_one, VT, lda_bl, &
-               U, lda_bl, &
-               blas_zero, output, lda_bl)
+      call PFLAREgemm("T", "T", n_bl, m_bl, k_bl, &
+               blas_one, VT, n_bl, &
+               U, m_bl, &
+               blas_zero, output, n_bl)
 
       ! nan check
       if (any(output /= output)) then

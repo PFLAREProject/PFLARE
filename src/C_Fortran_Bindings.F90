@@ -378,7 +378,8 @@ module c_fortran_bindings
       ! pointers stored in %v
       input_mat%v = input_mat_ptr
 
-      skip_symmetrize = skip_symmetrize_int == 1
+      ! Any nonzero value skips the symmetrize, as documented in pflare.h
+      skip_symmetrize = skip_symmetrize_int /= 0
       call compute_cf_splitting(input_mat, skip_symmetrize, &
                         strong_threshold, max_luby_steps, &
                         cf_splitting_type, ddc_its, fraction_swap, &

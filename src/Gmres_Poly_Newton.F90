@@ -450,6 +450,14 @@ module gmres_poly_newton
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
+      ! If we're reusing, coefficients may still be sized for the extra roots 
+      ! added in a previous setup, so make sure we start from p+1 roots
+      ! Otherwise the old roots would be included in the clustering below
+      if (size(coefficients, 1) /= poly_order + 1) then
+         deallocate(coefficients)
+         allocate(coefficients(poly_order + 1, 2))
+      end if
+
       ! ~~~~~~~~~~
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
@@ -747,7 +755,8 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~~
 
-      if (poly_sparsity_order .ge. size(coefficients)-1) then
+      ! coefficients is (number of roots, 2), so check against the number of roots
+      if (poly_sparsity_order .ge. size(coefficients, 1)-1) then
          print *, "Requested sparsity is greater than or equal to the order"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
@@ -1595,8 +1604,6 @@ end if
 
                ! Have to dynamically allocate this
                allocate(mat_ctx_scaled)
-               mat_ctx_scaled%real_roots => coefficients(:, 1)
-               mat_ctx_scaled%imag_roots => coefficients(:, 2)               
                
                ! Create the matshell
                call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
@@ -1640,8 +1647,11 @@ end if
          mat_ctx%mat = matrix     
 
          if (diag_scale_polys) then
-            mat_ctx_scaled%mat = matrix 
-            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)            
+            mat_ctx_scaled%mat = matrix
+            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+            ! The coefficients may have been reallocated since the last setup
+            mat_ctx_scaled%real_roots => coefficients(:, 1)
+            mat_ctx_scaled%imag_roots => coefficients(:, 2)
 
             ! Get the diagonal
             call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
@@ -1773,7 +1783,12 @@ end if
       end if
 
       ! Must be real as we only have one coefficient
-      call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
+      ! Skips eigenvalues that are numerically zero, like the matrix-free apply
+      if (abs(coefficients(1, 1)) > PFLARE_TOL_ZERO) then
+         call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
+      else
+         call VecSet(diag_vec, PFLARE_ZERO, ierr)
+      end if
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
@@ -1933,7 +1948,7 @@ end if
       ! Local variables
       PetscErrorCode :: ierr      
       logical :: reuse_triggered, output_product
-      PetscReal :: square_sum
+      PetscReal :: square_sum, inv_theta_one
 
       ! ~~~~~~      
 
@@ -1953,6 +1968,14 @@ end if
       ! If real
       if (coefficients(1,2) == 0d0) then
 
+         ! Skips eigenvalues that are numerically zero, like the matrix-free apply
+         ! A skipped first root leaves the product as the identity
+         if (abs(coefficients(1,1)) < PFLARE_TOL_ZERO) then
+            inv_theta_one = 0
+         else
+            inv_theta_one = PFLARE_ONE/coefficients(1,1)
+         end if
+
          ! Have to be careful here, as we may be first order, but the second eigenvaule
          ! might have been set to zero thanks to the rank reducing solve 
          ! So we just check if the second real part is zero and if it is
@@ -1962,7 +1985,8 @@ end if
          ! solve we don't have a zero coefficient but in the second solve we do
          ! So the mat type needs to remain consistent
          ! This can't happen in the complex case
-         if (abs(coefficients(2,1)) < PFLARE_TOL_ZERO) then
+         ! The matrix-free apply only applies the last root if it is > PFLARE_TOL_ZERO
+         if (.NOT. abs(coefficients(2,1)) > PFLARE_TOL_ZERO) then
 
             ! Set to zero
             call MatScale(inv_matrix, PFLARE_ZERO, ierr)
@@ -1976,7 +2000,7 @@ end if
             end if                
 
             ! Then add in the 0th order inverse
-            call MatShift(inv_matrix, PFLARE_ONE/coefficients(1,1), ierr)       
+            call MatShift(inv_matrix, inv_theta_one, ierr)       
             
             ! Then just return
             return  
@@ -1987,7 +2011,7 @@ end if
          ! theta_1 * theta_2 that would result
 
          ! result = -A_ff/theta_1
-         call MatScale(inv_matrix, PFLARE_MINUS_ONE/(coefficients(1, 1)), ierr)
+         call MatScale(inv_matrix, -inv_theta_one, ierr)
          ! result = I -A_ff/theta_1
          call MatShift(inv_matrix, PFLARE_ONE, ierr) 
          ! If we're doing this as part of fixed sparsity multiply, 
@@ -2001,7 +2025,7 @@ end if
 
          ! result = 1/theta_1 + 1/theta_2 * (I -A_ff/theta_1)
          ! Don't need an assemble as there is one called in this
-         call MatShift(inv_matrix, PFLARE_ONE/(coefficients(1, 1)), ierr)     
+         call MatShift(inv_matrix, inv_theta_one, ierr)     
          
          if (output_product) then
             status_output(1:2, 1) = 1
@@ -2009,8 +2033,14 @@ end if
 
       ! Complex conjugate roots, a +- ib
       else
-         ! a^2 + b^2
+         ! 1/(a^2 + b^2)
+         ! Skips eigenvalues that are numerically zero, like the matrix-free apply
          square_sum = coefficients(1,1)**2 + coefficients(1,2)**2
+         if (square_sum < PFLARE_TOL_ZERO) then
+            square_sum = 0
+         else
+            square_sum = PFLARE_ONE/square_sum
+         end if
 
          ! Complex conjugate roots
          ! result = -A_ff
@@ -2024,7 +2054,7 @@ end if
             call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
          end if      
          ! result = 2a I - A_ff/(a^2 + b^2)
-         call MatScale(inv_matrix, PFLARE_ONE/square_sum, ierr)
+         call MatScale(inv_matrix, square_sum, ierr)
 
          if (output_product) then
             status_output(1:2, 2) = 1
@@ -2137,11 +2167,12 @@ end if
                else
 
                   ! Check if the distance between the fixed sparsity root and the one before
-                  ! If > zero then they are not complex conjugates and hence we are on the first of the pair         
-                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > &
-                        PFLARE_TOL_CONSISTENCY .OR. &
-                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > &
-                        PFLARE_TOL_CONSISTENCY) then
+                  ! If > zero then they are not complex conjugates and hence we are on the first of the pair
+                  ! Don't divide by the root, as the real part may be zero (or negative)
+                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1)) > &
+                        PFLARE_TOL_CONSISTENCY * abs(coefficients(i_sparse,1)) .OR. &
+                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2)) > &
+                        PFLARE_TOL_CONSISTENCY * abs(coefficients(i_sparse,2))) then
                      output_first_complex = .TRUE.
                      i_sparse = i_sparse + 1
                   end if            
@@ -2184,7 +2215,7 @@ end if
             ! Then add the scaled version of each product
             if (i == 1) then
                ! If i == 1 then we know mat_product is identity so we can do it directly
-               call MatShift(inv_matrix, PFLARE_ONE/coefficients(i,1), ierr)  
+               call MatShift(inv_matrix, square_sum, ierr)  
             else
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset

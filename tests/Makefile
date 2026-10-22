@@ -331,7 +331,7 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
-	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3"
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1"
 	./pcair_reuse_amount_range
 #
 	@echo ""
@@ -349,6 +349,13 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with advection and fixed dd ratio"
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
+	@echo "Test AIRG with coefficients calculated on subcomms with diagonal Aff"
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 2 -pc_air_subcomm -pc_air_strong_threshold 0 -pc_air_inverse_type arnoldi
+	@echo "Test AIRG improving W and Z with matrix-free and full smoothing inverses"
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 3 -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_z_its 1 -pc_air_improve_w_its 1 -pc_air_matrix_free_polys
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 3 -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_z_its 1 -pc_air_improve_w_its 1 -pc_air_full_smoothing_up_and_down
 #
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting"
@@ -617,8 +624,12 @@ run_tests_no_load_short_serial:
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type power -ksp_max_it 5
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type arnoldi -ksp_max_it 5
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
+	@echo "Test PCAIR reuse_amount 3 in Fortran with Newton extra roots added in the first setup"
+	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order 15 -ksp_max_it 5 -test_reuse_amount_start 3
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5	
+	@echo "Test PCAIR reuse_amount 2 and 3 in Fortran with symmetric AIR"
+	./ex6f_reuse_amount -m 6 -n 6 -pc_type air -pc_air_symmetric -ksp_max_it 5 -test_reuse_amount_start 2
 #
 	@echo ""
 	@echo "Test single level GMRES polynomials with PC reused with no sparsity change"
@@ -822,11 +833,15 @@ run_tests_no_load_short_serial:
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
 # Skipped in single as there the roots' real parts are not below the zero tolerance
 	$(SKIP_SINGLE) ./newton_imag_roots
+	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply"
+	./newton_zero_roots
 #
 	@echo ""
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
 	./pflareinv_exact_inverse -pc_pflareinv_type isai
 	./pflareinv_exact_inverse -pc_pflareinv_type sai
+	@echo "Test SAI gives the minimum norm solution on rank deficient local least-squares systems"
+	./pflareinv_sai_rank_deficient
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
@@ -1075,6 +1090,8 @@ else
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5
+	@echo "Test PCAIR reuse_amount 2 and 3 in Fortran with symmetric AIR in parallel"
+	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 6 -n 6 -pc_type air -pc_air_symmetric -ksp_max_it 5 -test_reuse_amount_start 2
 #
 	@echo ""
 	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order in parallel"
@@ -1110,7 +1127,7 @@ else
 	 -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
-	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1 in parallel"
 	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
 #
 	@echo ""
@@ -1121,6 +1138,11 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo "Test AIRG with coefficients calculated on subcomms with diagonal Aff in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 2 -pc_air_subcomm -pc_air_strong_threshold 0 -pc_air_inverse_type arnoldi
+	@echo "Test AIRG with Newton coarse grid solver with extra roots calculated on subcomms in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 6 -da_grid_y 6 -pc_type air -ksp_max_it 3 -pc_air_coarsest_subcomm \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
@@ -1469,6 +1491,8 @@ else
 	@echo ""
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
+	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply in parallel"
+	$(MPIEXEC) -n 2 ./newton_zero_roots
 #
 	@echo ""
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse in parallel"
