@@ -833,6 +833,8 @@ run_tests_no_load_short_serial:
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
 	./pflareinv_exact_inverse -pc_pflareinv_type isai
 	./pflareinv_exact_inverse -pc_pflareinv_type sai
+	@echo "Test SAI gives the minimum norm solution on rank deficient local least-squares systems"
+	./pflareinv_sai_rank_deficient
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
