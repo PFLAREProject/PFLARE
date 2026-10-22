@@ -1621,8 +1621,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! ~~~~~~~~~~~~~~~~
 
       ! Matrix entries are PetscScalar; singular values (sigma) are genuinely real
-      ! The pseudo inverse of an m x n matrix is n x m (this routine assumes
-      ! square input, see the gemm below)
+      ! The pseudo inverse of an m x n matrix is n x m
       PetscScalar, dimension(:, :), intent(in) :: input
       PetscScalar, dimension(size(input, 2), size(input, 1)), intent(out) :: output
 
@@ -1633,7 +1632,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer :: iloc, errorcode
       PetscReal :: sigma_max, sigma_cutoff
       ! Kind-correct BLAS integer/real arguments for the dgemm call
-      PetscBLASInt :: n_bl, lda_bl
+      PetscBLASInt :: m_bl, n_bl, k_bl
       PetscScalar :: blas_one, blas_zero
 
       ! ~~~~~~~~~~~~~~~~
@@ -1663,7 +1662,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do
       sigma_cutoff = max(PFLARE_TOL_SIGMA_DROP, &
                          PFLARE_TOL_SIGMA_DROP_REL * sigma_max)
-      do iloc = 1, size(input,1)
+      ! There are only min(m, n) singular values
+      do iloc = 1, size(sigma)
          if (abs(sigma(iloc)) > sigma_cutoff) then
             U(:, iloc) = U(:, iloc) / sigma(iloc)
          else
@@ -1672,14 +1672,17 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end do
 
       ! Do the matmatmult, making sure to transpose both
-      n_bl = size(input,1)
-      lda_bl = size(input,1)
+      ! output = V(:, 1:k) * inv(sigma) * U(:, 1:k)^T, with k = min(m, n),
+      ! ie the first k rows of VT and the first k (scaled) columns of U
+      m_bl = size(input,1)
+      n_bl = size(input,2)
+      k_bl = size(sigma)
       blas_one = 1d0
       blas_zero = 0d0
-      call PFLAREgemm("T", "T", n_bl, n_bl, n_bl, &
-               blas_one, VT, lda_bl, &
-               U, lda_bl, &
-               blas_zero, output, lda_bl)
+      call PFLAREgemm("T", "T", n_bl, m_bl, k_bl, &
+               blas_one, VT, n_bl, &
+               U, m_bl, &
+               blas_zero, output, n_bl)
 
       ! nan check
       if (any(output /= output)) then
