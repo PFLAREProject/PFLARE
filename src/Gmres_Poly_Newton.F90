@@ -93,8 +93,14 @@ module gmres_poly_newton
                a = real_roots(i_loc) - real_roots(indices(k_loc))
                b = imag_roots(i_loc) - imag_roots(indices(k_loc))
 
-               ! If we have repeated roots this will be exactly zero, and magnitude will be -infinity
+               ! If we have repeated roots this will be exactly zero, and the product 
+               ! of differences is zero - we set the log of it to -huge rather than 
+               ! computing log10(0) = -infinity, which raises a floating point exception
                squares = a**2 + b**2
+               if (squares == 0d0) then
+                  magnitude(i_loc) = -huge(magnitude(i_loc))
+                  exit
+               end if
                magnitude(i_loc) = magnitude(i_loc) + &
                   log10(sqrt(squares))
             end do
@@ -321,7 +327,9 @@ module gmres_poly_newton
             ! reset pof back to one
             ! We can hit this for very high order polynomials, where we have to 
             ! add more roots than 22 (ie pof > 1e308)
-            if (log10(pof(k_loc)) + log10(div_mag) > 307) then
+            ! range gives the decimal exponent range of pof, ie 307 in double and 37 in single
+            ! In single pof can overflow at much lower order
+            if (log10(pof(k_loc)) + log10(div_mag) > range(pof(k_loc))) then
                overflow(k_loc) = overflow(k_loc) + int(log10(pof(k_loc)))
                pof(k_loc) = 1
             end if            
@@ -427,7 +435,7 @@ module gmres_poly_newton
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm
+      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm, perturb_scale
 
       ! ~~~~~~    
 
@@ -554,6 +562,11 @@ module gmres_poly_newton
       ! ie either compute the Ritz or Harmonic Ritz values
       ! ~~~~~~~~~~~~~~
 
+      ! The tolerances that control the clustering below are relative to ||H||
+      ! This has to be computed before the eigenvalue solve, as PFLAREgeev overwrites H_n
+      ! (after balancing, and at higher order with values that don't scale with the matrix)
+      H_norm = norm2(H_n(1:m,1:m))
+
       allocate(work(1))
       ! Not used but we have to allocate
       allocate(VL(0, 0))
@@ -590,9 +603,9 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~
 
       ! These are the tolerances that control the clustering
-      ! These are all relative to ||H||, which scales with the matrix, so the 
-      ! roots (and hence the polynomial) do not depend on the scale of the matrix
-      H_norm = norm2(H_n(1:m,1:m))
+      ! These are all relative to ||H|| (computed above, before H_n is overwritten), 
+      ! which scales with the matrix, so the roots (and hence the polynomial) 
+      ! do not depend on the scale of the matrix
       rel_tol = sqrt(PFLARE_EPS)
       abs_tol = PFLARE_EPS * H_norm
 
@@ -669,6 +682,15 @@ module gmres_poly_newton
          perturbed_imag = imag_roots_added
 
          ! Perturb the extra roots so they have unique values for the leja sort
+         ! The perturbation is relative to the smallest (non-zero) root, so the ordering 
+         ! doesn't depend on the scale of the matrix, while keeping the perturbation 
+         ! negligible relative to every root
+         ! A larger perturbation (e.g., relative to the biggest root, ||H|| or each root) 
+         ! makes the copies look well separated, so the leja ordering pulls them 
+         ! forward, which destabilises high order polynomials
+         ! If the perturbation is lost to rounding on a big root, the copies are exact 
+         ! duplicates, which modified_leja handles
+         perturb_scale = minval(sqrt(real_roots_added**2 + imag_roots_added**2))
          counter = numerical_order + 1
          do i_loc = 1, numerical_order
             k_loc = 0
@@ -677,7 +699,7 @@ module gmres_poly_newton
                if (real_roots_added(j_loc) == coefficients_temp(i_loc, 1) .AND. &
                    abs(imag_roots_added(j_loc)) == abs(coefficients_temp(i_loc, 2))) then
                   k_loc = k_loc + 1
-                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * PFLARE_TOL_LEJA_PERTURB
+                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * PFLARE_TOL_LEJA_PERTURB * perturb_scale
                end if
             end do
          end do
