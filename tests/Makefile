@@ -1129,6 +1129,9 @@ else
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo "Test AIRG with coefficients calculated on subcomms with diagonal Aff in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 2 -pc_air_subcomm -pc_air_strong_threshold 0 -pc_air_inverse_type arnoldi
+	@echo "Test AIRG with Newton coarse grid solver with extra roots calculated on subcomms in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 6 -da_grid_y 6 -pc_type air -ksp_max_it 3 -pc_air_coarsest_subcomm \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
