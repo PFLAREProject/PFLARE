@@ -619,6 +619,8 @@ run_tests_no_load_short_serial:
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type power -ksp_max_it 5
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type arnoldi -ksp_max_it 5
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
+	@echo "Test PCAIR reuse_amount 3 in Fortran with Newton extra roots added in the first setup"
+	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order 15 -ksp_max_it 5 -test_reuse_amount_start 3
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5	
 	@echo "Test PCAIR reuse_amount 2 and 3 in Fortran with symmetric AIR"

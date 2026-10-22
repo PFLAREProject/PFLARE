@@ -450,6 +450,14 @@ module gmres_poly_newton
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
+      ! If we're reusing, coefficients may still be sized for the extra roots 
+      ! added in a previous setup, so make sure we start from p+1 roots
+      ! Otherwise the old roots would be included in the clustering below
+      if (size(coefficients, 1) /= poly_order + 1) then
+         deallocate(coefficients)
+         allocate(coefficients(poly_order + 1, 2))
+      end if
+
       ! ~~~~~~~~~~
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
@@ -1595,8 +1603,6 @@ end if
 
                ! Have to dynamically allocate this
                allocate(mat_ctx_scaled)
-               mat_ctx_scaled%real_roots => coefficients(:, 1)
-               mat_ctx_scaled%imag_roots => coefficients(:, 2)               
                
                ! Create the matshell
                call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
@@ -1640,8 +1646,11 @@ end if
          mat_ctx%mat = matrix     
 
          if (diag_scale_polys) then
-            mat_ctx_scaled%mat = matrix 
-            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)            
+            mat_ctx_scaled%mat = matrix
+            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+            ! The coefficients may have been reallocated since the last setup
+            mat_ctx_scaled%real_roots => coefficients(:, 1)
+            mat_ctx_scaled%imag_roots => coefficients(:, 2)
 
             ! Get the diagonal
             call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
