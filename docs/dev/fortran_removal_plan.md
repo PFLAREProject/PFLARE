@@ -1,6 +1,8 @@
 # Removing Fortran from the PFLARE core: feasibility and staged plan
 
-Status: proposal (not started). Written against branch
+Status: complete. Stages 0 to 10 are done (each stage's "As done" paragraph in
+section 7 records what was actually done); the core is C and the Fortran
+interface is optional. Written against branch
 `claude/beautiful-davinci-gxkf35` at `85b4f7f` (PFLARE 1.27.0, PETSc >= 3.26),
 which is about to be merged into `main`. Every stage branches from that
 branch (or from `main` once it carries it) plus the previously merged stages.
@@ -401,6 +403,8 @@ of `TEST_TARGETS` only while `PFLARE_PORT_DEBUG=1`, and are deleted with
 `src/fref/` in stage 8.
 
 ## 7. Stages
+
+All stages are done; the plan is complete (stage 10 below).
 
 Dependency graph (an arrow means "must be merged first"):
 
@@ -978,6 +982,50 @@ Verification: full CI matrix including the two new jobs; in the no-Fortran
 image `make`, `make check`, `make tests`, `make python`, `make install` all
 succeed and `make install` writes no `.mod`; `nm libpflare.so | grep -i
 _gfortran` is empty.
+
+As done: one piece of core Fortran was still left: `PCRegister_PFLARE`, part of the C API of
+`include/pflare.h`, was a `bind(C)` module procedure of `src/fortran/PFLARE.F90`, so a build
+without the Fortran interface had no `PCRegister_PFLARE` (`nm` of the interface objects showed
+it was the only C-visible symbol they defined). It is now in `PCAIR.c` and the module `pflare`
+declares it with an interface block, so Fortran callers are unchanged. The top `Makefile` gates
+on `PETSC_USE_FORTRAN_BINDINGS` alone: `FOBJS` is empty without it, the Fortran drivers
+(`FORTRAN_TEST_TARGETS`) are filtered out of `TEST_TARGETS` and `CHECK_TARGETS`, `make depend`
+skips `makedepf90` and keeps the Fortran lines of `Makefile.deps` (checked in the `--with-fc=0`
+image: only the Kokkos lines, which need a Kokkos build, change), and the `.mod` install loop
+is skipped; `FCORE_OBJS` is gone. The shared library is linked with `$(CLINKER)`, or
+`$(CXXLINKER)` with Kokkos, instead of `$(LINK.F)`; with Fortran bindings the interface's
+`_gfortran_*` references are satisfied by PETSc's `LDLIBS` (`libpflare.so` has the same
+`NEEDED` list as before, `libgfortran.so.5` included, in the petsc and Kokkos images; in the
+Intel image, whose `LDLIBS` carries `-fortlib`, the list loses `libifport` and `libgcc_s` and
+gains `libirng`, and `ldd -r` finds no undefined symbol, as before). The `CONDA_BUILD` branch, which links only `-lpetsc`, BLAS/LAPACK
+and Kokkos, gets the Fortran runtime only through `libpetsc`'s own dependency on it, which is
+enough on Linux; a conda build with Fortran bindings on macOS would need the runtime added
+(untested, no such CI job). `tests/Makefile` prefixes the 104 command lines and 6 `for` loop
+lines that run a Fortran driver with `$(SKIP_FORTRAN)`, which without Fortran bindings is
+`@echo "  [skipped without Fortran bindings]"; exit 0;`: an echo of the command, as
+`SKIP_SINGLE` does, cannot gate a line with a top-level `;`, so the line exits its shell instead,
+and `tests_search` now evaluates each command in a subshell. `run_check` prints "Fortran check
+skipped (PETSc configured without Fortran bindings)". The valgrind images' `sed` still puts
+valgrind in front of the prefixed Fortran drivers. The golden log tools record the skipped
+lines as skipped and name the configuration `*_no_fortran` (the compiler is now read from
+`C_VERSION` when there is no `FC_VERSION`; it used to read the nonexistent `CC_VERSION`).
+`dockerfiles/Dockerfile_no_fortran` configures PETSc again inside `stevendargaville/petsc` with
+the base arch's reconfigure options and copied `externalpackages` (nothing is downloaded), for
+`--with-fc=0` with gfortran and `f951` deleted and the base arch's `libfblas.a`/`libflapack.a`
+linked as BLAS/LAPACK (so the numbers match `gnu_opt`), or `--with-fortran-bindings=0`. The
+PETSc configure and build (with petsc4py) took 9 minutes alone in the sandbox, the PFLARE
+steps 3.5 minutes (opt) and 13 minutes (debug). In the `--with-fc=0` image the golden capture of
+the head, compared with the `gnu_opt` capture of the same commit, has every one of the 462
+non-Fortran commands identical even at `--res-rtol 0` (apart from the documented 4-rank
+`adv_diff_fd ... agg` command), the 110 Fortran commands skipped and the `run_check` Fortran
+command replaced by its skip message. The `gnu_debug` job now builds the C/C++ with
+`-fsanitize=address,undefined` (and the Fortran with it too, so the Fortran drivers link the
+sanitizer runtime first), runs with `ASAN_OPTIONS=detect_leaks=0` and
+`UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1`, and skips the Python bindings; its Docker
+build passed with no sanitizer report. With Fortran bindings the golden logs of `gnu_opt`,
+`gnu_debug`, `gnu_opt_kokkos` and Intel are identical to stage 9 (at `--res-rtol 0` only the
+documented 4-rank `adv_diff_fd ... agg` variation remains in the non-Kokkos images), and the
+valgrind job's `tests_short` still runs the Fortran drivers under valgrind.
 
 ## 8. Risks
 
