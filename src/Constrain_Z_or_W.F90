@@ -262,6 +262,8 @@ module constrain_z_or_w
       PetscScalar, pointer :: b_c_nonlocal(:) => null()
       PetscScalar, dimension(:), pointer :: b_c_local, b_f_vals
       PetscScalar, dimension(:,:), allocatable :: b_c_nonlocal_alloc, b_c_vals, bctbc, pseudo, temp_mat
+      PetscScalar, dimension(:,:), allocatable :: b_c_local_alloc, b_f_local_alloc
+      PetscInt :: local_size_c, local_size_f
       PetscInt, parameter :: one = 1, zero = 0
       ! Global scale of the coarse near-nullspace vectors and the per-row test
       ! against it, see PFLARE_TOL_CONSTRAIN_REL below
@@ -434,6 +436,23 @@ module constrain_z_or_w
          return
       end if
 
+      ! ~~~~~
+      ! Copy out the local values of B_c and B_f once, rather than getting the 
+      ! arrays in every row (which on the gpu would copy to the host every row)
+      ! ~~~~~
+      call VecGetLocalSize(null_vecs_c(1), local_size_c, ierr)
+      call VecGetLocalSize(null_vecs_f(1), local_size_f, ierr)
+      allocate(b_c_local_alloc(local_size_c, size(null_vecs_c)))
+      allocate(b_f_local_alloc(local_size_f, size(null_vecs_c)))
+      do null_vec = 1, size(null_vecs_c)
+         call VecGetArrayRead(null_vecs_c(null_vec), b_c_local, ierr)
+         b_c_local_alloc(:, null_vec) = b_c_local
+         call VecRestoreArrayRead(null_vecs_c(null_vec), b_c_local, ierr)
+         call VecGetArrayRead(null_vecs_f(null_vec), b_f_vals, ierr)
+         b_f_local_alloc(:, null_vec) = b_f_vals
+         call VecRestoreArrayRead(null_vecs_f(null_vec), b_f_vals, ierr)
+      end do
+
       ! Now go through each of the rows
       ! GetRow has to happen over the global indices
       do i_loc = global_row_start, global_row_end_plus_one-1                  
@@ -479,13 +498,8 @@ module constrain_z_or_w
          ! Get the local b_c values 
          ! Loop over all the near nullspace vectors and get the local components
          do null_vec = 1, size(null_vecs_c)
-
-            call VecGetArray(null_vecs_c(null_vec), b_c_local, ierr)
-
             ! cols are local indices
-            b_c_vals(1:ncols_ad, null_vec) = b_c_local(cols(1:ncols_ad)+1)
-
-            call VecRestoreArray(null_vecs_c(null_vec), b_c_local, ierr)
+            b_c_vals(1:ncols_ad, null_vec) = b_c_local_alloc(cols(1:ncols_ad)+1, null_vec)
          end do
          call MatRestoreRow(Ad, i_loc - global_row_start, ncols_temp, &
                   cols, vals, ierr)          
@@ -550,11 +564,8 @@ module constrain_z_or_w
          ! Compute W * B_c^R - B_f^R
          ! Loop over near-nullspace vecs
          do null_vec = 1, size(null_vecs_c)
-
-            call VecGetArray(null_vecs_f(null_vec), b_f_vals, ierr)
-            ! b_f_vals is local (we want b_f for this row) but so is the value we want
-            diff(null_vec) = diff(null_vec) - b_f_vals(i_loc - global_row_start + 1)    
-            call VecRestoreArray(null_vecs_f(null_vec), b_f_vals, ierr)               
+            ! b_f is local (we want b_f for this row) but so is the value we want
+            diff(null_vec) = diff(null_vec) - b_f_local_alloc(i_loc - global_row_start + 1, null_vec)    
          end do                  
                
          ! Compute (B_c^R)^T * B_c^R
@@ -616,7 +627,7 @@ module constrain_z_or_w
       call MatAssemblyBegin(new_z_or_w, MAT_FINAL_ASSEMBLY, ierr)
       call MatAssemblyEnd(new_z_or_w, MAT_FINAL_ASSEMBLY, ierr)     
       
-      deallocate(b_c_nonlocal_alloc)
+      deallocate(b_c_nonlocal_alloc, b_c_local_alloc, b_f_local_alloc)
 
       ! Destroy the old input matrix
       call MatDestroy(z_or_w, ierr)      
