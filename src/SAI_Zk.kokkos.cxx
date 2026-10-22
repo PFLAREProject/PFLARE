@@ -1,5 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+// The prototype SAI_Z.c calls this kernel through
+#include "SAI_Zk.h"
 
 //------------------------------------------------------------------------------------------------------------------------
 

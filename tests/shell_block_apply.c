@@ -35,10 +35,10 @@ static char help[] = "Tests the multiple rhs (block) apply of the matrix-free po
   #define DEFAULT_CHECK_TOL 1e-10
 #endif
 
-// Defined in C_Fortran_Bindings.F90 - these are the same prototypes PCPFLAREINV.c uses
+// Defined in PCPFLAREINV.c (the C entry points for the tests)
 PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
 // coeffs_ptr/row_size/col_size are in/out:
-//   *coeffs_ptr == NULL on entry  -> fresh: Fortran allocates, writes c_loc to *coeffs_ptr on return
+//   *coeffs_ptr == NULL on entry  -> fresh: on return *coeffs_ptr is a C-malloc'd copy of the coefficients
 //   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
 PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, PetscInt inverse_type, PetscInt order, \
                      PetscInt sparsity_order, PetscInt matrix_free_int, PetscInt diag_scale_polys_int, \
