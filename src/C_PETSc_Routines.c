@@ -220,7 +220,7 @@ PETSC_INTERN void GenerateIS_ProcAgglomeration_c(PetscInt proc_stride, PetscInt 
 }
 
 // Takes a Mat and returns a Mat on a subcomm without ranks with no rows
-// If there are no empty ranks, then it returns the same matrix
+// If there are no empty ranks, or the matrix is not MPIAIJ, then it returns the same matrix
 // If not there is a new copy that must be destroyed
 // Basically taken from MatMPIAdjCreateNonemptySubcommMat_MPIAdj
 PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcomm, Mat *B)
@@ -231,10 +231,10 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
   PetscMPIInt     i, size, nranks, *ranks;
   Mat mat_local, mat_nonlocal;
   const PetscInt *colmap_input;
+  PetscBool       is_mpiaij;
 
   PetscFunctionBegin;
 
-  PetscCall(MatMPIAIJGetSeqAIJ(*A, &mat_local, &mat_nonlocal, &colmap_input));
   *on_subcomm = 1;
 
   // Ensure we return petsc_null so we can test if we are on this subcomm
@@ -246,7 +246,10 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
   for (i = 0, nranks = 0; i < size; i++) {
     if (ranges[i + 1] - ranges[i] > 0) nranks++;
   }
-  if (nranks == size) { /* All ranks have a positive number of rows, so we do not need to create a subcomm; */
+  // We can only build the subcomm copy from MPIAIJ matrices (this includes mpiaijkokkos)
+  // For any other type (e.g., a MATDIAGONAL Aff) just do the reductions on the original comm
+  PetscCall(PetscObjectBaseTypeCompare((PetscObject)(*A), MATMPIAIJ, &is_mpiaij));
+  if (nranks == size || !is_mpiaij) { /* All ranks have a positive number of rows, so we do not need to create a subcomm; */
     PetscCall(PetscObjectReference((PetscObject)(*A)));
     *B = (*A);
     // We haven't actually ended up on a subcomm
@@ -254,6 +257,7 @@ PETSC_INTERN PetscErrorCode MatMPICreateNonemptySubcomm_c(Mat *A, int *on_subcom
     PetscFunctionReturn(PETSC_SUCCESS);
   }
 
+  PetscCall(MatMPIAIJGetSeqAIJ(*A, &mat_local, &mat_nonlocal, &colmap_input));
   PetscCall(PetscMalloc1(nranks, &ranks));
   for (i = 0, nranks = 0; i < size; i++) {
     if (ranges[i + 1] - ranges[i] > 0) ranks[nranks++] = i;
