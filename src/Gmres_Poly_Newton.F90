@@ -755,7 +755,8 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~~
 
-      if (poly_sparsity_order .ge. size(coefficients)-1) then
+      ! coefficients is (number of roots, 2), so check against the number of roots
+      if (poly_sparsity_order .ge. size(coefficients, 1)-1) then
          print *, "Requested sparsity is greater than or equal to the order"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
