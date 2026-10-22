@@ -184,6 +184,7 @@ export TEST_TARGETS = ex12f \
 		  poly_zero_coeffs \
 		  newton_imag_roots \
 		  newton_zero_roots \
+		  newton_scale \
 		  pflareinv_exact_inverse \
 		  pflareinv_sai_rank_deficient \
 		  adv_diff_fd \

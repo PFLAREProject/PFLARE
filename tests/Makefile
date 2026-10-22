@@ -835,6 +835,8 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./newton_imag_roots
 	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply"
 	./newton_zero_roots
+	@echo "Test the Newton polynomial does not depend on the scale of the operator"
+	./newton_scale
 #
 	@echo ""
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
@@ -1493,6 +1495,8 @@ else
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
 	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply in parallel"
 	$(MPIEXEC) -n 2 ./newton_zero_roots
+	@echo "Test the Newton polynomial does not depend on the scale of the operator in parallel"
+	$(MPIEXEC) -n 2 ./newton_scale
 #
 	@echo ""
 	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse in parallel"

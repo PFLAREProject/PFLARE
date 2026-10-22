@@ -3,7 +3,7 @@ module gmres_poly_newton
    use petscmat
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos
-   use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
+   use pflare_parameters, only: PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
          PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB
@@ -221,7 +221,9 @@ module gmres_poly_newton
                         (imag_roots(j) - imag_roots(i))**2)
 
             ! Use the larger magnitude for relative scaling
-            scale = max(mag_i, mag_j, PFLARE_ONE)
+            ! This is purely relative so the clustering does not depend on the scale 
+            ! of the matrix, abs_tol handles roots near zero
+            scale = max(mag_i, mag_j)
 
             ! Check if within tolerance
             if (dist <= abs_tol + rel_tol * scale) then
@@ -291,11 +293,10 @@ module gmres_poly_newton
          ! We have already computed pof for the positive imaginary complex conjugate
          if (b < 0) cycle
 
-         ! Skips eigenvalues that are numerically zero
+         ! Skips zero eigenvalues (we should only be passed non-zero roots)
          ! This matches the zero test used when applying the polynomial, ie 
          ! a purely imaginary root (a == 0, b /= 0) is not zero
-         if (b == 0d0 .AND. abs(a) < PFLARE_TOL_ZERO) cycle
-         if (a**2 + b**2 < PFLARE_TOL_ZERO) cycle
+         if (a == 0d0 .AND. b == 0d0) cycle
 
          ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
          do i_loc = 1, n_roots
@@ -306,9 +307,8 @@ module gmres_poly_newton
             c = real_roots(i_loc)
             d = imag_roots(i_loc)
 
-            ! Skips eigenvalues that are numerically zero
-            if (d == 0d0 .AND. abs(c) < PFLARE_TOL_ZERO) cycle
-            if (c**2 + d**2 < PFLARE_TOL_ZERO) cycle
+            ! Skips zero eigenvalues
+            if (c == 0d0 .AND. d == 0d0) cycle
 
             ! theta_k/theta_i
             div_real = (a * c + b * d)/(c**2 + d**2)
@@ -590,13 +590,18 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~
 
       ! These are the tolerances that control the clustering
+      ! These are all relative to ||H||, which scales with the matrix, so the 
+      ! roots (and hence the polynomial) do not depend on the scale of the matrix
       H_norm = norm2(H_n(1:m,1:m))
       rel_tol = sqrt(PFLARE_EPS)
-      abs_tol = PFLARE_EPS * max(H_norm, beta)
+      abs_tol = PFLARE_EPS * H_norm
 
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
       ! are trivially small - we set them explicitly to zero
+      ! Everywhere downstream (the matrix-free apply, the assembled builds, 
+      ! the matvec counts) then only skips roots that are exactly zero
+      ! A complex root that survives this is never skipped
       do i_loc = 1, poly_order + 1
          if (coefficients(i_loc,1)**2 + coefficients(i_loc,2)**2 < &
             (abs_tol + rel_tol*H_norm)**2) then
@@ -861,7 +866,7 @@ module gmres_poly_newton
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-      PetscScalar :: normy
+      PetscScalar :: normy, max_cpu
       logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
       type(c_ptr)  :: coefficients_ptr, status_output_ptr
       type(tMat) :: reuse_mat_cpu
@@ -923,7 +928,7 @@ end if
          call mat_mult_powers_share_sparsity_newton_kokkos(A_array, sparsity_array, prod_save_array, &
                   prod_save_exists_int, num_terms, poly_sparsity_order, &
                   coefficients_ptr, status_output_ptr, output_first_complex_int, &
-                  PFLARE_TOL_ZERO, reuse_int_reuse_mat, reuse_array, B_array)
+                  reuse_int_reuse_mat, reuse_array, B_array)
 
          reuse_mat%v = reuse_array
 
@@ -958,9 +963,14 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)
 
+            ! Find the biggest entry in the cpu result, the entries scale with 1/(the scale
+            ! of the matrix), so the tolerance below is relative to this
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, max_cpu, ierr)
+
             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
-            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
@@ -972,7 +982,9 @@ end if
             ! this happens on the CPU and Kokkos sides independently) compound roughly
             ! quadratically, so scale the tolerance with num_terms rather than using a
             ! fixed bound that only holds at low order
-            if (normy .gt. PFLARE_TOL_MATFREE_NEWTON * dble(num_terms)**2 .OR. normy/=normy) then
+            ! The tolerance is relative to the biggest entry, but never tighter than absolute
+            if (normy .gt. PFLARE_TOL_MATFREE_NEWTON * dble(num_terms)**2 * max(PFLARE_ONE, max_cpu) &
+                     .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
@@ -1322,9 +1334,9 @@ end if
             ! If real
             if (coefficients(term,2) == 0d0) then
 
-               ! Skips eigenvalues that are numerically zero - see 
+               ! Skips zero eigenvalues - see 
                ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (abs(coefficients(term,1)) < PFLARE_TOL_ZERO) then
+               if (coefficients(term,1) == 0d0) then
                   term = term + 1
                   cycle
                end if
@@ -1357,13 +1369,10 @@ end if
             ! If complex
             else
 
-               ! Skips eigenvalues that are numerically zero - see 
-               ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (coefficients(term,1)**2 + coefficients(term,2)**2 < PFLARE_TOL_ZERO) then
-                  term = term + 2
-                  cycle
-               end if
-
+               ! A complex pair is never zero (its imaginary part is nonzero), so is
+               ! never skipped. That matters here, as skipping a pair where the fixed
+               ! sparsity root is the second of the pair would leave skip_add set
+               ! and the wrong product in vals_previous_power_temp
                square_sum = PFLARE_ONE/(coefficients(term,1)**2 + coefficients(term,2)**2)
 
                ! If our fixed sparsity order falls on the first of a complex conjugate pair
@@ -1472,9 +1481,12 @@ end if
 
          ! Final step if last root is real
          if (coefficients(size(coefficients, 1),2) == 0d0) then
-            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then
+            ! Skips zero eigenvalues
+            ! vals_previous_power_temp has the final prod in it, even if the loop 
+            ! above ended by skipping a zero root
+            if (ncols /= 0 .AND. coefficients(size(coefficients, 1),1) /= 0d0) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                     PFLARE_ONE/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
+                     PFLARE_ONE/coefficients(size(coefficients, 1), 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)
             end if             
          end if
 
@@ -1783,8 +1795,8 @@ end if
       end if
 
       ! Must be real as we only have one coefficient
-      ! Skips eigenvalues that are numerically zero, like the matrix-free apply
-      if (abs(coefficients(1, 1)) > PFLARE_TOL_ZERO) then
+      ! Skips zero eigenvalues, like the matrix-free apply
+      if (coefficients(1, 1) /= 0d0) then
          call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
       else
          call VecSet(diag_vec, PFLARE_ZERO, ierr)
@@ -1851,9 +1863,9 @@ end if
          ! If real this is easy
          if (coefficients(i,2) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero - see 
+            ! Skips zero eigenvalues - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
+            if (coefficients(i,1) == 0d0) then
                i = i + 1
                cycle
             end if        
@@ -1873,11 +1885,7 @@ end if
          ! Complex 
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
-               i = i + 2
-               cycle
-            end if
+            ! A complex pair is never zero as its imaginary part is nonzero
 
             ! Compute 2a I - A
             ! temp_vec_A = -A    
@@ -1907,8 +1915,8 @@ end if
       if (coefficients(size(coefficients,1),2) == 0d0) then
          ! Add in the final term multiplied by 1/theta_poly_order
 
-         ! Skips eigenvalues that are numerically zero
-         if (abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then      
+         ! Skips zero eigenvalues
+         if (coefficients(size(coefficients, 1),1) /= 0d0) then      
             call VecAXPY(inv_vec, PFLARE_ONE/coefficients(size(coefficients, 1),1), product_vec, ierr)  
          end if       
       end if
@@ -1968,9 +1976,9 @@ end if
       ! If real
       if (coefficients(1,2) == 0d0) then
 
-         ! Skips eigenvalues that are numerically zero, like the matrix-free apply
+         ! Skips zero eigenvalues, like the matrix-free apply
          ! A skipped first root leaves the product as the identity
-         if (abs(coefficients(1,1)) < PFLARE_TOL_ZERO) then
+         if (coefficients(1,1) == 0d0) then
             inv_theta_one = 0
          else
             inv_theta_one = PFLARE_ONE/coefficients(1,1)
@@ -1985,8 +1993,8 @@ end if
          ! solve we don't have a zero coefficient but in the second solve we do
          ! So the mat type needs to remain consistent
          ! This can't happen in the complex case
-         ! The matrix-free apply only applies the last root if it is > PFLARE_TOL_ZERO
-         if (.NOT. abs(coefficients(2,1)) > PFLARE_TOL_ZERO) then
+         ! The matrix-free apply only applies the last root if it is non-zero
+         if (coefficients(2,1) == 0d0) then
 
             ! Set to zero
             call MatScale(inv_matrix, PFLARE_ZERO, ierr)
@@ -2034,13 +2042,8 @@ end if
       ! Complex conjugate roots, a +- ib
       else
          ! 1/(a^2 + b^2)
-         ! Skips eigenvalues that are numerically zero, like the matrix-free apply
-         square_sum = coefficients(1,1)**2 + coefficients(1,2)**2
-         if (square_sum < PFLARE_TOL_ZERO) then
-            square_sum = 0
-         else
-            square_sum = PFLARE_ONE/square_sum
-         end if
+         ! A complex pair is never zero as its imaginary part is nonzero
+         square_sum = PFLARE_ONE/(coefficients(1,1)**2 + coefficients(1,2)**2)
 
          ! Complex conjugate roots
          ! result = -A_ff
@@ -2203,10 +2206,10 @@ end if
          ! If real this is easy
          if (coefficients(i,2) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero
+            ! Skips zero eigenvalues
             ! We still compute the entries as as zero because we need the sparsity
             ! to be correct for the next iteration
-            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
+            if (coefficients(i,1) == 0d0) then
                square_sum = 0
             else
                square_sum = PFLARE_ONE/coefficients(i,1)
@@ -2255,14 +2258,10 @@ end if
          ! Complex 
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
-               square_sum = 0
-               a_coeff = 0
-             else  
-               square_sum = PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2)
-               a_coeff = PFLARE_TWO * coefficients(i,1)
-            end if
+            ! A complex pair is never zero as its imaginary part is nonzero
+            ! The fixed sparsity continuation relies on this, as it never skips a complex pair
+            square_sum = PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2)
+            a_coeff = PFLARE_TWO * coefficients(i,1)
 
             ! If our fixed sparsity root is the first of a complex conjugate pair
             ! We want to pass out mat_product and only add that to inv_matrix
@@ -2375,8 +2374,8 @@ end if
          if (coefficients(i_sparse,2) == 0d0) then
             ! Add in the final term multiplied by 1/theta_poly_order
 
-            ! Skips eigenvalues that are numerically zero
-            if (abs(coefficients(i_sparse,1)) > PFLARE_TOL_ZERO) then     
+            ! Skips zero eigenvalues
+            if (coefficients(i_sparse,1) /= 0d0) then     
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset

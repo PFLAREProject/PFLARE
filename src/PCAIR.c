@@ -2869,6 +2869,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
   this call and may be freed or modified. row_size and col_size must match the sizes returned by
   `PCAIRGetPolyCoeffs()` for the same petsc_level and which_inverse, which must also be valid there.
 
+  For the Newton types the coefficients are the real and imaginary parts of the roots. Only roots that are exactly
+  zero are skipped when the polynomial is applied or built; any non-zero root, however small, is used.
+
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)

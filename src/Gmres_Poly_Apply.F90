@@ -2,7 +2,7 @@ module gmres_poly_apply
 
    use petscmat
    use matshell_data_type, only: mat_ctxtype, ensure_block_temp_mats, ensure_block_kernel_products
-   use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_ZERO, PFLARE_ONE, PFLARE_MINUS_ONE, PFLARE_TWO, &
+   use pflare_parameters, only: PFLARE_ZERO, PFLARE_ONE, PFLARE_MINUS_ONE, PFLARE_TWO, &
          MF_VEC_TEMP, MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, MF_VEC_DIAG, MF_VEC_RHS, &
          MF_MAT_TEMP, MF_MAT_TEMP_TWO, MF_MAT_TEMP_THREE, MF_MAT_RHS
 
@@ -869,9 +869,9 @@ module gmres_poly_apply
          ! If real this is easy
          if (imag_roots(i) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero - see 
-            ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(real_roots(i)) < PFLARE_TOL_ZERO) then
+            ! Skips zero eigenvalues - calculate_gmres_polynomial_roots_newton 
+            ! sets numerically zero roots to exactly zero (relative to ||H||)
+            if (real_roots(i) == 0d0) then
                i = i + 1
                cycle
             end if
@@ -895,11 +895,7 @@ module gmres_poly_apply
          ! Relies on the complex conjugate being next to each other
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (real_roots(i)**2 + imag_roots(i)**2 < PFLARE_TOL_ZERO) then
-               i = i + 2
-               cycle
-            end if            
+            ! A complex pair is never zero as its imaginary part is nonzero
 
             ! temp_vec_two = A * temp_vec
             call MatMult(mat, temp_vec, temp_vec_two, ierr)    
@@ -933,8 +929,8 @@ module gmres_poly_apply
       ! Final step if last root is real
       if (imag_roots(size(real_roots)) == 0d0) then
 
-         ! Skips eigenvalues that are numerically zero
-         if (abs(real_roots(size(real_roots))) > PFLARE_TOL_ZERO) then
+         ! Skips zero eigenvalues
+         if (real_roots(size(real_roots)) /= 0d0) then
 
             ! y = y + theta_i * temp_vec
             call VecAXPBY(y, &
@@ -985,9 +981,9 @@ module gmres_poly_apply
          ! If real this is easy
          if (imag_roots(order) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero - see 
-            ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(real_roots(order)) < PFLARE_TOL_ZERO) then
+            ! Skips zero eigenvalues - calculate_gmres_polynomial_roots_newton 
+            ! sets numerically zero roots to exactly zero (relative to ||H||)
+            if (real_roots(order) == 0d0) then
                order = order + 1
                cycle
             end if
@@ -1007,11 +1003,7 @@ module gmres_poly_apply
          ! Relies on the complex conjugate being next to each other
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (real_roots(order)**2 + imag_roots(order)**2 < PFLARE_TOL_ZERO) then
-               order = order + 2
-               cycle
-            end if           
+            ! A complex pair is never zero as its imaginary part is nonzero
             
             ! temp_vec_two = A * y
             call MatMult(mat, y, temp_vec_two, ierr)   
@@ -1115,9 +1107,9 @@ module gmres_poly_apply
          ! If real this is easy
          if (imag_roots(i) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero - see
-            ! the comment in calculate_gmres_polynomial_roots_newton
-            if (abs(real_roots(i)) < PFLARE_TOL_ZERO) then
+            ! Skips zero eigenvalues - calculate_gmres_polynomial_roots_newton
+            ! sets numerically zero roots to exactly zero (relative to ||H||)
+            if (real_roots(i) == 0d0) then
                i = i + 1
                cycle
             end if
@@ -1143,11 +1135,7 @@ module gmres_poly_apply
          ! Relies on the complex conjugate being next to each other
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (real_roots(i)**2 + imag_roots(i)**2 < PFLARE_TOL_ZERO) then
-               i = i + 2
-               cycle
-            end if
+            ! A complex pair is never zero as its imaginary part is nonzero
 
             ! temp_mat_two = A * temp_mat
             call MatProductNumeric(temp_mat_two, ierr)
@@ -1184,8 +1172,8 @@ module gmres_poly_apply
       ! Final step if last root is real
       if (imag_roots(nroots) == 0d0) then
 
-         ! Skips eigenvalues that are numerically zero
-         if (abs(real_roots(nroots)) > PFLARE_TOL_ZERO) then
+         ! Skips zero eigenvalues
+         if (real_roots(nroots) /= 0d0) then
 
             ! y_mat = y_mat + theta_i * temp_mat
             call MatAXPY(y_mat, &

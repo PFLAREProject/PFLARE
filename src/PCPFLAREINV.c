@@ -560,6 +560,9 @@ static PetscErrorCode PCPFLAREINVGetPolyCoeffs_PFLAREINV(PC pc, PetscReal **coef
   after this call and may be freed or modified. It does not itself trigger a rebuild of the approximate inverse -
   combine with `PCPFLAREINVSetReusePolyCoeffs()` to have the next `PCSetUp()` reuse these coefficients.
 
+  For the Newton types the coefficients are the real and imaginary parts of the roots. Only roots that are exactly
+  zero are skipped when the polynomial is applied or built; any non-zero root, however small, is used.
+
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyCoeffs()`, `PCPFLAREINVSetReusePolyCoeffs()`
 @*/
 PetscErrorCode PCPFLAREINVSetPolyCoeffs(PC pc, PetscReal *coeffs, PetscInt rows, PetscInt cols)
