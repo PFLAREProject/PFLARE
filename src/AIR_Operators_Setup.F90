@@ -928,8 +928,29 @@ module air_operators_setup
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
-         call MatTranspose(air_data%restrictors(our_level), MAT_INITIAL_MATRIX, air_data%prolongators(our_level), ierr)
-         call MatDestroy(air_data%restrictors(our_level), ierr)
+
+         ! P can only be updated in place if it was created as the transpose of
+         ! this R in a previous setup and hasn't been repartitioned since
+         temp_mat = air_data%prolongators(our_level)
+         temp_is = air_data%reuse(our_level)%reuse_is(IS_REPARTITION)
+         if (reuse_grid_transfer .AND. .NOT. PetscObjectIsNull(temp_mat) .AND. &
+                  PetscObjectIsNull(temp_is)) then
+            call MatTranspose(air_data%restrictors(our_level), MAT_REUSE_MATRIX, air_data%prolongators(our_level), ierr)
+         else
+            call MatDestroy(air_data%prolongators(our_level), ierr)
+            call MatTranspose(air_data%restrictors(our_level), MAT_INITIAL_MATRIX, air_data%prolongators(our_level), ierr)
+            ! Any stored PtAP data refers to the old P, so it can't be reused
+            temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP)
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+            end if
+         end if
+
+         ! Keep R if we're reusing the grid transfer operators (only amount=3)
+         ! as the reuse in compute_R_from_Z and the transpose above need it
+         if (.NOT. air_data%options%reuse_sparsity .OR. air_data%options%reuse_amount < 3) then
+            call MatDestroy(air_data%restrictors(our_level), ierr)
+         end if
       end if
 
       ! ~~~~~~~~~~~
