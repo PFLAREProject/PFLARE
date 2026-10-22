@@ -147,6 +147,27 @@ for earlier changes please see the git history.
   distinct (unused) up smoother on each level. The product data of the setup
   temporaries is cleared when they aren't reused, and the smoothing temporary
   vectors on every level share one pool sized for the largest level
+- Fixed `-pc_air_symmetric` with `-pc_air_reuse_sparsity`, which segfaulted
+  at reuse amount 3 and errored (or reused a stale coarse operator) at amount
+  2 in parallel
+- Fixed `-pc_air_subcomm` aborting in serial, or when Aff is diagonal
+- Fixed the Newton basis on a subcomm, where adding extra roots for stability
+  gave mismatched MPI broadcast sizes
+- Fixed the Newton roots kept with `-pc_air_reuse_sparsity` mixing in the
+  extra roots of the previous setup, which could index out of bounds
+- Fixed the SAI least-squares solves on rank deficient (or empty) local
+  systems, which inserted garbage or stopped the program; they now use the
+  minimum norm solution
+- Fixed the assembled Newton inverses dividing by a numerically zero first
+  root, so they now match the matrix-free inverse
+- Fixed `-pc_air_improve_w_its`/`-pc_air_improve_z_its` doing nothing with
+  `-pc_air_matrix_free_polys` or `-pc_air_full_smoothing_up_and_down`; they
+  now use the inverse of the diagonal of Aff in those cases
+- Fixed the `newton_no_extra` matvec counts in `-pc_air_print_stats_timings`
+- The C `compute_cf_splitting` now skips symmetrizing for any nonzero
+  `skip_symmetrize`, as documented
+- Behaviour change: `PCAIRSetDDCFraction` (and `-pc_air_ddc_fraction`) now
+  errors for a fraction bigger than 1
 
 ## [v1.27.0]
 
