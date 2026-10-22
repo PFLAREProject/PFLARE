@@ -615,9 +615,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       PetscInt :: col, ncols, ifree, max_nnzs, ncols_mod, index1, index2
       PetscInt :: local_rows, local_cols, global_rows, global_cols, global_row_start 
-      PetscInt :: global_row_end_plus_one, max_nnzs_total_two
-      PetscInt :: global_col_start, global_col_end_plus_one, max_nnzs_total
-      PetscCount :: counter
+      PetscInt :: global_row_end_plus_one
+      PetscInt :: global_col_start, global_col_end_plus_one
+      ! The total nnzs (and twice them) can overflow a 32-bit PetscInt
+      PetscCount :: counter, max_nnzs_total, max_nnzs_total_two
       PetscErrorCode :: ierr
       integer :: errorcode, comm_size
       PetscInt, dimension(:), pointer :: cols => null(), cols_mod
@@ -1515,7 +1516,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       ! Get nnzs without using getrow
       call MatGetNNZs_both(input_mat, local_nnzs_petsc, offdiag_nnzs_petsc)
-      local_nnzs = local_nnzs_petsc + offdiag_nnzs_petsc
+      ! Widen before adding so this can't overflow with 32-bit PetscInt
+      local_nnzs = int(local_nnzs_petsc, kind=8) + int(offdiag_nnzs_petsc, kind=8)
 
       ! Do an accumulate if in parallel
       if (comm_size/=1) then
