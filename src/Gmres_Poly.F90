@@ -6,7 +6,7 @@ module gmres_poly
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
-         PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
+         PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
          PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
          PFLARE_REAL_KIND
    use matshell_data_type, only: mat_ctxtype
@@ -99,7 +99,6 @@ module gmres_poly
       integer, intent(out)                              :: matvecs
 
       integer :: i_loc
-      logical :: zero_root
       ! ~~~~~~       
       
       ! What order is our polynomial
@@ -108,17 +107,10 @@ module gmres_poly
       ! We may have zero roots with newton that are skipped
       if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
          do i_loc = 1, size(coefficients,1)
-            zero_root = .FALSE.
-            if (coefficients(i_loc,2) == 0d0) then
-               ! The size of the zero check here has to match that in 
-               ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
-               if (abs(coefficients(i_loc,1)) < PFLARE_TOL_ZERO) zero_root = .TRUE.
-            else
-               if (coefficients(i_loc,1)**2 + &
-                        coefficients(i_loc,2)**2 < PFLARE_TOL_ZERO) zero_root = .TRUE.
-            end if
-
-            if (zero_root) then
+            ! The zero check here has to match that in 
+            ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
+            ! ie only exactly zero real roots are skipped, a complex pair is never zero
+            if (coefficients(i_loc,1) == 0d0 .AND. coefficients(i_loc,2) == 0d0) then
                matvecs = matvecs - 1
             end if
          end do
