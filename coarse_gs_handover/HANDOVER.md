@@ -1,5 +1,14 @@
 # Handover: local Gauss-Seidel inside the AIRG coarse-grid solver (advection)
 
+**Branch:** `claude/coarse-gs-handover` on `PFLAREProject/PFLARE`, branched from `main` @ 4326ad1.
+It only adds this folder (`coarse_gs_handover/`); no library code has changed. Get it with
+`git fetch origin claude/coarse-gs-handover && git checkout claude/coarse-gs-handover`.
+
+**Requirement from the user: auto-truncation stays on** (`-pc_air_auto_truncate_start_level`,
+`-pc_air_auto_truncate_tol`). The fixed `-pc_air_max_levels` runs below are only a stand-in, used
+because auto-truncation can't currently evaluate an overridden coarse solver (see "PFLARE / PETSc
+behaviour"). The goal is a coarse solver that auto-truncation itself tests.
+
 ## Question
 Does putting a *local* (per-rank, block-Jacobi) forward Gauss-Seidel sweep into the coarse-grid
 solver make it strong enough to truncate the AIRG hierarchy much higher for advection, and how do
@@ -94,9 +103,10 @@ Coarse solver options compared:
 256^2, np=16 (oversubscribed, so ignore the times), k=10 (>= index 7): A goes 7/10/15/31/185 its at
 L=10/8/6/4/2, while B gives 6/6/5/1/1. This was run as GMRES(10) right-preconditioned with local
 SOR under FGMRES; Richardson behaves the same.
-With k=2 < index (partial run): at L=8, A takes 33 its and B takes 9 its.
-**Still to do: k = 2 and 4 at L = 6, 4, 2 with 16+ ranks.** This is the regime that matters at
-scale, where k is below 2*sqrt(P)-1.
+With k=2 < index (Richardson outer, stopped early): A takes 33 / 63 its and B takes 9 / 8 its at
+L = 8 / 6.
+**Still to do: k = 2 and 4 at lower L with 16+ ranks.** This is the regime that matters at
+scale, where k is below 2*sqrt(P)-1. The run was stopped because 16 ranks on 4 cores was too slow.
 
 ### E. Reordering (unstructured DG, `adv_dg_upwind -dm_plex_filename tests/data/square_unstruc.msh -dm_refine 2`)
 DMPlex ordering is **not** downstream: about 44% of the local block's Frobenius norm is above the
@@ -124,13 +134,24 @@ Results:
   The prefix is propagated in `PCSetUp_AIR_c` (`src/PCAIR.c` ~252).
 - Caveats with the override:
   - (a) PFLARE still builds the coarse polynomial, which is wasted setup.
-  - (b) Auto-truncation (`-pc_air_auto_truncate_*`) tests only PFLARE's own polynomial, never the
-    overriding solver. Truncate with `-pc_air_max_levels` instead.
+  - (b) Auto-truncation (`-pc_air_auto_truncate_*`, `src/AIR_MG_Setup.F90` ~156-260) builds and
+    tests only PFLARE's own polynomial on each candidate level, never the `-mg_coarse_*` solver.
+    With auto-truncation on and a `-mg_coarse_*` override, the hierarchy is cut where the
+    *polynomial* passes, and the GS solver is then applied there. That is safe but truncates no
+    higher than today. The `-pc_air_max_levels` runs here only emulate what a GS-aware
+    auto-truncation would choose. **Using auto-truncation (required) means implementing the GS
+    coarse solver inside PFLARE**, so the auto-truncation test applies it (step 4 below).
   - (c) The PCAIR view still prints "Coarse grid solver: GMRES polynomial ...", and the printed
     complexities assume it.
   - (d) The coarse KSP default is left preconditioning with norm NONE; pass
     `-mg_coarse_ksp_pc_side right` for GMRES.
-  - (e) A coarse GMRES is nonlinear, so the outer solver must be FGMRES.
+  - (e) A coarse KSPGMRES with fixed k iterations is a *different* polynomial for every RHS:
+    its coefficients come from minimising that particular residual. The V-cycle is then a
+    nonlinear, varying operator, and an outer Richardson or GMRES (which assume a fixed linear
+    preconditioner) can stall or lose optimality, so it needs a flexible outer method (FGMRES or
+    GCR). PFLARE's coarse polynomial is computed once at setup and is linear, so it doesn't have
+    this problem, and neither does Richardson(k) + local GS. That is one more reason to use that
+    form.
 - **KSPRichardson + PCSOR uses `PCApplyRichardson`.** It runs all `max_it` sweeps inside MatSOR
   without residual checks: exactly k block-GS sweeps on the coarse grid, which is what we want.
   For an outer solve it ignores rtol and reports CONVERGED_ITS. MatSOR_MPIAIJ with
@@ -155,8 +176,9 @@ Results:
    scaled, U = diagonal), so this equals block-GS. PETSc's Kokkos ILU path uses Kokkos-Kernels
    SpTRSV on device. Combine it with `-mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it k`
    and confirm the iteration counts match the SOR runs on CPU first.
-3. **Weak-scale (P from 8 to 1000s of GCDs)** with k fixed and k ~ sqrt(P), sweeping
-   `-pc_air_max_levels`. Measure iterations, solve time, and time per coarse application split
+3. **Weak-scale (P from 8 to 1000s of GCDs)** with k fixed and k ~ sqrt(P). Until step 4
+   exists, `-pc_air_max_levels` sweeps are only an exploratory proxy for where a GS-aware
+   auto-truncation would cut; the final comparison must use auto-truncation for both solvers. Measure iterations, solve time, and time per coarse application split
    into SpTRSV levels vs SpMV + halo. Compare against the paper's best truncated Newton-mf
    configuration.
    - Expected trade-off: GS iteration counts stay low when truncating, but each sweep costs about
@@ -165,11 +187,13 @@ Results:
      nilpotency index.
    - Kokkos-Kernels SpTRSV options (level-set vs "chain" mode that merges small levels into one
      kernel) matter here.
-4. If it's worth it, implement it in PFLARE:
-   - A coarsest option `-pc_air_coarsest_local_gs` that does Richardson(k) with the local block
-     solve, with the topological reordering from section E on the fine level carried to the
-     C-points.
-   - Make auto-truncation evaluate that solver.
+4. **Implement it in PFLARE; this is needed to keep auto-truncation on:**
+   - A coarsest option (e.g. `-pc_air_coarsest_local_gs`) that does Richardson(k) with the local
+     block solve, with the topological reordering from section E on the fine level carried to
+     the C-points.
+   - Make the auto-truncation loop build and apply exactly that solver when it tests a level.
+     Today it calls start/finish_approximate_inverse plus a MatMult residual check on the
+     polynomial only.
    - Make the Newton/Arnoldi construction detect early breakdown, or fall back to (1-z)^k, when
      the preconditioned operator is near-nilpotent.
 
