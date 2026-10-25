@@ -100,11 +100,8 @@ Coarse solver options compared:
 | 6 | 40 | 5 | 200 | 18 |
 | 4 | 86 | 5 | 127 | 43 |
 
-256^2, np=16 (oversubscribed, so ignore the times), k=10 (>= index 7): A goes 7/10/15/31/185 its at
-L=10/8/6/4/2, while B gives 6/6/5/1/1. This was run as GMRES(10) right-preconditioned with local
-SOR under FGMRES; Richardson behaves the same.
-With k=2 < index (Richardson outer, stopped early): A takes 33 / 63 its and B takes 9 / 8 its at
-L = 8 / 6.
+256^2, np=16 (oversubscribed, so ignore the times), k=2 < index 7, stopped early: A takes
+33 / 63 its and B takes 9 / 8 its at L = 8 / 6.
 **Still to do: k = 2 and 4 at lower L with 16+ ranks.** This is the regime that matters at
 scale, where k is below 2*sqrt(P)-1. The run was stopped because 16 ranks on 4 cores was too slow.
 
@@ -143,22 +140,17 @@ Results:
     coarse solver inside PFLARE**, so the auto-truncation test applies it (step 4 below).
   - (c) The PCAIR view still prints "Coarse grid solver: GMRES polynomial ...", and the printed
     complexities assume it.
-  - (d) The coarse KSP default is left preconditioning with norm NONE; pass
-    `-mg_coarse_ksp_pc_side right` for GMRES.
-  - (e) A coarse KSPGMRES with fixed k iterations is a *different* polynomial for every RHS:
-    its coefficients come from minimising that particular residual. The V-cycle is then a
-    nonlinear, varying operator, and an outer Richardson or GMRES (which assume a fixed linear
-    preconditioner) can stall or lose optimality, so it needs a flexible outer method (FGMRES or
-    GCR). PFLARE's coarse polynomial is computed once at setup and is linear, so it doesn't have
-    this problem, and neither does Richardson(k) + local GS. That is one more reason to use that
-    form.
+  - (d) Don't use a Krylov coarse KSP (e.g. `-mg_coarse_ksp_type gmres`). It builds a different
+    polynomial for every RHS, which is not the PFLARE GMRES polynomial being studied, and it makes
+    the V-cycle nonlinear. Coarse solvers here must stay fixed linear operators: PFLARE's
+    polynomial, or Richardson(k) + local GS.
 - **KSPRichardson + PCSOR uses `PCApplyRichardson`.** It runs all `max_it` sweeps inside MatSOR
   without residual checks: exactly k block-GS sweeps on the coarse grid, which is what we want.
   For an outer solve it ignores rtol and reports CONVERGED_ITS. MatSOR_MPIAIJ with
   SOR_LOCAL_FORWARD_SWEEP does a ghost update plus a local sweep each iteration, which is block-GS
   Richardson.
 - `local_backward` on a lower-triangular matrix has no strictly-upper part, so it degenerates to
-  Jacobi. It gave identical iteration counts to no PC.
+  Jacobi.
 - Unrelated test-driver failures at np=4 in the CI image (not investigated):
   - `adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4` gives "No quadrature for celltype unknown".
   - `adv_dg_upwind -dm_plex_filename .../square_unstruc.msh -dm_refine 2 -curved_velocity` is
@@ -205,7 +197,6 @@ Results:
   counts. Needs scipy.
 - `ranges.py`: prints the per-rank ownership of the dumped matrix (run under `mpirun -n np`).
 - `tri.py`: checks triangularity of the local blocks.
-- `mg.sh np grid k "Ls"`: FGMRES V-cycle study with GMRES/SOR coarse.
 - `mg2.sh np grid k "Ls"`: Richardson V-cycle study, Newton-mf vs Richardson+local SOR, with times.
 
 The scripts assume the CI image with the repo mounted at `/work/PFLARE` and this folder at
