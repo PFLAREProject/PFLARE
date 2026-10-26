@@ -196,9 +196,9 @@ PETSC_INTERN PetscErrorCode reset_air_data(air_multigrid_data *air_data, const P
             if (!reuse || air_data->options.reuse_amount < 3) {
 
                PetscCall(MatDestroy(&air_data->prolongators[our_level]));
-               if (!air_data->options.symmetric) {
-                  PetscCall(MatDestroy(&air_data->restrictors[our_level]));
-               }
+               // When symmetric R is only kept between setups at amount=3,
+               // otherwise this is null already
+               PetscCall(MatDestroy(&air_data->restrictors[our_level]));
                PetscCall(reset_inverse_mat(&air_data->inv_A_ff[our_level]));
                PetscCall(MatDestroy(&air_data->A_ff[our_level]));
                PetscCall(MatDestroy(&air_data->A_fc[our_level]));
