@@ -621,9 +621,10 @@ PETSC_INTERN PetscErrorCode remove_from_sparse_match_cpu(Mat input_mat, Mat outp
    // ~~~~~~~~~~
    PetscInt col, ncols, ifree, max_nnzs, ncols_mod, index1, index2;
    PetscInt local_rows, local_cols, global_rows, global_cols, global_row_start;
-   PetscInt global_row_end_plus_one, max_nnzs_total_two;
-   PetscInt global_col_start, global_col_end_plus_one, max_nnzs_total;
-   PetscCount counter;
+   PetscInt global_row_end_plus_one;
+   PetscInt global_col_start, global_col_end_plus_one;
+   // The total nnzs (and twice them) can overflow a 32-bit PetscInt
+   PetscCount counter, max_nnzs_total, max_nnzs_total_two;
    PetscMPIInt comm_size;
    const PetscInt *cols = NULL;
    PetscInt *cols_mod;
@@ -1510,8 +1511,8 @@ PETSC_INTERN PetscErrorCode get_nnzs_petsc_sparse(Mat input_mat, PetscInt64 *nnz
 
    // Get nnzs without using getrow
    PetscCall(MatGetNNZs_both(input_mat, &local_nnzs_petsc, &offdiag_nnzs_petsc));
-   // The sum is a PetscInt, as in the Fortran, and is then widened
-   local_nnzs = local_nnzs_petsc + offdiag_nnzs_petsc;
+   // Widen before adding so this can't overflow with 32-bit PetscInt
+   local_nnzs = (PetscInt64)local_nnzs_petsc + (PetscInt64)offdiag_nnzs_petsc;
 
    // Do an accumulate if in parallel
    if (comm_size != 1) {
