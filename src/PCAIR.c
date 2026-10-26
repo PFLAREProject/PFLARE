@@ -2138,7 +2138,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
 
   Input Parameters:
 + pc         - the `PCAIR` preconditioner context
-- input_real - the local fraction of F points to convert to C points, or (if negative) minus the diagonal-dominance ratio threshold
+- input_real - the local fraction of F points to convert to C points (at most 1), or (if negative) minus the diagonal-dominance ratio threshold
 
   Options Database Key:
 . -pc_air_ddc_fraction fraction - local fraction of F points converted to C by diagonal dominance; if negative, convert any row whose diagonal-dominance ratio is less than the absolute value; defaults to 0.1
@@ -2157,6 +2157,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // A positive value is a fraction of the local F points, so can't be more than all of them
+   PetscCheck(input_real <= 1.0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "DDC fraction %g must be <= 1", (double)input_real);
    PetscCall(PCAIRGetDDCFraction(pc, &old_real));
    if (old_real == input_real) PetscFunctionReturn(PETSC_SUCCESS);
 

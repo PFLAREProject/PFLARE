@@ -338,7 +338,7 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
-	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3"
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1"
 	./pcair_reuse_amount_range
 #
 	@echo ""
@@ -1134,7 +1134,7 @@ else
 	 -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
-	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1 in parallel"
 	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
 #
 	@echo ""
