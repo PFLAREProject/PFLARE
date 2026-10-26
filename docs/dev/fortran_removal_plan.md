@@ -455,6 +455,35 @@ type instead of a flag, `calculate_l1_jacobi_inverse_diagonal` is new in
 `l1jacobi` as the Aff, C point and coarsest inverse and the CR splitting with
 `l1jacobi` and `wjacobi`.
 
+The second merge, after the port was complete (`claude/fortran-port-merge-main-2`, from
+stage 10), brought in PRs 302 and 303: the 20 commits on `main` from `80bdcff` to `ffd022f`
+(`930ff27..4326ad1`), which fix most of the Fortran defects the port had found and make the
+Newton roots independent of the scale of the operator. As there is no Fortran reference any
+more, each `main` commit got one "Port to C:" commit that re-ports its Fortran hunks into the
+C routine of the same name and applies its other hunks (tests, Kokkos kernel, `PCAIR.c`,
+`PCPFLAREINV.c`, `CHANGELOG.md`) as they are, then `main` was merged with no file changed by
+the merge. Where the code lives now: `MatMPICreateNonemptySubcomm_c` (`a36961f`) is in
+`Repartition.c`; the `skip_symmetrize` binding (`3fe9883`) is the C `compute_cf_splitting` in
+`PCAIR.c`; the DDC fraction check (`69d780d`) is in the C `PCAIRSetDDCFraction`, which the
+Fortran interface binds to; `PFLARE_TOL_ZERO` (`8cf7fca`) went from `pflare_parameters.h`
+and `src/fortran/Pflare_Parameters.F90`, and the `tol_zero` argument from
+`Gmres_Poly_Newtonk.h`; `SAI_Z.c` includes `Gmres_Poly.h` for `LAPACKgelsd_` (`1509aaf`);
+the Fortran `range()` of `a0e3160` is computed as gfortran defines it,
+`int(min(log10(huge), -log10(tiny)))`. Each port commit was checked in the `gnu_opt` image
+against `main` at the same commit (golden logs of both, `main` captured with its own
+`tests/Makefile`, so the new tests are in both): 575 to 587 commands per pair, 0 differences
+at the default tolerance and, at `--res-rtol 0`, only the documented 4-rank
+`adv_diff_fd ... agg` variation, with `make check` and `make tests_short` passing and no
+warnings on either side.
+On the merged head, against `4326ad1`: the golden logs of `gnu_debug` and `gnu_opt` (587
+commands) have 0 differences (at `--res-rtol 0` only the same 4-rank command), and those of
+`gnu_opt_kokkos` (595 commands, `PFLARE_KOKKOS_DEBUG=1`) are identical even at `--res-rtol 0`;
+`make check`, `make tests_short`, `make python`, `make tests` and `make install` pass with no
+warnings in both GNU images (and `run_parse_tests.py` in `gnu_opt`), as do `make check` and
+`make tests` in the Kokkos image, the single precision Kokkos prefix build and the Intel image,
+and the Docker builds of the two no-Fortran jobs and of the `gnu_debug` sanitizer job (no
+sanitizer report). The new tests are clean under valgrind in the debug image.
+
 Every stage brief has the same closing requirement: build warning-free in the
 debug and opt GNU images (and the Kokkos image where the stage says so), run
 layer A, run layers B and C where listed, and report the results verbatim in
