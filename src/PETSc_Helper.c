@@ -1618,8 +1618,7 @@ PETSC_INTERN PetscErrorCode pseudo_inv(const PetscScalar input[], PetscInt input
    // ~~~~~~~~~~~~~~~~
 
    // Matrix entries are PetscScalar; singular values (sigma) are genuinely real
-   // The pseudo inverse of an m x n matrix is n x m (this routine assumes
-   // square input, see the gemm below)
+   // The pseudo inverse of an m x n matrix is n x m
    // The arrays are column-major, input is input_rows x input_cols and
    // output is input_cols x input_rows
    PetscScalar *U;
@@ -1629,7 +1628,7 @@ PETSC_INTERN PetscErrorCode pseudo_inv(const PetscScalar input[], PetscInt input
    PetscInt iloc, jloc, n_sigma;
    PetscReal sigma_max, sigma_cutoff;
    // Kind-correct BLAS integer/real arguments for the dgemm call
-   PetscBLASInt n_bl, lda_bl;
+   PetscBLASInt m_bl, n_bl, k_bl;
    PetscScalar blas_one, blas_zero;
 
    // ~~~~~~~~~~~~~~~~
@@ -1666,7 +1665,8 @@ PETSC_INTERN PetscErrorCode pseudo_inv(const PetscScalar input[], PetscInt input
    }
    sigma_cutoff = PetscMax(PFLARE_TOL_SIGMA_DROP,
                       PFLARE_TOL_SIGMA_DROP_REL * sigma_max);
-   for (iloc = 0; iloc < input_rows; iloc++) {
+   // There are only min(m, n) singular values
+   for (iloc = 0; iloc < n_sigma; iloc++) {
       if (PetscAbsReal(sigma[iloc]) > sigma_cutoff) {
          for (jloc = 0; jloc < input_rows; jloc++) U[jloc + iloc * input_rows] = U[jloc + iloc * input_rows] / sigma[iloc];
       } else {
@@ -1675,14 +1675,17 @@ PETSC_INTERN PetscErrorCode pseudo_inv(const PetscScalar input[], PetscInt input
    }
 
    // Do the matmatmult, making sure to transpose both
-   PetscCall(PetscBLASIntCast(input_rows, &n_bl));
-   PetscCall(PetscBLASIntCast(input_rows, &lda_bl));
+   // output = V(:, 1:k) * inv(sigma) * U(:, 1:k)^T, with k = min(m, n),
+   // ie the first k rows of VT and the first k (scaled) columns of U
+   PetscCall(PetscBLASIntCast(input_rows, &m_bl));
+   PetscCall(PetscBLASIntCast(input_cols, &n_bl));
+   PetscCall(PetscBLASIntCast(n_sigma, &k_bl));
    blas_one = 1.0;
    blas_zero = 0.0;
-   PetscCallBLAS("BLASgemm", BLASgemm_("T", "T", &n_bl, &n_bl, &n_bl,
-            &blas_one, VT, &lda_bl,
-            U, &lda_bl,
-            &blas_zero, output, &lda_bl));
+   PetscCallBLAS("BLASgemm", BLASgemm_("T", "T", &n_bl, &m_bl, &k_bl,
+            &blas_one, VT, &n_bl,
+            U, &m_bl,
+            &blas_zero, output, &n_bl));
 
    // nan check
    for (iloc = 0; iloc < input_rows * input_cols; iloc++) {
