@@ -139,7 +139,7 @@ PETSC_INTERN PetscErrorCode compute_mf_gmres_poly_num_matvecs(int inverse_type, 
    *matvecs = (int)coefficients_rows;
 
    // We may have zero roots with newton that are skipped
-   if (inverse_type == PFLAREINV_NEWTON) {
+   if (inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA) {
       for (i_loc = 0; i_loc < coefficients_rows; i_loc++) {
          zero_root = PETSC_FALSE;
          if (coefficients[i_loc + coefficients_rows] == 0.0) {
