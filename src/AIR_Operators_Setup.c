@@ -913,22 +913,17 @@ PETSC_INTERN PetscErrorCode finish_comms_compute_restrict_prolong(Mat A, int our
    // Transpose the restrictor if needed
    if (air_data->options.symmetric) {
 
-      // P can only be updated in place if it was created as the transpose of
-      // this R in a previous setup and hasn't been repartitioned since
-      if (reuse_grid_transfer && air_data->prolongators[our_level] &&
-               !air_data->reuse[our_level].reuse_is[IS_REPARTITION]) {
-         PetscCall(MatTranspose(air_data->restrictors[our_level], MAT_REUSE_MATRIX, &air_data->prolongators[our_level]));
-      } else {
-         PetscCall(MatDestroy(&air_data->prolongators[our_level]));
-         PetscCall(MatTranspose(air_data->restrictors[our_level], MAT_INITIAL_MATRIX, &air_data->prolongators[our_level]));
-         // Any stored PtAP data refers to the old P, so it can't be reused
-         if (air_data->reuse[our_level].reuse_mat[MAT_RAP]) {
-            PetscCall(MatDestroy(&air_data->reuse[our_level].reuse_mat[MAT_RAP]));
-         }
+      // We always rebuild P rather than use MatTranspose with MAT_REUSE_MATRIX, as that
+      // gives a stale P with mpiaijkokkos once R has been updated in place on the device
+      PetscCall(MatDestroy(&air_data->prolongators[our_level]));
+      PetscCall(MatTranspose(air_data->restrictors[our_level], MAT_INITIAL_MATRIX, &air_data->prolongators[our_level]));
+      // The stored PtAP product refers to the old P, so it can't be reused
+      if (air_data->reuse[our_level].reuse_mat[MAT_RAP]) {
+         PetscCall(MatDestroy(&air_data->reuse[our_level].reuse_mat[MAT_RAP]));
       }
 
       // Keep R if we're reusing the grid transfer operators (only amount=3)
-      // as the reuse in compute_R_from_Z and the transpose above need it
+      // as the reuse in compute_R_from_Z needs it
       if (!air_data->options.reuse_sparsity || air_data->options.reuse_amount < 3) {
          PetscCall(MatDestroy(&air_data->restrictors[our_level]));
       }
