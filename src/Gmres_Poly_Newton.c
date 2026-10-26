@@ -471,8 +471,6 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
 
    PetscFunctionBegin;
 
-   (void)coefficients_cols;
-
    // This is how many columns we have in K_m
    subspace_size = poly_order + 1;
 
@@ -488,6 +486,16 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
    PetscCall(MatGetLocalSize(matrix, &local_rows, &local_cols));
 
    PetscCheck(subspace_size <= global_rows, MPI_COMM_MATRIX, PETSC_ERR_ARG_SIZ, "The input subspace size is greater than the matrix size");
+
+   // If we're reusing, coefficients may still be sized for the extra roots
+   // added in a previous setup, so make sure we start from p+1 roots
+   // Otherwise the old roots would be included in the clustering below
+   if (*coefficients_rows != poly_order + 1) {
+      PetscCall(PetscFree(*coefficients));
+      *coefficients_rows = poly_order + 1;
+      *coefficients_cols = 2;
+      PetscCall(PetscMalloc1((poly_order + 1) * 2, coefficients));
+   }
 
    ld_h = poly_order + 2;
    PetscCall(PetscMalloc1((poly_order + 2) * (poly_order + 1), &H_n));
@@ -1662,9 +1670,6 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse(Mat matrix, in
 
             // Have to dynamically allocate this
             PetscCall(create_mat_ctx(&mat_ctx_scaled));
-            mat_ctx_scaled->real_roots = &coefficients[0];
-            mat_ctx_scaled->imag_roots = &coefficients[coefficients_rows];
-            mat_ctx_scaled->roots_size = coefficients_rows;
 
             // Create the matshell
             PetscCall(MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols,
@@ -1712,6 +1717,10 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse(Mat matrix, in
          mat_ctx_scaled->mat = matrix;
          mat_ctx_scaled->coefficients = &coefficients[0];
          mat_ctx_scaled->coefficients_size = 2 * coefficients_rows;
+         // The coefficients may have been reallocated since the last setup
+         mat_ctx_scaled->real_roots = &coefficients[0];
+         mat_ctx_scaled->imag_roots = &coefficients[coefficients_rows];
+         mat_ctx_scaled->roots_size = coefficients_rows;
 
          // Get the diagonal
          PetscCall(MatGetDiagonal(matrix, mat_ctx->mf_temp_vec[MF_VEC_DIAG]));
