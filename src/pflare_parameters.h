@@ -234,8 +234,8 @@
 #define PFLARE_TOL_LUCKY_VALUE          PFLARE_SINGLE_LITERAL(1e-20)
 /* remove_small "drop essentially nothing" sentinel (1d-100 underflows single) */
 #define PFLARE_SENTINEL_DROP_VALUE      PFLARE_SINGLE_LITERAL(1e-30)
-/* Leja-ordering perturbation for duplicate added roots (Gmres_Poly_Newton) -
-   5e-8 underflows single eps (~1.19e-7), so duplicates would stay bit-identical */
+/* Leja-ordering perturbation for duplicate added roots (Gmres_Poly_Newton), relative to the
+   smallest root - 5e-8 underflows single eps (~1.19e-7), so duplicates would stay bit-identical */
 #define PFLARE_TOL_LEJA_PERTURB_VALUE   PFLARE_SINGLE_LITERAL(1e-4)
 #else
 /* Double branch - EXACT previous literals (bit-identical double builds), including
@@ -260,6 +260,7 @@
 #define PFLARE_KSP_ATOL_COARSE_VALUE    PFLARE_DOUBLE_LITERAL(1,13)
 #define PFLARE_KSP_RTOL_COARSE_VALUE    PFLARE_DOUBLE_LITERAL(1,3)
 #define PFLARE_KSP_ATOL_OFF_VALUE       PFLARE_DOUBLE_LITERAL(1,50)
+/* Absolute, but far enough out that it doesn't affect the scale invariance of the Newton roots in practice */
 #define PFLARE_TOL_LUCKY_VALUE          PFLARE_DOUBLE_LITERAL(1,30)
 #define PFLARE_SENTINEL_DROP_VALUE      PFLARE_DOUBLE_LITERAL(1,100)
 #define PFLARE_TOL_LEJA_PERTURB_VALUE   PFLARE_SINGLE_LITERAL(5e-8)

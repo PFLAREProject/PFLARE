@@ -114,8 +114,14 @@ PETSC_INTERN PetscErrorCode modified_leja(PetscReal real_roots[], PetscReal imag
             a = real_roots[i_loc] - real_roots[(*indices)[k_loc]];
             b = imag_roots[i_loc] - imag_roots[(*indices)[k_loc]];
 
-            // If we have repeated roots this will be exactly zero, and magnitude will be -infinity
+            // If we have repeated roots this will be exactly zero, and the product
+            // of differences is zero - we set the log of it to -huge rather than
+            // computing log10(0) = -infinity, which raises a floating point exception
             squares = a * a + b * b;
+            if (squares == 0.0) {
+               magnitude[i_loc] = -PETSC_MAX_REAL;
+               break;
+            }
             magnitude[i_loc] = magnitude[i_loc] + PetscLog10Real(PetscSqrtReal(squares));
          }
 
@@ -302,6 +308,9 @@ PETSC_INTERN PetscErrorCode compute_extra_roots(PetscReal real_roots[], PetscRea
    PetscReal a, b, c, d, div_real, div_imag, div_mag;
    PetscReal *pof;
    int *extra_pair_roots, *overflow;
+   // The decimal exponent range of pof, as the Fortran range(pof(k_loc)), ie
+   // int(min(log10(huge), -log10(tiny))), 307 in double and 37 in single
+   const int pof_range = (int)PetscMin(PetscLog10Real(PETSC_MAX_REAL), -PetscLog10Real(PETSC_REAL_MIN));
    // ~~~~~~
 
    PetscFunctionBegin;
@@ -355,7 +364,9 @@ PETSC_INTERN PetscErrorCode compute_extra_roots(PetscReal real_roots[], PetscRea
          // reset pof back to one
          // We can hit this for very high order polynomials, where we have to
          // add more roots than 22 (ie pof > 1e308)
-         if (PetscLog10Real(pof[k_loc]) + PetscLog10Real(div_mag) > 307) {
+         // range gives the decimal exponent range of pof, ie 307 in double and 37 in single
+         // In single pof can overflow at much lower order
+         if (PetscLog10Real(pof[k_loc]) + PetscLog10Real(div_mag) > pof_range) {
             overflow[k_loc] = overflow[k_loc] + (int)PetscLog10Real(pof[k_loc]);
             pof[k_loc] = 1;
          }
@@ -466,7 +477,7 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
    Vec w_j;
    Vec *V_n;
    PetscBool use_harmonic_ritz = PETSC_TRUE;
-   PetscReal rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm;
+   PetscReal rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm, perturb_scale;
    // ~~~~~~
 
    PetscFunctionBegin;
@@ -605,6 +616,17 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
    // ie either compute the Ritz or Harmonic Ritz values
    // ~~~~~~~~~~~~~~
 
+   // The tolerances that control the clustering below are relative to ||H||
+   // This has to be computed before the eigenvalue solve, as PFLAREgeev overwrites H_n
+   // (after balancing, and at higher order with values that don't scale with the matrix)
+   // (norm2 of the square section H_n(1:m,1:m), taken in Fortran array element order)
+   PetscCall(PetscMalloc1(PetscMax(m * m, 1), &H_n_square));
+   for (j_loc = 0; j_loc < m; j_loc++) {
+      for (i_loc = 0; i_loc < m; i_loc++) H_n_square[i_loc + j_loc * m] = H_n[i_loc + j_loc * ld_h];
+   }
+   H_norm = fortran_norm2(H_n_square, m * m);
+   PetscCall(PetscFree(H_n_square));
+
    PetscCall(PetscMalloc1(1, &work));
    lwork = -1;
 
@@ -636,15 +658,9 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
    // ~~~~~~~~~~~~~~
 
    // These are the tolerances that control the clustering
-   // These are all relative to ||H||, which scales with the matrix, so the
-   // roots (and hence the polynomial) do not depend on the scale of the matrix
-   // (norm2 of the square section H_n(1:m,1:m), taken in Fortran array element order)
-   PetscCall(PetscMalloc1(PetscMax(m * m, 1), &H_n_square));
-   for (j_loc = 0; j_loc < m; j_loc++) {
-      for (i_loc = 0; i_loc < m; i_loc++) H_n_square[i_loc + j_loc * m] = H_n[i_loc + j_loc * ld_h];
-   }
-   H_norm = fortran_norm2(H_n_square, m * m);
-   PetscCall(PetscFree(H_n_square));
+   // These are all relative to ||H|| (computed above, before H_n is overwritten),
+   // which scales with the matrix, so the roots (and hence the polynomial)
+   // do not depend on the scale of the matrix
    rel_tol = PetscSqrtReal(PFLARE_EPS);
    abs_tol = PFLARE_EPS * H_norm;
 
@@ -727,6 +743,19 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
       }
 
       // Perturb the extra roots so they have unique values for the leja sort
+      // The perturbation is relative to the smallest (non-zero) root, so the ordering
+      // doesn't depend on the scale of the matrix, while keeping the perturbation
+      // negligible relative to every root
+      // A larger perturbation (e.g., relative to the biggest root, ||H|| or each root)
+      // makes the copies look well separated, so the leja ordering pulls them
+      // forward, which destabilises high order polynomials
+      // If the perturbation is lost to rounding on a big root, the copies are exact
+      // duplicates, which modified_leja handles
+      perturb_scale = PETSC_MAX_REAL;
+      for (i_loc = 0; i_loc < n_added; i_loc++) {
+         perturb_scale = PetscMin(perturb_scale, PetscSqrtReal(real_roots_added[i_loc] * real_roots_added[i_loc] +
+                  imag_roots_added[i_loc] * imag_roots_added[i_loc]));
+      }
       counter = numerical_order;
       for (i_loc = 0; i_loc < numerical_order; i_loc++) {
          k_loc = 0;
@@ -735,7 +764,7 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
             if (real_roots_added[j_loc] == coefficients_temp[i_loc] &&
                 PetscAbsReal(imag_roots_added[j_loc]) == PetscAbsReal(coefficients_temp[i_loc + ld_temp])) {
                k_loc = k_loc + 1;
-               perturbed_real[j_loc] = real_roots_added[j_loc] + (PetscReal)k_loc * (PetscReal)PFLARE_TOL_LEJA_PERTURB;
+               perturbed_real[j_loc] = real_roots_added[j_loc] + (PetscReal)k_loc * (PetscReal)PFLARE_TOL_LEJA_PERTURB * perturb_scale;
             }
          }
       }

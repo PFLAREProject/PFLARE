@@ -243,8 +243,8 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_TOL_LUCKY          = PFLARE_TOL_LUCKY_VALUE
    ! remove_small "drop essentially nothing" sentinel (1d-100 underflows single)
    PetscReal, parameter :: PFLARE_SENTINEL_DROP      = PFLARE_SENTINEL_DROP_VALUE
-   ! Leja-ordering perturbation for duplicate added roots (Gmres_Poly_Newton) -
-   ! 5e-8 underflows single eps (~1.19e-7), so duplicates would stay bit-identical
+   ! Leja-ordering perturbation for duplicate added roots (Gmres_Poly_Newton), relative to the
+   ! smallest root - 5e-8 underflows single eps (~1.19e-7), so duplicates would stay bit-identical
    PetscReal, parameter :: PFLARE_TOL_LEJA_PERTURB   = PFLARE_TOL_LEJA_PERTURB_VALUE
 
 end module pflare_parameters

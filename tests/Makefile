@@ -838,7 +838,7 @@ run_tests_no_load_short_serial:
 #
 	@echo ""
 	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
-# Skipped in single as there the roots' real parts are not below the zero tolerance
+# Skipped in single as there the order 40 polynomial is unstable and the solve does not converge
 	$(SKIP_SINGLE) ./newton_imag_roots
 	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply"
 	./newton_zero_roots
