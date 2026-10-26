@@ -262,6 +262,7 @@ PETSC_INTERN PetscErrorCode start_approximate_inverse(Mat matrix, int inverse_ty
    VecType vtype;
    PetscInt local_rows, local_cols, global_rows, global_cols;
    PetscMPIInt count;
+   PetscInt n_roots;
    mat_ctxtype *mat_ctx_da;
    // ~~~~~~
 
@@ -419,6 +420,17 @@ PETSC_INTERN PetscErrorCode start_approximate_inverse(Mat matrix, int inverse_ty
 
       // Gmres polynomial with Newton basis - Can only use matrix-free
       } else if (inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA) {
+
+         // The ranks on the subcomm may have resized coefficients to hold extra roots
+         // so the ranks not on the subcomm need to match that size before the broadcast
+         n_roots = *coefficients_rows;
+         PetscCallMPI(MPI_Bcast(&n_roots, 1, MPIU_INT, 0, MPI_COMM_MATRIX));
+         if (n_roots != *coefficients_rows) {
+            PetscCall(PetscFree(*coefficients));
+            *coefficients_rows = n_roots;
+            *coefficients_cols = 2;
+            PetscCall(PetscMalloc1(n_roots * 2, coefficients));
+         }
 
          // Have to broadcast the 2D real and imaginary roots
          PetscCall(PetscMPIIntCast(*coefficients_rows * *coefficients_cols, &count));
