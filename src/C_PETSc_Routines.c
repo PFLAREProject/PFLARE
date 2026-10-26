@@ -413,3 +413,181 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Local triangular solve coarse-grid solver
+// A fixed number of Richardson iterations on A x = b preconditioned by an ILU(0) factorisation
+// of the local (on-rank) diagonal block of A, ie block Jacobi with ILU(0) on each block
+// If the local block is lower triangular (eg upwind advection in a downstream ordering, which
+// AIR coarse grids inherit from the top grid) then ILU(0) is exact and the preconditioner
+// is a local forward Gauss-Seidel sweep
+// This is a fixed linear operator (zero initial guess, no norms), so it can be used as the
+// coarse grid solver in a V-cycle and tested by the auto truncation like the polynomials
+// The triangular solves either use the default factorisation for the matrix type (Kokkos-Kernels
+// SpTRSV for aijkokkos) or hipSPARSE on a hipSPARSE copy of the local block
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+typedef struct {
+   Mat       A;          // the operator (we hold a reference)
+   Mat       A_local;    // hipSPARSE copy of the local block if used
+   Mat       factor;     // ILU(0) factor of the local block
+   Vec       r, w;       // parallel work vectors
+   Vec       b_local, x_local; // sequential wrappers of the local parts
+   PetscInt  its;
+   PetscBool hipsparse;
+} LocalTriCtx;
+
+static PetscErrorCode LocalTriCtxDestroy(void *ctx_ptr)
+{
+   LocalTriCtx *ctx = *(LocalTriCtx **)ctx_ptr;
+
+   PetscFunctionBegin;
+   PetscCall(MatDestroy(&ctx->A));
+   PetscCall(MatDestroy(&ctx->A_local));
+   PetscCall(MatDestroy(&ctx->factor));
+   PetscCall(VecDestroy(&ctx->r));
+   PetscCall(VecDestroy(&ctx->w));
+   PetscCall(VecDestroy(&ctx->b_local));
+   PetscCall(VecDestroy(&ctx->x_local));
+   PetscCall(PetscFree(ctx));
+   *(LocalTriCtx **)ctx_ptr = NULL;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// y = M^-1 x with M the block diagonal ILU(0)
+static PetscErrorCode LocalTriApplyPC(LocalTriCtx *ctx, Vec x, Vec y)
+{
+   PetscFunctionBegin;
+   if (ctx->hipsparse)
+   {
+      // Wrap the device pointers of the (kokkos) vectors in hip vectors so the
+      // hipSPARSE solve runs on the device with no copies
+      // Kokkos in PETSc runs on PETSc's default hip stream so the solve is stream ordered
+      const PetscScalar *x_array;
+      PetscScalar *y_array;
+      PetscMemType mtype_x, mtype_y;
+      PetscCall(VecGetArrayReadAndMemType(x, &x_array, &mtype_x));
+      PetscCall(VecGetArrayWriteAndMemType(y, &y_array, &mtype_y));
+      PetscCheck(PetscMemTypeDevice(mtype_x) && PetscMemTypeDevice(mtype_y), PETSC_COMM_SELF, PETSC_ERR_SUP, "hipSPARSE local triangular solve needs device vectors");
+      PetscCall(VecHIPPlaceArray(ctx->b_local, x_array));
+      PetscCall(VecHIPPlaceArray(ctx->x_local, y_array));
+      PetscCall(MatSolve(ctx->factor, ctx->b_local, ctx->x_local));
+      PetscCall(VecHIPResetArray(ctx->b_local));
+      PetscCall(VecHIPResetArray(ctx->x_local));
+      PetscCall(VecRestoreArrayWriteAndMemType(y, &y_array));
+      PetscCall(VecRestoreArrayReadAndMemType(x, &x_array));
+   }
+   else
+   {
+      PetscCall(VecGetLocalVectorRead(x, ctx->b_local));
+      PetscCall(VecGetLocalVector(y, ctx->x_local));
+      PetscCall(MatSolve(ctx->factor, ctx->b_local, ctx->x_local));
+      PetscCall(VecRestoreLocalVectorRead(x, ctx->b_local));
+      PetscCall(VecRestoreLocalVector(y, ctx->x_local));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode MatMult_LocalTri(Mat mat, Vec b, Vec x)
+{
+   LocalTriCtx *ctx;
+
+   PetscFunctionBegin;
+   PetscCall(PetscObjectContainerQuery((PetscObject)mat, "pflare_local_tri", (PetscCtxRt)&ctx));
+   // Zero initial guess, so the first iteration is just x = M^-1 b
+   PetscCall(LocalTriApplyPC(ctx, b, x));
+   for (PetscInt i = 1; i < ctx->its; i++)
+   {
+      // r = b - A x
+      PetscCall(MatMult(ctx->A, x, ctx->r));
+      PetscCall(VecAYPX(ctx->r, -1.0, b));
+      // x = x + M^-1 r
+      PetscCall(LocalTriApplyPC(ctx, ctx->r, ctx->w));
+      PetscCall(VecAXPY(x, 1.0, ctx->w));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Creates a matshell whose MatMult applies its iterations of the local triangular solver
+// The shell context is left null (the Fortran matshell routines check for that), the solver
+// data is composed on the matshell and destroyed with it
+PETSC_INTERN PetscErrorCode create_local_tri_inverse_c(Mat *A, PetscInt its, int hipsparse, Mat *inv)
+{
+   MPI_Comm      comm;
+   LocalTriCtx  *ctx;
+   Mat           A_diag, A_fact;
+   IS            row_perm, col_perm;
+   MatFactorInfo info;
+   PetscInt      local_rows, local_cols, global_rows, global_cols;
+
+   PetscFunctionBegin;
+   PetscCheck(its > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_OUTOFRANGE, "Need at least one iteration");
+   PetscCall(PetscObjectGetComm((PetscObject)(*A), &comm));
+   PetscCall(PetscNew(&ctx));
+   ctx->its       = its;
+   ctx->hipsparse = hipsparse ? PETSC_TRUE : PETSC_FALSE;
+   PetscCall(PetscObjectReference((PetscObject)(*A)));
+   ctx->A = *A;
+
+   // The local block (the matrix itself in serial)
+   PetscCall(MatGetDiagonalBlock(*A, &A_diag));
+   A_fact = A_diag;
+   {
+      // ILU(0) needs every diagonal entry present
+      PetscBool diag_dense;
+      PetscCall(MatGetDiagonalMarkers_SeqAIJ(A_diag, NULL, &diag_dense));
+      PetscCheck(diag_dense, PETSC_COMM_SELF, PETSC_ERR_ARG_WRONGSTATE, "Local block is missing diagonal entries");
+   }
+   if (ctx->hipsparse)
+   {
+      // Build a plain seqaij copy of the local block and convert that in place, rather
+      // than converting the (eg kokkos) block directly, which may not have a converter
+      const PetscInt    *ia, *ja;
+      const PetscScalar *aa;
+      PetscInt           n;
+      PetscBool          done;
+      PetscCall(MatGetRowIJ(A_diag, 0, PETSC_FALSE, PETSC_FALSE, &n, &ia, &ja, &done));
+      PetscCheck(done, PETSC_COMM_SELF, PETSC_ERR_SUP, "Cannot get the local block CSR");
+      PetscCall(MatSeqAIJGetArrayRead(A_diag, &aa));
+      PetscCall(MatCreate(PETSC_COMM_SELF, &ctx->A_local));
+      PetscCall(MatSetSizes(ctx->A_local, n, n, n, n));
+      PetscCall(MatSetType(ctx->A_local, MATSEQAIJ));
+      PetscCall(MatSeqAIJSetPreallocationCSR(ctx->A_local, ia, ja, aa));
+      PetscCall(MatSeqAIJRestoreArrayRead(A_diag, &aa));
+      PetscCall(MatRestoreRowIJ(A_diag, 0, PETSC_FALSE, PETSC_FALSE, &n, &ia, &ja, &done));
+      PetscCall(MatConvert(ctx->A_local, MATSEQAIJHIPSPARSE, MAT_INPLACE_MATRIX, &ctx->A_local));
+      A_fact = ctx->A_local;
+   }
+
+   // ILU(0) in the natural ordering
+   PetscCall(MatGetFactor(A_fact, ctx->hipsparse ? MATSOLVERHIPSPARSE : NULL, MAT_FACTOR_ILU, &ctx->factor));
+   PetscCall(MatGetOrdering(A_fact, MATORDERINGNATURAL, &row_perm, &col_perm));
+   PetscCall(MatFactorInfoInitialize(&info));
+   info.levels = 0;
+   info.fill   = 1.0;
+   PetscCall(MatILUFactorSymbolic(ctx->factor, A_fact, row_perm, col_perm, &info));
+   PetscCall(MatLUFactorNumeric(ctx->factor, A_fact, &info));
+   PetscCall(ISDestroy(&row_perm));
+   PetscCall(ISDestroy(&col_perm));
+
+   // Work vectors
+   PetscCall(MatCreateVecs(*A, &ctx->r, &ctx->w));
+   PetscCall(MatGetLocalSize(*A, &local_rows, &local_cols));
+   if (ctx->hipsparse)
+   {
+      PetscCall(VecCreateSeqHIPWithArrays(PETSC_COMM_SELF, 1, local_rows, NULL, NULL, &ctx->b_local));
+      PetscCall(VecCreateSeqHIPWithArrays(PETSC_COMM_SELF, 1, local_rows, NULL, NULL, &ctx->x_local));
+   }
+   else
+   {
+      PetscCall(VecCreateLocalVector(ctx->r, &ctx->b_local));
+      PetscCall(VecCreateLocalVector(ctx->r, &ctx->x_local));
+   }
+
+   PetscCall(MatGetSize(*A, &global_rows, &global_cols));
+   PetscCall(MatCreateShell(comm, local_rows, local_cols, global_rows, global_cols, NULL, inv));
+   PetscCall(MatShellSetOperation(*inv, MATOP_MULT, (PetscErrorCodeFn *)MatMult_LocalTri));
+   PetscCall(MatShellSetVecType(*inv, ((PetscObject)ctx->r)->type_name));
+   PetscCall(PetscObjectContainerCompose((PetscObject)(*inv), "pflare_local_tri", ctx, LocalTriCtxDestroy));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}

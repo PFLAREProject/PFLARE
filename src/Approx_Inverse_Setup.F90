@@ -262,7 +262,7 @@ module approx_inverse_setup
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine start_approximate_inverse(matrix, inverse_type, poly_order, diag_scale_polys, &
-                  buffers, coefficients)
+                  buffers, coefficients, right_pc)
 
       ! Starts the assembly of an approximate inverse
       ! We have different types of inverses we can use
@@ -274,6 +274,8 @@ module approx_inverse_setup
       logical, intent(in)                                :: diag_scale_polys
       type(tsqr_buffers), intent(inout)                  :: buffers 
       PetscReal, dimension(:, :), pointer, intent(inout) :: coefficients
+      ! Optional matshell applying M^-1, used in place of D^-1 when scaling the polynomial
+      type(tMat), intent(in), optional                   :: right_pc
 
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX, MPI_COMM_BUFFERS_MATRIX
@@ -281,7 +283,15 @@ module approx_inverse_setup
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       integer :: errorcode, n_roots
       type(mat_ctxtype), pointer :: mat_ctx_da=>null()
+      logical :: scale_polys
       ! ~~~~~~    
+
+      ! Preconditioning with M is just like the diagonal scaling but with M^-1 rather than D^-1
+      scale_polys = diag_scale_polys .OR. present(right_pc)
+      if (present(right_pc) .AND. buffers%subcomm) then
+         print *, "Preconditioning the polynomial with M is not supported on a subcomm"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
       if (buffers%subcomm .AND. inverse_type == PFLAREINV_POWER) then
          print *, "There is no reason to use a subcomm with the power basis, turn off subcomm"
@@ -329,7 +339,7 @@ module approx_inverse_setup
              inverse_type == PFLAREINV_ARNOLDI .OR. &
              inverse_type == PFLAREINV_NEWTON .OR. &
              inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
-             diag_scale_polys) then             
+             scale_polys) then             
 
             ! ~~~~~~~~~~~~~
             ! Now we allocate a new matshell that applies a diagonally scaled version of 
@@ -358,8 +368,12 @@ module approx_inverse_setup
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
             call MatCreateVecs(buffers%matrix, PETSC_NULL_VEC, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr) 
-            ! Get the diagonal
-            call MatGetDiagonal(buffers%matrix, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            ! Get the diagonal, or with M the vector is just a temporary
+            if (present(right_pc)) then
+               mat_ctx_da%mat_right_pc = right_pc
+            else
+               call MatGetDiagonal(buffers%matrix, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            end if
             ! This is the matrix whose inverse we are applying (just copying the pointer here)
             mat_ctx_da%mat = buffers%matrix
 
@@ -404,7 +418,7 @@ module approx_inverse_setup
              inverse_type == PFLAREINV_ARNOLDI .OR. &
              inverse_type == PFLAREINV_NEWTON .OR. &
              inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
-             diag_scale_polys) then
+             scale_polys) then
 
             call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)             
             call MatDestroy(mat_ctx_da%mat_scaled, ierr)
@@ -460,7 +474,7 @@ module approx_inverse_setup
    subroutine finish_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   buffers, coefficients, &
-                  matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, inv_matrix)
+                  matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, inv_matrix, right_pc)
 
       ! Finish the assembly of an approximate inverse
 
@@ -473,6 +487,9 @@ module approx_inverse_setup
       logical, intent(in)                               :: matrix_free, diag_scale_polys
       type(tMat), intent(inout)                         :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)  :: reuse_submatrices
+      ! Optional matshell applying M^-1, used in place of D^-1 when scaling the polynomial
+      ! Only supported with the matrix-free newton polynomials
+      type(tMat), intent(in), optional                  :: right_pc
 
       logical :: incomplete
       PetscErrorCode :: ierr
@@ -504,6 +521,12 @@ module approx_inverse_setup
 
       ! ~~~~~~~~~~~~
 
+      if (present(right_pc) .AND. .NOT. (matrix_free .AND. &
+            (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA))) then
+         print *, "Preconditioning the polynomial with M needs a matrix-free newton polynomial"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
       ! Gmres poylnomial with power or arnoldi basis
       if (inverse_type == PFLAREINV_POWER .OR. inverse_type == PFLAREINV_ARNOLDI) then
 
@@ -515,10 +538,17 @@ module approx_inverse_setup
       ! Gmres polynomial with newton basis
       else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
-         call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
-                           coefficients, &
-                           inverse_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
-                           inv_matrix)         
+         if (present(right_pc)) then
+            call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
+                              coefficients, &
+                              inverse_sparsity_order, matrix_free, .TRUE., reuse_mat, reuse_submatrices, &
+                              inv_matrix, right_pc)         
+         else
+            call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
+                              coefficients, &
+                              inverse_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
+                              inv_matrix)         
+         end if
 
       ! Neumann polynomial
       else if (inverse_type == PFLAREINV_NEUMANN) then
@@ -598,6 +628,12 @@ module approx_inverse_setup
                mat_ctx%coefficients => null()
             end if
             call VecDestroy(mat_ctx%mf_temp_vec(MF_VEC_TEMP), ierr)
+            ! The outer polynomial shell holds a reference to M^-1 if it was preconditioned with M
+            temp_mat = mat_ctx%mat_right_pc
+            if (.NOT. PetscObjectIsNull(temp_mat)) then
+               call MatDestroy(temp_mat, ierr)
+               mat_ctx%mat_right_pc = temp_mat
+            end if
 
             ! Both newton and neumann polynomials use some extra temporary vectors
             temp_mat = mat_ctx%mat_scaled

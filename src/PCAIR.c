@@ -68,6 +68,8 @@ PETSC_EXTERN void PCAIRGetCoarsestPolyOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetCoarsestDiagScalePolys_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetCoarsestTriScalePolys_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetCoarsestTriHipsparse_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetCoarsestSubcomm_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetRDrop_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetADrop_c(PC *pc, PetscReal *input_real);
@@ -122,6 +124,8 @@ PETSC_EXTERN void PCAIRSetCoarsestPolyOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestMatrixFreePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetCoarsestDiagScalePolys_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetCoarsestTriScalePolys_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetCoarsestTriHipsparse_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetCoarsestSubcomm_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetRDrop_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
@@ -1239,6 +1243,50 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC pc, PetscBool *inp
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRGetCoarsestDiagScalePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRGetCoarsestTriScalePolys - Returns whether `PCAIR` preconditions the coarse-grid polynomial with local triangular solves
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the coarse-grid polynomial is preconditioned with local triangular solves
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestTriScalePolys()`, `PCAIRGetCoarsestDiagScalePolys()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestTriScalePolys(PC pc, PetscBool *input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetCoarsestTriScalePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRGetCoarsestTriHipsparse - Returns whether the `PCAIR` coarse-grid local triangular solves use hipSPARSE
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the local triangular solves use hipSPARSE
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestTriHipsparse()`, `PCAIRSetCoarsestTriScalePolys()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestTriHipsparse(PC pc, PetscBool *input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetCoarsestTriHipsparse_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2632,6 +2680,62 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PC pc, PetscBool inpu
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
+  PCAIRSetCoarsestTriScalePolys - Sets whether `PCAIR` preconditions the coarse-grid polynomial with local triangular solves
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to right precondition the coarse-grid polynomial with local triangular solves
+
+  Options Database Key:
+. -pc_air_coarsest_tri_scale_polys (true|false) - precondition the coarse-grid polynomial with local triangular solves; defaults to false
+
+  Level: advanced
+
+  Note:
+  As `PCAIRSetCoarsestDiagScalePolys()` but with M an ILU(0) factorisation of the local (on-rank) diagonal block of the
+  coarse matrix rather than its diagonal, ie the coarse-grid solver is q(M^-1 A) M^-1. When the local blocks are lower
+  triangular (eg upwind advection in a downstream ordering) applying M^-1 is a local forward Gauss-Seidel sweep. This
+  is used both in the auto truncation test and as the coarse-grid solver. Only for the matrix-free Newton polynomial.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestTriScalePolys()`, `PCAIRSetCoarsestTriHipsparse()`, `PCAIRSetCoarsestDiagScalePolys()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestTriScalePolys(PC pc, PetscBool input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRSetCoarsestTriScalePolys_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRSetCoarsestTriHipsparse - Sets whether the `PCAIR` coarse-grid local triangular solves use hipSPARSE
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to factor and solve a hipSPARSE copy of the local block
+
+  Options Database Key:
+. -pc_air_coarsest_tri_hipsparse (true|false) - use hipSPARSE for the local triangular solves; defaults to false
+
+  Level: advanced
+
+  Note:
+  By default the factorisation of the local block matches its matrix type (Kokkos-Kernels SpTRSV with aijkokkos).
+  This needs device vectors and a PETSc built with HIP.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestTriHipsparse()`, `PCAIRSetCoarsestTriScalePolys()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestTriHipsparse(PC pc, PetscBool input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRSetCoarsestTriHipsparse_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
   PCAIRSetCoarsestSubcomm - Sets whether `PCAIR` computes the coarse-grid polynomial coefficients on a subcommunicator
 
   Logically Collective
@@ -2962,6 +3066,16 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    flg = old_flag;
    PetscCall(PetscOptionsBool("-pc_air_coarsest_diag_scale_polys", "Diagonally scale before computing coarse grid polynomial inverse", "PCAIRSetCoarsestDiagScalePolys", old_flag, &flg, NULL));
    PetscCall(PCAIRSetCoarsestDiagScalePolys(pc, flg));   
+   // ~~~~  
+   PetscCall(PCAIRGetCoarsestTriScalePolys(pc, &old_flag));
+   flg = old_flag;
+   PetscCall(PetscOptionsBool("-pc_air_coarsest_tri_scale_polys", "Precondition the coarse grid polynomial with local triangular solves", "PCAIRSetCoarsestTriScalePolys", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetCoarsestTriScalePolys(pc, flg));
+   // ~~~~  
+   PetscCall(PCAIRGetCoarsestTriHipsparse(pc, &old_flag));
+   flg = old_flag;
+   PetscCall(PetscOptionsBool("-pc_air_coarsest_tri_hipsparse", "Uses hipSPARSE for the coarse grid local triangular solves", "PCAIRSetCoarsestTriHipsparse", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetCoarsestTriHipsparse(pc, flg));
    // ~~~~  
    PetscCall(PCAIRGetCoarsestSubcomm(pc, &old_flag));
    flg = old_flag;
@@ -3595,6 +3709,9 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetCoarsestInverseSparsityOrder(pc, &input_int_three));
       PetscCall(PCAIRGetCoarsestDiagScalePolys(pc, &flg_diag_scale));
       PetscCall(PCAIRGetCoarsestMatrixFreePolys(pc, &flg));
+      PetscBool flg_tri_scale, flg_tri_hip;
+      PetscCall(PCAIRGetCoarsestTriScalePolys(pc, &flg_tri_scale));
+      PetscCall(PCAIRGetCoarsestTriHipsparse(pc, &flg_tri_hip));
 
       // What type of inverse
       if (input_type == PFLAREINV_POWER)
@@ -3616,7 +3733,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       else if (input_type == PFLAREINV_NEWTON)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with extra roots, order %" PetscInt_FMT " \n", input_int_two));      
-         if (flg_diag_scale)
+         if (flg_tri_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      preconditioned with local ILU(0) triangular solves%s \n", flg_tri_hip ? " (hipSPARSE)" : ""));
+         }          
+         else if (flg_diag_scale)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
          }          

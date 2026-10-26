@@ -1,6 +1,7 @@
 module air_mg_setup
 
    use petscksp
+   use iso_c_binding, only: c_int
    use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
    use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
    use matshell_data_type, only: mat_ctxtype
@@ -25,7 +26,7 @@ module air_mg_setup
          mg_FC_point_apply_transpose, mg_FC_point_residual_transpose
    use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
          mg_smooth_shell_block_apply
-   use c_petsc_interfaces, only: MatGetDiagonalOnly_c
+   use c_petsc_interfaces, only: MatGetDiagonalOnly_c, create_local_tri_inverse_c
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &
          finish_comms_compute_restrict_prolong, compute_coarse_matrix
@@ -69,12 +70,14 @@ module air_mg_setup
       integer             :: no_levels, our_level, our_level_coarse, errorcode, comm_rank, comm_size
       PetscErrorCode      :: ierr
       MPIU_Comm            :: MPI_COMM_MATRIX
-      PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b
+      PetscReal           :: ratio_local_nnzs_off_proc, achieved_rel_tol, norm_b, test_error, test_norm_x
       logical             :: continue_coarsening, trigger_proc_agglom, cf_split_reused
-      type(tMat)          :: temp_mat
+      type(tMat)          :: temp_mat, coarse_right_pc
       type(tKSP)          :: ksp_smoother_up, ksp_smoother_down, ksp_coarse_solver
       type(tPC)           :: pc_smoother_up, pc_smoother_down, pc_coarse_solver
       type(tVec)          :: temp_coarse_vec, rand_vec, sol_vec, temp_vec, diag_vec, diag_vec_aff
+      type(tVec)          :: x_exact_vec, b_exact_vec
+      PetscInt64, parameter :: test_seed = 12345
       type(tIS)           :: is_unchanged, is_full, temp_is
       type(mat_ctxtype), pointer :: mat_ctx => null()
       PetscInt, parameter :: one=1, zero=0
@@ -175,12 +178,23 @@ module air_mg_setup
                      air_data%inv_coarsest_poly_data)  
 
             ! Start the approximate inverse we'll use on this level
-            call start_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%options%coarsest_diag_scale_polys, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)                       
+            ! If preconditioning the polynomial with local triangular solves, build M^-1 first
+            if (air_data%options%coarsest_tri_scale_polys) then
+               call create_coarse_right_pc(air_data, air_data%coarse_matrix(our_level), coarse_right_pc)
+               call start_approximate_inverse(air_data%coarse_matrix(our_level), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients, coarse_right_pc)                       
+            else
+               call start_approximate_inverse(air_data%coarse_matrix(our_level), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients)                       
+            end if
 
             ! This will be a vec of randoms that differ from those used to create the gmres polynomials
             ! We will solve Ax = rand_vec to test how good our coarse solver is
@@ -196,24 +210,42 @@ module air_mg_setup
             call VecDuplicate(rand_vec, temp_vec, ierr)
 
             ! Finish our approximate inverse
-            call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients, &
-                  air_data%options%coarsest_matrix_free_polys, &
-                  air_data%options%coarsest_diag_scale_polys, &
-                  air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-                  air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
-                  air_data%inv_A_ff(our_level))          
+            if (air_data%options%coarsest_tri_scale_polys) then
+               call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients, &
+                     air_data%options%coarsest_matrix_free_polys, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+                     air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
+                     air_data%inv_A_ff(our_level), coarse_right_pc)          
+               ! The polynomial holds its own reference
+               call MatDestroy(coarse_right_pc, ierr)
+            else
+               call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients, &
+                     air_data%options%coarsest_matrix_free_polys, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+                     air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
+                     air_data%inv_A_ff(our_level))          
+            end if
                   
             ! We have a custom MF routine for computing just the residual 
             ! when applying the Newton form of the gmres polynomial that saves some flops
             ! We don't actually need the solution here as it's useless
+            ! That doesn't exist when preconditioning with M, so that uses the general path below
             if ((air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
-                  air_data%options%coarsest_matrix_free_polys) then
+                  air_data%options%coarsest_matrix_free_polys .AND. &
+                  .NOT. air_data%options%coarsest_tri_scale_polys) then
 
                if (air_data%options%coarsest_diag_scale_polys) then
                   call petsc_matvec_right_scale_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
@@ -232,7 +264,29 @@ module air_mg_setup
             end if 
 
             ! Get the achieved norm
-            call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
+            call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)
+            if (air_data%options%print_stats_timings) then
+               ! As a diagnostic also measure the relative error of the coarse solver on a 
+               ! problem with a known (random) solution, ie solve A x = A x_exact
+               call PetscRandomCreate(MPI_COMM_MATRIX, rctx, ierr)
+               call PetscRandomSetSeed(rctx, test_seed, ierr)
+               call PetscRandomSeed(rctx, ierr)
+               call VecDuplicate(rand_vec, x_exact_vec, ierr)
+               call VecDuplicate(rand_vec, b_exact_vec, ierr)
+               call VecSetRandom(x_exact_vec, rctx, ierr)
+               call PetscRandomDestroy(rctx, ierr)
+               call MatMult(air_data%coarse_matrix(our_level), x_exact_vec, b_exact_vec, ierr)
+               call MatMult(air_data%inv_A_ff(our_level), b_exact_vec, sol_vec, ierr)
+               call VecAXPY(sol_vec, PFLARE_MINUS_ONE, x_exact_vec, ierr)
+               call VecNorm(sol_vec, NORM_2, test_error, ierr)
+               call VecNorm(x_exact_vec, NORM_2, test_norm_x, ierr)
+               call VecDestroy(x_exact_vec, ierr)
+               call VecDestroy(b_exact_vec, ierr)
+               if (comm_rank == 0) then
+                  print *, "Auto truncation test level", our_level, "relative residual", achieved_rel_tol/norm_b, &
+                        "relative error", test_error/test_norm_x
+               end if
+            end if
 
             ! If it's good enough we can truncate on this level and our coarse solver has been computed
             if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol) then
@@ -1015,12 +1069,22 @@ module air_mg_setup
          if (.NOT. auto_truncated .AND. no_levels > 1) then
             call timer_start(TIMER_ID_AIR_INVERSE)   
 
-            call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%options%coarsest_diag_scale_polys, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)         
+            if (air_data%options%coarsest_tri_scale_polys) then
+               call create_coarse_right_pc(air_data, air_data%coarse_matrix(no_levels), coarse_right_pc)
+               call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients, coarse_right_pc)         
+            else
+               call start_approximate_inverse(air_data%coarse_matrix(no_levels), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients)         
+            end if
             call timer_finish(TIMER_ID_AIR_INVERSE)
          end if
       end if
@@ -1229,17 +1293,32 @@ module air_mg_setup
             ! Coarse grid polynomial coefficients
             call timer_start(TIMER_ID_AIR_INVERSE)             
 
-            call finish_approximate_inverse(air_data%coarse_matrix(no_levels), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients, &
-                  air_data%options%coarsest_matrix_free_polys, &
-                  air_data%options%coarsest_diag_scale_polys, &
-                  air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
-                  air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array, &
-                  air_data%inv_A_ff(air_data%no_levels))           
+            if (air_data%options%coarsest_tri_scale_polys) then
+               call finish_approximate_inverse(air_data%coarse_matrix(no_levels), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients, &
+                     air_data%options%coarsest_matrix_free_polys, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
+                     air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array, &
+                     air_data%inv_A_ff(air_data%no_levels), coarse_right_pc)           
+               call MatDestroy(coarse_right_pc, ierr)
+            else
+               call finish_approximate_inverse(air_data%coarse_matrix(no_levels), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_sparsity_order, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients, &
+                     air_data%options%coarsest_matrix_free_polys, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%reuse(air_data%no_levels)%reuse_mat(MAT_INV_AFF), &
+                     air_data%reuse(air_data%no_levels)%reuse_submatrices(MAT_INV_AFF)%array, &
+                     air_data%inv_A_ff(air_data%no_levels))           
+            end if
 
             ! Delete temporary if not reusing
             if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -1335,6 +1414,29 @@ module air_mg_setup
    end subroutine setup_air_pcmg       
    
 ! -------------------------------------------------------------------------------------------------------------------------------
+
+   ! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine create_coarse_right_pc(air_data, matrix, right_pc)
+
+      ! Builds the matshell applying M^-1, an ILU(0) of the local block of matrix, that 
+      ! preconditions the coarse grid polynomial with -pc_air_coarsest_tri_scale_polys
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      type(tMat), intent(in)               :: matrix
+      type(tMat), intent(inout)            :: right_pc
+
+      PetscErrorCode :: ierr
+      PetscInt, parameter :: one_its = 1
+      integer(c_int) :: hipsparse_int
+      ! ~~~~~~
+
+      hipsparse_int = 0
+      if (air_data%options%coarsest_tri_hipsparse) hipsparse_int = 1
+      ierr = create_local_tri_inverse_c(matrix%v, one_its, hipsparse_int, right_pc%v)
+
+   end subroutine create_coarse_right_pc
 
 end module air_mg_setup
 

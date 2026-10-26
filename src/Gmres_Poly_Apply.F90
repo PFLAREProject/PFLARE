@@ -71,6 +71,14 @@ module gmres_poly_apply
       ! We want to apply (D^-1 A) x
       ! ~~~~~~~~~~~~
 
+      ! If we are preconditioning with M rather than D we apply (M^-1 A) x
+      ! The diagonal vector isn't needed then, so we use it as the temporary
+      if (.NOT. PetscObjectIsNull(mat_ctx%mat_right_pc)) then
+         call MatMult(mat_ctx%mat, x, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+         call MatMult(mat_ctx%mat_right_pc, mat_ctx%mf_temp_vec(MF_VEC_DIAG), y, ierr)
+         return
+      end if
+
       ! Multiply by A
       call MatMult(mat_ctx%mat, x, y, ierr)
 
@@ -729,9 +737,13 @@ module gmres_poly_apply
       ! We want to apply q(mat_ctx%mat_scaled) D^-1
       ! ~~~~~~~~~~~~
 
-      ! Doing MF_VEC_RHS = D^-1 x 
-      call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
-               mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+      ! Doing MF_VEC_RHS = D^-1 x, or M^-1 x if preconditioning with M
+      if (.NOT. PetscObjectIsNull(mat_ctx%mat_right_pc)) then
+         call MatMult(mat_ctx%mat_right_pc, x, mat_ctx%mf_temp_vec(MF_VEC_RHS), ierr)
+      else
+         call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
+                  mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)            
+      end if
 
       ! and now we apply our polynomial
       ! q(mat_ctx%mat_scaled) to MF_VEC_RHS (D^-1 x)
@@ -812,6 +824,13 @@ module gmres_poly_apply
       ! ~~~~~~~~~~~~
       ! We want to apply q(mat_ctx%mat_scaled) D^-1 and then compute a residual
       ! ~~~~~~~~~~~~
+
+      ! The residual of the M preconditioned system would need a multiply by M to give
+      ! the true residual, so callers use MatMult with the inverse and A instead
+      if (.NOT. PetscObjectIsNull(mat_ctx%mat_right_pc)) then
+         print *, "Residual form of the M preconditioned newton polynomial is not supported"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
       ! Doing MF_VEC_RHS = D^-1 x 
       call VecPointwiseDivide(mat_ctx%mf_temp_vec(MF_VEC_RHS), x, &
@@ -1231,6 +1250,11 @@ module gmres_poly_apply
 
       block_applied = .FALSE.
       call MatShellGetContext(shell_mat, mat_ctx, ierr)
+
+      ! The blockwise kernels only know about D^-1, so polynomials preconditioned
+      ! with M go column by column
+      temp_mat = mat_ctx%mat_right_pc
+      if (.NOT. PetscObjectIsNull(temp_mat)) return
 
       ! Are we applying q(D^-1 A) D^-1 rather than just q(A)?
       temp_mat = mat_ctx%mat_scaled

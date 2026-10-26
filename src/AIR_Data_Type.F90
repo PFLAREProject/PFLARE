@@ -220,6 +220,10 @@ module air_data_type
       logical :: coarsest_matrix_free_polys = .FALSE.
       ! -pc_air_coarsest_diag_scale_polys
       logical :: coarsest_diag_scale_polys = .FALSE.      
+      ! -pc_air_coarsest_tri_scale_polys
+      logical :: coarsest_tri_scale_polys = .FALSE.
+      ! -pc_air_coarsest_tri_hipsparse
+      logical :: coarsest_tri_hipsparse = .FALSE.
       ! -pc_air_coarsest_subcomm
       logical :: coarsest_subcomm = .FALSE.
 

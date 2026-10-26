@@ -1553,7 +1553,7 @@ end if
    subroutine build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                   coefficients, &
                   poly_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
-                  inv_matrix)
+                  inv_matrix, right_pc)
 
       ! Builds a matrix which is an approximation to the inverse of a matrix using the 
       ! gmres polynomial in the newton basis
@@ -1567,6 +1567,9 @@ end if
       logical, intent(in)                                         :: matrix_free, diag_scale_polys
       type(tMat), intent(inout)                                   :: reuse_mat, inv_matrix
       type(tMat), dimension(:), pointer, intent(inout)            :: reuse_submatrices
+      ! Optional matshell applying M^-1 which replaces D^-1 in the diagonal scaling
+      ! (diag_scale_polys must be true), only for matrix_free
+      type(tMat), intent(in), optional                            :: right_pc
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
@@ -1576,7 +1579,7 @@ end if
       VecType :: vtype
       type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
       logical :: reuse_triggered
-      type(tMat) :: diag_scaled_mat
+      type(tMat) :: diag_scaled_mat, temp_pc
       type(tVec) :: diag_inverse_vec
 
       ! ~~~~~~       
@@ -1619,8 +1622,11 @@ end if
             ! The subroutine petsc_matvec_poly_transpose_mf applies the transpose of
             ! whichever of the two above we just set - it builds a transposed twin of
             ! this matshell on demand, see ensure_transpose_mat
-            call MatShellSetOperation(inv_matrix, &
-                        MATOP_MULT_TRANSPOSE, petsc_matvec_poly_transpose_mf, ierr)
+            ! The twin doesn't know about M, so there is no transpose when preconditioning with M
+            if (.NOT. present(right_pc)) then
+               call MatShellSetOperation(inv_matrix, &
+                           MATOP_MULT_TRANSPOSE, petsc_matvec_poly_transpose_mf, ierr)
+            end if
 
             call MatAssemblyBegin(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
             call MatAssemblyEnd(inv_matrix, MAT_FINAL_ASSEMBLY, ierr)
@@ -1687,8 +1693,18 @@ end if
             mat_ctx_scaled%real_roots => coefficients(:, 1)
             mat_ctx_scaled%imag_roots => coefficients(:, 2)
 
-            ! Get the diagonal
-            call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            ! Get the diagonal, or when preconditioning with M the inner shell just uses
+            ! this vector as a temporary
+            if (present(right_pc)) then
+               ! Swap in this M^-1, dropping the reference to any from a previous setup
+               temp_pc = mat_ctx%mat_right_pc
+               if (.NOT. PetscObjectIsNull(temp_pc)) call MatDestroy(temp_pc, ierr)
+               mat_ctx%mat_right_pc = right_pc
+               call PetscObjectReference(right_pc, ierr)
+               mat_ctx_scaled%mat_right_pc = right_pc
+            else
+               call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
+            end if
             mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
          end if         
          

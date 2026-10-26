@@ -101,6 +101,20 @@ module c_petsc_interfaces
 
    interface   
       
+      function create_local_tri_inverse_c(A_array, its, hipsparse, B_array) &
+         bind(c, name="create_local_tri_inverse_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt, value :: its
+         integer(c_int), value :: hipsparse
+         integer(c_long_long) :: B_array
+         PetscErrorCode :: create_local_tri_inverse_c
+      end function create_local_tri_inverse_c         
+ 
+   end interface   
+
+   interface   
+      
       subroutine remove_small_from_sparse_kokkos(A_array, tol, B_array, &
                      relative_max_row_tolerance_int, lump_int, allow_drop_diagonal_int, &
                      allow_diag_strength_int) &

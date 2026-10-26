@@ -718,6 +718,46 @@ module pcair_c_fortran_bindings
       if (dummy) scale = .TRUE.
 
    end subroutine PCAIRGetCoarsestDiagScalePolys_c   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestTriScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRGetCoarsestTriScalePolys_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, intent(out)        :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetCoarsestTriScalePolys(pc, dummy, ierr)
+      scale = .FALSE.
+      if (dummy) scale = .TRUE.
+
+   end subroutine PCAIRGetCoarsestTriScalePolys_c   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestTriHipsparse_c(pc_ptr, scale) bind(C, name='PCAIRGetCoarsestTriHipsparse_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, intent(out)        :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetCoarsestTriHipsparse(pc, dummy, ierr)
+      scale = .FALSE.
+      if (dummy) scale = .TRUE.
+
+   end subroutine PCAIRGetCoarsestTriHipsparse_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1708,6 +1748,46 @@ module pcair_c_fortran_bindings
       call PCAIRSetCoarsestDiagScalePolys(pc, dummy, ierr)
 
    end subroutine PCAIRSetCoarsestDiagScalePolys_c   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestTriScalePolys_c(pc_ptr, scale) bind(C, name='PCAIRSetCoarsestTriScalePolys_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, value, intent(in)         :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      if (scale) dummy = .TRUE.
+      call PCAIRSetCoarsestTriScalePolys(pc, dummy, ierr)
+
+   end subroutine PCAIRSetCoarsestTriScalePolys_c   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestTriHipsparse_c(pc_ptr, scale) bind(C, name='PCAIRSetCoarsestTriHipsparse_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, value, intent(in)         :: scale
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      if (scale) dummy = .TRUE.
+      call PCAIRSetCoarsestTriHipsparse(pc, dummy, ierr)
+
+   end subroutine PCAIRSetCoarsestTriHipsparse_c   
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

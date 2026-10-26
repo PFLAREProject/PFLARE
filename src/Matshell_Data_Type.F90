@@ -26,6 +26,10 @@ module matshell_data_type
       ! Whether the inner mat_scaled shell applies I - D^-1 A (the Neumann polynomial)
       ! rather than D^-1 A (the diagonally scaled gmres polynomials)
       logical :: neumann_inner = .FALSE.
+      ! If not null, a matshell applying M^-1 that replaces D^-1 in the diagonally scaled
+      ! gmres polynomials, ie the polynomial is preconditioned with M (see create_local_tri_inverse_c)
+      ! The outer polynomial matshell holds a reference, its inner mat_scaled shell just copies the handle
+      type(tMat) :: mat_right_pc
       ! Temporary vectors we use
       type(tVec), dimension(5) :: mf_temp_vec
       ! Temporary dense matrices we use during a multiple rhs (block) apply

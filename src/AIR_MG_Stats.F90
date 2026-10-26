@@ -155,7 +155,12 @@ module air_mg_stats
 
       ! Are we mf?
       call MatGetType(air_data%inv_A_ff(air_data%no_levels), mat_type, ierr)
-      if (mat_type==MATSHELL) then
+      if (mat_type==MATSHELL .AND. air_data%options%coarsest_tri_scale_polys) then
+         ! Preconditioned with local triangular solves, every matvec in the polynomial also does a 
+         ! triangular solve (counted as the nnzs of the coarse matrix) as does the input
+         nnzs = maxits_long * (2 * gmres_size_long + 1) * air_data%coarse_matrix_nnzs(air_data%no_levels) + &
+                  (maxits_long-1) * air_data%coarse_matrix_nnzs(air_data%no_levels)
+      else if (mat_type==MATSHELL) then
          nnzs = maxits_long * gmres_size_long * air_data%coarse_matrix_nnzs(air_data%no_levels) + &
                   (maxits_long-1) * air_data%coarse_matrix_nnzs(air_data%no_levels)
       else
