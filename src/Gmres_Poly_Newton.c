@@ -1842,7 +1842,12 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_0th_order(Mat 
    }
 
    // Must be real as we only have one coefficient
-   PetscCall(VecSet(diag_vec, PFLARE_ONE / REAL_ROOT(1)));
+   // Skips eigenvalues that are numerically zero, like the matrix-free apply
+   if (PetscAbsReal(REAL_ROOT(1)) > PFLARE_TOL_ZERO) {
+      PetscCall(VecSet(diag_vec, PFLARE_ONE / REAL_ROOT(1)));
+   } else {
+      PetscCall(VecSet(diag_vec, PFLARE_ZERO));
+   }
 
    // We may be reusing with the same sparsity
    if (!reuse_triggered) {
@@ -1991,7 +1996,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
 
    // ~~~~~~
    PetscBool reuse_triggered, output_product;
-   PetscReal square_sum;
+   PetscReal square_sum, inv_theta_one;
    PetscInt i_loc;
    // ~~~~~~
 
@@ -2017,6 +2022,14 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
    // If real
    if (IMAG_ROOT(1) == 0.0) {
 
+      // Skips eigenvalues that are numerically zero, like the matrix-free apply
+      // A skipped first root leaves the product as the identity
+      if (PetscAbsReal(REAL_ROOT(1)) < PFLARE_TOL_ZERO) {
+         inv_theta_one = 0;
+      } else {
+         inv_theta_one = PFLARE_ONE / REAL_ROOT(1);
+      }
+
       // Have to be careful here, as we may be first order, but the second eigenvaule
       // might have been set to zero thanks to the rank reducing solve
       // So we just check if the second real part is zero and if it is
@@ -2026,7 +2039,8 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
       // solve we don't have a zero coefficient but in the second solve we do
       // So the mat type needs to remain consistent
       // This can't happen in the complex case
-      if (PetscAbsReal(REAL_ROOT(2)) < PFLARE_TOL_ZERO) {
+      // The matrix-free apply only applies the last root if it is > PFLARE_TOL_ZERO
+      if (!(PetscAbsReal(REAL_ROOT(2)) > PFLARE_TOL_ZERO)) {
 
          // Set to zero
          PetscCall(MatScale(*inv_matrix, PFLARE_ZERO));
@@ -2041,7 +2055,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
          }
 
          // Then add in the 0th order inverse
-         PetscCall(MatShift(*inv_matrix, PFLARE_ONE / REAL_ROOT(1)));
+         PetscCall(MatShift(*inv_matrix, inv_theta_one));
 
          // Then just return
          PetscFunctionReturn(PETSC_SUCCESS);
@@ -2052,7 +2066,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
       // theta_1 * theta_2 that would result
 
       // result = -A_ff/theta_1
-      PetscCall(MatScale(*inv_matrix, PFLARE_MINUS_ONE / (REAL_ROOT(1))));
+      PetscCall(MatScale(*inv_matrix, -inv_theta_one));
       // result = I -A_ff/theta_1
       PetscCall(MatShift(*inv_matrix, PFLARE_ONE));
       // If we're doing this as part of fixed sparsity multiply,
@@ -2066,7 +2080,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
 
       // result = 1/theta_1 + 1/theta_2 * (I -A_ff/theta_1)
       // Don't need an assemble as there is one called in this
-      PetscCall(MatShift(*inv_matrix, PFLARE_ONE / (REAL_ROOT(1))));
+      PetscCall(MatShift(*inv_matrix, inv_theta_one));
 
       if (output_product) {
          STATUS(1, 1) = 1;
@@ -2075,8 +2089,14 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
 
    // Complex conjugate roots, a +- ib
    } else {
-      // a^2 + b^2
+      // 1/(a^2 + b^2)
+      // Skips eigenvalues that are numerically zero, like the matrix-free apply
       square_sum = REAL_ROOT(1) * REAL_ROOT(1) + IMAG_ROOT(1) * IMAG_ROOT(1);
+      if (square_sum < PFLARE_TOL_ZERO) {
+         square_sum = 0;
+      } else {
+         square_sum = PFLARE_ONE / square_sum;
+      }
 
       // Complex conjugate roots
       // result = -A_ff
@@ -2090,7 +2110,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
          PetscCall(MatConvert(*inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp));
       }
       // result = 2a I - A_ff/(a^2 + b^2)
-      PetscCall(MatScale(*inv_matrix, PFLARE_ONE / square_sum));
+      PetscCall(MatScale(*inv_matrix, square_sum));
 
       if (output_product) {
          STATUS(1, 2) = 1;
@@ -2197,10 +2217,11 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_full(Mat matri
 
                // Check if the distance between the fixed sparsity root and the one before
                // If > zero then they are not complex conjugates and hence we are on the first of the pair
-               if (PetscAbsReal(REAL_ROOT(i_sparse) - REAL_ROOT(i_sparse - 1)) / REAL_ROOT(i_sparse) >
-                     PFLARE_TOL_CONSISTENCY ||
-                   PetscAbsReal(IMAG_ROOT(i_sparse) + IMAG_ROOT(i_sparse - 1)) / IMAG_ROOT(i_sparse) >
-                     PFLARE_TOL_CONSISTENCY) {
+               // Don't divide by the root, as the real part may be zero (or negative)
+               if (PetscAbsReal(REAL_ROOT(i_sparse) - REAL_ROOT(i_sparse - 1)) >
+                     PFLARE_TOL_CONSISTENCY * PetscAbsReal(REAL_ROOT(i_sparse)) ||
+                   PetscAbsReal(IMAG_ROOT(i_sparse) + IMAG_ROOT(i_sparse - 1)) >
+                     PFLARE_TOL_CONSISTENCY * PetscAbsReal(IMAG_ROOT(i_sparse))) {
                   *output_first_complex = PETSC_TRUE;
                   i_sparse = i_sparse + 1;
                }
@@ -2243,7 +2264,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_full(Mat matri
          // Then add the scaled version of each product
          if (i == 1) {
             // If i == 1 then we know mat_product is identity so we can do it directly
-            PetscCall(MatShift(*inv_matrix, PFLARE_ONE / REAL_ROOT(i)));
+            PetscCall(MatShift(*inv_matrix, square_sum));
          } else {
             if (reuse_triggered) {
                // If doing reuse we know our nonzeros are a subset
