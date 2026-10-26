@@ -820,8 +820,8 @@ PETSC_INTERN PetscErrorCode build_newton_fixed_sparsity_start(Mat matrix, int po
 
    PetscFunctionBegin;
 
-   // The Fortran checked against size(coefficients), the number of entries in both columns
-   PetscCheck(poly_sparsity_order < 2 * coefficients_rows - 1, PetscObjectComm((PetscObject)matrix), PETSC_ERR_ARG_OUTOFRANGE, "Requested sparsity is greater than or equal to the order");
+   // coefficients is (number of roots, 2), so check against the number of roots
+   PetscCheck(poly_sparsity_order < coefficients_rows - 1, PetscObjectComm((PetscObject)matrix), PETSC_ERR_ARG_OUTOFRANGE, "Requested sparsity is greater than or equal to the order");
 
    reuse_triggered = *cmat ? PETSC_TRUE : PETSC_FALSE;
 
