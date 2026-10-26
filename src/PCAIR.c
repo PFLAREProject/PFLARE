@@ -296,8 +296,8 @@ PETSC_EXTERN void compute_cf_splitting(Mat input_mat, int skip_symmetrize_int,
 {
    // The C port of the Fortran compute_cf_splitting, which takes the optional cr_*
    // arguments too (absent here, so the CR splitting uses its defaults)
-   // skip_symmetrize_int skips symmetrizing the strength matrix when it is 1
-   PetscBool skip_symmetrize = skip_symmetrize_int == 1 ? PETSC_TRUE : PETSC_FALSE;
+   // Any nonzero value skips the symmetrize, as documented in pflare.h
+   PetscBool skip_symmetrize = skip_symmetrize_int != 0 ? PETSC_TRUE : PETSC_FALSE;
 
    PetscCallVoid(compute_cf_splitting_c(input_mat, skip_symmetrize, strong_threshold,
       max_luby_steps, cf_splitting_type, ddc_its, fraction_swap,
