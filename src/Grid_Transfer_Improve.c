@@ -21,6 +21,39 @@
 
 //------------------------------------------------------------------------------------------------------------------------
 
+PETSC_INTERN PetscErrorCode get_diagonal_inv_aff(Mat A_ff, Mat A_ff_inv, Vec diag_vec)
+{
+   // Returns the diagonal of Aff^-1 in diag_vec
+   // If Aff^-1 is matrix-free (a matshell) or is the inverse of the full matrix
+   // (with -pc_air_full_smoothing_up_and_down) we can't get the diagonal of Aff^-1
+   // from it, so we use the inverse of the diagonal of Aff instead
+
+   // ~~~~~~~~~~
+   PetscInt global_rows_aff, global_cols_aff, global_rows_inv, global_cols_inv;
+   MatType mat_type_inv_aff;
+   PetscBool is_shell;
+   // ~~~~~~~~~~
+
+   PetscFunctionBegin;
+
+   PetscCall(MatGetType(A_ff_inv, &mat_type_inv_aff));
+   PetscCall(MatGetSize(A_ff, &global_rows_aff, &global_cols_aff));
+   PetscCall(MatGetSize(A_ff_inv, &global_rows_inv, &global_cols_inv));
+
+   PetscCall(PetscStrcmp(mat_type_inv_aff, MATSHELL, &is_shell));
+   if (is_shell || global_rows_inv != global_rows_aff) {
+      PetscCall(MatGetDiagonal(A_ff, diag_vec));
+      // This leaves any zero entries as zero
+      PetscCall(VecReciprocal(diag_vec));
+   } else {
+      PetscCall(MatGetDiagonal(A_ff_inv, diag_vec));
+   }
+
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 PETSC_INTERN PetscErrorCode improve_w(Mat W, Mat A_ff, Mat A_fc, Mat A_ff_inv, Mat *reuse_mat, Mat *reuse_mat_two,
    int its, PetscBool reuse_sparsity)
 {
@@ -59,7 +92,7 @@ PETSC_INTERN PetscErrorCode improve_w(Mat W, Mat A_ff, Mat A_fc, Mat A_ff_inv, M
    // and saves a matmatmult if Aff^-1 is not diagonal
    //if (mat_type_inv_aff == MATDIAGONAL) then
       PetscCall(MatCreateVecs(W, NULL, &left_vec_inv_aff));
-      PetscCall(MatGetDiagonal(A_ff_inv, left_vec_inv_aff));
+      PetscCall(get_diagonal_inv_aff(A_ff, A_ff_inv, left_vec_inv_aff));
       diag_aff_inv = PETSC_TRUE;
    //end if
 
@@ -234,7 +267,7 @@ PETSC_INTERN PetscErrorCode improve_z(Mat Z, Mat A_ff, Mat A_cf, Mat A_ff_inv, M
    // and saves a matmatmult if Aff^-1 is not diagonal
    //if (mat_type_inv_aff == MATDIAGONAL) then
       PetscCall(MatCreateVecs(Z, &right_vec_inv_aff, NULL));
-      PetscCall(MatGetDiagonal(A_ff_inv, right_vec_inv_aff));
+      PetscCall(get_diagonal_inv_aff(A_ff, A_ff_inv, right_vec_inv_aff));
       diag_aff_inv = PETSC_TRUE;
    //end if
 
