@@ -735,9 +735,9 @@ PETSC_INTERN PetscErrorCode petsc_newton(Mat mat, const PetscReal real_roots[], 
       // If real this is easy
       if (imag_roots[i] == 0.0) {
 
-         // Skips eigenvalues that are numerically zero - see
-         // the comment in calculate_gmres_polynomial_roots_newton
-         if (PetscAbsReal(real_roots[i]) < PFLARE_TOL_ZERO) {
+         // Skips zero eigenvalues - calculate_gmres_polynomial_roots_newton
+         // sets numerically zero roots to exactly zero (relative to ||H||)
+         if (real_roots[i] == 0.0) {
             i = i + 1;
             continue;
          }
@@ -757,11 +757,7 @@ PETSC_INTERN PetscErrorCode petsc_newton(Mat mat, const PetscReal real_roots[], 
       // Relies on the complex conjugate being next to each other
       } else {
 
-         // Skips eigenvalues that are numerically zero
-         if (real_roots[i] * real_roots[i] + imag_roots[i] * imag_roots[i] < PFLARE_TOL_ZERO) {
-            i = i + 2;
-            continue;
-         }
+         // A complex pair is never zero as its imaginary part is nonzero
 
          // temp_vec_two = A * temp_vec
          PetscCall(MatMult(mat, temp_vec, temp_vec_two));
@@ -787,8 +783,8 @@ PETSC_INTERN PetscErrorCode petsc_newton(Mat mat, const PetscReal real_roots[], 
    // Final step if last root is real
    if (imag_roots[roots_size - 1] == 0.0) {
 
-      // Skips eigenvalues that are numerically zero
-      if (PetscAbsReal(real_roots[roots_size - 1]) > PFLARE_TOL_ZERO) {
+      // Skips zero eigenvalues
+      if (real_roots[roots_size - 1] != 0.0) {
 
          // y = y + theta_i * temp_vec
          PetscCall(VecAXPBY(y, PFLARE_ONE / real_roots[roots_size - 1], PFLARE_ONE, temp_vec));
@@ -831,9 +827,9 @@ PETSC_INTERN PetscErrorCode petsc_newton_residual(Mat mat, const PetscReal real_
       // If real this is easy
       if (imag_roots[order] == 0.0) {
 
-         // Skips eigenvalues that are numerically zero - see
-         // the comment in calculate_gmres_polynomial_roots_newton
-         if (PetscAbsReal(real_roots[order]) < PFLARE_TOL_ZERO) {
+         // Skips zero eigenvalues - calculate_gmres_polynomial_roots_newton
+         // sets numerically zero roots to exactly zero (relative to ||H||)
+         if (real_roots[order] == 0.0) {
             order = order + 1;
             continue;
          }
@@ -851,11 +847,7 @@ PETSC_INTERN PetscErrorCode petsc_newton_residual(Mat mat, const PetscReal real_
       // Relies on the complex conjugate being next to each other
       } else {
 
-         // Skips eigenvalues that are numerically zero
-         if (real_roots[order] * real_roots[order] + imag_roots[order] * imag_roots[order] < PFLARE_TOL_ZERO) {
-            order = order + 2;
-            continue;
-         }
+         // A complex pair is never zero as its imaginary part is nonzero
 
          // temp_vec_two = A * y
          PetscCall(MatMult(mat, y, temp_vec_two));
@@ -946,9 +938,9 @@ PETSC_INTERN PetscErrorCode petsc_newton_block(mat_ctxtype *mat_ctx, Mat x_mat, 
       // If real this is easy
       if (imag_roots[i] == 0.0) {
 
-         // Skips eigenvalues that are numerically zero - see
-         // the comment in calculate_gmres_polynomial_roots_newton
-         if (PetscAbsReal(real_roots[i]) < PFLARE_TOL_ZERO) {
+         // Skips zero eigenvalues - calculate_gmres_polynomial_roots_newton
+         // sets numerically zero roots to exactly zero (relative to ||H||)
+         if (real_roots[i] == 0.0) {
             i = i + 1;
             continue;
          }
@@ -970,11 +962,7 @@ PETSC_INTERN PetscErrorCode petsc_newton_block(mat_ctxtype *mat_ctx, Mat x_mat, 
       // Relies on the complex conjugate being next to each other
       } else {
 
-         // Skips eigenvalues that are numerically zero
-         if (real_roots[i] * real_roots[i] + imag_roots[i] * imag_roots[i] < PFLARE_TOL_ZERO) {
-            i = i + 2;
-            continue;
-         }
+         // A complex pair is never zero as its imaginary part is nonzero
 
          // temp_mat_two = A * temp_mat
          PetscCall(MatProductNumeric(temp_mat_two));
@@ -1004,8 +992,8 @@ PETSC_INTERN PetscErrorCode petsc_newton_block(mat_ctxtype *mat_ctx, Mat x_mat, 
    // Final step if last root is real
    if (imag_roots[nroots - 1] == 0.0) {
 
-      // Skips eigenvalues that are numerically zero
-      if (PetscAbsReal(real_roots[nroots - 1]) > PFLARE_TOL_ZERO) {
+      // Skips zero eigenvalues
+      if (real_roots[nroots - 1] != 0.0) {
 
          // y_mat = y_mat + theta_i * temp_mat
          PetscCall(MatAXPY(y_mat, PFLARE_ONE / real_roots[nroots - 1], temp_mat, SAME_NONZERO_PATTERN));

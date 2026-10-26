@@ -186,8 +186,6 @@
 #define PFLARE_PTAP_FILL_VALUE    PFLARE_SINGLE_LITERAL(1.58)
 
 #if defined(PETSC_USE_REAL_SINGLE)
-/* Coefficient/root "is effectively zero" tests (Gmres_Poly/Gmres_Poly_Newton) */
-#define PFLARE_TOL_ZERO_VALUE           PFLARE_SINGLE_LITERAL(1e-6)
 /* dgelsd rcond (harmonic Ritz min-norm solve) */
 #define PFLARE_TOL_RCOND_VALUE          PFLARE_SINGLE_LITERAL(1e-6)
 /* Kokkos-vs-CPU consistency (PFLARE_KOKKOS_DEBUG) and matrix-free reconstruction
@@ -230,7 +228,9 @@
 #define PFLARE_KSP_RTOL_COARSE_VALUE    PFLARE_SINGLE_LITERAL(1e-3)
 /* "atol effectively off" sentinel (1d-50 underflows single) */
 #define PFLARE_KSP_ATOL_OFF_VALUE       PFLARE_SINGLE_LITERAL(1e-30)
-/* Arnoldi "lucky breakdown" tolerance (was below double norms; sub-tiny in single) */
+/* Arnoldi "lucky breakdown" tolerance (was below double norms; sub-tiny in single)
+   This is absolute, but far enough out that it doesn't affect the scale invariance
+   of the Newton roots in practice */
 #define PFLARE_TOL_LUCKY_VALUE          PFLARE_SINGLE_LITERAL(1e-20)
 /* remove_small "drop essentially nothing" sentinel (1d-100 underflows single) */
 #define PFLARE_SENTINEL_DROP_VALUE      PFLARE_SINGLE_LITERAL(1e-30)
@@ -241,7 +241,6 @@
 /* Double branch - EXACT previous literals (bit-identical double builds), including
    whether a literal was single-default `1e-N` or double `1d-N`, which are
    bit-distinct once widened */
-#define PFLARE_TOL_ZERO_VALUE           PFLARE_SINGLE_LITERAL(1e-12)
 #define PFLARE_TOL_RCOND_VALUE          PFLARE_SINGLE_LITERAL(1e-12)
 #define PFLARE_TOL_MATFREE_12_VALUE     PFLARE_DOUBLE_LITERAL(1,12)
 #define PFLARE_TOL_MATFREE_13_VALUE     PFLARE_DOUBLE_LITERAL(1,13)
@@ -287,7 +286,6 @@
 #define PFLARE_TWO                PFLARE_TWO_VALUE
 #define PFLARE_MATMULT_FILL       PFLARE_MATMULT_FILL_VALUE
 #define PFLARE_PTAP_FILL          PFLARE_PTAP_FILL_VALUE
-#define PFLARE_TOL_ZERO           PFLARE_TOL_ZERO_VALUE
 #define PFLARE_TOL_RCOND          PFLARE_TOL_RCOND_VALUE
 #define PFLARE_TOL_MATFREE_12     PFLARE_TOL_MATFREE_12_VALUE
 #define PFLARE_TOL_MATFREE_13     PFLARE_TOL_MATFREE_13_VALUE

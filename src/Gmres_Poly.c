@@ -128,7 +128,6 @@ PETSC_INTERN PetscErrorCode compute_mf_gmres_poly_num_matvecs(int inverse_type, 
 
    // ~~~~~~
    PetscInt i_loc;
-   PetscBool zero_root;
    // ~~~~~~
 
    PetscFunctionBegin;
@@ -141,17 +140,10 @@ PETSC_INTERN PetscErrorCode compute_mf_gmres_poly_num_matvecs(int inverse_type, 
    // We may have zero roots with newton that are skipped
    if (inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA) {
       for (i_loc = 0; i_loc < coefficients_rows; i_loc++) {
-         zero_root = PETSC_FALSE;
-         if (coefficients[i_loc + coefficients_rows] == 0.0) {
-            // The size of the zero check here has to match that in
-            // petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
-            if (PetscAbsReal(coefficients[i_loc]) < PFLARE_TOL_ZERO) zero_root = PETSC_TRUE;
-         } else {
-            if (coefficients[i_loc] * coefficients[i_loc] +
-                coefficients[i_loc + coefficients_rows] * coefficients[i_loc + coefficients_rows] < PFLARE_TOL_ZERO) zero_root = PETSC_TRUE;
-         }
-
-         if (zero_root) {
+         // The zero check here has to match that in
+         // petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
+         // ie only exactly zero real roots are skipped, a complex pair is never zero
+         if (coefficients[i_loc] == 0.0 && coefficients[i_loc + coefficients_rows] == 0.0) {
             *matvecs = *matvecs - 1;
          }
       }

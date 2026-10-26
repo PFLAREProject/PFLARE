@@ -246,7 +246,9 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
                               (imag_roots[j] - imag_roots[i]) * (imag_roots[j] - imag_roots[i]));
 
          // Use the larger magnitude for relative scaling
-         scale = PetscMax(PetscMax(mag_i, mag_j), PFLARE_ONE);
+         // This is purely relative so the clustering does not depend on the scale
+         // of the matrix, abs_tol handles roots near zero
+         scale = PetscMax(mag_i, mag_j);
 
          // Check if within tolerance
          if (dist <= abs_tol + rel_tol * scale) {
@@ -325,11 +327,10 @@ PETSC_INTERN PetscErrorCode compute_extra_roots(PetscReal real_roots[], PetscRea
       // We have already computed pof for the positive imaginary complex conjugate
       if (b < 0) continue;
 
-      // Skips eigenvalues that are numerically zero
+      // Skips zero eigenvalues (we should only be passed non-zero roots)
       // This matches the zero test used when applying the polynomial, ie
       // a purely imaginary root (a == 0, b /= 0) is not zero
-      if (b == 0.0 && PetscAbsReal(a) < PFLARE_TOL_ZERO) continue;
-      if (a * a + b * b < PFLARE_TOL_ZERO) continue;
+      if (a == 0.0 && b == 0.0) continue;
 
       // Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
       for (i_loc = 0; i_loc < n_roots; i_loc++) {
@@ -340,9 +341,8 @@ PETSC_INTERN PetscErrorCode compute_extra_roots(PetscReal real_roots[], PetscRea
          c = real_roots[i_loc];
          d = imag_roots[i_loc];
 
-         // Skips eigenvalues that are numerically zero
-         if (d == 0.0 && PetscAbsReal(c) < PFLARE_TOL_ZERO) continue;
-         if (c * c + d * d < PFLARE_TOL_ZERO) continue;
+         // Skips zero eigenvalues
+         if (c == 0.0 && d == 0.0) continue;
 
          // theta_k/theta_i
          div_real = (a * c + b * d) / (c * c + d * d);
@@ -636,6 +636,8 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
    // ~~~~~~~~~~~~~~
 
    // These are the tolerances that control the clustering
+   // These are all relative to ||H||, which scales with the matrix, so the
+   // roots (and hence the polynomial) do not depend on the scale of the matrix
    // (norm2 of the square section H_n(1:m,1:m), taken in Fortran array element order)
    PetscCall(PetscMalloc1(PetscMax(m * m, 1), &H_n_square));
    for (j_loc = 0; j_loc < m; j_loc++) {
@@ -644,11 +646,14 @@ PETSC_INTERN PetscErrorCode calculate_gmres_polynomial_roots_newton(Mat matrix, 
    H_norm = fortran_norm2(H_n_square, m * m);
    PetscCall(PetscFree(H_n_square));
    rel_tol = PetscSqrtReal(PFLARE_EPS);
-   abs_tol = PFLARE_EPS * PetscMax(H_norm, beta);
+   abs_tol = PFLARE_EPS * H_norm;
 
    // In some cases with numerical rank deficiency, we can still
    // end up with non-zero (or negative) eigenvalues that
    // are trivially small - we set them explicitly to zero
+   // Everywhere downstream (the matrix-free apply, the assembled builds,
+   // the matvec counts) then only skips roots that are exactly zero
+   // A complex root that survives this is never skipped
    for (i_loc = 0; i_loc < poly_order + 1; i_loc++) {
       if ((*coefficients)[i_loc] * (*coefficients)[i_loc] + (*coefficients)[i_loc + rows] * (*coefficients)[i_loc + rows] <
           (abs_tol + rel_tol * H_norm) * (abs_tol + rel_tol * H_norm)) {
@@ -921,7 +926,7 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton(Mat matrix, in
    int prod_save_exists_int, output_first_complex_int;
    MatType mat_type;
    Mat temp_mat = NULL, temp_mat_reuse, temp_mat_compare;
-   PetscReal normy;
+   PetscReal normy, max_cpu;
    PetscBool reuse_triggered_cmat, reuse_triggered_reuse_mat;
    Mat reuse_mat_cpu = NULL;
    Mat *reuse_submatrices_cpu;
@@ -984,7 +989,7 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton(Mat matrix, in
       mat_mult_powers_share_sparsity_newton_kokkos(&A_array, &sparsity_array, &prod_save_array,
                prod_save_exists_int, num_terms, poly_sparsity_order,
                coefficients, status_output, output_first_complex_int,
-               PFLARE_TOL_ZERO, reuse_int_reuse_mat, &reuse_array, &B_array);
+               reuse_int_reuse_mat, &reuse_array, &B_array);
 
       *reuse_mat = reuse_array;
 
@@ -1019,9 +1024,14 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton(Mat matrix, in
 
          PetscCall(MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &temp_mat_reuse));
 
+         // Find the biggest entry in the cpu result, the entries scale with 1/(the scale
+         // of the matrix), so the tolerance below is relative to this
+         PetscCall(MatCreateVecs(temp_mat_reuse, NULL, &max_vec));
+         PetscCall(MatGetRowMaxAbs(temp_mat_reuse, max_vec, NULL));
+         PetscCall(VecMax(max_vec, &row_loc, &max_cpu));
+
          PetscCall(MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare));
          // Find the biggest entry in the difference
-         PetscCall(MatCreateVecs(temp_mat_reuse, NULL, &max_vec));
          PetscCall(MatGetRowMaxAbs(temp_mat_reuse, max_vec, NULL));
          PetscCall(VecMax(max_vec, &row_loc, &normy));
          PetscCall(VecDestroy(&max_vec));
@@ -1033,7 +1043,9 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton(Mat matrix, in
          // this happens on the CPU and Kokkos sides independently) compound roughly
          // quadratically, so scale the tolerance with num_terms rather than using a
          // fixed bound that only holds at low order
-         if (normy > PFLARE_TOL_MATFREE_NEWTON * ((double)num_terms * (double)num_terms) || PetscIsNanReal(normy)) {
+         // The tolerance is relative to the biggest entry, but never tighter than absolute
+         if (normy > PFLARE_TOL_MATFREE_NEWTON * ((double)num_terms * (double)num_terms) * PetscMax(PFLARE_ONE, max_cpu) ||
+               PetscIsNanReal(normy)) {
             //call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
             //call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
             SETERRQ(PETSC_COMM_SELF, PETSC_ERR_PLIB, "Diff Kokkos and CPU mat_mult_powers_share_sparsity %g row %" PetscInt_FMT, (double)normy, row_loc);
@@ -1386,9 +1398,9 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton_cpu(Mat matrix
          // If real
          if (IMAG_ROOT(term) == 0.0) {
 
-            // Skips eigenvalues that are numerically zero - see
+            // Skips zero eigenvalues - see
             // the comment in calculate_gmres_polynomial_roots_newton
-            if (PetscAbsReal(REAL_ROOT(term)) < PFLARE_TOL_ZERO) {
+            if (REAL_ROOT(term) == 0.0) {
                term = term + 1;
                continue;
             }
@@ -1423,13 +1435,10 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton_cpu(Mat matrix
          // If complex
          } else {
 
-            // Skips eigenvalues that are numerically zero - see
-            // the comment in calculate_gmres_polynomial_roots_newton
-            if (REAL_ROOT(term) * REAL_ROOT(term) + IMAG_ROOT(term) * IMAG_ROOT(term) < PFLARE_TOL_ZERO) {
-               term = term + 2;
-               continue;
-            }
-
+            // A complex pair is never zero (its imaginary part is nonzero), so is
+            // never skipped. That matters here, as skipping a pair where the fixed
+            // sparsity root is the second of the pair would leave skip_add set
+            // and the wrong product in vals_previous_power_temp
             square_sum = PFLARE_ONE / (REAL_ROOT(term) * REAL_ROOT(term) + IMAG_ROOT(term) * IMAG_ROOT(term));
 
             // If our fixed sparsity order falls on the first of a complex conjugate pair
@@ -1539,8 +1548,11 @@ PETSC_INTERN PetscErrorCode mat_mult_powers_share_sparsity_newton_cpu(Mat matrix
 
       // Final step if last root is real
       if (IMAG_ROOT(coefficients_rows) == 0.0) {
-         if (ncols != 0 && PetscAbsReal(REAL_ROOT(coefficients_rows)) > PFLARE_TOL_ZERO) {
-            for (j_loc = 0; j_loc < ncols; j_loc++) set_vals[j_loc] = PFLARE_ONE / REAL_ROOT(coefficients_rows) * vals_power_temp[j_loc];
+         // Skips zero eigenvalues
+         // vals_previous_power_temp has the final prod in it, even if the loop
+         // above ended by skipping a zero root
+         if (ncols != 0 && REAL_ROOT(coefficients_rows) != 0.0) {
+            for (j_loc = 0; j_loc < ncols; j_loc++) set_vals[j_loc] = PFLARE_ONE / REAL_ROOT(coefficients_rows) * vals_previous_power_temp[j_loc];
             PetscCall(MatSetValues(*cmat, one, &global_row, ncols, cols, set_vals, ADD_VALUES));
          }
       }
@@ -1842,8 +1854,8 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_0th_order(Mat 
    }
 
    // Must be real as we only have one coefficient
-   // Skips eigenvalues that are numerically zero, like the matrix-free apply
-   if (PetscAbsReal(REAL_ROOT(1)) > PFLARE_TOL_ZERO) {
+   // Skips zero eigenvalues, like the matrix-free apply
+   if (REAL_ROOT(1) != 0.0) {
       PetscCall(VecSet(diag_vec, PFLARE_ONE / REAL_ROOT(1)));
    } else {
       PetscCall(VecSet(diag_vec, PFLARE_ZERO));
@@ -1907,9 +1919,9 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_inverse_0th_order_sparsity_ne
       // If real this is easy
       if (IMAG_ROOT(i) == 0.0) {
 
-         // Skips eigenvalues that are numerically zero - see
+         // Skips zero eigenvalues - see
          // the comment in calculate_gmres_polynomial_roots_newton
-         if (PetscAbsReal(REAL_ROOT(i)) < PFLARE_TOL_ZERO) {
+         if (REAL_ROOT(i) == 0.0) {
             i = i + 1;
             continue;
          }
@@ -1929,11 +1941,7 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_inverse_0th_order_sparsity_ne
       // Complex
       } else {
 
-         // Skips eigenvalues that are numerically zero
-         if (REAL_ROOT(i) * REAL_ROOT(i) + IMAG_ROOT(i) * IMAG_ROOT(i) < PFLARE_TOL_ZERO) {
-            i = i + 2;
-            continue;
-         }
+         // A complex pair is never zero as its imaginary part is nonzero
 
          // Compute 2a I - A
          // temp_vec_A = -A
@@ -1962,8 +1970,8 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_inverse_0th_order_sparsity_ne
    if (IMAG_ROOT(coefficients_rows) == 0.0) {
       // Add in the final term multiplied by 1/theta_poly_order
 
-      // Skips eigenvalues that are numerically zero
-      if (PetscAbsReal(REAL_ROOT(coefficients_rows)) > PFLARE_TOL_ZERO) {
+      // Skips zero eigenvalues
+      if (REAL_ROOT(coefficients_rows) != 0.0) {
          PetscCall(VecAXPY(inv_vec, PFLARE_ONE / REAL_ROOT(coefficients_rows), product_vec));
       }
    }
@@ -2022,9 +2030,9 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
    // If real
    if (IMAG_ROOT(1) == 0.0) {
 
-      // Skips eigenvalues that are numerically zero, like the matrix-free apply
+      // Skips zero eigenvalues, like the matrix-free apply
       // A skipped first root leaves the product as the identity
-      if (PetscAbsReal(REAL_ROOT(1)) < PFLARE_TOL_ZERO) {
+      if (REAL_ROOT(1) == 0.0) {
          inv_theta_one = 0;
       } else {
          inv_theta_one = PFLARE_ONE / REAL_ROOT(1);
@@ -2039,8 +2047,8 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
       // solve we don't have a zero coefficient but in the second solve we do
       // So the mat type needs to remain consistent
       // This can't happen in the complex case
-      // The matrix-free apply only applies the last root if it is > PFLARE_TOL_ZERO
-      if (!(PetscAbsReal(REAL_ROOT(2)) > PFLARE_TOL_ZERO)) {
+      // The matrix-free apply only applies the last root if it is non-zero
+      if (REAL_ROOT(2) == 0.0) {
 
          // Set to zero
          PetscCall(MatScale(*inv_matrix, PFLARE_ZERO));
@@ -2090,13 +2098,8 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_1st_1st(Mat ma
    // Complex conjugate roots, a +- ib
    } else {
       // 1/(a^2 + b^2)
-      // Skips eigenvalues that are numerically zero, like the matrix-free apply
-      square_sum = REAL_ROOT(1) * REAL_ROOT(1) + IMAG_ROOT(1) * IMAG_ROOT(1);
-      if (square_sum < PFLARE_TOL_ZERO) {
-         square_sum = 0;
-      } else {
-         square_sum = PFLARE_ONE / square_sum;
-      }
+      // A complex pair is never zero as its imaginary part is nonzero
+      square_sum = PFLARE_ONE / (REAL_ROOT(1) * REAL_ROOT(1) + IMAG_ROOT(1) * IMAG_ROOT(1));
 
       // Complex conjugate roots
       // result = -A_ff
@@ -2252,10 +2255,10 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_full(Mat matri
       // If real this is easy
       if (IMAG_ROOT(i) == 0.0) {
 
-         // Skips eigenvalues that are numerically zero
+         // Skips zero eigenvalues
          // We still compute the entries as as zero because we need the sparsity
          // to be correct for the next iteration
-         if (PetscAbsReal(REAL_ROOT(i)) < PFLARE_TOL_ZERO) {
+         if (REAL_ROOT(i) == 0.0) {
             square_sum = 0;
          } else {
             square_sum = PFLARE_ONE / REAL_ROOT(i);
@@ -2304,14 +2307,10 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_full(Mat matri
       // Complex
       } else {
 
-         // Skips eigenvalues that are numerically zero
-         if (REAL_ROOT(i) * REAL_ROOT(i) + IMAG_ROOT(i) * IMAG_ROOT(i) < PFLARE_TOL_ZERO) {
-            square_sum = 0;
-            a_coeff = 0;
-         } else {
-            square_sum = PFLARE_ONE / (REAL_ROOT(i) * REAL_ROOT(i) + IMAG_ROOT(i) * IMAG_ROOT(i));
-            a_coeff = PFLARE_TWO * REAL_ROOT(i);
-         }
+         // A complex pair is never zero as its imaginary part is nonzero
+         // The fixed sparsity continuation relies on this, as it never skips a complex pair
+         square_sum = PFLARE_ONE / (REAL_ROOT(i) * REAL_ROOT(i) + IMAG_ROOT(i) * IMAG_ROOT(i));
+         a_coeff = PFLARE_TWO * REAL_ROOT(i);
 
          // If our fixed sparsity root is the first of a complex conjugate pair
          // We want to pass out mat_product and only add that to inv_matrix
@@ -2423,8 +2422,8 @@ PETSC_INTERN PetscErrorCode build_gmres_polynomial_newton_inverse_full(Mat matri
       if (IMAG_ROOT(i_sparse) == 0.0) {
          // Add in the final term multiplied by 1/theta_poly_order
 
-         // Skips eigenvalues that are numerically zero
-         if (PetscAbsReal(REAL_ROOT(i_sparse)) > PFLARE_TOL_ZERO) {
+         // Skips zero eigenvalues
+         if (REAL_ROOT(i_sparse) != 0.0) {
 
             if (reuse_triggered) {
                // If doing reuse we know our nonzeros are a subset

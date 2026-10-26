@@ -1,9 +1,10 @@
-static char help[] = "Tests assembled Newton polynomial inverses skip numerically zero roots like the matrix-free apply.\n\n";
+static char help[] = "Tests assembled Newton polynomial inverses skip zero roots like the matrix-free apply.\n\n";
 
 /*
   The matrix-free apply of a GMRES polynomial in the Newton basis skips any root
-  that is numerically zero (|theta| < tol for a real root, |theta|^2 < tol for a
-  complex pair). Here we set Newton roots containing zero and tiny roots into
+  that is exactly zero (the root computation sets numerically zero roots to exactly
+  zero, relative to the size of the operator). A complex pair is never zero, so is
+  never skipped. Here we set Newton roots containing zero roots into
   PCPFLAREINV with PCPFLAREINVSetPolyCoeffs and reuse on, and check the assembled
   inverse (with unconstrained sparsity) gives the same result as the
   matrix-free apply. This covers the 0th order, 1st order and higher order
@@ -17,14 +18,12 @@ static char help[] = "Tests assembled Newton polynomial inverses skip numericall
 
 #if defined(PETSC_USE_REAL_SINGLE)
   #define DEFAULT_CHECK_TOL 1e-5
-  #define TINY              1e-7
 #else
   #define DEFAULT_CHECK_TOL 1e-10
-  #define TINY              1e-14
 #endif
 
 #define MAX_ROOTS 4
-#define N_ROOT_SETS 9
+#define N_ROOT_SETS 5
 
 /*
    Writes a 1D upwind advection-diffusion stencil into A
@@ -99,17 +98,13 @@ int main(int argc, char **args)
   PetscReal   roots[2 * MAX_ROOTS];
   // Number of roots, then the real and imaginary parts of each root
   // The complex conjugate pairs are next to each other
-  const PetscInt  set_n_roots[N_ROOT_SETS] = {1, 1, 2, 2, 2, 2, 2, 4, 4};
+  const PetscInt  set_n_roots[N_ROOT_SETS] = {1, 2, 2, 2, 4};
   const PetscReal set_roots[N_ROOT_SETS][MAX_ROOTS][2] = {
     {{0.0, 0.0}},                                                  // 0th order, zero root
-    {{TINY, 0.0}},                                                 // 0th order, tiny root
     {{0.0, 0.0}, {0.5, 0.0}},                                      // 1st order, zero first root
-    {{TINY, 0.0}, {0.5, 0.0}},                                     // 1st order, tiny first root
     {{0.8, 0.0}, {0.0, 0.0}},                                      // 1st order, zero last root
     {{0.0, 0.0}, {0.0, 0.0}},                                      // 1st order, all zero
-    {{TINY, TINY}, {TINY, -TINY}},                                 // 1st order, tiny complex pair
     {{0.0, 0.0}, {0.5, 0.0}, {0.7, 0.0}, {0.9, 0.0}},              // 3rd order, zero first root
-    {{TINY, TINY}, {TINY, -TINY}, {0.5, 0.0}, {0.9, 0.0}},         // 3rd order, tiny complex first pair
   };
 
   PetscFunctionBeginUser;

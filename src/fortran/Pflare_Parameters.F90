@@ -192,8 +192,6 @@ module pflare_parameters
    PetscReal, parameter :: PFLARE_MATMULT_FILL = PFLARE_MATMULT_FILL_VALUE
    PetscReal, parameter :: PFLARE_PTAP_FILL    = PFLARE_PTAP_FILL_VALUE
 
-   ! Coefficient/root "is effectively zero" tests (Gmres_Poly/Gmres_Poly_Newton)
-   PetscReal, parameter :: PFLARE_TOL_ZERO           = PFLARE_TOL_ZERO_VALUE
    ! dgelsd rcond (harmonic Ritz min-norm solve)
    PetscReal, parameter :: PFLARE_TOL_RCOND          = PFLARE_TOL_RCOND_VALUE
    ! Kokkos-vs-CPU consistency (PFLARE_KOKKOS_DEBUG) and matrix-free reconstruction
@@ -240,6 +238,8 @@ module pflare_parameters
    ! "atol effectively off" sentinel (1d-50 underflows single)
    PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = PFLARE_KSP_ATOL_OFF_VALUE
    ! Arnoldi "lucky breakdown" tolerance (was below double norms; sub-tiny in single)
+   ! This is absolute, but far enough out that it doesn't affect the scale invariance
+   ! of the Newton roots in practice
    PetscReal, parameter :: PFLARE_TOL_LUCKY          = PFLARE_TOL_LUCKY_VALUE
    ! remove_small "drop essentially nothing" sentinel (1d-100 underflows single)
    PetscReal, parameter :: PFLARE_SENTINEL_DROP      = PFLARE_SENTINEL_DROP_VALUE

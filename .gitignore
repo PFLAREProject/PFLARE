@@ -51,6 +51,7 @@ tests/pcair_reuse_amount_range
 tests/pflareinv_apply_transpose
 tests/newton_imag_roots
 tests/newton_zero_roots
+tests/newton_scale
 tests/pflareinv_exact_inverse
 tests/pflareinv_sai_rank_deficient
 tests/pmisr_nonsymmetric
