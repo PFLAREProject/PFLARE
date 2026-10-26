@@ -60,8 +60,8 @@ PETSC_INTERN PetscErrorCode calculate_and_build_sai_z_cpu(Mat A_ff_input, Mat A_
    PetscScalar *submat_vals, *submat_vals_copy;
    PetscScalar *e_row_copy;
    PetscReal *sing_vals;
-   // Use machine precision to drop singular values in the minimum norm solve
-   const PetscReal rcond = -1.0;
+   // Relative tolerance below which the dense least-squares system is treated as rank deficient
+   PetscReal rcond, r_diag_min, r_diag_max;
    // The columns of the rows in the shadow I, before sorted_unique, with
    // i_rows_size entries allocated
    PetscInt *i_rows_unsorted, *i_rows_grow;
@@ -638,8 +638,19 @@ PETSC_INTERN PetscErrorCode calculate_and_build_sai_z_cpu(Mat A_ff_input, Mat A_
             // The QR needs a full rank system with at least as many rows as columns
             // If A_ff is singular that may not be the case, so we fall back
             // to computing the minimum norm solution below
+            // We use the same relative tolerance to decide if the QR is (numerically)
+            // rank deficient as the minimum norm solve uses to drop singular values
+            rcond = PFLARE_EPS * (PetscReal)PetscMax(i_size, j_size);
             info = 1;
-            if (i_size >= j_size) {
+            if (i_size == 0) {
+
+               // If there are no rows (ie the rows A(J, :) have no entries) the minimum
+               // norm solution is zero, and LAPACK won't accept a leading dimension of zero
+               PetscCall(PetscFree(e_row));
+               PetscCall(PetscCalloc1(j_size, &e_row));
+               info = 0;
+
+            } else if (i_size >= j_size) {
 
                // gels overwrites these, so keep a copy in case it finds we are rank deficient
                PetscCall(PetscMalloc1(i_size * j_size, &submat_vals_copy));
@@ -661,6 +672,19 @@ PETSC_INTERN PetscErrorCode calculate_and_build_sai_z_cpu(Mat A_ff_input, Mat A_
                PetscCall(PetscFree(work));
 
                PetscCheck(info >= 0, PETSC_COMM_SELF, PETSC_ERR_LIB, "SAI dense least-squares solve failed");
+
+               // gels only reports an exactly zero diagonal in R, so also check if R is
+               // numerically rank deficient - R is in the upper triangle of submat_vals
+               if (info == 0) {
+                  r_diag_min = PETSC_MAX_REAL;
+                  r_diag_max = 0;
+                  for (j_loc = 0; j_loc < j_size; j_loc++) {
+                     r_diag_min = PetscMin(r_diag_min, PetscAbsScalar(submat_vals[j_loc + j_loc * i_size]));
+                     r_diag_max = PetscMax(r_diag_max, PetscAbsScalar(submat_vals[j_loc + j_loc * i_size]));
+                  }
+                  if (r_diag_min <= rcond * r_diag_max) info = 1;
+               }
+
                // Rank deficient - restore the system for the minimum norm solve
                if (info > 0) {
                   PetscCall(PetscArraycpy(submat_vals, submat_vals_copy, i_size * j_size));
