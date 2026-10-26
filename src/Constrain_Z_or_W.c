@@ -257,11 +257,15 @@ PETSC_INTERN PetscErrorCode constrain_grid_transfer(Mat *z_or_w, PetscBool is_z,
    const PetscInt *colmap = NULL;
    // VecGetArrayRead returns the raw Vec array (PetscScalar)
    const PetscScalar *b_c_nonlocal = NULL;
-   PetscScalar *b_c_local, *b_f_vals;
+   const PetscScalar *b_c_local, *b_f_vals;
    // Column-major: b_c_nonlocal_alloc is cols_ao x size(null_vecs_c) (NULL until allocated),
    // b_c_vals ncols x size(null_vecs_c), bctbc and pseudo size(null_vecs_c) x size(null_vecs_c)
    // and temp_mat size(null_vecs_c) x ncols
    PetscScalar *b_c_nonlocal_alloc = NULL, *b_c_vals, *bctbc, *pseudo, *temp_mat;
+   // Column-major: b_c_local_alloc is local_size_c x size(null_vecs_c),
+   // b_f_local_alloc local_size_f x size(null_vecs_c)
+   PetscScalar *b_c_local_alloc, *b_f_local_alloc;
+   PetscInt local_size_c, local_size_f;
    PetscInt one = 1;
    // Global scale of the coarse near-nullspace vectors and the per-row test
    // against it, see PFLARE_TOL_CONSTRAIN_REL below
@@ -437,6 +441,23 @@ PETSC_INTERN PetscErrorCode constrain_grid_transfer(Mat *z_or_w, PetscBool is_z,
       PetscFunctionReturn(PETSC_SUCCESS);
    }
 
+   // ~~~~~
+   // Copy out the local values of B_c and B_f once, rather than getting the
+   // arrays in every row (which on the gpu would copy to the host every row)
+   // ~~~~~
+   PetscCall(VecGetLocalSize(null_vecs_c[0], &local_size_c));
+   PetscCall(VecGetLocalSize(null_vecs_f[0], &local_size_f));
+   PetscCall(PetscMalloc1(local_size_c * null_vecs_size, &b_c_local_alloc));
+   PetscCall(PetscMalloc1(local_size_f * null_vecs_size, &b_f_local_alloc));
+   for (null_vec = 0; null_vec < null_vecs_size; null_vec++) {
+      PetscCall(VecGetArrayRead(null_vecs_c[null_vec], &b_c_local));
+      for (j_loc = 0; j_loc < local_size_c; j_loc++) b_c_local_alloc[j_loc + null_vec * local_size_c] = b_c_local[j_loc];
+      PetscCall(VecRestoreArrayRead(null_vecs_c[null_vec], &b_c_local));
+      PetscCall(VecGetArrayRead(null_vecs_f[null_vec], &b_f_vals));
+      for (j_loc = 0; j_loc < local_size_f; j_loc++) b_f_local_alloc[j_loc + null_vec * local_size_f] = b_f_vals[j_loc];
+      PetscCall(VecRestoreArrayRead(null_vecs_f[null_vec], &b_f_vals));
+   }
+
    // Now go through each of the rows
    // GetRow has to happen over the global indices
    for (i_loc = global_row_start; i_loc < global_row_end_plus_one; i_loc++) {
@@ -482,13 +503,8 @@ PETSC_INTERN PetscErrorCode constrain_grid_transfer(Mat *z_or_w, PetscBool is_z,
       // Get the local b_c values
       // Loop over all the near nullspace vectors and get the local components
       for (null_vec = 0; null_vec < null_vecs_size; null_vec++) {
-
-         PetscCall(VecGetArray(null_vecs_c[null_vec], &b_c_local));
-
          // cols are local indices
-         for (j_loc = 0; j_loc < ncols_ad; j_loc++) b_c_vals[j_loc + null_vec * ncols] = b_c_local[cols[j_loc]];
-
-         PetscCall(VecRestoreArray(null_vecs_c[null_vec], &b_c_local));
+         for (j_loc = 0; j_loc < ncols_ad; j_loc++) b_c_vals[j_loc + null_vec * ncols] = b_c_local_alloc[cols[j_loc] + null_vec * local_size_c];
       }
       PetscCall(MatRestoreRow(Ad, i_loc - global_row_start, &ncols_temp,
                &cols, &vals));
@@ -565,11 +581,8 @@ PETSC_INTERN PetscErrorCode constrain_grid_transfer(Mat *z_or_w, PetscBool is_z,
       // Compute W * B_c^R - B_f^R
       // Loop over near-nullspace vecs
       for (null_vec = 0; null_vec < null_vecs_size; null_vec++) {
-
-         PetscCall(VecGetArray(null_vecs_f[null_vec], &b_f_vals));
-         // b_f_vals is local (we want b_f for this row) but so is the value we want
-         diff[null_vec] = diff[null_vec] - b_f_vals[i_loc - global_row_start];
-         PetscCall(VecRestoreArray(null_vecs_f[null_vec], &b_f_vals));
+         // b_f is local (we want b_f for this row) but so is the value we want
+         diff[null_vec] = diff[null_vec] - b_f_local_alloc[i_loc - global_row_start + null_vec * local_size_f];
       }
 
       // Compute (B_c^R)^T * B_c^R
@@ -646,6 +659,8 @@ PETSC_INTERN PetscErrorCode constrain_grid_transfer(Mat *z_or_w, PetscBool is_z,
    PetscCall(MatAssemblyEnd(new_z_or_w, MAT_FINAL_ASSEMBLY));
 
    PetscCall(PetscFree(b_c_nonlocal_alloc));
+   PetscCall(PetscFree(b_c_local_alloc));
+   PetscCall(PetscFree(b_f_local_alloc));
 
    // Destroy the old input matrix
    PetscCall(MatDestroy(z_or_w));
