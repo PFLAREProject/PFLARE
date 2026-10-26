@@ -37,7 +37,7 @@ src/PETSc_Helper.o : src/PETSc_Helper.c src/pflareimpl.h include/pflare.h src/pf
 src/PMISR_Module.o : src/PMISR_Module.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/PMISR_Modulek.h src/Device_Datak.h src/Pflare_Random.h src/PMISR_Module.h 
 src/Pflare_Random.o : src/Pflare_Random.c src/Pflare_Random.h 
 src/Repartition.o : src/Repartition.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/Repartition.h 
-src/SAI_Z.o : src/SAI_Z.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/Sorting.h src/SAI_Zk.h src/PETSc_Helper.h src/SAI_Z.h 
+src/SAI_Z.o : src/SAI_Z.c include/pflare.h src/pflareimpl.h src/pflare_parameters.h src/Sorting.h src/SAI_Zk.h src/PETSc_Helper.h src/Gmres_Poly.h src/SAI_Z.h 
 src/SAbs.o : src/SAbs.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/PETSc_Helper.h src/SAbs.h 
 src/Sorting.o : src/Sorting.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/Sorting.h 
 src/TSQR.o : src/TSQR.c src/pflareimpl.h include/pflare.h src/pflare_parameters.h src/TSQR.h 

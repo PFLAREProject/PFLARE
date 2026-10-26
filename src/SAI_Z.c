@@ -16,6 +16,8 @@
 #include "Sorting.h"
 #include "SAI_Zk.h"
 #include "PETSc_Helper.h"
+// For the gelsd declaration
+#include "Gmres_Poly.h"
 #include "SAI_Z.h"
 
 // -------------------------------------------------------------------------------------------------------------------------------
@@ -37,7 +39,8 @@ PETSC_INTERN PetscErrorCode calculate_and_build_sai_z_cpu(Mat A_ff_input, Mat A_
    int intersect_count;
    PetscMPIInt comm_size;
    // BLAS/LAPACK integer arguments must be PetscBLASInt
-   PetscBLASInt lwork, info, m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl;
+   PetscBLASInt lwork, info, m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl, rank, iwork_size;
+   PetscBLASInt *iwork;
    MPI_Comm MPI_COMM_MATRIX;
    Mat transpose_mat, A_ff;
    IS all_cols_indices, row_indices;
@@ -54,7 +57,11 @@ PETSC_INTERN PetscErrorCode calculate_and_build_sai_z_cpu(Mat A_ff_input, Mat A_
    const PetscScalar *vals = NULL;
    PetscScalar *e_row, *j_vals;
    // Column-major i_size x j_size
-   PetscScalar *submat_vals;
+   PetscScalar *submat_vals, *submat_vals_copy;
+   PetscScalar *e_row_copy;
+   PetscReal *sing_vals;
+   // Use machine precision to drop singular values in the minimum norm solve
+   const PetscReal rcond = -1.0;
    // The columns of the rows in the shadow I, before sorted_unique, with
    // i_rows_size entries allocated
    PetscInt *i_rows_unsorted, *i_rows_grow;
@@ -622,23 +629,83 @@ PETSC_INTERN PetscErrorCode calculate_and_build_sai_z_cpu(Mat A_ff_input, Mat A_
          // ~~~~~~~~~~~~~
          } else {
 
-            PetscCall(PetscMalloc1(1, &work));
-            lwork = -1;
             // Kind-correct BLAS integer dimensions
             PetscCall(PetscBLASIntCast(i_size, &m_bl));
             PetscCall(PetscBLASIntCast(j_size, &n_bl));
             nrhs_bl = 1;
             PetscCall(PetscBLASIntCast(i_size, &lda_bl));
-            PetscCall(PetscBLASIntCast(i_size, &ldb_bl));
-            PetscCallBLAS("LAPACKgels", LAPACKgels_("N", &m_bl, &n_bl, &nrhs_bl, submat_vals, &lda_bl,
-                     e_row, &ldb_bl, work, &lwork, &info));
-            // int() is exact for all plausible sizes < 2^24 even when work is single precision
-            PetscCall(PetscBLASIntCast((PetscInt)work[0], &lwork));
-            PetscCall(PetscFree(work));
-            PetscCall(PetscMalloc1(lwork, &work));
-            PetscCallBLAS("LAPACKgels", LAPACKgels_("N", &m_bl, &n_bl, &nrhs_bl, submat_vals, &lda_bl,
-                     e_row, &ldb_bl, work, &lwork, &info));
-            PetscCall(PetscFree(work));
+
+            // The QR needs a full rank system with at least as many rows as columns
+            // If A_ff is singular that may not be the case, so we fall back
+            // to computing the minimum norm solution below
+            info = 1;
+            if (i_size >= j_size) {
+
+               // gels overwrites these, so keep a copy in case it finds we are rank deficient
+               PetscCall(PetscMalloc1(i_size * j_size, &submat_vals_copy));
+               PetscCall(PetscArraycpy(submat_vals_copy, submat_vals, i_size * j_size));
+               PetscCall(PetscMalloc1(i_size, &e_row_copy));
+               PetscCall(PetscArraycpy(e_row_copy, e_row, i_size));
+
+               PetscCall(PetscMalloc1(1, &work));
+               lwork = -1;
+               PetscCall(PetscBLASIntCast(i_size, &ldb_bl));
+               PetscCallBLAS("LAPACKgels", LAPACKgels_("N", &m_bl, &n_bl, &nrhs_bl, submat_vals, &lda_bl,
+                        e_row, &ldb_bl, work, &lwork, &info));
+               // int() is exact for all plausible sizes < 2^24 even when work is single precision
+               PetscCall(PetscBLASIntCast((PetscInt)work[0], &lwork));
+               PetscCall(PetscFree(work));
+               PetscCall(PetscMalloc1(lwork, &work));
+               PetscCallBLAS("LAPACKgels", LAPACKgels_("N", &m_bl, &n_bl, &nrhs_bl, submat_vals, &lda_bl,
+                        e_row, &ldb_bl, work, &lwork, &info));
+               PetscCall(PetscFree(work));
+
+               PetscCheck(info >= 0, PETSC_COMM_SELF, PETSC_ERR_LIB, "SAI dense least-squares solve failed");
+               // Rank deficient - restore the system for the minimum norm solve
+               if (info > 0) {
+                  PetscCall(PetscArraycpy(submat_vals, submat_vals_copy, i_size * j_size));
+                  PetscCall(PetscArraycpy(e_row, e_row_copy, i_size));
+               }
+               PetscCall(PetscFree(submat_vals_copy));
+               PetscCall(PetscFree(e_row_copy));
+            }
+
+            // Minimum norm least-squares solution with an SVD
+            if (info != 0) {
+
+               // The rhs must have space for the solution if there are more columns than rows
+               PetscCall(PetscBLASIntCast(PetscMax(i_size, j_size), &ldb_bl));
+               PetscCall(PetscCalloc1(PetscMax(i_size, j_size), &e_row_copy));
+               for (k_loc = 0; k_loc < i_size; k_loc++) e_row_copy[k_loc] = e_row[k_loc];
+               PetscCall(PetscMalloc1(PetscMin(i_size, j_size), &sing_vals));
+
+               PetscCall(PetscMalloc1(1, &work));
+               PetscCall(PetscMalloc1(1, &iwork));
+               lwork = -1;
+               PetscCallBLAS("LAPACKgelsd", LAPACKgelsd_(&m_bl, &n_bl, &nrhs_bl, submat_vals, &lda_bl,
+                        e_row_copy, &ldb_bl, sing_vals, &rcond, &rank,
+                        work, &lwork, iwork, &info));
+               // Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
+               // for all plausible sizes < 2^24 even when work is single precision
+               PetscCall(PetscBLASIntCast((PetscInt)work[0], &lwork));
+               iwork_size = iwork[0];
+               PetscCall(PetscFree(work));
+               PetscCall(PetscFree(iwork));
+               PetscCall(PetscMalloc1(lwork, &work));
+               PetscCall(PetscMalloc1(iwork_size, &iwork));
+               PetscCallBLAS("LAPACKgelsd", LAPACKgelsd_(&m_bl, &n_bl, &nrhs_bl, submat_vals, &lda_bl,
+                        e_row_copy, &ldb_bl, sing_vals, &rcond, &rank,
+                        work, &lwork, iwork, &info));
+               PetscCall(PetscFree(work));
+               PetscCall(PetscFree(iwork));
+               PetscCall(PetscFree(sing_vals));
+
+               PetscCheck(info == 0, PETSC_COMM_SELF, PETSC_ERR_LIB, "SAI dense minimum norm least-squares solve failed");
+
+               // The first j_size entries are the solution
+               PetscCall(PetscFree(e_row));
+               e_row = e_row_copy;
+            }
          }
       }
 
