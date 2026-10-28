@@ -1,5 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
+// The prototypes Grid_Transfer.c calls these kernels through
+#include "Grid_Transferk.h"
 #include <iostream>
 
 //------------------------------------------------------------------------------------------------------------------------

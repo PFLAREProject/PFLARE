@@ -25,8 +25,7 @@ from petsc4py.PETSc cimport CHKERR, PetscErrorCode
 cdef extern from "petsc.h":
 	ctypedef int    PetscInt  "PetscInt"
 	ctypedef double PetscReal "PetscReal"
-	# PetscBool is a C bool (1 byte) and the Fortran bind(C) routines take it as
-	# a PetscBool (logical(c_bool)), so declare it as the real C type rather than
+	# PetscBool is a C bool (1 byte), so declare it as the real C type rather than
 	# passing an int or unsigned char in its place
 	ctypedef bint   PetscBool "PetscBool"
 	# Increment a PETSc object's reference count (used to balance petsc4py's
@@ -36,17 +35,15 @@ cdef extern from "petsc.h":
 
 cdef extern:
 	void PCRegister_PFLARE()
-	# Call the C wrappers (not the _c Fortran routines directly): they call
-	# PetscInitializeFortran() first, which petsc4py does not, so the Fortran
-	# module block (MPIU_REAL etc.) is populated before the Fortran code runs.
+	# The public C API of include/pflare.h.
 	# Aliased to distinct Cython names so they don't clash with the cpdef wrappers.
 	void compute_cf_splitting_cwrap "compute_cf_splitting" (PetscMat A, int skip_symmetrize_int, PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type, int ddc_its, PetscReal fraction_swap, PetscIS* is_fine, PetscIS* is_coarse)
 	void compute_diag_dom_submatrix_cwrap "compute_diag_dom_submatrix" (PetscMat A, PetscReal max_dd_ratio, PetscMat *output_mat)
 
 	# -----------------------------------------------------------------------
 	# PCAIR Get routines
-	# Call the public C API (not the _c Fortran routines directly): it checks
-	# the PC is of type PCAIR first, as the Fortran casts pc->data blindly.
+	# Call the public C API: it checks the PC is of type PCAIR first, rather than
+	# reading another PC type's pc->data as PCAIR data.
 	# Wrapping the calls in CHKERR raises PETSc.Error on a wrong type.
 	# -----------------------------------------------------------------------
 
@@ -102,9 +99,9 @@ cdef extern:
 
 	# PCAIR - polynomial coefficients
 	# Returns a pointer into internal PCAIR memory (valid until the next PCSetUp or PCReset).
-	# The Python wrapper copies the data before returning. Calls the C wrapper (not the
-	# _c Fortran routine) so an invalid level/inverse or a call before setup raises a
-	# PETSc error rather than reading through a null pointer.
+	# The Python wrapper copies the data before returning. The C API checks the
+	# level/inverse and that the PC is set up, so an invalid level/inverse or a call
+	# before setup raises a PETSc error rather than reading through a null pointer.
 	PetscErrorCode PCAIRGetPolyCoeffs(PetscPC pc, PetscInt petsc_level, int which_inverse,
 	                           PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size)
 	PetscErrorCode PCAIRGetGridComplexity(PetscPC pc, PetscReal *complexity)
@@ -576,7 +573,7 @@ cpdef pcair_set_smooth_type(PC pc, str smooth_type):
 	cdef int i, n
 	for i in range(11):
 		buf[i] = 0
-	# The underlying C/Fortran interface only supports at most 10 characters
+	# The underlying C interface only supports at most 10 characters
 	if len(encoded) > 10:
 		raise ValueError(f"smooth type {smooth_type!r} has {len(encoded)} characters, at most 10 are supported")
 	n = len(encoded)

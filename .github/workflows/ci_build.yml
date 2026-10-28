@@ -49,7 +49,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image with debug PETSc and gfortran runtime checks
+      # The sanitizers are also on the Fortran flags so the Fortran tests link their
+      # runtime first, which the address sanitizer needs; the Python bindings are not
+      # built in a sanitizer build (gnu_opt tests them)
+      - name: Build Docker image with debug PETSc, gfortran runtime checks and the address and undefined behaviour sanitizers
         uses: docker/build-push-action@v6
         with:
           platforms: linux/amd64
@@ -58,7 +61,11 @@ jobs:
           file: ./dockerfiles/Dockerfile
           build-args: |
             ARCH=arch-linux-c-debug
-            EXTRA_FFLAGS=-fcheck=all -g -fbacktrace
+            EXTRA_FFLAGS=-fcheck=all -g -fbacktrace -fsanitize=address,undefined
+            EXTRA_CFLAGS=-fsanitize=address,undefined
+            EXTRA_CXXFLAGS=-fsanitize=address,undefined
+            ASAN_OPTIONS=detect_leaks=0
+            UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
   gnu_debug_malloc_dump:
     runs-on: ubuntu-22.04
@@ -171,6 +178,73 @@ jobs:
           python3 /build/PFLARE/python/ex2.py -ksp_max_it 5
           EOF
 
+  # Golden logs (docs/dev/testing.md): runs the whole test suite with
+  # -ksp_converged_reason -ksp_monitor on the base commit (the merge-base of a PR,
+  # otherwise the first parent) and on the head commit, both built in the same
+  # container, and compares the converged reasons, iteration counts, residual
+  # histories and stats. Building both in the same image means PETSc main moving
+  # under the image can never show up as a difference
+  gnu_opt_golden_logs:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    env:
+      HEAD_COMMIT: ${{ needs.setup.outputs.head_commit }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.head_commit }}
+          fetch-depth: 0
+
+      - name: Extract the base commit
+        id: base
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            BASE_COMMIT=$(git merge-base FETCH_HEAD HEAD)
+          else
+            BASE_COMMIT=$(git rev-parse HEAD^1)
+          fi
+          echo "Base commit: ${BASE_COMMIT}, head commit: ${HEAD_COMMIT}"
+          echo "commit=${BASE_COMMIT}" >> "$GITHUB_OUTPUT"
+          mkdir -p "${RUNNER_TEMP}/pflare_base" "${RUNNER_TEMP}/golden"
+          git archive "${BASE_COMMIT}" | tar -x -C "${RUNNER_TEMP}/pflare_base"
+
+      - name: Capture and compare the golden logs of the base and head commits
+        env:
+          BASE_COMMIT: ${{ steps.base.outputs.commit }}
+        run: |
+          docker pull stevendargaville/petsc:latest
+          docker run -i --rm \
+            -v "${{ github.workspace }}:/build/PFLARE" \
+            -v "${RUNNER_TEMP}/pflare_base:/build/PFLARE_base" \
+            -v "${RUNNER_TEMP}/golden:/golden" \
+            -e PETSC_ARCH=arch-linux-c-opt \
+            -e PETSC_OPTIONS="-on_error_abort -fp_trap on" \
+            -e BASE_COMMIT -e HEAD_COMMIT \
+            stevendargaville/petsc:latest bash -s <<'EOF'
+          set -euo pipefail
+          FLAGS=(FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall")
+          # The base commit may not have the golden log tools, so both captures
+          # use the tools from the head commit
+          make -C /build/PFLARE_base -j4 build_tests "${FLAGS[@]}"
+          GOLDEN_COMMIT="${BASE_COMMIT}" /build/PFLARE/tools/capture_test_logs.sh -r /build/PFLARE_base -j 2 /golden/base \
+            || echo "Some test commands failed on the base commit"
+          make -C /build/PFLARE -j4 build_tests "${FLAGS[@]}"
+          # A failed command is reported by the comparison below
+          GOLDEN_COMMIT="${HEAD_COMMIT}" /build/PFLARE/tools/capture_test_logs.sh -r /build/PFLARE -j 2 /golden/head || true
+          python3 /build/PFLARE/tools/compare_test_logs.py compare /golden/base /golden/head
+          EOF
+
+      - name: Upload the golden logs of the head commit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-logs-gnu_opt
+          path: ${{ runner.temp }}/golden/head
+          if-no-files-found: ignore
+
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04
     needs: [setup]
@@ -193,6 +267,50 @@ jobs:
           tags: stevendargaville/pflare_64_bit:latest
           build-args: |
             ARCH=arch-linux-c-opt
+
+  # PETSc configured without a Fortran compiler (--with-fc=0) and gfortran removed from
+  # the image: PFLARE builds, tests and installs without its Fortran interface and Fortran
+  # tests. There is no such base image, so dockerfiles/Dockerfile_no_fortran configures
+  # PETSc again inside stevendargaville/petsc
+  gnu_opt_no_fortran:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image with PETSc configured without Fortran
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          push: false
+          context: .
+          file: ./dockerfiles/Dockerfile_no_fortran
+          build-args: |
+            BASE_ARCH=arch-linux-c-opt
+            ARCH=arch-linux-c-opt-no-fortran
+            FORTRAN=no_fortran
+
+  # PETSc configured with a Fortran compiler but --with-fortran-bindings=0, so FC is set
+  # but PETSc has no Fortran modules: PFLARE must not build its Fortran interface
+  gnu_debug_no_fortran_bindings:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image with debug PETSc configured without Fortran bindings
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          push: false
+          context: .
+          file: ./dockerfiles/Dockerfile_no_fortran
+          build-args: |
+            BASE_ARCH=arch-linux-c-debug
+            ARCH=arch-linux-c-debug-no-fortran-bindings
+            FORTRAN=no_fortran_bindings
 
   gnu_opt_kokkos:
     runs-on: ubuntu-22.04

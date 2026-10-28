@@ -60,3 +60,6 @@ tests/leja_ordering
 tests/newton_root_clustering
 tests/reuse_preconditioner
 tests/shell_block_apply
+
+# Golden test log captures (make tests_golden_capture)
+tests/golden_logs/

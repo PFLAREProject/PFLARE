@@ -61,7 +61,7 @@ An up to date Docker image is available on Dockerhub. To download the image and 
 
 ### Installing to a prefix
 
-After a source build, the library, headers, Fortran module files and Python bindings (if built) can be installed to a prefix with:
+After a source build, the library, headers, Fortran module files (if the Fortran interface was built, see [Building without a Fortran compiler](#building-without-a-fortran-compiler)) and Python bindings (if built) can be installed to a prefix with:
 
      make install
 
@@ -71,13 +71,25 @@ The default prefix is `/usr/local`; this can be changed with `PREFIX` (and `DEST
 
 The install also writes a pkg-config file to `$(PREFIX)/lib/pkgconfig/pflare.pc`, so the compile and link flags can be obtained with `pkg-config --cflags --libs pflare` once that directory is in your `PKG_CONFIG_PATH`. The Python bindings alone can be installed with `make install_python`.
 
+### Building without a Fortran compiler
+
+PFLARE is written in C (with C++ for its Kokkos kernels) and does not need a Fortran compiler. Its Fortran interface (the Fortran modules built from `src/fortran`) and the Fortran tests in `tests/` are built only when PETSc has been configured with its Fortran bindings, which PETSc does by default whenever it has a Fortran compiler. The PFLARE `Makefile` detects this from `PETSC_USE_FORTRAN_BINDINGS` in PETSc's `petscconf.h`, so there is nothing to set.
+
+If PETSc was configured without a Fortran compiler (``--with-fc=0``), or with a Fortran compiler but ``--with-fortran-bindings=0``:
+
+- ``make``, ``make python`` and ``make install`` build and install the library, the C headers and the Python bindings as usual. The Fortran interface is not built, so no Fortran module (`.mod`) files are installed
+- ``make check`` prints "Fortran check skipped (PETSc configured without Fortran bindings)" in place of its Fortran test, and ``make tests`` prints "[skipped without Fortran bindings]" for each Fortran test command; every C and Python test runs as usual
+- The C/C++ and Python interfaces, the command line options and the results are the same as in a build with the Fortran interface
+
+Note that PETSc's ``--download-fblaslapack`` needs a Fortran compiler; without one, configure PETSc with an existing BLAS/LAPACK or with ``--download-f2cblaslapack``.
+
 ## Linking to PFLARE
 
 For Fortran/C:
 
 1) Link the library `libpflare` to your application; it is output to `lib/`
 2) Add `include/` to your include path
-3) For Fortran also add the location of the .mod files to your include path (compiler dependent, often `lib/`, `include/` or the top level directory)
+3) For Fortran also add the location of the .mod files to your include path (compiler dependent, often `lib/`, `include/` or the top level directory). The Fortran interface is only built when PETSc has its Fortran bindings, see [Building without a Fortran compiler](#building-without-a-fortran-compiler)
 
 For Python:
 

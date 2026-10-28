@@ -41,6 +41,8 @@ SYCLC_FLAGS_INPUT := $(SYCLC_FLAGS)
 # Directories we want
 INCLUDEDIR  := include
 SRCDIR      := src
+# The Fortran interface layer (the public Fortran modules)
+FORTRANDIR  := $(SRCDIR)/fortran
 # This needs to be exported into the sub-makefile for Cython
 export LIBDIR := $(CURDIR)/lib
 
@@ -80,6 +82,10 @@ export PETSC_HAVE_MPIUNI := $(if $(call _have_conf,PETSC_HAVE_MPIUNI),1,0)
 # Detect single-precision PETSc: the tests/data binary matrices are double-width
 # and cannot be loaded under PETSC_USE_REAL_SINGLE, so the load tests are gated off
 export PETSC_USE_REAL_SINGLE := $(if $(call _have_conf,PETSC_USE_REAL_SINGLE),1,0)
+# Detect if PETSc was configured with its Fortran bindings - the Fortran interface
+# (src/fortran) and the Fortran tests are only built when it has them. PETSc sets
+# this whenever it has a Fortran compiler, unless configured with --with-fortran-bindings=0
+export PETSC_USE_FORTRAN_BINDINGS := $(if $(call _have_conf,PETSC_USE_FORTRAN_BINDINGS),1,0)
 
 # The load tests read the double-width binaries in tests/data, so they only run
 # when PETSc uses 32-bit indices AND double precision (both flags 0).
@@ -107,67 +113,77 @@ endif
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~
 
-# All the files required by PFLARE
-OBJS := $(SRCDIR)/Pflare_Parameters.o \
-		  $(SRCDIR)/Binary_Tree.o \
+# The C objects
+COBJS := $(SRCDIR)/C_PETSc_Routines.o \
+		  $(SRCDIR)/Pflare_Random.o \
 		  $(SRCDIR)/TSQR.o \
 		  $(SRCDIR)/Gmres_Poly_Data_Type.o \
-		  $(SRCDIR)/AIR_Data_Type.o \
 		  $(SRCDIR)/Matshell_Data_Type.o \
 		  $(SRCDIR)/Gmres_Poly_Apply.o \
-		  $(SRCDIR)/Sorting.o \
-		  $(SRCDIR)/C_PETSc_Interfaces.o \
-		  $(SRCDIR)/PCPFLAREINV_Interfaces.o \
-		  $(SRCDIR)/PCAIR_Data_Type.o
-
-# Include kokkos src files
-ifeq ($(PETSC_HAVE_KOKKOS),1)
-export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
-							  $(SRCDIR)/Grid_Transferk.o \
-							  $(SRCDIR)/VecISCopyLocalk.o \
-							  $(SRCDIR)/Device_Datak.o \
-							  $(SRCDIR)/MatDiagDomk.o \
-							  $(SRCDIR)/PMISR_Modulek.o \
-							  $(SRCDIR)/DDC_Modulek.o \
-							  $(SRCDIR)/Gmres_Polyk.o \
-							  $(SRCDIR)/Gmres_Poly_Newtonk.o \
-							  $(SRCDIR)/SAI_Zk.o
-endif	
-
-OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Gmres_Poly.o \
 		  $(SRCDIR)/Gmres_Poly_Newton.o \
-		  $(SRCDIR)/FC_Smooth.o \
-		  $(SRCDIR)/FC_Smooth_Block.o \
-		  $(SRCDIR)/AIR_MG_Stats.o \
-		  $(SRCDIR)/SAI_Z.o \
-		  $(SRCDIR)/Constrain_Z_or_W.o \
-		  $(SRCDIR)/MatDiagDom.o \
-		  $(SRCDIR)/SAbs.o \
-		  $(SRCDIR)/DDC_Module.o \
-		  $(SRCDIR)/PMISR_Module.o \
-		  $(SRCDIR)/Aggregation.o \
-		  $(SRCDIR)/Repartition.o \
-		  $(SRCDIR)/Weighted_Jacobi.o \
 		  $(SRCDIR)/Neumann_Poly.o \
+		  $(SRCDIR)/SAI_Z.o \
 		  $(SRCDIR)/Approx_Inverse_Setup.o \
+		  $(SRCDIR)/Grid_Transfer.o \
+		  $(SRCDIR)/Grid_Transfer_Improve.o \
+		  $(SRCDIR)/Constrain_Z_or_W.o \
+		  $(SRCDIR)/Sorting.o \
+		  $(SRCDIR)/Aggregation.o \
+		  $(SRCDIR)/Weighted_Jacobi.o \
+		  $(SRCDIR)/PETSc_Helper.o \
+		  $(SRCDIR)/Repartition.o \
+		  $(SRCDIR)/SAbs.o \
+		  $(SRCDIR)/MatDiagDom.o \
+		  $(SRCDIR)/PMISR_Module.o \
+		  $(SRCDIR)/DDC_Module.o \
 		  $(SRCDIR)/CR_Splitting.o \
 		  $(SRCDIR)/CF_Splitting.o \
 		  $(SRCDIR)/MatDiagDomSubmatrix.o \
 		  $(SRCDIR)/Timers.o \
+		  $(SRCDIR)/AIR_Data_Type.o \
+		  $(SRCDIR)/FC_Smooth.o \
+		  $(SRCDIR)/FC_Smooth_Block.o \
 		  $(SRCDIR)/AIR_Data_Type_Routines.o \
-		  $(SRCDIR)/Grid_Transfer.o \
-		  $(SRCDIR)/Grid_Transfer_Improve.o \
+		  $(SRCDIR)/AIR_MG_Stats.o \
 		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
+		  $(SRCDIR)/PCAIR_Data_Type.o \
 		  $(SRCDIR)/PCAIR_Shell.o \
-		  $(SRCDIR)/PCAIR_Interfaces.o \
-		  $(SRCDIR)/PFLARE.o \
-		  $(SRCDIR)/C_PETSc_Routines.o \
-		  $(SRCDIR)/C_Fortran_Bindings.o \
-		  $(SRCDIR)/PCAIR_C_Fortran_Bindings.o \
 		  $(SRCDIR)/PCAIR.o \
-		  $(SRCDIR)/PCPFLAREINV.o	
+		  $(SRCDIR)/PCPFLAREINV.o
+
+# The Kokkos objects (only when PETSc has Kokkos)
+KOBJS :=
+ifeq ($(PETSC_HAVE_KOKKOS),1)
+KOBJS := $(SRCDIR)/PETSc_Helperk.o \
+		  $(SRCDIR)/Grid_Transferk.o \
+		  $(SRCDIR)/VecISCopyLocalk.o \
+		  $(SRCDIR)/Device_Datak.o \
+		  $(SRCDIR)/MatDiagDomk.o \
+		  $(SRCDIR)/PMISR_Modulek.o \
+		  $(SRCDIR)/DDC_Modulek.o \
+		  $(SRCDIR)/Gmres_Polyk.o \
+		  $(SRCDIR)/Gmres_Poly_Newtonk.o \
+		  $(SRCDIR)/SAI_Zk.o
+endif
+
+# The Fortran interface layer (only when PETSc has its Fortran bindings)
+FOBJS :=
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),1)
+FOBJS := $(FORTRANDIR)/Pflare_Parameters.o \
+		  $(FORTRANDIR)/Gmres_Poly_Newton.o \
+		  $(FORTRANDIR)/CF_Splitting.o \
+		  $(FORTRANDIR)/MatDiagDomSubmatrix.o \
+		  $(FORTRANDIR)/PCPFLAREINV_Interfaces.o \
+		  $(FORTRANDIR)/PCAIR_Interfaces.o \
+		  $(FORTRANDIR)/PFLARE.o
+endif
+
+# All the files required by PFLARE
+# The Fortran list above is in module dependency order, but the build order
+# comes from the dependencies in Makefile.deps
+OBJS := $(KOBJS) $(FOBJS) $(COBJS)
 
 # Define a variable containing all the tests
 export TEST_TARGETS = ex12f \
@@ -210,6 +226,23 @@ export TEST_TARGETS := $(TEST_TARGETS) adv_1dk
 endif
 # Define a variable containing all the tests that the make check runs
 export CHECK_TARGETS = adv_diff_fd matrandom
+# The tests written in Fortran are only built when PETSc has its Fortran bindings
+# (tests/Makefile skips their commands with SKIP_FORTRAN otherwise)
+FORTRAN_TEST_TARGETS := ex12f \
+		  ex12f_gmres_poly \
+		  ex6f \
+		  ex6f_getcoeffs \
+		  ex6f_reuse_amount \
+		  leja_ordering \
+		  mat_diag \
+		  matrandom \
+		  matrandom_check_reset \
+		  newton_root_clustering \
+		  pmisr_nonsymmetric
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),0)
+export TEST_TARGETS := $(filter-out $(FORTRAN_TEST_TARGETS),$(TEST_TARGETS))
+export CHECK_TARGETS := $(filter-out $(FORTRAN_TEST_TARGETS),$(CHECK_TARGETS))
+endif
 
 # Output the library - either static or dynamic
 ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
@@ -223,17 +256,51 @@ OUT = $(LIBDIR)/libpflare.so
 endif
 endif
 
-# Dependency generation with makedepf90
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+# Dependency generation for the parallel build - make depend writes Makefile.deps
+# The Fortran module dependencies come from makedepf90 and the C/C++ header
+# dependencies from the compilers (-MM). Run it in a build with Kokkos and the
+# Fortran bindings so the Kokkos and Fortran objects are included (without the
+# Fortran bindings the Fortran lines already in Makefile.deps are kept)
+# ~~~~~~~~~~~~~~~~~~~~~~~~
 DEPFILE = Makefile.deps
 
-# Find Fortran source files in the src directory for makedepf90
-FSRC := $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)
+# Find Fortran source files in the src directories for makedepf90
+FSRC_SUBDIRS := $(sort $(wildcard $(FORTRANDIR)/*.F90))
+FSRC := $(sort $(wildcard $(SRCDIR)/*.f90) $(wildcard $(SRCDIR)/*.F90)) $(FSRC_SUBDIRS)
+# makedepf90 has to see all the Fortran at once to find modules used across
+# directories, but it puts every object in the -b directory, so the objects
+# of the subdirectories are moved back into their own directory afterwards
+FDEP_RELOCATE := $(foreach f,$(basename $(FSRC_SUBDIRS)),-e 's|$(SRCDIR)/$(notdir $(f))\.o |$(f).o |g')
+
+# Find C and Kokkos source files for the compilers
+CSRC := $(sort $(wildcard $(SRCDIR)/*.c))
+KSRC := $(if $(filter 1,$(PETSC_HAVE_KOKKOS)),$(sort $(wildcard $(SRCDIR)/*.kokkos.cxx)))
+# PFLARE's headers are found through relative paths and PETSc's (with those of
+# MPI and Kokkos) are system headers, so -MM lists only PFLARE's own headers
+DEP_CPPFLAGS := -I. -I$(INCLUDEDIR) $(patsubst -I%,-isystem %,$(PETSC_CC_INCLUDES)) $(PETSCFLAGS)
+# Writes each compiler rule on one line in the makedepf90 format and drops any
+# prerequisite with an absolute path (e.g. headers from a compiler wrapper)
+DEP_TIDY := awk '{ line = line $$0 } /\\$$/ { sub(/\\$$/, "", line); next } \
+	{ n = split(line, w, " "); printf "%s :", substr(w[1], 1, length(w[1]) - 1); \
+	for (i = 2; i <= n; i++) if (substr(w[i], 1, 1) != "/") printf " %s", w[i]; \
+	printf " \n"; line = "" }'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Rules
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .DEFAULT_GOAL := all		  	
 all: $(OUT)
+
+# The shared library is linked with the C linker, or the C++ linker when the
+# Kokkos (C++) objects are in it, so no Fortran linker is needed. When the
+# Fortran interface is built, the Fortran runtime it needs is on PETSc's link
+# line (LDLIBS), as PETSc with Fortran bindings links it for its own Fortran
+ifeq ($(PETSC_HAVE_KOKKOS),1)
+LINK_SHARED = $(CXXLINKER) $(LDFLAGS)
+else
+LINK_SHARED = $(CLINKER) $(LDFLAGS)
+endif
 
 # # Create our directory structure and build the library
 # # (either static or dynamic depending on what petsc was configured with)
@@ -246,18 +313,36 @@ ifeq ($(PETSC_USE_SHARED_LIBRARIES),0)
 else
 ifeq ($(shell uname -s 2>/dev/null),Darwin)
 # macOS: Use -dynamiclib and set a relocatable @rpath install_name. Do not embed rpaths.
-	$(LINK.F) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS_NORPATH) -install_name @rpath/$(notdir $(OUT))
+	$(LINK_SHARED) -dynamiclib -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS_NORPATH) -install_name @rpath/$(notdir $(OUT))
 else	
 # Linux: Use -shared and set the soname.
-	$(LINK.F) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
+	$(LINK_SHARED) -shared -o $(OUT) $(OBJS) $(PETSC_LINK_LIBS) -Wl,-soname,$(notdir $(OUT))
 endif
 endif
 
-# Generate dependencies for parallel build with makedepf90
+# Generate dependencies for parallel build
+# The .c files are compiled with PETSc's PCC (the C++ compiler if PETSc was
+# configured with --with-clanguage=cxx) and the Kokkos files with CXX
 .PHONY: depend
 depend:
 	@echo "Generating dependencies..."
-	@makedepf90 -b $(SRCDIR) $(FSRC) > $(DEPFILE)
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),1)
+	@makedepf90 -b $(SRCDIR) $(FSRC) > $(DEPFILE).tmp
+	@$(if $(FDEP_RELOCATE),sed $(FDEP_RELOCATE),cat) $(DEPFILE).tmp > $(DEPFILE)
+else
+	@echo "PETSc has no Fortran bindings: keeping the Fortran lines of $(DEPFILE)"
+	@grep '^$(FORTRANDIR)/' $(DEPFILE) > $(DEPFILE).tmp 2>/dev/null || true
+	@mv $(DEPFILE).tmp $(DEPFILE)
+endif
+	@for f in $(CSRC); do \
+		$(PCC) -MM -MT $${f%.c}.o $(DEP_CPPFLAGS) $$f > $(DEPFILE).tmp || exit 1; \
+		$(DEP_TIDY) $(DEPFILE).tmp >> $(DEPFILE); \
+	done
+	@for f in $(KSRC); do \
+		$(CXX) -MM -MT $${f%.kokkos.cxx}.o $(CXX_FLAGS) $(DEP_CPPFLAGS) $$f > $(DEPFILE).tmp || exit 1; \
+		$(DEP_TIDY) $(DEPFILE).tmp >> $(DEPFILE); \
+	done
+	@$(RM) $(DEPFILE).tmp
 
 # Include dependencies if the file exists
 -include $(DEPFILE)
@@ -348,6 +433,34 @@ tests: build_tests
 	($(MAKE) tests_python || (echo "Python tests failed" && exit 1)) && \
 	echo "All tests passed: OK"
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+# Golden logs - see docs/dev/testing.md
+# tests_golden_capture runs every test command with -ksp_converged_reason -ksp_monitor
+# and keeps a log per command in GOLDEN_DIR
+# tests_golden also compares that capture against a locally produced baseline
+# GOLDEN_BASELINE_DIR/<config>.json (see docs/dev/testing.md; baselines are not committed)
+# GOLDEN_JOBS runs that many test commands at once
+# ~~~~~~~~~~~~~~~~~~~~~~~~
+GOLDEN_DIR ?= $(CURDIR)/tests/golden_logs
+GOLDEN_JOBS ?= 1
+GOLDEN_BASELINE_DIR ?= $(CURDIR)/tests/golden
+
+.PHONY: tests_golden_capture
+tests_golden_capture: build_tests
+	MAKE="$(MAKE)" $(CURDIR)/tools/capture_test_logs.sh -j $(GOLDEN_JOBS) $(GOLDEN_DIR)
+
+.PHONY: tests_golden
+tests_golden: build_tests
+	-MAKE="$(MAKE)" $(CURDIR)/tools/capture_test_logs.sh -j $(GOLDEN_JOBS) $(GOLDEN_DIR)
+	@config="$$(sed -n 's/^config=//p' $(GOLDEN_DIR)/meta.txt)"; \
+	baseline="$(GOLDEN_BASELINE_DIR)/$$config.json"; \
+	if [ ! -f "$$baseline" ]; then \
+		echo "ERROR: no golden baseline $$baseline for configuration $$config"; \
+		exit 1; \
+	fi; \
+	echo "Comparing against $$baseline"; \
+	$(PYTHON) $(CURDIR)/tools/compare_test_logs.py compare "$$baseline" $(GOLDEN_DIR)
+
 # A quick sanity check with simple tests
 .PHONY: check
 check: build_tests_check
@@ -370,6 +483,8 @@ clean::
 	$(RM) $(INCLUDEDIR)/*.mod
 	$(RM) $(SRCDIR)/*.mod
 	$(RM) $(SRCDIR)/*.o
+	$(RM) $(FORTRANDIR)/*.mod
+	$(RM) $(FORTRANDIR)/*.o
 	$(RM) $(CURDIR)/*.mod
 	$(MAKE) -C tests clean
 	$(MAKE) -C python clean	
@@ -399,9 +514,11 @@ install: all
 		find . -type d ! -name '.' -exec $(INSTALL) -d "$(INCLUDEDIR_INSTALL)/{}" \; && \
 		find . -type f -name "*.h" -exec $(INSTALL_DATA) "{}" "$(INCLUDEDIR_INSTALL)/{}" \; ; \
 	fi
+ifeq ($(PETSC_USE_FORTRAN_BINDINGS),1)
 	@for m in *.mod lib/*.mod; do \
 		if [ -f "$$m" ]; then $(INSTALL_DATA) "$$m" $(INCLUDEDIR_INSTALL)/; fi; \
 	done
+endif
 	@$(MAKE) --no-print-directory install_python PREFIX="$(PREFIX)" DESTDIR="$(DESTDIR)"
 	@printf 'prefix=%s\nexec_prefix=$${prefix}\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: pflare\nDescription: Library with parallel iterative methods for asymmetric linear systems built on PETSc.\nVersion: %s\nCflags: -I$${includedir}\nLibs: -L$${libdir} -lpflare\nRequires: petsc\n' "$(PREFIX)" "$(PFLARE_VERSION)" > $(PKGCONFIGDIR_INSTALL)/pflare.pc
 	@echo '==> Install complete'
