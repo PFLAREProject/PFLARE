@@ -212,8 +212,6 @@ PETSC_INTERN PetscErrorCode create_temp_space_box_muller(Mat matrix, PetscInt su
    // different on each process so we don't have the same random numbers on each processor
    // At least one entry, so pflare_random_fill is never handed a NULL on a rank without rows
    PetscCall(PetscMalloc1(PetscMax(2 * local_rows, 1), &random_data));
-   // The random numbers returned don't include one so don't have to
-   // remove 1
    // random_data(:, 1:2) is contiguous, so it is filled column by column as one
    // array of 2 * local_rows, in the same order random_number(random_data(:, 1:2)) does
    pflare_random_fill((int)comm_rank, 2 * local_rows, random_data);
@@ -222,8 +220,10 @@ PETSC_INTERN PetscErrorCode create_temp_space_box_muller(Mat matrix, PetscInt su
    // white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
    // Do a box-muller to take two numbers with uniform distribution and produce a number
    // that is normally distributed
+   // random_number can return exactly 0 (with probability 2^-24 per draw in single precision,
+   // so likely once there are more than 2^24 rows), so use 1 - u in (0, 1] to keep the log finite
    for (row_i = 0; row_i < local_rows; row_i++) {
-      random_data[row_i] = PetscSqrtReal(-2 * PetscLogReal(random_data[row_i])) * PetscCosReal(2 * pi * random_data[row_i + local_rows]);
+      random_data[row_i] = PetscSqrtReal(-2 * PetscLogReal(1 - random_data[row_i])) * PetscCosReal(2 * pi * random_data[row_i + local_rows]);
    }
 
    // ~~~~~~~~~~
