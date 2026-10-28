@@ -195,8 +195,9 @@ module gmres_poly
       ! Do a box-muller to take two numbers with uniform distribution and produce a number
       ! that is normally distributed
       ! random_number can return exactly 0 (with probability 2^-24 per draw in single precision,
-      ! so likely once there are more than 2^24 rows), so use 1 - u in (0, 1] to keep the log finite
-      random_data(:, 1) = sqrt(-2 * log(1 - random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
+      ! so likely once there are more than 2^24 rows), so map 0 to 1 to keep the log finite
+      where (random_data(:, 1) == 0) random_data(:, 1) = 1
+      random_data(:, 1) = sqrt(-2 * log(random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
       deallocate(seed)
 
       ! ~~~~~~~~~~
