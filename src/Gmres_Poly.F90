@@ -188,14 +188,15 @@ module gmres_poly
 
       ! Gives random numbers between 0 <= u < 1  
       allocate(random_data(local_rows, 2))
-      ! Random numbers returned in fortran don't include one so don't have to 
-      ! remove 1 
       call random_number(random_data(:, 1:2))
 
       ! We want our random rhs to be a normal distribution with zero mean as that preserves
       ! white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
       ! Do a box-muller to take two numbers with uniform distribution and produce a number
-      ! that is normally distributed       
+      ! that is normally distributed
+      ! random_number can return exactly 0 (with probability 2^-24 per draw in single precision,
+      ! so likely once there are more than 2^24 rows), so map 0 to 1 to keep the log finite
+      where (random_data(:, 1) == 0) random_data(:, 1) = 1
       random_data(:, 1) = sqrt(-2 * log(random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
       deallocate(seed)
 

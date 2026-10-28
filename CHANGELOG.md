@@ -171,6 +171,11 @@ for earlier changes please see the git history.
   `skip_symmetrize`, as documented
 - Behaviour change: `PCAIRSetDDCFraction` (and `-pc_air_ddc_fraction`) now
   errors for a fraction bigger than 1
+- Fixed the Kokkos `MatCreateSubMatrix` erroring in parallel in single
+  precision once a submatrix had more than 2^24 global columns
+- Fixed the GMRES polynomial random start vector occasionally containing
+  inf/NaN in single precision, which broke levels with more than about 2^24
+  F-points
 
 ## [v1.27.0]
 
