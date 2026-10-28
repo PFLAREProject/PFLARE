@@ -151,7 +151,9 @@ survive by name:
 - `use pcpflareinv_interfaces` (ex6f_getcoeffs, ex12f_gmres_poly).
 - `use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC` (pmisr_nonsymmetric)
   with the full optional-argument Fortran signature of `compute_cf_splitting`.
-- `use gmres_poly_newton, only: modified_leja` (leja_ordering).
+- `use gmres_poly_newton, only: modified_leja` (leja_ordering), and since the third
+  merge from `main` also `cluster_eigenvalues_stable` and `compute_extra_roots`
+  (newton_root_clustering).
 
 ## 3. Invariants
 
@@ -193,7 +195,8 @@ src/
     PCPFLAREINV_Interfaces.F90, PCAIR_Interfaces.F90, PFLARE.F90
     CF_Splitting.F90        module cf_splitting: compute_cf_splitting wrapper for the C routine
     MatDiagDomSubmatrix.F90 module matdiagdomsubmatrix: compute_diag_dom_submatrix wrapper
-    Gmres_Poly_Newton.F90   module gmres_poly_newton: modified_leja wrapper
+    Gmres_Poly_Newton.F90   module gmres_poly_newton: modified_leja, cluster_eigenvalues_stable
+                            and compute_extra_roots wrappers
     Gmres_Poly_Data_Type.F90 (stages 5 to 7) bind(C) mirror of gmres_poly_data
     Port_Interfaces_Poly.F90 (stages 5 to 7) wrappers for the AIR Fortran to call
                             the stage 5 C ports (port_interfaces cannot use the fref
@@ -483,6 +486,42 @@ warnings in both GNU images (and `run_parse_tests.py` in `gnu_opt`), as do `make
 `make tests` in the Kokkos image, the single precision Kokkos prefix build and the Intel image,
 and the Docker builds of the two no-Fortran jobs and of the `gnu_debug` sanitizer job (no
 sanitizer report). The new tests are clean under valgrind in the debug image.
+
+The third merge (`claude/fortran-port-merge-main-3`, from the second merge's head `99b195e`)
+brought in PRs 304 to 306: the 8 commits on `main` from `cfa9584` to `8d2b9c4`
+(`4326ad1..dae423b`), the same way, one "Port to C:" commit per `main` commit (the
+changelog-only `78f4d3a` taken as is) and a merge that changes no file. The Kokkos
+`MatCreateSubMatrix` change (`cfa9584`) is shared and taken as is. The Newton root clustering
+fix (`b046d66`) is in `cluster_eigenvalues_stable` (`Gmres_Poly_Newton.c`); its Fortran test
+`tests/newton_root_clustering.F90` is taken byte-identical and calls
+`cluster_eigenvalues_stable`, `compute_extra_roots` and `modified_leja` directly, so
+`src/fortran/Gmres_Poly_Newton.F90` now also wraps the first two with `main`'s Fortran
+signatures (the extra roots the C allocates are copied into the allocatable outputs and freed
+with `PetscFree_c`); the C routines keep their names and stay `PETSC_INTERN`, as
+`modified_leja` does, since the wrappers are linked into `libpflare`. The Box-Muller fixes
+(`7dcf8c7`, then `361faf4`, which maps only an exact 0 draw to 1) are in
+`create_temp_space_box_muller` (`Gmres_Poly.c`); `pflare_random_fill` reproduces gfortran's
+draws including an exact 0. The power basis column scaling (`af003b3`) is in
+`finish_gmres_polynomial_coefficients_power` (`Gmres_Poly.c`), with the Fortran `norm2`
+taken by `fortran_norm2`. Each port commit was checked in the `gnu_opt` image against `main`
+at the same commit as before: 587 to 590 commands per pair, 0 differences at the default
+tolerance and, at `--res-rtol 0`, only the 4-rank `adv_diff_fd ... agg` variation, with
+`make check` and `make tests_short` passing and no warnings on either side. As PRs 304 to 306
+branched from `4326ad1` in parallel, `main` at `7dcf8c7` and later lacks `b046d66`, so
+`newton_root_clustering` shows as the one new command in those pairs; and at `7dcf8c7` (the
+`1 - u` draw, reverted by `361faf4`) the order 2 and 3 `ex12f_gmres_poly` loop fails its
+Newton vs Arnoldi residual check identically in `main` and the port, the failure `361faf4`
+records.
+On the merged head, against `dae423b`: the golden logs of `gnu_debug` and `gnu_opt` (591
+commands) have 0 differences (at `--res-rtol 0` only the same 4-rank command), and those of
+`gnu_opt_kokkos` (599 commands, `PFLARE_KOKKOS_DEBUG=1`) are identical even at `--res-rtol 0`;
+`make check`, `make tests_short`, `make python`, `make tests` and `make install` pass with no
+warnings in both GNU images (and `run_parse_tests.py` in `gnu_opt`), as do `make check` and
+`make tests` in the Kokkos image, the single precision Kokkos prefix build and the Intel image,
+where the three bcsstk19 power basis tests take 22, 24 and 22 iterations (caps 30, 30, 25), as
+with gnu, since the port draws gfortran's random numbers there too. The new tests are clean
+under valgrind in the debug image. The Docker builds of the no-Fortran and sanitizer jobs were
+left to CI.
 
 Every stage brief has the same closing requirement: build warning-free in the
 debug and opt GNU images (and the Kokkos image where the stage says so), run
