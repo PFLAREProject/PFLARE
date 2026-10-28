@@ -164,6 +164,13 @@ module gmres_poly_newton
       ! Remaining entries are set to zero.
       ! Skips eigenvalues that are exactly zero (both real and imag parts).
       !
+      ! The roots must be passed in with complex conjugate pairs next to each other
+      ! (as dgeev returns them). The clustering is done only on the roots with 
+      ! imag >= 0 and every complex cluster is output as a conjugate pair, with the
+      ! positive imaginary root first, as everything downstream relies on that.
+      ! Clustering all the roots instead can split a pair, e.g., if a real root is 
+      ! within tolerance of a complex root but not of its conjugate
+      !
       ! Inputs:
       !   real_roots, imag_roots : eigenvalues (length k)
       !   rel_tol               : relative tolerance (suggest sqrt(eps) ~ 1e-8)
@@ -174,10 +181,10 @@ module gmres_poly_newton
 
       PetscReal, dimension(:), intent(inout) :: real_roots, imag_roots
       PetscReal, intent(in)                  :: rel_tol, abs_tol
-      integer                                :: i, j, n, n_unique, cluster_size
+      integer                                :: i, j, n, n_unique, weight, cluster_weight
       logical, allocatable                   :: used(:)
       PetscReal                              :: dist, mag_i, mag_j, scale
-      PetscReal                              :: sum_real, sum_imag
+      PetscReal                              :: sum_real, sum_imag, centroid_real, centroid_imag
       PetscReal, allocatable                 :: rtmp(:), itmp(:)
 
       n = size(real_roots)
@@ -189,22 +196,29 @@ module gmres_poly_newton
       n_unique = 0
 
       ! ---------------------------------------------------------
-      ! All-pairs clustering
+      ! All-pairs clustering of the roots with imag >= 0
       ! ---------------------------------------------------------
       do i = 1, n
 
          if (used(i)) cycle
 
-         ! Skip eigenvalues that are exactly zero
-         if (real_roots(i) == 0.0d0 .AND. imag_roots(i) == 0.0d0) then
+         ! Skip eigenvalues that are exactly zero and the negative imaginary
+         ! conjugates (they are output with their positive imaginary root)
+         if ((real_roots(i) == 0.0d0 .AND. imag_roots(i) == 0.0d0) .OR. &
+               imag_roots(i) < 0.0d0) then
             used(i) = .true.
             cycle
          end if
 
          ! Start new cluster with eigenvalue i
-         sum_real = real_roots(i)
-         sum_imag = imag_roots(i)
-         cluster_size = 1
+         ! Each member is weighted by how many roots it stands for, ie a complex root 
+         ! counts twice (itself and its conjugate) and a real root once, so the 
+         ! real part of the centroid is the mean over the cluster and its mirror image
+         weight = 1
+         if (imag_roots(i) > 0.0d0) weight = 2
+         sum_real = weight * real_roots(i)
+         sum_imag = weight * imag_roots(i)
+         cluster_weight = weight
          used(i) = .true.
          
          mag_i = sqrt(real_roots(i)**2 + imag_roots(i)**2)
@@ -214,8 +228,9 @@ module gmres_poly_newton
 
             if (used(j)) cycle
 
-            ! Skip exactly zero eigenvalues
-            if (real_roots(j) == 0.0d0 .AND. imag_roots(j) == 0.0d0) then
+            ! Skip exactly zero eigenvalues and negative imaginary conjugates
+            if ((real_roots(j) == 0.0d0 .AND. imag_roots(j) == 0.0d0) .OR. &
+                  imag_roots(j) < 0.0d0) then
                used(j) = .true.
                cycle
             end if
@@ -223,6 +238,7 @@ module gmres_poly_newton
             mag_j = sqrt(real_roots(j)**2 + imag_roots(j)**2)
             
             ! Distance between eigenvalues
+            ! Both have imag >= 0, so the conjugate of j is never closer to i than j
             dist = sqrt((real_roots(j) - real_roots(i))**2 + &
                         (imag_roots(j) - imag_roots(i))**2)
 
@@ -233,18 +249,38 @@ module gmres_poly_newton
 
             ! Check if within tolerance
             if (dist <= abs_tol + rel_tol * scale) then
-               sum_real = sum_real + real_roots(j)
-               sum_imag = sum_imag + imag_roots(j)
-               cluster_size = cluster_size + 1
+               weight = 1
+               if (imag_roots(j) > 0.0d0) weight = 2
+               sum_real = sum_real + weight * real_roots(j)
+               sum_imag = sum_imag + weight * imag_roots(j)
+               cluster_weight = cluster_weight + weight
                used(j) = .true.
             end if
 
          end do
 
-         ! Compute cluster centroid (mean)
+         ! Compute cluster centroid (weighted mean)
+         centroid_real = sum_real / real(cluster_weight, kind=kind(rtmp))
+         centroid_imag = sum_imag / real(cluster_weight, kind=kind(itmp))
+
+         ! If the centroid is within tolerance of its own conjugate, the pair
+         ! is numerically a single real root
+         if (centroid_imag > 0.0d0) then
+            if (2 * centroid_imag <= abs_tol + &
+                  rel_tol * sqrt(centroid_real**2 + centroid_imag**2)) then
+               centroid_imag = 0.0d0
+            end if
+         end if
+
          n_unique = n_unique + 1
-         rtmp(n_unique) = sum_real / real(cluster_size, kind=kind(rtmp))
-         itmp(n_unique) = sum_imag / real(cluster_size, kind=kind(itmp))
+         rtmp(n_unique) = centroid_real
+         itmp(n_unique) = centroid_imag
+         ! Output a complex centroid as a conjugate pair, positive imaginary first
+         if (centroid_imag > 0.0d0) then
+            n_unique = n_unique + 1
+            rtmp(n_unique) = centroid_real
+            itmp(n_unique) = -centroid_imag
+         end if
 
       end do
 

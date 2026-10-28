@@ -910,6 +910,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test the modified Leja ordering of the Newton basis roots is invariant to scaling"
 	./leja_ordering
+#
+	@echo ""
+	@echo "Test the clustering of the Newton basis roots keeps complex conjugate pairs together"
+	./newton_root_clustering
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
