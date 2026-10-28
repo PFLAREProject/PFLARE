@@ -164,6 +164,9 @@ for earlier changes please see the git history.
   `-pc_air_matrix_free_polys` or `-pc_air_full_smoothing_up_and_down`; they
   now use the inverse of the diagonal of Aff in those cases
 - Fixed the `newton_no_extra` matvec counts in `-pc_air_print_stats_timings`
+- Fixed the clustering of the Newton roots splitting a complex conjugate pair
+  when only one of the pair was close to a real root, which gave the wrong
+  polynomial or indexed out of bounds; this is most likely in single precision
 - The C `compute_cf_splitting` now skips symmetrizing for any nonzero
   `skip_symmetrize`, as documented
 - Behaviour change: `PCAIRSetDDCFraction` (and `-pc_air_ddc_fraction`) now
