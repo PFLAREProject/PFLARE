@@ -186,6 +186,13 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
    // Remaining entries are set to zero.
    // Skips eigenvalues that are exactly zero (both real and imag parts).
    //
+   // The roots must be passed in with complex conjugate pairs next to each other
+   // (as dgeev returns them). The clustering is done only on the roots with
+   // imag >= 0 and every complex cluster is output as a conjugate pair, with the
+   // positive imaginary root first, as everything downstream relies on that.
+   // Clustering all the roots instead can split a pair, e.g., if a real root is
+   // within tolerance of a complex root but not of its conjugate
+   //
    // Inputs:
    //   real_roots, imag_roots : eigenvalues (length k)
    //   rel_tol               : relative tolerance (suggest sqrt(eps) ~ 1e-8)
@@ -195,10 +202,10 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
    //   real_roots, imag_roots : clustered eigenvalues at front, zeros after
 
    // ~~~~~~
-   PetscInt i, j, n, n_unique, cluster_size;
+   PetscInt i, j, n, n_unique, weight, cluster_weight;
    PetscBool *used;
    PetscReal dist, mag_i, mag_j, scale;
-   PetscReal sum_real, sum_imag;
+   PetscReal sum_real, sum_imag, centroid_real, centroid_imag;
    PetscReal *rtmp, *itmp;
    // ~~~~~~
 
@@ -214,22 +221,29 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
    n_unique = 0;
 
    // ---------------------------------------------------------
-   // All-pairs clustering
+   // All-pairs clustering of the roots with imag >= 0
    // ---------------------------------------------------------
    for (i = 0; i < n; i++) {
 
       if (used[i]) continue;
 
-      // Skip eigenvalues that are exactly zero
-      if (real_roots[i] == 0.0 && imag_roots[i] == 0.0) {
+      // Skip eigenvalues that are exactly zero and the negative imaginary
+      // conjugates (they are output with their positive imaginary root)
+      if ((real_roots[i] == 0.0 && imag_roots[i] == 0.0) ||
+            imag_roots[i] < 0.0) {
          used[i] = PETSC_TRUE;
          continue;
       }
 
       // Start new cluster with eigenvalue i
-      sum_real = real_roots[i];
-      sum_imag = imag_roots[i];
-      cluster_size = 1;
+      // Each member is weighted by how many roots it stands for, ie a complex root
+      // counts twice (itself and its conjugate) and a real root once, so the
+      // real part of the centroid is the mean over the cluster and its mirror image
+      weight = 1;
+      if (imag_roots[i] > 0.0) weight = 2;
+      sum_real = weight * real_roots[i];
+      sum_imag = weight * imag_roots[i];
+      cluster_weight = weight;
       used[i] = PETSC_TRUE;
 
       mag_i = PetscSqrtReal(real_roots[i] * real_roots[i] + imag_roots[i] * imag_roots[i]);
@@ -239,8 +253,9 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
 
          if (used[j]) continue;
 
-         // Skip exactly zero eigenvalues
-         if (real_roots[j] == 0.0 && imag_roots[j] == 0.0) {
+         // Skip exactly zero eigenvalues and negative imaginary conjugates
+         if ((real_roots[j] == 0.0 && imag_roots[j] == 0.0) ||
+               imag_roots[j] < 0.0) {
             used[j] = PETSC_TRUE;
             continue;
          }
@@ -248,6 +263,7 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
          mag_j = PetscSqrtReal(real_roots[j] * real_roots[j] + imag_roots[j] * imag_roots[j]);
 
          // Distance between eigenvalues
+         // Both have imag >= 0, so the conjugate of j is never closer to i than j
          dist = PetscSqrtReal((real_roots[j] - real_roots[i]) * (real_roots[j] - real_roots[i]) +
                               (imag_roots[j] - imag_roots[i]) * (imag_roots[j] - imag_roots[i]));
 
@@ -258,17 +274,37 @@ PETSC_INTERN PetscErrorCode cluster_eigenvalues_stable(PetscReal real_roots[], P
 
          // Check if within tolerance
          if (dist <= abs_tol + rel_tol * scale) {
-            sum_real = sum_real + real_roots[j];
-            sum_imag = sum_imag + imag_roots[j];
-            cluster_size = cluster_size + 1;
+            weight = 1;
+            if (imag_roots[j] > 0.0) weight = 2;
+            sum_real = sum_real + weight * real_roots[j];
+            sum_imag = sum_imag + weight * imag_roots[j];
+            cluster_weight = cluster_weight + weight;
             used[j] = PETSC_TRUE;
          }
       }
 
-      // Compute cluster centroid (mean)
-      rtmp[n_unique] = sum_real / (PetscReal)cluster_size;
-      itmp[n_unique] = sum_imag / (PetscReal)cluster_size;
+      // Compute cluster centroid (weighted mean)
+      centroid_real = sum_real / (PetscReal)cluster_weight;
+      centroid_imag = sum_imag / (PetscReal)cluster_weight;
+
+      // If the centroid is within tolerance of its own conjugate, the pair
+      // is numerically a single real root
+      if (centroid_imag > 0.0) {
+         if (2 * centroid_imag <= abs_tol +
+               rel_tol * PetscSqrtReal(centroid_real * centroid_real + centroid_imag * centroid_imag)) {
+            centroid_imag = 0.0;
+         }
+      }
+
+      rtmp[n_unique] = centroid_real;
+      itmp[n_unique] = centroid_imag;
       n_unique = n_unique + 1;
+      // Output a complex centroid as a conjugate pair, positive imaginary first
+      if (centroid_imag > 0.0) {
+         rtmp[n_unique] = centroid_real;
+         itmp[n_unique] = -centroid_imag;
+         n_unique = n_unique + 1;
+      }
    }
 
    // ---------------------------------------------------------

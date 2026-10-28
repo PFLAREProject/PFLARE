@@ -57,6 +57,7 @@ tests/pflareinv_sai_rank_deficient
 tests/pmisr_nonsymmetric
 tests/poly_zero_coeffs
 tests/leja_ordering
+tests/newton_root_clustering
 tests/reuse_preconditioner
 tests/shell_block_apply
 
