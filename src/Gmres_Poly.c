@@ -221,9 +221,12 @@ PETSC_INTERN PetscErrorCode create_temp_space_box_muller(Mat matrix, PetscInt su
    // Do a box-muller to take two numbers with uniform distribution and produce a number
    // that is normally distributed
    // random_number can return exactly 0 (with probability 2^-24 per draw in single precision,
-   // so likely once there are more than 2^24 rows), so use 1 - u in (0, 1] to keep the log finite
+   // so likely once there are more than 2^24 rows), so map 0 to 1 to keep the log finite
    for (row_i = 0; row_i < local_rows; row_i++) {
-      random_data[row_i] = PetscSqrtReal(-2 * PetscLogReal(1 - random_data[row_i])) * PetscCosReal(2 * pi * random_data[row_i + local_rows]);
+      if (random_data[row_i] == 0) random_data[row_i] = 1;
+   }
+   for (row_i = 0; row_i < local_rows; row_i++) {
+      random_data[row_i] = PetscSqrtReal(-2 * PetscLogReal(random_data[row_i])) * PetscCosReal(2 * pi * random_data[row_i + local_rows]);
    }
 
    // ~~~~~~~~~~
