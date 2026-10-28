@@ -680,13 +680,14 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tsqr_buffers), target, intent(inout)                :: buffers
       PetscReal, dimension(:), intent(inout)                        :: coefficients
  
-      integer :: subspace_size, n_size, iwork_size
+      integer :: subspace_size, n_size, iwork_size, i_loc
       integer :: errorcode
       ! BLAS/LAPACK integer arguments must be PetscBLASInt
       PetscBLASInt :: lwork, rank, info
       PetscBLASInt :: m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
       PetscBLASInt, dimension(:), allocatable :: iwork
       PetscReal, dimension(poly_order+2) :: g0, s
+      PetscReal, dimension(poly_order+1) :: col_scale
       PetscReal, dimension(:), allocatable :: work
       PetscReal, dimension(:,:), pointer :: R_pointer
       PetscReal :: rcond = -1d0
@@ -720,6 +721,16 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! We know beta is in the top left of R
       g0(1) = R_pointer(1, 1)   
       
+      ! The columns of R(:, 2:) scale like ||A||^k, so dgelsd's rank cutoff (relative
+      ! to the largest singular value) would drop all but the highest powers for a
+      ! badly scaled A. Scale each column to unit norm and unscale the solution after,
+      ! which makes the coefficients invariant to the scale of A
+      do i_loc = 1, subspace_size
+         col_scale(i_loc) = norm2(R_pointer(:, i_loc + 1))
+         if (col_scale(i_loc) == 0) col_scale(i_loc) = 1
+         R_pointer(:, i_loc + 1) = R_pointer(:, i_loc + 1) / col_scale(i_loc)
+      end do
+
       ! We've now finished orthogonalising, let's solve our least squares system
       allocate(work(1))
       allocate(iwork(1))
@@ -757,7 +768,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       end if  
       
       ! These are the polynomial coefficients
-      coefficients = g0(1:subspace_size)      
+      coefficients = g0(1:subspace_size) / col_scale
 
       ! Deallocate the receive buffer
       if (allocated(buffers%R_buffer_receive)) deallocate(buffers%R_buffer_receive)    

@@ -15,6 +15,9 @@ for earlier changes please see the git history.
   as quoted in the hypre documentation; the weight is larger by a factor of 16/9.
   The CR splitting (`-pc_air_cf_splitting_type cr`) relaxation uses the same weight
 - Minimum PETSc version is now 3.26.0
+- Fixed power basis GMRES polynomials failing on badly scaled matrices (eg
+  bcsstk19); the coefficients no longer depend on the scale of the matrix, so
+  iteration counts may change slightly
 - Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
   from a level that failed the truncation test, which gave the wrong coarse
   grid polynomial (or an out-of-bounds write with the power basis) when the
