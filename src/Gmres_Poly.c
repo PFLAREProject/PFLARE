@@ -708,11 +708,12 @@ PETSC_INTERN PetscErrorCode finish_gmres_polynomial_coefficients_power(int poly_
    PetscBLASInt lwork, rank, info;
    PetscBLASInt m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl;
    PetscBLASInt *iwork;
-   PetscReal *g0, *s;
+   PetscReal *g0, *s, *col_scale;
    PetscReal *work;
    // Column-major n_size x n_size
    PetscReal *R_pointer;
    PetscReal rcond = -1.0;
+   PetscInt row_i;
    // ~~~~~~
 
    PetscFunctionBegin;
@@ -739,8 +740,22 @@ PETSC_INTERN PetscErrorCode finish_gmres_polynomial_coefficients_power(int poly_
    R_pointer = &buffers->R_buffer_receive[1];
    PetscCall(PetscCalloc1(poly_order + 2, &g0));
    PetscCall(PetscMalloc1(poly_order + 2, &s));
+   PetscCall(PetscMalloc1(poly_order + 1, &col_scale));
    // We know beta is in the top left of R
    g0[0] = R_pointer[0];
+
+   // The columns of R(:, 2:) scale like ||A||^k, so dgelsd's rank cutoff (relative
+   // to the largest singular value) would drop all but the highest powers for a
+   // badly scaled A. Scale each column to unit norm and unscale the solution after,
+   // which makes the coefficients invariant to the scale of A
+   // Column i_loc + 1 (0-based) of R starts at R_pointer[(i_loc + 1) * n_size]
+   for (i_loc = 0; i_loc < subspace_size; i_loc++) {
+      col_scale[i_loc] = fortran_norm2(&R_pointer[(i_loc + 1) * n_size], n_size);
+      if (col_scale[i_loc] == 0) col_scale[i_loc] = 1;
+      for (row_i = 0; row_i < n_size; row_i++) {
+         R_pointer[row_i + (i_loc + 1) * n_size] = R_pointer[row_i + (i_loc + 1) * n_size] / col_scale[i_loc];
+      }
+   }
 
    // We've now finished orthogonalising, let's solve our least squares system
    PetscCall(PetscMalloc1(1, &work));
@@ -778,13 +793,14 @@ PETSC_INTERN PetscErrorCode finish_gmres_polynomial_coefficients_power(int poly_
    PetscCheck(info == 0, PETSC_COMM_SELF, PETSC_ERR_LIB, "LS solve failed");
 
    // These are the polynomial coefficients
-   for (i_loc = 0; i_loc < subspace_size; i_loc++) coefficients[i_loc] = g0[i_loc];
+   for (i_loc = 0; i_loc < subspace_size; i_loc++) coefficients[i_loc] = g0[i_loc] / col_scale[i_loc];
 
    // Deallocate the receive buffer
    PetscCall(PetscFree(buffers->R_buffer_receive));
 
    PetscCall(PetscFree(g0));
    PetscCall(PetscFree(s));
+   PetscCall(PetscFree(col_scale));
 
    PetscFunctionReturn(PETSC_SUCCESS);
 }

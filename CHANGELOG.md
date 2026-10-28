@@ -37,6 +37,9 @@ for earlier changes please see the git history.
   as quoted in the hypre documentation; the weight is larger by a factor of 16/9.
   The CR splitting (`-pc_air_cf_splitting_type cr`) relaxation uses the same weight
 - Minimum PETSc version is now 3.26.0
+- Fixed power basis GMRES polynomials failing on badly scaled matrices (eg
+  bcsstk19); the coefficients no longer depend on the scale of the matrix, so
+  iteration counts may change slightly
 - PCAIR no longer wraps an internal PCShell, so `-ksp_view` no longer shows an
   inner `shell` PC: "The underlying PCMG:" is followed directly by the view of
   the PCMG. The undocumented Fortran-only accessors `PCAIRGetOptions`,
