@@ -104,3 +104,11 @@ By default the coarse grid is solved with one application of a polynomial approx
    | ``-pc_air_reuse_sparsity``  |  PCAIRGetReuseSparsity  PCAIRSetReuseSparsity  | Store temporary data to allow fast setup with reuse | false |
    | ``-pc_air_reuse_amount``  |  PCAIRGetReuseAmount  PCAIRSetReuseAmount  | Control how much data is stored when reuse sparsity is enabled: 1=CF splitting only, 2=CF splitting + SpGEMM sparsity, 3=everything | 3 |
    | ``-pc_air_reuse_poly_coeffs``  |  PCAIRGetReusePolyCoeffs  PCAIRSetReusePolyCoeffs  | Don't recompute the polynomial inverse coefficients during setup with reuse | false |         
+
+#### Diagonal update options
+
+   | Command line  | Routine | Description | Default |
+   | ------------- | -- | ------------- | --- |
+   | (none)  |  PCAIRSetDiagonalUpdate  | Apply a diagonal perturbation D to an existing hierarchy, so it approximates the hierarchy of A + D | |
+   | ``-pc_air_diag_update_lump_type``  |  PCAIRGetDiagUpdateLumpType  PCAIRSetDiagUpdateLumpType  | How a diagonal update is lumped onto the coarse grids: 0=row sum of R diag(d) P, 1=diagonal of R diag(d) P | 0 |
+   | ``-pc_air_diag_update_scale_r``  |  PCAIRGetDiagUpdateScaleR  PCAIRSetDiagUpdateScaleR  | Rescale the F point columns of the restrictors by a_ff / (a_ff + d_f) in a diagonal update | false |

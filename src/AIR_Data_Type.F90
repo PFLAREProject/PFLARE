@@ -269,6 +269,19 @@ module air_data_type
       ! -pc_air_reuse_poly_coeffs
       logical :: reuse_poly_coeffs = .FALSE.
 
+      ! How a diagonal update (see PCAIRSetDiagonalUpdate) is carried down to the
+      ! coarse grids, given a diagonal perturbation d on a level, the coarse
+      ! perturbation is
+      ! 0 - row sum lumping of R diag(d) P, ie R (d .* (P 1))
+      ! 1 - the diagonal of R diag(d) P
+      ! -pc_air_diag_update_lump_type
+      integer :: diag_update_lump_type = 0
+      ! Do we rescale the F point columns of the restrictor when applying a diagonal
+      ! update, by a_ff / (a_ff + d_f), as a cheap approximation to rebuilding Z
+      ! with the updated A_ff
+      ! -pc_air_diag_update_scale_r
+      logical :: diag_update_scale_r = .FALSE.
+
    end type air_options 
    
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
@@ -376,6 +389,29 @@ module air_data_type
       ! src/VecISCopyLocalk.kokkos.cxx) so concurrent PCAIR instances do not
       ! overwrite each other's per-level IS views.
       type(c_ptr) :: kokkos_is_views_handle = c_null_ptr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! Data for applying a diagonal update to an existing hierarchy, see AIR_Diagonal_Update.F90
+      ! All of these are vectors (or with diag_update_lump_type == 1 the
+      ! matrices R .* P^T), so this is O(n) storage on each level
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! Have we captured the baseline diagonals from the hierarchy
+      logical :: diag_update_initialised = .FALSE.
+      ! The diagonals of A_ff and A_cc (if C smoothing) on each level and of the 
+      ! coarsest matrix (stored in diag_update_base_aff(no_levels)) before any update
+      type(tVec), allocatable, dimension(:) :: diag_update_base_aff, diag_update_base_acc
+      ! The diagonal perturbation on each level
+      type(tVec), allocatable, dimension(:) :: diag_update_d
+      ! Work vectors with the layout of the F and C points on each level
+      type(tVec), allocatable, dimension(:) :: diag_update_f, diag_update_c
+      ! A work vector with the layout of each level
+      type(tVec), allocatable, dimension(:) :: diag_update_work
+      ! P 1 on each level, used with row sum lumping
+      type(tVec), allocatable, dimension(:) :: diag_update_p_one
+      ! The column scaling currently applied to the restrictor on each level
+      type(tVec), allocatable, dimension(:) :: diag_update_r_scale
+      ! R .* P^T on each level, used when taking the diagonal of R diag(d) P
+      type(tMat), allocatable, dimension(:) :: diag_update_m
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse

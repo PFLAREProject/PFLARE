@@ -917,6 +917,43 @@ module pcair_c_fortran_bindings
       if (dummy) reuse = .TRUE.
 
    end subroutine PCAIRGetReusePolyCoeffs_c    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagUpdateLumpType_c(pc_ptr, lump_type) bind(C, name='PCAIRGetDiagUpdateLumpType_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)         :: lump_type
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetDiagUpdateLumpType(pc, lump_type, ierr)
+
+   end subroutine PCAIRGetDiagUpdateLumpType_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagUpdateScaleR_c(pc_ptr, scale_r) bind(C, name='PCAIRGetDiagUpdateScaleR_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, intent(out)        :: scale_r
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetDiagUpdateScaleR(pc, dummy, ierr)
+      scale_r = .FALSE.
+      if (dummy) scale_r = .TRUE.
+
+   end subroutine PCAIRGetDiagUpdateScaleR_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1822,6 +1859,62 @@ module pcair_c_fortran_bindings
       call PCAIRSetReusePolyCoeffs(pc, dummy, ierr)
 
    end subroutine PCAIRSetReusePolyCoeffs_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdateLumpType_c(pc_ptr, lump_type) bind(C, name='PCAIRSetDiagUpdateLumpType_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)          :: lump_type
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetDiagUpdateLumpType(pc, lump_type, ierr)
+
+   end subroutine PCAIRSetDiagUpdateLumpType_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdateScaleR_c(pc_ptr, scale_r) bind(C, name='PCAIRSetDiagUpdateScaleR_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, value, intent(in)         :: scale_r
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      if (scale_r) dummy = .TRUE.
+      call PCAIRSetDiagUpdateScaleR(pc, dummy, ierr)
+
+   end subroutine PCAIRSetDiagUpdateScaleR_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagonalUpdate_c(pc_ptr, mat_ptr) bind(C, name='PCAIRSetDiagonalUpdate_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout)      :: pc_ptr
+      integer(c_long_long), value, intent(in)  :: mat_ptr
+
+      type(tPC)                  :: pc
+      type(tMat)                 :: mat
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      mat%v = mat_ptr
+      call PCAIRSetDiagonalUpdate(pc, mat, ierr)
+
+   end subroutine PCAIRSetDiagonalUpdate_c
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

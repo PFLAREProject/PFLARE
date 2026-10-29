@@ -98,6 +98,8 @@ cdef extern:
 	PetscErrorCode PCAIRGetReuseSparsity(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReusePolyCoeffs(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReuseAmount(PetscPC pc, PetscInt *amount)
+	PetscErrorCode PCAIRGetDiagUpdateLumpType(PetscPC pc, PetscInt *lump_type)
+	PetscErrorCode PCAIRGetDiagUpdateScaleR(PetscPC pc, PetscBool *scale_r)
 	PetscErrorCode PCAIRGetSmoothType(PetscPC pc, char *output_string)
 
 	# PCAIR - polynomial coefficients
@@ -165,6 +167,11 @@ cdef extern:
 	PetscErrorCode PCAIRSetReuseSparsity(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReusePolyCoeffs(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReuseAmount(PetscPC pc, PetscInt amount)
+
+	# PCAIR - diagonal update
+	PetscErrorCode PCAIRSetDiagUpdateLumpType(PetscPC pc, PetscInt lump_type)
+	PetscErrorCode PCAIRSetDiagUpdateScaleR(PetscPC pc, PetscBool scale_r)
+	PetscErrorCode PCAIRSetDiagonalUpdate(PetscPC pc, PetscMat mat)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
 	# wrapper checks the level/inverse are valid and the sizes match before copying.
@@ -476,6 +483,16 @@ cpdef int pcair_get_reuse_amount(PC pc):
 	CHKERR(PCAIRGetReuseAmount(pc.pc, &amount))
 	return int(amount)
 
+cpdef int pcair_get_diag_update_lump_type(PC pc):
+	cdef PetscInt lump_type = 0
+	CHKERR(PCAIRGetDiagUpdateLumpType(pc.pc, &lump_type))
+	return int(lump_type)
+
+cpdef bint pcair_get_diag_update_scale_r(PC pc):
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetDiagUpdateScaleR(pc.pc, &result))
+	return bool(result)
+
 cpdef str pcair_get_smooth_type(PC pc):
 	cdef char buf[256]
 	cdef int i
@@ -691,6 +708,30 @@ cpdef pcair_set_reuse_amount(PC pc, int amount):
 	if amount < 1 or amount > 3:
 		raise ValueError(f"reuse amount {amount} must be 1, 2 or 3")
 	CHKERR(PCAIRSetReuseAmount(pc.pc, <PetscInt>amount))
+
+cpdef pcair_set_diag_update_lump_type(PC pc, int lump_type):
+	"""Set how a diagonal update is lumped onto the coarse grids.
+
+	0 - row sum lumping of R diag(d) P (default)
+	1 - the diagonal of R diag(d) P
+
+	Raises ValueError for any other type.
+	"""
+	if lump_type < 0 or lump_type > 1:
+		raise ValueError(f"diagonal update lump type {lump_type} must be 0 or 1")
+	CHKERR(PCAIRSetDiagUpdateLumpType(pc.pc, <PetscInt>lump_type))
+
+cpdef pcair_set_diag_update_scale_r(PC pc, bint flag):
+	"""Set whether a diagonal update rescales the F point columns of the restrictors."""
+	CHKERR(PCAIRSetDiagUpdateScaleR(pc.pc, <PetscBool>flag))
+
+cpdef pcair_set_diagonal_update(PC pc, Mat D):
+	"""Set a diagonal perturbation D, so PCAIR approximates the hierarchy of A + D
+	(A the Pmat) without rebuilding it. Pass None to remove the update."""
+	if D is None:
+		CHKERR(PCAIRSetDiagonalUpdate(pc.pc, NULL))
+	else:
+		CHKERR(PCAIRSetDiagonalUpdate(pc.pc, D.mat))
 
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.

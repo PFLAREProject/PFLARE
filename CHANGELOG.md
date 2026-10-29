@@ -6,6 +6,19 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Added `PCAIRSetDiagonalUpdate()` (`pflare.pcair_set_diagonal_update` in
+  Python), which applies a diagonal perturbation D to an existing PCAIR
+  hierarchy so it approximates the hierarchy of A + D, without forming A + D,
+  computing any matrix-matrix products or storing any reuse data. The CF
+  splittings and grid-transfer operators are kept, the diagonals of the
+  extracted blocks and the coarsest matrix are updated (with D lumped onto the
+  coarse grids) and the approximate inverses rebuilt in place. The update is
+  not cumulative, and is reapplied if the hierarchy is rebuilt. Added
+  `-pc_air_diag_update_lump_type` to choose the lumping and
+  `-pc_air_diag_update_scale_r` to also rescale the restrictors; with
+  `-pc_air_smooth_type fcf -pc_air_diag_update_scale_r` the iteration count
+  stays within a few iterations of rebuilding the hierarchy over decades of D
+  in the tests
 - Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
   inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
   wherever the other Jacobi types can, including the CR splitting relaxation

@@ -159,6 +159,19 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
 
+pflare.pcair_set_diag_update_lump_type(pc, 1)
+check('diag_update_lump_type_1', pflare.pcair_get_diag_update_lump_type(pc), 1)
+pflare.pcair_set_diag_update_lump_type(pc, 0)
+check('diag_update_lump_type_0', pflare.pcair_get_diag_update_lump_type(pc), 0)
+
+pflare.pcair_set_diag_update_scale_r(pc, True)
+check('diag_update_scale_r_true', pflare.pcair_get_diag_update_scale_r(pc), True)
+pflare.pcair_set_diag_update_scale_r(pc, False)
+check('diag_update_scale_r_false', pflare.pcair_get_diag_update_scale_r(pc), False)
+
+# Removing a diagonal update that was never set does nothing
+pflare.pcair_set_diagonal_update(pc, None)
+
 # Neumann always diagonally scales, but setting the flag while Neumann is the
 # inverse type must still be stored, as it is used by the other (e.g., C point)
 # inverses and must survive a later change of inverse type

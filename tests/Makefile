@@ -347,6 +347,16 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
+	@echo "Test AIRG with a diagonal update over decades of the diagonal, with fcf smoothing and a rescaled restrictor"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fcf -pc_air_diag_update_scale_r \
+	 -max_extra_its 5
+	@echo "Test AIRG with a diagonal update with diagonal lumping and matrix-free smoothing"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_diag_update_lump_type 1 -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys
+	@echo "Test AIRG with a diagonal update with a diagonal Aff"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fcf -pc_air_strong_threshold 0 \
+	 -pc_air_diag_update_lump_type 1 -pc_air_diag_update_scale_r
+	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
 	 -pc_air_auto_truncate_tol 1e-14 -pc_air_coarsest_inverse_type power -pc_air_coarsest_poly_order 10
@@ -1097,6 +1107,13 @@ run_tests_no_load_short_parallel:
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load short parallel tests skipped (PETSc configured without MPI)"
 else
+#
+	@echo ""
+	@echo "Test AIRG with a diagonal update in parallel, with processor agglomeration"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fcf -pc_air_diag_update_scale_r \
+	 -pc_air_process_eq_limit 400 -max_extra_its 5
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_diag_update_lump_type 1 \
+	 -pc_air_process_eq_limit 400
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"

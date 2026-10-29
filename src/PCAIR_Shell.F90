@@ -5,6 +5,8 @@ module pcair_shell
    use pcair_data_type, only: pc_air_multigrid_data, air_options
    use air_mg_setup, only: setup_air_pcmg
    use air_data_type_routines, only: reset_air_data, destroy_air_data
+   use air_diagonal_update, only: update_air_diag
+   use pflare_parameters, only: PFLARE_ZERO
 
 #include "petsc/finclude/petscksp.h"
 
@@ -65,6 +67,7 @@ module pcair_shell
       ! ~~~~~~    
 
       call destroy_air_data(pc_air_data%air_data)
+      call MatDestroy(pc_air_data%diag_update_mat, ierr)
       ! Destroy the underlying pcmg
       call PCDestroy(pc_air_data%pcmg, ierr)  
 
@@ -106,6 +109,42 @@ module pcair_shell
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine apply_diag_update_pc_air_data(pc_air_data)
+
+      ! Applies the stored diagonal update (if any) to the hierarchy
+      ! If there isn't one, any previous update is removed
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+
+      PetscErrorCode :: ierr
+      type(tVec) :: diag_vec
+      type(tMat) :: temp_mat
+      ! ~~~~~~    
+
+      ! Nothing to do if we haven't built a hierarchy yet, the update will
+      ! be applied once we have
+      if (pc_air_data%air_data%no_levels == -1) return
+
+      temp_mat = pc_air_data%diag_update_mat
+      if (.NOT. PetscObjectIsNull(temp_mat)) then
+         call MatCreateVecs(pc_air_data%diag_update_mat, PETSC_NULL_VEC, diag_vec, ierr)
+         call MatGetDiagonal(pc_air_data%diag_update_mat, diag_vec, ierr)
+         call update_air_diag(pc_air_data%air_data, diag_vec)
+         call VecDestroy(diag_vec, ierr)
+
+      ! If we have previously applied an update, go back to the original hierarchy
+      else if (pc_air_data%air_data%diag_update_initialised) then
+         call VecDuplicate(pc_air_data%air_data%diag_update_d(1), diag_vec, ierr)
+         call VecSet(diag_vec, PFLARE_ZERO, ierr)
+         call update_air_diag(pc_air_data%air_data, diag_vec)
+         call VecDestroy(diag_vec, ierr)
+      end if
+
+   end subroutine apply_diag_update_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCSetUp_AIR_Shell(pc, ierr)
       
       ! Setup our shell PC
@@ -133,6 +172,7 @@ module pcair_shell
       if (setupcalled == 0) then
 
          call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+         call apply_diag_update_pc_air_data(pc_air_data)
 
       ! We can possibly re-use some of the setup
       else
@@ -146,6 +186,7 @@ module pcair_shell
             call reset_pc_air_data(pc_air_data)
             ! Set it up again
             call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+            call apply_diag_update_pc_air_data(pc_air_data)
 
          ! We can re-use the sparsity
          ! SAME_NONZERO_PATTERN = 2
@@ -160,6 +201,7 @@ module pcair_shell
             end if
             ! Set it up again
             call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+            call apply_diag_update_pc_air_data(pc_air_data)
 
          end if
       end if

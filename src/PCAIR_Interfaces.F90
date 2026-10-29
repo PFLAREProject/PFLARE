@@ -2,7 +2,8 @@ module pcair_interfaces
 
    use iso_c_binding
    use petscksp
-   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
+   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c, &
+         apply_diag_update_pc_air_data
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 
@@ -1285,6 +1286,44 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagUpdateLumpType(pc, lump_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: lump_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      lump_type = options%diag_update_lump_type
+      ierr = 0
+
+   end subroutine PCAIRGetDiagUpdateLumpType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagUpdateScaleR(pc, scale_r, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: scale_r
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      scale_r = options%diag_update_scale_r
+      ierr = 0
+
+   end subroutine PCAIRGetDiagUpdateScaleR
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -2768,6 +2807,104 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdateLumpType(pc, lump_type, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: lump_type
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      call PCAIRGetDiagUpdateLumpType(pc, old_int, ierr)
+      if (old_int == lump_type) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_update_lump_type = int(lump_type)
+      ierr = 0
+
+   end subroutine PCAIRSetDiagUpdateLumpType
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdateScaleR(pc, scale_r, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: scale_r
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetDiagUpdateScaleR(pc, old_bool, ierr)
+      if (old_bool .eqv. scale_r) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      ! The restrictors may have been rescaled by a previous update, so we have
+      ! to rebuild the hierarchy
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_update_scale_r = scale_r
+      ierr = 0
+
+   end subroutine PCAIRSetDiagUpdateScaleR
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagonalUpdate(pc, diag_update, ierr) 
+
+      ! Sets a diagonal matrix D such that PCAIR approximates the hierarchy of A + D, 
+      ! where A is the Pmat, without rebuilding the hierarchy
+      ! Pass in a null matrix to remove the update
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      type(tMat), intent(in)        :: diag_update
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      ! ~~~~~~~~
+
+      call PCAIRGetPCShell(pc, pc_shell)
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+
+      ! Hold a reference to the update, as we apply it again whenever the hierarchy is rebuilt
+      if (.NOT. PetscObjectIsNull(diag_update)) then
+         call PetscObjectReference(diag_update, ierr)
+      end if
+      call MatDestroy(pc_air_data%diag_update_mat, ierr)
+      pc_air_data%diag_update_mat = diag_update
+
+      ! If we already have a hierarchy apply the update now, otherwise it 
+      ! will be applied once the hierarchy is built
+      call apply_diag_update_pc_air_data(pc_air_data)
+      ierr = 0
+
+   end subroutine PCAIRSetDiagonalUpdate
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

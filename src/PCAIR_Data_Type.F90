@@ -18,6 +18,9 @@ module pcair_data_type
       type(air_multigrid_data) :: air_data
       ! AIR under the hood is just a PCMG object 
       type(tPC) :: pcmg
+      ! The diagonal update to apply to the hierarchy (we hold a reference), 
+      ! see PCAIRSetDiagonalUpdate
+      type(tMat) :: diag_update_mat
 
    end type pc_air_multigrid_data
    
