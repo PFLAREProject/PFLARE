@@ -190,6 +190,7 @@ export TEST_TARGETS = ex12f \
 		  pflareinv_sai_rank_deficient \
 		  adv_diff_fd \
 		  adv_diff_fd_diag_update \
+		  adv_diff_fd_ts \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \
 		  matrandom \

@@ -361,6 +361,13 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
 	 -check_reuse
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, rebuilding, freezing and updating the PC"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -snes_lag_preconditioner -2 -snes_lag_preconditioner_persists
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update
 	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
@@ -426,6 +433,12 @@ run_tests_no_load_short_serial:
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_diag_scale_polys \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 0.5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 0.5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
@@ -1118,6 +1131,9 @@ else
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
 	 -pc_air_process_eq_limit 400 -max_extra_its 5
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_process_eq_limit 400
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"
@@ -1229,6 +1245,10 @@ else
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_diag_scale_polys \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 0.5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
