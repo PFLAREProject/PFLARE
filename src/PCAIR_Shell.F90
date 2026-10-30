@@ -6,7 +6,7 @@ module pcair_shell
    use air_mg_setup, only: setup_air_pcmg
    use air_data_type_routines, only: reset_air_data, destroy_air_data
    use air_diagonal_update, only: update_air_diag
-   use pflare_parameters, only: PFLARE_MINUS_ONE
+   use air_mg_stats, only: print_stats
 
 #include "petsc/finclude/petscksp.h"
 
@@ -159,15 +159,14 @@ module pcair_shell
       type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
       type(tMat), intent(in)                        :: pmat
 
-      PetscErrorCode :: ierr
-      type(tVec) :: diag_vec
       ! ~~~~~~    
 
-      call VecDuplicate(pc_air_data%air_data%diag_update_base_pmat, diag_vec, ierr)
-      call MatGetDiagonal(pmat, diag_vec, ierr)
-      call VecAXPY(diag_vec, PFLARE_MINUS_ONE, pc_air_data%air_data%diag_update_base_pmat, ierr)
-      call update_air_diag(pc_air_data%air_data, diag_vec)
-      call VecDestroy(diag_vec, ierr)
+      call update_air_diag(pc_air_data%air_data, pmat)
+      ! The polynomial orders can change with an update, so print the stats as a setup does
+      ! This is collective so call it on all ranks
+      if (pc_air_data%air_data%options%print_stats_timings) then
+         call print_stats(pc_air_data%air_data, pc_air_data%pcmg)
+      end if
 
    end subroutine diag_update_pc_air_data
 

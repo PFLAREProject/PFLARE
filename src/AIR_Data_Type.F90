@@ -269,10 +269,11 @@ module air_data_type
       ! -pc_air_reuse_poly_coeffs
       logical :: reuse_poly_coeffs = .FALSE.
 
-      ! Are changes to the pmat with the same nonzero pattern only ever changes to its
-      ! diagonal? If so, rather than rebuilding the hierarchy on a new setup we update 
-      ! the existing hierarchy with the change in the diagonal, see AIR_Diagonal_Update.F90
-      ! It is up to the user to ensure only the diagonal has changed
+      ! Rather than rebuilding the hierarchy on a new setup with the same nonzero pattern,
+      ! update the existing hierarchy with the change in the diagonal of the pmat,
+      ! see AIR_Diagonal_Update.F90
+      ! Any change to the off-diagonal entries is ignored, so this can also be used
+      ! when other entries change but the diagonal is the biggest change
       ! -pc_air_diag_update
       logical :: diag_update = .FALSE.
 
@@ -386,7 +387,6 @@ module air_data_type
 
       ! ~~~~~~~~~~~~~~~~~~~~~~
       ! Data for applying a diagonal update to an existing hierarchy, see AIR_Diagonal_Update.F90
-      ! All of these are vectors, so this is O(n) storage on each level
       ! ~~~~~~~~~~~~~~~~~~~~~~
       ! The diagonal of the pmat the hierarchy was built from
       type(tVec) :: diag_update_base_pmat
@@ -394,17 +394,8 @@ module air_data_type
       logical :: diag_update_initialised = .FALSE.
       ! The diagonals of A_ff and A_cc (if C smoothing) on each level and of the 
       ! coarsest matrix (stored in diag_update_base_aff(no_levels)) before any update
+      ! Everything else an update needs is temporary
       type(tVec), allocatable, dimension(:) :: diag_update_base_aff, diag_update_base_acc
-      ! The diagonal perturbation on each level
-      type(tVec), allocatable, dimension(:) :: diag_update_d
-      ! Work vectors with the layout of the F and C points on each level
-      type(tVec), allocatable, dimension(:) :: diag_update_f, diag_update_c
-      ! A work vector with the layout of each level
-      type(tVec), allocatable, dimension(:) :: diag_update_work
-      ! P 1 on each level, used with row sum lumping
-      type(tVec), allocatable, dimension(:) :: diag_update_p_one
-      ! The column scaling currently applied to the restrictor on each level
-      type(tVec), allocatable, dimension(:) :: diag_update_r_scale
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse

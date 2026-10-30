@@ -350,12 +350,6 @@ module air_data_type_routines
       call VecDestroy(air_data%diag_update_base_pmat, ierr)
       call destroy_vec_array(air_data%diag_update_base_aff)
       call destroy_vec_array(air_data%diag_update_base_acc)
-      call destroy_vec_array(air_data%diag_update_d)
-      call destroy_vec_array(air_data%diag_update_f)
-      call destroy_vec_array(air_data%diag_update_c)
-      call destroy_vec_array(air_data%diag_update_work)
-      call destroy_vec_array(air_data%diag_update_p_one)
-      call destroy_vec_array(air_data%diag_update_r_scale)
       air_data%diag_update_initialised = .FALSE.
 
    contains

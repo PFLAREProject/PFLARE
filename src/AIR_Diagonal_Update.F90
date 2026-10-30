@@ -3,7 +3,10 @@ module air_diagonal_update
    use petscksp
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE
    use gmres_poly_data_type, only: gmres_poly_data
-   use pflare_parameters, only: MAT_INV_AFF, MAT_INV_ACC, PFLARE_ONE
+   use pflare_parameters, only: MAT_INV_AFF, MAT_INV_ACC, PFLARE_ONE, PFLARE_MINUS_ONE, &
+         TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, TIMER_ID_AIR_RESTRICT, &
+         TIMER_ID_AIR_RAP
+   use timers, only: timer_start, timer_finish, timer_time, print_timers
    use approx_inverse_setup, only: start_approximate_inverse, finish_approximate_inverse, &
          destroy_matrix_reuse
    use fc_smooth, only: VecISCopyLocalWrapper
@@ -32,18 +35,24 @@ module air_diagonal_update
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine update_air_diag(air_data, diag_update)
+   subroutine update_air_diag(air_data, pmat)
 
-      ! Applies the diagonal perturbation diag_update (which has the layout of the
-      ! top grid matrix) to the hierarchy in air_data
+      ! Updates the hierarchy in air_data with the change in the diagonal of pmat 
+      ! since the hierarchy was built
+      ! The only vectors we keep between updates are the baseline diagonals
+      ! The F and C point scratch on each level are the smoothing temporaries, and the 
+      ! vectors with the layout of each level are subvectors of one pool that only 
+      ! exists during the update
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
-      type(tVec), intent(in)                  :: diag_update
+      type(tMat), intent(in)                  :: pmat
 
-      integer :: our_level, no_levels, errorcode
+      integer :: our_level, no_levels, errorcode, comm_rank
       PetscErrorCode :: ierr
-      type(tVec) :: s_f, temp_vec
+      MPIU_Comm :: MPI_COMM_MATRIX
+      type(tVec) :: pool, temp_vec, d_vec, d_coarse, work, f_new, f_old, c_vec
+      type(tIS) :: d_is, d_coarse_is, work_is
       logical :: update_acc
       ! ~~~~~~
 
@@ -65,26 +74,43 @@ module air_diagonal_update
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
+      call timer_start(TIMER_ID_AIR_SETUP)
+
       ! The first time through we capture the diagonals of the hierarchy we were given
       if (.NOT. air_data%diag_update_initialised) call setup_diag_update_data(air_data)
 
-      call VecCopy(diag_update, air_data%diag_update_d(1), ierr)
+      ! The pool holds the perturbation on two levels at once and a work vector
+      call create_pool(air_data, pool)
+
+      ! The perturbation on the top grid
+      call get_level_vec(air_data, pool, 1, 1, d_is, d_vec)
+      call MatGetDiagonal(pmat, d_vec, ierr)
+      call VecAXPY(d_vec, PFLARE_MINUS_ONE, air_data%diag_update_base_pmat, ierr)
 
       ! ~~~~~~~~~~~~
       ! Go down the hierarchy
       ! ~~~~~~~~~~~~
       do our_level = 1, no_levels - 1
 
+         ! The perturbations on this level and the next alternate between the first
+         ! two parts of the pool
+         call get_level_vec(air_data, pool, our_level + 1, mod(our_level, 2) + 1, d_coarse_is, d_coarse)
+         call get_level_vec(air_data, pool, our_level, 3, work_is, work)
+         ! F point scratch
+         f_new = air_data%temp_vecs_fine(1)%array(our_level)
+         f_old = air_data%temp_vecs_fine(2)%array(our_level)
+
          ! ~~~~~~~~~~~~
          ! Update the diagonal of A_ff
          ! ~~~~~~~~~~~~
-         ! Pull out the F points of the perturbation
-         call VecISCopyLocalWrapper(air_data, our_level, .TRUE., air_data%diag_update_d(our_level), &
-                  SCATTER_REVERSE, air_data%diag_update_f(our_level), air_data%diag_update_work(our_level))
-         ! diag_update_f = baseline + d_f
-         call VecAYPX(air_data%diag_update_f(our_level), PFLARE_ONE, &
-                  air_data%diag_update_base_aff(our_level), ierr)
-         call set_diagonal(air_data%A_ff(our_level), air_data%diag_update_f(our_level))
+         call timer_start(TIMER_ID_AIR_EXTRACT)
+         ! The diagonal of A_ff from the last update, which we need to rescale R
+         call MatGetDiagonal(air_data%A_ff(our_level), f_old, ierr)
+         ! f_new = baseline + d_f
+         call VecISCopyLocalWrapper(air_data, our_level, .TRUE., d_vec, SCATTER_REVERSE, f_new)
+         call VecAYPX(f_new, PFLARE_ONE, air_data%diag_update_base_aff(our_level), ierr)
+         call set_diagonal(air_data%A_ff(our_level), f_new)
+         call timer_finish(TIMER_ID_AIR_EXTRACT)
 
          ! ~~~~~~~~~~~~
          ! Rescale the F point columns of the restrictor
@@ -96,27 +122,20 @@ module air_diagonal_update
          ! If we're symmetric we don't have R (it is P^T) and scaling it would also scale P
          if (.NOT. air_data%options%symmetric) then
 
-            call VecDuplicate(air_data%diag_update_f(our_level), s_f, ierr)
-            call VecPointwiseDivide(s_f, air_data%diag_update_base_aff(our_level), &
-                     air_data%diag_update_f(our_level), ierr)
+            call timer_start(TIMER_ID_AIR_RESTRICT)
+            ! R has already been scaled by a_ff / (a_ff + d_f_old), so scale by the ratio of the 
+            ! new scaling to that, which is (a_ff + d_f_old) / (a_ff + d_f)
+            call VecPointwiseDivide(f_old, f_old, f_new, ierr)
             ! The scaling on all the points on this level, one on the C points
-            call VecSet(air_data%diag_update_work(our_level), PFLARE_ONE, ierr)
+            call VecSet(work, PFLARE_ONE, ierr)
             ! On gpus without kokkos this just goes through the host
             if (air_data%fast_veciscopy_exists) then
-               call VecISCopyLocalWrapper(air_data, our_level, .TRUE., air_data%diag_update_work(our_level), &
-                        SCATTER_FORWARD, s_f)
+               call VecISCopyLocalWrapper(air_data, our_level, .TRUE., work, SCATTER_FORWARD, f_old)
             else
-               call VecISCopy(air_data%diag_update_work(our_level), air_data%IS_fine_index(our_level), &
-                        SCATTER_FORWARD, s_f, ierr)
+               call VecISCopy(work, air_data%IS_fine_index(our_level), SCATTER_FORWARD, f_old, ierr)
             end if
-            call VecDestroy(s_f, ierr)
-            ! We only store the current scaled R, so scale by the ratio of the new scaling
-            ! to the current one
-            call VecPointwiseDivide(air_data%diag_update_r_scale(our_level), &
-                     air_data%diag_update_work(our_level), air_data%diag_update_r_scale(our_level), ierr)
-            call MatDiagonalScale(air_data%restrictors(our_level), PETSC_NULL_VEC, &
-                     air_data%diag_update_r_scale(our_level), ierr)
-            call VecCopy(air_data%diag_update_work(our_level), air_data%diag_update_r_scale(our_level), ierr)
+            call MatDiagonalScale(air_data%restrictors(our_level), PETSC_NULL_VEC, work, ierr)
+            call timer_finish(TIMER_ID_AIR_RESTRICT)
          end if
 
          ! ~~~~~~~~~~~~
@@ -136,11 +155,12 @@ module air_diagonal_update
             update_acc = .NOT. PetscObjectIsNull(temp_vec)
          end if
          if (update_acc) then
-            call VecISCopyLocalWrapper(air_data, our_level, .FALSE., air_data%diag_update_d(our_level), &
-                     SCATTER_REVERSE, air_data%diag_update_c(our_level), air_data%diag_update_work(our_level))
-            call VecAYPX(air_data%diag_update_c(our_level), PFLARE_ONE, &
-                     air_data%diag_update_base_acc(our_level), ierr)
-            call set_diagonal(air_data%A_cc(our_level), air_data%diag_update_c(our_level))
+            call timer_start(TIMER_ID_AIR_EXTRACT)
+            c_vec = air_data%temp_vecs_coarse(1)%array(our_level)
+            call VecISCopyLocalWrapper(air_data, our_level, .FALSE., d_vec, SCATTER_REVERSE, c_vec)
+            call VecAYPX(c_vec, PFLARE_ONE, air_data%diag_update_base_acc(our_level), ierr)
+            call set_diagonal(air_data%A_cc(our_level), c_vec)
+            call timer_finish(TIMER_ID_AIR_EXTRACT)
 
             call rebuild_approximate_inverse(air_data, air_data%A_cc(our_level), &
                      air_data%inv_A_cc_poly_data(our_level), &
@@ -153,66 +173,171 @@ module air_diagonal_update
          ! ~~~~~~~~~~~~
          ! Row sum lumping of R diag(d) P, ie R (d .* P 1), which keeps the action 
          ! of R diag(d) P on the constant
-         call VecPointwiseMult(air_data%diag_update_work(our_level), air_data%diag_update_d(our_level), &
-                  air_data%diag_update_p_one(our_level), ierr)
-         call restrict_vec(air_data, our_level, air_data%diag_update_work(our_level), &
-                  air_data%diag_update_d(our_level + 1))
+         ! P 1 is one matvec with P, so we just recompute it rather than store it
+         call timer_start(TIMER_ID_AIR_RAP)
+         call VecSet(d_coarse, PFLARE_ONE, ierr)
+         call MatMult(air_data%prolongators(our_level), d_coarse, work, ierr)
+         call VecPointwiseMult(work, work, d_vec, ierr)
+         ! If we're symmetric the restrictor is P^T
+         if (air_data%options%symmetric) then
+            call MatMultTranspose(air_data%prolongators(our_level), work, d_coarse, ierr)
+         else
+            call MatMult(air_data%restrictors(our_level), work, d_coarse, ierr)
+         end if
+         call timer_finish(TIMER_ID_AIR_RAP)
+
+         call VecRestoreSubVector(pool, work_is, work, ierr)
+         call ISDestroy(work_is, ierr)
+         call VecRestoreSubVector(pool, d_is, d_vec, ierr)
+         call ISDestroy(d_is, ierr)
+         ! The coarse perturbation becomes the perturbation on the next level
+         d_vec = d_coarse
+         d_is = d_coarse_is
       end do
 
       ! ~~~~~~~~~~~~
       ! Update the coarse grid matrix and rebuild the coarse grid solver
       ! ~~~~~~~~~~~~
-      call VecAYPX(air_data%diag_update_d(no_levels), PFLARE_ONE, &
-               air_data%diag_update_base_aff(no_levels), ierr)
-      call set_diagonal(air_data%coarse_matrix(no_levels), air_data%diag_update_d(no_levels))
+      call timer_start(TIMER_ID_AIR_RAP)
+      call VecAYPX(d_vec, PFLARE_ONE, air_data%diag_update_base_aff(no_levels), ierr)
+      call set_diagonal(air_data%coarse_matrix(no_levels), d_vec)
+      call timer_finish(TIMER_ID_AIR_RAP)
+      call VecRestoreSubVector(pool, d_is, d_vec, ierr)
+      call ISDestroy(d_is, ierr)
+      call VecDestroy(pool, ierr)
 
       call rebuild_approximate_inverse(air_data, air_data%coarse_matrix(no_levels), &
                air_data%inv_coarsest_poly_data, &
                air_data%options%coarsest_matrix_free_polys, air_data%options%coarsest_diag_scale_polys, &
                no_levels, MAT_INV_AFF, air_data%inv_A_ff(no_levels))
 
+      call timer_finish(TIMER_ID_AIR_SETUP)
+
+      ! ~~~~~~~~~~~~
+      ! Output some timing results, as at the end of a setup
+      ! ~~~~~~~~~~~~
+      if (air_data%options%print_stats_timings) then
+         call PetscObjectGetComm(air_data%prolongators(1), MPI_COMM_MATRIX, ierr)
+         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
+         if (comm_rank == 0) then
+            print *, "~~~~~~~~~~~~ Diagonal update"
+            call print_timers()
+            print *, "~~~~~~~~~~~~ "
+            print *,  "Total cumulative setup time :", timer_time(TIMER_ID_AIR_SETUP)
+            print *, "~~~~~~~~~~~~ "
+         end if
+      end if
+
    end subroutine update_air_diag
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   PetscInt function level_local_size(air_data, our_level)
+
+      ! The local size of a level, from the rows of its prolongator or on the 
+      ! coarsest level the columns of the prolongator above it
+      ! The prolongators have been repartitioned along with the coarse matrices
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      integer, intent(in)                  :: our_level
+
+      PetscInt :: local_rows, local_cols
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      if (our_level < air_data%no_levels) then
+         call MatGetLocalSize(air_data%prolongators(our_level), local_rows, local_cols, ierr)
+         level_local_size = local_rows
+      else
+         call MatGetLocalSize(air_data%prolongators(our_level - 1), local_rows, local_cols, ierr)
+         level_local_size = local_cols
+      end if
+
+   end function level_local_size
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine create_pool(air_data, pool)
+
+      ! Creates a vector with three parts, each big enough to hold any level on this rank
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      type(tVec), intent(inout)            :: pool
+
+      integer :: our_level
+      PetscInt :: max_local
+      PetscInt, parameter :: three = 3
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vec_type
+      ! ~~~~~~
+
+      max_local = 0
+      do our_level = 1, air_data%no_levels
+         max_local = max(max_local, level_local_size(air_data, our_level))
+      end do
+
+      call PetscObjectGetComm(air_data%prolongators(1), MPI_COMM_MATRIX, ierr)
+      call MatGetVecType(air_data%prolongators(1), vec_type, ierr)
+      call VecCreate(MPI_COMM_MATRIX, pool, ierr)
+      call VecSetSizes(pool, three * max_local, PETSC_DECIDE, ierr)
+      call VecSetType(pool, vec_type, ierr)
+
+   end subroutine create_pool
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine get_level_vec(air_data, pool, our_level, part, is_part, level_vec)
+
+      ! Gets a vector with the layout of our_level that shares the memory of 
+      ! part (1, 2 or 3) of the pool
+      ! The IS is contiguous so this doesn't copy, and works on the device
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      type(tVec), intent(inout)            :: pool
+      integer, intent(in)                  :: our_level, part
+      type(tIS), intent(inout)             :: is_part
+      type(tVec), intent(inout)            :: level_vec
+
+      PetscInt :: pool_start, pool_end_plus_one, part_size, offset
+      PetscInt, parameter :: one = 1, three = 3
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      ! ~~~~~~
+
+      call VecGetOwnershipRange(pool, pool_start, pool_end_plus_one, ierr)
+      part_size = (pool_end_plus_one - pool_start) / three
+      offset = part - 1
+      call PetscObjectGetComm(pool, MPI_COMM_MATRIX, ierr)
+      call ISCreateStride(MPI_COMM_MATRIX, level_local_size(air_data, our_level), &
+               pool_start + offset * part_size, one, is_part, ierr)
+      call VecGetSubVector(pool, is_part, level_vec, ierr)
+
+   end subroutine get_level_vec
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine setup_diag_update_data(air_data)
 
-      ! Captures the baseline diagonals from the hierarchy and builds the vectors
-      ! (and matrices) we need to apply diagonal updates
+      ! Captures the baseline diagonals from the hierarchy, which are all we need to 
+      ! keep between updates
 
       ! ~~~~~~
       type(air_multigrid_data), intent(inout) :: air_data
 
       integer :: our_level, no_levels
       PetscErrorCode :: ierr
-      type(tVec) :: ones
       ! ~~~~~~
 
       no_levels = air_data%no_levels
 
       allocate(air_data%diag_update_base_aff(no_levels))
-      allocate(air_data%diag_update_d(no_levels))
-      allocate(air_data%diag_update_f(no_levels - 1))
-      allocate(air_data%diag_update_work(no_levels - 1))
       if (air_data%options%any_c_smooths) then
          allocate(air_data%diag_update_base_acc(no_levels - 1))
-         allocate(air_data%diag_update_c(no_levels - 1))
       end if
-      allocate(air_data%diag_update_p_one(no_levels - 1))
-      if (.NOT. air_data%options%symmetric) then
-         allocate(air_data%diag_update_r_scale(no_levels - 1))
-      end if
-
-      ! The perturbation on each level has the layout of the rows of the prolongator
-      ! (which is the layout of the level) and on the coarsest the layout of its columns
-      ! The prolongators always exist and have been repartitioned along with the coarse matrices
-      do our_level = 1, no_levels - 1
-         call MatCreateVecs(air_data%prolongators(our_level), PETSC_NULL_VEC, &
-                  air_data%diag_update_d(our_level), ierr)
-         call VecDuplicate(air_data%diag_update_d(our_level), air_data%diag_update_work(our_level), ierr)
-      end do
-      call MatCreateVecs(air_data%prolongators(no_levels - 1), air_data%diag_update_d(no_levels), &
-               PETSC_NULL_VEC, ierr)
 
       do our_level = 1, no_levels - 1
 
@@ -220,7 +345,6 @@ module air_diagonal_update
          call MatCreateVecs(air_data%A_ff(our_level), PETSC_NULL_VEC, &
                   air_data%diag_update_base_aff(our_level), ierr)
          call MatGetDiagonal(air_data%A_ff(our_level), air_data%diag_update_base_aff(our_level), ierr)
-         call VecDuplicate(air_data%diag_update_base_aff(our_level), air_data%diag_update_f(our_level), ierr)
 
          ! Baseline diagonal of A_cc
          if (air_data%options%any_c_smooths) then
@@ -228,26 +352,13 @@ module air_diagonal_update
                call MatCreateVecs(air_data%A_cc(our_level), PETSC_NULL_VEC, &
                         air_data%diag_update_base_acc(our_level), ierr)
                call MatGetDiagonal(air_data%A_cc(our_level), air_data%diag_update_base_acc(our_level), ierr)
-               call VecDuplicate(air_data%diag_update_base_acc(our_level), air_data%diag_update_c(our_level), ierr)
             end if
-         end if
-
-         ! P 1 for row sum lumping
-         call VecDuplicate(air_data%diag_update_d(our_level + 1), ones, ierr)
-         call VecSet(ones, PFLARE_ONE, ierr)
-         call VecDuplicate(air_data%diag_update_d(our_level), air_data%diag_update_p_one(our_level), ierr)
-         call MatMult(air_data%prolongators(our_level), ones, air_data%diag_update_p_one(our_level), ierr)
-         call VecDestroy(ones, ierr)
-
-         ! The restrictor starts unscaled
-         if (.NOT. air_data%options%symmetric) then
-            call VecDuplicate(air_data%diag_update_d(our_level), air_data%diag_update_r_scale(our_level), ierr)
-            call VecSet(air_data%diag_update_r_scale(our_level), PFLARE_ONE, ierr)
          end if
       end do
 
       ! Baseline diagonal of the coarsest matrix
-      call VecDuplicate(air_data%diag_update_d(no_levels), air_data%diag_update_base_aff(no_levels), ierr)
+      call MatCreateVecs(air_data%coarse_matrix(no_levels), PETSC_NULL_VEC, &
+               air_data%diag_update_base_aff(no_levels), ierr)
       call MatGetDiagonal(air_data%coarse_matrix(no_levels), air_data%diag_update_base_aff(no_levels), ierr)
 
       air_data%diag_update_initialised = .TRUE.
@@ -300,6 +411,8 @@ module air_diagonal_update
       type(tMat), intent(inout)               :: inv_matrix
       ! ~~~~~~
 
+      call timer_start(TIMER_ID_AIR_INVERSE)
+
       call start_approximate_inverse(matrix, &
                poly_data%inverse_type, &
                poly_data%gmres_poly_order, &
@@ -319,6 +432,8 @@ module air_diagonal_update
                air_data%reuse(our_level)%reuse_submatrices(reuse_index)%array, &
                inv_matrix)
 
+      call timer_finish(TIMER_ID_AIR_INVERSE)
+
       ! Delete temporary if not reusing, exactly as the setup does
       if (.NOT. air_data%options%reuse_sparsity .OR. &
           .NOT. REUSE_MAT_ACTIVE(reuse_index, air_data%options%reuse_amount)) then
@@ -327,29 +442,6 @@ module air_diagonal_update
       end if
 
    end subroutine rebuild_approximate_inverse
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine restrict_vec(air_data, our_level, fine_vec, coarse_vec)
-
-      ! Applies the restrictor on our_level, which is P^T if we're symmetric
-
-      ! ~~~~~~
-      type(air_multigrid_data), intent(inout) :: air_data
-      integer, intent(in)                     :: our_level
-      type(tVec), intent(inout)               :: fine_vec, coarse_vec
-
-      PetscErrorCode :: ierr
-      ! ~~~~~~
-
-      if (air_data%options%symmetric) then
-         call MatMultTranspose(air_data%prolongators(our_level), fine_vec, coarse_vec, ierr)
-      else
-         call MatMult(air_data%restrictors(our_level), fine_vec, coarse_vec, ierr)
-      end if
-
-   end subroutine restrict_vec
-
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

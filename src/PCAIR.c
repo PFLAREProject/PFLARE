@@ -2837,24 +2837,16 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
   Level: advanced
 
   Notes:
-  With this set, after the hierarchy is built from the Pmat A, the user can change the diagonal of the Pmat
-  in place (e.g., with `MatShift()` or `MatDiagonalSet()`) to A + D. On the next `PCSetUp()` (e.g., triggered by `KSPSolve()`)
-  `PCAIR` then updates the existing hierarchy with D = diag(A + D) - diag(A), rather than rebuilding it. It is the
-  user's responsibility to ensure only the diagonal has changed - `PCAIR` does not check this, and any change to the
-  off-diagonal entries will be ignored.
+  With this set, after the hierarchy is built from the Pmat, the user can change the diagonal of the Pmat in place
+  (e.g., with `MatShift()` or `MatDiagonalSet()`). On the next `PCSetUp()` (e.g., triggered by `KSPSolve()`) `PCAIR`
+  then updates the existing hierarchy with the change in the diagonal of the Pmat since the hierarchy was built,
+  rather than rebuilding it. `PCAIR` does not check that only the diagonal has changed: any change to the off-diagonal
+  entries is ignored, so the update can also be used when other entries change but the diagonal is the biggest change.
 
-  The CF splittings and prolongators built from A are kept, only the diagonals of the
-  extracted blocks and the coarsest matrix are changed, with the perturbation carried down the
-  hierarchy by row sum lumping R diag(D) P, the F-point columns of the restrictors are rescaled by
-  a_ff / (a_ff + d_f), and the approximate inverses are rebuilt. No matrix-matrix products are computed.
-  As the restrictor is kept frozen otherwise, using C-point smoothing (e.g., `-pc_air_smooth_type fcf`)
-  is recommended if D can be large. D is always relative to the Pmat the hierarchy was built from,
-  so updates do not accumulate. A change to the nonzero pattern of the Pmat rebuilds the hierarchy as normal,
-  and subsequent updates are then relative to that Pmat.
-
-  With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always rebuilt. If
-  `-pc_air_reuse_sparsity` is also set it takes priority, and the hierarchy is rebuilt with reuse. As with any
-  change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
+  A change to the nonzero pattern of the Pmat rebuilds the hierarchy as normal, and subsequent updates are then
+  relative to that Pmat. With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always
+  rebuilt. If `-pc_air_reuse_sparsity` is also set it takes priority, and the hierarchy is rebuilt with reuse. As with
+  any change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`
 @*/
