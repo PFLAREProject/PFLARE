@@ -99,10 +99,10 @@ with restrictor $\mathbf{R} = [\mathbf{Z} \;\; \mathbf{I}]$, where $\mathbf{Z} \
 **The restrictor:** The F point columns of $\mathbf{R}$ are therefore rescaled
 
 $$
-\mathbf{Z} \leftarrow \mathbf{Z} \, \textrm{diag}\left( \frac{a_\textrm{ff}}{a_\textrm{ff} + d_\textrm{f}} \right),
+\mathbf{Z} \leftarrow \mathbf{Z} \, \textrm{diag}\left( \min\left(1, \frac{a_\textrm{ff}}{a_\textrm{ff} + d_\textrm{f}}\right) \right),
 $$
 
-where $a_\textrm{ff}$ and $d_\textrm{f}$ are the diagonals of $\mathbf{A}_\textrm{ff}$ and $\mathbf{D}_\textrm{f}$. This is exact if $\mathbf{A}_\textrm{ff}$ is diagonal and a good approximation when $\mathbf{A}_\textrm{ff}$ is strongly diagonally dominant, as the CF splittings in PCAIR aim for. With ``-pc_air_symmetric`` the restrictor is $\mathbf{P}^T$ and is not rescaled.
+where $a_\textrm{ff}$ and $d_\textrm{f}$ are the diagonals of $\mathbf{A}_\textrm{ff}$ and $\mathbf{D}_\textrm{f}$. Without the $\min$ this is exact if $\mathbf{A}_\textrm{ff}$ is diagonal and a good approximation when $\mathbf{A}_\textrm{ff}$ is strongly diagonally dominant, as the CF splittings in PCAIR aim for. Taking the $\min$ with 1 clips the scaling so that $\mathbf{Z}$ is only ever shrunk, never grown. When the diagonal decreases (e.g., when the time step grows in implicit time stepping), if we don't clip the iteration count grows substantially. With ``-pc_air_symmetric`` the restrictor is $\mathbf{P}^T$ and is not rescaled.
 
 **The coarse matrix:** the Galerkin coarse matrix of $\mathbf{A} + \mathbf{D}$ would be $\mathbf{R}\mathbf{A}\mathbf{P} + \mathbf{R}\mathbf{D}\mathbf{P}$. Rather than computing $\mathbf{R}\mathbf{D}\mathbf{P}$ with matrix-matrix products, it is lumped onto the diagonal with a row sum, which preserves its action on the constant vector
 
@@ -116,7 +116,7 @@ where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, $\mathbf{1}$ is the vector o
 
 Using this diagonal update in PCAIR is very fast and uses almost no extra memory. The frozen grid-transfer operators and the lumping, however, mean the updated hierarchy is not identical to one rebuilt from $\mathbf{A} + \mathbf{D}$. With F point smoothing only, errors introduced at the C points by the frozen grid-transfer operators are never corrected, so adding C point smoothing (e.g., ``-pc_air_smooth_type fc`` or ``ffc``) is recommended with this type of diagonal update.
 
-On a 2D advection problem with diagonal perturbations varying over six orders of magnitude, adding C point smoothing kept the iteration count within a few iterations of rebuilding the hierarchy, independent of the grid size. The gap is largest when $\mathbf{D}$ is of similar size to the diagonal of $\mathbf{A}$; when $\mathbf{D}$ is either small or dominant the updated hierarchy performs like a rebuilt one.
+On a 2D advection problem with diagonal perturbations varying over six orders of magnitude, adding C point smoothing kept the iteration count within a few iterations of rebuilding the hierarchy, independent of the grid size. The gap is largest when $\mathbf{D}$ is of similar size to the diagonal of $\mathbf{A}$; when $\mathbf{D}$ is either small or dominant the updated hierarchy performs like a rebuilt one. In implicit time stepping of 2D advection problems where an adaptive time step grew by a few hundred times, updating the hierarchy took fewer iterations than never rebuilding it, at a fraction of the cost of rebuilding every time step.
 
 If the off-diagonal entries also change significantly, or the iteration count with the updated hierarchy grows too large, the hierarchy should instead be rebuilt. The reuse described in the sections below makes that rebuild cheaper.
 

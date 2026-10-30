@@ -3,7 +3,7 @@ module air_diagonal_update
    use petscksp
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE
    use gmres_poly_data_type, only: gmres_poly_data
-   use pflare_parameters, only: MAT_INV_AFF, MAT_INV_ACC, PFLARE_ONE, PFLARE_MINUS_ONE, &
+   use pflare_parameters, only: MAT_INV_AFF, MAT_INV_ACC, PFLARE_ONE, PFLARE_MINUS_ONE, PFLARE_HALF, &
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, TIMER_ID_AIR_RESTRICT, &
          TIMER_ID_AIR_RAP
    use timers, only: timer_start, timer_finish, timer_time, print_timers
@@ -26,7 +26,7 @@ module air_diagonal_update
    ! along with the approximate inverses built from them
    ! The diagonal perturbation is carried down to the coarse grids by row sum lumping 
    ! R diag(d) P, and the F point columns of the restrictors are rescaled to account for 
-   ! the change in A_ff
+   ! the change in A_ff, though only ever shrunk
    ! The update is always relative to the hierarchy built from A (ie it is not cumulative),
    ! so applying D = 0 gives back the original hierarchy
    ! -------------------------------------------------------------------------------------------------------------------------------
@@ -119,13 +119,22 @@ module air_diagonal_update
          ! the original with columns scaled by a_ff / (a_ff + d_f)
          ! Without this the frozen Z is far too big when d is large, and with only F point 
          ! smoothing the error that introduces at the C points is never corrected
+         ! We only ever shrink Z though, so the scaling is min(1, a_ff / (a_ff + d_f))
+         ! When the diagonal decreases, if we don't clip the iteration count grows substantially
          ! If we're symmetric we don't have R (it is P^T) and scaling it would also scale P
          if (.NOT. air_data%options%symmetric) then
 
             call timer_start(TIMER_ID_AIR_RESTRICT)
-            ! R has already been scaled by a_ff / (a_ff + d_f_old), so scale by the ratio of the 
-            ! new scaling to that, which is (a_ff + d_f_old) / (a_ff + d_f)
-            call VecPointwiseDivide(f_old, f_old, f_new, ierr)
+            ! The scaling a_ff / (a_ff + d_f) clipped at one
+            call VecPointwiseDivide(f_new, air_data%diag_update_base_aff(our_level), f_new, ierr)
+            call clip_at_one(f_new, air_data%temp_vecs_fine(3)%array(our_level), &
+                     air_data%temp_vecs_fine(4)%array(our_level))
+            ! R has already been scaled by the clipped a_ff / (a_ff + d_f_old), so scale by 
+            ! the ratio of the new scaling to that
+            call VecPointwiseDivide(f_old, air_data%diag_update_base_aff(our_level), f_old, ierr)
+            call clip_at_one(f_old, air_data%temp_vecs_fine(3)%array(our_level), &
+                     air_data%temp_vecs_fine(4)%array(our_level))
+            call VecPointwiseDivide(f_old, f_new, f_old, ierr)
             ! The scaling on all the points on this level, one on the C points
             call VecSet(work, PFLARE_ONE, ierr)
             ! On gpus without kokkos this just goes through the host
@@ -229,6 +238,30 @@ module air_diagonal_update
       end if
 
    end subroutine update_air_diag
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine clip_at_one(vec, temp_a, temp_b)
+
+      ! Replaces each entry of vec with min(1, vec), written as 
+      ! vec - (vec - 1 + |vec - 1|) / 2 with vector operations that run on the device
+      ! Where an entry is at most one, vec - 1 + |vec - 1| is exactly zero, so it doesn't change
+      ! The temporaries must have the same layout as vec
+
+      ! ~~~~~~
+      type(tVec), intent(inout) :: vec, temp_a, temp_b
+
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      call VecCopy(vec, temp_a, ierr)
+      call VecShift(temp_a, PFLARE_MINUS_ONE, ierr)
+      call VecCopy(temp_a, temp_b, ierr)
+      call VecAbs(temp_b, ierr)
+      call VecAXPY(temp_a, PFLARE_ONE, temp_b, ierr)
+      call VecAXPY(vec, -PFLARE_HALF, temp_a, ierr)
+
+   end subroutine clip_at_one
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
