@@ -20,11 +20,15 @@
       The time dependent solve does backward-Euler TS integration
         instead of the steady KSP solve
         Integrates   M du/dt + A_stiff u = b_stiff
-        rewritten as du/dt + (M^-1 A_stiff) u = M^-1 b_stiff
-        using a PETSc TS with backward Euler.  Swaps the
-        diag_scale preconditioner from the stiffness block-
-        diagonal to the DG mass-matrix block-diagonal and skips the
-        steady KSPSolve entirely.  Requires -diag_scale true.
+        With -diag_scale true (the default) this is rewritten as
+          du/dt + (M^-1 A_stiff) u = M^-1 b_stiff
+        by swapping the diag_scale preconditioner from the stiffness block-
+        diagonal to the DG mass-matrix block-diagonal, so the implicit
+        Jacobian is shift * I + M^-1 A_stiff and changing the time step only
+        changes its diagonal.
+        With -diag_scale false the mass matrix is kept, so the implicit
+        Jacobian is shift * M + A_stiff and changing the time step also
+        changes the off-diagonal entries in each cell's block.
         Should run with -bottom_only_inflow_one otherwise 
         the solution is zero at all time.
         Timestep / step count / final time / inner solver are
@@ -33,6 +37,13 @@
           -ts_max_time <T>       -ts_type <type>
           -ts_monitor            -ts_view
           -ts_ksp_... / -ts_snes_...
+        The time step can change, e.g., with -ts_adapt_type basic.
+        With a constant time step the PC is built once, otherwise
+        the PC is rebuilt every time the time step changes, unless
+        given -snes_lag_preconditioner -2 -snes_lag_preconditioner_persists
+        (the PC is never rebuilt) or -pc_air_diag_update (the PC is updated).
+        Can print the dt and the linear iterations of every step 
+        with -print_steps
         When -write_vtk is also set, one VTU is written per
         TS step (basename dg_solution_ts_XXXX).
 
@@ -679,6 +690,45 @@ static PetscErrorCode AssembleCellMassBlock(DM dm, PetscFE fe, PetscInt c,
     }
   }
   PetscCall(PetscTabulationDestroy(&T));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* -----------------------------------------------------------------------
+   Global block-diagonal DG mass matrix, with the same layout as A
+   ----------------------------------------------------------------------- */
+static PetscErrorCode AssembleMassMatrix(DM dm, PetscFE fe, PetscInt Nb, Mat A, Mat *M)
+{
+  PetscSection gsec;
+  PetscScalar *block;
+  PetscInt    *dof_idx, cStart, cEnd, nrows;
+  MatType      mat_type;
+
+  PetscFunctionBeginUser;
+  PetscCall(MatGetLocalSize(A, &nrows, NULL));
+  PetscCall(MatGetType(A, &mat_type));
+  PetscCall(MatCreate(PetscObjectComm((PetscObject)A), M));
+  PetscCall(MatSetSizes(*M, nrows, nrows, PETSC_DETERMINE, PETSC_DETERMINE));
+  PetscCall(MatSetType(*M, mat_type));
+  PetscCall(MatSeqAIJSetPreallocation(*M, Nb, NULL));
+  PetscCall(MatMPIAIJSetPreallocation(*M, Nb, NULL, 0, NULL));
+  PetscCall(MatSetUp(*M));
+
+  PetscCall(PetscMalloc1(Nb * Nb, &block));
+  PetscCall(PetscMalloc1(Nb, &dof_idx));
+  PetscCall(DMGetGlobalSection(dm, &gsec));
+  PetscCall(DMPlexGetHeightStratum(dm, 0, &cStart, &cEnd));
+  for (PetscInt c = cStart; c < cEnd; c++) {
+    PetscInt goff;
+    PetscCall(PetscSectionGetOffset(gsec, c, &goff));
+    if (goff < 0) continue; /* skip ghost cells */
+    for (PetscInt i = 0; i < Nb; i++) dof_idx[i] = goff + i;
+    PetscCall(AssembleCellMassBlock(dm, fe, c, Nb, block));
+    PetscCall(MatSetValues(*M, Nb, dof_idx, Nb, dof_idx, block, INSERT_VALUES));
+  }
+  PetscCall(MatAssemblyBegin(*M, MAT_FINAL_ASSEMBLY));
+  PetscCall(MatAssemblyEnd(*M, MAT_FINAL_ASSEMBLY));
+  PetscCall(PetscFree(block));
+  PetscCall(PetscFree(dof_idx));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1597,28 +1647,36 @@ static PetscErrorCode WriteDGFieldVTU(DM dm, PetscFE fe, PetscSection sec,
 /* -----------------------------------------------------------------------
    PETSc TS callbacks for the -time_depend path
 
-   Equation integrated:   du/dt + A u = b_rhs
-   where A = M^{-1} A_stiff and b_rhs = M^{-1} b_stiff after the
+   Equation integrated:   M du/dt + A u = b_rhs
+   With diag_scale, A = M^{-1} A_stiff and b_rhs = M^{-1} b_stiff after the
    diag_scale step has applied the block-diagonal DG mass-matrix inverse
    (see AssembleCellMassBlock).  The effective mass matrix is therefore
-   the identity, so the implicit form reduces to
+   the identity (M = NULL below), so the implicit form reduces to
      F(t, u, udot) = udot + A u - b_rhs
      J            = shift * I + A         (shift = 1/dt)
+   Without diag_scale, A = A_stiff, b_rhs = b_stiff and M is the
+   block-diagonal DG mass matrix, so
+     F(t, u, udot) = M udot + A u - b_rhs
+     J            = shift * M + A
 
-   Memory note: A is pre-shifted in place (A := A + shift_pre*I) before
+   Memory note: A is pre-shifted in place (A := A + shift_pre*M) before
    TSSolve so it is *itself* the implicit Jacobian.  This avoids a separate
    copy of J. IFunctionAdv
    subtracts the pre-shift contribution back out so the residual is
-   unchanged, and IJacobianAdv just verifies the shift PETSc passes in
-   matches our pre-applied value (it must, since dt is constant).
+   unchanged, and if the time step changes IJacobianAdv adds the change
+   in the shift to A.
    ----------------------------------------------------------------------- */
 typedef struct {
-  Mat          A;           /* pre-shifted: holds shift_pre*I + A_orig    */
+  Mat          A;           /* pre-shifted: holds shift_pre*M + A_orig    */
+  Mat          M;           /* mass matrix, NULL for the identity         */
   Vec          b_rhs;
+  Vec          work;
   DM           dm;
   PetscFE      fe;
   PetscSection sec;
   PetscBool    write_vtk;
+  PetscBool    print_steps;
+  PetscInt     its_last;
   PetscReal    shift_pre;   /* the shift baked into A (= 1/dt for BEULER) */
 } TSAdvCtx;
 
@@ -1628,16 +1686,23 @@ static PetscErrorCode IFunctionAdv(TS ts, PetscReal t, Vec u, Vec udot, Vec F, v
 
   PetscFunctionBeginUser;
   (void)ts; (void)t;
-  /* MatMult gives (A_orig + shift_pre*I)*u; subtract shift_pre*u to recover A_orig*u. */
+  /* MatMult gives (A_orig + shift_pre*M)*u; subtract shift_pre*M*u to recover A_orig*u. */
   PetscCall(MatMult(c->A, u, F));
-  PetscCall(VecAXPY(F, -c->shift_pre, u));
-  PetscCall(VecAXPY(F, 1.0, udot));
+  if (c->M) {
+    PetscCall(VecWAXPY(c->work, -c->shift_pre, u, udot));
+    PetscCall(MatMultAdd(c->M, c->work, F, F));
+  } else {
+    PetscCall(VecAXPY(F, -c->shift_pre, u));
+    PetscCall(VecAXPY(F, 1.0, udot));
+  }
   PetscCall(VecAXPY(F, -1.0, c->b_rhs));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* A is already shift_pre*I + A_orig, so the implicit Jacobian is A itself.
-   We just check that the shift PETSc requests is the one we baked in. */
+/* A is already shift_pre*M + A_orig, so the implicit Jacobian is A itself.
+   If the shift PETSc requests has changed, we add the change to A in place.
+   A is only touched when the shift changes, so the PC only sees a change
+   to the Pmat when the time step changes. */
 static PetscErrorCode IJacobianAdv(TS ts, PetscReal t, Vec u, Vec udot, PetscReal shift,
                                    Mat J, Mat Jpre, void *ctx_void)
 {
@@ -1645,10 +1710,10 @@ static PetscErrorCode IJacobianAdv(TS ts, PetscReal t, Vec u, Vec udot, PetscRea
 
   PetscFunctionBeginUser;
   (void)ts; (void)t; (void)u; (void)udot; (void)J; (void)Jpre;
-  PetscCheck(PetscAbsReal(shift - c->shift_pre) <= 1e-12 * PetscAbsReal(c->shift_pre),
-             PetscObjectComm((PetscObject)ts), PETSC_ERR_ARG_WRONGSTATE,
-             "TS shift %g != pre-applied shift %g; -time_depend assumes constant dt",
-             (double)shift, (double)c->shift_pre);
+  if (shift == c->shift_pre) PetscFunctionReturn(PETSC_SUCCESS);
+  if (c->M) PetscCall(MatAXPY(c->A, shift - c->shift_pre, c->M, SUBSET_NONZERO_PATTERN));
+  else PetscCall(MatShift(c->A, shift - c->shift_pre));
+  c->shift_pre = shift;
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1660,7 +1725,14 @@ static PetscErrorCode TSMonitorWriteVTK(TS ts, PetscInt step, PetscReal time, Ve
   char      basename[64];
 
   PetscFunctionBeginUser;
-  (void)ts; (void)time;
+  if (c->print_steps) {
+    PetscInt  its;
+    PetscReal dt;
+    PetscCall(TSGetKSPIterations(ts, &its));
+    PetscCall(TSGetTimeStep(ts, &dt));
+    if (step > 0) PetscCall(PetscPrintf(PETSC_COMM_WORLD, "step %4" PetscInt_FMT " time %10.4e next dt %10.4e its %4" PetscInt_FMT "\n", step, (double)time, (double)dt, its - c->its_last));
+    c->its_last = its;
+  }
   if (!c->write_vtk) PetscFunctionReturn(PETSC_SUCCESS);
   PetscCall(PetscSNPrintf(basename, sizeof(basename),
                           "dg_solution_ts_%04" PetscInt_FMT, step));
@@ -1988,16 +2060,24 @@ int main(int argc, char **argv)
 
     /* -time_depend: no KSPSolve is performed here. The TS below is the
        only linear-solve driver. The first TS step's inner KSP builds its
-       PC on J = shift*I + A (one host->device transfer on GPU builds);
-       subsequent steps reuse the PC and run entirely on-device. */
-    PetscCheck(ctx.diag_scale, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE,
-               "-time_depend requires -diag_scale true");
+       PC on J = shift*M + A (one host->device transfer on GPU builds);
+       with a constant time step subsequent steps reuse the PC and run 
+       entirely on-device. */
 
     TS        ts;
     TSAdvCtx  tsctx;
+    TSAdapt   adapt;
+    PetscBool adapt_none;
     PetscReal dt;
 
     tsctx.A         = A;
+    tsctx.M         = NULL;
+    /* Without diag_scale we keep the mass matrix */
+    if (!ctx.diag_scale) PetscCall(AssembleMassMatrix(dm, fe, Nb, A, &tsctx.M));
+    PetscCall(VecDuplicate(b_rhs, &tsctx.work));
+    tsctx.print_steps = PETSC_FALSE;
+    PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_steps", &tsctx.print_steps, NULL));
+    tsctx.its_last  = 0;
     tsctx.b_rhs     = b_rhs;
     tsctx.dm        = dm;
     tsctx.fe        = fe;
@@ -2032,12 +2112,16 @@ int main(int argc, char **argv)
        pre-shift contribution back out so the residual is unchanged. */
     PetscCall(TSGetTimeStep(ts, &dt));
     tsctx.shift_pre = 1.0 / dt;
-    PetscCall(MatShift(A, tsctx.shift_pre));
+    if (tsctx.M) PetscCall(MatAXPY(A, tsctx.shift_pre, tsctx.M, SUBSET_NONZERO_PATTERN));
+    else PetscCall(MatShift(A, tsctx.shift_pre));
     PetscCall(TSSetIJacobian(ts, A, A, IJacobianAdv, &tsctx));
 
     /* Constant dt => shift = 1/dt is constant => the pre-shifted A is
-       the correct Jacobian for every step.  Build the PC once and reuse. */
-    {
+       the correct Jacobian for every step.  Build the PC once and reuse. 
+       If the time step can change we leave the lags to the options */
+    PetscCall(TSGetAdapt(ts, &adapt));
+    PetscCall(PetscObjectTypeCompare((PetscObject)adapt, TSADAPTNONE, &adapt_none));
+    if (adapt_none) {
       SNES snes;
       PetscCall(TSGetSNES(ts, &snes));
       PetscCall(SNESSetLagJacobian(snes, -2));
@@ -2071,7 +2155,16 @@ int main(int argc, char **argv)
 
     TSConvergedReason ts_reason;
     PetscCall(TSGetConvergedReason(ts, &ts_reason));
+    if (tsctx.print_steps) {
+      PetscInt steps, rejects, its;
+      PetscCall(TSGetStepNumber(ts, &steps));
+      PetscCall(TSGetStepRejections(ts, &rejects));
+      PetscCall(TSGetKSPIterations(ts, &its));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Steps %" PetscInt_FMT ", rejected steps %" PetscInt_FMT ", total linear iterations %" PetscInt_FMT ", average its per solve %.2f\n", steps, rejects, its, (double)its / (double)(steps + rejects)));
+    }
     PetscCall(TSDestroy(&ts));
+    PetscCall(MatDestroy(&tsctx.M));
+    PetscCall(VecDestroy(&tsctx.work));
     if (ts_reason < 0) return 1;
 
   } else {

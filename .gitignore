@@ -32,6 +32,7 @@ tests/adv_diff_2d
 tests/adv_diff_cg_supg
 tests/adv_diff_fd
 tests/adv_diff_fd_diag_update
+tests/adv_diff_fd_ts
 tests/ex12f
 tests/ex12f_gmres_poly
 tests/ex6
