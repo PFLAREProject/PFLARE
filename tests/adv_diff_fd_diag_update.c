@@ -18,6 +18,8 @@
      Can add diffusion with -alpha (default 0.0)
      Can give the list of c_g with -c_values c1,c2,...
      Can error if the update takes more than -max_extra_its extra iterations than fresh (default -1, don't check)
+     Can check with -check_reuse that, when -pc_air_reuse_sparsity is also set, the update KSP gives
+       exactly the iteration counts of a KSP with only reuse sparsity, ie reuse takes priority over the update
 
      The checks always done are:
        - applying the same D_g twice gives the same iteration count
@@ -138,16 +140,16 @@ static PetscErrorCode Solve(KSP ksp, Vec b, Vec x, PetscInt *its)
 
 int main(int argc, char **argv)
 {
-  KSP       ksp_fresh, ksp_update, ksp_frozen = NULL;
-  PC        pc_update;
+  KSP       ksp_fresh, ksp_update, ksp_frozen = NULL, ksp_reuse = NULL;
+  PC        pc_update, pc_reuse;
   DM        da;
-  Mat       L, A_fresh, A_update, A_new;
+  Mat       L, A_fresh, A_update, A_new, A_reuse = NULL;
   Vec       x, b, d_vec;
-  PetscInt  n = 50, n_c = 16, i_loc, its_fresh, its_update, its_repeat, its_frozen, its_base, its_zero, its_new;
+  PetscInt  n = 50, n_c = 16, i_loc, its_fresh, its_update, its_repeat, its_frozen, its_base, its_zero, its_new, its_reuse;
   PetscInt  max_extra_its = -1;
   PetscReal alpha = 0.0;
   PetscReal c_values[16] = {0.0, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3};
-  PetscBool print_frozen = PETSC_FALSE, flg;
+  PetscBool print_frozen = PETSC_FALSE, check_reuse = PETSC_FALSE, flg;
 
   PetscCall(PetscInitialize(&argc, &argv, (char *)0, help));
   PCRegister_PFLARE();
@@ -156,6 +158,7 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha", &alpha, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-max_extra_its", &max_extra_its, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_frozen", &print_frozen, NULL));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_reuse", &check_reuse, NULL));
   PetscCall(PetscOptionsGetRealArray(NULL, NULL, "-c_values", c_values, &n_c, &flg));
   if (!flg) n_c = 8;
 
@@ -190,6 +193,18 @@ int main(int argc, char **argv)
     PetscCall(KSPSetFromOptions(ksp_frozen));
   }
 
+  // The reuse solve, built from L with only reuse sparsity, with the same in place changes as A_update
+  if (check_reuse) {
+    PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_reuse));
+    PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_reuse));
+    PetscCall(KSPSetOperators(ksp_reuse, A_reuse, A_reuse));
+    PetscCall(KSPSetFromOptions(ksp_reuse));
+    PetscCall(KSPGetPC(ksp_reuse, &pc_reuse));
+    PetscCall(PCAIRSetReuseSparsity(pc_reuse, PETSC_TRUE));
+    PetscCall(PCAIRSetDiagUpdate(pc_reuse, PETSC_FALSE));
+    PetscCall(Solve(ksp_reuse, b, x, &its_reuse));
+  }
+
   // The iteration count with the hierarchy built from L
   PetscCall(Solve(ksp_update, b, x, &its_base));
 
@@ -215,6 +230,13 @@ int main(int argc, char **argv)
     PetscCall(MatDiagonalSet(A_update, d_vec, ADD_VALUES));
     PetscCall(Solve(ksp_update, b, x, &its_repeat));
     PetscCheck(its_repeat == its_update, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Repeating the update gave %" PetscInt_FMT " iterations rather than %" PetscInt_FMT, its_repeat, its_update);
+
+    if (check_reuse) {
+      PetscCall(MatCopy(L, A_reuse, SAME_NONZERO_PATTERN));
+      PetscCall(MatDiagonalSet(A_reuse, d_vec, ADD_VALUES));
+      PetscCall(Solve(ksp_reuse, b, x, &its_reuse));
+      PetscCheck(its_reuse == its_update, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "With reuse sparsity the update gave %" PetscInt_FMT " iterations rather than the reuse %" PetscInt_FMT, its_update, its_reuse);
+    }
 
     its_frozen = -1;
     if (print_frozen) PetscCall(Solve(ksp_frozen, b, x, &its_frozen));
@@ -243,6 +265,8 @@ int main(int argc, char **argv)
   PetscCall(KSPDestroy(&ksp_fresh));
   PetscCall(KSPDestroy(&ksp_update));
   PetscCall(KSPDestroy(&ksp_frozen));
+  PetscCall(KSPDestroy(&ksp_reuse));
+  PetscCall(MatDestroy(&A_reuse));
   PetscCall(MatDestroy(&L));
   PetscCall(MatDestroy(&A_fresh));
   PetscCall(MatDestroy(&A_update));

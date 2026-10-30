@@ -122,7 +122,7 @@ module pcair_shell
 
       call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
 
-      if (pc_air_data%air_data%options%diag_update) then
+      if (can_diag_update_pc_air_data(pc_air_data)) then
          call MatCreateVecs(pmat, PETSC_NULL_VEC, pc_air_data%air_data%diag_update_base_pmat, ierr)
          call MatGetDiagonal(pmat, pc_air_data%air_data%diag_update_base_pmat, ierr)
       end if
@@ -135,12 +135,14 @@ module pcair_shell
 
       ! Can we update the existing hierarchy given only the diagonal of the pmat has changed
       ! With a single level or when smoothing all the unknowns we just rebuild
+      ! If we're reusing the sparsity we always rebuild with reuse, which is more accurate
 
       ! ~~~~~~
       type(pc_air_multigrid_data), intent(in)    :: pc_air_data
       ! ~~~~~~    
 
       can_diag_update_pc_air_data = pc_air_data%air_data%options%diag_update .AND. &
+               .NOT. pc_air_data%air_data%options%reuse_sparsity .AND. &
                pc_air_data%air_data%no_levels > 1 .AND. &
                .NOT. pc_air_data%air_data%options%full_smoothing_up_and_down
 

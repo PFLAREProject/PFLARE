@@ -358,6 +358,9 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with a diagonal update with F point smoothing and a symmetric hierarchy"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL)
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_symmetric
+	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
+	 -check_reuse
 	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \

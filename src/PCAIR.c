@@ -2852,7 +2852,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
   so updates do not accumulate. A change to the nonzero pattern of the Pmat rebuilds the hierarchy as normal,
   and subsequent updates are then relative to that Pmat.
 
-  With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always rebuilt. As with any
+  With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always rebuilt. If
+  `-pc_air_reuse_sparsity` is also set it takes priority, and the hierarchy is rebuilt with reuse. As with any
   change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`
