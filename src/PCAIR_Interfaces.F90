@@ -2,8 +2,7 @@ module pcair_interfaces
 
    use iso_c_binding
    use petscksp
-   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c, &
-         apply_diag_update_pc_air_data
+   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
 
@@ -1286,6 +1285,25 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagUpdate(pc, diag_update, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: diag_update
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      diag_update = options%diag_update
+      ierr = 0
+
+   end subroutine PCAIRGetDiagUpdate
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -2874,37 +2892,34 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetDiagonalUpdate(pc, diag_update, ierr) 
-
-      ! Sets a diagonal matrix D such that PCAIR approximates the hierarchy of A + D, 
-      ! where A is the Pmat, without rebuilding the hierarchy
-      ! Pass in a null matrix to remove the update
+   subroutine PCAIRSetDiagUpdate(pc, diag_update, ierr) 
 
       ! ~~~~~~~~
       type(tPC), intent(inout)      :: pc
-      type(tMat), intent(in)        :: diag_update
+      PetscBool, intent(in)         :: diag_update
       PetscErrorCode, intent(out)   :: ierr
 
-      type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
-      call PCAIRGetPCShell(pc, pc_shell)
-      call PCShellGetContext(pc_shell, pc_air_data, ierr)
-
-      ! Hold a reference to the update, as we apply it again whenever the hierarchy is rebuilt
-      if (.NOT. PetscObjectIsNull(diag_update)) then
-         call PetscObjectReference(diag_update, ierr)
+      call PCAIRGetDiagUpdate(pc, old_bool, ierr)
+      if (old_bool .eqv. diag_update) then
+         ierr = 0
+         return
       end if
-      call MatDestroy(pc_air_data%diag_update_mat, ierr)
-      pc_air_data%diag_update_mat = diag_update
 
-      ! If we already have a hierarchy apply the update now, otherwise it 
-      ! will be applied once the hierarchy is built
-      call apply_diag_update_pc_air_data(pc_air_data)
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_update = diag_update
       ierr = 0
 
-   end subroutine PCAIRSetDiagonalUpdate
+   end subroutine PCAIRSetDiagUpdate
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

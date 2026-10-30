@@ -1,18 +1,19 @@
-/*   Tests PCAIRSetDiagonalUpdate on a series of diagonally perturbed systems
+/*   Tests -pc_air_diag_update on a series of diagonally perturbed systems
      (L + D_g) x = b, where L is a steady 2D upwind finite difference advection(-diffusion)
      operator and D_g is diagonal, D_g = c_g (1 + 0.5 sin(row)), with c_g sweeping over
-     decades. This mimics a multigroup transport solve, where L is the streaming operator
+     decades. This mimics a multigroup transport solve, where L is the streaming operator 
      and D_g the per-group removal.
 
      For each D_g we solve with:
        - fresh:  PCAIR built from L + D_g
-       - update: PCAIR built once from L, with PCAIRSetDiagonalUpdate(pc, D_g) and
-                 the Amat set to L + D_g
+       - update: PCAIR built once from L with PCAIRSetDiagUpdate set, then for each g the 
+                 diagonal of the same Pmat is changed in place to L + D_g, so PCAIR updates
+                 the hierarchy rather than rebuilding it
        - frozen: (with -print_frozen) PCAIR built once from L with no update
 
      ./adv_diff_fd_diag_update -pc_type air
              : sweep with the default c_g, on a 2D grid of size 50 x 50
-
+     
      Can control the grid size with -n (default 50)
      Can add diffusion with -alpha (default 0.0)
      Can give the list of c_g with -c_values c1,c2,...
@@ -20,8 +21,8 @@
 
      The checks always done are:
        - applying the same D_g twice gives the same iteration count
-       - after the sweep, applying D = 0 gives the iteration count of the hierarchy built from L
-       - removing the update with PCAIRSetDiagonalUpdate(pc, NULL) does the same
+       - after the sweep, going back to the Pmat L gives the iteration count of the hierarchy built from L
+       - changing to a different Pmat rebuilds the hierarchy, giving the fresh iteration count
 */
 
 static char help[] = "Tests a diagonal update to PCAIR with 2D advection.\n\n";
@@ -140,9 +141,9 @@ int main(int argc, char **argv)
   KSP       ksp_fresh, ksp_update, ksp_frozen = NULL;
   PC        pc_update;
   DM        da;
-  Mat       L, A_fresh, A_update, D;
+  Mat       L, A_fresh, A_update, A_new;
   Vec       x, b, d_vec;
-  PetscInt  n = 50, n_c = 16, i_loc, its_fresh, its_update, its_repeat, its_frozen, its_base, its_zero, its_null;
+  PetscInt  n = 50, n_c = 16, i_loc, its_fresh, its_update, its_repeat, its_frozen, its_base, its_zero, its_new;
   PetscInt  max_extra_its = -1;
   PetscReal alpha = 0.0;
   PetscReal c_values[16] = {0.0, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3};
@@ -169,19 +170,18 @@ int main(int argc, char **argv)
   PetscCall(MatCreateVecs(L, &x, &b));
   PetscCall(VecDuplicate(x, &d_vec));
   PetscCall(VecSet(b, 1.0));
-  // D only needs its diagonal
-  PetscCall(MatCreateDiagonal(d_vec, &D));
 
   // The fresh solve, rebuilt from L + D_g for every g
   PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_fresh));
   PetscCall(KSPSetOperators(ksp_fresh, A_fresh, A_fresh));
   PetscCall(KSPSetFromOptions(ksp_fresh));
 
-  // The updated solve, the Pmat is always L
+  // The updated solve, we only ever change the diagonal of A_update
   PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_update));
-  PetscCall(KSPSetOperators(ksp_update, A_update, L));
+  PetscCall(KSPSetOperators(ksp_update, A_update, A_update));
   PetscCall(KSPSetFromOptions(ksp_update));
   PetscCall(KSPGetPC(ksp_update, &pc_update));
+  PetscCall(PCAIRSetDiagUpdate(pc_update, PETSC_TRUE));
 
   // The frozen solve, the hierarchy built from L with no update
   if (print_frozen) {
@@ -191,32 +191,28 @@ int main(int argc, char **argv)
   }
 
   // The iteration count with the hierarchy built from L
-  PetscCall(KSPSetOperators(ksp_update, L, L));
   PetscCall(Solve(ksp_update, b, x, &its_base));
-  PetscCall(KSPSetOperators(ksp_update, A_update, L));
 
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Iterations with the hierarchy built from L: %" PetscInt_FMT "\n", its_base));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12s %8s %8s %8s\n", "c", "fresh", "update", print_frozen ? "frozen" : ""));
 
   for (i_loc = 0; i_loc < n_c; i_loc++) {
 
-    // D_g, with the matdiagonal D sharing d_vec
     PetscCall(ComputeDiag(d_vec, c_values[i_loc]));
-    PetscCall(PetscObjectStateIncrease((PetscObject)D));
 
     // L + D_g
     PetscCall(MatCopy(L, A_fresh, SAME_NONZERO_PATTERN));
     PetscCall(MatDiagonalSet(A_fresh, d_vec, ADD_VALUES));
-    PetscCall(MatCopy(L, A_update, SAME_NONZERO_PATTERN));
-    PetscCall(MatDiagonalSet(A_update, d_vec, ADD_VALUES));
-
     PetscCall(Solve(ksp_fresh, b, x, &its_fresh));
 
-    PetscCall(PCAIRSetDiagonalUpdate(pc_update, D));
+    // Change the diagonal of the Pmat in place, which updates the hierarchy
+    PetscCall(MatCopy(L, A_update, SAME_NONZERO_PATTERN));
+    PetscCall(MatDiagonalSet(A_update, d_vec, ADD_VALUES));
     PetscCall(Solve(ksp_update, b, x, &its_update));
     PetscCall(CheckMatApply(pc_update, b));
-    // Applying the same update again has to give the same answer
-    PetscCall(PCAIRSetDiagonalUpdate(pc_update, D));
+    // Setting the same values again has to give the same answer
+    PetscCall(MatCopy(L, A_update, SAME_NONZERO_PATTERN));
+    PetscCall(MatDiagonalSet(A_update, d_vec, ADD_VALUES));
     PetscCall(Solve(ksp_update, b, x, &its_repeat));
     PetscCheck(its_repeat == its_update, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Repeating the update gave %" PetscInt_FMT " iterations rather than %" PetscInt_FMT, its_repeat, its_update);
 
@@ -229,31 +225,27 @@ int main(int argc, char **argv)
     if (max_extra_its >= 0) PetscCheck(its_update - its_fresh <= max_extra_its, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The update took %" PetscInt_FMT " iterations compared to %" PetscInt_FMT " fresh", its_update, its_fresh);
   }
 
-  // Going back to D = 0 has to give back the hierarchy built from L
+  // Going back to L has to give back the hierarchy built from L
   PetscCall(MatCopy(L, A_update, SAME_NONZERO_PATTERN));
-  PetscCall(VecSet(d_vec, 0.0));
-  PetscCall(PetscObjectStateIncrease((PetscObject)D));
-  PetscCall(PCAIRSetDiagonalUpdate(pc_update, D));
   PetscCall(Solve(ksp_update, b, x, &its_zero));
-  PetscCheck(its_zero == its_base, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "An update with D = 0 gave %" PetscInt_FMT " iterations rather than %" PetscInt_FMT, its_zero, its_base);
+  PetscCheck(its_zero == its_base, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Going back to L gave %" PetscInt_FMT " iterations rather than %" PetscInt_FMT, its_zero, its_base);
 
-  // As does removing the update, after applying a non-zero one
-  PetscCall(ComputeDiag(d_vec, 1.0));
-  PetscCall(PetscObjectStateIncrease((PetscObject)D));
-  PetscCall(PCAIRSetDiagonalUpdate(pc_update, D));
-  PetscCall(PCAIRSetDiagonalUpdate(pc_update, NULL));
-  PetscCall(Solve(ksp_update, b, x, &its_null));
-  PetscCheck(its_null == its_base, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Removing the update gave %" PetscInt_FMT " iterations rather than %" PetscInt_FMT, its_null, its_base);
+  // A different Pmat has to rebuild the hierarchy rather than update it, so it has 
+  // to match the fresh solve on L + D_g with the last c
+  PetscCall(MatDuplicate(A_fresh, MAT_COPY_VALUES, &A_new));
+  PetscCall(KSPSetOperators(ksp_update, A_new, A_new));
+  PetscCall(Solve(ksp_update, b, x, &its_new));
+  PetscCheck(its_new == its_fresh, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "A new Pmat gave %" PetscInt_FMT " iterations rather than the fresh %" PetscInt_FMT, its_new, its_fresh);
 
-  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Iterations after going back to D = 0: %" PetscInt_FMT ", after removing the update: %" PetscInt_FMT "\n", its_zero, its_null));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Iterations after going back to L: %" PetscInt_FMT ", with a new Pmat: %" PetscInt_FMT "\n", its_zero, its_new));
 
+  PetscCall(MatDestroy(&A_new));
   PetscCall(KSPDestroy(&ksp_fresh));
   PetscCall(KSPDestroy(&ksp_update));
   PetscCall(KSPDestroy(&ksp_frozen));
   PetscCall(MatDestroy(&L));
   PetscCall(MatDestroy(&A_fresh));
   PetscCall(MatDestroy(&A_update));
-  PetscCall(MatDestroy(&D));
   PetscCall(VecDestroy(&x));
   PetscCall(VecDestroy(&b));
   PetscCall(VecDestroy(&d_vec));

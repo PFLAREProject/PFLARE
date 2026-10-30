@@ -98,6 +98,7 @@ cdef extern:
 	PetscErrorCode PCAIRGetReuseSparsity(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReusePolyCoeffs(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReuseAmount(PetscPC pc, PetscInt *amount)
+	PetscErrorCode PCAIRGetDiagUpdate(PetscPC pc, PetscBool *diag_update)
 	PetscErrorCode PCAIRGetDiagUpdateLumpType(PetscPC pc, PetscInt *lump_type)
 	PetscErrorCode PCAIRGetDiagUpdateScaleR(PetscPC pc, PetscBool *scale_r)
 	PetscErrorCode PCAIRGetSmoothType(PetscPC pc, char *output_string)
@@ -171,7 +172,7 @@ cdef extern:
 	# PCAIR - diagonal update
 	PetscErrorCode PCAIRSetDiagUpdateLumpType(PetscPC pc, PetscInt lump_type)
 	PetscErrorCode PCAIRSetDiagUpdateScaleR(PetscPC pc, PetscBool scale_r)
-	PetscErrorCode PCAIRSetDiagonalUpdate(PetscPC pc, PetscMat mat)
+	PetscErrorCode PCAIRSetDiagUpdate(PetscPC pc, PetscBool diag_update)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
 	# wrapper checks the level/inverse are valid and the sizes match before copying.
@@ -483,6 +484,11 @@ cpdef int pcair_get_reuse_amount(PC pc):
 	CHKERR(PCAIRGetReuseAmount(pc.pc, &amount))
 	return int(amount)
 
+cpdef bint pcair_get_diag_update(PC pc):
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetDiagUpdate(pc.pc, &result))
+	return bool(result)
+
 cpdef int pcair_get_diag_update_lump_type(PC pc):
 	cdef PetscInt lump_type = 0
 	CHKERR(PCAIRGetDiagUpdateLumpType(pc.pc, &lump_type))
@@ -725,13 +731,10 @@ cpdef pcair_set_diag_update_scale_r(PC pc, bint flag):
 	"""Set whether a diagonal update rescales the F point columns of the restrictors."""
 	CHKERR(PCAIRSetDiagUpdateScaleR(pc.pc, <PetscBool>flag))
 
-cpdef pcair_set_diagonal_update(PC pc, Mat D):
-	"""Set a diagonal perturbation D, so PCAIR approximates the hierarchy of A + D
-	(A the Pmat) without rebuilding it. Pass None to remove the update."""
-	if D is None:
-		CHKERR(PCAIRSetDiagonalUpdate(pc.pc, NULL))
-	else:
-		CHKERR(PCAIRSetDiagonalUpdate(pc.pc, D.mat))
+cpdef pcair_set_diag_update(PC pc, bint flag):
+	"""Set whether a change to the Pmat with the same nonzero pattern is treated as a change
+	to its diagonal only, updating rather than rebuilding the hierarchy."""
+	CHKERR(PCAIRSetDiagUpdate(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.

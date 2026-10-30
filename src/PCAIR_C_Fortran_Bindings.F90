@@ -920,6 +920,26 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetDiagUpdate_c(pc_ptr, diag_update) bind(C, name='PCAIRGetDiagUpdate_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, intent(out)        :: diag_update
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetDiagUpdate(pc, dummy, ierr)
+      diag_update = .FALSE.
+      if (dummy) diag_update = .TRUE.
+
+   end subroutine PCAIRGetDiagUpdate_c
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetDiagUpdateLumpType_c(pc_ptr, lump_type) bind(C, name='PCAIRGetDiagUpdateLumpType_c')
 
       ! ~~~~~~~~
@@ -1899,22 +1919,23 @@ module pcair_c_fortran_bindings
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetDiagonalUpdate_c(pc_ptr, mat_ptr) bind(C, name='PCAIRSetDiagonalUpdate_c')
+   subroutine PCAIRSetDiagUpdate_c(pc_ptr, diag_update) bind(C, name='PCAIRSetDiagUpdate_c')
 
       ! ~~~~~~~~
-      integer(c_long_long), intent(inout)      :: pc_ptr
-      integer(c_long_long), value, intent(in)  :: mat_ptr
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, value, intent(in)         :: diag_update
 
       type(tPC)                  :: pc
-      type(tMat)                 :: mat
       PetscErrorCode         :: ierr
+      PetscBool :: dummy
       ! ~~~~~~~~
 
       pc%v = pc_ptr
-      mat%v = mat_ptr
-      call PCAIRSetDiagonalUpdate(pc, mat, ierr)
+      dummy = .FALSE.
+      if (diag_update) dummy = .TRUE.
+      call PCAIRSetDiagUpdate(pc, dummy, ierr)
 
-   end subroutine PCAIRSetDiagonalUpdate_c
+   end subroutine PCAIRSetDiagUpdate_c
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

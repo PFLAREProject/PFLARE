@@ -111,6 +111,7 @@ pcair_get_a_lump                       = pflare_defs.pcair_get_a_lump
 pcair_get_reuse_sparsity               = pflare_defs.pcair_get_reuse_sparsity
 pcair_get_reuse_poly_coeffs            = pflare_defs.pcair_get_reuse_poly_coeffs
 pcair_get_reuse_amount                 = pflare_defs.pcair_get_reuse_amount
+pcair_get_diag_update                  = pflare_defs.pcair_get_diag_update
 pcair_get_diag_update_lump_type        = pflare_defs.pcair_get_diag_update_lump_type
 pcair_get_diag_update_scale_r          = pflare_defs.pcair_get_diag_update_scale_r
 pcair_get_smooth_type                  = pflare_defs.pcair_get_smooth_type
@@ -167,7 +168,7 @@ pcair_set_reuse_poly_coeffs            = pflare_defs.pcair_set_reuse_poly_coeffs
 pcair_set_reuse_amount                 = pflare_defs.pcair_set_reuse_amount
 pcair_set_diag_update_lump_type        = pflare_defs.pcair_set_diag_update_lump_type
 pcair_set_diag_update_scale_r          = pflare_defs.pcair_set_diag_update_scale_r
-pcair_set_diagonal_update              = pflare_defs.pcair_set_diagonal_update
+pcair_set_diag_update                  = pflare_defs.pcair_set_diag_update
 pcair_set_poly_coeffs                  = pflare_defs.pcair_set_poly_coeffs
 
 # -----------------------------------------------------------------------
@@ -248,7 +249,7 @@ _PCAIR_OPTION_DOCS = {
     'poly_coeffs':                  ("the polynomial inverse coefficients for a given inverse (a WhichInverseType selector)", "N/A", "N/A"),
     'diag_update_lump_type':        ("how a diagonal update is lumped onto the coarse grids: 0=row sum of R diag(d) P, 1=diagonal of R diag(d) P", "-pc_air_diag_update_lump_type", "0"),
     'diag_update_scale_r':          ("whether a diagonal update rescales the F point columns of the restrictors by a_ff / (a_ff + d_f)", "-pc_air_diag_update_scale_r", "False"),
-    'diagonal_update':              ("a diagonal perturbation D (a Mat, or None to remove it), so the hierarchy approximates that of A + D without being rebuilt", "N/A", "N/A"),
+    'diag_update':                  ("whether a change to the Pmat with the same nonzero pattern is treated as a change to its diagonal only, updating rather than rebuilding the hierarchy", "-pc_air_diag_update", "False"),
 }
 
 _PCPFLAREINV_OPTION_DOCS = {

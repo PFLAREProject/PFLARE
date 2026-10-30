@@ -6,7 +6,7 @@ module pcair_shell
    use air_mg_setup, only: setup_air_pcmg
    use air_data_type_routines, only: reset_air_data, destroy_air_data
    use air_diagonal_update, only: update_air_diag
-   use pflare_parameters, only: PFLARE_ZERO
+   use pflare_parameters, only: PFLARE_MINUS_ONE
 
 #include "petsc/finclude/petscksp.h"
 
@@ -67,7 +67,6 @@ module pcair_shell
       ! ~~~~~~    
 
       call destroy_air_data(pc_air_data%air_data)
-      call MatDestroy(pc_air_data%diag_update_mat, ierr)
       ! Destroy the underlying pcmg
       call PCDestroy(pc_air_data%pcmg, ierr)  
 
@@ -109,39 +108,66 @@ module pcair_shell
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine apply_diag_update_pc_air_data(pc_air_data)
+   subroutine setup_pc_air_data(pc_air_data, amat, pmat)
 
-      ! Applies the stored diagonal update (if any) to the hierarchy
-      ! If there isn't one, any previous update is removed
+      ! Builds the hierarchy and, if we're doing diagonal updates, keeps 
+      ! the diagonal of the pmat it was built from
 
       ! ~~~~~~
       type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+      type(tMat), intent(in)                        :: amat, pmat
+
+      PetscErrorCode :: ierr
+      ! ~~~~~~    
+
+      call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+
+      if (pc_air_data%air_data%options%diag_update) then
+         call MatCreateVecs(pmat, PETSC_NULL_VEC, pc_air_data%air_data%diag_update_base_pmat, ierr)
+         call MatGetDiagonal(pmat, pc_air_data%air_data%diag_update_base_pmat, ierr)
+      end if
+
+   end subroutine setup_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function can_diag_update_pc_air_data(pc_air_data)
+
+      ! Can we update the existing hierarchy given only the diagonal of the pmat has changed
+      ! With a single level or when smoothing all the unknowns we just rebuild
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(in)    :: pc_air_data
+      ! ~~~~~~    
+
+      can_diag_update_pc_air_data = pc_air_data%air_data%options%diag_update .AND. &
+               pc_air_data%air_data%no_levels > 1 .AND. &
+               .NOT. pc_air_data%air_data%options%full_smoothing_up_and_down
+
+   end function can_diag_update_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine diag_update_pc_air_data(pc_air_data, pmat)
+
+      ! Updates the hierarchy with the change in the diagonal of the pmat since the
+      ! hierarchy was built, trusting that nothing else in the pmat has changed
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+      type(tMat), intent(in)                        :: pmat
 
       PetscErrorCode :: ierr
       type(tVec) :: diag_vec
-      type(tMat) :: temp_mat
       ! ~~~~~~    
 
-      ! Nothing to do if we haven't built a hierarchy yet, the update will
-      ! be applied once we have
-      if (pc_air_data%air_data%no_levels == -1) return
+      call VecDuplicate(pc_air_data%air_data%diag_update_base_pmat, diag_vec, ierr)
+      call MatGetDiagonal(pmat, diag_vec, ierr)
+      call VecAXPY(diag_vec, PFLARE_MINUS_ONE, pc_air_data%air_data%diag_update_base_pmat, ierr)
+      call update_air_diag(pc_air_data%air_data, diag_vec)
+      call VecDestroy(diag_vec, ierr)
 
-      temp_mat = pc_air_data%diag_update_mat
-      if (.NOT. PetscObjectIsNull(temp_mat)) then
-         call MatCreateVecs(pc_air_data%diag_update_mat, PETSC_NULL_VEC, diag_vec, ierr)
-         call MatGetDiagonal(pc_air_data%diag_update_mat, diag_vec, ierr)
-         call update_air_diag(pc_air_data%air_data, diag_vec)
-         call VecDestroy(diag_vec, ierr)
-
-      ! If we have previously applied an update, go back to the original hierarchy
-      else if (pc_air_data%air_data%diag_update_initialised) then
-         call VecDuplicate(pc_air_data%air_data%diag_update_d(1), diag_vec, ierr)
-         call VecSet(diag_vec, PFLARE_ZERO, ierr)
-         call update_air_diag(pc_air_data%air_data, diag_vec)
-         call VecDestroy(diag_vec, ierr)
-      end if
-
-   end subroutine apply_diag_update_pc_air_data
+   end subroutine diag_update_pc_air_data
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -171,8 +197,7 @@ module pcair_shell
       ! We need to call the setup routines
       if (setupcalled == 0) then
 
-         call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
-         call apply_diag_update_pc_air_data(pc_air_data)
+         call setup_pc_air_data(pc_air_data, amat, pmat)
 
       ! We can possibly re-use some of the setup
       else
@@ -185,8 +210,14 @@ module pcair_shell
             ! Reset the air data
             call reset_pc_air_data(pc_air_data)
             ! Set it up again
-            call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
-            call apply_diag_update_pc_air_data(pc_air_data)
+            call setup_pc_air_data(pc_air_data, amat, pmat)
+
+         ! If we've been told only the diagonal of the pmat changes 
+         ! we can just update the existing hierarchy
+         ! SAME_NONZERO_PATTERN = 2
+         else if (structure_flag == 2 .AND. can_diag_update_pc_air_data(pc_air_data)) then
+
+            call diag_update_pc_air_data(pc_air_data, pmat)
 
          ! We can re-use the sparsity
          ! SAME_NONZERO_PATTERN = 2
@@ -200,8 +231,7 @@ module pcair_shell
                call reset_pc_air_data(pc_air_data)               
             end if
             ! Set it up again
-            call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
-            call apply_diag_update_pc_air_data(pc_air_data)
+            call setup_pc_air_data(pc_air_data, amat, pmat)
 
          end if
       end if

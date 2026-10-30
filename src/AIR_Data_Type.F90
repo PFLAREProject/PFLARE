@@ -269,7 +269,13 @@ module air_data_type
       ! -pc_air_reuse_poly_coeffs
       logical :: reuse_poly_coeffs = .FALSE.
 
-      ! How a diagonal update (see PCAIRSetDiagonalUpdate) is carried down to the
+      ! Are changes to the pmat with the same nonzero pattern only ever changes to its
+      ! diagonal? If so, rather than rebuilding the hierarchy on a new setup we update 
+      ! the existing hierarchy with the change in the diagonal, see AIR_Diagonal_Update.F90
+      ! It is up to the user to ensure only the diagonal has changed
+      ! -pc_air_diag_update
+      logical :: diag_update = .FALSE.
+      ! How a diagonal update is carried down to the
       ! coarse grids, given a diagonal perturbation d on a level, the coarse
       ! perturbation is
       ! 0 - row sum lumping of R diag(d) P, ie R (d .* (P 1))
@@ -395,6 +401,8 @@ module air_data_type
       ! All of these are vectors (or with diag_update_lump_type == 1 the
       ! matrices R .* P^T), so this is O(n) storage on each level
       ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! The diagonal of the pmat the hierarchy was built from
+      type(tVec) :: diag_update_base_pmat
       ! Have we captured the baseline diagonals from the hierarchy
       logical :: diag_update_initialised = .FALSE.
       ! The diagonals of A_ff and A_cc (if C smoothing) on each level and of the 

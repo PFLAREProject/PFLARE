@@ -347,6 +347,7 @@ module air_data_type_routines
       integer :: i_loc
       ! ~~~~~~
 
+      call VecDestroy(air_data%diag_update_base_pmat, ierr)
       call destroy_vec_array(air_data%diag_update_base_aff)
       call destroy_vec_array(air_data%diag_update_base_acc)
       call destroy_vec_array(air_data%diag_update_d)
@@ -456,6 +457,7 @@ module air_data_type_routines
       air_data%options%reuse_sparsity = .FALSE.     
       air_data%options%reuse_poly_coeffs = .FALSE.           
 
+      air_data%options%diag_update = .FALSE.
       air_data%options%diag_update_lump_type = 0
       air_data%options%diag_update_scale_r = .FALSE.
 

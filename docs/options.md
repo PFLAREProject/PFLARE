@@ -109,6 +109,6 @@ By default the coarse grid is solved with one application of a polynomial approx
 
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
-   | (none)  |  PCAIRSetDiagonalUpdate  | Apply a diagonal perturbation D to an existing hierarchy, so it approximates the hierarchy of A + D | |
+   | ``-pc_air_diag_update``  |  PCAIRGetDiagUpdate  PCAIRSetDiagUpdate  | Treat changes to the Pmat with the same nonzero pattern as changes to its diagonal only, and update rather than rebuild the hierarchy | false |
    | ``-pc_air_diag_update_lump_type``  |  PCAIRGetDiagUpdateLumpType  PCAIRSetDiagUpdateLumpType  | How a diagonal update is lumped onto the coarse grids: 0=row sum of R diag(d) P, 1=diagonal of R diag(d) P | 0 |
    | ``-pc_air_diag_update_scale_r``  |  PCAIRGetDiagUpdateScaleR  PCAIRSetDiagUpdateScaleR  | Rescale the F point columns of the restrictors by a_ff / (a_ff + d_f) in a diagonal update | false |
