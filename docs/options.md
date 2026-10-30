@@ -101,12 +101,7 @@ By default the coarse grid is solved with one application of a polynomial approx
 
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
+   | ``-pc_air_diag_update``  |  PCAIRGetDiagUpdate  PCAIRSetDiagUpdate  | Treat changes to the Pmat with the same nonzero pattern as changes to its diagonal only, and update rather than rebuild the hierarchy. ``-pc_air_reuse_sparsity`` takes priority if set | false |
    | ``-pc_air_reuse_sparsity``  |  PCAIRGetReuseSparsity  PCAIRSetReuseSparsity  | Store temporary data to allow fast setup with reuse | false |
    | ``-pc_air_reuse_amount``  |  PCAIRGetReuseAmount  PCAIRSetReuseAmount  | Control how much data is stored when reuse sparsity is enabled: 1=CF splitting only, 2=CF splitting + SpGEMM sparsity, 3=everything | 3 |
    | ``-pc_air_reuse_poly_coeffs``  |  PCAIRGetReusePolyCoeffs  PCAIRSetReusePolyCoeffs  | Don't recompute the polynomial inverse coefficients during setup with reuse | false |         
-
-#### Diagonal update options
-
-   | Command line  | Routine | Description | Default |
-   | ------------- | -- | ------------- | --- |
-   | ``-pc_air_diag_update``  |  PCAIRGetDiagUpdate  PCAIRSetDiagUpdate  | Treat changes to the Pmat with the same nonzero pattern as changes to its diagonal only, and update rather than rebuild the hierarchy | false |
