@@ -17,6 +17,8 @@
      Can control the grid size with -n (default 50)
      Can add diffusion with -alpha (default 0.0)
      Can give the list of c_g with -c_values c1,c2,...
+     Can build the hierarchy from L + D_base with -c_base (default 0.0), where D_base is D_g with c_g = c_base,
+       so negative c_g down to -c_base decrease the diagonal of the base
      Can error if the update takes more than -max_extra_its extra iterations than fresh (default -1, don't check)
      Can check with -check_reuse that, when -pc_air_reuse_sparsity is also set, the update KSP gives
        exactly the iteration counts of a KSP with only reuse sparsity, ie reuse takes priority over the update
@@ -147,7 +149,7 @@ int main(int argc, char **argv)
   Vec       x, b, d_vec;
   PetscInt  n = 50, n_c = 16, i_loc, its_fresh, its_update, its_repeat, its_frozen, its_base, its_zero, its_new, its_reuse;
   PetscInt  max_extra_its = -1;
-  PetscReal alpha = 0.0;
+  PetscReal alpha = 0.0, c_base = 0.0;
   PetscReal c_values[16] = {0.0, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3};
   PetscBool print_frozen = PETSC_FALSE, check_reuse = PETSC_FALSE, flg;
 
@@ -156,6 +158,7 @@ int main(int argc, char **argv)
 
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha", &alpha, NULL));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-c_base", &c_base, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-max_extra_its", &max_extra_its, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_frozen", &print_frozen, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_reuse", &check_reuse, NULL));
@@ -168,10 +171,15 @@ int main(int argc, char **argv)
 
   PetscCall(DMCreateMatrix(da, &L));
   PetscCall(ComputeMat(da, L, alpha));
-  PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_fresh));
-  PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_update));
   PetscCall(MatCreateVecs(L, &x, &b));
   PetscCall(VecDuplicate(x, &d_vec));
+  // From here on L is the base, L + D_base
+  if (c_base != 0.0) {
+    PetscCall(ComputeDiag(d_vec, c_base));
+    PetscCall(MatDiagonalSet(L, d_vec, ADD_VALUES));
+  }
+  PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_fresh));
+  PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_update));
   PetscCall(VecSet(b, 1.0));
 
   // The fresh solve, rebuilt from L + D_g for every g

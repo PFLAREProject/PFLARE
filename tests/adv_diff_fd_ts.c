@@ -201,6 +201,8 @@ int main(int argc, char **argv)
   PetscCall(TSGetKSPIterations(ts, &its));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Steps %" PetscInt_FMT ", rejected steps %" PetscInt_FMT ", total linear iterations %" PetscInt_FMT ", average its per solve %.2f, TSSolve time %.4e s\n", steps, rejects, its, (double)its / (double)(steps + rejects), (double)(time_end - time_start)));
 
+  if (max_total_its >= 0 && its > max_total_its) PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Total linear iterations %" PetscInt_FMT " above -max_total_its %" PetscInt_FMT "\n", its, max_total_its));
+
   if (verify_solution) {
     Vec       x_ones;
     PetscReal err_norm;

@@ -44,6 +44,8 @@
         (the PC is never rebuilt) or -pc_air_diag_update (the PC is updated).
         Can print the dt and the linear iterations of every step 
         with -print_steps
+        Can error if the total number of linear iterations is above
+        -max_total_its (default -1, don't check)
         When -write_vtk is also set, one VTU is written per
         TS step (basename dg_solution_ts_XXXX).
 
@@ -2155,17 +2157,23 @@ int main(int argc, char **argv)
 
     TSConvergedReason ts_reason;
     PetscCall(TSGetConvergedReason(ts, &ts_reason));
+    PetscInt its, max_total_its = -1;
+    PetscCall(PetscOptionsGetInt(NULL, NULL, "-max_total_its", &max_total_its, NULL));
+    PetscCall(TSGetKSPIterations(ts, &its));
     if (tsctx.print_steps) {
-      PetscInt steps, rejects, its;
+      PetscInt steps, rejects;
       PetscCall(TSGetStepNumber(ts, &steps));
       PetscCall(TSGetStepRejections(ts, &rejects));
-      PetscCall(TSGetKSPIterations(ts, &its));
       PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Steps %" PetscInt_FMT ", rejected steps %" PetscInt_FMT ", total linear iterations %" PetscInt_FMT ", average its per solve %.2f\n", steps, rejects, its, (double)its / (double)(steps + rejects)));
     }
     PetscCall(TSDestroy(&ts));
     PetscCall(MatDestroy(&tsctx.M));
     PetscCall(VecDestroy(&tsctx.work));
     if (ts_reason < 0) return 1;
+    if (max_total_its >= 0 && its > max_total_its) {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Total linear iterations %" PetscInt_FMT " above -max_total_its %" PetscInt_FMT "\n", its, max_total_its));
+      return 1;
+    }
 
   } else {
 
