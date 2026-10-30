@@ -44,6 +44,10 @@ KSP_RTOL := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),1e-5,1e-10)
 #   * -pc_air_reuse_sparsity across a PC regeneration: that optimisation reuses the
 #     first setup's sparsity pattern, but single-precision roundoff can shift which
 #     polynomial terms survive between setups, leaving the reused pattern stale.
+#   * -pc_air_diag_update with assembled smoothers once the diagonal has dropped a
+#     long way below the one the hierarchy was built with: in single the frozen
+#     restrictor no longer gives a good enough coarse correction (matrix-free
+#     smoothers are fine).
 SKIP_SINGLE := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),@echo "  [skipped under single precision]:",)
 
 # Same skip mechanism for kokkos builds - only for the specific commands that hit
@@ -1995,7 +1999,7 @@ run_tests_medium_serial:
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
 	 -pc_air_diag_update -pc_air_matrix_free_polys -max_total_its 3000
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update, where the time step grows"
-	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	$(SKIP_SINGLE) ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
 	 -bottom_only_inflow_one -pc_air_diag_update -max_total_its 3200
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
@@ -2123,9 +2127,9 @@ else
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
 	 -pc_air_diag_update -max_total_its 3000
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update, where the time step grows, in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
-	 -bottom_only_inflow_one -pc_air_diag_update -max_total_its 3200
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc \
+	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 \
+	 -ts_adapt_type basic -bottom_only_inflow_one -pc_air_diag_update -max_total_its 3200
 endif
 
 # ~~~~~~~~~~~
