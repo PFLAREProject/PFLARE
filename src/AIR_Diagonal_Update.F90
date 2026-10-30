@@ -21,7 +21,9 @@ module air_diagonal_update
    ! The CF splittings, the grid-transfer operators and the off-diagonal blocks are frozen,
    ! only the diagonals of A_ff, A_cc and the coarsest matrix change on each level,
    ! along with the approximate inverses built from them
-   ! The diagonal perturbation is carried down to the coarse grids by lumping R diag(d) P
+   ! The diagonal perturbation is carried down to the coarse grids by row sum lumping 
+   ! R diag(d) P, and the F point columns of the restrictors are rescaled to account for 
+   ! the change in A_ff
    ! The update is always relative to the hierarchy built from A (ie it is not cumulative),
    ! so applying D = 0 gives back the original hierarchy
    ! -------------------------------------------------------------------------------------------------------------------------------
@@ -62,15 +64,6 @@ module air_diagonal_update
          print *, "A diagonal update is not supported with full smoothing up and down"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
-      if (air_data%options%diag_update_scale_r .AND. air_data%options%symmetric) then
-         print *, "Rescaling the restrictor in a diagonal update is not supported with a symmetric hierarchy"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-      if (air_data%options%diag_update_lump_type /= 0 .AND. &
-            air_data%options%diag_update_lump_type /= 1) then
-         print *, "Unknown diagonal update lump type"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
 
       ! The first time through we capture the diagonals of the hierarchy we were given
       if (.NOT. air_data%diag_update_initialised) call setup_diag_update_data(air_data)
@@ -98,7 +91,10 @@ module air_diagonal_update
          ! ~~~~~~~~~~~~
          ! Z = -A_cf A_ff^-1, so if A_ff were diagonal the updated Z would just be
          ! the original with columns scaled by a_ff / (a_ff + d_f)
-         if (air_data%options%diag_update_scale_r) then
+         ! Without this the frozen Z is far too big when d is large, and with only F point 
+         ! smoothing the error that introduces at the C points is never corrected
+         ! If we're symmetric we don't have R (it is P^T) and scaling it would also scale P
+         if (.NOT. air_data%options%symmetric) then
 
             call VecDuplicate(air_data%diag_update_f(our_level), s_f, ierr)
             call VecPointwiseDivide(s_f, air_data%diag_update_base_aff(our_level), &
@@ -149,19 +145,12 @@ module air_diagonal_update
          ! ~~~~~~~~~~~~
          ! Compute the perturbation on the coarse grid
          ! ~~~~~~~~~~~~
-         if (air_data%options%diag_update_lump_type == 0) then
-
-            ! Row sum lumping of R diag(d) P, ie R (d .* P 1)
-            call VecPointwiseMult(air_data%diag_update_work(our_level), air_data%diag_update_d(our_level), &
-                     air_data%diag_update_p_one(our_level), ierr)
-            call restrict_vec(air_data, our_level, air_data%diag_update_work(our_level), &
-                     air_data%diag_update_d(our_level + 1))
-         else
-
-            ! The diagonal of R diag(d) P is (R .* P^T) d
-            call MatMult(air_data%diag_update_m(our_level), air_data%diag_update_d(our_level), &
-                     air_data%diag_update_d(our_level + 1), ierr)
-         end if
+         ! Row sum lumping of R diag(d) P, ie R (d .* P 1), which keeps the action 
+         ! of R diag(d) P on the constant
+         call VecPointwiseMult(air_data%diag_update_work(our_level), air_data%diag_update_d(our_level), &
+                  air_data%diag_update_p_one(our_level), ierr)
+         call restrict_vec(air_data, our_level, air_data%diag_update_work(our_level), &
+                  air_data%diag_update_d(our_level + 1))
       end do
 
       ! ~~~~~~~~~~~~
@@ -203,12 +192,8 @@ module air_diagonal_update
          allocate(air_data%diag_update_base_acc(no_levels - 1))
          allocate(air_data%diag_update_c(no_levels - 1))
       end if
-      if (air_data%options%diag_update_lump_type == 0) then
-         allocate(air_data%diag_update_p_one(no_levels - 1))
-      else
-         allocate(air_data%diag_update_m(no_levels - 1))
-      end if
-      if (air_data%options%diag_update_scale_r) then
+      allocate(air_data%diag_update_p_one(no_levels - 1))
+      if (.NOT. air_data%options%symmetric) then
          allocate(air_data%diag_update_r_scale(no_levels - 1))
       end if
 
@@ -242,18 +227,14 @@ module air_diagonal_update
          end if
 
          ! P 1 for row sum lumping
-         if (air_data%options%diag_update_lump_type == 0) then
-            call VecDuplicate(air_data%diag_update_d(our_level + 1), ones, ierr)
-            call VecSet(ones, PFLARE_ONE, ierr)
-            call VecDuplicate(air_data%diag_update_d(our_level), air_data%diag_update_p_one(our_level), ierr)
-            call MatMult(air_data%prolongators(our_level), ones, air_data%diag_update_p_one(our_level), ierr)
-            call VecDestroy(ones, ierr)
-         else
-            call build_r_hadamard_pt(air_data, our_level, air_data%diag_update_m(our_level))
-         end if
+         call VecDuplicate(air_data%diag_update_d(our_level + 1), ones, ierr)
+         call VecSet(ones, PFLARE_ONE, ierr)
+         call VecDuplicate(air_data%diag_update_d(our_level), air_data%diag_update_p_one(our_level), ierr)
+         call MatMult(air_data%prolongators(our_level), ones, air_data%diag_update_p_one(our_level), ierr)
+         call VecDestroy(ones, ierr)
 
          ! The restrictor starts unscaled
-         if (air_data%options%diag_update_scale_r) then
+         if (.NOT. air_data%options%symmetric) then
             call VecDuplicate(air_data%diag_update_d(our_level), air_data%diag_update_r_scale(our_level), ierr)
             call VecSet(air_data%diag_update_r_scale(our_level), PFLARE_ONE, ierr)
          end if
@@ -363,69 +344,6 @@ module air_diagonal_update
 
    end subroutine restrict_vec
 
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine build_r_hadamard_pt(air_data, our_level, output_mat)
-
-      ! Builds M = R .* P^T (on the sparsity of P^T), such that diag(R diag(d) P) = M d
-      ! This is only built once so is done on the host
-
-      ! ~~~~~~
-      type(air_multigrid_data), intent(inout) :: air_data
-      integer, intent(in)                     :: our_level
-      type(tMat), intent(inout)               :: output_mat
-
-      PetscErrorCode :: ierr
-      type(tMat) :: p_transpose, r_mat
-      PetscInt :: global_row_start, global_row_end_plus_one, ifree
-      PetscInt :: ncols_r, ncols_pt, i_loc, j_loc
-      PetscInt, dimension(:), pointer :: cols_r => null(), cols_pt => null()
-      PetscScalar, dimension(:), pointer :: vals_r => null(), vals_pt => null()
-      PetscScalar, dimension(:), allocatable :: vals_m
-      PetscInt, parameter :: one = 1
-      ! ~~~~~~
-
-      call MatTranspose(air_data%prolongators(our_level), MAT_INITIAL_MATRIX, p_transpose, ierr)
-      if (air_data%options%symmetric) then
-         r_mat = p_transpose
-      else
-         r_mat = air_data%restrictors(our_level)
-      end if
-
-      call MatDuplicate(p_transpose, MAT_DO_NOT_COPY_VALUES, output_mat, ierr)
-      call MatGetOwnershipRange(p_transpose, global_row_start, global_row_end_plus_one, ierr)
-
-      do ifree = global_row_start, global_row_end_plus_one - 1
-
-         ! The columns come back sorted in both
-         call MatGetRow(r_mat, ifree, ncols_r, cols_r, vals_r, ierr)
-         call MatGetRow(p_transpose, ifree, ncols_pt, cols_pt, vals_pt, ierr)
-
-         allocate(vals_m(ncols_pt))
-         vals_m = 0
-         ! Merge the two sorted rows
-         i_loc = 1
-         do j_loc = 1, ncols_pt
-            do while (i_loc <= ncols_r)
-               if (cols_r(i_loc) >= cols_pt(j_loc)) exit
-               i_loc = i_loc + 1
-            end do
-            if (i_loc > ncols_r) exit
-            if (cols_r(i_loc) == cols_pt(j_loc)) vals_m(j_loc) = vals_r(i_loc) * vals_pt(j_loc)
-         end do
-
-         call MatSetValues(output_mat, one, [ifree], ncols_pt, cols_pt, vals_m, INSERT_VALUES, ierr)
-         deallocate(vals_m)
-
-         call MatRestoreRow(p_transpose, ifree, ncols_pt, cols_pt, vals_pt, ierr)
-         call MatRestoreRow(r_mat, ifree, ncols_r, cols_r, vals_r, ierr)
-      end do
-
-      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
-      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
-      call MatDestroy(p_transpose, ierr)
-
-   end subroutine build_r_hadamard_pt
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

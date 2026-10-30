@@ -275,18 +275,6 @@ module air_data_type
       ! It is up to the user to ensure only the diagonal has changed
       ! -pc_air_diag_update
       logical :: diag_update = .FALSE.
-      ! How a diagonal update is carried down to the
-      ! coarse grids, given a diagonal perturbation d on a level, the coarse
-      ! perturbation is
-      ! 0 - row sum lumping of R diag(d) P, ie R (d .* (P 1))
-      ! 1 - the diagonal of R diag(d) P
-      ! -pc_air_diag_update_lump_type
-      integer :: diag_update_lump_type = 0
-      ! Do we rescale the F point columns of the restrictor when applying a diagonal
-      ! update, by a_ff / (a_ff + d_f), as a cheap approximation to rebuilding Z
-      ! with the updated A_ff
-      ! -pc_air_diag_update_scale_r
-      logical :: diag_update_scale_r = .FALSE.
 
    end type air_options 
    
@@ -398,8 +386,7 @@ module air_data_type
 
       ! ~~~~~~~~~~~~~~~~~~~~~~
       ! Data for applying a diagonal update to an existing hierarchy, see AIR_Diagonal_Update.F90
-      ! All of these are vectors (or with diag_update_lump_type == 1 the
-      ! matrices R .* P^T), so this is O(n) storage on each level
+      ! All of these are vectors, so this is O(n) storage on each level
       ! ~~~~~~~~~~~~~~~~~~~~~~
       ! The diagonal of the pmat the hierarchy was built from
       type(tVec) :: diag_update_base_pmat
@@ -418,8 +405,6 @@ module air_data_type
       type(tVec), allocatable, dimension(:) :: diag_update_p_one
       ! The column scaling currently applied to the restrictor on each level
       type(tVec), allocatable, dimension(:) :: diag_update_r_scale
-      ! R .* P^T on each level, used when taking the diagonal of R diag(d) P
-      type(tMat), allocatable, dimension(:) :: diag_update_m
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse

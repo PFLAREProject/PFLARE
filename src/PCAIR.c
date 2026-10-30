@@ -75,8 +75,6 @@ PETSC_EXTERN void PCAIRGetALump_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseSparsity_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetDiagUpdate_c(PC *pc, PetscBool *input_bool);
-PETSC_EXTERN void PCAIRGetDiagUpdateLumpType_c(PC *pc, PetscInt *input_int);
-PETSC_EXTERN void PCAIRGetDiagUpdateScaleR_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
 PETSC_EXTERN void PCAIRGetGridComplexity_c(PC *pc, PetscReal *complexity);
@@ -131,8 +129,6 @@ PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
-PETSC_EXTERN void PCAIRSetDiagUpdateLumpType_c(PC *pc, PetscInt input_int);
-PETSC_EXTERN void PCAIRSetDiagUpdateScaleR_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetDiagUpdate_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
 
@@ -1399,50 +1395,6 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC pc, PetscBool *input_bool)
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRGetDiagUpdate_c(&pc, input_bool);
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-/*@
-  PCAIRGetDiagUpdateLumpType - Returns how `PCAIR` carries a diagonal update down to the coarse grids
-
-  Not Collective
-
-  Input Parameter:
-. pc - the `PCAIR` preconditioner context
-
-  Output Parameter:
-. input_int - 0 for row sum lumping of R diag(d) P, 1 for the diagonal of R diag(d) P
-
-  Level: advanced
-
-.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagUpdateLumpType()`, `PCAIRSetDiagUpdate()`
-@*/
-PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdateLumpType(PC pc, PetscInt *input_int)
-{
-   PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRGetDiagUpdateLumpType_c(&pc, input_int);
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-/*@
-  PCAIRGetDiagUpdateScaleR - Returns whether `PCAIR` rescales the restrictors when applying a diagonal update
-
-  Not Collective
-
-  Input Parameter:
-. pc - the `PCAIR` preconditioner context
-
-  Output Parameter:
-. input_bool - `PETSC_TRUE` if the restrictors are rescaled
-
-  Level: advanced
-
-.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagUpdateScaleR()`, `PCAIRSetDiagUpdate()`
-@*/
-PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdateScaleR(PC pc, PetscBool *input_bool)
-{
-   PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRGetDiagUpdateScaleR_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@C
@@ -2870,60 +2822,6 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
-  PCAIRSetDiagUpdateLumpType - Sets how `PCAIR` carries a diagonal update down to the coarse grids
-
-  Logically Collective
-
-  Input Parameters:
-+ pc        - the `PCAIR` preconditioner context
-- input_int - 0 for row sum lumping of R diag(d) P, 1 for the diagonal of R diag(d) P
-
-  Options Database Key:
-. -pc_air_diag_update_lump_type type - the lumping used for a diagonal update; defaults to 0
-
-  Level: advanced
-
-  Note:
-  Given the diagonal perturbation d on a level, row sum lumping gives the coarse perturbation R (d .* P 1),
-  which keeps the action of R diag(d) P on the constant. Taking the diagonal gives (R .* P^T) d.
-
-.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdateLumpType()`, `PCAIRSetDiagUpdate()`
-@*/
-PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdateLumpType(PC pc, PetscInt input_int)
-{
-   PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRSetDiagUpdateLumpType_c(&pc, input_int);
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-/*@
-  PCAIRSetDiagUpdateScaleR - Sets whether `PCAIR` rescales the restrictors when applying a diagonal update
-
-  Logically Collective
-
-  Input Parameters:
-+ pc         - the `PCAIR` preconditioner context
-- input_bool - `PETSC_TRUE` to rescale the restrictors
-
-  Options Database Key:
-. -pc_air_diag_update_scale_r (true|false) - rescale the restrictors in a diagonal update; defaults to false
-
-  Level: advanced
-
-  Note:
-  The F-point columns of the restrictor are scaled by a_ff / (a_ff + d_f), which is the exact update of
-  Z = -A_cf A_ff^-1 if A_ff is diagonal. The coarse grid matrices are not updated to match.
-
-.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdateScaleR()`, `PCAIRSetDiagUpdate()`
-@*/
-PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdateScaleR(PC pc, PetscBool input_bool)
-{
-   PetscFunctionBegin;
-   PetscCall(PCAIRCheckType(pc));
-   PCAIRSetDiagUpdateScaleR_c(&pc, input_bool);
-   PetscFunctionReturn(PETSC_SUCCESS);
-}
-/*@
   PCAIRSetDiagUpdate - Sets whether `PCAIR` treats any change to the Pmat with the same nonzero pattern as a change
   to its diagonal only, and updates the existing hierarchy rather than rebuilding it
 
@@ -2945,17 +2843,19 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdateScaleR(PC pc, PetscBool input_bool
   user's responsibility to ensure only the diagonal has changed - `PCAIR` does not check this, and any change to the
   off-diagonal entries will be ignored.
 
-  The CF splittings and grid-transfer operators built from A are kept, only the diagonals of the
+  The CF splittings and prolongators built from A are kept, only the diagonals of the
   extracted blocks and the coarsest matrix are changed, with the perturbation carried down the
-  hierarchy by lumping (see `PCAIRSetDiagUpdateLumpType()`), and the approximate inverses rebuilt.
-  No matrix-matrix products are computed. D is always relative to the Pmat the hierarchy was built from,
+  hierarchy by row sum lumping R diag(D) P, the F-point columns of the restrictors are rescaled by
+  a_ff / (a_ff + d_f), and the approximate inverses are rebuilt. No matrix-matrix products are computed.
+  As the restrictor is kept frozen otherwise, using C-point smoothing (e.g., `-pc_air_smooth_type fcf`)
+  is recommended if D can be large. D is always relative to the Pmat the hierarchy was built from,
   so updates do not accumulate. A change to the nonzero pattern of the Pmat rebuilds the hierarchy as normal,
   and subsequent updates are then relative to that Pmat.
 
   With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always rebuilt. As with any
   change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
 
-.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetDiagUpdateLumpType()`, `PCAIRSetDiagUpdateScaleR()`
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC pc, PetscBool input_bool)
 {
@@ -3154,16 +3054,6 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    flg = old_flag;
    PetscCall(PetscOptionsBool("-pc_air_diag_update", "Update rather than rebuild the hierarchy when the diagonal of the Pmat changes", "PCAIRSetDiagUpdate", old_flag, &flg, NULL));
    PetscCall(PCAIRSetDiagUpdate(pc, flg));
-   // ~~~~
-   PetscCall(PCAIRGetDiagUpdateLumpType(pc, &old_int));
-   input_int = old_int;
-   PetscCall(PetscOptionsRangeInt("-pc_air_diag_update_lump_type", "How a diagonal update is lumped onto the coarse grids (0 row sum, 1 diagonal)", "PCAIRSetDiagUpdateLumpType", old_int, &input_int, NULL, 0, 1));
-   PetscCall(PCAIRSetDiagUpdateLumpType(pc, input_int));
-   // ~~~~
-   PetscCall(PCAIRGetDiagUpdateScaleR(pc, &old_flag));
-   flg = old_flag;
-   PetscCall(PetscOptionsBool("-pc_air_diag_update_scale_r", "Rescales the restrictors in a diagonal update", "PCAIRSetDiagUpdateScaleR", old_flag, &flg, NULL));
-   PetscCall(PCAIRSetDiagUpdateScaleR(pc, flg));
    // ~~~~
    PetscCall(PCAIRGetReuseAmount(pc, &old_int));
    input_int = old_int;
@@ -3375,11 +3265,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetReusePolyCoeffs(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing gmres polynomial coefficients during setup \n"));
       PetscCall(PCAIRGetDiagUpdate(pc, &flg));
-      if (flg) {
-         PetscCall(PCAIRGetDiagUpdateLumpType(pc, &input_int));
-         PetscCall(PCAIRGetDiagUpdateScaleR(pc, &flg));
-         PetscCall(PetscViewerASCIIPrintf(viewer, "  Updating hierarchy on diagonal changes, lump type=%" PetscInt_FMT ", rescaling restrictors=%s \n", input_int, PetscBools[flg]));
-      }
+      if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Updating rather than rebuilding when the diagonal of the Pmat changes \n"));
 
       PetscCall(PCAIRGetProcessorAgglom(pc, &flg));
       PetscCall(PCAIRGetProcessorAgglomRatio(pc, &input_real));

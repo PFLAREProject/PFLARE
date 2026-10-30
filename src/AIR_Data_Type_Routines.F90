@@ -356,12 +356,6 @@ module air_data_type_routines
       call destroy_vec_array(air_data%diag_update_work)
       call destroy_vec_array(air_data%diag_update_p_one)
       call destroy_vec_array(air_data%diag_update_r_scale)
-      if (allocated(air_data%diag_update_m)) then
-         do i_loc = 1, size(air_data%diag_update_m)
-            call MatDestroy(air_data%diag_update_m(i_loc), ierr)
-         end do
-         deallocate(air_data%diag_update_m)
-      end if
       air_data%diag_update_initialised = .FALSE.
 
    contains
@@ -458,8 +452,6 @@ module air_data_type_routines
       air_data%options%reuse_poly_coeffs = .FALSE.           
 
       air_data%options%diag_update = .FALSE.
-      air_data%options%diag_update_lump_type = 0
-      air_data%options%diag_update_scale_r = .FALSE.
 
       ! Use if this data structure is allocated to determine if we setup anything
       if (allocated(air_data%allocated_matrices_A_ff)) then
