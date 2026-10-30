@@ -101,8 +101,16 @@ module air_diagonal_update
                      air_data%diag_update_f(our_level), ierr)
             ! The scaling on all the points on this level, one on the C points
             call VecSet(air_data%diag_update_work(our_level), PFLARE_ONE, ierr)
-            call VecISCopy(air_data%diag_update_work(our_level), air_data%IS_fine_index(our_level), &
-                     SCATTER_FORWARD, s_f, ierr)
+            ! Without a fast veciscopy the forward copy needs a full sized temporary
+            if (.NOT. air_data%fast_veciscopy_exists) then
+               call VecDuplicate(air_data%diag_update_work(our_level), temp_vec, ierr)
+               call VecISCopyLocalWrapper(air_data, our_level, .TRUE., air_data%diag_update_work(our_level), &
+                        SCATTER_FORWARD, s_f, temp_vec)
+               call VecDestroy(temp_vec, ierr)
+            else
+               call VecISCopyLocalWrapper(air_data, our_level, .TRUE., air_data%diag_update_work(our_level), &
+                        SCATTER_FORWARD, s_f)
+            end if
             call VecDestroy(s_f, ierr)
             ! We only store the current scaled R, so scale by the ratio of the new scaling
             ! to the current one
