@@ -140,15 +140,14 @@ module gmres_poly
       ! Local variables
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
-      PetscCount :: vec_size
-      PetscInt, allocatable, dimension(:) :: indices
+      PetscInt :: global_row_start, global_row_end_plus_one, vecs_needed
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
-      ! Kept PetscReal: the intrinsic random_number requires a real array. Its use
-      ! in VecSetValuesCOO below is an identity conversion in all real builds.
+      ! Kept PetscReal: the intrinsic random_number requires a real array. Copying it 
+      ! into the vector below is an identity conversion in all real builds.
       PetscReal, dimension(:, :), allocatable, target   :: random_data
+      PetscScalar, dimension(:), pointer :: v_array
       type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
       ! ~~~~~~    
@@ -201,32 +200,20 @@ module gmres_poly
       deallocate(seed)
 
       ! ~~~~~~~~~~
-      ! Create a single template vec, set the random values into it, then use
-      ! VecDuplicateVecs to allocate all V_n vectors in one contiguous block.
-      ! Contiguous allocation lets VecMAXPY use BLAS-2 operations.
+      ! Use a template vec and VecDuplicateVecs to allocate all V_n vectors 
+      ! in one contiguous block. Contiguous allocation lets VecMAXPY use BLAS-2 operations.
       ! ~~~~~~~~~~
       call MatCreateVecs(matrix, temp_vec, PETSC_NULL_VEC, ierr)
-
-      allocate(indices(local_rows))
-      ! Set the random values into the template vector
-      ! Data will be copied to the gpu when needed
-      do row_i = 1, local_rows
-         indices(row_i) = global_row_start + row_i-1
-      end do
-      ! PetscCount vs PetscInt??
-      vec_size = local_rows
-      call VecSetPreallocationCOO(temp_vec, vec_size, indices, ierr)
-      deallocate(indices)
-      call VecSetValuesCOO(temp_vec, random_data(:, 1), INSERT_VALUES, ierr)
-
-      deallocate(random_data)
       vecs_needed = subspace_size + 1
-
-      ! Allocate all subspace_size+1 vectors contiguously from the template
       call VecDuplicateVecs(temp_vec, vecs_needed, V_n, ierr)
-      ! Copy random data from template into the first vector
-      call VecCopy(temp_vec, V_n(1), ierr)
       call VecDestroy(temp_vec, ierr)
+
+      ! The random values are just the local entries of the first vector, so copy them
+      ! straight in. Data will be copied to the gpu when needed
+      call VecGetArrayWrite(V_n(1), v_array, ierr)
+      v_array(1:local_rows) = random_data(:, 1)
+      call VecRestoreArrayWrite(V_n(1), v_array, ierr)
+      deallocate(random_data)
 
       ! ~~~~~~~~~~~~
 
