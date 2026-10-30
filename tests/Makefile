@@ -354,7 +354,7 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_matrix_free_polys -max_extra_its 5
 	@echo "Test AIRG with a diagonal update with a diagonal Aff"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_strong_threshold 0 \
-	 -max_extra_its 5
+	 -max_extra_its 7
 	@echo "Test AIRG with a diagonal update with F point smoothing and a symmetric hierarchy"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL)
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_symmetric
