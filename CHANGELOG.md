@@ -11,14 +11,13 @@ for earlier changes please see the git history.
   Pmat to A + D (e.g. with `MatShift()` or `MatDiagonalSet()`) and calling
   `KSPSolve()` updates the existing hierarchy, rather than rebuilding it, with
   no matrix-matrix products and no reuse data stored. The CF splittings and
-  grid-transfer operators are kept, the diagonals of the extracted blocks and
-  the coarsest matrix are updated (with D lumped onto the coarse grids) and the
-  approximate inverses rebuilt in place. PCAIR does not check that only the
-  diagonal has changed. Added `-pc_air_diag_update_lump_type` to choose the
-  lumping and `-pc_air_diag_update_scale_r` to also rescale the restrictors;
-  with `-pc_air_smooth_type fcf -pc_air_diag_update_scale_r` the iteration
-  count stays within a few iterations of rebuilding the hierarchy over decades
-  of D in the tests
+  prolongators are kept, the diagonals of the extracted blocks and the
+  coarsest matrix are updated, the perturbation is carried to the coarse grids
+  by row sum lumping R diag(D) P, the F-point columns of the restrictors are
+  rescaled by a_ff / (a_ff + d_f) and the approximate inverses are rebuilt in
+  place. PCAIR does not check that only the diagonal has changed. With
+  `-pc_air_smooth_type fcf` the iteration count stays within a few iterations
+  of rebuilding the hierarchy over decades of D in the tests
 - Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
   inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
   wherever the other Jacobi types can, including the CR splitting relaxation

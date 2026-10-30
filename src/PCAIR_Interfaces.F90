@@ -1305,43 +1305,7 @@ module pcair_interfaces
 
    end subroutine PCAIRGetDiagUpdate
 
-! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRGetDiagUpdateLumpType(pc, lump_type, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscInt, intent(out)         :: lump_type
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      ! ~~~~~~~~
-
-      ! Get the options
-      call PCAIRGetOptions(pc, options)    
-      lump_type = options%diag_update_lump_type
-      ierr = 0
-
-   end subroutine PCAIRGetDiagUpdateLumpType
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRGetDiagUpdateScaleR(pc, scale_r, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscBool, intent(out)        :: scale_r
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      ! ~~~~~~~~
-
-      ! Get the options
-      call PCAIRGetOptions(pc, options)    
-      scale_r = options%diag_update_scale_r
-      ierr = 0
-
-   end subroutine PCAIRGetDiagUpdateScaleR
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -2826,69 +2790,7 @@ module pcair_interfaces
 
    end subroutine PCAIRSetReusePolyCoeffs
 
-! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine PCAIRSetDiagUpdateLumpType(pc, lump_type, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscInt, intent(in)          :: lump_type
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      type(tPC)                  :: pc_shell      
-      PetscInt                   :: old_int
-      ! ~~~~~~~~
-
-      call PCAIRGetDiagUpdateLumpType(pc, old_int, ierr)
-      if (old_int == lump_type) then
-         ierr = 0
-         return
-      end if
-
-      ! Set the options
-      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
-      call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)
-      call PCMarkNotSetUp_c(pc%v)      
-
-      options%diag_update_lump_type = int(lump_type)
-      ierr = 0
-
-   end subroutine PCAIRSetDiagUpdateLumpType
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine PCAIRSetDiagUpdateScaleR(pc, scale_r, ierr) 
-
-      ! ~~~~~~~~
-      type(tPC), intent(inout)      :: pc
-      PetscBool, intent(in)         :: scale_r
-      PetscErrorCode, intent(out)   :: ierr
-
-      type(air_options), pointer :: options
-      type(tPC)                  :: pc_shell      
-      PetscBool                  :: old_bool
-      ! ~~~~~~~~
-
-      call PCAIRGetDiagUpdateScaleR(pc, old_bool, ierr)
-      if (old_bool .eqv. scale_r) then
-         ierr = 0
-         return
-      end if
-
-      ! Set the options
-      ! The restrictors may have been rescaled by a previous update, so we have
-      ! to rebuild the hierarchy
-      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
-      call PCReset(pc_shell, ierr)
-      call PCReset_AIR_Shell(pc_shell, ierr)
-      call PCMarkNotSetUp_c(pc%v)      
-
-      options%diag_update_scale_r = scale_r
-      ierr = 0
-
-   end subroutine PCAIRSetDiagUpdateScaleR
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -159,16 +159,6 @@ check('reuse_amount_2',  pflare.pcair_get_reuse_amount(pc),  2)
 pflare.pcair_set_reuse_amount(pc, 3)
 check('reuse_amount_3',  pflare.pcair_get_reuse_amount(pc),  3)
 
-pflare.pcair_set_diag_update_lump_type(pc, 1)
-check('diag_update_lump_type_1', pflare.pcair_get_diag_update_lump_type(pc), 1)
-pflare.pcair_set_diag_update_lump_type(pc, 0)
-check('diag_update_lump_type_0', pflare.pcair_get_diag_update_lump_type(pc), 0)
-
-pflare.pcair_set_diag_update_scale_r(pc, True)
-check('diag_update_scale_r_true', pflare.pcair_get_diag_update_scale_r(pc), True)
-pflare.pcair_set_diag_update_scale_r(pc, False)
-check('diag_update_scale_r_false', pflare.pcair_get_diag_update_scale_r(pc), False)
-
 pflare.pcair_set_diag_update(pc, True)
 check('diag_update_true', pflare.pcair_get_diag_update(pc), True)
 pflare.pcair_set_diag_update(pc, False)

@@ -99,8 +99,6 @@ cdef extern:
 	PetscErrorCode PCAIRGetReusePolyCoeffs(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReuseAmount(PetscPC pc, PetscInt *amount)
 	PetscErrorCode PCAIRGetDiagUpdate(PetscPC pc, PetscBool *diag_update)
-	PetscErrorCode PCAIRGetDiagUpdateLumpType(PetscPC pc, PetscInt *lump_type)
-	PetscErrorCode PCAIRGetDiagUpdateScaleR(PetscPC pc, PetscBool *scale_r)
 	PetscErrorCode PCAIRGetSmoothType(PetscPC pc, char *output_string)
 
 	# PCAIR - polynomial coefficients
@@ -170,8 +168,6 @@ cdef extern:
 	PetscErrorCode PCAIRSetReuseAmount(PetscPC pc, PetscInt amount)
 
 	# PCAIR - diagonal update
-	PetscErrorCode PCAIRSetDiagUpdateLumpType(PetscPC pc, PetscInt lump_type)
-	PetscErrorCode PCAIRSetDiagUpdateScaleR(PetscPC pc, PetscBool scale_r)
 	PetscErrorCode PCAIRSetDiagUpdate(PetscPC pc, PetscBool diag_update)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
@@ -489,16 +485,6 @@ cpdef bint pcair_get_diag_update(PC pc):
 	CHKERR(PCAIRGetDiagUpdate(pc.pc, &result))
 	return bool(result)
 
-cpdef int pcair_get_diag_update_lump_type(PC pc):
-	cdef PetscInt lump_type = 0
-	CHKERR(PCAIRGetDiagUpdateLumpType(pc.pc, &lump_type))
-	return int(lump_type)
-
-cpdef bint pcair_get_diag_update_scale_r(PC pc):
-	cdef PetscBool result = 0
-	CHKERR(PCAIRGetDiagUpdateScaleR(pc.pc, &result))
-	return bool(result)
-
 cpdef str pcair_get_smooth_type(PC pc):
 	cdef char buf[256]
 	cdef int i
@@ -714,22 +700,6 @@ cpdef pcair_set_reuse_amount(PC pc, int amount):
 	if amount < 1 or amount > 3:
 		raise ValueError(f"reuse amount {amount} must be 1, 2 or 3")
 	CHKERR(PCAIRSetReuseAmount(pc.pc, <PetscInt>amount))
-
-cpdef pcair_set_diag_update_lump_type(PC pc, int lump_type):
-	"""Set how a diagonal update is lumped onto the coarse grids.
-
-	0 - row sum lumping of R diag(d) P (default)
-	1 - the diagonal of R diag(d) P
-
-	Raises ValueError for any other type.
-	"""
-	if lump_type < 0 or lump_type > 1:
-		raise ValueError(f"diagonal update lump type {lump_type} must be 0 or 1")
-	CHKERR(PCAIRSetDiagUpdateLumpType(pc.pc, <PetscInt>lump_type))
-
-cpdef pcair_set_diag_update_scale_r(PC pc, bint flag):
-	"""Set whether a diagonal update rescales the F point columns of the restrictors."""
-	CHKERR(PCAIRSetDiagUpdateScaleR(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_diag_update(PC pc, bint flag):
 	"""Set whether a change to the Pmat with the same nonzero pattern is treated as a change
