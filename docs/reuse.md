@@ -130,6 +130,72 @@ The Pmat the hierarchy is built from decides the sign of every later change to t
 
 If the iteration count grows too large with this type of diagonal update, the hierarchy should instead be rebuilt; the reuse described in the sections below makes that rebuild cheaper.
 
+##### Updating a PCPFLAREINV polynomial after a diagonal change
+
+With the Newton inverse types (``newton`` and ``newton_no_extra``), PCPFLAREINV can update its polynomial after a change to the diagonal without computing it again. If ``-pc_pflareinv_poly_shift`` is set, PCPFLAREINV stores the (small, dense) Hessenberg matrix from the Arnoldi that computes the polynomial, along with the trace of the Pmat. On subsequent setups with the same nonzero pattern, it computes the mean change in the diagonal from the trace, shifts the stored Hessenberg matrix by it and computes the roots of the polynomial from that, without any matrix-vector products. 
+
+If $\mathbf{A}$ is changed to $\mathbf{A} + \sigma \mathbf{I}$, e.g., with ``MatShift``, the Arnoldi of $\mathbf{A} + \sigma \mathbf{I}$ would build the same Krylov basis and its Hessenberg matrix would just be shifted by $\sigma$. In that case the update gives the same polynomial as computing it again, up to rounding. If the diagonal changes by different amounts, the update is an approximation, which can be poor if the change varies smoothly in space. As with PCAIR, PCPFLAREINV does not check that only the diagonal has changed.
+
+in Fortran:
+
+     call KSPGetPC(ksp, pc, ierr)
+     call PCSetType(pc, PCPFLAREINV, ierr)
+     call PCPFLAREINVSetType(pc, PFLAREINV_NEWTON, ierr)
+
+     ! Before the first setup, we tell it to update the
+     ! polynomial by shifting the stored Hessenberg matrix
+     call PCPFLAREINVSetPolyShift(pc, PETSC_TRUE, ierr)
+
+     ! First solve - the PCPFLAREINV will be setup from A
+     call KSPSolve(ksp, b, x, ierr)
+
+     ! ...[Shift the diagonal of A in place, e.g., with MatShift]
+
+     ! Second solve - the polynomial will be updated without an Arnoldi
+     call KSPSolve(ksp, b, x, ierr)
+
+or in C:
+
+     ierr = KSPGetPC(ksp, &pc);
+     ierr = PCSetType(pc, PCPFLAREINV);
+     ierr = PCPFLAREINVSetType(pc, PFLAREINV_NEWTON);
+
+     // Before the first setup, we tell it to update the
+     // polynomial by shifting the stored Hessenberg matrix
+     ierr = PCPFLAREINVSetPolyShift(pc, PETSC_TRUE);
+
+     // First solve - the PCPFLAREINV will be setup from A
+     ierr = KSPSolve(ksp, b, x);
+
+     // ...[Shift the diagonal of A in place, e.g., with MatShift]
+
+     // Second solve - the polynomial will be updated without an Arnoldi
+     ierr = KSPSolve(ksp, b, x);
+
+or in Python with petsc4py:
+
+     pc = ksp.getPC()
+     pc.setType("pflareinv")
+     pflare.pcpflareinv_set_type(pc, pflare.PFLAREINV_NEWTON)
+
+     # Before the first setup, we tell it to update the
+     # polynomial by shifting the stored Hessenberg matrix
+     pflare.pcpflareinv_set_poly_shift(pc, True)
+
+     # First solve - the PCPFLAREINV will be setup from A
+     ksp.solve(b, x)
+
+     # ...[Shift the diagonal of A in place, e.g., with A.shift]
+
+     # Second solve - the polynomial will be updated without an Arnoldi
+     ksp.solve(b, x)
+
+or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_shift``.
+
+If ``-pc_pflareinv_reuse_poly_coeffs`` is also set it takes priority, and the stored coefficients are reused unchanged. The stored Hessenberg matrix is replaced whenever the polynomial is computed from scratch, e.g., on the first setup or after a change to the nonzero pattern.
+
+**Note for both PCAIR and PCPFLAREINV:** in parallel, the first ``MatShift`` of an assembled matrix changes its nonzero state in PETSc, so the next setup treats the Pmat as having a different nonzero pattern and rebuilds from scratch (subsequent updates are then relative to that Pmat). ``MatDiagonalSet`` does not change the nonzero state.
+
 #### 3) Reuse sparsity during setup
 
 **With PCAIR:** When solving a linear system where the matrix has the same sparsity pattern as in a previous solve, PCAIR can reuse the CF splitting, repartitioning, symbolic matrix-matrix products and resulting sparsity throughout the hierarchy during the setup. This takes more memory (typically 2-5x the storage complexity) but significantly reduces the time required in subsequent setups (10-20x). If we have a PETSc matrix $\mathbf{A}$:

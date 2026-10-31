@@ -429,7 +429,8 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, add_roots, coefficients)
+   subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, add_roots, coefficients, &
+                  hessenberg, hessenberg_m)
 
       ! Computes a fixed order gmres polynomial for the matrix passed in
       ! and outputs the Harmonic Ritz values (ie the roots) which we can use to apply 
@@ -442,36 +443,28 @@ module gmres_poly_newton
       ! f you want that with these roots you could build one directly (although it would not 
       ! be very sparse at high order, and a fixed sparsity version at higher order than either the 
       ! power basis or Arnoldi basis could compute is likely not any better)
+      ! If hessenberg and hessenberg_m are present, they return a copy of the Hessenberg matrix
+      ! from the Arnoldi and the number of Arnoldi steps taken, so the roots can be recomputed 
+      ! for a shifted matrix without another Arnoldi, see 
+      ! calculate_gmres_polynomial_roots_newton_hessenberg
 
       ! ~~~~~~
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: poly_order
       logical, intent(in)                               :: add_roots
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
+      PetscReal, dimension(:, :), allocatable, optional, intent(inout) :: hessenberg
+      integer, optional, intent(out)                    :: hessenberg_m
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols, vecs_needed
-      integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
-      integer :: total_extra, counter, k_loc, m, numerical_order
-      ! BLAS/LAPACK integer arguments must be PetscBLASInt
-      PetscBLASInt :: lwork, rank, info
-      PetscBLASInt :: np1_bl, nrhs_bl, lda_hnt_bl, ldb_bl, lda_hn_bl, one_bl
+      integer :: subspace_size, comm_size, comm_rank, errorcode, m
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
-      PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
-      PetscReal, dimension(poly_order+1) :: e_d, solution, s
-      PetscBLASInt, dimension(:), allocatable :: iwork_allocated
-      integer, dimension(:), allocatable :: indices
-      PetscReal, dimension(:), allocatable :: work, real_roots_added, imag_roots_added
-      PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
-      PetscReal, dimension(:,:), allocatable :: VL, VR
       PetscReal :: beta
-      PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
-      logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm, perturb_scale
 
       ! ~~~~~~    
 
@@ -494,14 +487,6 @@ module gmres_poly_newton
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
-      ! If we're reusing, coefficients may still be sized for the extra roots 
-      ! added in a previous setup, so make sure we start from p+1 roots
-      ! Otherwise the old roots would be included in the clustering below
-      if (size(coefficients, 1) /= poly_order + 1) then
-         deallocate(coefficients)
-         allocate(coefficients(poly_order + 1, 2))
-      end if
-
       ! ~~~~~~~~~~
       ! Allocate space and create random numbers 
       ! The first vec has random numbers in it
@@ -514,6 +499,89 @@ module gmres_poly_newton
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
       call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+
+      ! Keep a copy of the Hessenberg matrix if requested
+      if (present(hessenberg)) then
+         if (allocated(hessenberg)) deallocate(hessenberg)
+         allocate(hessenberg(poly_order + 2, poly_order + 1))
+         hessenberg = H_n
+      end if
+      if (present(hessenberg_m)) hessenberg_m = m
+
+      ! Compute the roots from the Hessenberg matrix
+      call calculate_gmres_polynomial_roots_newton_hessenberg(H_n, m, poly_order, add_roots, &
+               PFLARE_ZERO, coefficients)
+
+      ! Cleanup
+      vecs_needed = subspace_size + 1
+      call VecDestroyVecs(vecs_needed, V_n, ierr)
+      call VecDestroy(w_j, ierr)       
+
+   end subroutine calculate_gmres_polynomial_roots_newton   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine calculate_gmres_polynomial_roots_newton_hessenberg(H_n_input, m, poly_order, add_roots, &
+                  sigma, coefficients)
+
+      ! Computes the Harmonic Ritz values (ie the roots of the gmres polynomial) from the 
+      ! (poly_order + 2) x (poly_order + 1) Hessenberg matrix H_n_input of an Arnoldi that took m steps
+      ! and outputs them Leja ordered (with any extra roots added for stability) in coefficients
+      ! If sigma is non-zero, the roots are those of the gmres polynomial of the matrix shifted
+      ! by sigma * I. The Arnoldi of A + sigma I with the same starting vector gives the same 
+      ! basis and the Hessenberg matrix H_n + sigma I, so this gives the same roots as computing
+      ! the polynomial of the shifted matrix from scratch, without any matvecs or reductions
+
+      ! ~~~~~~
+      PetscReal, dimension(:, :), intent(in)            :: H_n_input
+      integer, intent(in)                               :: m, poly_order
+      logical, intent(in)                               :: add_roots
+      PetscReal, intent(in)                             :: sigma
+      PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
+
+      ! Local variables
+      integer :: i_loc, errorcode, iwork_size, j_loc
+      integer :: total_extra, counter, k_loc, numerical_order
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, rank, info
+      PetscBLASInt :: np1_bl, nrhs_bl, lda_hnt_bl, ldb_bl, lda_hn_bl, one_bl
+      PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
+      PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
+      PetscReal, dimension(poly_order+1) :: e_d, solution, s
+      PetscBLASInt, dimension(:), allocatable :: iwork_allocated
+      integer, dimension(:), allocatable :: indices
+      PetscReal, dimension(:), allocatable :: work, real_roots_added, imag_roots_added
+      PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
+      PetscReal, dimension(:,:), allocatable :: VL, VR
+      PetscReal, dimension(:, :), allocatable :: coefficients_temp
+      logical :: use_harmonic_ritz = .TRUE.
+      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm, perturb_scale
+
+      ! ~~~~~~    
+
+      if (size(H_n_input, 1) /= poly_order + 2 .OR. size(H_n_input, 2) /= poly_order + 1) then
+         print *, "The Hessenberg matrix is the wrong size for the polynomial order"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Work on a copy, as the eigenvalue solve overwrites it
+      H_n = H_n_input
+      ! Shift the square part of the Hessenberg matrix the Arnoldi computed
+      ! If the Arnoldi stopped early, the Arnoldi of the shifted matrix stops at the 
+      ! same step, so only the first m columns are shifted
+      if (sigma /= PFLARE_ZERO) then
+         do i_loc = 1, m
+            H_n(i_loc, i_loc) = H_n(i_loc, i_loc) + sigma
+         end do
+      end if
+
+      ! If we're reusing, coefficients may still be sized for the extra roots 
+      ! added in a previous setup, so make sure we start from p+1 roots
+      ! Otherwise the old roots would be included in the clustering below
+      if (size(coefficients, 1) /= poly_order + 1) then
+         deallocate(coefficients)
+         allocate(coefficients(poly_order + 1, 2))
+      end if
 
       ! ~~~~~~~~~~~
       ! Now the Ritz values are just the eigenvalues of the square part of H_n
@@ -784,12 +852,7 @@ module gmres_poly_newton
 
       end if     
 
-      ! Cleanup
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)
-      call VecDestroy(w_j, ierr)       
-
-   end subroutine calculate_gmres_polynomial_roots_newton   
+   end subroutine calculate_gmres_polynomial_roots_newton_hessenberg   
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

@@ -351,6 +351,9 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
+	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL)
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free
 	@echo "Test AIRG with a few steps of adaptive backward-Euler TS with upwind FD advection and a diagonal update"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_steps 10 -pc_air_diag_update
@@ -1007,6 +1010,14 @@ run_tests_no_load_serial:
 	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
+	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix, with other options"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -mat_shift
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_type newton_no_extra
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 20
+	@echo "Test PCPFLAREINV shifting the stored Hessenberg matrix by the mean change in a varying diagonal"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -varying
+	@echo "Test PCPFLAREINV with poly shift and reuse poly coeffs, where reuse takes priority"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_reuse_poly_coeffs -check_reuse
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, rebuilding, freezing and updating the PC"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_time 3 -verify_solution
@@ -1718,6 +1729,9 @@ else
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
 	@echo "Test AIRG with a diagonal update recomputing the polynomial coefficients in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
+	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL)
+	$(MPIEXEC) -n 2 ./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update -max_total_its 1700

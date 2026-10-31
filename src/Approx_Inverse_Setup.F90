@@ -34,7 +34,7 @@ module approx_inverse_setup
    subroutine calculate_and_build_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   matrix_free, diag_scale_polys, subcomm, &
-                  inv_matrix, coefficients)
+                  inv_matrix, coefficients, hessenberg, hessenberg_m)
 
       ! Builds an approximate inverse
       ! inverse_type:
@@ -67,6 +67,11 @@ module approx_inverse_setup
       !   - Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI, L1JACOBI) have no coefficients:
       !     supplied coefficients are ignored and none are allocated or returned, so
       !     coefficients is left unassociated if it was not associated on entry.
+      !
+      ! Optional hessenberg and hessenberg_m arguments:
+      !   - Only used by the Newton types when fresh coefficients are computed. They return a copy
+      !     of the Hessenberg matrix from the Arnoldi and the number of steps it took, see 
+      !     calculate_gmres_polynomial_roots_newton. Otherwise hessenberg is left unallocated
 
       ! ~~~~~~
       type(tMat), intent(in)                                        :: matrix
@@ -80,6 +85,8 @@ module approx_inverse_setup
       ! contiguous it creates a temporary copy which then disappears and
       ! we segfault when trying to apply mf
       PetscReal, dimension(:, :), contiguous, pointer, optional, intent(inout) :: coefficients
+      PetscReal, dimension(:, :), allocatable, optional, intent(inout) :: hessenberg
+      integer, optional, intent(out)                                :: hessenberg_m
 
       type(tsqr_buffers)                           :: buffers
       PetscReal, dimension(:, :), contiguous, pointer   :: work_coefficients
@@ -202,7 +209,7 @@ module approx_inverse_setup
          ! Start the calculation
          call start_approximate_inverse(matrix, inverse_type, &
                      poly_order_eff, diag_scale_polys, &
-                     buffers, work_coefficients)
+                     buffers, work_coefficients, hessenberg, hessenberg_m)
          ! Finish it
          call finish_approximate_inverse(matrix, inverse_type, &
                      poly_order_eff, inverse_sparsity_order_eff, &
@@ -262,7 +269,7 @@ module approx_inverse_setup
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine start_approximate_inverse(matrix, inverse_type, poly_order, diag_scale_polys, &
-                  buffers, coefficients)
+                  buffers, coefficients, hessenberg, hessenberg_m)
 
       ! Starts the assembly of an approximate inverse
       ! We have different types of inverses we can use
@@ -274,6 +281,10 @@ module approx_inverse_setup
       logical, intent(in)                                :: diag_scale_polys
       type(tsqr_buffers), intent(inout)                  :: buffers 
       PetscReal, dimension(:, :), pointer, intent(inout) :: coefficients
+      ! If present, the Newton types return a copy of the Hessenberg matrix from their Arnoldi
+      ! and the number of steps it took (of D^-1 A if diag_scale_polys)
+      PetscReal, dimension(:, :), allocatable, optional, intent(inout) :: hessenberg
+      integer, optional, intent(out)                     :: hessenberg_m
 
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX, MPI_COMM_BUFFERS_MATRIX
@@ -282,6 +293,12 @@ module approx_inverse_setup
       integer :: errorcode, n_roots
       type(mat_ctxtype), pointer :: mat_ctx_da=>null()
       ! ~~~~~~    
+
+      ! On a subcomm only the ranks on the subcomm would get the Hessenberg matrix
+      if (buffers%subcomm .AND. present(hessenberg)) then
+         print *, "Returning the Hessenberg matrix is not supported with a subcomm"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)         
+      end if
 
       if (buffers%subcomm .AND. inverse_type == PFLAREINV_POWER) then
          print *, "There is no reason to use a subcomm with the power basis, turn off subcomm"
@@ -390,13 +407,15 @@ module approx_inverse_setup
          else if (inverse_type == PFLAREINV_NEWTON) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .TRUE., coefficients)
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .TRUE., coefficients, &
+                     hessenberg, hessenberg_m)
 
          ! Gmres polynomial with Newton basis without extra added roots - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .FALSE., coefficients)            
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .FALSE., coefficients, &
+                     hessenberg, hessenberg_m)
          end if
 
          ! Destroy the shell matrix

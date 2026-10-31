@@ -125,6 +125,12 @@ check('reuse_poly_coeffs', pflare.pcpflareinv_get_reuse_poly_coeffs(pc), True)
 pflare.pcpflareinv_set_reuse_poly_coeffs(pc, False)
 check('reuse_poly_coeffs_false', pflare.pcpflareinv_get_reuse_poly_coeffs(pc), False)
 
+pflare.pcpflareinv_set_poly_shift(pc, True)
+check('poly_shift', pflare.pcpflareinv_get_poly_shift(pc), True)
+
+pflare.pcpflareinv_set_poly_shift(pc, False)
+check('poly_shift_false', pflare.pcpflareinv_get_poly_shift(pc), False)
+
 # -----------------------------------------------------------------------
 # PCPFLAREINVGetInverseMat: access the underlying approximate-inverse matrix
 # -----------------------------------------------------------------------

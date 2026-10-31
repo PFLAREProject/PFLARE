@@ -6,6 +6,7 @@ module c_fortran_bindings
    use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
          inverse_type_is_polynomial
+   use gmres_poly_newton, only: calculate_gmres_polynomial_roots_newton_hessenberg
    use gmres_poly_apply, only: shell_poly_block_apply
    use cf_splitting, only: compute_cf_splitting
    use matdiagdomsubmatrix, only: compute_diag_dom_submatrix
@@ -178,7 +179,8 @@ module c_fortran_bindings
          poly_order, poly_sparsity_order, &
          matrix_free_int, diag_scale_polys_int, subcomm_int, &
          coeffs_ptr, row_size, col_size, &
-         inv_matrix_ptr) &
+         inv_matrix_ptr, &
+         want_hessenberg_int, hess_ptr, hess_rows, hess_cols, hess_m) &
          bind(C, name='calculate_and_build_approximate_inverse_c')
 
       ! Builds an approximate inverse, with optional coefficient passing.
@@ -192,7 +194,11 @@ module c_fortran_bindings
       !     coeffs_ptr/row_size/col_size are unchanged on return.
       !   Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI, L1JACOBI) have no coefficients;
       !     on the fresh path coeffs_ptr is returned as c_null_ptr with row_size = col_size = 0.
-
+      !
+      ! If want_hessenberg_int is 1 and a Newton type computes fresh coefficients, hess_ptr returns
+      !   a C-malloc'd copy of the Hessenberg matrix from the Arnoldi (hess_rows x hess_cols, column-major)
+      !   and hess_m the number of Arnoldi steps taken; the caller owns this memory and must free it 
+      !   with C free(). Otherwise hess_ptr/hess_rows/hess_cols/hess_m are unchanged on return.
 
       ! Interface to C stdlib malloc
       interface
@@ -210,6 +216,9 @@ module c_fortran_bindings
       type(c_ptr), intent(inout)                         :: coeffs_ptr
       PetscInt, intent(inout)      :: row_size, col_size
       integer(c_long_long), intent(inout)                :: inv_matrix_ptr
+      integer(c_int), value, intent(in)                  :: want_hessenberg_int
+      type(c_ptr), intent(inout)                         :: hess_ptr
+      PetscInt, intent(inout)                            :: hess_rows, hess_cols, hess_m
 
       type(tMat)  :: input_mat, inv_matrix
       logical     :: matrix_free, subcomm, diag_scale_polys
@@ -217,6 +226,8 @@ module c_fortran_bindings
       type(c_ptr) :: c_buf
       PetscReal, pointer :: c_view(:,:)
       PetscInt :: nr, nc
+      PetscReal, dimension(:, :), allocatable :: hessenberg
+      integer :: hessenberg_m
       ! ~~~~~~~~
 
       input_mat%v = input_mat_ptr
@@ -249,10 +260,32 @@ module c_fortran_bindings
 
       end if
 
-      call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
-               poly_order, poly_sparsity_order, &
-               matrix_free, diag_scale_polys, subcomm, &
-               inv_matrix, coefficients)
+      if (want_hessenberg_int == 1) then
+         call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
+                  poly_order, poly_sparsity_order, &
+                  matrix_free, diag_scale_polys, subcomm, &
+                  inv_matrix, coefficients, hessenberg, hessenberg_m)
+      else
+         call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
+                  poly_order, poly_sparsity_order, &
+                  matrix_free, diag_scale_polys, subcomm, &
+                  inv_matrix, coefficients)
+      end if
+
+      ! Copy out the Hessenberg matrix into a C-malloc'd buffer for the same reason as the 
+      ! coefficients below
+      if (allocated(hessenberg)) then
+         nr = int(size(hessenberg, 1), PETSC_INT_KIND)
+         nc = int(size(hessenberg, 2), PETSC_INT_KIND)
+         c_buf = c_malloc(int(nr, c_size_t) * int(nc, c_size_t) * int(PETSC_REAL_KIND, c_size_t))
+         call c_f_pointer(c_buf, c_view, [int(nr), int(nc)])
+         c_view = hessenberg
+         deallocate(hessenberg)
+         hess_ptr  = c_buf
+         hess_rows = nr
+         hess_cols = nc
+         hess_m    = int(hessenberg_m, PETSC_INT_KIND)
+      end if
 
       if (.NOT. c_associated(coeffs_ptr) .AND. .NOT. associated(coefficients)) then
          ! Fresh path with a non-polynomial inverse type: no coefficients
@@ -284,6 +317,63 @@ module c_fortran_bindings
       inv_matrix_ptr = inv_matrix%v
 
    end subroutine calculate_and_build_approximate_inverse_c
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine calculate_gmres_polynomial_roots_newton_hessenberg_c(hess_ptr, hess_rows, hess_cols, hess_m, &
+         add_roots_int, sigma, coeffs_ptr, row_size, col_size) &
+         bind(C, name='calculate_gmres_polynomial_roots_newton_hessenberg_c')
+
+      ! Computes the Newton roots of the gmres polynomial of the matrix shifted by sigma * I from 
+      ! the Hessenberg matrix (hess_rows x hess_cols, column-major) an Arnoldi of the unshifted 
+      ! matrix returned, see calculate_gmres_polynomial_roots_newton_hessenberg
+      ! On return coeffs_ptr points to a C-malloc'd buffer with the roots (row_size x col_size); 
+      ! the caller owns this memory and must free it with C free()
+
+      ! Interface to C stdlib malloc
+      interface
+         function c_malloc(sz) bind(C, name='malloc')
+            use iso_c_binding
+            integer(c_size_t), value :: sz
+            type(c_ptr) :: c_malloc
+         end function c_malloc
+      end interface
+
+      ! ~~~~~~~~
+      type(c_ptr), value, intent(in)          :: hess_ptr
+      PetscInt, value, intent(in)             :: hess_rows, hess_cols, hess_m
+      integer(c_int), value, intent(in)       :: add_roots_int
+      PetscReal, value, intent(in)            :: sigma
+      type(c_ptr), intent(inout)              :: coeffs_ptr
+      PetscInt, intent(inout)                 :: row_size, col_size
+
+      PetscReal, pointer :: hessenberg(:, :), c_view(:, :)
+      PetscReal, dimension(:, :), pointer :: coefficients
+      type(c_ptr) :: c_buf
+      PetscInt :: nr, nc
+      integer :: poly_order
+      ! ~~~~~~~~
+
+      call c_f_pointer(hess_ptr, hessenberg, [int(hess_rows), int(hess_cols)])
+      ! The Hessenberg matrix is (poly_order + 2) x (poly_order + 1)
+      poly_order = int(hess_cols) - 1
+
+      allocate(coefficients(poly_order + 1, 2))
+      call calculate_gmres_polynomial_roots_newton_hessenberg(hessenberg, int(hess_m), poly_order, &
+               add_roots_int == 1, sigma, coefficients)
+
+      ! Fortran allocate may use a compiler-specific allocator, so copy into a C-malloc'd buffer
+      nr = int(size(coefficients, 1), PETSC_INT_KIND)
+      nc = int(size(coefficients, 2), PETSC_INT_KIND)
+      c_buf = c_malloc(int(nr, c_size_t) * int(nc, c_size_t) * int(PETSC_REAL_KIND, c_size_t))
+      call c_f_pointer(c_buf, c_view, [int(nr), int(nc)])
+      c_view = coefficients
+      deallocate(coefficients)
+      coeffs_ptr = c_buf
+      row_size   = nr
+      col_size   = nc
+
+   end subroutine calculate_gmres_polynomial_roots_newton_hessenberg_c
 
    !------------------------------------------------------------------------------------------------------------------------
 

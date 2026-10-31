@@ -89,6 +89,17 @@ module pcpflareinv_interfaces
    end interface
 
    interface
+      function PCPFLAREINVGetPolyShift_mine(A_array, b) &
+         bind(c, name="PCPFLAREINVGetPolyShift")
+         use iso_c_binding
+#include "finclude/pflare_types.h"
+         integer(c_long_long), value            :: A_array
+         PetscBool, intent(out)                 :: b
+         PetscErrorCode  :: PCPFLAREINVGetPolyShift_mine
+      end function PCPFLAREINVGetPolyShift_mine
+   end interface
+
+   interface
       function PCPFLAREINVGetInverseMat_mine(A_array, mat_array) &
          bind(c, name="PCPFLAREINVGetInverseMat")
          use iso_c_binding
@@ -169,6 +180,17 @@ module pcpflareinv_interfaces
          PetscBool, value                       :: b
          PetscErrorCode  :: PCPFLAREINVSetReusePolyCoeffs_mine
       end function PCPFLAREINVSetReusePolyCoeffs_mine
+   end interface
+
+   interface 
+      function PCPFLAREINVSetPolyShift_mine(A_array, b) &
+         bind(c, name="PCPFLAREINVSetPolyShift")
+         use iso_c_binding
+#include "finclude/pflare_types.h"
+         integer(c_long_long), value            :: A_array
+         PetscBool, value                       :: b
+         PetscErrorCode  :: PCPFLAREINVSetPolyShift_mine
+      end function PCPFLAREINVSetPolyShift_mine
    end interface
 
 
@@ -316,6 +338,23 @@ module pcpflareinv_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCPFLAREINVGetPolyShift(pc, flag, ierr)
+
+      ! ~~~~~~~~~~
+      type(tPC), intent(in)         :: pc
+      PetscBool, intent(inout)      :: flag
+      PetscErrorCode, intent(inout) :: ierr
+
+      integer(c_long_long) :: pc_ptr
+      ! ~~~~~~~~~~
+
+      pc_ptr   = pc%v
+      ierr     = PCPFLAREINVGetPolyShift_mine(pc_ptr, flag)
+
+   end subroutine PCPFLAREINVGetPolyShift
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCPFLAREINVGetInverseMat(pc, mat, ierr)
 
       ! Returns the underlying approximate-inverse matrix as a borrowed reference.
@@ -455,6 +494,23 @@ module pcpflareinv_interfaces
       ierr = PCPFLAREINVSetReusePolyCoeffs_mine(pc_ptr, flag)
 
    end subroutine PCPFLAREINVSetReusePolyCoeffs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCPFLAREINVSetPolyShift(pc, flag, ierr)
+
+      ! ~~~~~~~~~~
+      type(tPC), intent(in)         :: pc
+      PetscBool, intent(in)         :: flag
+      PetscErrorCode, intent(inout) :: ierr
+
+      integer(c_long_long) :: pc_ptr
+      ! ~~~~~~~~~~
+
+      pc_ptr   = pc%v
+      ierr = PCPFLAREINVSetPolyShift_mine(pc_ptr, flag)
+
+   end subroutine PCPFLAREINVSetPolyShift
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
