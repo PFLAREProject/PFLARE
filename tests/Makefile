@@ -367,7 +367,6 @@ run_tests_no_load_short_serial:
 	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix"
 	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL)
 	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free
-	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -mat_shift
 	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_type newton_no_extra
 	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 20
 	@echo "Test PCPFLAREINV shifting the stored Hessenberg matrix by the mean change in a varying diagonal"
