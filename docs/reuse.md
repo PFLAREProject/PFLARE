@@ -184,8 +184,6 @@ or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pfla
 
 If ``-pc_pflareinv_reuse_poly_coeffs`` is also set it takes priority, and the stored coefficients are reused unchanged. The stored Hessenberg matrix is replaced whenever the polynomial is computed from scratch, e.g., on the first setup or after a change to the nonzero pattern.
 
-**Note for both PCAIR and PCPFLAREINV:** in parallel, the first ``MatShift`` of a matrix created with ``MatDuplicate`` changes its nonzero state in PETSc, even though no new nonzeros are created. The next setup then treats the Pmat as having a different nonzero pattern and rebuilds from scratch (subsequent updates are then relative to that Pmat). Later calls to ``MatShift``, and any call to ``MatDiagonalSet``, do not change the nonzero state.
-
 #### 3) Reuse sparsity during setup
 
 **With PCAIR:** When solving a linear system where the matrix has the same sparsity pattern as in a previous solve, PCAIR can reuse the CF splitting, repartitioning, symbolic matrix-matrix products and resulting sparsity throughout the hierarchy during the setup. This takes more memory (typically 2-5x the storage complexity) but significantly reduces the time required in subsequent setups (10-20x). If we have a PETSc matrix $\mathbf{A}$:
