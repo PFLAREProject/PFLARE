@@ -98,6 +98,7 @@ cdef extern:
 	PetscErrorCode PCAIRGetReuseSparsity(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReusePolyCoeffs(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReuseAmount(PetscPC pc, PetscInt *amount)
+	PetscErrorCode PCAIRGetDiagUpdate(PetscPC pc, PetscBool *diag_update)
 	PetscErrorCode PCAIRGetSmoothType(PetscPC pc, char *output_string)
 
 	# PCAIR - polynomial coefficients
@@ -165,6 +166,9 @@ cdef extern:
 	PetscErrorCode PCAIRSetReuseSparsity(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReusePolyCoeffs(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReuseAmount(PetscPC pc, PetscInt amount)
+
+	# PCAIR - diagonal update
+	PetscErrorCode PCAIRSetDiagUpdate(PetscPC pc, PetscBool diag_update)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
 	# wrapper checks the level/inverse are valid and the sizes match before copying.
@@ -476,6 +480,11 @@ cpdef int pcair_get_reuse_amount(PC pc):
 	CHKERR(PCAIRGetReuseAmount(pc.pc, &amount))
 	return int(amount)
 
+cpdef bint pcair_get_diag_update(PC pc):
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetDiagUpdate(pc.pc, &result))
+	return bool(result)
+
 cpdef str pcair_get_smooth_type(PC pc):
 	cdef char buf[256]
 	cdef int i
@@ -691,6 +700,11 @@ cpdef pcair_set_reuse_amount(PC pc, int amount):
 	if amount < 1 or amount > 3:
 		raise ValueError(f"reuse amount {amount} must be 1, 2 or 3")
 	CHKERR(PCAIRSetReuseAmount(pc.pc, <PetscInt>amount))
+
+cpdef pcair_set_diag_update(PC pc, bint flag):
+	"""Set whether a change to the Pmat with the same nonzero pattern is treated as a change
+	to its diagonal only, updating rather than rebuilding the hierarchy."""
+	CHKERR(PCAIRSetDiagUpdate(pc.pc, <PetscBool>flag))
 
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.

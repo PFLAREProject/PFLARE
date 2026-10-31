@@ -1288,6 +1288,27 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetDiagUpdate(pc, diag_update, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: diag_update
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      diag_update = options%diag_update
+      ierr = 0
+
+   end subroutine PCAIRGetDiagUpdate
+
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetReuseAmount(pc, amount, ierr)
 
       ! ~~~~~~~~
@@ -2768,6 +2789,39 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetReusePolyCoeffs
+
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdate(pc, diag_update, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: diag_update
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetDiagUpdate(pc, old_bool, ierr)
+      if (old_bool .eqv. diag_update) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_update = diag_update
+      ierr = 0
+
+   end subroutine PCAIRSetDiagUpdate
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

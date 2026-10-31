@@ -191,6 +191,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetADrop(PC, PetscReal *);
 PETSC_EXTERN PetscErrorCode PCAIRGetALump(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC, PetscBool *);
+PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC, PetscInt, int, PetscReal **, PetscInt *, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC, PetscReal *);
@@ -244,6 +245,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetADrop(PC, PetscReal);
 PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC, PetscBool);
+PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC, PetscInt, int, PetscReal *, PetscInt, PetscInt);
 

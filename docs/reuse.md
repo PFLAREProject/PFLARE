@@ -1,14 +1,128 @@
 ## Reuse in PFLARE
 
-If solving multiple linear systems, there are several ways to reuse components of PFLARE preconditioners (PCAIR and PCPFLAREINV) to reduce setup times:
+If solving multiple linear systems, there are several ways to reuse components of PFLARE preconditioners (PCAIR and PCPFLAREINV) to reduce setup times.
 
 #### 1) Setup once
 
 In PETSc the ``KSPSetReusePreconditioner`` flag can be set to ensure the preconditioner is only setup once, even if the entries or sparsity of the underlying matrix in the KSP is changed. This can be useful in time stepping problems where the linear system (or Jacobian for non-linear problems) does not change, or if the changes are small.
 
-#### 2) Reuse sparsity during setup
+#### 2) Reuse sparsity in the setup when the diagonal changes
 
-When solving a linear system where the matrix has the same sparsity pattern as in a previous solve, PCAIR can reuse the CF splitting, repartitioning, symbolic matrix-matrix products and resulting sparsity throughout the hierarchy during the setup. This takes more memory (typically 2-5x the storage complexity) but significantly reduces the time required in subsequent setups (10-20x). If we have a PETSc matrix $\mathbf{A}$:
+**With PCAIR:** By default, if the values of the Pmat change between solves, PCAIR rebuilds the entire hierarchy on the next setup, even if only the diagonal has changed. 
+
+Instead, if PCAIR has been built from a matrix $\mathbf{A}$ and we want to solve with $\mathbf{A} + \mathbf{D}$, where $\mathbf{D}$ is diagonal, then the flag ``-pc_air_diag_update`` can be set before the PCAIR hierarchy is first set up. In subsequent setups, PCAIR doesn't do a full rebuild, instead it modifies the existing hierarchy so that it approximates the hierarchy of $\mathbf{A} + \mathbf{D}$. 
+
+When this flag is set, PCAIR does not check that only the diagonal has changed. This means the update can also be used when other entries of the matrix change (e.g., if the biggest change is on the diagonal); only the new diagonal is extracted and the hierarchy modified.
+
+in Fortran:
+
+     call KSPGetPC(ksp, pc, ierr)
+     call PCSetType(pc, PCAIR, ierr)
+
+     ! Before the first setup, we tell it to update the
+     ! hierarchy when the diagonal of the Pmat changes
+     call PCAIRSetDiagUpdate(pc, PETSC_TRUE, ierr)
+     ! Adding C point smoothing is recommended with diagonal updates, e.g., fc or ffc
+     call PCAIRSetSmoothType(pc, "fc", ierr)
+
+     ! First solve - the PCAIR will be setup from A
+     call KSPSolve(ksp, b, x, ierr)
+
+     ! ...[Change the diagonal of A in place, e.g., with MatDiagonalSet or MatShift]
+
+     ! Second solve - the PCAIR hierarchy will be updated
+     call KSPSolve(ksp, b, x, ierr)
+
+or in C:
+
+     ierr = KSPGetPC(ksp, &pc);
+     ierr = PCSetType(pc, PCAIR);
+
+     // Before the first setup, we tell it to update the
+     // hierarchy when the diagonal of the Pmat changes
+     ierr = PCAIRSetDiagUpdate(pc, PETSC_TRUE);
+     // Adding C point smoothing is recommended with diagonal updates, e.g., fc or ffc
+     ierr = PCAIRSetSmoothType(pc, "fc");
+
+     // First solve - the PCAIR will be setup from A
+     ierr = KSPSolve(ksp, b, x);
+
+     // ...[Change the diagonal of A in place, e.g., with MatDiagonalSet or MatShift]
+
+     // Second solve - the PCAIR hierarchy will be updated
+     ierr = KSPSolve(ksp, b, x);
+
+or in Python with petsc4py:
+
+     pc = ksp.getPC()
+     pc.setType("air")
+
+     # Before the first setup, we tell it to update the
+     # hierarchy when the diagonal of the Pmat changes
+     pflare.pcair_set_diag_update(pc, True)
+     # Adding C point smoothing is recommended with diagonal updates, e.g., fc or ffc
+     pflare.pcair_set_smooth_type(pc, "fc")
+
+     # First solve - the PCAIR will be setup from A
+     ksp.solve(b, x)
+
+     # ...[Change the diagonal of A in place, e.g., with A.setDiagonal or A.shift]
+
+     # Second solve - the PCAIR hierarchy will be updated
+     ksp.solve(b, x)
+
+or via the command line: ``-pc_type air -pc_air_diag_update -pc_air_smooth_type fc``.
+
+A change to the nonzero pattern of the Pmat, or passing a different Pmat to ``KSPSetOperators``, rebuilds the hierarchy as normal. As with any change to the Pmat, nothing happens if ``KSPSetReusePreconditioner`` has been set.
+
+##### How the update is computed
+
+Consider a single level, with the level matrix split into fine (F) and coarse (C) points
+
+$$
+\mathbf{A} = 
+\begin{bmatrix}
+\mathbf{A}_\textrm{ff} & \mathbf{A}_\textrm{fc} \\
+\mathbf{A}_\textrm{cf} & \mathbf{A}_\textrm{cc}
+\end{bmatrix}, \quad
+\mathbf{D} = 
+\begin{bmatrix}
+\mathbf{D}_\textrm{f} & \\
+ & \mathbf{D}_\textrm{c}
+\end{bmatrix},
+$$
+
+with restrictor $\mathbf{R} = [\mathbf{Z} \;\; \mathbf{I}]$, where $\mathbf{Z} \approx -\mathbf{A}_\textrm{cf} \mathbf{A}_\textrm{ff}^{-1}$, and prolongator $\mathbf{P} = [\mathbf{W} ;\; \mathbf{I}]$. If we rebuilt the hierarchy from $\mathbf{A} + \mathbf{D}$ everything on the level would change. Instead, the update keeps the CF splitting, $\mathbf{P}$, $\mathbf{A}_\textrm{fc}$, $\mathbf{A}_\textrm{cf}$ and the sparsity of every matrix, and changes only:
+
+**The diagonal blocks:** $\mathbf{A}_\textrm{ff} \leftarrow \mathbf{A}_\textrm{ff} + \mathbf{D}_\textrm{f}$ and, if C point smoothing is used, $\mathbf{A}_\textrm{cc} \leftarrow \mathbf{A}_\textrm{cc} + \mathbf{D}_\textrm{c}$. 
+
+**The restrictor:** The F point columns of $\mathbf{R}$ are therefore rescaled
+
+$$
+\mathbf{Z} \leftarrow \mathbf{Z} \, \textrm{diag}\left( \min\left(1, \frac{a_\textrm{ff}}{a_\textrm{ff} + d_\textrm{f}}\right) \right),
+$$
+
+where $a_\textrm{ff}$ and $d_\textrm{f}$ are the diagonals of $\mathbf{A}_\textrm{ff}$ and $\mathbf{D}_\textrm{f}$. Without the $\min$ this is exact if $\mathbf{A}_\textrm{ff}$ is diagonal and a good approximation when $\mathbf{A}_\textrm{ff}$ is strongly diagonally dominant, as the CF splittings in PCAIR aim for. Taking the $\min$ with 1 clips the scaling so that $\mathbf{Z}$ is only ever shrunk, never grown. When the diagonal decreases (e.g., when the time step grows in implicit time stepping), if we don't clip the iteration count grows substantially. With ``-pc_air_symmetric`` the restrictor is $\mathbf{P}^T$ and is not rescaled.
+
+**The coarse matrix:** the Galerkin coarse matrix of $\mathbf{A} + \mathbf{D}$ would be $\mathbf{R}\mathbf{A}\mathbf{P} + \mathbf{R}\mathbf{D}\mathbf{P}$. Rather than computing $\mathbf{R}\mathbf{D}\mathbf{P}$ with matrix-matrix products, it is lumped onto the diagonal with a row sum, which preserves its action on the constant vector
+
+$$
+\mathbf{d}_\textrm{coarse} = \mathbf{R}(\mathbf{d} \circ \mathbf{P}\mathbf{1}),
+$$
+
+where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, $\mathbf{1}$ is the vector of ones and $\circ$ is the entrywise product. With the default one-point prolongator $\mathbf{P}\mathbf{1} = \mathbf{1}$, so this is just one matrix-vector product with the (rescaled) restrictor, $\mathbf{d}_\textrm{coarse} = \mathbf{R}\mathbf{d}$. The coarse matrix becomes $\mathbf{R}\mathbf{A}\mathbf{P} + \textrm{diag}(\mathbf{d}_\textrm{coarse})$ and the diagonal update can proceed on the next level. 
+
+**The smoothers:** the approximate inverses of $\mathbf{A}_\textrm{ff} + \mathbf{D}_\textrm{f}$ (and of $\mathbf{A}_\textrm{cc} + \mathbf{D}_\textrm{c}$) used in the smoothers are rebuilt. The updated $\mathbf{R}$ and coarse matrix do not depend on an updated approximation to $\mathbf{A}_\textrm{ff}^{-1}$, so with matrix-free smoothing (``-pc_air_matrix_free_polys`` and ``-pc_air_coarsest_matrix_free_polys``) an update does not assemble any approximate inverses and only computes the new polynomial coefficients.
+
+Using this diagonal update in PCAIR is very fast and uses almost no extra memory. The frozen grid-transfer operators and the lumping, however, mean the updated hierarchy is not identical to one rebuilt from $\mathbf{A} + \mathbf{D}$. With F point smoothing only, errors introduced at the C points by the frozen grid-transfer operators are never corrected, so adding C point smoothing (e.g., ``-pc_air_smooth_type fc`` or ``ffc``) is recommended with this type of diagonal update.
+
+On a 2D advection problem with diagonal perturbations varying over six orders of magnitude, adding C point smoothing kept the iteration count within a few iterations of rebuilding the hierarchy, independent of the grid size. The gap is largest when $\mathbf{D}$ is of similar size to the diagonal of $\mathbf{A}$; when $\mathbf{D}$ is either small or dominant the updated hierarchy performs like a rebuilt one. In implicit time stepping of 2D advection problems where an adaptive time step grew by a few hundred times, updating the hierarchy took fewer iterations than never rebuilding it, at a fraction of the cost of rebuilding every time step.
+
+If the off-diagonal entries also change significantly, or the iteration count with the updated hierarchy grows too large, the hierarchy should instead be rebuilt. The reuse described in the sections below makes that rebuild cheaper.
+
+#### 3) Reuse sparsity during setup
+
+**With PCAIR:** When solving a linear system where the matrix has the same sparsity pattern as in a previous solve, PCAIR can reuse the CF splitting, repartitioning, symbolic matrix-matrix products and resulting sparsity throughout the hierarchy during the setup. This takes more memory (typically 2-5x the storage complexity) but significantly reduces the time required in subsequent setups (10-20x). If we have a PETSc matrix $\mathbf{A}$:
 
 in Fortran:
 
@@ -93,11 +207,11 @@ or in Python with petsc4py:
 
 or via the command line: ``-pc_type air -pc_air_reuse_sparsity -pc_air_reuse_amount 2``.
 
-#### 3) Reuse GMRES polynomial coefficients during setup
+#### 4) Reuse GMRES polynomial coefficients during setup
 
 When the matrix is very similar to that used in a previous solve, the GMRES polynomial coefficients can be reused to save the parallel polynomial iteration in the setup. Note that the GMRES polynomial coefficients are very sensitive to changes in the matrix, so this may not always give good results.
 
-**With PCAIR (AIRG):** In addition to reusing the polynomial coefficients, the sparsity must also be set to reuse (see section 2 above). To enable both:
+**With PCAIR (AIRG):** In addition to reusing the polynomial coefficients, the sparsity must also be set to reuse (see section 3 above). To enable both:
 
 in Fortran:
 
@@ -213,7 +327,7 @@ or in Python with petsc4py:
 
 or via the command line: ``-pc_type pflareinv -pc_pflareinv_reuse_poly_coeffs``.
 
-#### 4) Reuse when solving the same linear system
+#### 5) Reuse when solving the same linear system
 
 Often an outer loop (e.g., eigenvalue) will require solving a series of different linear systems one after another, and then returning to the first linear system to start the loop again. If the linear systems are close enough to each other to get good performance from reusing sparsity, but different enough from each other that reusing the GMRES polynomial coefficients from a different linear system gives poor performance, both PCAIR and PCPFLAREINV allow the GMRES polynomial coefficients to be saved externally and then restored before a solve.
 

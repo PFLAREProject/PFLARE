@@ -147,6 +147,9 @@ module air_data_type_routines
       ! does that lazily on the next block apply
       call destroy_air_block_temps(air_data)
 
+      ! Any diagonal update is relative to the hierarchy we are about to throw away
+      call destroy_diag_update_data(air_data)
+
       ! Use if this data structure is allocated to determine if we setup anything
       if (allocated(air_data%allocated_matrices_A_ff)) then
 
@@ -331,6 +334,43 @@ module air_data_type_routines
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine destroy_diag_update_data(air_data)
+
+      ! Destroys the data used to apply a diagonal update to the hierarchy
+      ! The baselines are only valid for the hierarchy they were captured
+      ! from, so this has to be called whenever the hierarchy is rebuilt
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+
+      PetscErrorCode :: ierr
+      integer :: i_loc
+      ! ~~~~~~
+
+      call VecDestroy(air_data%diag_update_base_pmat, ierr)
+      call destroy_vec_array(air_data%diag_update_base_aff)
+      call destroy_vec_array(air_data%diag_update_base_acc)
+      air_data%diag_update_initialised = .FALSE.
+
+   contains
+
+      subroutine destroy_vec_array(vecs)
+
+         type(tVec), allocatable, dimension(:), intent(inout) :: vecs
+
+         if (allocated(vecs)) then
+            do i_loc = 1, size(vecs)
+               call VecDestroy(vecs(i_loc), ierr)
+            end do
+            deallocate(vecs)
+         end if
+
+      end subroutine destroy_vec_array
+
+   end subroutine destroy_diag_update_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine destroy_air_data(air_data)
 
       ! Destroys the data structures for air
@@ -404,6 +444,8 @@ module air_data_type_routines
 
       air_data%options%reuse_sparsity = .FALSE.     
       air_data%options%reuse_poly_coeffs = .FALSE.           
+
+      air_data%options%diag_update = .FALSE.
 
       ! Use if this data structure is allocated to determine if we setup anything
       if (allocated(air_data%allocated_matrices_A_ff)) then

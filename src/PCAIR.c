@@ -74,6 +74,7 @@ PETSC_EXTERN void PCAIRGetADrop_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetALump_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseSparsity_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetDiagUpdate_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
 PETSC_EXTERN void PCAIRGetGridComplexity_c(PC *pc, PetscReal *complexity);
@@ -128,6 +129,7 @@ PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetDiagUpdate_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
 
 // ~~~~~~~~~~~~~
@@ -1371,6 +1373,28 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRGetReusePolyCoeffs_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRGetDiagUpdate - Returns whether `PCAIR` updates the existing hierarchy, rather than rebuilding it, when the diagonal of the Pmat changes
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the hierarchy is updated
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagUpdate()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC pc, PetscBool *input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetDiagUpdate_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@C
@@ -2798,6 +2822,42 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
+  PCAIRSetDiagUpdate - Sets whether `PCAIR` treats any change to the Pmat with the same nonzero pattern as a change
+  to its diagonal only, and updates the existing hierarchy rather than rebuilding it
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to update the hierarchy when the diagonal of the Pmat changes
+
+  Options Database Key:
+. -pc_air_diag_update (true|false) - update rather than rebuild the hierarchy when the diagonal of the Pmat changes; defaults to false
+
+  Level: advanced
+
+  Notes:
+  With this set, after the hierarchy is built from the Pmat, the user can change the diagonal of the Pmat in place
+  (e.g., with `MatShift()` or `MatDiagonalSet()`). On the next `PCSetUp()` (e.g., triggered by `KSPSolve()`) `PCAIR`
+  then updates the existing hierarchy with the change in the diagonal of the Pmat since the hierarchy was built,
+  rather than rebuilding it. `PCAIR` does not check that only the diagonal has changed: any change to the off-diagonal
+  entries is ignored, so the update can also be used when other entries change but the diagonal is the biggest change.
+
+  A change to the nonzero pattern of the Pmat rebuilds the hierarchy as normal, and subsequent updates are then
+  relative to that Pmat. With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always
+  rebuilt. If `-pc_air_reuse_sparsity` is also set it takes priority, and the hierarchy is rebuilt with reuse. As with
+  any change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC pc, PetscBool input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRSetDiagUpdate_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
   PCAIRGetReuseAmount - Returns how much data `PCAIR` stores when reusing the sparsity of the multigrid hierarchy
 
   Not Collective
@@ -2982,6 +3042,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    flg = old_flag;
    PetscCall(PetscOptionsBool("-pc_air_reuse_poly_coeffs", "Reuses gmres polynomial coefficients during setup", "PCAIRSetReusePolyCoeffs", old_flag, &flg, NULL));
    PetscCall(PCAIRSetReusePolyCoeffs(pc, flg));
+   // ~~~~
+   PetscCall(PCAIRGetDiagUpdate(pc, &old_flag));
+   flg = old_flag;
+   PetscCall(PetscOptionsBool("-pc_air_diag_update", "Update rather than rebuild the hierarchy when the diagonal of the Pmat changes", "PCAIRSetDiagUpdate", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetDiagUpdate(pc, flg));
    // ~~~~
    PetscCall(PCAIRGetReuseAmount(pc, &old_int));
    input_int = old_int;
@@ -3192,6 +3257,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       }
       PetscCall(PCAIRGetReusePolyCoeffs(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing gmres polynomial coefficients during setup \n"));
+      PetscCall(PCAIRGetDiagUpdate(pc, &flg));
+      if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Updating rather than rebuilding when the diagonal of the Pmat changes \n"));
 
       PetscCall(PCAIRGetProcessorAgglom(pc, &flg));
       PetscCall(PCAIRGetProcessorAgglomRatio(pc, &input_real));

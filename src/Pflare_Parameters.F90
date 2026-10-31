@@ -181,6 +181,7 @@ module pflare_parameters
    PetscScalar, parameter :: PFLARE_ONE       = 1.0
    PetscScalar, parameter :: PFLARE_MINUS_ONE = -1.0
    PetscScalar, parameter :: PFLARE_TWO       = 2.0
+   PetscScalar, parameter :: PFLARE_HALF      = 0.5
    ! MatMatMult / MatPtAP fill-ratio estimates (PetscReal args; separate values)
    PetscReal, parameter :: PFLARE_MATMULT_FILL = 1.5
    PetscReal, parameter :: PFLARE_PTAP_FILL    = 1.58

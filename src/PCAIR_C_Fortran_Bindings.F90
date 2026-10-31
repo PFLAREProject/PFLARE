@@ -917,6 +917,28 @@ module pcair_c_fortran_bindings
       if (dummy) reuse = .TRUE.
 
    end subroutine PCAIRGetReusePolyCoeffs_c    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetDiagUpdate_c(pc_ptr, diag_update) bind(C, name='PCAIRGetDiagUpdate_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, intent(out)        :: diag_update
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetDiagUpdate(pc, dummy, ierr)
+      diag_update = .FALSE.
+      if (dummy) diag_update = .TRUE.
+
+   end subroutine PCAIRGetDiagUpdate_c
+
+
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1822,6 +1844,28 @@ module pcair_c_fortran_bindings
       call PCAIRSetReusePolyCoeffs(pc, dummy, ierr)
 
    end subroutine PCAIRSetReusePolyCoeffs_c
+
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdate_c(pc_ptr, diag_update) bind(C, name='PCAIRSetDiagUpdate_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscBool, value, intent(in)         :: diag_update
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      PetscBool :: dummy
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      dummy = .FALSE.
+      if (diag_update) dummy = .TRUE.
+      call PCAIRSetDiagUpdate(pc, dummy, ierr)
+
+   end subroutine PCAIRSetDiagUpdate_c
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

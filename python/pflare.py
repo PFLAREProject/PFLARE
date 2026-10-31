@@ -111,6 +111,7 @@ pcair_get_a_lump                       = pflare_defs.pcair_get_a_lump
 pcair_get_reuse_sparsity               = pflare_defs.pcair_get_reuse_sparsity
 pcair_get_reuse_poly_coeffs            = pflare_defs.pcair_get_reuse_poly_coeffs
 pcair_get_reuse_amount                 = pflare_defs.pcair_get_reuse_amount
+pcair_get_diag_update                  = pflare_defs.pcair_get_diag_update
 pcair_get_smooth_type                  = pflare_defs.pcair_get_smooth_type
 pcair_get_poly_coeffs                  = pflare_defs.pcair_get_poly_coeffs
 
@@ -163,6 +164,7 @@ pcair_set_a_lump                       = pflare_defs.pcair_set_a_lump
 pcair_set_reuse_sparsity               = pflare_defs.pcair_set_reuse_sparsity
 pcair_set_reuse_poly_coeffs            = pflare_defs.pcair_set_reuse_poly_coeffs
 pcair_set_reuse_amount                 = pflare_defs.pcair_set_reuse_amount
+pcair_set_diag_update                  = pflare_defs.pcair_set_diag_update
 pcair_set_poly_coeffs                  = pflare_defs.pcair_set_poly_coeffs
 
 # -----------------------------------------------------------------------
@@ -241,6 +243,7 @@ _PCAIR_OPTION_DOCS = {
     'reuse_amount':                 ("how much data is stored when reuse sparsity is enabled: 1=CF splitting only, 2=CF splitting + SpGEMM sparsity, 3=everything", "-pc_air_reuse_amount", "3"),
     'reuse_poly_coeffs':            ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse", "-pc_air_reuse_poly_coeffs", "False"),
     'poly_coeffs':                  ("the polynomial inverse coefficients for a given inverse (a WhichInverseType selector)", "N/A", "N/A"),
+    'diag_update':                  ("whether a change to the Pmat with the same nonzero pattern is treated as a change to its diagonal only, updating rather than rebuilding the hierarchy", "-pc_air_diag_update", "False"),
 }
 
 _PCPFLAREINV_OPTION_DOCS = {

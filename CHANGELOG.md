@@ -6,6 +6,9 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Added `-pc_air_diag_update` (`PCAIRSetDiagUpdate()`). When only the diagonal
+  of the Pmat changes in place, PCAIR updates the existing hierarchy rather than
+  rebuilding it, with no matrix-matrix products; see `docs/reuse.md`
 - Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
   inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
   wherever the other Jacobi types can, including the CR splitting relaxation

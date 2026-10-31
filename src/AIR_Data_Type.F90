@@ -269,6 +269,14 @@ module air_data_type
       ! -pc_air_reuse_poly_coeffs
       logical :: reuse_poly_coeffs = .FALSE.
 
+      ! Rather than rebuilding the hierarchy on a new setup with the same nonzero pattern,
+      ! update the existing hierarchy with the change in the diagonal of the pmat,
+      ! see AIR_Diagonal_Update.F90
+      ! Any change to the off-diagonal entries is ignored, so this can also be used
+      ! when other entries change but the diagonal is the biggest change
+      ! -pc_air_diag_update
+      logical :: diag_update = .FALSE.
+
    end type air_options 
    
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
@@ -376,6 +384,18 @@ module air_data_type
       ! src/VecISCopyLocalk.kokkos.cxx) so concurrent PCAIR instances do not
       ! overwrite each other's per-level IS views.
       type(c_ptr) :: kokkos_is_views_handle = c_null_ptr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! Data for applying a diagonal update to an existing hierarchy, see AIR_Diagonal_Update.F90
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! The diagonal of the pmat the hierarchy was built from
+      type(tVec) :: diag_update_base_pmat
+      ! Have we captured the baseline diagonals from the hierarchy
+      logical :: diag_update_initialised = .FALSE.
+      ! The diagonals of A_ff and A_cc (if C smoothing) on each level and of the 
+      ! coarsest matrix (stored in diag_update_base_aff(no_levels)) before any update
+      ! Everything else an update needs is temporary
+      type(tVec), allocatable, dimension(:) :: diag_update_base_aff, diag_update_base_acc
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse
