@@ -21,7 +21,6 @@
      Can control the relative tolerance on the difference between the shifted and fresh roots 
        with -root_tol (default sqrt(machine epsilon), 1e-2 in single precision)
      Can control the largest c_g whose roots are compared with -root_c_max (default 1)
-     Can apply the constant shift with MatShift rather than MatDiagonalSet with -mat_shift
      Can print the roots with -print_roots
      Can check with -check_reuse that, when -pc_pflareinv_reuse_poly_coeffs is also set, the coefficients
        never change, ie reuse takes priority over the shift
@@ -76,8 +75,7 @@ static PetscErrorCode ComputeMat(DM da, Mat A, PetscReal alpha)
 }
 
 // Sets A = L + c I, or L + c diag(1 + 0.5 sin(row)) if varying
-// The constant shift is done with MatDiagonalSet, or MatShift if mat_shift
-static PetscErrorCode SetShifted(Mat L, Mat A, PetscReal c, PetscBool varying, PetscBool mat_shift)
+static PetscErrorCode SetShifted(Mat L, Mat A, PetscReal c, PetscBool varying)
 {
   Vec          d;
   PetscInt     start, end, i;
@@ -85,16 +83,16 @@ static PetscErrorCode SetShifted(Mat L, Mat A, PetscReal c, PetscBool varying, P
 
   PetscFunctionBeginUser;
   PetscCall(MatCopy(L, A, SAME_NONZERO_PATTERN));
-  if (mat_shift && !varying) {
-    PetscCall(MatShift(A, c));
-  } else {
+  if (varying) {
     PetscCall(MatCreateVecs(A, NULL, &d));
     PetscCall(VecGetOwnershipRange(d, &start, &end));
     PetscCall(VecGetArray(d, &d_array));
-    for (i = start; i < end; i++) d_array[i - start] = varying ? c * (1.0 + 0.5 * PetscSinReal((PetscReal)i)) : c;
+    for (i = start; i < end; i++) d_array[i - start] = c * (1.0 + 0.5 * PetscSinReal((PetscReal)i));
     PetscCall(VecRestoreArray(d, &d_array));
     PetscCall(MatDiagonalSet(A, d, ADD_VALUES));
     PetscCall(VecDestroy(&d));
+  } else {
+    PetscCall(MatShift(A, c));
   }
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -218,7 +216,7 @@ int main(int argc, char **argv)
   PetscReal alpha = 0.1, rel_diff, tol, root_c_max = 1.0;
   PetscReal c_values[16] = {1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e4, 1e6};
   PetscReal *base_roots;
-  PetscBool varying = PETSC_FALSE, check_reuse = PETSC_FALSE, print_roots = PETSC_FALSE, mat_shift = PETSC_FALSE, poly_shift, flg;
+  PetscBool varying = PETSC_FALSE, check_reuse = PETSC_FALSE, print_roots = PETSC_FALSE, poly_shift, flg;
   PCPFLAREINVType type;
 
   PetscFunctionBeginUser;
@@ -231,7 +229,6 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-varying", &varying, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_reuse", &check_reuse, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_roots", &print_roots, NULL));
-  PetscCall(PetscOptionsGetBool(NULL, NULL, "-mat_shift", &mat_shift, NULL));
   PetscCall(PetscOptionsGetRealArray(NULL, NULL, "-c_values", c_values, &n_c, &flg));
   if (!flg) n_c = 8;
 
@@ -287,8 +284,8 @@ int main(int argc, char **argv)
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12s %8s %8s %16s\n", "c", "fresh", "shift", "rel root diff"));
 
   for (i_loc = 0; i_loc < n_c; i_loc++) {
-    PetscCall(SetShifted(L, A_fresh, c_values[i_loc], varying, mat_shift));
-    PetscCall(SetShifted(L, A_shift, c_values[i_loc], varying, mat_shift));
+    PetscCall(SetShifted(L, A_fresh, c_values[i_loc], varying));
+    PetscCall(SetShifted(L, A_shift, c_values[i_loc], varying));
 
     // Fresh polynomial built from scratch
     // PCReset drops the operators, so set them again

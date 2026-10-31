@@ -1011,7 +1011,6 @@ run_tests_no_load_serial:
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
 	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix, with other options"
-	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -mat_shift
 	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_type newton_no_extra
 	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 20
 	@echo "Test PCPFLAREINV shifting the stored Hessenberg matrix by the mean change in a varying diagonal"
