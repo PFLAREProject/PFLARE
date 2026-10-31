@@ -21,9 +21,7 @@
      Can control the relative tolerance on the difference between the shifted and fresh roots 
        with -root_tol (default sqrt(machine epsilon), 1e-2 in single precision)
      Can control the largest c_g whose roots are compared with -root_c_max (default 1)
-     Can apply the constant shift with MatShift rather than MatDiagonalSet with -mat_shift (serial only, 
-       as in parallel the first MatShift of a matrix created with MatDuplicate changes its nonzero state, 
-       which rebuilds the polynomial)
+     Can apply the constant shift with MatShift rather than MatDiagonalSet with -mat_shift
      Can print the roots with -print_roots
      Can check with -check_reuse that, when -pc_pflareinv_reuse_poly_coeffs is also set, the coefficients
        never change, ie reuse takes priority over the shift
@@ -78,9 +76,7 @@ static PetscErrorCode ComputeMat(DM da, Mat A, PetscReal alpha)
 }
 
 // Sets A = L + c I, or L + c diag(1 + 0.5 sin(row)) if varying
-// The constant shift is done with MatDiagonalSet, or MatShift if mat_shift. In parallel the first
-// MatShift of a matrix created with MatDuplicate changes its nonzero state, so the first setup 
-// after it rebuilds
+// The constant shift is done with MatDiagonalSet, or MatShift if mat_shift
 static PetscErrorCode SetShifted(Mat L, Mat A, PetscReal c, PetscBool varying, PetscBool mat_shift)
 {
   Vec          d;

@@ -773,10 +773,6 @@ static PetscErrorCode PCPFLAREINVGetPolyShift_PFLAREINV(PC pc, PetscBool *flg)
   stored coefficients are reused unchanged. The Pmat must support `MatGetDiagonal()`. As with any change to the Pmat,
   nothing happens if `KSPSetReusePreconditioner()` has been set.
 
-  In parallel, the first `MatShift()` of a matrix created with `MatDuplicate()` changes its nonzero state in PETSc,
-  even though no new nonzeros are created, so the next setup sees a different nonzero pattern and computes the
-  polynomial from scratch; later setups shift as normal. `MatDiagonalSet()` does not change the nonzero state.
-
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyShift()`, `PCPFLAREINVSetReusePolyCoeffs()`
 @*/
 PetscErrorCode PCPFLAREINVSetPolyShift(PC pc, PetscBool flg)
