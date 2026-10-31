@@ -2804,13 +2804,20 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
 - input_bool - `PETSC_TRUE` to also reuse the GMRES polynomial coefficients
 
   Options Database Key:
-. -pc_air_reuse_poly_coeffs (true|false) - also reuse the GMRES polynomial coefficients when `-pc_air_reuse_sparsity` is set; defaults to false
+. -pc_air_reuse_poly_coeffs (true|false) - also reuse the GMRES polynomial coefficients when `-pc_air_reuse_sparsity` or `-pc_air_diag_update` is set; defaults to false
 
   Level: advanced
 
-  Note:
-  Only useful when regenerating the hierarchy for the same matrix, with coefficients stored and restored using
-  `PCAIRGetPolyCoeffs()` and `PCAIRSetPolyCoeffs()`; the coefficients are very sensitive to changes in the matrix.
+  Notes:
+  With `-pc_air_reuse_sparsity`, this is only useful when regenerating the hierarchy for the same matrix, with
+  coefficients stored and restored using `PCAIRGetPolyCoeffs()` and `PCAIRSetPolyCoeffs()`; the coefficients are very
+  sensitive to changes in the matrix.
+
+  With `-pc_air_diag_update`, a diagonal update keeps the polynomial coefficients rather than recomputing them, so an
+  update with matrix-free smoothing (`-pc_air_matrix_free_polys` and `-pc_air_coarsest_matrix_free_polys`) does
+  no matrix-vector products to build the smoothers. Only use this with `-pc_air_diag_scale_polys` and
+  `-pc_air_coarsest_diag_scale_polys`: the diagonally scaled polynomials stay good approximations as the diagonal
+  changes, while unscaled polynomials can diverge once the change is comparable to the diagonal.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReusePolyCoeffs()`, `PCAIRSetReuseSparsity()`, `PCAIRGetPolyCoeffs()`, `PCAIRSetPolyCoeffs()`
 @*/
@@ -2848,7 +2855,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
   rebuilt. If `-pc_air_reuse_sparsity` is also set it takes priority, and the hierarchy is rebuilt with reuse. As with
   any change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
 
-.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`
+  The approximate inverses used in the smoothers are recomputed on each update, unless `-pc_air_reuse_poly_coeffs` is
+  also set, in which case the polynomial coefficients are kept (see `PCAIRSetReusePolyCoeffs()`).
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`, `PCAIRSetReusePolyCoeffs()`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC pc, PetscBool input_bool)
 {

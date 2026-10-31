@@ -181,6 +181,7 @@ cdef extern:
 	PetscErrorCode PCPFLAREINVGetType(PetscPC pc, int *pflare_type)
 	PetscErrorCode PCPFLAREINVGetMatrixFree(PetscPC pc, PetscBool *flag)
 	PetscErrorCode PCPFLAREINVGetReusePolyCoeffs(PetscPC pc, PetscBool *flag)
+	PetscErrorCode PCPFLAREINVGetPolyShift(PetscPC pc, PetscBool *flag)
 
 	# PCPFLAREINV - underlying approximate-inverse matrix (borrowed reference)
 	PetscErrorCode PCPFLAREINVGetInverseMat(PetscPC pc, PetscMat *mat)
@@ -201,6 +202,7 @@ cdef extern:
 
 	# PCPFLAREINV - reuse flag
 	PetscErrorCode PCPFLAREINVSetReusePolyCoeffs(PetscPC pc, PetscBool flg)
+	PetscErrorCode PCPFLAREINVSetPolyShift(PetscPC pc, PetscBool flg)
 
 
 cpdef py_PCRegister_PFLARE():
@@ -783,6 +785,12 @@ cpdef pcpflareinv_set_reuse_poly_coeffs(PC pc, bint flag):
 	"""
 	CHKERR(PCPFLAREINVSetReusePolyCoeffs(pc.pc, <PetscBool>flag))
 
+cpdef pcpflareinv_set_poly_shift(PC pc, bint flag):
+	"""Tell PCPFLAREINV to update its Newton polynomial by shifting the stored Hessenberg matrix
+	by the mean change in the diagonal, on setups with the same nonzero pattern.
+	"""
+	CHKERR(PCPFLAREINVSetPolyShift(pc.pc, <PetscBool>flag))
+
 cpdef int pcpflareinv_get_poly_order(PC pc):
 	cdef PetscInt result = 0
 	CHKERR(PCPFLAREINVGetPolyOrder(pc.pc, &result))
@@ -806,6 +814,11 @@ cpdef bint pcpflareinv_get_matrix_free(PC pc):
 cpdef bint pcpflareinv_get_reuse_poly_coeffs(PC pc):
 	cdef PetscBool result = 0
 	CHKERR(PCPFLAREINVGetReusePolyCoeffs(pc.pc, &result))
+	return bool(result)
+
+cpdef bint pcpflareinv_get_poly_shift(PC pc):
+	cdef PetscBool result = 0
+	CHKERR(PCPFLAREINVGetPolyShift(pc.pc, &result))
 	return bool(result)
 
 cpdef pcpflareinv_get_inverse_mat(PC pc):

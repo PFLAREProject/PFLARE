@@ -13,6 +13,7 @@ All options can be set either through command line arguments or programmatically
    | ``-pc_pflareinv_sparsity_order``  |  PCPFLAREINVGetSparsityOrder  PCPFLAREINVSetSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |   
    | ``-pc_pflareinv_matrix_free``  |  PCPFLAREINVGetMatrixFree  PCPFLAREINVSetMatrixFree  | Is the inverse applied matrix free, or is an assembled matrix built and used | false |
    | ``-pc_pflareinv_reuse_poly_coeffs``  |  PCPFLAREINVGetReusePolyCoeffs  PCPFLAREINVSetReusePolyCoeffs  | Don't recompute the polynomial inverse coefficients during setup with reuse | false |                                        
+   | ``-pc_pflareinv_poly_shift``  |  PCPFLAREINVGetPolyShift  PCPFLAREINVSetPolyShift  | With a Newton inverse type, update the polynomial during setup with the same nonzero pattern by shifting the stored Hessenberg matrix by the mean change in the diagonal | false |
 
 ### PCAIR
 
@@ -104,4 +105,4 @@ By default the coarse grid is solved with one application of a polynomial approx
    | ``-pc_air_diag_update``  |  PCAIRGetDiagUpdate  PCAIRSetDiagUpdate  | Treat changes to the Pmat with the same nonzero pattern as changes to its diagonal only, and update rather than rebuild the hierarchy. ``-pc_air_reuse_sparsity`` takes priority if set | false |
    | ``-pc_air_reuse_sparsity``  |  PCAIRGetReuseSparsity  PCAIRSetReuseSparsity  | Store temporary data to allow fast setup with reuse | false |
    | ``-pc_air_reuse_amount``  |  PCAIRGetReuseAmount  PCAIRSetReuseAmount  | Control how much data is stored when reuse sparsity is enabled: 1=CF splitting only, 2=CF splitting + SpGEMM sparsity, 3=everything | 3 |
-   | ``-pc_air_reuse_poly_coeffs``  |  PCAIRGetReusePolyCoeffs  PCAIRSetReusePolyCoeffs  | Don't recompute the polynomial inverse coefficients during setup with reuse | false |         
+   | ``-pc_air_reuse_poly_coeffs``  |  PCAIRGetReusePolyCoeffs  PCAIRSetReusePolyCoeffs  | Don't recompute the polynomial inverse coefficients during setup with reuse or a diagonal update | false |         

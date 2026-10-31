@@ -25,7 +25,15 @@ PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int 
                      int sparsity_order, int matrix_free_int, int diag_scale_polys_int, \
                      int subcomm_int, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
-                     Mat *inv_matrix);
+                     Mat *inv_matrix, \
+                     int want_hessenberg_int, PetscReal **hess_ptr, PetscInt *hess_rows, PetscInt *hess_cols, \
+                     PetscInt *hess_m);
+// Computes the Newton roots of the gmres polynomial of the matrix shifted by sigma * I from the
+// Hessenberg matrix the Arnoldi of the unshifted matrix returned (from calculate_and_build_approximate_inverse_c)
+// *coeffs_ptr comes back as a C-malloc'd buffer the caller owns
+PETSC_EXTERN void calculate_gmres_polynomial_roots_newton_hessenberg_c(PetscReal *hess_ptr, PetscInt hess_rows, \
+                     PetscInt hess_cols, PetscInt hess_m, int add_roots_int, PetscReal sigma, \
+                     PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
 // Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.
 // *applied comes back 0 if no block apply was possible and the caller has to apply
 // column by column instead - that includes being handed a matshell whose context
@@ -77,6 +85,18 @@ typedef struct {
    // If PETSC_TRUE and SAME_NONZERO_PATTERN, skip coefficient recomputation
    PetscBool  reuse_poly_coeffs;
 
+   // If PETSC_TRUE and SAME_NONZERO_PATTERN, the Newton roots are recomputed from the 
+   // stored Hessenberg matrix shifted by the mean change in the diagonal, without an Arnoldi
+   PetscBool  poly_shift;
+   // The Hessenberg matrix (column-major, C-malloc'd) and number of steps from the last Arnoldi 
+   // of a Newton type, only stored when poly_shift is set, along with the trace of the 
+   // pmat that Arnoldi was done on
+   PetscReal *hessenberg;
+   PetscInt   hessenberg_rows;
+   PetscInt   hessenberg_cols;
+   PetscInt   hessenberg_m;
+   PetscReal  hessenberg_trace;
+
    // Dense work matrix for the assembled PCMatApply, with the product
    // block_work = mat_inverse * X attached so repeat applies only run the numeric
    // phase - the symbolic phase of the mpi product builds the dense scatter every
@@ -109,6 +129,19 @@ static PetscErrorCode PCPFLAREINVResetBlockWork_Private(PC_PFLAREINV *inv_data)
 
 // ~~~~~~~~~~
 
+// Frees the stored Hessenberg matrix
+static void PCPFLAREINVFreeHessenberg_Private(PC_PFLAREINV *inv_data)
+{
+   free(inv_data->hessenberg);
+   inv_data->hessenberg       = NULL;
+   inv_data->hessenberg_rows  = 0;
+   inv_data->hessenberg_cols  = 0;
+   inv_data->hessenberg_m     = 0;
+   inv_data->hessenberg_trace = 0.0;
+}
+
+// ~~~~~~~~~~
+
 static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
 {
    PC_PFLAREINV *inv_data;
@@ -123,7 +156,8 @@ static PetscErrorCode PCReset_PFLAREINV_c(PC pc)
    inv_data->poly_coeffs      = NULL;
    inv_data->poly_coeffs_rows = 0;
    inv_data->poly_coeffs_cols = 0;
-   // Note: reuse_poly_coeffs is intentionally NOT reset here (persists across resets)
+   PCPFLAREINVFreeHessenberg_Private(inv_data);
+   // Note: reuse_poly_coeffs and poly_shift are intentionally NOT reset here (persist across resets)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -588,6 +622,8 @@ static PetscErrorCode PCPFLAREINVSetPolyCoeffs_PFLAREINV(PC pc, PetscReal *coeff
    inv_data->poly_coeffs      = new_coeffs;
    inv_data->poly_coeffs_rows = rows;
    inv_data->poly_coeffs_cols = cols;
+   // The stored Hessenberg matrix no longer matches the coefficients
+   PCPFLAREINVFreeHessenberg_Private(inv_data);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -665,6 +701,100 @@ static PetscErrorCode PCPFLAREINVSetReusePolyCoeffs_PFLAREINV(PC pc, PetscBool f
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
    inv_data->reuse_poly_coeffs = flg;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+/*@
+  PCPFLAREINVGetPolyShift - Returns whether `PCPFLAREINV` updates its Newton polynomial by shifting a stored Hessenberg matrix on setup
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. flg - `PETSC_TRUE` if the Newton polynomial is updated by shifting the stored Hessenberg matrix
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetPolyShift()`
+@*/
+PetscErrorCode PCPFLAREINVGetPolyShift(PC pc, PetscBool *flg)
+{
+   PetscFunctionBegin;
+   PetscUseMethod(pc, "PCPFLAREINVGetPolyShift_C", (PC, PetscBool *), (pc, flg));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVGetPolyShift_PFLAREINV(PC pc, PetscBool *flg)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   *flg = inv_data->poly_shift;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+/*@
+  PCPFLAREINVSetPolyShift - Sets whether `PCPFLAREINV` treats a change to the Pmat with the same nonzero pattern as a
+  change to its diagonal, and updates the Newton polynomial by shifting a stored Hessenberg matrix rather than recomputing it
+
+  Logically Collective
+
+  Input Parameters:
++ pc  - the `PCPFLAREINV` preconditioner context
+- flg - `PETSC_TRUE` to update the Newton polynomial by shifting the stored Hessenberg matrix
+
+  Options Database Key:
+. -pc_pflareinv_poly_shift (true|false) - update the Newton polynomial by shifting the stored Hessenberg matrix on setups with the same nonzero pattern; defaults to false
+
+  Level: advanced
+
+  Notes:
+  This only affects the Newton inverse types (`PFLAREINV_NEWTON` and `PFLAREINV_NEWTON_NO_EXTRA`). With this set,
+  the Hessenberg matrix from the Arnoldi that computes the polynomial is stored, along with the trace of the Pmat. The
+  user can then change the diagonal of the Pmat in place (e.g., with `MatShift()` or `MatDiagonalSet()`). On the next
+  `PCSetUp()` (e.g., triggered by `KSPSolve()`), `PCPFLAREINV` computes the mean change in the diagonal from the trace,
+  shifts the stored Hessenberg matrix by it and computes the roots of the polynomial from that, without any
+  matrix-vector products or parallel reductions beyond the trace.
+
+  If the change to the Pmat is a constant shift of the diagonal, this gives the same polynomial as recomputing it,
+  up to rounding. If the diagonal changes by different amounts, this is an approximation, which can be poor if the
+  change varies smoothly in space. `PCPFLAREINV` does not check that only the diagonal has changed; any change to the
+  off-diagonal entries is ignored.
+
+  The stored Hessenberg matrix is replaced whenever the polynomial is computed from scratch, e.g., on the first setup
+  or after a change to the nonzero pattern. If `PCPFLAREINVSetReusePolyCoeffs()` is also set it takes priority, and the
+  stored coefficients are reused unchanged. The Pmat must support `MatGetDiagonal()`. As with any change to the Pmat,
+  nothing happens if `KSPSetReusePreconditioner()` has been set.
+
+  In parallel, the first `MatShift()` of an assembled matrix changes its nonzero state in PETSc, so the next setup
+  sees a different nonzero pattern and computes the polynomial from scratch; later setups shift as normal.
+  `MatDiagonalSet()` does not change the nonzero state.
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyShift()`, `PCPFLAREINVSetReusePolyCoeffs()`
+@*/
+PetscErrorCode PCPFLAREINVSetPolyShift(PC pc, PetscBool flg)
+{
+   PetscFunctionBegin;
+   PetscTryMethod(pc, "PCPFLAREINVSetPolyShift_C", (PC, PetscBool), (pc, flg));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVSetPolyShift_PFLAREINV(PC pc, PetscBool flg)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   inv_data->poly_shift = flg;
+   // Only keep a Hessenberg matrix while we might use it
+   if (!flg) PCPFLAREINVFreeHessenberg_Private(inv_data);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -847,6 +977,8 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyCoeffs_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetReusePolyCoeffs_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetReusePolyCoeffs_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyShift_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyShift_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetInverseMat_C", NULL));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -855,7 +987,7 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
 
 static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems PetscOptionsObject)
 {
-   PetscBool    flg, matrix_free;
+   PetscBool    flg, flg_set, matrix_free;
    PCPFLAREINVType deflt, type;
    PetscInt poly_order, inverse_sparsity_order;
    PC_PFLAREINV *inv_data;
@@ -873,6 +1005,8 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
    PetscCall(PetscOptionsBool("-pc_pflareinv_matrix_free", "Apply matrix free", "PCPFLAREINVSetMatrixFree", inv_data->matrix_free, &matrix_free, &flg));
    if (flg) PetscCall(PCPFLAREINVSetMatrixFree(pc, matrix_free));
    PetscCall(PetscOptionsBool("-pc_pflareinv_reuse_poly_coeffs", "Reuses gmres polynomial coefficients during setup", "PCPFLAREINVSetReusePolyCoeffs", inv_data->reuse_poly_coeffs, &inv_data->reuse_poly_coeffs, NULL));
+   PetscCall(PetscOptionsBool("-pc_pflareinv_poly_shift", "Updates the Newton polynomial by shifting the stored Hessenberg matrix during setup", "PCPFLAREINVSetPolyShift", inv_data->poly_shift, &flg, &flg_set));
+   if (flg_set) PetscCall(PCPFLAREINVSetPolyShift(pc, flg));
    PetscCall(PetscOptionsInt("-pc_pflareinv_poly_order", "Order of polynomial", "PCPFLAREINVSetPolyOrder", inv_data->poly_order, &poly_order, &flg));
    if (flg) PetscCall(PCPFLAREINVSetPolyOrder(pc, poly_order));
    PetscCall(PetscOptionsInt("-pc_pflareinv_sparsity_order", "Sparsity order of assembled inverse", "PCPFLAREINVSetSparsityOrder", inv_data->inverse_sparsity_order, &inverse_sparsity_order, &flg));
@@ -883,13 +1017,95 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
 
 // ~~~~~~~~~~
 
+// Builds the inverse from the stored coefficients if there are any (poly_coeffs != NULL), 
+// otherwise computes fresh coefficients and stores them
+// If want_hessenberg and a Newton type computes fresh coefficients, the Hessenberg matrix from 
+// its Arnoldi is stored along with the trace of the pmat
+static PetscErrorCode PCPFLAREINVBuild_Private(PC pc, PCPFLAREINVType type, PetscBool want_hessenberg)
+{
+   PC_PFLAREINV *inv_data;
+   PetscReal    *new_hessenberg = NULL;
+   PetscInt      new_rows = 0, new_cols = 0, new_m = 0;
+   PetscScalar   trace;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+
+   // We have to pass in an int
+   int matrix_free_int = inv_data->matrix_free == PETSC_TRUE;   
+   // We don't allow polynomail diagonal scaling through PCPFLAREINV
+   // as the user could pass in a matshell as the matrix
+   // It is the user's responsibility to have done the scaling beforehand
+   // if they want
+   int diag_scale_polys_int = 0;
+   // Similarly for the subcomm
+   int subcomm_int = 0;
+   int want_hessenberg_int = want_hessenberg == PETSC_TRUE;
+
+   // Pass poly_coeffs by address: NULL -> fresh allocation on return; non-NULL -> reuse
+   calculate_and_build_approximate_inverse_c(&(pc->pmat), \
+         type, \
+         inv_data->poly_order, inv_data->inverse_sparsity_order, \
+         matrix_free_int, diag_scale_polys_int, subcomm_int, \
+         &inv_data->poly_coeffs, &inv_data->poly_coeffs_rows, &inv_data->poly_coeffs_cols, \
+         &(inv_data->mat_inverse), \
+         want_hessenberg_int, &new_hessenberg, &new_rows, &new_cols, &new_m);
+
+   // If we computed a new Hessenberg matrix, it replaces the old one along with the trace
+   if (new_hessenberg) {
+      PCPFLAREINVFreeHessenberg_Private(inv_data);
+      inv_data->hessenberg      = new_hessenberg;
+      inv_data->hessenberg_rows = new_rows;
+      inv_data->hessenberg_cols = new_cols;
+      inv_data->hessenberg_m    = new_m;
+      PetscCall(MatGetTrace(pc->pmat, &trace));
+      inv_data->hessenberg_trace = PetscRealPart(trace);
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+// Replaces the stored coefficients with the Newton roots computed from the stored Hessenberg matrix
+// shifted by the mean change in the diagonal of the pmat since that Hessenberg matrix was computed
+static PetscErrorCode PCPFLAREINVShiftPoly_Private(PC pc, PCPFLAREINVType type)
+{
+   PC_PFLAREINV *inv_data;
+   PetscReal    *new_coeffs = NULL;
+   PetscInt      new_rows = 0, new_cols = 0, global_rows;
+   PetscScalar   trace;
+   PetscReal     sigma;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+
+   // The mean change in the diagonal, which is exactly the shift if the diagonal has 
+   // changed by a constant
+   PetscCall(MatGetTrace(pc->pmat, &trace));
+   PetscCall(MatGetSize(pc->pmat, &global_rows, NULL));
+   sigma = (PetscRealPart(trace) - inv_data->hessenberg_trace) / (PetscReal)global_rows;
+   PetscCall(PetscInfo(pc, "Shifting the stored Hessenberg matrix by %g\n", (double)sigma));
+
+   int add_roots_int = type == PFLAREINV_NEWTON;
+   calculate_gmres_polynomial_roots_newton_hessenberg_c(inv_data->hessenberg, inv_data->hessenberg_rows, \
+         inv_data->hessenberg_cols, inv_data->hessenberg_m, add_roots_int, sigma, \
+         &new_coeffs, &new_rows, &new_cols);
+
+   free(inv_data->poly_coeffs);
+   inv_data->poly_coeffs      = new_coeffs;
+   inv_data->poly_coeffs_rows = new_rows;
+   inv_data->poly_coeffs_cols = new_cols;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
 static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
 {
    PCPFLAREINVType type;
    MPI_Comm   comm; 
    PC_PFLAREINV *inv_data;
-   PetscReal *new_coeffs;
-   PetscInt   new_rows, new_cols;
+   PetscBool  use_poly_shift;
 
    PetscFunctionBegin;
 
@@ -907,31 +1123,27 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       PetscCheck(!inv_data->matrix_free, comm, PETSC_ERR_ARG_WRONGSTATE, "PFLARE SAI/ISAI inverses cannot be applied matrix-free - Use PCASM");
    }     
 
-   // We have to pass in an int
-   int matrix_free_int = inv_data->matrix_free == PETSC_TRUE;   
-   // We don't allow polynomail diagonal scaling through PCPFLAREINV
-   // as the user could pass in a matshell as the matrix
-   // It is the user's responsibility to have done the scaling beforehand
-   // if they want
-   int diag_scale_polys_int = 0;
-   // Similarly for the subcomm
-   int subcomm_int = 0;
+   // Only the Newton types can update their polynomial by shifting the Hessenberg matrix
+   use_poly_shift = (PetscBool)(inv_data->poly_shift && \
+                     (type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA));
+   // We need the diagonal of the pmat to compute the shift
+   if (use_poly_shift) {
+      PetscBool has_diagonal;
+      PetscCall(MatHasOperation(pc->pmat, MATOP_GET_DIAGONAL, &has_diagonal));
+      PetscCheck(has_diagonal, comm, PETSC_ERR_SUP, \
+            "-pc_pflareinv_poly_shift requires an operator that supports MatGetDiagonal - " \
+            "register MATOP_GET_DIAGONAL on your MatShell, or don't use -pc_pflareinv_poly_shift");
+   }
 
    // If we haven't setup yet
    if (pc->setupcalled == 0)
    {
-      // Fresh setup: pass NULL to let Fortran allocate and return the coefficient pointer
-      new_coeffs = NULL; new_rows = 0; new_cols = 0;
-      calculate_and_build_approximate_inverse_c(&(pc->pmat), \
-            type, \
-            inv_data->poly_order, inv_data->inverse_sparsity_order, \
-            matrix_free_int, diag_scale_polys_int, subcomm_int, \
-            &new_coeffs, &new_rows, &new_cols, \
-            &(inv_data->mat_inverse));
+      // Fresh setup: drop any stored coefficients so Fortran computes and returns new ones
       free(inv_data->poly_coeffs);
-      inv_data->poly_coeffs      = new_coeffs;
-      inv_data->poly_coeffs_rows = new_rows;
-      inv_data->poly_coeffs_cols = new_cols;
+      inv_data->poly_coeffs      = NULL;
+      inv_data->poly_coeffs_rows = 0;
+      inv_data->poly_coeffs_cols = 0;
+      PetscCall(PCPFLAREINVBuild_Private(pc, type, use_poly_shift));
    }
    else
    {
@@ -939,44 +1151,34 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       // start again       
       if (pc->flag == DIFFERENT_NONZERO_PATTERN)
       {
-         // PCReset also frees poly_coeffs
+         // PCReset also frees poly_coeffs and the Hessenberg matrix
          PetscCall(PCReset_PFLAREINV_c(pc));
-         // Fresh: pass NULL to let Fortran allocate and return the coefficient pointer
-         new_coeffs = NULL; new_rows = 0; new_cols = 0;
-         calculate_and_build_approximate_inverse_c(&(pc->pmat), \
-               type, \
-               inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, diag_scale_polys_int, subcomm_int, \
-               &new_coeffs, &new_rows, &new_cols, \
-               &(inv_data->mat_inverse));
-         inv_data->poly_coeffs      = new_coeffs;
-         inv_data->poly_coeffs_rows = new_rows;
-         inv_data->poly_coeffs_cols = new_cols;
+         PetscCall(PCPFLAREINVBuild_Private(pc, type, use_poly_shift));
       }
       else if (pc->flag == SAME_NONZERO_PATTERN)
       {
          // We don't call reset on the pc here so it reuses the sparsity of mat_inverse
-         // Optionally reuse stored polynomial coefficients:
-         //   poly_coeffs != NULL and reuse flag set  ->  pass the existing pointer (reuse path)
-         //   otherwise                               ->  pass NULL so Fortran computes fresh ones
+         // In order of priority:
+         //   poly_coeffs != NULL and reuse flag set  ->  reuse the stored coefficients
+         //   poly shift and a stored Hessenberg      ->  shift it to compute new Newton roots, 
+         //                                               then build the inverse with them
+         //   otherwise                               ->  compute fresh coefficients
          // Non-polynomial types (SAI, ISAI, WJacobi, Jacobi, L1Jacobi) have no coefficients, so any
          // stored ones are dropped and Fortran returns NULL
          int is_polynomial;
          inverse_type_is_polynomial_c((int)type, &is_polynomial);
-         if (!(is_polynomial && inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL)) {
-            // Fresh: free old coefficients so poly_coeffs is NULL going into the call
+         if (is_polynomial && inv_data->reuse_poly_coeffs == PETSC_TRUE && inv_data->poly_coeffs != NULL) {
+            // Reuse: nothing to do, the build uses the stored coefficients
+         } else if (use_poly_shift && inv_data->hessenberg != NULL) {
+            PetscCall(PCPFLAREINVShiftPoly_Private(pc, type));
+         } else {
+            // Fresh: free old coefficients so poly_coeffs is NULL going into the build
             free(inv_data->poly_coeffs);
             inv_data->poly_coeffs      = NULL;
             inv_data->poly_coeffs_rows = 0;
             inv_data->poly_coeffs_cols = 0;
          }
-         // Pass poly_coeffs by address: NULL -> fresh allocation on return; non-NULL -> reuse
-         calculate_and_build_approximate_inverse_c(&(pc->pmat), \
-               type, \
-               inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, diag_scale_polys_int, subcomm_int, \
-               &inv_data->poly_coeffs, &inv_data->poly_coeffs_rows, &inv_data->poly_coeffs_cols, \
-               &(inv_data->mat_inverse));
+         PetscCall(PCPFLAREINVBuild_Private(pc, type, use_poly_shift));
       }
    }
 
@@ -1055,6 +1257,8 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
             PetscCall(PetscViewerASCIIPrintf(viewer, "  assembled inverse, sparsity order %i\n", inv_data->inverse_sparsity_order));
          }
          if (inv_data->reuse_poly_coeffs) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing gmres polynomial coefficients during setup \n"));
+         if (inv_data->poly_shift && (type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA)) \
+            PetscCall(PetscViewerASCIIPrintf(viewer, "  Updating the Newton polynomial by shifting the stored Hessenberg matrix during setup \n"));
       }
    }
 
@@ -1133,6 +1337,12 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    inv_data->poly_coeffs_rows  = 0;
    inv_data->poly_coeffs_cols  = 0;
    inv_data->reuse_poly_coeffs = PETSC_FALSE;
+   inv_data->poly_shift        = PETSC_FALSE;
+   inv_data->hessenberg        = NULL;
+   inv_data->hessenberg_rows   = 0;
+   inv_data->hessenberg_cols   = 0;
+   inv_data->hessenberg_m      = 0;
+   inv_data->hessenberg_trace  = 0.0;
    inv_data->block_work                  = NULL;
    inv_data->block_work_inverse          = NULL;
    inv_data->block_work_inverse_nz_state = 0;
@@ -1162,6 +1372,8 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyCoeffs_C", PCPFLAREINVSetPolyCoeffs_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetReusePolyCoeffs_C", PCPFLAREINVGetReusePolyCoeffs_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetReusePolyCoeffs_C", PCPFLAREINVSetReusePolyCoeffs_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyShift_C", PCPFLAREINVGetPolyShift_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyShift_C", PCPFLAREINVSetPolyShift_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetInverseMat_C", PCPFLAREINVGetInverseMat_PFLAREINV));
 
    PetscFunctionReturn(PETSC_SUCCESS);

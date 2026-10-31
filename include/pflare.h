@@ -143,6 +143,8 @@ PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyCoeffs(PC, PetscReal **, PetscInt 
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetPolyCoeffs(PC, PetscReal *, PetscInt, PetscInt);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetReusePolyCoeffs(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetReusePolyCoeffs(PC, PetscBool);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyShift(PC, PetscBool *);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVSetPolyShift(PC, PetscBool);
 
 /* Define PCAIR get routines */
 PETSC_EXTERN PetscErrorCode PCAIRGetPrintStatsTimings(PC, PetscBool *);

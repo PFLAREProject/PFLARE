@@ -114,11 +114,77 @@ where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, $\mathbf{1}$ is the vector o
 
 **The smoothers:** the approximate inverses of $\mathbf{A}_\textrm{ff} + \mathbf{D}_\textrm{f}$ (and of $\mathbf{A}_\textrm{cc} + \mathbf{D}_\textrm{c}$) used in the smoothers are rebuilt. The updated $\mathbf{R}$ and coarse matrix do not depend on an updated approximation to $\mathbf{A}_\textrm{ff}^{-1}$, so with matrix-free smoothing (``-pc_air_matrix_free_polys`` and ``-pc_air_coarsest_matrix_free_polys``) an update does not assemble any approximate inverses and only computes the new polynomial coefficients.
 
+Computing those polynomial coefficients is then most of the cost of an update. Setting ``-pc_air_reuse_poly_coeffs`` as well keeps the polynomial coefficients rather than recomputing them, so the update builds the smoothers without any matrix-vector products. This should only be used with diagonally scaled polynomials (``-pc_air_diag_scale_polys`` and ``-pc_air_coarsest_diag_scale_polys``): a diagonally scaled polynomial remains a good approximation as the diagonal changes, whereas an unscaled polynomial can diverge once the change is comparable to the diagonal. For example, with ``-pc_type air -pc_air_diag_update -pc_air_smooth_type fc -pc_air_inverse_type newton -pc_air_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs``, on the advection problem in ``tests/adv_diff_fd_diag_update.c`` with diagonal perturbations from $10^{-2}$ to $10^{6}$, keeping the coefficients gave the same iteration counts as recomputing them (within one iteration) while making each update about 4 times faster.
+
 Using this diagonal update in PCAIR is very fast and uses almost no extra memory. The frozen grid-transfer operators and the lumping, however, mean the updated hierarchy is not identical to one rebuilt from $\mathbf{A} + \mathbf{D}$. With F point smoothing only, errors introduced at the C points by the frozen grid-transfer operators are never corrected, so adding C point smoothing (e.g., ``-pc_air_smooth_type fc`` or ``ffc``) is recommended with this type of diagonal update.
 
 On a 2D advection problem with diagonal perturbations varying over six orders of magnitude, adding C point smoothing kept the iteration count within a few iterations of rebuilding the hierarchy, independent of the grid size. The gap is largest when $\mathbf{D}$ is of similar size to the diagonal of $\mathbf{A}$; when $\mathbf{D}$ is either small or dominant the updated hierarchy performs like a rebuilt one. In implicit time stepping of 2D advection problems where an adaptive time step grew by a few hundred times, updating the hierarchy took fewer iterations than never rebuilding it, at a fraction of the cost of rebuilding every time step.
 
 If the off-diagonal entries also change significantly, or the iteration count with the updated hierarchy grows too large, the hierarchy should instead be rebuilt. The reuse described in the sections below makes that rebuild cheaper.
+
+**With PCPFLAREINV:** With the Newton inverse types (``newton`` and ``newton_no_extra``), PCPFLAREINV can update its polynomial after a change to the diagonal without computing it again. If ``-pc_pflareinv_poly_shift`` is set, PCPFLAREINV stores the (small, dense) Hessenberg matrix from the Arnoldi that computes the polynomial, along with the trace of the Pmat. On subsequent setups with the same nonzero pattern, it computes the mean change in the diagonal from the trace, shifts the stored Hessenberg matrix by it and computes the roots of the polynomial from that, without any matrix-vector products. 
+
+If $\mathbf{A}$ is changed to $\mathbf{A} + \sigma \mathbf{I}$, e.g., with ``MatShift``, the Arnoldi of $\mathbf{A} + \sigma \mathbf{I}$ would build the same Krylov basis and its Hessenberg matrix would just be shifted by $\sigma$. In that case the update gives the same polynomial as computing it again, up to rounding. If the diagonal changes by different amounts, the update is an approximation, which can be poor if the change varies smoothly in space. As with PCAIR, PCPFLAREINV does not check that only the diagonal has changed.
+
+in Fortran:
+
+     call KSPGetPC(ksp, pc, ierr)
+     call PCSetType(pc, PCPFLAREINV, ierr)
+     call PCPFLAREINVSetType(pc, PFLAREINV_NEWTON, ierr)
+
+     ! Before the first setup, we tell it to update the
+     ! polynomial by shifting the stored Hessenberg matrix
+     call PCPFLAREINVSetPolyShift(pc, PETSC_TRUE, ierr)
+
+     ! First solve - the PCPFLAREINV will be setup from A
+     call KSPSolve(ksp, b, x, ierr)
+
+     ! ...[Shift the diagonal of A in place, e.g., with MatShift]
+
+     ! Second solve - the polynomial will be updated without an Arnoldi
+     call KSPSolve(ksp, b, x, ierr)
+
+or in C:
+
+     ierr = KSPGetPC(ksp, &pc);
+     ierr = PCSetType(pc, PCPFLAREINV);
+     ierr = PCPFLAREINVSetType(pc, PFLAREINV_NEWTON);
+
+     // Before the first setup, we tell it to update the
+     // polynomial by shifting the stored Hessenberg matrix
+     ierr = PCPFLAREINVSetPolyShift(pc, PETSC_TRUE);
+
+     // First solve - the PCPFLAREINV will be setup from A
+     ierr = KSPSolve(ksp, b, x);
+
+     // ...[Shift the diagonal of A in place, e.g., with MatShift]
+
+     // Second solve - the polynomial will be updated without an Arnoldi
+     ierr = KSPSolve(ksp, b, x);
+
+or in Python with petsc4py:
+
+     pc = ksp.getPC()
+     pc.setType("pflareinv")
+     pflare.pcpflareinv_set_type(pc, pflare.PFLAREINV_NEWTON)
+
+     # Before the first setup, we tell it to update the
+     # polynomial by shifting the stored Hessenberg matrix
+     pflare.pcpflareinv_set_poly_shift(pc, True)
+
+     # First solve - the PCPFLAREINV will be setup from A
+     ksp.solve(b, x)
+
+     # ...[Shift the diagonal of A in place, e.g., with A.shift]
+
+     # Second solve - the polynomial will be updated without an Arnoldi
+     ksp.solve(b, x)
+
+or via the command line: ``-pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_shift``.
+
+If ``-pc_pflareinv_reuse_poly_coeffs`` is also set it takes priority, and the stored coefficients are reused unchanged. The stored Hessenberg matrix is replaced whenever the polynomial is computed from scratch, e.g., on the first setup or after a change to the nonzero pattern.
+
+**Note for both PCAIR and PCPFLAREINV:** in parallel, the first ``MatShift`` of an assembled matrix changes its nonzero state in PETSc, so the next setup treats the Pmat as having a different nonzero pattern and rebuilds from scratch (subsequent updates are then relative to that Pmat). ``MatDiagonalSet`` does not change the nonzero state.
 
 #### 3) Reuse sparsity during setup
 

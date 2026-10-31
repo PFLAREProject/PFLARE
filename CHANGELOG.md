@@ -9,6 +9,14 @@ for earlier changes please see the git history.
 - Added `-pc_air_diag_update` (`PCAIRSetDiagUpdate()`). When only the diagonal
   of the Pmat changes in place, PCAIR updates the existing hierarchy rather than
   rebuilding it, with no matrix-matrix products; see `docs/reuse.md`
+- A PCAIR diagonal update now honours `-pc_air_reuse_poly_coeffs`, keeping the
+  polynomial coefficients rather than recomputing them; use it with
+  `-pc_air_diag_scale_polys` and `-pc_air_coarsest_diag_scale_polys`
+- Added `-pc_pflareinv_poly_shift` (`PCPFLAREINVSetPolyShift()`). With a Newton
+  inverse type, a setup with the same nonzero pattern recomputes the polynomial
+  roots from the stored Arnoldi Hessenberg matrix, shifted by the mean change in
+  the diagonal, without an Arnoldi; for a constant shift (e.g., `MatShift()`) this
+  gives the same polynomial as recomputing it; see `docs/reuse.md`
 - Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
   inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
   wherever the other Jacobi types can, including the CR splitting relaxation

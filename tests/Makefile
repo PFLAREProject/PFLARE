@@ -356,6 +356,24 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with a diagonal update with matrix-free smoothing"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_matrix_free_polys \
 	 -pc_air_coarsest_matrix_free_polys -max_extra_its 5
+	@echo "Test AIRG with a diagonal update keeping the diagonally scaled Newton polynomial coefficients"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_inverse_type newton \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_coarsest_matrix_free_polys \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs -max_extra_its 5
+	@echo "Test AIRG with a diagonal update keeping the diagonally scaled assembled polynomial coefficients"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs -max_extra_its 5
+	@echo ""
+	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL)
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -mat_shift
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_type newton_no_extra
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 20
+	@echo "Test PCPFLAREINV shifting the stored Hessenberg matrix by the mean change in a varying diagonal"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -varying
+	@echo "Test PCPFLAREINV with poly shift and reuse poly coeffs, where reuse takes priority"
+	./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free -pc_pflareinv_reuse_poly_coeffs -check_reuse
 	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
 	 -check_reuse
@@ -1148,6 +1166,15 @@ else
 	 -pc_air_process_eq_limit 400 -max_extra_its 5
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
+	@echo "Test AIRG with a diagonal update keeping the diagonally scaled Newton polynomial coefficients in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
+	 -pc_air_inverse_type newton -pc_air_matrix_free_polys -pc_air_coarsest_inverse_type newton \
+	 -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_reuse_poly_coeffs -pc_air_process_eq_limit 400 -max_extra_its 5
+	@echo ""
+	@echo "Test PCPFLAREINV updating a Newton polynomial by shifting the stored Hessenberg matrix in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL)
+	$(MPIEXEC) -n 2 ./pflareinv_poly_shift -ksp_rtol $(KSP_RTOL) -pc_pflareinv_matrix_free
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"

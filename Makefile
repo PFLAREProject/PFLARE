@@ -188,6 +188,7 @@ export TEST_TARGETS = ex12f \
 		  newton_scale \
 		  pflareinv_exact_inverse \
 		  pflareinv_sai_rank_deficient \
+		  pflareinv_poly_shift \
 		  adv_diff_fd \
 		  adv_diff_fd_diag_update \
 		  adv_diff_fd_ts \

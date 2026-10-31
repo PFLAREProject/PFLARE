@@ -175,6 +175,7 @@ pcpflareinv_get_sparsity_order     = pflare_defs.pcpflareinv_get_sparsity_order
 pcpflareinv_get_type               = pflare_defs.pcpflareinv_get_type
 pcpflareinv_get_matrix_free        = pflare_defs.pcpflareinv_get_matrix_free
 pcpflareinv_get_reuse_poly_coeffs  = pflare_defs.pcpflareinv_get_reuse_poly_coeffs
+pcpflareinv_get_poly_shift         = pflare_defs.pcpflareinv_get_poly_shift
 pcpflareinv_get_poly_coeffs        = pflare_defs.pcpflareinv_get_poly_coeffs
 pcpflareinv_get_inverse_mat        = pflare_defs.pcpflareinv_get_inverse_mat
 
@@ -187,6 +188,7 @@ pcpflareinv_set_type               = pflare_defs.pcpflareinv_set_type
 pcpflareinv_set_matrix_free        = pflare_defs.pcpflareinv_set_matrix_free
 pcpflareinv_set_poly_coeffs        = pflare_defs.pcpflareinv_set_poly_coeffs
 pcpflareinv_set_reuse_poly_coeffs  = pflare_defs.pcpflareinv_set_reuse_poly_coeffs
+pcpflareinv_set_poly_shift         = pflare_defs.pcpflareinv_set_poly_shift
 
 # -----------------------------------------------------------------------
 # Docstrings
@@ -241,7 +243,7 @@ _PCAIR_OPTION_DOCS = {
     'coarsest_subcomm':             ("whether to use a subcommunicator on the coarse grid", "-pc_air_coarsest_subcomm", "False"),
     'reuse_sparsity':               ("whether to store temporary data to allow fast setup with reuse", "-pc_air_reuse_sparsity", "False"),
     'reuse_amount':                 ("how much data is stored when reuse sparsity is enabled: 1=CF splitting only, 2=CF splitting + SpGEMM sparsity, 3=everything", "-pc_air_reuse_amount", "3"),
-    'reuse_poly_coeffs':            ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse", "-pc_air_reuse_poly_coeffs", "False"),
+    'reuse_poly_coeffs':            ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse or a diagonal update", "-pc_air_reuse_poly_coeffs", "False"),
     'poly_coeffs':                  ("the polynomial inverse coefficients for a given inverse (a WhichInverseType selector)", "N/A", "N/A"),
     'diag_update':                  ("whether a change to the Pmat with the same nonzero pattern is treated as a change to its diagonal only, updating rather than rebuilding the hierarchy", "-pc_air_diag_update", "False"),
 }
@@ -252,6 +254,7 @@ _PCPFLAREINV_OPTION_DOCS = {
     'sparsity_order':    ("the power of A used as the sparsity in assembled inverses", "-pc_pflareinv_sparsity_order", "1"),
     'matrix_free':       ("whether the inverse is applied matrix-free, or an assembled matrix is built and used", "-pc_pflareinv_matrix_free", "False"),
     'reuse_poly_coeffs': ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse", "-pc_pflareinv_reuse_poly_coeffs", "False"),
+    'poly_shift':        ("whether a Newton polynomial is updated by shifting the stored Hessenberg matrix by the mean change in the diagonal, on setups with the same nonzero pattern", "-pc_pflareinv_poly_shift", "False"),
     'poly_coeffs':       ("the polynomial inverse coefficients", "N/A", "N/A"),
 }
 
