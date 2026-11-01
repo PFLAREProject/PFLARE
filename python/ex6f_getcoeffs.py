@@ -83,6 +83,25 @@ if not (is_air or is_pflareinv):
         print(f"Unexpected PC type '{pc_type}'; expected 'air' or 'pflareinv'")
     sys.exit(1)
 
+# With -grow_newton_roots, solve 3 restores each Newton polynomial (2 columns)
+# with two exact-zero roots appended. They are skipped when applying, so solve 3
+# must still reproduce solve 1, while the number of rows PCAIR stores changes.
+# After solve 3 the original roots are set back, shrinking the stored arrays
+grow_newton_roots = OptDB.getBool('grow_newton_roots', False)
+
+
+def set_air_coeffs(petsc_level, which_inverse, coeffs, grow):
+    to_set = coeffs
+    if grow and coeffs.shape[1] == 2:
+        to_set = np.zeros((coeffs.shape[0] + 2, 2), dtype=coeffs.dtype)
+        to_set[:coeffs.shape[0], :] = coeffs
+    pflare.pcair_set_poly_coeffs(pc, petsc_level, which_inverse, to_set)
+    stored = pflare.pcair_get_poly_coeffs(pc, petsc_level, which_inverse)
+    if stored.shape != to_set.shape or not np.array_equal(stored, to_set):
+        print(f"FAIL: PCAIR stores {stored.shape} coefficients, set {to_set.shape}")
+        sys.exit(1)
+
+
 # For PCAIR, tell it to reuse the sparsity pattern (CF splitting and matrix
 # structure) on every subsequent setup.  This must be set via the direct C API
 # because ksp.setFromOptions() has already been called.
@@ -123,12 +142,10 @@ for count in range(1, nsteps + 1):
         if is_air:
             num_levels = pflare.pcair_get_num_levels(pc)
             for petsc_level in range(num_levels - 1, 0, -1):
-                pflare.pcair_set_poly_coeffs(pc, petsc_level,
-                                              pflare.COEFFS_INV_AFF,
-                                              coeffs_air[petsc_level])
-            pflare.pcair_set_poly_coeffs(pc, 0,
-                                          pflare.COEFFS_INV_COARSE,
-                                          coeffs_air[0])
+                set_air_coeffs(petsc_level, pflare.COEFFS_INV_AFF,
+                               coeffs_air[petsc_level], grow_newton_roots)
+            set_air_coeffs(0, pflare.COEFFS_INV_COARSE, coeffs_air[0],
+                           grow_newton_roots)
             pflare.pcair_set_reuse_poly_coeffs(pc, True)
 
         elif is_pflareinv:
@@ -150,6 +167,12 @@ for count in range(1, nsteps + 1):
         norm_first = norm
     if count == 3:
         norm_third = norm
+        # Set the original roots back, shrinking the stored arrays again
+        if is_air and grow_newton_roots:
+            for petsc_level in range(num_levels - 1, 0, -1):
+                set_air_coeffs(petsc_level, pflare.COEFFS_INV_AFF,
+                               coeffs_air[petsc_level], False)
+            set_air_coeffs(0, pflare.COEFFS_INV_COARSE, coeffs_air[0], False)
 
     # -- After solve 1 save polynomial coefficients ---------------------
     if count == 1:
@@ -169,9 +192,11 @@ for count in range(1, nsteps + 1):
             bad_calls = [
                 lambda: pflare.pcair_get_poly_coeffs(pc, num_levels, pflare.COEFFS_INV_AFF),
                 lambda: pflare.pcair_get_poly_coeffs(pc, num_levels - 1, pflare.COEFFS_INV_ACC),
+                # The number of columns can never change (the number of rows can
+                # for the Newton bases)
                 lambda: pflare.pcair_set_poly_coeffs(pc, num_levels - 1, pflare.COEFFS_INV_AFF,
-                                                     np.zeros((coeffs_air[num_levels - 1].shape[0] + 1,
-                                                               coeffs_air[num_levels - 1].shape[1]))),
+                                                     np.zeros((coeffs_air[num_levels - 1].shape[0],
+                                                               coeffs_air[num_levels - 1].shape[1] + 1))),
             ]
             for i_call, bad_call in enumerate(bad_calls):
                 try:

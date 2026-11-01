@@ -628,6 +628,9 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients - newton basis"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test AIRG set polynomial coefficients in Fortran with a different number of Newton roots"
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton -grow_newton_roots
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_matrix_free_polys -grow_newton_roots
 #
 	@echo ""
 	@echo "Test AIRG get/set polynomial coefficients in C with PC regenerated and no sparsity change"
@@ -1203,6 +1206,9 @@ else
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse \
 	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_inverse_type arnoldi
+	@echo "Test AIRG set polynomial coefficients in Fortran with a different number of Newton roots in parallel"
+	$(MPIEXEC) -n 2 ./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
+	 -pc_air_matrix_free_polys -grow_newton_roots
 	@echo "Test PCAIR replaying recorded Newton roots whose number changes between Pmats in parallel"
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -c_values 0.5,2,8,50 -alpha 1 -pc_air_poly_order 16 -require_resize -pc_air_reuse_sparsity \
 	 -pc_air_processor_agglom -pc_air_process_eq_limit 50 -pc_air_subcomm -pc_air_coarsest_subcomm

@@ -57,6 +57,16 @@ contains
       PetscMPIInt rank
       PetscReal norm_first, norm_third
       common /ksp_coeffs_data/ norm_first, rank
+      logical :: grow_newton_roots
+      PetscBool :: grow_flag, flg
+
+      ! With -grow_newton_roots, solve 3 restores each Newton polynomial with two
+      ! exact-zero roots appended, which are skipped when applying, so it must
+      ! still reproduce solve 1 while the stored arrays change size
+      grow_flag = PETSC_FALSE
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-grow_newton_roots', grow_flag, flg, ierr)
+      grow_newton_roots = grow_flag
 
       one = 1
       call KSPSetInitialGuessNonzero(ksp, PETSC_FALSE, ierr)
@@ -112,9 +122,10 @@ contains
          if (pctype == PCAIR) then
             call PCAIRGetNumLevels(pc, num_levels, ierr)
             do petsc_level = num_levels-1, 1, -1
-               call PCAIRSetPolyCoeffs(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, ierr)
+               call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, &
+                        grow_newton_roots)
             end do
-            call PCAIRSetPolyCoeffs(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, ierr)
+            call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, grow_newton_roots)
             call PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE, ierr)
 
          ! If PCPFLAREINV only one level
@@ -129,6 +140,16 @@ contains
       call MatResidual(A, b, x, u, ierr)
       if (count == 1) call VecNorm(u, NORM_2, norm_first, ierr)
       if (count == 3) call VecNorm(u, NORM_2, norm_third, ierr)
+
+      ! After solve 3 with grown Newton roots, set the original roots back, which
+      ! shrinks the stored arrays again, and check the sizes
+      if (count == 3 .AND. pctype == PCAIR .AND. grow_newton_roots) then
+         call PCAIRGetNumLevels(pc, num_levels, ierr)
+         do petsc_level = num_levels-1, 1, -1
+            call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, .FALSE.)
+         end do
+         call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, .FALSE.)
+      end if
 
       ! After solve 1, save the polynomial coefficients
       if (count == 1) then
@@ -171,6 +192,53 @@ contains
       end if
 
    end subroutine test_solve_getcoeffs
+
+   ! -----------------------------------------------------------------------
+
+   subroutine set_coeffs_maybe_grown(pc, petsc_level, which_inverse, coeffs, grow)
+#include <petsc/finclude/petscksp.h>
+      use petscksp
+#include "finclude/pflare.h"
+      use pflare
+
+   !  Sets coeffs into PCAIR, or if grow is true and coeffs are Newton roots
+   !  (2 columns), coeffs with two exact-zero roots appended, which changes the
+   !  number of rows PCAIR stores. Then checks PCAIR stores what was set
+
+      PC :: pc
+      PetscInt :: petsc_level
+      integer :: which_inverse
+      PetscReal, dimension(:,:), pointer :: coeffs
+      logical :: grow
+
+      PetscReal, dimension(:,:), pointer :: to_set => null(), stored => null()
+      PetscErrorCode :: ierr
+
+      if (grow .AND. size(coeffs, 2) == 2) then
+         allocate(to_set(size(coeffs, 1) + 2, 2))
+         to_set = 0
+         to_set(1:size(coeffs, 1), :) = coeffs
+      else
+         to_set => coeffs
+      end if
+
+      call PCAIRSetPolyCoeffs(pc, petsc_level, which_inverse, to_set, ierr)
+
+      ! The Fortran get returns a copy, reallocated to the stored size
+      call PCAIRGetPolyCoeffs(pc, petsc_level, which_inverse, stored, ierr)
+      if (size(stored, 1) /= size(to_set, 1) .OR. size(stored, 2) /= size(to_set, 2)) then
+         print *, "Stored coefficients are the wrong size", shape(stored), " expected", shape(to_set)
+         error stop 1
+      end if
+      if (any(stored /= to_set)) then
+         print *, "Stored coefficients differ from those set"
+         error stop 1
+      end if
+
+      deallocate(stored)
+      if (.NOT. associated(to_set, coeffs)) deallocate(to_set)
+
+   end subroutine set_coeffs_maybe_grown
   
   end module solve_module
 
