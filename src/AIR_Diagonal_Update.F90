@@ -446,12 +446,16 @@ module air_diagonal_update
 
       call timer_start(TIMER_ID_AIR_INVERSE)
 
-      call start_approximate_inverse(matrix, &
-               poly_data%inverse_type, &
-               poly_data%gmres_poly_order, &
-               diag_scale_polys, &
-               poly_data%buffers, &
-               poly_data%coefficients)
+      ! If we are re-using the polynomial coefficients then we don't have to compute
+      ! them, exactly as the setup does
+      if (.NOT. air_data%options%reuse_poly_coeffs) then
+         call start_approximate_inverse(matrix, &
+                  poly_data%inverse_type, &
+                  poly_data%gmres_poly_order, &
+                  diag_scale_polys, &
+                  poly_data%buffers, &
+                  poly_data%coefficients)
+      end if
 
       call finish_approximate_inverse(matrix, &
                poly_data%inverse_type, &

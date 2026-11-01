@@ -356,6 +356,10 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with a diagonal update with matrix-free smoothing"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_matrix_free_polys \
 	 -pc_air_coarsest_matrix_free_polys -max_extra_its 5
+	@echo "Test AIRG with a diagonal update keeping and recomputing the polynomial coefficients"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
 	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
 	 -check_reuse
@@ -1148,6 +1152,10 @@ else
 	 -pc_air_process_eq_limit 400 -max_extra_its 5
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
+	@echo "Test AIRG with a diagonal update keeping and recomputing the polynomial coefficients in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"
