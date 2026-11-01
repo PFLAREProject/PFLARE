@@ -11,6 +11,7 @@ Checklist for adding a test
 2. Add the executable name to `TEST_TARGETS` in the top `Makefile`.
 3. Add the executable name to `.gitignore` (there is a marked section for compiled test executables).
 4. Add invocation line(s) to the appropriate `run_tests_*` group(s) in `tests/Makefile` — usually both a serial and a parallel (`mpiexec -n 2`+) variant, with an `@echo` label describing the test.
+5. Add to the short groups sparingly: the valgrind CI jobs run `make tests_short`, which takes a long time. Prefer `run_tests_no_load_*` or `run_tests_medium_*`.
 
 TEST_MATCH mechanics (`make tests_search TEST_MATCH="<substring>"`)
 - Dry-runs (`make -n`) the groups in `FILTER_RUN_TARGETS` (default = all groups; load groups dropped when 64-bit indices or single precision), joins continuation lines, greps command lines for the substring with `grep -F`, and evals each matching `./exe` line.
