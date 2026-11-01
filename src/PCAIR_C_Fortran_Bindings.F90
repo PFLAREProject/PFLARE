@@ -950,8 +950,7 @@ module pcair_c_fortran_bindings
       ! to save them
       ! If there are no coefficients stored for this level and inverse (invalid petsc_level or 
       ! which_inverse, not setup, or not a polynomial inverse) this returns a NULL pointer with 
-      ! zero sizes, which the C wrapper turns into a PETSc error. PCAIRSetPolyCoeffs in C 
-      ! also copies into the pointer returned from here
+      ! zero sizes, which the C wrapper turns into a PETSc error
 
       ! ~~~~~~~~
       integer(c_long_long), intent(inout) :: pc_ptr

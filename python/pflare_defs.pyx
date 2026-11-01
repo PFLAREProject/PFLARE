@@ -510,7 +510,7 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 	Returns
 	-------
 	numpy.ndarray, shape (n, 1_or_2), Fortran-contiguous
-	    Column 0: real coefficients (power/Arnoldi) or real roots (Newton).
+	    Column 0: real coefficients (power/Arnoldi/Neumann) or real roots (Newton).
 	    Column 1: imaginary roots (Newton basis only).
 	    n is poly_order+1, except with the newton basis, which can have
 	    more rows when extra roots are added for stability.
@@ -726,6 +726,8 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	    Arnoldi bases. For the Newton bases (newton, newton_no_extra) the rows
 	    are the roots, whose number can differ between setups, so any shape
 	    (n, 2) with n >= poly_order+1 is accepted and PCAIR resizes its storage.
+	    Every rank must pass the same coefficients; this is not checked, to
+	    keep the call cheap (no reductions).
 	"""
 	# Stage in the build's PetscReal dtype (float32 single / float64 double) so the
 	# PetscReal* the C setter reads has the right element width. Casting a float64

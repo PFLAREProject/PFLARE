@@ -2954,6 +2954,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
   coefficients until it is rebuilt by the next setup, which happens with the new coefficients if
   `PCAIRSetReusePolyCoeffs()` has been set.
 
+  Every rank must pass the same coefficients, with the same row_size and col_size. This is not checked, to keep
+  the call cheap (no reductions); different coefficients on different ranks give an inconsistent preconditioner,
+  and a different number of Newton roots can hang the matrix-free apply.
+
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)

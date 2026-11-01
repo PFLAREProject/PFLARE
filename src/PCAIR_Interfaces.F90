@@ -642,6 +642,8 @@ module pcair_interfaces
       ! Does not trigger a rebuild; after setting these coefficients call
       ! PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE) and then KSPSolve to apply them.
       ! A matrix-free Newton polynomial uses the new roots straight away
+      ! Every rank must pass the same coeffs (with the same sizes); this is not checked,
+      ! to keep the call cheap (no reductions)
       type(tPC), intent(inout)                           :: pc
       PetscInt, intent(in)                               :: petsc_level
       integer, intent(in)                                :: which_inverse

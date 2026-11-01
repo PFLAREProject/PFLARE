@@ -1594,7 +1594,8 @@ end if
       ! that is pointed at them too
       ! This must be called whenever the coefficients are reallocated, eg if the
       ! number of roots changes, otherwise the matshell is left pointing at freed memory
-      ! The matshell does not take ownership of the coefficients
+      ! Whether the matshell owns the coefficients is set by the caller in
+      ! mat_ctx%own_coefficients, which this doesn't change (PCAIR never gives it ownership)
 
       ! ~~~~~~
       type(mat_ctxtype), intent(inout)                              :: mat_ctx
@@ -1606,10 +1607,9 @@ end if
 
       mat_ctx%real_roots => coefficients(:, 1)
       mat_ctx%imag_roots => coefficients(:, 2)
-      ! Now because the context reset deallocates the coefficient pointer 
-      ! we want to make sure we don't leak memory, so we use pointer remapping here 
-      ! to turn the 2D coefficient pointer into a 1D that we can store in mat_ctx%coefficients
-      ! and then the deallocate on mat_ctx%coefficients should still delete all the memory
+      ! Pointer remapping turns the 2D coefficients into the 1D mat_ctx%coefficients
+      ! If the caller sets mat_ctx%own_coefficients (PCPFLAREINV), the context reset
+      ! deallocates through this pointer, which frees the whole 2D array
       mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
 
       if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled)) then

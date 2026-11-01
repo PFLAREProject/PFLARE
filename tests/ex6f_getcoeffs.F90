@@ -162,6 +162,9 @@ contains
             end do
             call PCAIRGetPolyCoeffs(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, ierr)
 
+            ! A matrix-free polynomial must use roots of a different size straight away
+            if (grow_newton_roots) call check_mf_uses_new_roots(pc, b, coeffs_levels, num_levels)
+
          ! Single level
          else if (pctype == PCPFLAREINV) then
             call PCPFLAREINVGetPolyCoeffs(pc, coeffs_pflareinv, ierr)
@@ -195,7 +198,80 @@ contains
 
    ! -----------------------------------------------------------------------
 
-   subroutine set_coeffs_maybe_grown(pc, petsc_level, which_inverse, coeffs, grow)
+   subroutine check_mf_uses_new_roots(pc, b, coeffs_levels, num_levels)
+#include <petsc/finclude/petscksp.h>
+      use petscksp
+#include "finclude/pflare.h"
+      use pflare
+
+   !  With matrix-free polynomials, checks the matshells use roots of a different
+   !  size straight away, without a setup in between. The roots are grown and scaled
+   !  by 1000, so PCApply must change; then the original roots are set back, so PCApply
+   !  must be what it was. A matshell left pointing at the freed roots would fail one
+   !  of these, whether or not that memory still holds the old values, as it would
+   !  repeat exactly the arithmetic of the roots it was left on
+   !  Both comparisons are against 100 eps, as the change is small here (~7e-4
+   !  relative): the top grid A_ff is diagonal, so most of PCApply doesn't depend on
+   !  the matrix-free polynomials
+
+      PC :: pc
+      Vec :: b
+      type(real_coeffs), dimension(:), allocatable :: coeffs_levels
+      PetscInt :: num_levels
+
+      PetscBool :: matrix_free
+      PetscInt :: petsc_level
+      PetscErrorCode :: ierr
+      Vec :: y_ref, y
+      PetscReal :: norm_ref, norm_diff
+      PetscScalar :: minus_one
+
+      minus_one = -1
+
+      call PCAIRGetMatrixFreePolys(pc, matrix_free, ierr)
+      if (.NOT. matrix_free) return
+
+      call VecDuplicate(b, y_ref, ierr)
+      call VecDuplicate(b, y, ierr)
+      call PCApply(pc, b, y_ref, ierr)
+      call VecNorm(y_ref, NORM_2, norm_ref, ierr)
+
+      ! Grown and scaled roots
+      do petsc_level = num_levels-1, 1, -1
+         call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, &
+                  .TRUE., 1000.0)
+      end do
+      call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, .TRUE., 1000.0)
+      call PCApply(pc, b, y, ierr)
+      call VecAXPY(y, minus_one, y_ref, ierr)
+      call VecNorm(y, NORM_2, norm_diff, ierr)
+      if (norm_diff <= 100 * epsilon(norm_ref) * norm_ref) then
+         print *, "PCApply did not change after setting different roots; the matrix-free polynomial is not using them", &
+                  norm_diff / norm_ref
+         error stop 1
+      end if
+
+      ! The original roots again
+      do petsc_level = num_levels-1, 1, -1
+         call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_AFF, coeffs_levels(petsc_level+1)%coeffs, .FALSE.)
+      end do
+      call set_coeffs_maybe_grown(pc, petsc_level, COEFFS_INV_COARSE, coeffs_levels(1)%coeffs, .FALSE.)
+      call PCApply(pc, b, y, ierr)
+      call VecAXPY(y, minus_one, y_ref, ierr)
+      call VecNorm(y, NORM_2, norm_diff, ierr)
+      if (norm_diff > 100 * epsilon(norm_ref) * norm_ref) then
+         print *, "PCApply changed after setting the original roots back", norm_diff / norm_ref
+         error stop 1
+      end if
+
+      call VecDestroy(y_ref, ierr)
+      call VecDestroy(y, ierr)
+
+   end subroutine check_mf_uses_new_roots
+
+   ! -----------------------------------------------------------------------
+
+   subroutine set_coeffs_maybe_grown(pc, petsc_level, which_inverse, coeffs, grow, scale)
 #include <petsc/finclude/petscksp.h>
       use petscksp
 #include "finclude/pflare.h"
@@ -203,13 +279,15 @@ contains
 
    !  Sets coeffs into PCAIR, or if grow is true and coeffs are Newton roots
    !  (2 columns), coeffs with two exact-zero roots appended, which changes the
-   !  number of rows PCAIR stores. Then checks PCAIR stores what was set
+   !  number of rows PCAIR stores, and the roots multiplied by scale if present.
+   !  Then checks PCAIR stores what was set
 
       PC :: pc
       PetscInt :: petsc_level
       integer :: which_inverse
       PetscReal, dimension(:,:), pointer :: coeffs
       logical :: grow
+      real, intent(in), optional :: scale
 
       PetscReal, dimension(:,:), pointer :: to_set => null(), stored => null()
       PetscErrorCode :: ierr
@@ -218,6 +296,7 @@ contains
          allocate(to_set(size(coeffs, 1) + 2, 2))
          to_set = 0
          to_set(1:size(coeffs, 1), :) = coeffs
+         if (present(scale)) to_set = scale * to_set
       else
          to_set => coeffs
       end if
