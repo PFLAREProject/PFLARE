@@ -49,7 +49,8 @@
         Can store the PCAIR polynomial coefficients for bands of the time
         step [factor^k, factor^(k+1)) with -dt_bands factor (with
         -pc_air_diag_update), restoring them rather than recomputing them
-        when the time step returns to a band, see dt_bands.h
+        when the time step returns to a band, see dt_bands.h;
+        -dt_bands_check errors if the bands did nothing
         Can build the PC from the Jacobian at a time step of -pc_setup_dt,
         e.g., the largest time step allowed (with -ts_adapt_dt_max), so
         that with -pc_air_diag_update the diagonal only ever increases

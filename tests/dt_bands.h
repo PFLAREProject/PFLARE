@@ -11,6 +11,9 @@
   valid for every band
   The number of coefficients restored has to match those stored by PCAIR, so this doesn't
   work with the newton inverse type, which can add a different number of extra roots
+
+  With -dt_bands_check this errors if the bands did nothing: if coefficients aren't restored,
+  if a new band doesn't compute its own, or if the update doesn't keep those restored
 */
 
 #include <petscksp.h>
@@ -37,6 +40,9 @@ typedef struct {
   DtBandEntry *entries[DT_BANDS_NUM];
   // How many times coefficients were computed and stored, and restored
   PetscInt     n_stored, n_restored;
+  // Do we check the bands, the last band stored and the band that should be in the PC
+  PetscBool    check;
+  PetscInt     last_stored, restored;
 } DtBands;
 
 static PetscErrorCode DtBandsCreate(DtBands *bands, PetscReal factor)
@@ -53,6 +59,10 @@ static PetscErrorCode DtBandsCreate(DtBands *bands, PetscReal factor)
   }
   bands->n_stored   = 0;
   bands->n_restored = 0;
+  bands->check       = PETSC_FALSE;
+  bands->last_stored = DT_BANDS_NONE;
+  bands->restored    = DT_BANDS_NONE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-dt_bands_check", &bands->check, NULL));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -78,11 +88,13 @@ static PetscErrorCode DtBandsPrepare(DtBands *bands, PetscReal dt)
       PetscCall(PCAIRSetPolyCoeffs(bands->pc, e->petsc_level, e->which_inverse, e->coeffs, e->rows, e->cols));
     }
     PetscCall(PCAIRSetReusePolyCoeffs(bands->pc, PETSC_TRUE));
-    bands->pending = DT_BANDS_NONE;
+    bands->pending  = DT_BANDS_NONE;
+    bands->restored = b;
     bands->n_restored++;
   } else {
     PetscCall(PCAIRSetReusePolyCoeffs(bands->pc, PETSC_FALSE));
-    bands->pending = b;
+    bands->pending  = b;
+    bands->restored = DT_BANDS_NONE;
   }
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -112,6 +124,44 @@ static PetscErrorCode DtBandsStoreEntry(DtBands *bands, PetscInt petsc_level, in
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Errors if a new band has stored the same coefficients as the last band stored
+static PetscErrorCode DtBandsCheckStored(DtBands *bands, PetscInt b)
+{
+  PetscInt  i;
+  PetscBool same = PETSC_TRUE;
+
+  PetscFunctionBeginUser;
+  if (!bands->check || bands->last_stored == DT_BANDS_NONE) PetscFunctionReturn(PETSC_SUCCESS);
+  PetscCheck(bands->n_entries[b] == bands->n_entries[bands->last_stored], PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Time step bands store different inverses");
+  for (i = 0; i < bands->n_entries[b] && same; i++) {
+    DtBandEntry *e = &bands->entries[b][i], *e_last = &bands->entries[bands->last_stored][i];
+    if (e->rows != e_last->rows || e->cols != e_last->cols) same = PETSC_FALSE;
+    else PetscCall(PetscArraycmp(e->coeffs, e_last->coeffs, e->rows * e->cols, &same));
+  }
+  PetscCheck(!same, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "A new time step band didn't compute new polynomial coefficients");
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Errors if the PC isn't using the coefficients of the band just restored
+static PetscErrorCode DtBandsCheckRestored(DtBands *bands)
+{
+  PetscInt i;
+
+  PetscFunctionBeginUser;
+  if (!bands->check || bands->restored == DT_BANDS_NONE) PetscFunctionReturn(PETSC_SUCCESS);
+  for (i = 0; i < bands->n_entries[bands->restored]; i++) {
+    DtBandEntry *e = &bands->entries[bands->restored][i];
+    PetscReal   *coeffs;
+    PetscInt     rows, cols;
+    PetscBool    same = PETSC_FALSE;
+
+    PetscCall(PCAIRGetPolyCoeffs(bands->pc, e->petsc_level, e->which_inverse, &coeffs, &rows, &cols));
+    if (rows == e->rows && cols == e->cols) PetscCall(PetscArraycmp(coeffs, e->coeffs, rows * cols, &same));
+    PetscCheck(same, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The polynomial coefficients restored for a time step band were not kept on petsc_level %" PetscInt_FMT, e->petsc_level);
+  }
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // Called after the PC setup, stores the coefficients for the pending band
 static PetscErrorCode DtBandsStore(DtBands *bands)
 {
@@ -125,7 +175,9 @@ static PetscErrorCode DtBandsStore(DtBands *bands)
     PetscCall(DtBandsStoreEntry(bands, level, COEFFS_INV_ACC));
   }
   PetscCall(DtBandsStoreEntry(bands, 0, COEFFS_INV_COARSE));
-  bands->pending = DT_BANDS_NONE;
+  PetscCall(DtBandsCheckStored(bands, bands->pending));
+  bands->last_stored = bands->pending;
+  bands->pending     = DT_BANDS_NONE;
   bands->n_stored++;
   PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -136,6 +188,7 @@ static PetscErrorCode DtBandsPreSolve(KSP ksp, Vec b, Vec x, void *ctx)
   PetscFunctionBeginUser;
   (void)ksp; (void)b; (void)x;
   PetscCall(DtBandsStore((DtBands *)ctx));
+  PetscCall(DtBandsCheckRestored((DtBands *)ctx));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -158,6 +211,7 @@ static PetscErrorCode DtBandsDestroy(DtBands *bands)
     PetscInt n_bands = 0;
     for (b = 0; b < DT_BANDS_NUM; b++) if (bands->n_entries[b] > 0) n_bands++;
     PetscCall(PetscPrintf(PETSC_COMM_WORLD, "dt bands: %" PetscInt_FMT " bands stored, coefficients computed %" PetscInt_FMT " times and restored %" PetscInt_FMT " times\n", n_bands, bands->n_stored, bands->n_restored));
+    if (bands->check) PetscCheck(n_bands > 1 && bands->n_restored > 0, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The time step bands were not used");
   }
   for (b = 0; b < DT_BANDS_NUM; b++) {
     for (i = 0; i < bands->n_entries[b]; i++) PetscCall(PetscFree(bands->entries[b][i].coeffs));

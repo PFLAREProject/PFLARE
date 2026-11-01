@@ -24,8 +24,8 @@
      Can error if the total number of linear iterations is above -max_total_its (default -1, don't check)
      Can check the final solution is within 1e-3 of the steady state u=1 with -verify_solution
      Can store the PCAIR polynomial coefficients for bands of the time step [factor^k, factor^(k+1))
-       with -dt_bands factor (with -pc_air_diag_update), restoring them rather than recomputing them 
-       when the time step returns to a band, see dt_bands.h
+       with -dt_bands factor (with -pc_air_diag_update), restoring them rather than recomputing them
+       when the time step returns to a band, see dt_bands.h; -dt_bands_check errors if the bands did nothing
      Can build the preconditioner before time stepping from the Jacobian at a time step of -pc_setup_dt,
        e.g., the largest time step allowed (with -ts_adapt_dt_max), so that with -pc_air_diag_update
        the diagonal only ever increases relative to the Pmat the hierarchy was built from
