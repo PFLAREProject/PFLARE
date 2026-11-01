@@ -426,6 +426,8 @@ or in Python with petsc4py:
      # Third solve - reproduces the preconditioner from the first solve
      ksp.solve(b, x)
 
+The coefficients set must have the same size as those PCAIR stores, except with the Newton basis (``-pc_air_inverse_type newton`` or ``newton_no_extra``). There the coefficients are the roots of the polynomial, an ``n x 2`` array of real and imaginary parts, and ``n`` can differ between setups: ``newton`` adds extra copies of roots for stability, and how many depends on the matrix. PCAIRSetPolyCoeffs therefore accepts any number of Newton roots, as long as there are 2 columns and at least the polynomial order + 1 rows, and resizes the storage in PCAIR. A matrix-free smoother uses the new roots straight away; an assembled one only when it is rebuilt by the next setup. Resizing invalidates any pointer previously returned by ``PCAIRGetPolyCoeffs`` in C. This also works when restoring coefficients before a diagonal update (``-pc_air_diag_update`` with ``-pc_air_reuse_poly_coeffs``), e.g., to switch between sets of coefficients saved at different time step sizes. An example is given in ``tests/ex6_setcoeffs_resize.c``.
+
 **With PCPFLAREINV:** As with PCAIR, this requires that the sparsity pattern of A is the same for the first and third solves, since the sparsity of the assembled approximate inverse depends on A. The polynomial coefficients can be saved and restored without a separate sparsity-reuse flag:
 
 in Fortran:

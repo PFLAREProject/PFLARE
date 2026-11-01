@@ -77,6 +77,7 @@ PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetDiagUpdate_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
+PETSC_EXTERN void PCAIRSetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size, int *err_code, PetscInt *min_rows);
 PETSC_EXTERN void PCAIRGetGridComplexity_c(PC *pc, PetscReal *complexity);
 PETSC_EXTERN void PCAIRGetOperatorComplexity_c(PC *pc, PetscReal *complexity);
 PETSC_EXTERN void PCAIRGetCycleComplexity_c(PC *pc, PetscReal *complexity);
@@ -1416,7 +1417,8 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC pc, PetscBool *input_bool)
 
   Note:
   This routine returns a pointer into the `PCAIR` object itself, valid only until the next `PCSetUp()` or
-  `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
+  `PCReset()` call, or until `PCAIRSetPolyCoeffs()` changes the number of rows for the same petsc_level and
+  which_inverse; copy the coefficients yourself if you need to save or restore them later. This differs from
   the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
   It is an error to call this before `PCSetUp()`, with petsc_level outside [0, number of levels - 1], or for an
@@ -2937,24 +2939,38 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 
   Note:
   This routine copies the data from coeffs_ptr into the `PCAIR` object; the caller's array is not referenced after
-  this call and may be freed or modified. row_size and col_size must match the sizes returned by
-  `PCAIRGetPolyCoeffs()` for the same petsc_level and which_inverse, which must also be valid there.
+  this call and may be freed or modified. petsc_level and which_inverse must be valid for `PCAIRGetPolyCoeffs()`.
+  row_size and col_size must match the sizes it returns, except for the Newton types described below.
 
-  For the Newton types the coefficients are the real and imaginary parts of the roots. Only roots that are exactly
-  zero are skipped when the polynomial is applied or built; any non-zero root, however small, is used.
+  For the Newton types (`PFLAREINV_NEWTON` and `PFLAREINV_NEWTON_NO_EXTRA`) the coefficients are the real and
+  imaginary parts of the roots, in 2 columns. Only roots that are exactly zero are skipped when the polynomial is
+  applied or built; any non-zero root, however small, is used. The number of roots can differ between setups (the
+  extra roots `PFLAREINV_NEWTON` adds for stability depend on the matrix), so for these types row_size may differ
+  from the number of rows stored, as long as col_size is 2 and row_size is at least the polynomial order + 1. The
+  storage in `PCAIR` is then reallocated, which invalidates any pointer previously returned by
+  `PCAIRGetPolyCoeffs()` for this petsc_level and which_inverse.
+
+  A matrix-free polynomial inverse uses the new coefficients straight away. An assembled one keeps using the old
+  coefficients until it is rebuilt by the next setup, which happens with the new coefficients if
+  `PCAIRSetReusePolyCoeffs()` has been set.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 {
    PetscReal *coeffs_internal;
-   PetscInt   rows_internal, cols_internal;
+   PetscInt   rows_internal, cols_internal, min_rows;
+   int        err_code;
 
    PetscFunctionBegin;
+   // Errors if there are no coefficients stored for this level and inverse
    PetscCall(PCAIRGetPolyCoeffsPointer_Private(pc, petsc_level, which_inverse, &coeffs_internal, &rows_internal, &cols_internal));
-   PetscCheck(row_size == rows_internal && col_size == cols_internal, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT " but PCAIR stores %" PetscInt_FMT " x %" PetscInt_FMT " for which_inverse %d on petsc_level %" PetscInt_FMT, row_size, col_size, rows_internal, cols_internal, which_inverse, petsc_level);
    PetscAssertPointer(coeffs_ptr, 4);
-   PetscCall(PetscArraycpy(coeffs_internal, coeffs_ptr, rows_internal * cols_internal));
+   PetscCheck(row_size > 0 && col_size > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT ", sizes must be positive", row_size, col_size);
+   // Copies in, reallocating the internal storage if a Newton polynomial is given a different number of roots
+   PCAIRSetPolyCoeffs_c(&pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size, &err_code, &min_rows);
+   PetscCheck(err_code != 1, PETSC_COMM_SELF, PETSC_ERR_PLIB, "PCAIR stores no polynomial coefficients for which_inverse %d on petsc_level %" PetscInt_FMT, which_inverse, petsc_level);
+   PetscCheck(err_code == 0, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT " but PCAIR stores %" PetscInt_FMT " x %" PetscInt_FMT " for which_inverse %d on petsc_level %" PetscInt_FMT "; only the Newton inverse types can change the number of rows, with 2 columns and at least %" PetscInt_FMT " rows", row_size, col_size, rows_internal, cols_internal, which_inverse, petsc_level, min_rows);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

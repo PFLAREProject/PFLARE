@@ -654,6 +654,19 @@ run_tests_no_load_short_serial:
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type wjacobi
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type l1jacobi
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, rebuilt with reuse sparsity"
+	./ex6_setcoeffs_resize -pc_air_reuse_sparsity
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, rebuilt with reuse sparsity, matrix-free"
+	./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_matrix_free_polys
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, rebuilt with a diagonal update, Acc and coarse grid"
+	./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, rebuilt with a diagonal update, Acc and coarse grid, matrix-free"
+	./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, newton_no_extra, diagonally scaled, matrix-free"
+	./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_inverse_type newton_no_extra -pc_air_diag_scale_polys -pc_air_matrix_free_polys
+	@echo "Test PCAIR set polynomial coefficients rejects a different number of rows for the Arnoldi basis"
+	./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_inverse_type arnoldi
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
@@ -1172,6 +1185,11 @@ else
 	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
 	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots in parallel"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_inverse_type arnoldi
 	@echo "Test block Jacobi with PCPFLAREINV sub-blocks with fewer rows than the polynomial order + 1 in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 2 -da_grid_y 4 -pc_type bjacobi -sub_pc_type pflareinv -sub_pc_pflareinv_type newton
 #

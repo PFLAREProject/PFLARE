@@ -979,6 +979,38 @@ module pcair_c_fortran_bindings
       end if
 
    end subroutine PCAIRGetPolyCoeffs_c      
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetPolyCoeffs_c(pc_ptr, petsc_level, which_inverse, &
+      coeffs_ptr, row_size, col_size, err_code, min_rows) bind(C, name='PCAIRSetPolyCoeffs_c')
+
+      ! Copies the row_size x col_size (column major) array in coeffs_ptr into the PC
+      ! The C wrapper turns a non-zero err_code into a PETSc error
+      ! See PCAIRSetPolyCoeffsInternal for err_code, min_rows and when the
+      ! internal storage is reallocated
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)         :: petsc_level
+      integer(c_int), value, intent(in)   :: which_inverse 
+      type(c_ptr), value, intent(in)      :: coeffs_ptr
+      PetscInt, value, intent(in)         :: row_size, col_size
+      integer(c_int), intent(out)         :: err_code
+      PetscInt, intent(out)               :: min_rows
+
+      type(tPC)                              :: pc
+      PetscReal, dimension(:,:), pointer     :: coeffs
+      integer                                :: err_code_int
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+
+      call c_f_pointer(coeffs_ptr, coeffs, [row_size, col_size])
+      call PCAIRSetPolyCoeffsInternal(pc, petsc_level, int(which_inverse), coeffs, err_code_int, min_rows)
+      err_code = int(err_code_int, c_int)
+
+   end subroutine PCAIRSetPolyCoeffs_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------   
 
