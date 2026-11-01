@@ -39,6 +39,8 @@ tests/ex6
 tests/ex6_cf_splitting
 tests/ex6_getcoeffs
 tests/ex6_setcoeffs_resize
+tests/ex6_setcoeffs_replay
+tests/ex6_newton_roots_rebuild
 tests/ex6_two_airg
 tests/ex6f
 tests/ex6f_getcoeffs

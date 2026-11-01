@@ -176,6 +176,8 @@ export TEST_TARGETS = ex12f \
 		  ex6f_getcoeffs \
 		  ex6_getcoeffs \
 		  ex6_setcoeffs_resize \
+		  ex6_setcoeffs_replay \
+		  ex6_newton_roots_rebuild \
 		  ex6f_reuse_amount \
 		  ex6 \
 		  adv_1d \

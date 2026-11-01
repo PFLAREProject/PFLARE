@@ -667,6 +667,19 @@ run_tests_no_load_short_serial:
 	./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_inverse_type newton_no_extra -pc_air_diag_scale_polys -pc_air_matrix_free_polys
 	@echo "Test PCAIR set polynomial coefficients rejects a different number of rows for the Arnoldi basis"
 	./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_inverse_type arnoldi
+	@echo "Test PCAIR replaying recorded Newton roots whose number changes between Pmats, rebuilt with reuse sparsity"
+	./ex6_setcoeffs_replay -c_values 0.5,2,8,50 -alpha 1 -pc_air_poly_order 16 -require_resize -pc_air_reuse_sparsity
+	@echo "Test PCAIR replaying recorded Newton roots whose number changes between Pmats, diagonal update, matrix-free, Acc and AIRG dropped"
+	./ex6_setcoeffs_replay -c_values 0.5,2,8,50 -alpha 1 -pc_air_poly_order 16 -require_resize -pc_air_diag_update \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_c_poly_order 16 -pc_air_strong_r_threshold 0.1
+	@echo "Test rebuilding Newton polynomial inverses from more or fewer roots - matrix-free"
+	./ex6_newton_roots_rebuild -pc_pflareinv_matrix_free
+	./ex6_newton_roots_rebuild -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 1
+	@echo "Test rebuilding Newton polynomial inverses from more or fewer roots - assembled with fixed sparsity"
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 1
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 3
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 4 -pc_pflareinv_sparsity_order 0
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
@@ -1190,6 +1203,14 @@ else
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse \
 	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_inverse_type arnoldi
+	@echo "Test PCAIR replaying recorded Newton roots whose number changes between Pmats in parallel"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -c_values 0.5,2,8,50 -alpha 1 -pc_air_poly_order 16 -require_resize -pc_air_reuse_sparsity \
+	 -pc_air_processor_agglom -pc_air_process_eq_limit 50 -pc_air_subcomm -pc_air_coarsest_subcomm
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -c_values 0.5,2,8,50 -alpha 1 -pc_air_poly_order 16 -require_resize -pc_air_diag_update \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 16
+	@echo "Test rebuilding Newton polynomial inverses from more or fewer roots in parallel"
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_matrix_free
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 1
 	@echo "Test block Jacobi with PCPFLAREINV sub-blocks with fewer rows than the polynomial order + 1 in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 2 -da_grid_y 4 -pc_type bjacobi -sub_pc_type pflareinv -sub_pc_pflareinv_type newton
 #
