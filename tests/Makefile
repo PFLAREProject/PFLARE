@@ -351,21 +351,6 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
 	@echo ""
-	@echo "Test AIRG with a diagonal update over decades of the diagonal, with ffc smoothing"
-	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -max_extra_its 5
-	@echo "Test AIRG with a diagonal update with matrix-free smoothing"
-	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_matrix_free_polys \
-	 -pc_air_coarsest_matrix_free_polys -max_extra_its 5
-	@echo "Test AIRG with a diagonal update keeping and recomputing the polynomial coefficients"
-	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
-	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
-	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
-	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
-	 -check_reuse
-	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
-	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
-	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
 	@echo "Test AIRG with a few steps of adaptive backward-Euler TS with upwind FD advection and a diagonal update"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_steps 10 -pc_air_diag_update
@@ -373,11 +358,6 @@ run_tests_no_load_short_serial:
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
 	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
-	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
-	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
-	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, stored coefficients for bands of the time step and a different number of Newton roots in each band"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
@@ -454,17 +434,6 @@ run_tests_no_load_short_serial:
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
 	 -pc_air_diag_update
-	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step"
-	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
-	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
-	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
-	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
-	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
-	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
@@ -1023,6 +992,21 @@ run_tests_no_load_serial:
 	@echo "Test AIRG with a diagonal update with F point smoothing and a symmetric hierarchy"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL)
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_symmetric
+	@echo "Test AIRG with a diagonal update over decades of the diagonal, with ffc smoothing"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -max_extra_its 5
+	@echo "Test AIRG with a diagonal update with matrix-free smoothing"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -max_extra_its 5
+	@echo "Test AIRG with a diagonal update keeping and recomputing the polynomial coefficients"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
+	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
+	 -check_reuse
+	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
+	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, rebuilding, freezing and updating the PC"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_time 3 -verify_solution
@@ -1049,6 +1033,23 @@ run_tests_no_load_serial:
 	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
 	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
 	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets"
@@ -1203,41 +1204,19 @@ ifeq ($(PETSC_HAVE_MPIUNI),1)
 else
 #
 	@echo ""
-	@echo "Test AIRG with a diagonal update in parallel, with processor agglomeration"
-	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
-	 -pc_air_process_eq_limit 400 -max_extra_its 5
-	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
-	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
-	@echo "Test AIRG with a diagonal update keeping and recomputing the polynomial coefficients in parallel"
+	@echo "Test AIRG with a diagonal update keeping the polynomial coefficients in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
 	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
-	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
 	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
-	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
-	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
-	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, stored coefficients for bands of the time step and a different number of Newton roots in each band in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
 	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
 	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
 	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20 \
-	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
-	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step in parallel"
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
-	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
-	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
-	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
-	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
-	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
 	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 #
 	@echo ""
@@ -1732,6 +1711,13 @@ else
 	@echo ""
 	@echo "Test AIRG with a diagonal update in parallel with F point smoothing, with processor agglomeration"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_process_eq_limit 400
+	@echo "Test AIRG with a diagonal update in parallel, with processor agglomeration"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
+	 -pc_air_process_eq_limit 400 -max_extra_its 5
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
+	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
+	@echo "Test AIRG with a diagonal update recomputing the polynomial coefficients in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update -max_total_its 1700
@@ -1752,6 +1738,23 @@ else
 	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
 	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
 	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets in parallel"
