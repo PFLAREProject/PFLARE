@@ -46,6 +46,10 @@
         with -print_steps
         Can error if the total number of linear iterations is above
         -max_total_its (default -1, don't check)
+        Can build the PC from the Jacobian at a time step of -pc_setup_dt,
+        e.g., the largest time step allowed (with -ts_adapt_dt_max), so
+        that with -pc_air_diag_update the diagonal only ever increases
+        relative to the Pmat the hierarchy was built from
         When -write_vtk is also set, one VTU is written per
         TS step (basename dg_solution_ts_XXXX).
 
@@ -2113,6 +2117,15 @@ int main(int argc, char **argv)
        a separate matrix. IFunctionAdv subtracts the
        pre-shift contribution back out so the residual is unchanged. */
     PetscCall(TSGetTimeStep(ts, &dt));
+    /* With -pc_setup_dt the preconditioner is built from the Jacobian at that time step,
+       e.g., the largest time step allowed (with -ts_adapt_dt_max), so that with -pc_air_diag_update
+       the diagonal only ever increases relative to the Pmat the hierarchy was built from.
+       The first step then changes the Jacobian to its own time step */
+    {
+      PetscReal pc_setup_dt = -1.0;
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-pc_setup_dt", &pc_setup_dt, NULL));
+      if (pc_setup_dt > 0) dt = pc_setup_dt;
+    }
     tsctx.shift_pre = 1.0 / dt;
     if (tsctx.M) PetscCall(MatAXPY(A, tsctx.shift_pre, tsctx.M, SUBSET_NONZERO_PATTERN));
     else PetscCall(MatShift(A, tsctx.shift_pre));

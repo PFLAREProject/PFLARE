@@ -23,6 +23,9 @@
      Can print the dt and the iteration count of every step with -print_steps
      Can error if the total number of linear iterations is above -max_total_its (default -1, don't check)
      Can check the final solution is within 1e-3 of the steady state u=1 with -verify_solution
+     Can build the preconditioner before time stepping from the Jacobian at a time step of -pc_setup_dt,
+       e.g., the largest time step allowed (with -ts_adapt_dt_max), so that with -pc_air_diag_update
+       the diagonal only ever increases relative to the Pmat the hierarchy was built from
 
      The preconditioner behaviour across steps is controlled by standard options:
        rebuilt every time J changes : the default
@@ -144,7 +147,7 @@ int main(int argc, char **argv)
   Vec               x;
   AppCtx            ctx;
   PetscInt          steps, rejects, its, max_total_its = -1;
-  PetscReal         theta = PETSC_PI / 4.0;
+  PetscReal         theta = PETSC_PI / 4.0, pc_setup_dt = -1.0;
   PetscBool         verify_solution = PETSC_FALSE;
   TSConvergedReason ts_reason;
   PetscLogDouble    time_start, time_end;
@@ -157,6 +160,7 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-max_total_its", &max_total_its, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-verify_solution", &verify_solution, NULL));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-pc_setup_dt", &pc_setup_dt, NULL));
   PetscCheck(theta <= PETSC_PI / 2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
 
   PetscCall(DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE, DMDA_STENCIL_STAR, 11, 11, PETSC_DECIDE, PETSC_DECIDE, 1, 1, NULL, NULL, &da));
@@ -191,6 +195,20 @@ int main(int argc, char **argv)
 
   // Zero initial condition
   PetscCall(VecSet(x, 0.0));
+
+  // Build the preconditioner from the Jacobian at pc_setup_dt
+  // The first step then changes the Jacobian to its own time step
+  if (pc_setup_dt > 0) {
+    SNES snes;
+    KSP  ksp;
+    PetscCall(IJacobian(ts, 0.0, x, NULL, 1.0 / pc_setup_dt, J, J, &ctx));
+    PetscCall(TSSetUp(ts));
+    PetscCall(TSGetSNES(ts, &snes));
+    PetscCall(SNESSetUp(snes));
+    PetscCall(SNESGetKSP(snes, &ksp));
+    PetscCall(KSPSetOperators(ksp, J, J));
+    PetscCall(KSPSetUp(ksp));
+  }
   PetscCall(PetscTime(&time_start));
   PetscCall(TSSolve(ts, x));
   PetscCall(PetscTime(&time_end));
