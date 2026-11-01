@@ -241,7 +241,7 @@ _PCAIR_OPTION_DOCS = {
     'coarsest_subcomm':             ("whether to use a subcommunicator on the coarse grid", "-pc_air_coarsest_subcomm", "False"),
     'reuse_sparsity':               ("whether to store temporary data to allow fast setup with reuse", "-pc_air_reuse_sparsity", "False"),
     'reuse_amount':                 ("how much data is stored when reuse sparsity is enabled: 1=CF splitting only, 2=CF splitting + SpGEMM sparsity, 3=everything", "-pc_air_reuse_amount", "3"),
-    'reuse_poly_coeffs':            ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse", "-pc_air_reuse_poly_coeffs", "False"),
+    'reuse_poly_coeffs':            ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse or a diagonal update", "-pc_air_reuse_poly_coeffs", "False"),
     'poly_coeffs':                  ("the polynomial inverse coefficients for a given inverse (a WhichInverseType selector)", "N/A", "N/A"),
     'diag_update':                  ("whether a change to the Pmat with the same nonzero pattern is treated as a change to its diagonal only, updating rather than rebuilding the hierarchy", "-pc_air_diag_update", "False"),
 }

@@ -23,6 +23,8 @@
      Can check with -check_reuse that, when -pc_air_reuse_sparsity is also set, the update KSP gives
        exactly the iteration counts of a KSP with only reuse sparsity, ie reuse takes priority over the update
 
+     Can check with -check_poly_coeffs that the polynomial coefficients of the top grid A_ff inverse never
+       change during the updates if -pc_air_reuse_poly_coeffs is set, and do change if it isn't
      The checks always done are:
        - applying the same D_g twice gives the same iteration count
        - after the sweep, going back to the Pmat L gives the iteration count of the hierarchy built from L
@@ -126,6 +128,34 @@ static PetscErrorCode CheckMatApply(PC pc, Vec b)
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// Copies the polynomial coefficients of the top grid A_ff inverse
+static PetscErrorCode CopyTopCoeffs(PC pc, PetscReal **coeffs, PetscInt *rows, PetscInt *cols)
+{
+  PetscReal *pc_coeffs;
+  PetscInt   num_levels;
+
+  PetscFunctionBeginUser;
+  PetscCall(PCAIRGetNumLevels(pc, &num_levels));
+  PetscCall(PCAIRGetPolyCoeffs(pc, num_levels - 1, COEFFS_INV_AFF, &pc_coeffs, rows, cols));
+  PetscCall(PetscMalloc1((*rows) * (*cols), coeffs));
+  PetscCall(PetscArraycpy(*coeffs, pc_coeffs, (*rows) * (*cols)));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Checks whether the polynomial coefficients of the top grid A_ff inverse are bitwise identical to the given ones
+static PetscErrorCode SameTopCoeffs(PC pc, const PetscReal *coeffs, PetscInt rows, PetscInt cols, PetscBool *same)
+{
+  PetscReal *pc_coeffs;
+  PetscInt   num_levels, pc_rows, pc_cols, i;
+
+  PetscFunctionBeginUser;
+  PetscCall(PCAIRGetNumLevels(pc, &num_levels));
+  PetscCall(PCAIRGetPolyCoeffs(pc, num_levels - 1, COEFFS_INV_AFF, &pc_coeffs, &pc_rows, &pc_cols));
+  *same = (PetscBool)(pc_rows == rows && pc_cols == cols);
+  for (i = 0; *same && i < rows * cols; i++) *same = (PetscBool)(pc_coeffs[i] == coeffs[i]);
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // Solves and returns the iteration count, erroring if we didn't converge
 static PetscErrorCode Solve(KSP ksp, Vec b, Vec x, PetscInt *its)
 {
@@ -151,7 +181,9 @@ int main(int argc, char **argv)
   PetscInt  max_extra_its = -1;
   PetscReal alpha = 0.0, c_base = 0.0;
   PetscReal c_values[16] = {0.0, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3};
-  PetscBool print_frozen = PETSC_FALSE, check_reuse = PETSC_FALSE, flg;
+  PetscBool print_frozen = PETSC_FALSE, check_reuse = PETSC_FALSE, check_poly_coeffs = PETSC_FALSE, reuse_poly_coeffs = PETSC_FALSE, same = PETSC_FALSE, flg;
+  PetscReal *base_coeffs = NULL;
+  PetscInt  base_rows = 0, base_cols = 0;
 
   PetscCall(PetscInitialize(&argc, &argv, (char *)0, help));
   PCRegister_PFLARE();
@@ -162,6 +194,7 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-max_extra_its", &max_extra_its, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_frozen", &print_frozen, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_reuse", &check_reuse, NULL));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_poly_coeffs", &check_poly_coeffs, NULL));
   PetscCall(PetscOptionsGetRealArray(NULL, NULL, "-c_values", c_values, &n_c, &flg));
   if (!flg) n_c = 8;
 
@@ -215,6 +248,9 @@ int main(int argc, char **argv)
 
   // The iteration count with the hierarchy built from L
   PetscCall(Solve(ksp_update, b, x, &its_base));
+  // The polynomial coefficients from the hierarchy built from L
+  PetscCall(PCAIRGetReusePolyCoeffs(pc_update, &reuse_poly_coeffs));
+  if (check_poly_coeffs) PetscCall(CopyTopCoeffs(pc_update, &base_coeffs, &base_rows, &base_cols));
 
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Iterations with the hierarchy built from L: %" PetscInt_FMT "\n", its_base));
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12s %8s %8s %8s\n", "c", "fresh", "update", print_frozen ? "frozen" : ""));
@@ -233,6 +269,11 @@ int main(int argc, char **argv)
     PetscCall(MatDiagonalSet(A_update, d_vec, ADD_VALUES));
     PetscCall(Solve(ksp_update, b, x, &its_update));
     PetscCall(CheckMatApply(pc_update, b));
+    // With reuse the update keeps the coefficients, without it they are recomputed for the new diagonal
+    if (check_poly_coeffs && c_values[i_loc] != 0.0) {
+      PetscCall(SameTopCoeffs(pc_update, base_coeffs, base_rows, base_cols, &same));
+      PetscCheck(same == reuse_poly_coeffs, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The polynomial coefficients %s after an update with -pc_air_reuse_poly_coeffs %s", same ? "did not change" : "changed", reuse_poly_coeffs ? "set" : "not set");
+    }
     // Setting the same values again has to give the same answer
     PetscCall(MatCopy(L, A_update, SAME_NONZERO_PATTERN));
     PetscCall(MatDiagonalSet(A_update, d_vec, ADD_VALUES));
@@ -270,6 +311,7 @@ int main(int argc, char **argv)
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Iterations after going back to L: %" PetscInt_FMT ", with a new Pmat: %" PetscInt_FMT "\n", its_zero, its_new));
 
   PetscCall(MatDestroy(&A_new));
+  PetscCall(PetscFree(base_coeffs));
   PetscCall(KSPDestroy(&ksp_fresh));
   PetscCall(KSPDestroy(&ksp_update));
   PetscCall(KSPDestroy(&ksp_frozen));
