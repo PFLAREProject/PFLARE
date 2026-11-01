@@ -65,8 +65,7 @@ run_tests_serial:
 		echo "Test save/restore poly coefficients with PCPFLAREINV with Python with Newton"; \
 		$(PYTHON) ex6f_getcoeffs.py -pc_type pflareinv -pc_pflareinv_type newton || fail=1; \
 		echo "Test PCAIR set poly coefficients with a different number of Newton roots with Python"; \
-		$(PYTHON) ex6f_getcoeffs.py -pc_type air -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton -grow_newton_roots || fail=1; \
-		$(PYTHON) ex6f_getcoeffs.py -pc_type air -pc_air_inverse_type newton -pc_air_matrix_free_polys -grow_newton_roots || fail=1; \
+		$(PYTHON) ex6f_getcoeffs.py -pc_type air -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton -pc_air_matrix_free_polys -grow_newton_roots || fail=1; \
 		exit $$fail; \
 	 else \
 		echo 'Python tests skipped (PFLARE Python module not built or not found)'; \

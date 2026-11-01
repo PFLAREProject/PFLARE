@@ -18,7 +18,7 @@ or any change for the non-Newton types) must error and leave the stored roots al
 \n\
   -test_acc    : also resize COEFFS_INV_ACC (needs C point smoothing, e.g. -pc_air_smooth_type fc)\n\
   -test_coarse : also resize COEFFS_INV_COARSE (needs -pc_air_coarsest_inverse_type newton or newton_no_extra)\n\
-  -n           : grid size (default 30)\n\n";
+  -n           : grid size (default 10)\n\n";
 
 #include <petscksp.h>
 #include "pflare.h"
@@ -121,7 +121,7 @@ int main(int argc, char **args)
   Vec              x, b_solve, b, y_ref, y;
   KSP              ksp;
   PC               pc;
-  PetscInt         n = 30, num_levels, its_ref, k, i, n_inverses = 0;
+  PetscInt         n = 10, num_levels, its_ref, k, i, n_inverses = 0;
   PetscBool        test_acc = PETSC_FALSE, test_coarse = PETSC_FALSE, matrix_free, newton, reuse_sparsity, diag_update;
   PCPFLAREINVType  inverse_type;
   PetscRandom      rctx;

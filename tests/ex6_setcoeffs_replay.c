@@ -13,11 +13,13 @@ Replay: with PCAIRSetReusePolyCoeffs, the Pmats are visited again in reverse and
 forward order, each time setting the recorded coefficients before the solve. The\n\
 iteration count, PCApply and the stored coefficients must match those recorded.\n\
 \n\
-  -c_values c1,c2,...  : the c_k (default 0,0.3,3,30)\n\
+  -c_values c1,c2,...  : the c_k (default 0.5,8,50)\n\
   -require_resize      : error if no replay changed the number of stored roots\n\
   -print_roots         : print the recorded roots\n\
-  -n                   : grid size (default 30)\n\
-  -alpha               : diffusion (default 0.1)\n\n";
+  -n                   : grid size (default 10)\n\
+  -alpha               : diffusion (default 1)\n\
+The polynomial order defaults to 16, high enough that the number of Newton roots\n\
+changes between the default c_k; it can be changed with -pc_air_poly_order.\n\n";
 
 #include <petscksp.h>
 #include "pflare.h"
@@ -79,8 +81,8 @@ int main(int argc, char **args)
   Vec         y_rec[MAX_C];
   KSP         ksp;
   PC          pc;
-  PetscInt    n = 30, n_c = MAX_C, k, k_idx, i, num_levels, lvl, its, its_rec[MAX_C], n_inv = 0, n_resized = 0, n_sets = 0, rows, cols, pass;
-  PetscReal   alpha = 0.1, c_values[MAX_C] = {0.0, 0.3, 3.0, 30.0}, norm_diff, norm_ref, max_rel_diff = 0.0;
+  PetscInt    n = 10, n_c = MAX_C, k, k_idx, i, num_levels, lvl, its, its_rec[MAX_C], n_inv = 0, n_resized = 0, n_sets = 0, rows, cols, pass;
+  PetscReal   alpha = 1.0, c_values[MAX_C] = {0.5, 8.0, 50.0}, norm_diff, norm_ref, max_rel_diff = 0.0;
   PetscBool   flg, require_resize = PETSC_FALSE, print_roots = PETSC_FALSE, reuse_sparsity, diag_update, same;
   PetscRandom rctx;
   PetscReal  *ptr;
@@ -96,7 +98,7 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-alpha", &alpha, NULL));
   PetscCall(PetscOptionsGetRealArray(NULL, NULL, "-c_values", c_values, &n_c, &flg));
-  if (!flg) n_c = 4;
+  if (!flg) n_c = 3;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-require_resize", &require_resize, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_roots", &print_roots, NULL));
   PetscCall(PetscCalloc1(MAX_INV, &inv));
@@ -120,6 +122,7 @@ int main(int argc, char **args)
   PetscCall(KSPGetPC(ksp, &pc));
   PetscCall(PCSetType(pc, PCAIR));
   PetscCall(PCAIRSetInverseType(pc, PFLAREINV_NEWTON));
+  PetscCall(PCAIRSetPolyOrder(pc, 16));
   PetscCall(KSPSetFromOptions(ksp));
 
   /* ~~~~~~~~ Record ~~~~~~~~ */

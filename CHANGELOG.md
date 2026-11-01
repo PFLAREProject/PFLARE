@@ -15,8 +15,7 @@ for earlier changes please see the git history.
 - `PCAIRSetPolyCoeffs()` (C, Fortran and Python) now accepts a different number
   of roots than PCAIR stores for the Newton inverse types (`newton`,
   `newton_no_extra`), whose number of roots can differ between setups; the
-  storage is resized and matrix-free smoothers use the new roots immediately.
-  Other size changes are still an error; see `docs/reuse.md`
+  storage is resized and matrix-free smoothers use the new roots immediately
 - Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
   inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
   wherever the other Jacobi types can, including the CR splitting relaxation
