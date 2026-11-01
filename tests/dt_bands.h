@@ -9,8 +9,8 @@
   keeps them (PCAIRSetReusePolyCoeffs), so it doesn't compute any coefficients
   The hierarchy is never rebuilt by a diagonal update, so the stored coefficients stay
   valid for every band
-  The number of coefficients restored has to match those stored by PCAIR, so this doesn't
-  work with the newton inverse type, which can add a different number of extra roots
+  With the newton inverse type each band can have a different number of extra roots, which
+  PCAIRSetPolyCoeffs resizes for
 
   With -dt_bands_check this errors if the bands did nothing: if coefficients aren't restored,
   if a new band doesn't compute its own, or if the update doesn't keep those restored
