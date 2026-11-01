@@ -209,12 +209,16 @@ int main(int argc, char **args)
      old (freed) roots it would still apply the original polynomial
      All the roots are scaled as well as two being added, as when the polynomial is an exact
      inverse (e.g. a diagonal A_ff with diagonal scaling) one factor of the Newton product is
-     zero and adding roots alone would not change the result */
+     zero and adding roots alone would not change the result. The scaling is large, as when
+     the polynomial is close to an exact inverse a small change to the roots barely changes it
+     (scaling by 1.5 changed PCApply by only 4e-5 here, which single precision can't resolve
+     against a threshold of 1e3 eps). Matrix-free shells left on the old roots would give
+     exactly the original PCApply, so the threshold doesn't depend on the precision */
   if (newton && matrix_free) {
     for (k = 0; k < n_inverses; k++) {
       PetscReal *changed;
       PetscCall(PetscMalloc1((rows[k] + 2) * cols[k], &changed));
-      for (i = 0; i < (rows[k] + 2) * cols[k]; i++) changed[i] = 1.5 * grown[k][i];
+      for (i = 0; i < (rows[k] + 2) * cols[k]; i++) changed[i] = 10.0 * grown[k][i];
       /* Two extra real roots, repeating the first root's real part */
       changed[rows[k]] = changed[rows[k] + 1] = orig[k][0];
       PetscCall(PCAIRSetPolyCoeffs(pc, level[k], which[k], changed, rows[k] + 2, cols[k]));
@@ -226,7 +230,7 @@ int main(int argc, char **args)
       PetscCall(VecAXPY(y, -1.0, y_ref));
       PetscCall(VecNorm(y, NORM_2, &norm_diff));
       PetscCall(VecNorm(y_ref, NORM_2, &norm_ref));
-      PetscCheck(norm_diff > 1e3 * PETSC_MACHINE_EPSILON * norm_ref, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "PCApply did not change after setting different roots; the matrix-free polynomial is not using them");
+      PetscCheck(norm_diff > 1e-3 * norm_ref, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "PCApply did not change after setting different roots (relative change %g); the matrix-free polynomial is not using them", (double)(norm_diff / norm_ref));
     }
     /* Back to the original roots, without a setup */
     for (k = 0; k < n_inverses; k++) PetscCall(PCAIRSetPolyCoeffs(pc, level[k], which[k], orig[k], rows[k], cols[k]));
