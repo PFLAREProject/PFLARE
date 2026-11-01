@@ -83,6 +83,66 @@ if not (is_air or is_pflareinv):
         print(f"Unexpected PC type '{pc_type}'; expected 'air' or 'pflareinv'")
     sys.exit(1)
 
+# With -grow_newton_roots, solve 3 restores each Newton polynomial (2 columns)
+# with two exact-zero roots appended. They are skipped when applying, so solve 3
+# must still reproduce solve 1, while the number of rows PCAIR stores changes.
+# After solve 3 the original roots are set back, shrinking the stored arrays
+grow_newton_roots = OptDB.getBool('grow_newton_roots', False)
+
+
+def set_air_coeffs(petsc_level, which_inverse, coeffs, grow, scale=1.0):
+    to_set = coeffs
+    if grow and coeffs.shape[1] == 2:
+        to_set = np.zeros((coeffs.shape[0] + 2, 2), dtype=coeffs.dtype)
+        to_set[:coeffs.shape[0], :] = scale * coeffs
+    pflare.pcair_set_poly_coeffs(pc, petsc_level, which_inverse, to_set)
+    stored = pflare.pcair_get_poly_coeffs(pc, petsc_level, which_inverse)
+    if stored.shape != to_set.shape or not np.array_equal(stored, to_set):
+        print(f"FAIL: PCAIR stores {stored.shape} coefficients, set {to_set.shape}")
+        sys.exit(1)
+
+
+def check_mf_uses_new_roots(num_levels, b):
+    # With matrix-free polynomials, check the matshells use roots of a different
+    # size straight away, without a setup in between. The roots are grown and
+    # scaled by 1000, so PCApply must change; then the original roots are set
+    # back, so PCApply must be what it was. A matshell left pointing at the freed
+    # roots would fail one of these, whether or not that memory still holds the
+    # old values, as it would repeat exactly the arithmetic of the roots it was
+    # left on. Both comparisons are against 100 eps, as the change is small here
+    # (~7e-4 relative): the top grid A_ff is diagonal, so most of PCApply doesn't
+    # depend on the matrix-free polynomials
+    if not pflare.pcair_get_matrix_free_polys(pc):
+        return
+    tol = 100 * np.finfo(PETSc.RealType).eps
+    y_ref = b.duplicate()
+    y = b.duplicate()
+    pc.apply(b, y_ref)
+    norm_ref = y_ref.norm()
+
+    for petsc_level in range(num_levels - 1, 0, -1):
+        set_air_coeffs(petsc_level, pflare.COEFFS_INV_AFF, coeffs_air[petsc_level], True, 1000.0)
+    set_air_coeffs(0, pflare.COEFFS_INV_COARSE, coeffs_air[0], True, 1000.0)
+    pc.apply(b, y)
+    y.axpy(-1.0, y_ref)
+    if y.norm() <= tol * norm_ref:
+        print("FAIL: PCApply did not change after setting different roots; "
+              "the matrix-free polynomial is not using them")
+        sys.exit(1)
+
+    for petsc_level in range(num_levels - 1, 0, -1):
+        set_air_coeffs(petsc_level, pflare.COEFFS_INV_AFF, coeffs_air[petsc_level], False)
+    set_air_coeffs(0, pflare.COEFFS_INV_COARSE, coeffs_air[0], False)
+    pc.apply(b, y)
+    y.axpy(-1.0, y_ref)
+    if y.norm() > tol * norm_ref:
+        print(f"FAIL: PCApply changed after setting the original roots back, "
+              f"relative {y.norm() / norm_ref:.3e}")
+        sys.exit(1)
+    y_ref.destroy()
+    y.destroy()
+
+
 # For PCAIR, tell it to reuse the sparsity pattern (CF splitting and matrix
 # structure) on every subsequent setup.  This must be set via the direct C API
 # because ksp.setFromOptions() has already been called.
@@ -123,12 +183,10 @@ for count in range(1, nsteps + 1):
         if is_air:
             num_levels = pflare.pcair_get_num_levels(pc)
             for petsc_level in range(num_levels - 1, 0, -1):
-                pflare.pcair_set_poly_coeffs(pc, petsc_level,
-                                              pflare.COEFFS_INV_AFF,
-                                              coeffs_air[petsc_level])
-            pflare.pcair_set_poly_coeffs(pc, 0,
-                                          pflare.COEFFS_INV_COARSE,
-                                          coeffs_air[0])
+                set_air_coeffs(petsc_level, pflare.COEFFS_INV_AFF,
+                               coeffs_air[petsc_level], grow_newton_roots)
+            set_air_coeffs(0, pflare.COEFFS_INV_COARSE, coeffs_air[0],
+                           grow_newton_roots)
             pflare.pcair_set_reuse_poly_coeffs(pc, True)
 
         elif is_pflareinv:
@@ -150,6 +208,12 @@ for count in range(1, nsteps + 1):
         norm_first = norm
     if count == 3:
         norm_third = norm
+        # Set the original roots back, shrinking the stored arrays again
+        if is_air and grow_newton_roots:
+            for petsc_level in range(num_levels - 1, 0, -1):
+                set_air_coeffs(petsc_level, pflare.COEFFS_INV_AFF,
+                               coeffs_air[petsc_level], False)
+            set_air_coeffs(0, pflare.COEFFS_INV_COARSE, coeffs_air[0], False)
 
     # -- After solve 1 save polynomial coefficients ---------------------
     if count == 1:
@@ -161,6 +225,10 @@ for count in range(1, nsteps + 1):
             coeffs_air[0] = pflare.pcair_get_poly_coeffs(
                 pc, 0, pflare.COEFFS_INV_COARSE)
 
+            # A matrix-free polynomial must use roots of a different size straight away
+            if grow_newton_roots:
+                check_mf_uses_new_roots(num_levels, b)
+
             # Invalid gets/sets must raise rather than read/write through bad
             # memory: out of range level, no Acc polynomial (no C smoothing),
             # and mismatched sizes. Use the Python error handler so these raise
@@ -169,9 +237,11 @@ for count in range(1, nsteps + 1):
             bad_calls = [
                 lambda: pflare.pcair_get_poly_coeffs(pc, num_levels, pflare.COEFFS_INV_AFF),
                 lambda: pflare.pcair_get_poly_coeffs(pc, num_levels - 1, pflare.COEFFS_INV_ACC),
+                # The number of columns can never change (the number of rows can
+                # for the Newton bases)
                 lambda: pflare.pcair_set_poly_coeffs(pc, num_levels - 1, pflare.COEFFS_INV_AFF,
-                                                     np.zeros((coeffs_air[num_levels - 1].shape[0] + 1,
-                                                               coeffs_air[num_levels - 1].shape[1]))),
+                                                     np.zeros((coeffs_air[num_levels - 1].shape[0],
+                                                               coeffs_air[num_levels - 1].shape[1] + 1))),
             ]
             for i_call, bad_call in enumerate(bad_calls):
                 try:

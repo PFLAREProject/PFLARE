@@ -27,7 +27,7 @@ src/Matshell_Data_Type.o : src/Matshell_Data_Type.F90 src/Pflare_Parameters.o sr
 src/Neumann_Poly.o : src/Neumann_Poly.F90 src/Pflare_Parameters.o src/TSQR.o src/Matshell_Data_Type.o src/Gmres_Poly_Apply.o src/Gmres_Poly.o 
 src/PCAIR_C_Fortran_Bindings.o : src/PCAIR_C_Fortran_Bindings.F90 src/PCAIR_Interfaces.o 
 src/PCAIR_Data_Type.o : src/PCAIR_Data_Type.F90 src/AIR_Data_Type.o 
-src/PCAIR_Interfaces.o : src/PCAIR_Interfaces.F90 src/Pflare_Parameters.o src/AIR_MG_Stats.o src/PCAIR_Shell.o 
+src/PCAIR_Interfaces.o : src/PCAIR_Interfaces.F90 src/Gmres_Poly_Newton.o src/Matshell_Data_Type.o src/Gmres_Poly_Data_Type.o src/Pflare_Parameters.o src/AIR_MG_Stats.o src/PCAIR_Shell.o 
 src/PCAIR_Shell.o : src/PCAIR_Shell.F90 src/AIR_MG_Stats.o src/AIR_Diagonal_Update.o src/AIR_Data_Type_Routines.o src/AIR_MG_Setup.o src/PCAIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/PCPFLAREINV_Interfaces.o : src/PCPFLAREINV_Interfaces.F90 
 src/PETSc_Helper.o : src/PETSc_Helper.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o 

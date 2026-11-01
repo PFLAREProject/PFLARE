@@ -1586,6 +1586,43 @@ end if
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine point_mf_newton_roots(mat_ctx, coefficients)
+
+      ! Points the context of a matrix-free Newton polynomial matshell at the roots
+      ! in coefficients (real parts in column 1, imaginary parts in column 2)
+      ! If the matshell has an inner diagonally scaled matshell (mat_ctx%mat_scaled)
+      ! that is pointed at them too
+      ! This must be called whenever the coefficients are reallocated, eg if the
+      ! number of roots changes, otherwise the matshell is left pointing at freed memory
+      ! Whether the matshell owns the coefficients is set by the caller in
+      ! mat_ctx%own_coefficients, which this doesn't change (PCAIR never gives it ownership)
+
+      ! ~~~~~~
+      type(mat_ctxtype), intent(inout)                              :: mat_ctx
+      PetscReal, dimension(:, :), target, contiguous, intent(inout) :: coefficients
+
+      type(mat_ctxtype), pointer :: mat_ctx_scaled => null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      mat_ctx%real_roots => coefficients(:, 1)
+      mat_ctx%imag_roots => coefficients(:, 2)
+      ! Pointer remapping turns the 2D coefficients into the 1D mat_ctx%coefficients
+      ! If the caller sets mat_ctx%own_coefficients (PCPFLAREINV), the context reset
+      ! deallocates through this pointer, which frees the whole 2D array
+      mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+
+      if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled)) then
+         call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
+         mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+         mat_ctx_scaled%real_roots => coefficients(:, 1)
+         mat_ctx_scaled%imag_roots => coefficients(:, 2)
+      end if
+
+   end subroutine point_mf_newton_roots
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                   coefficients, &
                   poly_sparsity_order, matrix_free, diag_scale_polys, reuse_mat, reuse_submatrices, &
@@ -1706,23 +1743,15 @@ end if
             mat_ctx%coefficients => null()
          end if
 
-         mat_ctx%real_roots => coefficients(:, 1)
-         mat_ctx%imag_roots => coefficients(:, 2)
-         ! Now because the context reset deallocates the coefficient pointer 
-         ! we want to make sure we don't leak memory, so we use pointer remapping here 
-         ! to turn the 2D coefficient pointer into a 1D that we can store in mat_ctx%coefficients
-         ! and then the deallocate on mat_ctx%coefficients should still delete all the memory
-         mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
          mat_ctx%mat = matrix     
+         if (diag_scale_polys) mat_ctx_scaled%mat = matrix
+
+         ! Point the shell (and the inner diagonally scaled shell) at the roots
+         ! The coefficients may have been reallocated since the last setup
+         call point_mf_newton_roots(mat_ctx, coefficients)
 
          if (diag_scale_polys) then
-            mat_ctx_scaled%mat = matrix
-            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
-            ! The coefficients may have been reallocated since the last setup
-            mat_ctx_scaled%real_roots => coefficients(:, 1)
-            mat_ctx_scaled%imag_roots => coefficients(:, 2)
-
             ! Get the diagonal
             call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
             mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
