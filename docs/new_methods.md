@@ -15,8 +15,9 @@ PCPFLAREINV contains methods for computing approximate inverses, most of which c
    | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  | Yes |
    | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  | No |
    | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | Yes |
-   | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi  | Partial |
+   | wjacobi  |  PFLAREINV_WJACOBI  | Weighted Jacobi, with weight 4 / (3 ‖D^(-1/2) A D^(-1/2)‖_inf), as computed by hypre  | Yes |
    | jacobi  |  PFLAREINV_JACOBI  | Jacobi  | Yes |
+   | l1jacobi  |  PFLAREINV_L1JACOBI  | l1 Jacobi, with inverse sign(a_ii) / sum_j abs(a_ij), as in hypre  | Yes |
 
 ### PCAIR - A new PETSc PC type
 
@@ -28,9 +29,9 @@ PCAIR contains different types of reduction multigrids. PCAIR can be used with t
    | product  |  neumann  | nAIR with Neumann smoothing  | Yes |
    | product  |  sai  | SAI reduction multigrid  | No |
    | product  |  isai  | ISAI reduction multigrid  | Yes |
-   | product  |  wjacobi or jacobi  | Distance 0 reduction multigrid  | Yes |
-   | lair  |  wjacobi or jacobi  | lAIR  | Yes |
-   | lair_sai  |  wjacobi or jacobi  | SAI version of lAIR  | No |
+   | product  |  wjacobi, jacobi or l1jacobi  | Distance 0 reduction multigrid  | Yes |
+   | lair  |  wjacobi, jacobi or l1jacobi  | lAIR  | Yes |
+   | lair_sai  |  wjacobi, jacobi or l1jacobi  | SAI version of lAIR  | No |
 
 Different combinations of these types can also be used, e.g., ``-pc_air_z_type lair -pc_air_inverse_type power`` uses a lAIR grid transfer operator and GMRES polynomial smoothing with the power basis.
 

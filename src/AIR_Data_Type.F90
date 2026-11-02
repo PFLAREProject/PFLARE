@@ -174,12 +174,14 @@ module air_data_type
       ! These are defined by PCPFLAREINVType 
       ! 0 - GMRES polynomial with the power basis 
       ! 1 - GMRES polynomial with the arnoldi basis 
-      ! 2 - GMRES polynomial with the newton basis - can only be used matrix-free atm      
-      ! 3 - Neumann polynomial
-      ! 4 - SAI
-      ! 5 - Incomplete SAI (ie a restricted additive schwartz)
-      ! 6 - Weighted Jacobi with weight 3 / ( 4 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
-      ! 7 - Unweighted Jacobi
+      ! 2 - GMRES polynomial with the newton basis with extra roots for stability
+      ! 3 - GMRES polynomial with the newton basis without extra roots
+      ! 4 - Neumann polynomial
+      ! 5 - SAI
+      ! 6 - Incomplete SAI (ie a restricted additive schwartz)
+      ! 7 - Weighted Jacobi with weight 4 / ( 3 * || Dff^(-1/2) * Aff * Dff^(-1/2) ||_inf )
+      ! 8 - Unweighted Jacobi
+      ! 9 - l1 Jacobi with inverse sign(a_ii) / sum_j |a_ij|
       ! -pc_air_inverse_type
       integer :: inverse_type = 1      
 
@@ -267,6 +269,14 @@ module air_data_type
       ! -pc_air_reuse_poly_coeffs
       logical :: reuse_poly_coeffs = .FALSE.
 
+      ! Rather than rebuilding the hierarchy on a new setup with the same nonzero pattern,
+      ! update the existing hierarchy with the change in the diagonal of the pmat,
+      ! see AIR_Diagonal_Update.F90
+      ! Any change to the off-diagonal entries is ignored, so this can also be used
+      ! when other entries change but the diagonal is the biggest change
+      ! -pc_air_diag_update
+      logical :: diag_update = .FALSE.
+
    end type air_options 
    
    ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~    
@@ -346,6 +356,13 @@ module air_data_type
       ! Temporary storage
       type(petsc_vec_array), dimension(4) :: temp_vecs_fine, temp_vecs_coarse
       type(petsc_vec_array), dimension(1) :: temp_vecs
+      ! The temporary vectors above are only ever scratch space within a single smooth 
+      ! (or residual) on one level, so on every level each slot is a subvector of one pool,
+      ! sized for the biggest level - the IS's are the (contiguous) subsets of the pools 
+      ! each level uses
+      type(tVec), dimension(4) :: temp_vecs_fine_pool, temp_vecs_coarse_pool
+      type(tVec), dimension(1) :: temp_vecs_pool
+      type(tIS), allocatable, dimension(:) :: temp_vecs_fine_is, temp_vecs_coarse_is, temp_vecs_is
 
       ! Temporary dense storage used during a multiple rhs (block) smooth
       ! These are the block twins of temp_vecs_fine/temp_vecs_coarse/temp_vecs,
@@ -367,6 +384,18 @@ module air_data_type
       ! src/VecISCopyLocalk.kokkos.cxx) so concurrent PCAIR instances do not
       ! overwrite each other's per-level IS views.
       type(c_ptr) :: kokkos_is_views_handle = c_null_ptr
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! Data for applying a diagonal update to an existing hierarchy, see AIR_Diagonal_Update.F90
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! The diagonal of the pmat the hierarchy was built from
+      type(tVec) :: diag_update_base_pmat
+      ! Have we captured the baseline diagonals from the hierarchy
+      logical :: diag_update_initialised = .FALSE.
+      ! The diagonals of A_ff and A_cc (if C smoothing) on each level and of the 
+      ! coarsest matrix (stored in diag_update_base_aff(no_levels)) before any update
+      ! Everything else an update needs is temporary
+      type(tVec), allocatable, dimension(:) :: diag_update_base_aff, diag_update_base_acc
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse

@@ -21,6 +21,40 @@ module grid_transfer_improve
    contains  
 
 !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine get_diagonal_inv_aff(A_ff, A_ff_inv, diag_vec)
+
+      ! Returns the diagonal of Aff^-1 in diag_vec
+      ! If Aff^-1 is matrix-free (a matshell) or is the inverse of the full matrix
+      ! (with -pc_air_full_smoothing_up_and_down) we can't get the diagonal of Aff^-1
+      ! from it, so we use the inverse of the diagonal of Aff instead
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in)    :: A_ff, A_ff_inv
+      type(tVec), intent(inout) :: diag_vec
+
+      PetscErrorCode :: ierr
+      PetscInt :: global_rows_aff, global_cols_aff, global_rows_inv, global_cols_inv
+      MatType :: mat_type_inv_aff
+
+      ! ~~~~~~~~~~
+
+      call MatGetType(A_ff_inv, mat_type_inv_aff, ierr)
+      call MatGetSize(A_ff, global_rows_aff, global_cols_aff, ierr)
+      call MatGetSize(A_ff_inv, global_rows_inv, global_cols_inv, ierr)
+
+      if (mat_type_inv_aff == MATSHELL .OR. global_rows_inv /= global_rows_aff) then
+         call MatGetDiagonal(A_ff, diag_vec, ierr)
+         ! This leaves any zero entries as zero
+         call VecReciprocal(diag_vec, ierr)
+      else
+         call MatGetDiagonal(A_ff_inv, diag_vec, ierr)
+      end if
+
+   end subroutine get_diagonal_inv_aff
+
+!------------------------------------------------------------------------------------------------------------------------
    
    subroutine improve_w(W, A_ff, A_fc, A_ff_inv, reuse_mat, reuse_mat_two, its, reuse_sparsity)
 
@@ -61,7 +95,7 @@ module grid_transfer_improve
       ! and saves a matmatmult if Aff^-1 is not diagonal
       !if (mat_type_inv_aff == MATDIAGONAL) then
          call MatCreateVecs(W, PETSC_NULL_VEC, left_vec_inv_aff, ierr)
-         call MatGetDiagonal(A_ff_inv, left_vec_inv_aff, ierr)    
+         call get_diagonal_inv_aff(A_ff, A_ff_inv, left_vec_inv_aff)
          diag_aff_inv = .TRUE.
       !end if      
 
@@ -236,7 +270,7 @@ module grid_transfer_improve
       ! and saves a matmatmult if Aff^-1 is not diagonal
       !if (mat_type_inv_aff == MATDIAGONAL) then
          call MatCreateVecs(Z, right_vec_inv_aff, PETSC_NULL_VEC, ierr)
-         call MatGetDiagonal(A_ff_inv, right_vec_inv_aff, ierr)    
+         call get_diagonal_inv_aff(A_ff, A_ff_inv, right_vec_inv_aff)
          diag_aff_inv = .TRUE.
       !end if      
 

@@ -98,6 +98,7 @@ cdef extern:
 	PetscErrorCode PCAIRGetReuseSparsity(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReusePolyCoeffs(PetscPC pc, PetscBool *reuse)
 	PetscErrorCode PCAIRGetReuseAmount(PetscPC pc, PetscInt *amount)
+	PetscErrorCode PCAIRGetDiagUpdate(PetscPC pc, PetscBool *diag_update)
 	PetscErrorCode PCAIRGetSmoothType(PetscPC pc, char *output_string)
 
 	# PCAIR - polynomial coefficients
@@ -165,6 +166,9 @@ cdef extern:
 	PetscErrorCode PCAIRSetReuseSparsity(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReusePolyCoeffs(PetscPC pc, PetscBool input_bool)
 	PetscErrorCode PCAIRSetReuseAmount(PetscPC pc, PetscInt amount)
+
+	# PCAIR - diagonal update
+	PetscErrorCode PCAIRSetDiagUpdate(PetscPC pc, PetscBool diag_update)
 
 	# PCAIR - set polynomial coefficients (copies from the provided pointer). The C
 	# wrapper checks the level/inverse are valid and the sizes match before copying.
@@ -476,6 +480,11 @@ cpdef int pcair_get_reuse_amount(PC pc):
 	CHKERR(PCAIRGetReuseAmount(pc.pc, &amount))
 	return int(amount)
 
+cpdef bint pcair_get_diag_update(PC pc):
+	cdef PetscBool result = 0
+	CHKERR(PCAIRGetDiagUpdate(pc.pc, &result))
+	return bool(result)
+
 cpdef str pcair_get_smooth_type(PC pc):
 	cdef char buf[256]
 	cdef int i
@@ -500,9 +509,11 @@ cpdef pcair_get_poly_coeffs(PC pc, int petsc_level, int which_inverse):
 
 	Returns
 	-------
-	numpy.ndarray, shape (poly_order+1, 1_or_2), Fortran-contiguous
+	numpy.ndarray, shape (n, 1_or_2), Fortran-contiguous
 	    Column 0: real coefficients (power/Arnoldi/Neumann) or real roots (Newton).
 	    Column 1: imaginary roots (Newton basis only).
+	    n is poly_order+1, except with the newton basis, which can have
+	    more rows when extra roots are added for stability.
 	"""
 	cdef PetscReal *coeffs_ptr = NULL
 	cdef PetscInt row_size = 0, col_size = 0
@@ -692,6 +703,11 @@ cpdef pcair_set_reuse_amount(PC pc, int amount):
 		raise ValueError(f"reuse amount {amount} must be 1, 2 or 3")
 	CHKERR(PCAIRSetReuseAmount(pc.pc, <PetscInt>amount))
 
+cpdef pcair_set_diag_update(PC pc, bint flag):
+	"""Set whether a change to the Pmat with the same nonzero pattern is treated as a change
+	to its diagonal only, updating rather than rebuilding the hierarchy."""
+	CHKERR(PCAIRSetDiagUpdate(pc.pc, <PetscBool>flag))
+
 cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	"""Copy polynomial coefficients into the PCAIR preconditioner at the given level.
 
@@ -706,7 +722,12 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	    COEFFS_INV_ACC, or COEFFS_INV_COARSE.
 	coeffs : numpy.ndarray
 	    Coefficient array as returned by pcair_get_poly_coeffs.
-	    Must have shape (poly_order+1, 1_or_2).
+	    Must have the shape PCAIR stores, (poly_order+1, 1) for the power and
+	    Arnoldi bases. For the Newton bases (newton, newton_no_extra) the rows
+	    are the roots, whose number can differ between setups, so any shape
+	    (n, 2) with n >= poly_order+1 is accepted and PCAIR resizes its storage.
+	    Every rank must pass the same coefficients; this is not checked, to
+	    keep the call cheap (no reductions).
 	"""
 	# Stage in the build's PetscReal dtype (float32 single / float64 double) so the
 	# PetscReal* the C setter reads has the right element width. Casting a float64

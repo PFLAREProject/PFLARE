@@ -3,6 +3,81 @@
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Team-parallel dense solve A x = b with LU and partial (row) pivoting, mirroring
+// LAPACK ?gesv (the CPU path in SAI_Z.F90): at step k the pivot is the first row
+// i >= k with the largest |A(i,k)|, whole rows of A are swapped and the same swap
+// applied to b. The forward substitution with the unit lower factor is fused into
+// the elimination (same flops, same order as ?getrs), then back substitution with
+// the upper factor writes x. A and b are overwritten; no extra scratch is needed.
+// If a column has no nonzero pivot candidate (singular block) it is skipped, as
+// in ?getf2, and the back substitution will produce Inf/NaN as LAPACK would.
+template <typename MemberType, typename MatrixType, typename VectorType>
+KOKKOS_INLINE_FUNCTION void team_gesv_partial_pivot(const MemberType &member, const MatrixType &A,
+                                                   const VectorType &x, const VectorType &b, const PetscInt n)
+{
+   for (PetscInt k = 0; k < n; k++)
+   {
+      // Largest magnitude in column k at or below the diagonal
+      PetscReal col_max = 0.0;
+      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, k, n),
+         [&](const PetscInt i, PetscReal &thread_max) {
+            const PetscReal val = Kokkos::abs(A(i, k));
+            if (val > thread_max) thread_max = val;
+         }, Kokkos::Max<PetscReal>(col_max));
+      // Singular column - nothing to eliminate
+      if (col_max == 0.0) continue;
+
+      // First row that attains the max (LAPACK i?amax picks the first on ties)
+      PetscInt piv = n;
+      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, k, n),
+         [&](const PetscInt i, PetscInt &thread_min) {
+            if (Kokkos::abs(A(i, k)) == col_max && i < thread_min) thread_min = i;
+         }, Kokkos::Min<PetscInt>(piv));
+
+      // Swap rows k and piv of A and b
+      if (piv != k)
+      {
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n), [&](const PetscInt j) {
+            const PetscScalar temp = A(k, j);
+            A(k, j) = A(piv, j);
+            A(piv, j) = temp;
+         });
+         Kokkos::single(Kokkos::PerTeam(member), [&]() {
+            const PetscScalar temp = b(k);
+            b(k) = b(piv);
+            b(piv) = temp;
+         });
+         member.team_barrier();
+      }
+
+      // Eliminate below the pivot; each thread owns row i, so no races
+      const PetscScalar recip_pivot = PetscScalar(1.0) / A(k, k);
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, k + 1, n), [&](const PetscInt i) {
+         const PetscScalar l_ik = A(i, k) * recip_pivot;
+         A(i, k) = l_ik;
+         for (PetscInt j = k + 1; j < n; j++) A(i, j) -= l_ik * A(k, j);
+         b(i) -= l_ik * b(k);
+      });
+      member.team_barrier();
+   }
+
+   // Back substitution with the upper factor
+   for (PetscInt k = n - 1; k >= 0; k--)
+   {
+      // b(k) is final after the previous barrier, every thread computes x(k)
+      const PetscScalar x_k = b(k) / A(k, k);
+      Kokkos::single(Kokkos::PerTeam(member), [&]() {
+         x(k) = x_k;
+      });
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, k), [&](const PetscInt i) {
+         b(i) -= x_k * A(i, k);
+      });
+      member.team_barrier();
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Compute lAIR Z matrix with kokkos - keeping everything on the device
 // For each row i of Z:
 //   1. Get J indices from sparsity_mat_cf row i (sorted global indices)
@@ -14,7 +89,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                const int reuse_int_reuse_mat, Mat *reuse_mat, Mat *z_mat,
                const int no_approx_solve_int)
 {
-   // Threshold above which we switch a row from dense direct solve (TeamGesv)
+   // Threshold above which we switch a row from dense direct solve
    // to dense Jacobi iteration. Mirrors the CPU code in src/SAI_Z.F90 which
    // switches at j_size > 40 (see calculate_and_build_sai_z_cpu).
    const PetscInt iter_threshold = 40;
@@ -258,7 +333,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
 
    // ~~~~~~~~~~~~~~
    // Find per-row j_size = local_nnz + nonlocal_nnz and split into:
-   //   sparsity_max_nnz_direct - max j_size over rows handled by TeamGesv
+   //   sparsity_max_nnz_direct - max j_size over rows handled by the direct solve
    //   sparsity_max_nnz_iter   - max j_size over rows handled by Jacobi
    //   count_iter              - number of rows above threshold
    // When no_approx_solve_int is set, all rows go to the direct kernel
@@ -321,14 +396,19 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                                + ScratchIntView::shmem_size(j_max)
                                + ScratchIntView::shmem_size(j_max);
 
-   // Level 0 scratch budget for TeamGesv: it internally allocates n*(n+4) scalars
-   // Disabling the level 0 scratch since we are using the nopivoting version of
-   // teamgesv as it doesn't require temporary space
-   //const size_t level0_scratch = Scratch2DScalarView::shmem_size(j_max, j_max + 4);
+   // The dense j_max x j_max block has to fit in the Kokkos level-1 team scratch cap.
+   // Outside of debug mode only rows with j_size <= iter_threshold come here, so this
+   // can only trigger when no_approx_solve_int forces every row through the direct
+   // solve (PFLARE_KOKKOS_DEBUG=1); error cleanly rather than failing inside Kokkos
+   PetscCheckAbort(level1_scratch <= static_cast<size_t>(team_policy_t::scratch_size_max(1)), PETSC_COMM_SELF, PETSC_ERR_SUP,
+      "SAI_Z direct solve needs %zu bytes of Kokkos level-1 team scratch for a sparsity row with %" PetscInt_FMT " entries, but the Kokkos maximum is %d bytes. "
+      "Reduce the sparsity (e.g., -pc_air_lair_distance or -pc_air_inverse_sparsity_order) or unset PFLARE_KOKKOS_DEBUG, which forces every row through the direct solve",
+      level1_scratch, j_max, team_policy_t::scratch_size_max(1));
+
+   // No level 0 scratch is needed, team_gesv_partial_pivot works in place on
+   // dense_mat and rhs
 
    auto policy = team_policy_t(exec, local_rows_cf, Kokkos::AUTO());
-   // Disable 0 scratch budget
-   //policy.set_scratch_size(0, Kokkos::PerTeam(level0_scratch));
    policy.set_scratch_size(1, Kokkos::PerTeam(level1_scratch));
 
    // ~~~~~~~~~~~~~~
@@ -358,7 +438,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       ScratchIntView j_global(member.team_scratch(1), j_size);
       ScratchIntView j_perm(member.team_scratch(1), j_size);
 
-      // Zero dense_mat and rhs (sol is overwritten by TeamGesv)
+      // Zero dense_mat and rhs (sol is overwritten by the solve)
       Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size), [&](const PetscInt k) {
          rhs(k) = 0.0;
       });
@@ -473,16 +553,13 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       member.team_barrier();
 
       // ~~~~~~~~
-      // Step D: Solve A_ff(J,J)^T * x = rhs using TeamGesv
+      // Step D: Solve A_ff(J,J)^T * x = rhs with LU and partial pivoting
       // ~~~~~~~~
-      // Deliberately using the nopivoting version here as the pivoting
-      // version uses level 0 scratch space and we can have the problem
-      // where the j_size grows larger than the available level 0 scratch, causing a failure.
-      // If you want to use the pivoting version you need to reenable the set_scratch_size
-      // for level 0 outside the loop
-      // The submatrices should not require pivoting given Aff is diagonally dominant
-      KokkosBatched::TeamGesv<member_type, KokkosBatched::Gesv::NoPivoting>
-         ::invoke(member, dense_mat, sol, rhs);
+      // A_ff(J,J) can have zero or tiny leading pivots (e.g. zero diagonals), so
+      // we pivot like the LAPACK ?gesv used on the CPU. KokkosBatched only has
+      // NoPivoting/StaticPivoting TeamGesv (the latter isn't partial pivoting and
+      // needs n*(n+4) level 0 scratch), so we use our own in-place team solve
+      team_gesv_partial_pivot(member, dense_mat, sol, rhs, j_size);
       member.team_barrier();
 
       // ~~~~~~~~
@@ -889,9 +966,12 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                if (rnorm_sq < stop_sq) break;
 
                // Jacobi update: sol += r / diag. diag(A_ff(J,J)^T) == diag(A_ff(J,J)).
+               // A zero (or missing) diagonal is replaced by 1, matching PCJACOBI
+               // which the CPU approximate solve uses.
                Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
                   [&](const PetscInt k) {
-                     sol(k) += r(k) / diag(k);
+                     const PetscScalar d = diag(k);
+                     sol(k) += (d == 0.0) ? r(k) : r(k) / d;
                   });
                member.team_barrier();
             }
@@ -1131,9 +1211,12 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                if (rnorm_sq < stop_sq) break;
 
                // Jacobi update: sol += r / diag. diag(A_ff(J,J)^T) == diag(A_ff(J,J)).
+               // A zero (or missing) diagonal is replaced by 1, matching PCJACOBI
+               // which the CPU approximate solve uses.
                Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
                   [&](const PetscInt k) {
-                     sol(k) += r(k) / diag(k);
+                     const PetscScalar d = diag(k);
+                     sol(k) += (d == 0.0) ? r(k) : r(k) / d;
                   });
                member.team_barrier();
             }

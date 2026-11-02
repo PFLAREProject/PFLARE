@@ -160,6 +160,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Grid_Transfer_Improve.o \
 		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
+		  $(SRCDIR)/AIR_Diagonal_Update.o \
 		  $(SRCDIR)/PCAIR_Shell.o \
 		  $(SRCDIR)/PCAIR_Interfaces.o \
 		  $(SRCDIR)/PFLARE.o \
@@ -174,13 +175,25 @@ export TEST_TARGETS = ex12f \
 		  ex6f \
 		  ex6f_getcoeffs \
 		  ex6_getcoeffs \
+		  ex6_setcoeffs_resize \
+		  ex6_setcoeffs_replay \
+		  ex6_newton_roots_rebuild \
 		  ex6f_reuse_amount \
 		  ex6 \
 		  adv_1d \
 		  adv_1d_multi_rhs \
 		  shell_block_apply \
 		  pflareinv_apply_transpose \
+		  pcair_apply_transpose \
+		  poly_zero_coeffs \
+		  newton_imag_roots \
+		  newton_zero_roots \
+		  newton_scale \
+		  pflareinv_exact_inverse \
+		  pflareinv_sai_rank_deficient \
 		  adv_diff_fd \
+		  adv_diff_fd_diag_update \
+		  adv_diff_fd_ts \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \
 		  matrandom \
@@ -193,7 +206,10 @@ export TEST_TARGETS = ex12f \
 		  reuse_preconditioner \
 		  operator_refcount \
 		  pcair_reuse_amount_range \
-		  pmisr_nonsymmetric
+		  comm_self_then_world \
+		  pmisr_nonsymmetric \
+		  leja_ordering \
+		  newton_root_clustering
 # Include kokkos examples
 ifeq ($(PETSC_HAVE_KOKKOS),1)
 export TEST_TARGETS := $(TEST_TARGETS) adv_1dk

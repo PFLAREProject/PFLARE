@@ -29,7 +29,7 @@ int main(int argc, char **args)
   PetscCall(PetscInitialize(&argc, &args, (char*)0, help));
 
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
-  PetscBool second_solve= PETSC_FALSE;
+  PetscBool second_solve= PETSC_FALSE, transpose_solve = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
   // Check the second solve does not copy anything between the host and the device
   // This is only meaningful with device matrices and vectors (e.g. -mat_type aijkokkos
@@ -37,6 +37,18 @@ int main(int argc, char **args)
   PetscBool check_copies = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
   if (check_copies) second_solve = PETSC_TRUE;
+  // Use a central difference advection operator (skew-symmetric off-diagonals) with
+  // a shifted diagonal, rather than the upwind operator
+  PetscBool skew = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-skew", &skew, NULL));
+  // Negate the matrix, so it has a negative diagonal
+  PetscBool negate = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-negate", &negate, NULL));
+  // Error if AIR builds fewer than this many levels
+  PetscInt min_levels = 0, num_levels;
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-min_levels", &min_levels, NULL));
+  // Solve the transposed system A^T x = b with KSPSolveTranspose instead
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-transpose_solve", &transpose_solve, NULL));
 
   // Register the pflare types
   PCRegister_PFLARE();
@@ -83,8 +95,8 @@ int main(int argc, char **args)
 
   // Going to do assembly in the COO interface so assembly happens on the gpu when needed
   // Allocate memory for the coordinates
-  PetscCall(PetscMalloc2(2 * local_size, &oor, 2 * local_size, &ooc));
-  PetscCall(PetscMalloc1(2 * local_size, &v));
+  PetscCall(PetscMalloc2(3 * local_size, &oor, 3 * local_size, &ooc));
+  PetscCall(PetscMalloc1(3 * local_size, &v));
 
   counter = 0;
   // Dirichlet condition on left boundary
@@ -112,6 +124,17 @@ int main(int argc, char **args)
     v[counter + 1] = 1.0;
 
     counter = counter + 2;
+
+    if (skew) {
+      // Central difference, a_{i,i-1} = -1, a_{i,i+1} = 1, with a diagonal shift
+      v[counter - 1] = 3.0;
+      if (i < n - 1) {
+        oor[counter] = i;
+        ooc[counter] = i + 1;
+        v[counter] = 1.0;
+        counter = counter + 1;
+      }
+    }
   }
 
   // Set the indices
@@ -119,6 +142,9 @@ int main(int argc, char **args)
   // Can delete oor and ooc now
   PetscCall(PetscFree2(oor, ooc));
   // Set the values
+  if (negate) {
+    for (i = 0; i < (PetscInt)counter; i++) v[i] = -v[i];
+  }
   PetscCall(MatSetValuesCOO(A, v, INSERT_VALUES));
   PetscCall(PetscFree(v));
 
@@ -170,7 +196,11 @@ int main(int argc, char **args)
   PetscCall(VecSet(x, 1.0));
 
   PetscCall(PetscLogStagePush(gpu_copy));
-  PetscCall(KSPSolve(ksp, b, x));
+  if (transpose_solve) {
+    PetscCall(KSPSolveTranspose(ksp, b, x));
+  } else {
+    PetscCall(KSPSolve(ksp, b, x));
+  }
   PetscCall(PetscLogStagePop());
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -182,11 +212,19 @@ int main(int argc, char **args)
   {
    PetscCall(VecSet(x, 1.0));
    PetscCall(PetscLogEventBegin(second_solve_event, 0, 0, 0, 0));
-   PetscCall(KSPSolve(ksp, b, x));
+   if (transpose_solve) {
+     PetscCall(KSPSolveTranspose(ksp, b, x));
+   } else {
+     PetscCall(KSPSolve(ksp, b, x));
+   }
    PetscCall(PetscLogEventEnd(second_solve_event, 0, 0, 0, 0));
   }
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
+
+  PetscCall(PCAIRGetNumLevels(pc, &num_levels));
+  PetscCheck(num_levels >= min_levels, PETSC_COMM_WORLD, PETSC_ERR_PLIB,
+             "AIR built %" PetscInt_FMT " levels, expected at least %" PetscInt_FMT, num_levels, min_levels);
 
 #if PetscDefined(HAVE_DEVICE)
   // The preliminary solve has already moved everything the solve needs onto the

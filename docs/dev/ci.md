@@ -19,6 +19,9 @@ Enforced flags (why "fix all compile warnings" is a hard rule)
 - Kokkos builds: `-Wall -Werror -Wunused-result`, `CXXFLAGS` additionally `-std=c++20`.
 - Default runtime options in the image: `PETSC_OPTIONS="-on_error_abort -fp_trap on"` (Kokkos image sets the aijkokkos/kokkos mat/vec types too).
 
+Makefile.deps check (first step of `gnu_opt`, before the build)
+- Runs `make depend` (`makedepf90`, installed in the job) in the `stevendargaville/petsc` image and fails if the result differs from the committed `Makefile.deps`. After adding a Fortran module or changing a `use`, run `make depend` and commit `Makefile.deps`.
+
 Output-parser checks (part of `gnu_opt`)
 - `python/run_parse_tests.py` with `tools/parse_pflare_output.py` runs inside the image (`PFLARE_TESTS_DIR`, `PFLARE_TOOLS_DIR` env vars) and asserts: grid complexity < 3.0, reuse storage == 0.0, KSP iteration counts below their maxima. Changes that alter PFLARE's printed stats/timing output can break these.
 

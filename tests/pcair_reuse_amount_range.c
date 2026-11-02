@@ -1,10 +1,11 @@
-static char help[] = "Checks PCAIR rejects a reuse amount outside 1, 2 or 3.\n\n";
+static char help[] = "Checks PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1.\n\n";
 
 /*
   The reuse amount is used as an index into the constant reuse tables in
   AIR_Data_Type.F90, so anything other than 1, 2 or 3 would read out of bounds.
   This checks that PCAIRSetReuseAmount returns PETSC_ERR_ARG_OUTOFRANGE for a
-  bad value and leaves the stored amount alone.
+  bad value and leaves the stored amount alone. It also checks a DDC fraction
+  bigger than 1 (ie more than all the local F points) is rejected.
 
   The error handler is swapped for PetscReturnErrorHandler around the calls
   that are expected to fail, so this runs fine with -on_error_abort.
@@ -61,6 +62,21 @@ int main(int argc, char **args)
   PetscCall(CheckSetFails(pc, 0));
   PetscCall(CheckSetFails(pc, 4));
   PetscCall(CheckSetFails(pc, -1));
+
+  // A DDC fraction bigger than 1 is rejected, but negative values are valid
+  {
+    PetscErrorCode ierr;
+    PetscReal      fraction;
+    PetscCall(PCAIRSetDDCFraction(pc, -0.5));
+    PetscCall(PCAIRSetDDCFraction(pc, 1.0));
+    PetscCall(PetscPushErrorHandler(PetscReturnErrorHandler, NULL));
+    ierr = PCAIRSetDDCFraction(pc, 1.5);
+    PetscCall(PetscPopErrorHandler());
+    PetscCheck(ierr == PETSC_ERR_ARG_OUTOFRANGE, PETSC_COMM_WORLD, PETSC_ERR_LIB,
+               "PCAIRSetDDCFraction(1.5) returned error %d, expected PETSC_ERR_ARG_OUTOFRANGE", (int)ierr);
+    PetscCall(PCAIRGetDDCFraction(pc, &fraction));
+    PetscCheck(fraction == 1.0, PETSC_COMM_WORLD, PETSC_ERR_LIB, "DDC fraction changed to %g after a failed set", (double)fraction);
+  }
 
   PetscCall(PCDestroy(&pc));
   PetscCall(PetscFinalize());

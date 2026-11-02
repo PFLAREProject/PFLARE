@@ -44,6 +44,10 @@ KSP_RTOL := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),1e-5,1e-10)
 #   * -pc_air_reuse_sparsity across a PC regeneration: that optimisation reuses the
 #     first setup's sparsity pattern, but single-precision roundoff can shift which
 #     polynomial terms survive between setups, leaving the reused pattern stale.
+#   * -pc_air_diag_update with assembled smoothers once the diagonal has dropped a
+#     long way below the one the hierarchy was built with: in single the frozen
+#     restrictor no longer gives a good enough coarse correction (matrix-free
+#     smoothers are fine).
 SKIP_SINGLE := $(if $(filter 1,$(PETSC_USE_REAL_SINGLE)),@echo "  [skipped under single precision]:",)
 
 # Same skip mechanism for kokkos builds - only for the specific commands that hit
@@ -162,6 +166,9 @@ run_tests_load_serial:
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26
 	@echo "Test AIRG with Newton GMRES polynomials in indefinite problem with zero diagonals"
 	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -ksp_max_it 26			
+	@echo "Test single level ISAI in indefinite problem with zero diagonals (Jacobi local solves hit zero diagonals, direct local solves need pivoting)"
+	./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_type pflareinv -pc_pflareinv_type isai \
+	 -ksp_max_it 20 -ksp_converged_maxits
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order"
@@ -208,6 +215,12 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 120 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 5
 	@echo "Test Newton GMRES polynomials order 120 with fixed sparsity with added roots in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5		
+	@echo "Test Newton GMRES polynomials order 80 matrix-free on the badly scaled market matrix problem bcsstk19"
+	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 5
+	@echo "Test power basis GMRES polynomials order 10 matrix-free on the badly scaled market matrix problem bcsstk19"
+	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 30
+	@echo "Test power basis GMRES polynomials order 10 with fixed sparsity on the badly scaled market matrix problem bcsstk19"
+	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -ksp_norm_type unpreconditioned -ksp_max_it 30
 #
 	@echo "Test Newton AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing"
 	./ex12f -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type newton -pc_air_matrix_free_polys -ksp_max_it 5	
@@ -221,6 +234,9 @@ else
 #
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem, matrix-free smoothing in C in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -pc_air_matrix_free_polys -ksp_max_it 5
+#
+	@echo "Test power basis GMRES polynomials order 10 matrix-free on the badly scaled market matrix problem bcsstk19 in parallel"
+	$(MPIEXEC) -n 2 ./ex6 -b_in_f 0 -f data/bcsstk19 -mat_partitioning_type current -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 25
 #
 	@echo "Test two concurrent AIRG solves in parallel"
 	$(MPIEXEC) -n 2 ./ex6_two_airg -f data/mat_stream_2364 -air1_mg_coarse_ksp_type richardson -air1_mg_coarse_ksp_max_it 3 \
@@ -258,6 +274,9 @@ else
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials in indefinite problem with zero diagonals in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_air_a_drop 1e-3 -pc_air_inverse_type power -ksp_max_it 26		
+	@echo "Test single level ISAI in indefinite problem with zero diagonals (Jacobi local solves hit zero diagonals, direct local solves need pivoting) in parallel"
+	$(MPIEXEC) -n 2 ./ex6 -f data/e05r0100_petsc -b_in_f 0 -pc_type pflareinv -pc_pflareinv_type isai \
+	 -ksp_max_it 20 -ksp_converged_maxits
 #
 	@echo ""
 	@echo "Test AIRG with assembled Newton GMRES polynomials for hyperbolic streaming problem for 2nd order in parallel"
@@ -302,6 +321,11 @@ run_tests_no_load_short_serial:
 	./reuse_preconditioner
 #
 	@echo ""
+	@echo "Test assembled PCPFLAREINV and PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+#
+	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact"
 	./operator_refcount -ksp_max_it 3
 	./operator_refcount -ksp_max_it 3 -pc_air_full_smoothing_up_and_down
@@ -320,12 +344,27 @@ run_tests_no_load_short_serial:
 	 -pc_air_coarsest_matrix_free_polys -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
-	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3"
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1"
 	./pcair_reuse_amount_range
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo ""
+	@echo "Test AIRG with a few steps of adaptive backward-Euler TS with upwind FD advection and a diagonal update"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_steps 10 -pc_air_diag_update
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, stored coefficients for bands of the time step and a different number of Newton roots in each band"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
+	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20 \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order"
 	./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
@@ -338,10 +377,30 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with advection and fixed dd ratio"
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type diag_dom -pc_air_strong_threshold 0.9
+	@echo "Test AIRG with coefficients calculated on subcomms with diagonal Aff"
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 2 -pc_air_subcomm -pc_air_strong_threshold 0 -pc_air_inverse_type arnoldi
+	@echo "Test AIRG improving W and Z with matrix-free and full smoothing inverses"
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 3 -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_z_its 1 -pc_air_improve_w_its 1 -pc_air_matrix_free_polys
+	./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 3 -pc_air_one_point_classical_prolong 0 \
+	 -pc_air_improve_z_its 1 -pc_air_improve_w_its 1 -pc_air_full_smoothing_up_and_down
 #
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting"
 	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+	@echo ""
+	@echo "Test AIRG with advection and PMIS then aggregation CF splitting"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type pmis_agg
+	@echo ""
+	@echo "Test AIRG with advection and distance 2 PMIS CF splitting"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
+#
+	@echo ""
+	@echo "Test AIRG with advection, zero strong threshold and PMIS CF splitting (Aff not diagonal)"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type pmis -pc_air_strong_threshold 0.0
+	@echo ""
+	@echo "Test AIRG with advection, zero strong threshold and aggregation CF splitting (Aff not diagonal)"
+	./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type agg -pc_air_strong_threshold 0.0
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D"
@@ -371,6 +430,10 @@ run_tests_no_load_short_serial:
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_diag_scale_polys \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -bottom_only_inflow_one
+	@echo "Test a few steps of adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, and a diagonal update"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_steps 5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update
 #	 
 	@echo ""
 	@echo "Test AIRG with upwind DG FEM in 2D with unstructured triangles"
@@ -446,6 +509,8 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test AIRG with Weighted Jacobi for 2D finite difference stencil"
 	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -pc_air_inverse_type wjacobi -ksp_max_it 8 -pc_air_a_drop 1e-3
+	@echo "Test AIRG with l1 Jacobi for 2D finite difference stencil"
+	./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -pc_air_inverse_type l1jacobi -ksp_max_it 6 -pc_air_a_drop 1e-3
 # 
 	@echo ""
 	@echo "Test AIRG with Unweighted Jacobi for 2D finite difference stencil"
@@ -559,6 +624,9 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients - newton basis"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test AIRG set polynomial coefficients in Fortran with a different number of Newton roots"
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
+	 -pc_air_matrix_free_polys -grow_newton_roots
 #
 	@echo ""
 	@echo "Test AIRG get/set polynomial coefficients in C with PC regenerated and no sparsity change"
@@ -584,14 +652,32 @@ run_tests_no_load_short_serial:
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type isai
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type wjacobi
 	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type jacobi
+	./ex6_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type l1jacobi
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, Aff, Acc and coarse grid, rebuilt with reuse sparsity"
+	./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots, Aff, Acc and coarse grid, diagonal update, matrix-free"
+	./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
+	@echo "Test PCAIR set polynomial coefficients rejects a different number of rows for the Arnoldi basis"
+	./ex6_setcoeffs_resize -pc_air_reuse_sparsity -pc_air_inverse_type arnoldi
+	@echo "Test PCAIR replaying recorded Newton roots whose number changes between Pmats, diagonal update, matrix-free, Acc and AIRG dropped"
+	./ex6_setcoeffs_replay -require_resize -pc_air_diag_update -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys \
+	 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_c_poly_order 16 -pc_air_strong_r_threshold 0.1
+	@echo "Test rebuilding Newton polynomial inverses from more or fewer roots, matrix-free and assembled with fixed sparsity"
+	./ex6_newton_roots_rebuild -pc_pflareinv_matrix_free
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 4 -pc_pflareinv_sparsity_order 2
 #
 	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran"
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type power -ksp_max_it 5
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type arnoldi -ksp_max_it 5
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
+	@echo "Test PCAIR reuse_amount 3 in Fortran with Newton extra roots added in the first setup"
+	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_poly_order 15 -ksp_max_it 5 -test_reuse_amount_start 3
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5	
+	@echo "Test PCAIR reuse_amount 2 and 3 in Fortran with symmetric AIR"
+	./ex6f_reuse_amount -m 6 -n 6 -pc_type air -pc_air_symmetric -ksp_max_it 5 -test_reuse_amount_start 2
 #
 	@echo ""
 	@echo "Test single level GMRES polynomials with PC reused with no sparsity change"
@@ -609,7 +695,11 @@ run_tests_no_load_short_serial:
 	@echo "Test AIRG with full smoothing up and down converges with an assembled inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
 	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse - guaranteed diagonal inverse"
-	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 25
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi -ksp_max_it 45
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse"
+	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi -ksp_max_it 12
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse on a negated matrix - checks the sign of the l1 Jacobi weight"
+	./adv_1d -n 1000 -negate -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi -ksp_max_it 12
 	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse"
 	./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
@@ -623,6 +713,10 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test multiple RHS block solve with PCPFLAREINV via PCMatApply"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5
+#
+	@echo ""
+	@echo "Test distance 2 PMIS on 1D central difference advection - skew-symmetric off-diagonals must not cancel in the strength matrix"
+	./adv_1d -n 1000 -skew -pc_type air -pc_air_cf_splitting_type pmis_dist2 -min_levels 3 -ksp_max_it 5
 	@echo "Test multiple RHS block solve with a Newton polynomial PCPFLAREINV"
 	./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_pflareinv_type newton
 	@echo "Test multiple RHS block solve with matrix-free PCPFLAREINV"
@@ -731,6 +825,7 @@ run_tests_no_load_short_serial:
 	./pflareinv_apply_transpose -pc_pflareinv_type isai
 	./pflareinv_apply_transpose -pc_pflareinv_type wjacobi
 	./pflareinv_apply_transpose -pc_pflareinv_type jacobi
+	./pflareinv_apply_transpose -pc_pflareinv_type l1jacobi
 	@echo "Test PCApplyTranspose with a matrix-free PCPFLAREINV - builds the transposed matshell twin"
 	$(SKIP_SINGLE) ./pflareinv_apply_transpose -pc_pflareinv_matrix_free
 	@echo "Test PCApplyTranspose with a matrix-free Arnoldi PCPFLAREINV"
@@ -755,6 +850,48 @@ run_tests_no_load_short_serial:
 	 -transpose_solve -ksp_max_it 100
 	@echo "Test PCApplyTranspose at a size too big for the explicit check"
 	./pflareinv_apply_transpose -n 5000 -pc_pflareinv_matrix_free -pc_pflareinv_type newton
+#
+	@echo ""
+	@echo "Test PCApplyTranspose with the default PCAIR - the F point smoothing Kaskade cycle"
+	./pcair_apply_transpose
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing - the smoother blocks run in reverse"
+	./pcair_apply_transpose -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with symmetric PCAIR - the restrictor is the transposed prolongator"
+	./pcair_apply_transpose -pc_air_symmetric
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down - petsc's transposed V-cycle"
+	./pcair_apply_transpose -pc_air_full_smoothing_up_and_down
+	./pcair_apply_transpose -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with matrix-free PCAIR polynomials - the transposed matshell twins"
+	./pcair_apply_transpose -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with a single level PCAIR - defers to the inner PCMG"
+	./pcair_apply_transpose -pc_air_max_levels 1
+	@echo "Test PCApplyTranspose after the PCAIR nonzero pattern changes - the hierarchy is rebuilt"
+	./pcair_apply_transpose -rebuild_pattern
+	@echo "Test KSPSolveTranspose through PCAIR"
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100
+#
+	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros, assembled and matrix-free"
+	./poly_zero_coeffs
+	./poly_zero_coeffs -pc_pflareinv_matrix_free
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi
+	./poly_zero_coeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots"
+# Skipped in single as there the order 40 polynomial is unstable and the solve does not converge
+	$(SKIP_SINGLE) ./newton_imag_roots
+	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply"
+	./newton_zero_roots
+	@echo "Test the Newton polynomial does not depend on the scale of the operator"
+	./newton_scale
+#
+	@echo ""
+	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse"
+	./pflareinv_exact_inverse -pc_pflareinv_type isai
+	./pflareinv_exact_inverse -pc_pflareinv_type sai
+	@echo "Test SAI gives the minimum norm solution on rank deficient local least-squares systems"
+	./pflareinv_sai_rank_deficient
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference"
@@ -795,6 +932,8 @@ run_tests_no_load_short_serial:
 	./mat_diag -ksp_max_it 1
 	@echo "Test Arnoldi GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type arnoldi -ksp_max_it 1
+	@echo "Test Arnoldi GMRES polynomial doesn't stop Arnoldi early on a well-conditioned diagonal matrix"
+	$(SKIP_SINGLE) ./mat_diag -pc_pflareinv_type arnoldi -pc_pflareinv_poly_order 10 -ksp_max_it 1 -check_rel_res 2e-14
 	@echo "Test Power GMRES polynomial on a diagonal matrix"
 	./mat_diag -pc_pflareinv_type power -ksp_max_it 1
 #
@@ -813,6 +952,14 @@ run_tests_no_load_short_serial:
 	@echo ""
 	@echo "Test the PMISR CF splitting directly on a structurally nonsymmetric strength matrix"
 	./pmisr_nonsymmetric -n 700
+#
+	@echo ""
+	@echo "Test the modified Leja ordering of the Newton basis roots is invariant to scaling"
+	./leja_ordering
+#
+	@echo ""
+	@echo "Test the clustering of the Newton basis roots keeps complex conjugate pairs together"
+	./newton_root_clustering
 				
 #	 
 # ~~~~~~~~~~~~~~~~~~~~~~~	 
@@ -837,6 +984,72 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_serial:
+#
+	@echo ""
+	@echo "Test AIRG with a diagonal update with a diagonal Aff"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_strong_threshold 0 \
+	 -max_extra_its 7
+	@echo "Test AIRG with a diagonal update with F point smoothing and a symmetric hierarchy"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL)
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_symmetric
+	@echo "Test AIRG with a diagonal update over decades of the diagonal, with ffc smoothing"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -max_extra_its 5
+	@echo "Test AIRG with a diagonal update with matrix-free smoothing"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -max_extra_its 5
+	@echo "Test AIRG with a diagonal update keeping and recomputing the polynomial coefficients"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
+	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
+	 -check_reuse
+	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
+	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
+	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, rebuilding, freezing and updating the PC"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -snes_lag_preconditioner -2 -snes_lag_preconditioner_persists
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update -max_total_its 1700
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 0.5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 0.5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 0.5 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -diag_scale false -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 -max_total_its 4200 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, stored coefficients for bands of the time step and a different number of Newton roots in each band, assembled"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
+	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 #
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets"
@@ -890,6 +1103,10 @@ run_tests_no_load_serial:
 	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
 	 -pc_air_z_type lair -pc_air_inverse_type wjacobi -ksp_max_it 10
+	@echo "Test lAIR with l1 Jacobi smoothing on 2D advection"
+	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_pc_side right \
+	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -pc_air_a_drop 1e-4 -pc_air_smooth_type ffc \
+	 -pc_air_z_type lair -pc_air_inverse_type l1jacobi -ksp_max_it 6
 #
 	@echo ""
 	@echo "Test AIRG on steady 2D structured advection with 0th order sparsity GMRES poly C smooth and faster coarsening"
@@ -936,6 +1153,10 @@ run_tests_no_load_serial:
 	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
 	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 18
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and compatible relaxation CF splitting with l1 Jacobi"
+	./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -pc_air_inverse_type l1jacobi -ksp_max_it 12
 #
 	@echo ""
 	@echo "Test AIRG with poorly scaled SUPG CG FEM, compatible relaxation CF splitting and diagonal scaling"
@@ -983,24 +1204,59 @@ ifeq ($(PETSC_HAVE_MPIUNI),1)
 else
 #
 	@echo ""
+	@echo "Test AIRG with a diagonal update keeping the polynomial coefficients in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_reuse_poly_coeffs
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, stored coefficients for bands of the time step and a different number of Newton roots in each band in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
+	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20 \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+#
+	@echo ""
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran in parallel"
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type power -ksp_max_it 5
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type arnoldi -ksp_max_it 5
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -ksp_max_it 5
 	@echo "Test PCAIR reuse_amount (1=CF splitting only, 2=+SpGEMMs, 3=everything) in Fortran with diagonal Aff"
 	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 10 -n 10 -pc_type air -pc_air_strong_threshold 0.0 -ksp_max_it 5
+	@echo "Test PCAIR reuse_amount 2 and 3 in Fortran with symmetric AIR in parallel"
+	$(MPIEXEC) -n 2 ./ex6f_reuse_amount -m 6 -n 6 -pc_type air -pc_air_symmetric -ksp_max_it 5 -test_reuse_amount_start 2
 #
 	@echo ""
 	@echo "Test PCPFLAREINV with fewer rows than the polynomial order + 1 clamps the order in parallel"
 	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type arnoldi
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type power
 	$(MPIEXEC) -n 2 ./ex6_getcoeffs -m 2 -n 3 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCAIR set polynomial coefficients with a different number of Newton roots in parallel, diagonal update, matrix-free"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_resize -pc_air_diag_update -pc_air_smooth_type fc -test_acc -pc_air_coarsest_inverse_type newton -test_coarse \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test PCAIR replaying recorded Newton roots whose number changes between Pmats in parallel, with processor agglomeration"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -require_resize -pc_air_reuse_sparsity \
+	 -pc_air_processor_agglom -pc_air_process_eq_limit 50 -pc_air_subcomm -pc_air_coarsest_subcomm
 	@echo "Test block Jacobi with PCPFLAREINV sub-blocks with fewer rows than the polynomial order + 1 in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 2 -da_grid_y 4 -pc_type bjacobi -sub_pc_type pflareinv -sub_pc_pflareinv_type newton
 #
 	@echo ""
 	@echo "Test PCAIR honours KSPSetReusePreconditioner when the pmat values change in place in parallel"
 	$(MPIEXEC) -n 2 ./reuse_preconditioner
+#
+	@echo ""
+	@echo "Test assembled PCPFLAREINV set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type arnoldi -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type pflareinv -pc_pflareinv_type isai
+	@echo "Test PCAIR set up on PETSC_COMM_SELF and then on PETSC_COMM_WORLD, with re-setups reusing the sparsity"
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type arnoldi -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type newton -pc_air_reuse_sparsity
+	$(MPIEXEC) -n 2 ./comm_self_then_world -pc_type air -pc_air_inverse_type isai -pc_air_z_type lair \
+	 -pc_air_reuse_sparsity
 #
 	@echo ""
 	@echo "Test PCAIR gives back the operators it was given with their reference counts intact in parallel"
@@ -1013,12 +1269,22 @@ else
 	 -pc_air_print_stats_timings -fp_trap
 #
 	@echo ""
-	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 in parallel"
+	@echo "Test PCAIR rejects a reuse amount outside 1, 2 or 3 and a DDC fraction > 1 in parallel"
 	$(MPIEXEC) -n 2 ./pcair_reuse_amount_range
+#
+	@echo ""
+	@echo "Test PMIS_AGG keeps boundary C points whose strong neighbours are all off-process in parallel"
+	$(MPIEXEC) -n 4 ./adv_diff_fd -da_grid_x 4 -da_grid_y 64 -da_processors_x 4 -da_processors_y 1 -u 1 -v 0 \
+	 -pc_type air -pc_air_cf_splitting_type pmis_agg -ksp_max_it 1
 #
 	@echo ""
 	@echo "Test AIRG with advection and fc smoothing in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_smooth_type fc
+	@echo "Test AIRG with coefficients calculated on subcomms with diagonal Aff in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 4 -da_grid_y 4 -pc_type air -ksp_max_it 2 -pc_air_subcomm -pc_air_strong_threshold 0 -pc_air_inverse_type arnoldi
+	@echo "Test AIRG with Newton coarse grid solver with extra roots calculated on subcomms in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 6 -da_grid_y 6 -pc_type air -ksp_max_it 3 -pc_air_coarsest_subcomm \
+	 -pc_air_coarsest_inverse_type newton -pc_air_coarsest_poly_order 10
 	@echo ""
 	@echo "Test AIRG with auto truncation that fails before a coarsest grid smaller than the coarse polynomial order in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 8 -da_grid_y 8 -pc_type air -ksp_max_it 3 -pc_air_auto_truncate_start_level 1 \
@@ -1034,6 +1300,12 @@ else
 	@echo ""
 	@echo "Test AIRG with advection and compatible relaxation CF splitting in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 4 -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1
+	@echo ""
+	@echo "Test AIRG with advection and PMIS then aggregation CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 5 -pc_air_cf_splitting_type pmis_agg
+	@echo ""
+	@echo "Test AIRG with advection and distance 2 PMIS CF splitting in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 10 -da_grid_y 10 -pc_type air -ksp_max_it 6 -pc_air_cf_splitting_type pmis_dist2
 	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 2D in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_simplex 0 -dm_refine 2 -pc_type air \
@@ -1142,6 +1414,8 @@ else
 	@echo ""
 	@echo "Test AIRG with Weighted Jacobi for 2D finite difference stencil in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air  -pc_air_inverse_type wjacobi -ksp_max_it 8 -pc_air_a_drop 1e-3
+	@echo "Test AIRG with l1 Jacobi for 2D finite difference stencil in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -u 0 -v 0 -alpha 1.0 -da_grid_x 8 -da_grid_y 8 -pc_type air -pc_air_inverse_type l1jacobi -ksp_max_it 6 -pc_air_a_drop 1e-3
 # 
 	@echo ""
 	@echo "Test AIRG with Unweighted Jacobi for 2D finite difference stencil in parallel"
@@ -1261,10 +1535,18 @@ else
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -ksp_max_it 25
 	@echo "Test AIRG with full smoothing up and down converges with a weighted Jacobi inverse in parallel - guaranteed diagonal inverse"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi \
-	 -ksp_max_it 25
+	 -ksp_max_it 45
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi \
+	 -ksp_max_it 12
+	@echo "Test AIRG with full smoothing up and down converges with an l1 Jacobi inverse on a negated matrix in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -negate -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type l1jacobi \
+	 -ksp_max_it 12
 	@echo "Test AIRG with full smoothing up and down converges with a Newton polynomial inverse in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -pc_type air -pc_air_full_smoothing_up_and_down -pc_air_inverse_type newton \
 	 -pc_air_poly_order 3 -ksp_max_it 15
+	@echo "Test distance 2 PMIS on 1D central difference advection in parallel - skew-symmetric off-diagonals must not cancel in the strength matrix"
+	$(MPIEXEC) -n 2 ./adv_1d -n 1000 -skew -pc_type air -pc_air_cf_splitting_type pmis_dist2 -min_levels 3 -ksp_max_it 5
 	@echo "Test AIRG with full smoothing up and down converges on 2D advection-diffusion in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 40 -da_grid_y 40 -pc_type air -pc_air_full_smoothing_up_and_down \
 	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 30
@@ -1314,6 +1596,7 @@ else
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type neumann
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type wjacobi
+	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type l1jacobi
 	@echo "Test PCApplyTranspose with a matrix-free PCPFLAREINV in parallel - builds the transposed matshell twin"
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type arnoldi
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton
@@ -1329,6 +1612,36 @@ else
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_type newton -transpose_solve -ksp_max_it 100
 	$(MPIEXEC) -n 2 ./pflareinv_apply_transpose -pc_pflareinv_matrix_free -pc_pflareinv_type newton \
 	 -transpose_solve -ksp_max_it 100
+#
+	@echo ""
+	@echo "Test PCApplyTranspose with the default PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_full_smoothing_up_and_down
+	@echo "Test PCApplyTranspose after the PCAIR operator values change in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild
+	@echo "Test KSPSolveTranspose through PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100
+#
+	@echo ""
+	@echo "Test monomial polynomial coefficients with exact zeros in parallel, assembled and matrix-free"
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs
+	$(MPIEXEC) -n 2 ./poly_zero_coeffs -pc_pflareinv_matrix_free
+#
+	@echo ""
+	@echo "Test Newton polynomial adds extra roots to purely imaginary roots in parallel"
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./newton_imag_roots
+	@echo "Test assembled Newton inverses skip zero roots like the matrix-free apply in parallel"
+	$(MPIEXEC) -n 2 ./newton_zero_roots
+	@echo "Test the Newton polynomial does not depend on the scale of the operator in parallel"
+	$(MPIEXEC) -n 2 ./newton_scale
+#
+	@echo ""
+	@echo "Test SAI/ISAI with a full sparsity pattern on a dense matrix that needs pivoting give the exact inverse in parallel"
+	$(MPIEXEC) -n 2 ./pflareinv_exact_inverse -pc_pflareinv_type isai
+	$(MPIEXEC) -n 2 ./pflareinv_exact_inverse -pc_pflareinv_type sai
 #
 	@echo ""
 	@echo "Test 3D upwind finite-difference in parallel"
@@ -1396,6 +1709,54 @@ ifeq ($(PETSC_HAVE_MPIUNI),1)
 else
 #
 	@echo ""
+	@echo "Test AIRG with a diagonal update in parallel with F point smoothing, with processor agglomeration"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_process_eq_limit 400
+	@echo "Test AIRG with a diagonal update in parallel, with processor agglomeration"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
+	 -pc_air_process_eq_limit 400 -max_extra_its 5
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
+	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
+	@echo "Test AIRG with a diagonal update recomputing the polynomial coefficients in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update -max_total_its 1700
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 0.01 -ts_max_time 0.5 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 0.5 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -diag_scale false -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 -max_total_its 4200 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, stored coefficients for bands of the time step and a different number of Newton roots in each band, assembled in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
+	 -pc_air_poly_order 20 -pc_air_coarsest_poly_order 20
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_steps 20 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test adaptive backward-Euler TS with upwind DG FEM in 2D with quads, keeping the mass matrix, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 2 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -time_depend -ts_time_step 1e-3 -ts_max_steps 30 -ts_adapt_type basic -bottom_only_inflow_one -diag_scale false \
+	 -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+#
+	@echo ""
 	@echo "Test AIRG with SUPG CG FEM in 3D unstructured tets in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_cg_supg -dm_plex_filename data/cube_unstruc.msh -pc_type air \
 	 -ksp_type richardson -ksp_norm_type unpreconditioned -ksp_max_it 4 -pc_air_a_lump
@@ -1437,6 +1798,10 @@ else
 	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
 	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
 	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -ksp_max_it 18
+	@echo "Test AIRG with upwind DG FEM in 2D with unstructured quads and compatible relaxation CF splitting with l1 Jacobi in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_filename data/square_unstruc.msh -pc_type air -ksp_type richardson \
+	 -ksp_norm_type unpreconditioned -pc_air_cf_splitting_type cr -pc_air_strong_threshold 0.1 \
+	 -ksp_rtol $(KSP_RTOL) -dm_refine 2 -pc_air_a_drop 1e-6 -pc_air_r_drop 1e-6 -pc_air_inverse_type l1jacobi -ksp_max_it 12
 #
 	@echo ""
 	@echo "Test AIRG with poorly scaled SUPG CG FEM, compatible relaxation CF splitting and diagonal scaling in parallel"
@@ -1652,6 +2017,133 @@ run_tests_medium_serial:
 	 -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -time_depend -ts_time_step 0.01 -ts_max_time 2.5 -bottom_only_inflow_one	-verify_solution								
 
+#
+	@echo ""
+	@echo "PCAIR PCApplyTranspose - the bulk of the configurations; the essential ones are in the short tests"
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing - the smoother blocks run in reverse"
+	./pcair_apply_transpose -pc_air_smooth_type fc
+	./pcair_apply_transpose -pc_air_smooth_type ffc
+	./pcair_apply_transpose -pc_air_smooth_type cf
+	@echo "Test PCApplyTranspose with PCAIR with a C point inverse different to the F point one"
+	./pcair_apply_transpose -pc_air_smooth_type fc -pc_air_c_inverse_type wjacobi
+	./pcair_apply_transpose -pc_air_smooth_type fcf -pc_air_c_inverse_type newton
+	@echo "Test PCApplyTranspose with symmetric PCAIR - the restrictor is the transposed prolongator"
+	./pcair_apply_transpose -pc_air_symmetric -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down - petsc's transposed V-cycle"
+	./pcair_apply_transpose -pc_air_full_smoothing_up_and_down -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with matrix-free PCAIR polynomials - the transposed matshell twins"
+	./pcair_apply_transpose -pc_air_matrix_free_polys -pc_air_smooth_type fcf
+	./pcair_apply_transpose -pc_air_matrix_free_polys -pc_air_inverse_type newton
+	@echo "Test PCApplyTranspose with a matrix-free PCAIR coarse grid solver"
+	./pcair_apply_transpose -pc_air_coarsest_matrix_free_polys
+	./pcair_apply_transpose -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton
+	@echo "Test PCApplyTranspose with diagonally scaled PCAIR polynomials - the scaling transposes too"
+	./pcair_apply_transpose -pc_air_diag_scale_polys
+	./pcair_apply_transpose -pc_air_diag_scale_polys -pc_air_matrix_free_polys
+	./pcair_apply_transpose -pc_air_coarsest_diag_scale_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test PCApplyTranspose with every PCAIR inverse type"
+	$(SKIP_SINGLE) ./pcair_apply_transpose -pc_air_inverse_type power
+	./pcair_apply_transpose -pc_air_inverse_type arnoldi
+	./pcair_apply_transpose -pc_air_inverse_type newton
+	./pcair_apply_transpose -pc_air_inverse_type newton_no_extra -pc_air_poly_order 10
+	./pcair_apply_transpose -pc_air_inverse_type neumann
+	./pcair_apply_transpose -pc_air_inverse_type sai
+	./pcair_apply_transpose -pc_air_inverse_type isai
+	./pcair_apply_transpose -pc_air_inverse_type wjacobi
+	./pcair_apply_transpose -pc_air_inverse_type jacobi
+	./pcair_apply_transpose -pc_air_inverse_type l1jacobi
+	@echo "Test PCApplyTranspose with a PCAIR coarse grid inverse type of its own"
+	./pcair_apply_transpose -pc_air_coarsest_inverse_type newton
+	./pcair_apply_transpose -pc_air_coarsest_inverse_type jacobi
+	@echo "Test PCApplyTranspose with the PCAIR Z types and lAIR distances"
+	./pcair_apply_transpose -pc_air_z_type product
+	./pcair_apply_transpose -pc_air_z_type lair
+	./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 1
+	./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 3
+	./pcair_apply_transpose -pc_air_z_type lair_sai
+	@echo "Test PCApplyTranspose with a classical PCAIR prolongator rather than the one point one"
+	./pcair_apply_transpose -pc_air_one_point_classical_prolong 0
+	./pcair_apply_transpose -pc_air_one_point_classical_prolong 0 -pc_air_improve_w_its 2
+	@echo "Test PCApplyTranspose with constrained PCAIR grid-transfer operators"
+	./pcair_apply_transpose -pc_air_constrain_z
+	./pcair_apply_transpose -pc_air_constrain_w -pc_air_one_point_classical_prolong 0
+	./pcair_apply_transpose -pc_air_constrain_z -pc_air_constrain_w -pc_air_one_point_classical_prolong 0
+	@echo "Test PCApplyTranspose with a lumped and a dropped PCAIR A"
+	./pcair_apply_transpose -pc_air_a_lump
+	./pcair_apply_transpose -pc_air_a_lump -pc_air_a_drop 1e-3
+	@echo "Test PCApplyTranspose with a direct and an iterative PCAIR coarse grid solve"
+	./pcair_apply_transpose -mg_coarse_pc_type lu
+	./pcair_apply_transpose -mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it 3 \
+	 -mg_coarse_ksp_norm_type none
+	@echo "Test PCApplyTranspose with a single level PCAIR - defers to the inner PCMG"
+	./pcair_apply_transpose -pc_air_max_levels 1 -pc_air_coarsest_matrix_free_polys
+	./pcair_apply_transpose -pc_air_max_levels 1 -pc_air_coarsest_inverse_type jacobi
+	@echo "Test PCApplyTranspose with a two level PCAIR"
+	./pcair_apply_transpose -pc_air_max_levels 2
+	./pcair_apply_transpose -pc_air_max_levels 2 -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose after the PCAIR operator values change - the same nonzero pattern"
+	./pcair_apply_transpose -rebuild
+	./pcair_apply_transpose -rebuild -pc_air_smooth_type fcf
+	./pcair_apply_transpose -rebuild -pc_air_matrix_free_polys
+	$(SKIP_SINGLE) ./pcair_apply_transpose -rebuild -pc_air_reuse_sparsity
+	$(SKIP_SINGLE) ./pcair_apply_transpose -rebuild -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs
+	@echo "Test PCApplyTranspose after the PCAIR nonzero pattern changes - the hierarchy is rebuilt"
+	./pcair_apply_transpose -rebuild_pattern -pc_air_smooth_type fcf
+	./pcair_apply_transpose -rebuild_pattern -pc_air_full_smoothing_up_and_down
+	@echo "Test PCApplyTranspose with PCAIR on a 2D upwind advection-diffusion operator"
+	./pcair_apply_transpose -dim 2 -n 20
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_smooth_type fcf
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_z_type lair
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_full_smoothing_up_and_down
+	./pcair_apply_transpose -dim 2 -n 20 -pc_air_matrix_free_polys -rebuild
+	./pcair_apply_transpose -dim 2 -n 20 -rebuild_pattern
+	@echo "Test KSPSolveTranspose through PCAIR"
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_smooth_type fcf
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_symmetric
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -mg_coarse_pc_type lu
+	./pcair_apply_transpose -dim 2 -n 20 -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_matrix_free_polys
+	@echo "Test KSPSolveTranspose through PCAIR with full smoothing up and down - petsc's transposed v-cycle"
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 -its_slack 4 \
+	 -pc_air_full_smoothing_up_and_down -pc_air_inverse_type wjacobi
+	./pcair_apply_transpose -dim 2 -n 20 -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 -its_slack 4 \
+	 -pc_air_full_smoothing_up_and_down
+	@echo "Test PCApplyTranspose with PCAIR at a size too big for the explicit check"
+	./pcair_apply_transpose -n 5000
+	./pcair_apply_transpose -n 5000 -pc_air_matrix_free_polys -pc_air_smooth_type fcf
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update, where the time step grows"
+	./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
+	 -pc_air_diag_update -max_total_its 3000
+	./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
+	 -pc_air_diag_update -pc_air_matrix_free_polys -max_total_its 3000
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update, where the time step grows"
+	$(SKIP_SINGLE) ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -pc_air_diag_update -max_total_its 3200
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -pc_air_diag_update -pc_air_matrix_free_polys -max_total_its 3200
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
+	 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 -max_total_its 2300 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads, built at the largest time step, and stored coefficients for bands of the time step"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 -max_total_its 3000 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_medium_parallel:
@@ -1712,6 +2204,85 @@ else
 		-ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 \
 		-dm_plex_filename data/square_unstruc.msh -dm_refine $$refine -ksp_max_it 7; \
 	done
+#
+	@echo ""
+	@echo "PCAIR PCApplyTranspose in parallel - the bulk of the configurations; the essential ones are in the short tests"
+	@echo "Test PCApplyTranspose with the default PCAIR in parallel"
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose
+	@echo "Test PCApplyTranspose with PCAIR with C point smoothing in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_smooth_type fc
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -pc_air_smooth_type cf
+	@echo "Test PCApplyTranspose with symmetric PCAIR in parallel - a transposed prolongator restrictor"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_symmetric
+	@echo "Test PCApplyTranspose with PCAIR with full smoothing up and down in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with matrix-free PCAIR polynomials in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_matrix_free_polys
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_matrix_free_polys -pc_air_inverse_type newton
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_diag_scale_polys -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with different PCAIR inverse types in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type newton
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type neumann
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type wjacobi
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_inverse_type l1jacobi
+	@echo "Test PCApplyTranspose with the PCAIR Z types in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair -pc_air_lair_distance 3
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_z_type lair_sai
+	@echo "Test PCApplyTranspose with constrained PCAIR grid-transfer operators in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_constrain_z -pc_air_constrain_w \
+	 -pc_air_one_point_classical_prolong 0
+	@echo "Test PCApplyTranspose with PCAIR with processor agglomeration in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_processor_agglom \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -pc_air_processor_agglom -pc_air_smooth_type fcf \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_processor_agglom -pc_air_matrix_free_polys \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 400
+	@echo "Test PCApplyTranspose with a single and a two level PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_max_levels 1
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -pc_air_max_levels 2
+	@echo "Test PCApplyTranspose with a redundant direct PCAIR coarse grid solve in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -mg_coarse_pc_type redundant -mg_coarse_redundant_pc_type lu
+	@echo "Test PCApplyTranspose after the PCAIR operator values change in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild -pc_air_matrix_free_polys
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild -pc_air_reuse_sparsity
+	@echo "Test PCApplyTranspose after the PCAIR nonzero pattern changes in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -rebuild_pattern
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -rebuild_pattern -pc_air_smooth_type fcf
+	@echo "Test PCApplyTranspose with PCAIR on a 2D upwind advection-diffusion operator in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -dim 2 -n 20
+	$(MPIEXEC) -n 3 ./pcair_apply_transpose -dim 2 -n 20 -pc_air_smooth_type fcf
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -dim 2 -n 20 -pc_air_z_type lair
+	@echo "Test KSPSolveTranspose through PCAIR in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_smooth_type fcf
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -transpose_solve -ksp_rtol $(KSP_RTOL) -ksp_max_it 100 \
+	 -pc_air_full_smoothing_up_and_down -pc_air_matrix_free_polys
+	@echo "Test PCApplyTranspose with PCAIR at a size too big for the explicit check in parallel"
+	$(MPIEXEC) -n 2 ./pcair_apply_transpose -n 5000 -pc_air_matrix_free_polys
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update, where the time step grows, in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
+	 -pc_air_diag_update -max_total_its 3000
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update, where the time step grows, in parallel"
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc \
+	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 \
+	 -ts_adapt_type basic -bottom_only_inflow_one -pc_air_diag_update -max_total_its 3200
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
+	 -pc_air_diag_update -pc_setup_dt 0.25 -ts_adapt_dt_max 0.25 -max_total_its 2300 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads, built at the largest time step, and stored coefficients for bands of the time step in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -pc_air_diag_update -pc_setup_dt 0.7 -ts_adapt_dt_max 0.7 -max_total_its 3000 \
+	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -dt_bands 2 -dt_bands_check \
+	 -pc_air_inverse_type newton_no_extra -pc_air_coarsest_inverse_type newton_no_extra \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 endif
 
 # ~~~~~~~~~~~
@@ -1724,6 +2295,13 @@ run_tests_copies:
 	@echo "Test AIRG with matrix-free polynomials makes no host/device copies in a second Richardson solve with device types"
 	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_matrix_free_polys \
 	 -pc_air_coarsest_matrix_free_polys -check_copies
+	@echo "Test AIRG with default options makes no host/device copies in a second transposed Richardson solve with device types"
+	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -transpose_solve -check_copies
+	@echo "Test AIRG with matrix-free polynomials makes no host/device copies in a second transposed Richardson solve with device types"
+	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -transpose_solve -check_copies
+	@echo "Test AIRG with C point smoothing makes no host/device copies in a second transposed Richardson solve with device types"
+	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fcf -transpose_solve -check_copies
 	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR makes no host/device copies with device types"
 	./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
 	@echo "Test multiple RHS block solve with a Richardson KSP and matrix-free PCAIR makes no host/device copies with device types"
@@ -1736,9 +2314,13 @@ run_tests_copies:
 	@echo "Test AIRG with matrix-free polynomials makes no host/device copies in a second Richardson solve with device types in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_matrix_free_polys \
 	 -pc_air_coarsest_matrix_free_polys -check_copies
-# Disabled until PETSc keeps the product of PCMG's block interpolate into a user-supplied block (the symbolic is redone every apply)
-#	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR makes no host/device copies with device types in parallel"
-#	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
+	@echo "Test AIRG with default options makes no host/device copies in a second transposed Richardson solve with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -transpose_solve -check_copies
+	@echo "Test AIRG with matrix-free polynomials makes no host/device copies in a second transposed Richardson solve with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -transpose_solve -check_copies
+	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR makes no host/device copies with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
 
 run_check:
 

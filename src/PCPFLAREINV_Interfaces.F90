@@ -276,7 +276,7 @@ module pcpflareinv_interfaces
 
       if (.NOT. c_associated(coeffs_c_ptr)) then
          print *, "PCPFLAREINVGetPolyCoeffs: no coefficients available; call PCSetUp first", &
-                  " (SAI, ISAI, WJacobi and Jacobi inverse types have no coefficients)"
+                  " (SAI, ISAI, WJacobi, Jacobi and L1Jacobi inverse types have no coefficients)"
          error stop 1
       end if
 

@@ -6,7 +6,28 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Added `-pc_air_diag_update` (`PCAIRSetDiagUpdate()`). When only the diagonal
+  of the Pmat changes in place, PCAIR updates the existing hierarchy rather than
+  rebuilding it, with no matrix-matrix products; see `docs/reuse.md`
+- A PCAIR diagonal update now honours `-pc_air_reuse_poly_coeffs`, keeping the
+  polynomial coefficients rather than recomputing them; see `docs/reuse.md` for
+  when this is appropriate
+- `PCAIRSetPolyCoeffs()` (C, Fortran and Python) now accepts a different number
+  of roots than PCAIR stores for the Newton inverse types (`newton`,
+  `newton_no_extra`), whose number of roots can differ between setups; the
+  storage is resized and matrix-free smoothers use the new roots immediately
+- Added the l1 Jacobi inverse type (`l1jacobi`, `PFLAREINV_L1JACOBI`), with
+  inverse sign(a_ii) / sum_j |a_ij|, as in hypre's l1 Jacobi; it can be used
+  wherever the other Jacobi types can, including the CR splitting relaxation
+- Behaviour change: the weighted Jacobi (`wjacobi`) weight is now
+  4 / (3 ||D^{-1/2} A D^{-1/2}||_inf), which is what hypre BoomerAMG computes
+  with a relaxation weight of 0, rather than 3 / (4 ||D^{-1/2} A D^{-1/2}||_inf)
+  as quoted in the hypre documentation; the weight is larger by a factor of 16/9.
+  The CR splitting (`-pc_air_cf_splitting_type cr`) relaxation uses the same weight
 - Minimum PETSc version is now 3.26.0
+- Fixed power basis GMRES polynomials failing on badly scaled matrices (eg
+  bcsstk19); the coefficients no longer depend on the scale of the matrix, so
+  iteration counts may change slightly
 - Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
   from a level that failed the truncation test, which gave the wrong coarse
   grid polynomial (or an out-of-bounds write with the power basis) when the
@@ -91,6 +112,83 @@ for earlier changes please see the git history.
 - Fixed the Fortran `PCPFLAREINVGetMatrixFree` not returning the stored value,
   and made the C/Fortran/Cython prototypes of the PCPFLAREINV and PCAIR bool
   routines match their definitions exactly (`PetscBool`, `int` by value)
+- Fixed a crash when an assembled GMRES polynomial or SAI/ISAI inverse (in
+  PCPFLAREINV or PCAIR) was set up in parallel after one had been set up on a
+  single rank in the same program, eg as a block Jacobi sub-PC
+- Behaviour change: the Arnoldi basis GMRES polynomial (the default PCAIR
+  inverse type) now includes every entry of the least-squares residual in its
+  early termination test, so it no longer stops before reaching its tolerance
+  and iteration counts may change slightly
+- Fixed monomial GMRES polynomials with exactly zero interior coefficients
+  (eg set with `PCPFLAREINVSetPolyCoeffs`) applying the wrong polynomial, both
+  assembled and matrix-free
+- Newton basis GMRES polynomials: the modified Leja ordering of the roots no
+  longer depends on the scaling of the spectrum, and purely imaginary roots now
+  receive extra roots for stability, so results may change for tightly
+  clustered, small magnitude or skew-symmetric spectra
+- Fixed PCAIR with `-pc_air_strong_threshold 0` assuming Aff is diagonal for
+  every CF splitting type; this only holds for `pmisr_ddc` and `diag_dom`, so
+  other splittings (e.g., `pmis`, `agg`) silently dropped the off-diagonal
+  entries of Aff, degrading or breaking convergence
+- Fixed the `pmis_agg` CF splitting: in parallel, boundary C points whose
+  strong neighbours were all off-process were turned into F points (which
+  could remove every C point), and with Kokkos matrices the aggregation read
+  uninitialised PMIS markers from the host
+- Fixed the `pmis_dist2` CF splitting cancelling signed connections when
+  squaring the strength matrix (e.g., skew-symmetric advection gave almost no
+  connections and coarsening failed), and leaking an IS on every setup. The
+  coarse grids from `pmis_dist2` may change
+- Fixed the CPU ISAI exact dense solve wrongly permuting the solution returned
+  by LAPACK `gesv`, which gave an incorrect ISAI (and lAIR Z) whenever a local
+  submatrix needed row pivoting; a singular local submatrix now aborts rather
+  than silently returning the right-hand side
+- Fixed the Kokkos dense direct solve used to build lAIR/SAI Z and ISAI
+  rows not pivoting, which gave Inf/NaN or inaccurate rows when a local block
+  had a zero or small leading pivot (e.g. matrices with zero diagonals); it now
+  uses LU with partial pivoting like the CPU LAPACK solve
+- Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z
+  and ISAI rows dividing by zero (giving Inf/NaN) when a local block has a
+  zero diagonal; zero diagonals are now replaced by 1, matching the CPU PCJACOBI
+- PCAIR now implements `PCApplyTranspose`, so it can be used as the
+  preconditioner in a `KSPSolveTranspose`. It applies the exact transpose of the
+  cycle `PCApply` applies, so the two are adjoints. `PCMatApplyTranspose` falls
+  back to applying `PCApplyTranspose` column by column
+- Reduced the memory PCAIR uses during and after setup, with no change to the
+  hierarchy (#299). The CPU matrix builders now use `MatSetValues` with exact
+  preallocation rather than the COO interface, whose maps PETSc kept attached
+  to R, P and the coarse matrices. F-point and FC smoothing no longer create a
+  distinct (unused) up smoother on each level. The product data of the setup
+  temporaries is cleared when they aren't reused, and the smoothing temporary
+  vectors on every level share one pool sized for the largest level
+- Fixed `-pc_air_symmetric` with `-pc_air_reuse_sparsity`, which segfaulted
+  at reuse amount 3 and errored (or reused a stale coarse operator) at amount
+  2 in parallel
+- Fixed `-pc_air_subcomm` aborting in serial, or when Aff is diagonal
+- Fixed the Newton basis on a subcomm, where adding extra roots for stability
+  gave mismatched MPI broadcast sizes
+- Fixed the Newton roots kept with `-pc_air_reuse_sparsity` mixing in the
+  extra roots of the previous setup, which could index out of bounds
+- Fixed the SAI least-squares solves on rank deficient (or empty) local
+  systems, which inserted garbage or stopped the program; they now use the
+  minimum norm solution
+- Fixed the assembled Newton inverses dividing by a numerically zero first
+  root, so they now match the matrix-free inverse
+- Fixed `-pc_air_improve_w_its`/`-pc_air_improve_z_its` doing nothing with
+  `-pc_air_matrix_free_polys` or `-pc_air_full_smoothing_up_and_down`; they
+  now use the inverse of the diagonal of Aff in those cases
+- Fixed the `newton_no_extra` matvec counts in `-pc_air_print_stats_timings`
+- Fixed the clustering of the Newton roots splitting a complex conjugate pair
+  when only one of the pair was close to a real root, which gave the wrong
+  polynomial or indexed out of bounds; this is most likely in single precision
+- The C `compute_cf_splitting` now skips symmetrizing for any nonzero
+  `skip_symmetrize`, as documented
+- Behaviour change: `PCAIRSetDDCFraction` (and `-pc_air_ddc_fraction`) now
+  errors for a fraction bigger than 1
+- Fixed the Kokkos `MatCreateSubMatrix` erroring in parallel in single
+  precision once a submatrix had more than 2^24 global columns
+- Fixed the GMRES polynomial random start vector occasionally containing
+  inf/NaN in single precision, which broke levels with more than about 2^24
+  F-points
 
 ## [v1.27.0]
 

@@ -3,7 +3,7 @@ module gmres_poly_newton
    use petscmat
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos
-   use pflare_parameters, only: PFLARE_TOL_ZERO, PFLARE_TOL_RCOND, &
+   use pflare_parameters, only: PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
          PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB
@@ -38,6 +38,7 @@ module gmres_poly_newton
       PetscReal, dimension(:), allocatable :: magnitude
       PetscReal :: a, b, squares, max_mag
       logical, dimension(size(real_roots)) :: sorted
+      logical :: found
 
       ! ~~~~~~    
 
@@ -76,6 +77,7 @@ module gmres_poly_newton
       do while (counter-1 < size(real_roots))
 
          max_mag = -huge(max_mag)
+         found = .FALSE.
 
          ! For each value compute a product of differences
          do i_loc = 1, size(real_roots)
@@ -91,8 +93,14 @@ module gmres_poly_newton
                a = real_roots(i_loc) - real_roots(indices(k_loc))
                b = imag_roots(i_loc) - imag_roots(indices(k_loc))
 
-               ! If we have repeated roots this will be exactly zero, and magnitude will be -infinity
+               ! If we have repeated roots this will be exactly zero, and the product 
+               ! of differences is zero - we set the log of it to -huge rather than 
+               ! computing log10(0) = -infinity, which raises a floating point exception
                squares = a**2 + b**2
+               if (squares == 0d0) then
+                  magnitude(i_loc) = -huge(magnitude(i_loc))
+                  exit
+               end if
                magnitude(i_loc) = magnitude(i_loc) + &
                   log10(sqrt(squares))
             end do
@@ -101,12 +109,16 @@ module gmres_poly_newton
             if (magnitude(i_loc) > max_mag) then
                max_mag = magnitude(i_loc)
                max_loc(1) = i_loc
+               found = .TRUE.
             end if            
          end do
 
          ! If we found nothing (ie the only unsorted are repeated roots with zero distance)
          ! just have the next entry in the list
-         if (max_mag < 0) then
+         ! Note we can't test max_mag < 0 here, as the log of the product of distances
+         ! is legitimately negative whenever that product is small (e.g., tightly 
+         ! clustered or small magnitude eigenvalues), which would make the ordering scale dependent
+         if (.NOT. found) then
             do i_loc = 1, size(real_roots)
                if (.NOT. sorted(i_loc)) then
                   max_loc(1) = i_loc
@@ -152,6 +164,13 @@ module gmres_poly_newton
       ! Remaining entries are set to zero.
       ! Skips eigenvalues that are exactly zero (both real and imag parts).
       !
+      ! The roots must be passed in with complex conjugate pairs next to each other
+      ! (as dgeev returns them). The clustering is done only on the roots with 
+      ! imag >= 0 and every complex cluster is output as a conjugate pair, with the
+      ! positive imaginary root first, as everything downstream relies on that.
+      ! Clustering all the roots instead can split a pair, e.g., if a real root is 
+      ! within tolerance of a complex root but not of its conjugate
+      !
       ! Inputs:
       !   real_roots, imag_roots : eigenvalues (length k)
       !   rel_tol               : relative tolerance (suggest sqrt(eps) ~ 1e-8)
@@ -162,10 +181,10 @@ module gmres_poly_newton
 
       PetscReal, dimension(:), intent(inout) :: real_roots, imag_roots
       PetscReal, intent(in)                  :: rel_tol, abs_tol
-      integer                                :: i, j, n, n_unique, cluster_size
+      integer                                :: i, j, n, n_unique, weight, cluster_weight
       logical, allocatable                   :: used(:)
       PetscReal                              :: dist, mag_i, mag_j, scale
-      PetscReal                              :: sum_real, sum_imag
+      PetscReal                              :: sum_real, sum_imag, centroid_real, centroid_imag
       PetscReal, allocatable                 :: rtmp(:), itmp(:)
 
       n = size(real_roots)
@@ -177,22 +196,29 @@ module gmres_poly_newton
       n_unique = 0
 
       ! ---------------------------------------------------------
-      ! All-pairs clustering
+      ! All-pairs clustering of the roots with imag >= 0
       ! ---------------------------------------------------------
       do i = 1, n
 
          if (used(i)) cycle
 
-         ! Skip eigenvalues that are exactly zero
-         if (real_roots(i) == 0.0d0 .AND. imag_roots(i) == 0.0d0) then
+         ! Skip eigenvalues that are exactly zero and the negative imaginary
+         ! conjugates (they are output with their positive imaginary root)
+         if ((real_roots(i) == 0.0d0 .AND. imag_roots(i) == 0.0d0) .OR. &
+               imag_roots(i) < 0.0d0) then
             used(i) = .true.
             cycle
          end if
 
          ! Start new cluster with eigenvalue i
-         sum_real = real_roots(i)
-         sum_imag = imag_roots(i)
-         cluster_size = 1
+         ! Each member is weighted by how many roots it stands for, ie a complex root 
+         ! counts twice (itself and its conjugate) and a real root once, so the 
+         ! real part of the centroid is the mean over the cluster and its mirror image
+         weight = 1
+         if (imag_roots(i) > 0.0d0) weight = 2
+         sum_real = weight * real_roots(i)
+         sum_imag = weight * imag_roots(i)
+         cluster_weight = weight
          used(i) = .true.
          
          mag_i = sqrt(real_roots(i)**2 + imag_roots(i)**2)
@@ -202,8 +228,9 @@ module gmres_poly_newton
 
             if (used(j)) cycle
 
-            ! Skip exactly zero eigenvalues
-            if (real_roots(j) == 0.0d0 .AND. imag_roots(j) == 0.0d0) then
+            ! Skip exactly zero eigenvalues and negative imaginary conjugates
+            if ((real_roots(j) == 0.0d0 .AND. imag_roots(j) == 0.0d0) .OR. &
+                  imag_roots(j) < 0.0d0) then
                used(j) = .true.
                cycle
             end if
@@ -211,26 +238,49 @@ module gmres_poly_newton
             mag_j = sqrt(real_roots(j)**2 + imag_roots(j)**2)
             
             ! Distance between eigenvalues
+            ! Both have imag >= 0, so the conjugate of j is never closer to i than j
             dist = sqrt((real_roots(j) - real_roots(i))**2 + &
                         (imag_roots(j) - imag_roots(i))**2)
 
             ! Use the larger magnitude for relative scaling
-            scale = max(mag_i, mag_j, PFLARE_ONE)
+            ! This is purely relative so the clustering does not depend on the scale 
+            ! of the matrix, abs_tol handles roots near zero
+            scale = max(mag_i, mag_j)
 
             ! Check if within tolerance
             if (dist <= abs_tol + rel_tol * scale) then
-               sum_real = sum_real + real_roots(j)
-               sum_imag = sum_imag + imag_roots(j)
-               cluster_size = cluster_size + 1
+               weight = 1
+               if (imag_roots(j) > 0.0d0) weight = 2
+               sum_real = sum_real + weight * real_roots(j)
+               sum_imag = sum_imag + weight * imag_roots(j)
+               cluster_weight = cluster_weight + weight
                used(j) = .true.
             end if
 
          end do
 
-         ! Compute cluster centroid (mean)
+         ! Compute cluster centroid (weighted mean)
+         centroid_real = sum_real / real(cluster_weight, kind=kind(rtmp))
+         centroid_imag = sum_imag / real(cluster_weight, kind=kind(itmp))
+
+         ! If the centroid is within tolerance of its own conjugate, the pair
+         ! is numerically a single real root
+         if (centroid_imag > 0.0d0) then
+            if (2 * centroid_imag <= abs_tol + &
+                  rel_tol * sqrt(centroid_real**2 + centroid_imag**2)) then
+               centroid_imag = 0.0d0
+            end if
+         end if
+
          n_unique = n_unique + 1
-         rtmp(n_unique) = sum_real / real(cluster_size, kind=kind(rtmp))
-         itmp(n_unique) = sum_imag / real(cluster_size, kind=kind(itmp))
+         rtmp(n_unique) = centroid_real
+         itmp(n_unique) = centroid_imag
+         ! Output a complex centroid as a conjugate pair, positive imaginary first
+         if (centroid_imag > 0.0d0) then
+            n_unique = n_unique + 1
+            rtmp(n_unique) = centroid_real
+            itmp(n_unique) = -centroid_imag
+         end if
 
       end do
 
@@ -285,9 +335,10 @@ module gmres_poly_newton
          ! We have already computed pof for the positive imaginary complex conjugate
          if (b < 0) cycle
 
-         ! Skips eigenvalues that are numerically zero
-         if (abs(a) < PFLARE_TOL_ZERO) cycle
-         if (a**2 + b**2 < PFLARE_TOL_ZERO) cycle
+         ! Skips zero eigenvalues (we should only be passed non-zero roots)
+         ! This matches the zero test used when applying the polynomial, ie 
+         ! a purely imaginary root (a == 0, b /= 0) is not zero
+         if (a == 0d0 .AND. b == 0d0) cycle
 
          ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
          do i_loc = 1, n_roots
@@ -298,9 +349,8 @@ module gmres_poly_newton
             c = real_roots(i_loc)
             d = imag_roots(i_loc)
 
-            ! Skips eigenvalues that are numerically zero
-            if (abs(c) < PFLARE_TOL_ZERO) cycle
-            if (c**2 + d**2 < PFLARE_TOL_ZERO) cycle
+            ! Skips zero eigenvalues
+            if (c == 0d0 .AND. d == 0d0) cycle
 
             ! theta_k/theta_i
             div_real = (a * c + b * d)/(c**2 + d**2)
@@ -313,7 +363,9 @@ module gmres_poly_newton
             ! reset pof back to one
             ! We can hit this for very high order polynomials, where we have to 
             ! add more roots than 22 (ie pof > 1e308)
-            if (log10(pof(k_loc)) + log10(div_mag) > 307) then
+            ! range gives the decimal exponent range of pof, ie 307 in double and 37 in single
+            ! In single pof can overflow at much lower order
+            if (log10(pof(k_loc)) + log10(div_mag) > range(pof(k_loc))) then
                overflow(k_loc) = overflow(k_loc) + int(log10(pof(k_loc)))
                pof(k_loc) = 1
             end if            
@@ -419,7 +471,7 @@ module gmres_poly_newton
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
       logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm
+      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm, perturb_scale
 
       ! ~~~~~~    
 
@@ -440,6 +492,14 @@ module gmres_poly_newton
       if (subspace_size > global_rows) then
          print *, "The input subspace size is greater than the matrix size"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! If we're reusing, coefficients may still be sized for the extra roots 
+      ! added in a previous setup, so make sure we start from p+1 roots
+      ! Otherwise the old roots would be included in the clustering below
+      if (size(coefficients, 1) /= poly_order + 1) then
+         deallocate(coefficients)
+         allocate(coefficients(poly_order + 1, 2))
       end if
 
       ! ~~~~~~~~~~
@@ -538,6 +598,11 @@ module gmres_poly_newton
       ! ie either compute the Ritz or Harmonic Ritz values
       ! ~~~~~~~~~~~~~~
 
+      ! The tolerances that control the clustering below are relative to ||H||
+      ! This has to be computed before the eigenvalue solve, as PFLAREgeev overwrites H_n
+      ! (after balancing, and at higher order with values that don't scale with the matrix)
+      H_norm = norm2(H_n(1:m,1:m))
+
       allocate(work(1))
       ! Not used but we have to allocate
       allocate(VL(0, 0))
@@ -574,13 +639,18 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~
 
       ! These are the tolerances that control the clustering
-      H_norm = norm2(H_n(1:m,1:m))
+      ! These are all relative to ||H|| (computed above, before H_n is overwritten), 
+      ! which scales with the matrix, so the roots (and hence the polynomial) 
+      ! do not depend on the scale of the matrix
       rel_tol = sqrt(PFLARE_EPS)
-      abs_tol = PFLARE_EPS * max(H_norm, beta)
+      abs_tol = PFLARE_EPS * H_norm
 
       ! In some cases with numerical rank deficiency, we can still
       ! end up with non-zero (or negative) eigenvalues that
       ! are trivially small - we set them explicitly to zero
+      ! Everywhere downstream (the matrix-free apply, the assembled builds, 
+      ! the matvec counts) then only skips roots that are exactly zero
+      ! A complex root that survives this is never skipped
       do i_loc = 1, poly_order + 1
          if (coefficients(i_loc,1)**2 + coefficients(i_loc,2)**2 < &
             (abs_tol + rel_tol*H_norm)**2) then
@@ -648,6 +718,15 @@ module gmres_poly_newton
          perturbed_imag = imag_roots_added
 
          ! Perturb the extra roots so they have unique values for the leja sort
+         ! The perturbation is relative to the smallest (non-zero) root, so the ordering 
+         ! doesn't depend on the scale of the matrix, while keeping the perturbation 
+         ! negligible relative to every root
+         ! A larger perturbation (e.g., relative to the biggest root, ||H|| or each root) 
+         ! makes the copies look well separated, so the leja ordering pulls them 
+         ! forward, which destabilises high order polynomials
+         ! If the perturbation is lost to rounding on a big root, the copies are exact 
+         ! duplicates, which modified_leja handles
+         perturb_scale = minval(sqrt(real_roots_added**2 + imag_roots_added**2))
          counter = numerical_order + 1
          do i_loc = 1, numerical_order
             k_loc = 0
@@ -656,7 +735,7 @@ module gmres_poly_newton
                if (real_roots_added(j_loc) == coefficients_temp(i_loc, 1) .AND. &
                    abs(imag_roots_added(j_loc)) == abs(coefficients_temp(i_loc, 2))) then
                   k_loc = k_loc + 1
-                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * PFLARE_TOL_LEJA_PERTURB
+                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * PFLARE_TOL_LEJA_PERTURB * perturb_scale
                end if
             end do
          end do
@@ -739,7 +818,8 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~~
 
-      if (poly_sparsity_order .ge. size(coefficients)-1) then
+      ! coefficients is (number of roots, 2), so check against the number of roots
+      if (poly_sparsity_order .ge. size(coefficients, 1)-1) then
          print *, "Requested sparsity is greater than or equal to the order"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
@@ -844,7 +924,7 @@ module gmres_poly_newton
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
-      PetscScalar :: normy
+      PetscScalar :: normy, max_cpu
       logical :: reuse_triggered_cmat, reuse_triggered_reuse_mat
       type(c_ptr)  :: coefficients_ptr, status_output_ptr
       type(tMat) :: reuse_mat_cpu
@@ -906,7 +986,7 @@ end if
          call mat_mult_powers_share_sparsity_newton_kokkos(A_array, sparsity_array, prod_save_array, &
                   prod_save_exists_int, num_terms, poly_sparsity_order, &
                   coefficients_ptr, status_output_ptr, output_first_complex_int, &
-                  PFLARE_TOL_ZERO, reuse_int_reuse_mat, reuse_array, B_array)
+                  reuse_int_reuse_mat, reuse_array, B_array)
 
          reuse_mat%v = reuse_array
 
@@ -941,9 +1021,14 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)
 
+            ! Find the biggest entry in the cpu result, the entries scale with 1/(the scale
+            ! of the matrix), so the tolerance below is relative to this
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, max_cpu, ierr)
+
             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
-            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
@@ -955,7 +1040,9 @@ end if
             ! this happens on the CPU and Kokkos sides independently) compound roughly
             ! quadratically, so scale the tolerance with num_terms rather than using a
             ! fixed bound that only holds at low order
-            if (normy .gt. PFLARE_TOL_MATFREE_NEWTON * dble(num_terms)**2 .OR. normy/=normy) then
+            ! The tolerance is relative to the biggest entry, but never tighter than absolute
+            if (normy .gt. PFLARE_TOL_MATFREE_NEWTON * dble(num_terms)**2 * max(PFLARE_ONE, max_cpu) &
+                     .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
@@ -1015,7 +1102,7 @@ end if
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao, mat_sparsity_match, mat_product_save
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       type(int_vec), dimension(:), allocatable :: symbolic_ones
       type(real_vec), dimension(:), allocatable :: symbolic_vals
       integer(c_long_long) A_array
@@ -1032,6 +1119,10 @@ end if
       integer, dimension(size(coefficients, 1), 2) :: status_output
 
       ! ~~~~~~~~~~
+
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)
       ! Get the comm size 
@@ -1301,9 +1392,9 @@ end if
             ! If real
             if (coefficients(term,2) == 0d0) then
 
-               ! Skips eigenvalues that are numerically zero - see 
+               ! Skips zero eigenvalues - see 
                ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (abs(coefficients(term,1)) < PFLARE_TOL_ZERO) then
+               if (coefficients(term,1) == 0d0) then
                   term = term + 1
                   cycle
                end if
@@ -1336,13 +1427,10 @@ end if
             ! If complex
             else
 
-               ! Skips eigenvalues that are numerically zero - see 
-               ! the comment in calculate_gmres_polynomial_roots_newton                
-               if (coefficients(term,1)**2 + coefficients(term,2)**2 < PFLARE_TOL_ZERO) then
-                  term = term + 2
-                  cycle
-               end if
-
+               ! A complex pair is never zero (its imaginary part is nonzero), so is
+               ! never skipped. That matters here, as skipping a pair where the fixed
+               ! sparsity root is the second of the pair would leave skip_add set
+               ! and the wrong product in vals_previous_power_temp
                square_sum = PFLARE_ONE/(coefficients(term,1)**2 + coefficients(term,2)**2)
 
                ! If our fixed sparsity order falls on the first of a complex conjugate pair
@@ -1451,9 +1539,12 @@ end if
 
          ! Final step if last root is real
          if (coefficients(size(coefficients, 1),2) == 0d0) then
-            if (ncols /= 0 .AND. abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then
+            ! Skips zero eigenvalues
+            ! vals_previous_power_temp has the final prod in it, even if the loop 
+            ! above ended by skipping a zero root
+            if (ncols /= 0 .AND. coefficients(size(coefficients, 1),1) /= 0d0) then
                call MatSetValues(cmat, one, [global_row_start + i_loc-1], ncols, cols, &
-                     PFLARE_ONE/coefficients(size(coefficients, 1), 1) * vals_power_temp(1:ncols), ADD_VALUES, ierr)
+                     PFLARE_ONE/coefficients(size(coefficients, 1), 1) * vals_previous_power_temp(1:ncols), ADD_VALUES, ierr)
             end if             
          end if
 
@@ -1492,6 +1583,43 @@ end if
       call MatAssemblyEnd(cmat, MAT_FINAL_ASSEMBLY, ierr) 
 
    end subroutine mat_mult_powers_share_sparsity_newton_cpu   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine point_mf_newton_roots(mat_ctx, coefficients)
+
+      ! Points the context of a matrix-free Newton polynomial matshell at the roots
+      ! in coefficients (real parts in column 1, imaginary parts in column 2)
+      ! If the matshell has an inner diagonally scaled matshell (mat_ctx%mat_scaled)
+      ! that is pointed at them too
+      ! This must be called whenever the coefficients are reallocated, eg if the
+      ! number of roots changes, otherwise the matshell is left pointing at freed memory
+      ! Whether the matshell owns the coefficients is set by the caller in
+      ! mat_ctx%own_coefficients, which this doesn't change (PCAIR never gives it ownership)
+
+      ! ~~~~~~
+      type(mat_ctxtype), intent(inout)                              :: mat_ctx
+      PetscReal, dimension(:, :), target, contiguous, intent(inout) :: coefficients
+
+      type(mat_ctxtype), pointer :: mat_ctx_scaled => null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      mat_ctx%real_roots => coefficients(:, 1)
+      mat_ctx%imag_roots => coefficients(:, 2)
+      ! Pointer remapping turns the 2D coefficients into the 1D mat_ctx%coefficients
+      ! If the caller sets mat_ctx%own_coefficients (PCPFLAREINV), the context reset
+      ! deallocates through this pointer, which frees the whole 2D array
+      mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+
+      if (.NOT. PetscObjectIsNull(mat_ctx%mat_scaled)) then
+         call MatShellGetContext(mat_ctx%mat_scaled, mat_ctx_scaled, ierr)
+         mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
+         mat_ctx_scaled%real_roots => coefficients(:, 1)
+         mat_ctx_scaled%imag_roots => coefficients(:, 2)
+      end if
+
+   end subroutine point_mf_newton_roots
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1583,8 +1711,6 @@ end if
 
                ! Have to dynamically allocate this
                allocate(mat_ctx_scaled)
-               mat_ctx_scaled%real_roots => coefficients(:, 1)
-               mat_ctx_scaled%imag_roots => coefficients(:, 2)               
                
                ! Create the matshell
                call MatCreateShell(MPI_COMM_MATRIX, local_rows, local_cols, global_rows, global_cols, &
@@ -1617,20 +1743,15 @@ end if
             mat_ctx%coefficients => null()
          end if
 
-         mat_ctx%real_roots => coefficients(:, 1)
-         mat_ctx%imag_roots => coefficients(:, 2)
-         ! Now because the context reset deallocates the coefficient pointer 
-         ! we want to make sure we don't leak memory, so we use pointer remapping here 
-         ! to turn the 2D coefficient pointer into a 1D that we can store in mat_ctx%coefficients
-         ! and then the deallocate on mat_ctx%coefficients should still delete all the memory
-         mat_ctx%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)
          ! This is the matrix whose inverse we are applying (just copying the pointer here)
          mat_ctx%mat = matrix     
+         if (diag_scale_polys) mat_ctx_scaled%mat = matrix
+
+         ! Point the shell (and the inner diagonally scaled shell) at the roots
+         ! The coefficients may have been reallocated since the last setup
+         call point_mf_newton_roots(mat_ctx, coefficients)
 
          if (diag_scale_polys) then
-            mat_ctx_scaled%mat = matrix 
-            mat_ctx_scaled%coefficients(1:2*size(coefficients,1)) => coefficients(:, :)            
-
             ! Get the diagonal
             call MatGetDiagonal(matrix, mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)    
             mat_ctx_scaled%mf_temp_vec(MF_VEC_DIAG) = mat_ctx%mf_temp_vec(MF_VEC_DIAG)
@@ -1761,7 +1882,12 @@ end if
       end if
 
       ! Must be real as we only have one coefficient
-      call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
+      ! Skips zero eigenvalues, like the matrix-free apply
+      if (coefficients(1, 1) /= 0d0) then
+         call VecSet(diag_vec, PFLARE_ONE/coefficients(1, 1), ierr)
+      else
+         call VecSet(diag_vec, PFLARE_ZERO, ierr)
+      end if
 
       ! We may be reusing with the same sparsity
       if (.NOT. reuse_triggered) then
@@ -1824,9 +1950,9 @@ end if
          ! If real this is easy
          if (coefficients(i,2) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero - see 
+            ! Skips zero eigenvalues - see 
             ! the comment in calculate_gmres_polynomial_roots_newton 
-            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
+            if (coefficients(i,1) == 0d0) then
                i = i + 1
                cycle
             end if        
@@ -1846,11 +1972,7 @@ end if
          ! Complex 
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
-               i = i + 2
-               cycle
-            end if
+            ! A complex pair is never zero as its imaginary part is nonzero
 
             ! Compute 2a I - A
             ! temp_vec_A = -A    
@@ -1880,8 +2002,8 @@ end if
       if (coefficients(size(coefficients,1),2) == 0d0) then
          ! Add in the final term multiplied by 1/theta_poly_order
 
-         ! Skips eigenvalues that are numerically zero
-         if (abs(coefficients(size(coefficients, 1),1)) > PFLARE_TOL_ZERO) then      
+         ! Skips zero eigenvalues
+         if (coefficients(size(coefficients, 1),1) /= 0d0) then      
             call VecAXPY(inv_vec, PFLARE_ONE/coefficients(size(coefficients, 1),1), product_vec, ierr)  
          end if       
       end if
@@ -1921,7 +2043,7 @@ end if
       ! Local variables
       PetscErrorCode :: ierr      
       logical :: reuse_triggered, output_product
-      PetscReal :: square_sum
+      PetscReal :: square_sum, inv_theta_one
 
       ! ~~~~~~      
 
@@ -1941,6 +2063,14 @@ end if
       ! If real
       if (coefficients(1,2) == 0d0) then
 
+         ! Skips zero eigenvalues, like the matrix-free apply
+         ! A skipped first root leaves the product as the identity
+         if (coefficients(1,1) == 0d0) then
+            inv_theta_one = 0
+         else
+            inv_theta_one = PFLARE_ONE/coefficients(1,1)
+         end if
+
          ! Have to be careful here, as we may be first order, but the second eigenvaule
          ! might have been set to zero thanks to the rank reducing solve 
          ! So we just check if the second real part is zero and if it is
@@ -1950,7 +2080,8 @@ end if
          ! solve we don't have a zero coefficient but in the second solve we do
          ! So the mat type needs to remain consistent
          ! This can't happen in the complex case
-         if (abs(coefficients(2,1)) < PFLARE_TOL_ZERO) then
+         ! The matrix-free apply only applies the last root if it is non-zero
+         if (coefficients(2,1) == 0d0) then
 
             ! Set to zero
             call MatScale(inv_matrix, PFLARE_ZERO, ierr)
@@ -1964,7 +2095,7 @@ end if
             end if                
 
             ! Then add in the 0th order inverse
-            call MatShift(inv_matrix, PFLARE_ONE/coefficients(1,1), ierr)       
+            call MatShift(inv_matrix, inv_theta_one, ierr)       
             
             ! Then just return
             return  
@@ -1975,7 +2106,7 @@ end if
          ! theta_1 * theta_2 that would result
 
          ! result = -A_ff/theta_1
-         call MatScale(inv_matrix, PFLARE_MINUS_ONE/(coefficients(1, 1)), ierr)
+         call MatScale(inv_matrix, -inv_theta_one, ierr)
          ! result = I -A_ff/theta_1
          call MatShift(inv_matrix, PFLARE_ONE, ierr) 
          ! If we're doing this as part of fixed sparsity multiply, 
@@ -1989,7 +2120,7 @@ end if
 
          ! result = 1/theta_1 + 1/theta_2 * (I -A_ff/theta_1)
          ! Don't need an assemble as there is one called in this
-         call MatShift(inv_matrix, PFLARE_ONE/(coefficients(1, 1)), ierr)     
+         call MatShift(inv_matrix, inv_theta_one, ierr)     
          
          if (output_product) then
             status_output(1:2, 1) = 1
@@ -1997,8 +2128,9 @@ end if
 
       ! Complex conjugate roots, a +- ib
       else
-         ! a^2 + b^2
-         square_sum = coefficients(1,1)**2 + coefficients(1,2)**2
+         ! 1/(a^2 + b^2)
+         ! A complex pair is never zero as its imaginary part is nonzero
+         square_sum = PFLARE_ONE/(coefficients(1,1)**2 + coefficients(1,2)**2)
 
          ! Complex conjugate roots
          ! result = -A_ff
@@ -2012,7 +2144,7 @@ end if
             call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
          end if      
          ! result = 2a I - A_ff/(a^2 + b^2)
-         call MatScale(inv_matrix, PFLARE_ONE/square_sum, ierr)
+         call MatScale(inv_matrix, square_sum, ierr)
 
          if (output_product) then
             status_output(1:2, 2) = 1
@@ -2125,11 +2257,12 @@ end if
                else
 
                   ! Check if the distance between the fixed sparsity root and the one before
-                  ! If > zero then they are not complex conjugates and hence we are on the first of the pair         
-                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1))/coefficients(i_sparse,1) > &
-                        PFLARE_TOL_CONSISTENCY .OR. &
-                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2))/coefficients(i_sparse,2) > &
-                        PFLARE_TOL_CONSISTENCY) then
+                  ! If > zero then they are not complex conjugates and hence we are on the first of the pair
+                  ! Don't divide by the root, as the real part may be zero (or negative)
+                  if (abs(coefficients(i_sparse,1) - coefficients(i_sparse-1,1)) > &
+                        PFLARE_TOL_CONSISTENCY * abs(coefficients(i_sparse,1)) .OR. &
+                        abs(coefficients(i_sparse,2) + coefficients(i_sparse-1,2)) > &
+                        PFLARE_TOL_CONSISTENCY * abs(coefficients(i_sparse,2))) then
                      output_first_complex = .TRUE.
                      i_sparse = i_sparse + 1
                   end if            
@@ -2160,10 +2293,10 @@ end if
          ! If real this is easy
          if (coefficients(i,2) == 0d0) then
 
-            ! Skips eigenvalues that are numerically zero
+            ! Skips zero eigenvalues
             ! We still compute the entries as as zero because we need the sparsity
             ! to be correct for the next iteration
-            if (abs(coefficients(i,1)) < PFLARE_TOL_ZERO) then
+            if (coefficients(i,1) == 0d0) then
                square_sum = 0
             else
                square_sum = PFLARE_ONE/coefficients(i,1)
@@ -2172,7 +2305,7 @@ end if
             ! Then add the scaled version of each product
             if (i == 1) then
                ! If i == 1 then we know mat_product is identity so we can do it directly
-               call MatShift(inv_matrix, PFLARE_ONE/coefficients(i,1), ierr)  
+               call MatShift(inv_matrix, square_sum, ierr)  
             else
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset
@@ -2212,14 +2345,10 @@ end if
          ! Complex 
          else
 
-            ! Skips eigenvalues that are numerically zero
-            if (coefficients(i,1)**2 + coefficients(i,2)**2 < PFLARE_TOL_ZERO) then
-               square_sum = 0
-               a_coeff = 0
-             else  
-               square_sum = PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2)
-               a_coeff = PFLARE_TWO * coefficients(i,1)
-            end if
+            ! A complex pair is never zero as its imaginary part is nonzero
+            ! The fixed sparsity continuation relies on this, as it never skips a complex pair
+            square_sum = PFLARE_ONE/(coefficients(i,1)**2 + coefficients(i,2)**2)
+            a_coeff = PFLARE_TWO * coefficients(i,1)
 
             ! If our fixed sparsity root is the first of a complex conjugate pair
             ! We want to pass out mat_product and only add that to inv_matrix
@@ -2332,8 +2461,8 @@ end if
          if (coefficients(i_sparse,2) == 0d0) then
             ! Add in the final term multiplied by 1/theta_poly_order
 
-            ! Skips eigenvalues that are numerically zero
-            if (abs(coefficients(i_sparse,1)) > PFLARE_TOL_ZERO) then     
+            ! Skips zero eigenvalues
+            if (coefficients(i_sparse,1) /= 0d0) then     
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset

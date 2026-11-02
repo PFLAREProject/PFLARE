@@ -4,7 +4,7 @@ module grid_transfer
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos
    use petsc_helper, only: kokkos_debug
-   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -101,15 +101,13 @@ module grid_transfer
       type(tMat), intent(in) :: input_mat
       type(tMat), intent(inout) :: output_mat
       
-      PetscInt :: ncols, ifree
+      PetscInt :: ncols, ifree, i_loc
       PetscInt :: local_rows, local_cols, global_rows, global_cols
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt :: global_col_start, global_col_end_plus_one
       PetscInt :: max_local_col, max_nonlocal_col
-      PetscCount :: counter
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      ! The column of the biggest entry in each local row (-1 if the row is empty)
+      PetscInt, allocatable, dimension(:) :: biggest_cols, d_nnz, o_nnz
       PetscErrorCode :: ierr
       PetscInt, dimension(:), pointer :: cols => null()
       ! Matrix entries filled by MatGetRow are PetscScalar
@@ -137,26 +135,9 @@ module grid_transfer
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
       call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)   
 
-      ! ! Create the output matrix
-      call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
-      call MatSetSizes(output_mat, local_rows, local_cols, &
-                       global_rows, global_cols, ierr)
-      ! Match the output type
-      call MatGetType(input_mat, mat_type, ierr)
-      call MatSetType(output_mat, mat_type, ierr)
-      call MatSetUp(output_mat, ierr)      
-      
-      ! Just in case there are some zeros in the input mat, ignore them
-      call MatSetOption(output_mat, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE, ierr)   
-      ! Don't set any off processor entries so no need for a reduction when assembling
-      call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)        
-      call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)    
-
       ! We know we only have one entry per row
-      allocate(row_indices(local_rows))
-      allocate(col_indices(local_rows))
-      allocate(v(local_rows))
-      v = 1d0
+      allocate(biggest_cols(local_rows))
+      biggest_cols = -1
 
       ! Get the local/nonlocal components
       if (comm_size /= 1) then
@@ -165,9 +146,8 @@ module grid_transfer
          Ad = input_mat
       end if
       
-      ! Now go and fill the new matrix
+      ! Find the biggest entry in each row
       ! Loop over global row indices
-      counter = 1
       do ifree = global_row_start, global_row_end_plus_one-1             
          
          ! huge() of the PetscReal target (not 0d0) so single builds get the
@@ -204,18 +184,44 @@ module grid_transfer
          ! we use the local entry
          if (max_nonlocal_val > max_local_val) max_local_col = max_nonlocal_col
 
-         if (max_local_col /= -1) then
-            row_indices(counter) = ifree
-            col_indices(counter) = max_local_col  
-            counter = counter + 1
-         end if     
+         biggest_cols(ifree - global_row_start + 1) = max_local_col
       end do         
+
+      ! Create the output matrix, exactly preallocated
+      allocate(d_nnz(local_rows), o_nnz(local_rows))
+      d_nnz = 0
+      o_nnz = 0
+      do i_loc = 1, local_rows
+         if (biggest_cols(i_loc) == -1) cycle
+         if (biggest_cols(i_loc) >= global_col_start .AND. biggest_cols(i_loc) < global_col_end_plus_one) then
+            d_nnz(i_loc) = 1
+         else
+            o_nnz(i_loc) = 1
+         end if
+      end do
+
+      call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
+      call MatSetSizes(output_mat, local_rows, local_cols, &
+                       global_rows, global_cols, ierr)
+      ! Match the output type
+      call MatGetType(input_mat, mat_type, ierr)
+      call MatSetType(output_mat, mat_type, ierr)
+      call MatXAIJSetPreallocation(output_mat, one, d_nnz, o_nnz, &
+               PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+      deallocate(d_nnz, o_nnz)
       
-      ! Set the values
-      call MatSetPreallocationCOO(output_mat, counter-1, row_indices, col_indices, ierr)
-      deallocate(row_indices, col_indices)
-      call MatSetValuesCOO(output_mat, v, INSERT_VALUES, ierr)    
-      deallocate(v)      
+      ! Don't set any off processor entries so no need for a reduction when assembling
+      call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)        
+      call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)    
+
+      do i_loc = 1, local_rows
+         if (biggest_cols(i_loc) == -1) cycle
+         call MatSetValue(output_mat, global_row_start + i_loc - 1, biggest_cols(i_loc), &
+                  PFLARE_ONE, INSERT_VALUES, ierr)
+      end do
+      deallocate(biggest_cols)
+      call MatAssemblyBegin(output_mat, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(output_mat, MAT_FINAL_ASSEMBLY, ierr)
          
    end subroutine generate_one_point_with_one_entry_from_sparse_cpu   
    
@@ -268,11 +274,9 @@ module grid_transfer
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
+            ! If we're doing reuse and debug, then the cpu version reuses the output
+            ! matrix itself (as that has the sparsity the cpu version expects) and so
+            ! we compare against a copy of the kokkos result
             if (reuse) then
                temp_mat = P
                call MatConvert(P, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
@@ -340,19 +344,17 @@ module grid_transfer
       PetscInt :: global_row_start_W, global_row_end_plus_one_W
       PetscInt :: global_col_start_W, global_col_end_plus_one_W
       PetscInt :: local_rows_coarse, local_rows, local_cols, local_cols_coarse
-      PetscInt :: max_nnzs, i_loc, ncols, max_nnzs_total
+      PetscInt :: i_loc, ncols, col, p_row
       PetscInt :: global_cols, global_rows, global_rows_coarse, global_cols_coarse
       PetscInt :: cols_z, rows_z, local_rows_fine
-      PetscCount :: counter
+      PetscInt, dimension(1) :: row_array
       integer :: errorcode, comm_size, comm_size_world
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt, dimension(:), pointer :: cols => null()
       ! Matrix entries filled by MatGetRow are PetscScalar
       PetscScalar, dimension(:), pointer :: vals => null()
-      PetscInt, allocatable, dimension(:) :: row_indices, col_indices
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       PetscInt, dimension(:), pointer :: is_pointer_coarse, is_pointer_fine
       MatType:: mat_type
@@ -384,24 +386,6 @@ module grid_transfer
       global_rows_coarse = rows_z
       global_cols_coarse = rows_z      
 
-      ! Get the max number of nnzs
-      max_nnzs_total = 0
-      max_nnzs = -1
-      do i_loc = global_row_start_W, global_row_end_plus_one_W-1
-         call MatGetRow(W, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         max_nnzs_total = max_nnzs_total + ncols
-         if (ncols > max_nnzs) max_nnzs = ncols                  
-         call MatRestoreRow(W, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)          
-      end do
-      if (identity) max_nnzs_total = max_nnzs_total + local_rows_coarse
-      max_nnzs = max_nnzs + 1
-
-      allocate(row_indices(max_nnzs_total))
-      allocate(col_indices(max_nnzs_total))
-      allocate(v(max_nnzs_total))
-
       ! We may be reusing with the same sparsity
       if (.NOT. reuse) then
       
@@ -411,49 +395,59 @@ module grid_transfer
          ! Match the output type
          call MatGetType(W, mat_type, ierr)
          call MatSetType(P, mat_type, ierr)
-         call MatSetUp(P, ierr)         
+
+         ! Count the entries in each row so we can exactly preallocate
+         ! The columns of P have the same layout as the columns of W
+         allocate(d_nnz(local_rows), o_nnz(local_rows))
+         d_nnz = 0
+         o_nnz = 0
+         do i_loc = global_row_start_W, global_row_end_plus_one_W-1
+            call MatGetRow(W, i_loc, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
+            p_row = is_pointer_fine(i_loc - global_row_start_W + 1) - global_row_start + 1
+            do col = 1, ncols
+               if (cols(col) >= global_col_start_W .AND. cols(col) < global_col_end_plus_one_W) then
+                  d_nnz(p_row) = d_nnz(p_row) + 1
+               else
+                  o_nnz(p_row) = o_nnz(p_row) + 1
+               end if
+            end do
+            call MatRestoreRow(W, i_loc, ncols, cols, PETSC_NULL_SCALAR_POINTER, ierr)
+         end do
+         ! The identity block is always local
+         if (identity) then
+            do i_loc = 1, local_rows_coarse
+               p_row = is_pointer_coarse(i_loc) - global_row_start + 1
+               d_nnz(p_row) = d_nnz(p_row) + 1
+            end do
+         end if
+         call MatXAIJSetPreallocation(P, one, d_nnz, o_nnz, &
+                  PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+         deallocate(d_nnz, o_nnz)
       end if
 
-      ! Just in case there are some zeros in the input mat, ignore them
-      call MatSetOption(P, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE, ierr)     
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(P, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)      
       call MatSetOption(P, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)           
 
       ! Copy in the values of W
-      counter = 1
       do i_loc = global_row_start_W, global_row_end_plus_one_W-1
-         call MatGetRow(W, i_loc, &
-                  ncols, cols, vals, ierr)
-
-         row_indices(counter:counter+ncols-1) = is_pointer_fine(i_loc - global_row_start_W + 1)
-         col_indices(counter:counter+ncols-1) = cols(1:ncols)
-         v(counter:counter+ncols-1) = vals(1:ncols)    
-         counter = counter + ncols                                
-
-         call MatRestoreRow(W, i_loc, &
-                  ncols, cols, vals, ierr)          
+         call MatGetRow(W, i_loc, ncols, cols, vals, ierr)
+         if (ncols > 0) then
+            row_array(1) = is_pointer_fine(i_loc - global_row_start_W + 1)
+            call MatSetValues(P, one, row_array, ncols, cols(1:ncols), vals(1:ncols), INSERT_VALUES, ierr)
+         end if
+         call MatRestoreRow(W, i_loc, ncols, cols, vals, ierr)          
       end do
 
       ! If we want the identity block or just leave it zero
       if (identity) then
          do i_loc = 1, local_rows_coarse
-
-            row_indices(counter) = is_pointer_coarse(i_loc)
-            col_indices(counter) = i_loc - 1 + global_col_start_W
-            v(counter) = 1d0
-            counter = counter + 1
-
+            call MatSetValue(P, is_pointer_coarse(i_loc), i_loc - 1 + global_col_start_W, &
+                     PFLARE_ONE, INSERT_VALUES, ierr)
          end do     
       end if
-      
-      ! Set the values
-      if (.NOT. reuse) then
-         call MatSetPreallocationCOO(P, counter-1, row_indices, col_indices, ierr)
-      end if
-      deallocate(row_indices, col_indices)
-      call MatSetValuesCOO(P, v, INSERT_VALUES, ierr)    
-      deallocate(v)  
+      call MatAssemblyBegin(P, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(P, MAT_FINAL_ASSEMBLY, ierr)
       
       call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)
       call ISRestoreIndices(is_fine, is_pointer_fine, ierr)       
@@ -520,11 +514,9 @@ module grid_transfer
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
 
-            ! If we're doing reuse and debug, then we have to always output the result 
-            ! from the cpu version, as it will have coo preallocation structures set
-            ! They aren't copied over if you do a matcopy (or matconvert)
-            ! If we didn't do that the next time we come through this routine 
-            ! and try to call the cpu version with reuse, it will segfault
+            ! If we're doing reuse and debug, then the cpu version reuses the output
+            ! matrix itself (as that has the sparsity the cpu version expects) and so
+            ! we compare against a copy of the kokkos result
             if (reuse) then
                temp_mat = R
                call MatConvert(R, MATSAME, MAT_INITIAL_MATRIX, temp_mat_compare, ierr)  
@@ -603,21 +595,20 @@ module grid_transfer
       PetscInt :: global_row_start_Z, global_row_end_plus_one_Z
       PetscInt :: global_col_start_Z, global_col_end_plus_one_Z
       PetscInt :: local_coarse_size, local_fine_size, local_full_cols
-      PetscInt :: i_loc, ncols, max_nnzs_total, max_nnzs
+      PetscInt :: i_loc, ncols, max_ncols
       PetscInt :: global_coarse_size, global_fine_size, global_full_cols
       PetscInt :: rows_ao, cols_ao, rows_ad, cols_ad, size_cols
       PetscInt :: global_rows_z, global_cols_z
       PetscInt :: local_rows_z, local_cols_z
-      PetscCount :: counter
       integer :: comm_size, errorcode
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX      
       PetscInt, dimension(:), pointer :: cols => null()
       ! Matrix entries filled by MatGetRow are PetscScalar
       PetscScalar, dimension(:), pointer :: vals => null()
-      PetscInt, allocatable, dimension(:) :: row_indices_coo, col_indices_coo
-      ! COO value buffer feeding MatSetValuesCOO is PetscScalar
-      PetscScalar, allocatable, dimension(:) :: v
+      ! The columns of a row of Z in the full matrix
+      PetscInt, allocatable, dimension(:) :: row_cols, d_nnz, o_nnz
+      PetscInt, dimension(1) :: row_array
       PetscInt, dimension(:), pointer :: colmap
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       type(tMat) :: Ad, Ao
@@ -716,25 +707,6 @@ module grid_transfer
       ! Get the indices
       call ISGetIndices(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
 
-      ! Z
-      ! Get the max number of nnzs
-      max_nnzs_total = 0
-      max_nnzs = -1      
-      do i_loc = global_row_start_Z, global_row_end_plus_one_Z-1
-         call MatGetRow(Z, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
-         max_nnzs_total = max_nnzs_total + ncols
-         if (ncols > max_nnzs) max_nnzs = ncols
-         call MatRestoreRow(Z, i_loc, &
-                  ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)          
-      end do
-      if (identity) max_nnzs_total = max_nnzs_total + local_rows_z
-      max_nnzs = max_nnzs + 1
-
-      allocate(row_indices_coo(max_nnzs_total))
-      allocate(col_indices_coo(max_nnzs_total))
-      allocate(v(max_nnzs_total))    
-      
       ! We may be reusing with the same sparsity
       if (.NOT. reuse) then
       
@@ -746,67 +718,76 @@ module grid_transfer
                              global_rows_z, global_full_cols, ierr)
          ! Match the output type
          call MatSetType(R, mat_type, ierr)
-         call MatSetUp(R, ierr)         
       end if      
 
-      ! Just in case there are some zeros in the input mat, ignore them
-      call MatSetOption(R, MAT_IGNORE_ZERO_ENTRIES, PETSC_TRUE, ierr)     
+      ! Get the longest row of Ad or Ao and if we're not reusing, the number of entries in each 
+      ! row of R so we can exactly preallocate
+      ! The columns of Ad are local fine points and so are in the diagonal block of R, the
+      ! columns of Ao are fine points on other ranks and so are in the off-diagonal block, and
+      ! the identity is local
+      if (.NOT. reuse) allocate(d_nnz(local_rows_z), o_nnz(local_rows_z))
+      max_ncols = 0
+      do i_loc = 1, local_rows_z
+         call MatGetRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         max_ncols = max(max_ncols, ncols)
+         if (.NOT. reuse) then
+            d_nnz(i_loc) = ncols
+            if (identity) d_nnz(i_loc) = d_nnz(i_loc) + 1
+            o_nnz(i_loc) = 0
+         end if
+         call MatRestoreRow(Ad, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         if (comm_size /= 1) then
+            call MatGetRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+            max_ncols = max(max_ncols, ncols)
+            if (.NOT. reuse) o_nnz(i_loc) = ncols
+            call MatRestoreRow(Ao, i_loc-1, ncols, PETSC_NULL_INTEGER_POINTER, PETSC_NULL_SCALAR_POINTER, ierr)
+         end if
+      end do
+      allocate(row_cols(max_ncols))
+
+      if (.NOT. reuse) then
+         call MatXAIJSetPreallocation(R, one, d_nnz, o_nnz, &
+                  PETSC_NULL_INTEGER_ARRAY, PETSC_NULL_INTEGER_ARRAY, ierr)
+         deallocate(d_nnz, o_nnz)
+      end if
+
       ! Don't set any off processor entries so no need for a reduction when assembling
       call MatSetOption(R, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)      
       call MatSetOption(R, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr) 
 
       ! Z - do Ad and Ao separately, as that way we have local indices into is_pointer_orig_fine_col
       ! to give us the original column numbers 
-      ! Let's start with Ad - remember Ad and Ao are serial
-      counter = 1
+      ! Remember Ad and Ao are serial
       do i_loc = 1, local_rows_z
-         call MatGetRow(Ad, i_loc-1, &
-                  ncols, cols, vals, ierr)
+         row_array(1) = i_loc - 1 + global_row_start_Z
 
-         row_indices_coo(counter:counter+ncols-1) = i_loc -1 + global_row_start_Z
-         col_indices_coo(counter:counter+ncols-1) = is_pointer_orig_fine_col(cols(1:ncols)+1)
-         v(counter:counter+ncols-1) = vals(1:ncols)    
-         counter = counter + ncols                                
+         ! Ad
+         call MatGetRow(Ad, i_loc-1, ncols, cols, vals, ierr)
+         if (ncols > 0) then
+            row_cols(1:ncols) = is_pointer_orig_fine_col(cols(1:ncols)+1)
+            call MatSetValues(R, one, row_array, ncols, row_cols(1:ncols), vals(1:ncols), INSERT_VALUES, ierr)
+         end if
+         call MatRestoreRow(Ad, i_loc-1, ncols, cols, vals, ierr)         
 
-         call MatRestoreRow(Ad, i_loc-1, &
-                  ncols, cols, vals, ierr)         
+         ! Ao
+         if (comm_size /= 1) then
+            call MatGetRow(Ao, i_loc-1, ncols, cols, vals, ierr)
+            if (ncols > 0) then
+               row_cols(1:ncols) = is_pointer_orig_fine_col(cols(1:ncols)+1 + cols_ad)
+               call MatSetValues(R, one, row_array, ncols, row_cols(1:ncols), vals(1:ncols), INSERT_VALUES, ierr)
+            end if
+            call MatRestoreRow(Ao, i_loc-1, ncols, cols, vals, ierr)          
+         end if
+
+         ! If we want the identity block or just leave it zero
+         if (identity) then
+            call MatSetValue(R, row_array(1), is_pointer_coarse(i_loc), PFLARE_ONE, INSERT_VALUES, ierr)
+         end if
       end do
+      deallocate(row_cols)
 
-      if (comm_size /= 1) then
-         ! Then Ao
-         do i_loc = 1, local_rows_z
-            call MatGetRow(Ao, i_loc-1, &
-                     ncols, cols, vals, ierr)
-
-            row_indices_coo(counter:counter+ncols-1) = i_loc -1 + global_row_start_Z
-            col_indices_coo(counter:counter+ncols-1) = is_pointer_orig_fine_col(cols(1:ncols)+1 + cols_ad)
-            v(counter:counter+ncols-1) = vals(1:ncols)    
-            counter = counter + ncols                       
-
-            call MatRestoreRow(Ao, i_loc-1, &
-                     ncols, cols, vals, ierr)          
-         end do
-      end if
-
-      ! If we want the identity block or just leave it zero
-      if (identity) then
-         do i_loc = 1, local_rows_z
-
-            row_indices_coo(counter) = i_loc - 1 + global_row_start_Z
-            col_indices_coo(counter) = is_pointer_coarse(i_loc)
-            v(counter) = 1d0
-            counter = counter + 1
-
-         end do  
-      end if                                   
-
-      ! Set the values
-      if (.NOT. reuse) then
-         call MatSetPreallocationCOO(R, counter-1, row_indices_coo, col_indices_coo, ierr)
-      end if
-      deallocate(row_indices_coo, col_indices_coo)
-      call MatSetValuesCOO(R, v, INSERT_VALUES, ierr)    
-      deallocate(v)     
+      call MatAssemblyBegin(R, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(R, MAT_FINAL_ASSEMBLY, ierr)
 
       call ISRestoreIndices(orig_fine_col_indices, is_pointer_orig_fine_col, ierr)
       call ISRestoreIndices(is_coarse, is_pointer_coarse, ierr)

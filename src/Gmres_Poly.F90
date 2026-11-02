@@ -6,12 +6,12 @@ module gmres_poly
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
-         PFLARE_TOL_ZERO, PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
+         PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
          PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
          PFLARE_REAL_KIND
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_apply, only: petsc_matvec_poly_mf, petsc_matvec_right_scale_poly_mf, &
-         petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf
+         petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf, highest_nonzero_coeff
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
    use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
@@ -99,39 +99,28 @@ module gmres_poly
       integer, intent(out)                              :: matvecs
 
       integer :: i_loc
-      logical :: zero_root
       ! ~~~~~~       
       
       ! What order is our polynomial
       matvecs = size(coefficients,1)
 
       ! We may have zero roots with newton that are skipped
-      if (inverse_type == PFLAREINV_NEWTON) then
+      if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
          do i_loc = 1, size(coefficients,1)
-            zero_root = .FALSE.
-            if (coefficients(i_loc,2) == 0d0) then
-               ! The size of the zero check here has to match that in 
-               ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
-               if (abs(coefficients(i_loc,1)) < PFLARE_TOL_ZERO) zero_root = .TRUE.
-            else
-               if (coefficients(i_loc,1)**2 + &
-                        coefficients(i_loc,2)**2 < PFLARE_TOL_ZERO) zero_root = .TRUE.
-            end if
-
-            if (zero_root) then
+            ! The zero check here has to match that in 
+            ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual
+            ! ie only exactly zero real roots are skipped, a complex pair is never zero
+            if (coefficients(i_loc,1) == 0d0 .AND. coefficients(i_loc,2) == 0d0) then
                matvecs = matvecs - 1
             end if
          end do
 
       ! For power or Arnoldi   
       else
-         ! The size of the zero check is exactly 0d0, normally can only happen
-         ! in an Arnoldi that terminates early
-         do i_loc = 1, size(coefficients,1)
-            if (abs(coefficients(i_loc,1)) == 0d0) then
-               matvecs = matvecs - 1
-            end if
-         end do         
+         ! Horner can only skip the leading (highest order) zero coefficients,
+         ! normally can only happen in an Arnoldi that terminates early
+         ! This has to match petsc_horner
+         matvecs = highest_nonzero_coeff(coefficients(:,1))
       end if      
 
    end subroutine compute_mf_gmres_poly_num_matvecs   
@@ -151,15 +140,14 @@ module gmres_poly
       ! Local variables
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
-      PetscCount :: vec_size
-      PetscInt, allocatable, dimension(:) :: indices
+      PetscInt :: global_row_start, global_row_end_plus_one, vecs_needed
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
-      ! Kept PetscReal: the intrinsic random_number requires a real array. Its use
-      ! in VecSetValuesCOO below is an identity conversion in all real builds.
+      ! Kept PetscReal: the intrinsic random_number requires a real array. Copying it 
+      ! into the vector below is an identity conversion in all real builds.
       PetscReal, dimension(:, :), allocatable, target   :: random_data
+      PetscScalar, dimension(:), pointer :: v_array
       type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
       ! ~~~~~~    
@@ -199,44 +187,33 @@ module gmres_poly
 
       ! Gives random numbers between 0 <= u < 1  
       allocate(random_data(local_rows, 2))
-      ! Random numbers returned in fortran don't include one so don't have to 
-      ! remove 1 
       call random_number(random_data(:, 1:2))
 
       ! We want our random rhs to be a normal distribution with zero mean as that preserves
       ! white noise in the eigenspace (ie it is rotation invariant to unitary transforms)
       ! Do a box-muller to take two numbers with uniform distribution and produce a number
-      ! that is normally distributed       
+      ! that is normally distributed
+      ! random_number can return exactly 0 (with probability 2^-24 per draw in single precision,
+      ! so likely once there are more than 2^24 rows), so map 0 to 1 to keep the log finite
+      where (random_data(:, 1) == 0) random_data(:, 1) = 1
       random_data(:, 1) = sqrt(-2 * log(random_data(:, 1))) * cos(2 * pi * random_data(:, 2))
       deallocate(seed)
 
       ! ~~~~~~~~~~
-      ! Create a single template vec, set the random values into it, then use
-      ! VecDuplicateVecs to allocate all V_n vectors in one contiguous block.
-      ! Contiguous allocation lets VecMAXPY use BLAS-2 operations.
+      ! Use a template vec and VecDuplicateVecs to allocate all V_n vectors 
+      ! in one contiguous block. Contiguous allocation lets VecMAXPY use BLAS-2 operations.
       ! ~~~~~~~~~~
       call MatCreateVecs(matrix, temp_vec, PETSC_NULL_VEC, ierr)
-
-      allocate(indices(local_rows))
-      ! Set the random values into the template vector
-      ! Data will be copied to the gpu when needed
-      do row_i = 1, local_rows
-         indices(row_i) = global_row_start + row_i-1
-      end do
-      ! PetscCount vs PetscInt??
-      vec_size = local_rows
-      call VecSetPreallocationCOO(temp_vec, vec_size, indices, ierr)
-      deallocate(indices)
-      call VecSetValuesCOO(temp_vec, random_data(:, 1), INSERT_VALUES, ierr)
-
-      deallocate(random_data)
       vecs_needed = subspace_size + 1
-
-      ! Allocate all subspace_size+1 vectors contiguously from the template
       call VecDuplicateVecs(temp_vec, vecs_needed, V_n, ierr)
-      ! Copy random data from template into the first vector
-      call VecCopy(temp_vec, V_n(1), ierr)
       call VecDestroy(temp_vec, ierr)
+
+      ! The random values are just the local entries of the first vector, so copy them
+      ! straight in. Data will be copied to the gpu when needed
+      call VecGetArrayWrite(V_n(1), v_array, ierr)
+      v_array(1:local_rows) = random_data(:, 1)
+      call VecRestoreArrayWrite(V_n(1), v_array, ierr)
+      deallocate(random_data)
 
       ! ~~~~~~~~~~~~
 
@@ -444,8 +421,9 @@ module gmres_poly
 
             ! Minus away e1 beta
             g0(1) = g0(1) - beta
-            ! This is the relative residual
-            user_rel_tol = norm2(g0(1:m))/beta
+            ! This is the relative residual - H_n is (m+1) x m so the residual
+            ! has m+1 entries (the last is typically the largest)
+            user_rel_tol = norm2(g0(1:m+1))/beta
             !print *, m, "rel residual", user_rel_tol
             if (user_rel_tol < rel_tol) exit
          end if
@@ -690,13 +668,14 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tsqr_buffers), target, intent(inout)                :: buffers
       PetscReal, dimension(:), intent(inout)                        :: coefficients
  
-      integer :: subspace_size, n_size, iwork_size
+      integer :: subspace_size, n_size, iwork_size, i_loc
       integer :: errorcode
       ! BLAS/LAPACK integer arguments must be PetscBLASInt
       PetscBLASInt :: lwork, rank, info
       PetscBLASInt :: m_bl, n_bl, nrhs_bl, lda_bl, ldb_bl
       PetscBLASInt, dimension(:), allocatable :: iwork
       PetscReal, dimension(poly_order+2) :: g0, s
+      PetscReal, dimension(poly_order+1) :: col_scale
       PetscReal, dimension(:), allocatable :: work
       PetscReal, dimension(:,:), pointer :: R_pointer
       PetscReal :: rcond = -1d0
@@ -730,6 +709,16 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       ! We know beta is in the top left of R
       g0(1) = R_pointer(1, 1)   
       
+      ! The columns of R(:, 2:) scale like ||A||^k, so dgelsd's rank cutoff (relative
+      ! to the largest singular value) would drop all but the highest powers for a
+      ! badly scaled A. Scale each column to unit norm and unscale the solution after,
+      ! which makes the coefficients invariant to the scale of A
+      do i_loc = 1, subspace_size
+         col_scale(i_loc) = norm2(R_pointer(:, i_loc + 1))
+         if (col_scale(i_loc) == 0) col_scale(i_loc) = 1
+         R_pointer(:, i_loc + 1) = R_pointer(:, i_loc + 1) / col_scale(i_loc)
+      end do
+
       ! We've now finished orthogonalising, let's solve our least squares system
       allocate(work(1))
       allocate(iwork(1))
@@ -767,7 +756,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       end if  
       
       ! These are the polynomial coefficients
-      coefficients = g0(1:subspace_size)      
+      coefficients = g0(1:subspace_size) / col_scale
 
       ! Deallocate the receive buffer
       if (allocated(buffers%R_buffer_receive)) deallocate(buffers%R_buffer_receive)    
@@ -949,7 +938,7 @@ end if
       type(tIS), dimension(1) :: col_indices, row_indices
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
-      logical :: deallocate_submatrices = .FALSE.
+      logical :: deallocate_submatrices
       type(tMat), dimension(size(coefficients)-1), target :: matrix_powers
       type(tMat), pointer :: mat_sparsity_match
       type(int_vec), dimension(:), allocatable :: symbolic_ones
@@ -966,6 +955,10 @@ end if
       PetscInt, parameter :: one = 1, zero = 0
       
       ! ~~~~~~~~~~  
+
+      ! Must be set here rather than with an initialiser in the declaration, which would
+      ! give it an implicit save and leave it .TRUE. for every call after a serial one
+      deallocate_submatrices = .FALSE.
 
       if (poly_sparsity_order .ge. size(coefficients)-1) then      
          print *, "Requested sparsity is greater than or equal to the order"
@@ -1594,10 +1587,9 @@ end if
       ! For terms 2nd order and higher
       ! ~~~~~~~~~~~~~   
 
-      do order = 2, poly_order
-
-         ! Skip this term if the coefficient is zero
-         if (coefficients(order+1) == 0d0) cycle
+      ! Only the leading (highest order) zero coefficients can be skipped entirely,
+      ! any lower order zero coefficient still needs its matrix power computed for the next order
+      do order = 2, highest_nonzero_coeff(coefficients) - 1
 
          ! TODO - these can be reused
          if (order == 2) then
@@ -1614,7 +1606,10 @@ end if
          call MatDestroy(temp_mat, ierr)
 
          ! Do result = alpha_1 * A_ff + alpha_2 * A_ff^2 + ....
-         if (reuse_triggered) then
+         ! Skip the add if the coefficient is zero
+         if (coefficients(order+1) == 0d0) then
+            cycle
+         else if (reuse_triggered) then
             ! If doing reuse we know our nonzeros are a subset
             call MatAXPY(inv_matrix, coefficients(order+1), mat_power, SUBSET_NONZERO_PATTERN, ierr)
          else

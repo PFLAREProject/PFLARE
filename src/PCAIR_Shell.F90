@@ -5,6 +5,8 @@ module pcair_shell
    use pcair_data_type, only: pc_air_multigrid_data, air_options
    use air_mg_setup, only: setup_air_pcmg
    use air_data_type_routines, only: reset_air_data, destroy_air_data
+   use air_diagonal_update, only: update_air_diag
+   use air_mg_stats, only: print_stats
 
 #include "petsc/finclude/petscksp.h"
 
@@ -36,6 +38,8 @@ module pcair_shell
       call PCShellSetContext(pc, pc_air_data, ierr)
       ! Set the apply routine
       call PCShellSetApply(pc, PCApply_AIR_Shell, ierr)
+      ! Set the transposed apply routine
+      call PCShellSetApplyTranspose(pc, PCApplyTranspose_AIR_Shell, ierr)
       ! Set the destroy routine
       call PCShellSetDestroy(pc, PCDestroy_AIR_Shell, ierr)
       ! Set the setup routine
@@ -104,6 +108,70 @@ module pcair_shell
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine setup_pc_air_data(pc_air_data, amat, pmat)
+
+      ! Builds the hierarchy and, if we're doing diagonal updates, keeps 
+      ! the diagonal of the pmat it was built from
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+      type(tMat), intent(in)                        :: amat, pmat
+
+      PetscErrorCode :: ierr
+      ! ~~~~~~    
+
+      call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+
+      if (can_diag_update_pc_air_data(pc_air_data)) then
+         call MatCreateVecs(pmat, PETSC_NULL_VEC, pc_air_data%air_data%diag_update_base_pmat, ierr)
+         call MatGetDiagonal(pmat, pc_air_data%air_data%diag_update_base_pmat, ierr)
+      end if
+
+   end subroutine setup_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function can_diag_update_pc_air_data(pc_air_data)
+
+      ! Can we update the existing hierarchy given only the diagonal of the pmat has changed
+      ! With a single level or when smoothing all the unknowns we just rebuild
+      ! If we're reusing the sparsity we always rebuild with reuse, which is more accurate
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(in)    :: pc_air_data
+      ! ~~~~~~    
+
+      can_diag_update_pc_air_data = pc_air_data%air_data%options%diag_update .AND. &
+               .NOT. pc_air_data%air_data%options%reuse_sparsity .AND. &
+               pc_air_data%air_data%no_levels > 1 .AND. &
+               .NOT. pc_air_data%air_data%options%full_smoothing_up_and_down
+
+   end function can_diag_update_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine diag_update_pc_air_data(pc_air_data, pmat)
+
+      ! Updates the hierarchy with the change in the diagonal of the pmat since the
+      ! hierarchy was built, trusting that nothing else in the pmat has changed
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+      type(tMat), intent(in)                        :: pmat
+
+      ! ~~~~~~    
+
+      call update_air_diag(pc_air_data%air_data, pmat)
+      ! The polynomial orders can change with an update, so print the stats as a setup does
+      ! This is collective so call it on all ranks
+      if (pc_air_data%air_data%options%print_stats_timings) then
+         call print_stats(pc_air_data%air_data, pc_air_data%pcmg)
+      end if
+
+   end subroutine diag_update_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCSetUp_AIR_Shell(pc, ierr)
       
       ! Setup our shell PC
@@ -130,7 +198,7 @@ module pcair_shell
       ! We need to call the setup routines
       if (setupcalled == 0) then
 
-         call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+         call setup_pc_air_data(pc_air_data, amat, pmat)
 
       ! We can possibly re-use some of the setup
       else
@@ -143,7 +211,14 @@ module pcair_shell
             ! Reset the air data
             call reset_pc_air_data(pc_air_data)
             ! Set it up again
-            call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+            call setup_pc_air_data(pc_air_data, amat, pmat)
+
+         ! If we've been told only the diagonal of the pmat changes 
+         ! we can just update the existing hierarchy
+         ! SAME_NONZERO_PATTERN = 2
+         else if (structure_flag == 2 .AND. can_diag_update_pc_air_data(pc_air_data)) then
+
+            call diag_update_pc_air_data(pc_air_data, pmat)
 
          ! We can re-use the sparsity
          ! SAME_NONZERO_PATTERN = 2
@@ -157,7 +232,7 @@ module pcair_shell
                call reset_pc_air_data(pc_air_data)               
             end if
             ! Set it up again
-            call setup_air_pcmg(amat, pmat, pc_air_data%air_data, pc_air_data%pcmg)
+            call setup_pc_air_data(pc_air_data, amat, pmat)
 
          end if
       end if
@@ -185,7 +260,32 @@ module pcair_shell
       ! Just apply the pcmg
       call PCApply(pc_air_data%pcmg, x, y, ierr)
 
-   end subroutine PCApply_AIR_Shell   
+   end subroutine PCApply_AIR_Shell
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCApplyTranspose_AIR_Shell(pc, x, y, ierr)
+
+      ! Apply the transpose of our shell PC
+      ! Just like the forward apply we hand this straight to the pcmg - petsc's
+      ! transposed cycles are the transpose of the forward ones, given the
+      ! transposed smoother and transposed residual setup_air_pcmg registers
+
+      ! ~~~~~~
+      type(tPC), intent(in)    :: pc
+      type(tVec), intent(in)   :: x, y
+      PetscErrorCode, intent(inout)   :: ierr
+
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+
+      ! ~~~~~~
+
+      ! Get the PC context
+      call PCShellGetContext(pc, pc_air_data, ierr)
+      ! Just apply the transpose of the pcmg
+      call PCApplyTranspose(pc_air_data%pcmg, x, y, ierr)
+
+   end subroutine PCApplyTranspose_AIR_Shell
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

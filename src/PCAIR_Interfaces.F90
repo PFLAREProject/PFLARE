@@ -4,7 +4,11 @@ module pcair_interfaces
    use petscksp
    use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
    use air_mg_stats, only: compute_stats
-   use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE
+   use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE, &
+         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA
+   use gmres_poly_data_type, only: gmres_poly_data
+   use matshell_data_type, only: mat_ctxtype
+   use gmres_poly_newton, only: point_mf_newton_roots
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -365,6 +369,97 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetPolyDataPointer(pc, petsc_level, which_inverse, poly_data, inv_matrix)
+
+      ! Returns a pointer to the polynomial data stored internally in the PC
+      ! for the given level and inverse, or a null pointer if there is none. That is
+      ! the case if which_inverse is unknown, petsc_level is out of range, PCSetUp
+      ! has not been called (or the PC has been reset since), or the requested
+      ! inverse doesn't exist on that level (e.g. COEFFS_INV_ACC when there is no
+      ! C point smoothing)
+      ! inv_matrix is the inverse built from that polynomial, which may be a matshell
+      ! that points at the coefficients. It is a null matrix if the inverse is not kept
+      ! (COEFFS_INV_AFF_DROPPED) and may not have been built from these coefficients
+      ! at all, so check what it points at before using it
+      ! petsc_level is ignored for COEFFS_INV_COARSE
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                        :: pc
+      PetscInt, intent(in)                            :: petsc_level
+      integer, intent(in)                             :: which_inverse
+      type(gmres_poly_data), pointer, intent(out)     :: poly_data
+      type(tMat), intent(out)                         :: inv_matrix
+
+      type(tPC)                             :: pc_shell
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+      PetscInt                              :: num_levels
+      PetscErrorCode                        :: ierr
+      integer                               :: our_level
+      ! ~~~~~~~~
+
+      poly_data => null()
+      inv_matrix = PETSC_NULL_MAT
+
+      ! Get the underlying PCShell
+      call PCAIRGetPCShell(pc, pc_shell)
+
+      ! Get the PC shell context
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+
+      ! Get the number of levels in our mg - this is -1 before setup
+      call PCAIRGetNumLevels(pc, num_levels, ierr)
+
+      ! Coarsest grid matrix
+      if (which_inverse == COEFFS_INV_COARSE) then
+         poly_data => pc_air_data%air_data%inv_coarsest_poly_data
+         ! The coarse grid inverse is stored in inv_A_ff(no_levels)
+         if (num_levels > 0 .AND. allocated(pc_air_data%air_data%inv_A_ff)) then
+            if (num_levels <= size(pc_air_data%air_data%inv_A_ff)) then
+               inv_matrix = pc_air_data%air_data%inv_A_ff(num_levels)
+            end if
+         end if
+         return
+      end if
+
+      ! Check the level is in range before indexing any of the level data
+      if (petsc_level < 0 .OR. petsc_level >= num_levels) return
+
+      ! We order our levels from 1 to num_levels
+      our_level = int(num_levels - petsc_level)
+
+      ! Inverse Aff
+      if (which_inverse == COEFFS_INV_AFF) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data)) return
+         poly_data => pc_air_data%air_data%inv_A_ff_poly_data(our_level)
+         if (allocated(pc_air_data%air_data%inv_A_ff)) then
+            if (our_level <= size(pc_air_data%air_data%inv_A_ff)) then
+               inv_matrix = pc_air_data%air_data%inv_A_ff(our_level)
+            end if
+         end if
+
+      ! Inverse dropped Aff - only used during the setup, so no inverse is kept
+      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
+         poly_data => pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)
+
+      ! Inverse Acc
+      else if (which_inverse == COEFFS_INV_ACC) then
+         if (.NOT. allocated(pc_air_data%air_data%inv_A_cc_poly_data)) return
+         if (our_level > size(pc_air_data%air_data%inv_A_cc_poly_data)) return
+         poly_data => pc_air_data%air_data%inv_A_cc_poly_data(our_level)
+         if (allocated(pc_air_data%air_data%inv_A_cc)) then
+            if (our_level <= size(pc_air_data%air_data%inv_A_cc)) then
+               inv_matrix = pc_air_data%air_data%inv_A_cc(our_level)
+            end if
+         end if
+      end if
+
+   end subroutine PCAIRGetPolyDataPointer
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
 
       ! Returns a pointer to the polynomial coefficients stored internally in the PC
@@ -381,56 +476,109 @@ module pcair_interfaces
       integer, intent(in)                             :: which_inverse
       PetscReal, dimension(:,:), pointer, contiguous, intent(out) :: coeffs_internal
 
-      type(tPC)                             :: pc_shell
-      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
-      PetscInt                              :: num_levels
-      PetscErrorCode                        :: ierr
-      integer                               :: our_level
+      type(gmres_poly_data), pointer        :: poly_data
+      type(tMat)                            :: inv_matrix
       ! ~~~~~~~~
 
       coeffs_internal => null()
+      call PCAIRGetPolyDataPointer(pc, petsc_level, which_inverse, poly_data, inv_matrix)
+      if (associated(poly_data)) coeffs_internal => poly_data%coefficients
 
-      ! Get the underlying PCShell
-      call PCAIRGetPCShell(pc, pc_shell)
+   end subroutine PCAIRGetPolyCoeffsPointer
 
-      ! Get the PC shell context
-      call PCShellGetContext(pc_shell, pc_air_data, ierr)
+! -------------------------------------------------------------------------------------------------------------------------------
 
-      ! Coarsest grid matrix
-      if (which_inverse == COEFFS_INV_COARSE) then
-         coeffs_internal => pc_air_data%air_data%inv_coarsest_poly_data%coefficients
+   subroutine PCAIRSetPolyCoeffsInternal(pc, petsc_level, which_inverse, coeffs, err_code, min_rows)
+
+      ! Copies coeffs into the PC's internal storage for the given level and inverse
+      ! Used by both the Fortran and C versions of PCAIRSetPolyCoeffs
+      ! If coeffs has a different number of rows to what is stored, the storage is
+      ! reallocated, but only for the Newton inverse types, where the number of roots
+      ! can differ between setups (e.g. the extra roots added for stability by
+      ! PFLAREINV_NEWTON depend on the matrix)
+      ! If the inverse is a matrix-free polynomial that points at the old storage,
+      ! it is pointed at the new storage, so it applies the new roots straight away
+      ! Any assembled inverse only picks up the new coefficients when it is rebuilt
+      ! Returns err_code:
+      !    0 - success
+      !    1 - no coefficients stored for this petsc_level and which_inverse
+      !    2 - the sizes don't match and the storage can't be resized
+      ! min_rows is the fewest rows a Newton polynomial can be given (the polynomial
+      ! order + 1), or the stored number of rows if the storage can't be resized
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)                           :: pc
+      PetscInt, intent(in)                               :: petsc_level
+      integer, intent(in)                                :: which_inverse
+      PetscReal, dimension(:,:), intent(in)              :: coeffs
+      integer, intent(out)                               :: err_code
+      PetscInt, intent(out)                              :: min_rows
+
+      type(gmres_poly_data), pointer        :: poly_data
+      type(tMat)                            :: inv_matrix
+      PetscReal, dimension(:,:), pointer, contiguous :: old_coeffs
+      type(mat_ctxtype), pointer            :: mat_ctx => null()
+      MatType                               :: mat_type
+      PetscErrorCode                        :: ierr
+      logical                               :: newton
+      ! ~~~~~~~~
+
+      err_code = 0
+      min_rows = 0
+      call PCAIRGetPolyDataPointer(pc, petsc_level, which_inverse, poly_data, inv_matrix)
+
+      if (.NOT. associated(poly_data)) then
+         err_code = 1
+         return
+      end if
+      if (.NOT. associated(poly_data%coefficients)) then
+         err_code = 1
          return
       end if
 
-      ! Get the number of levels in our mg - this is -1 before setup
-      call PCAIRGetNumLevels(pc, num_levels, ierr)
-
-      ! Check the level is in range before indexing any of the level data
-      if (petsc_level < 0 .OR. petsc_level >= num_levels) return
-
-      ! We order our levels from 1 to num_levels
-      our_level = int(num_levels - petsc_level)
-
-      ! Inverse Aff
-      if (which_inverse == COEFFS_INV_AFF) then
-         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data)) return
-         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data)) return
-         coeffs_internal => pc_air_data%air_data%inv_A_ff_poly_data(our_level)%coefficients
-
-      ! Inverse dropped Aff
-      else if (which_inverse == COEFFS_INV_AFF_DROPPED) then
-         if (.NOT. allocated(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
-         if (our_level > size(pc_air_data%air_data%inv_A_ff_poly_data_dropped)) return
-         coeffs_internal => pc_air_data%air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients
-
-      ! Inverse Acc
-      else if (which_inverse == COEFFS_INV_ACC) then
-         if (.NOT. allocated(pc_air_data%air_data%inv_A_cc_poly_data)) return
-         if (our_level > size(pc_air_data%air_data%inv_A_cc_poly_data)) return
-         coeffs_internal => pc_air_data%air_data%inv_A_cc_poly_data(our_level)%coefficients
+      newton = poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
+               poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+      if (newton) then
+         min_rows = poly_data%gmres_poly_order + 1
+      else
+         min_rows = size(poly_data%coefficients, 1)
       end if
 
-   end subroutine PCAIRGetPolyCoeffsPointer
+      ! Same size, just copy in
+      if (size(coeffs, 1) == size(poly_data%coefficients, 1) .AND. &
+            size(coeffs, 2) == size(poly_data%coefficients, 2)) then
+         poly_data%coefficients = coeffs
+         return
+      end if
+
+      ! Only the number of rows (roots) of a Newton polynomial can change
+      ! The builders assume at least poly_order + 1 roots
+      if (.NOT. newton .OR. size(coeffs, 2) /= 2 .OR. size(coeffs, 1) < min_rows) then
+         err_code = 2
+         return
+      end if
+
+      old_coeffs => poly_data%coefficients
+      allocate(poly_data%coefficients(size(coeffs, 1), 2))
+      poly_data%coefficients = coeffs
+
+      ! If the inverse is a matrix-free Newton polynomial, it points at the old storage
+      ! so point it at the new storage before we free the old
+      ! The check on what it points at means we never touch a matshell that wasn't
+      ! built from these coefficients
+      if (.NOT. PetscObjectIsNull(inv_matrix)) then
+         call MatGetType(inv_matrix, mat_type, ierr)
+         if (mat_type == MATSHELL) then
+            call MatShellGetContext(inv_matrix, mat_ctx, ierr)
+            if (associated(mat_ctx%real_roots, old_coeffs(:, 1))) then
+               call point_mf_newton_roots(mat_ctx, poly_data%coefficients)
+            end if
+         end if
+      end if
+
+      deallocate(old_coeffs)
+
+   end subroutine PCAIRSetPolyCoeffsInternal
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -487,40 +635,41 @@ module pcair_interfaces
       ! This routine copies coeffs into the PC's internal storage.
       ! The caller's array is not referenced after this call and can be
       ! deallocated or modified freely.
+      ! The sizes of coeffs must match those stored, except for the Newton inverse
+      ! types (newton, newton_no_extra), where the number of rows (roots) can differ,
+      ! as long as there are 2 columns and at least poly_order + 1 rows. The internal
+      ! storage is then reallocated
       ! Does not trigger a rebuild; after setting these coefficients call
       ! PCAIRSetReusePolyCoeffs(pc, PETSC_TRUE) and then KSPSolve to apply them.
+      ! A matrix-free Newton polynomial uses the new roots straight away
+      ! Every rank must pass the same coeffs (with the same sizes); this is not checked,
+      ! to keep the call cheap (no reductions)
       type(tPC), intent(inout)                           :: pc
       PetscInt, intent(in)                               :: petsc_level
       integer, intent(in)                                :: which_inverse
       PetscReal, dimension(:,:), pointer, intent(in)          :: coeffs
       PetscErrorCode, intent(out)                        :: ierr
 
-      PetscReal, dimension(:,:), pointer, contiguous :: coeffs_internal
-      integer                               :: errorcode
+      integer                               :: errorcode, err_code
+      PetscInt                              :: min_rows
       ! ~~~~~~~~
-
-      call PCAIRGetPolyCoeffsPointer(pc, petsc_level, which_inverse, coeffs_internal)
-
-      if (.NOT. associated(coeffs_internal)) then
-         print *, "PCAIRSetPolyCoeffs: no coefficients stored for this petsc_level and which_inverse;", &
-                  " check both are valid and that PCSetUp has been called"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
 
       if (.NOT. associated(coeffs)) then
          print *, "PCAIRSetPolyCoeffs: coeffs is not associated"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
 
-      ! Check sizes
-      if (.NOT. (size(coeffs,1) == size(coeffs_internal, 1) .AND. &
-            size(coeffs,2) == size(coeffs_internal, 2))) then
+      call PCAIRSetPolyCoeffsInternal(pc, petsc_level, which_inverse, coeffs, err_code, min_rows)
 
-         print *, "Sizes wrong in PCAIRSetPolyCoeffs"
+      if (err_code == 1) then
+         print *, "PCAIRSetPolyCoeffs: no coefficients stored for this petsc_level and which_inverse;", &
+                  " check both are valid and that PCSetUp has been called"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      else if (err_code == 2) then
+         print *, "Sizes wrong in PCAIRSetPolyCoeffs; only the Newton inverse types can change", &
+                  " the number of rows, with 2 columns and at least ", min_rows, " rows"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
-
-      coeffs_internal = coeffs
 
       ierr = 0
 
@@ -1288,6 +1437,27 @@ module pcair_interfaces
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetDiagUpdate(pc, diag_update, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(out)        :: diag_update
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      diag_update = options%diag_update
+      ierr = 0
+
+   end subroutine PCAIRGetDiagUpdate
+
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetReuseAmount(pc, amount, ierr)
 
       ! ~~~~~~~~
@@ -1677,6 +1847,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscReal                  :: old_real
       ! ~~~~~~~~
+
+      ! A positive value is a fraction of the local F points, so can't be more than all of them
+      if (frac > 1d0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "DDC fraction must be <= 1")
+         return
+      end if
 
       call PCAIRGetDDCFraction(pc, old_real, ierr)
       if (old_real == frac) then
@@ -2760,6 +2938,39 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetReusePolyCoeffs
+
+
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetDiagUpdate(pc, diag_update, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscBool, intent(in)         :: diag_update
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscBool                  :: old_bool
+      ! ~~~~~~~~
+
+      call PCAIRGetDiagUpdate(pc, old_bool, ierr)
+      if (old_bool .eqv. diag_update) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%diag_update = diag_update
+      ierr = 0
+
+   end subroutine PCAIRSetDiagUpdate
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

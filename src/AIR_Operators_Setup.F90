@@ -551,6 +551,9 @@ module air_operators_setup
             else
                call MatMatMult(inv_dropped_Aff, air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP), &
                         MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)  
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_W, air_data%options%reuse_amount)) &
+               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_W), ierr)
             end if
             call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_W), PFLARE_MINUS_ONE, ierr)                         
 
@@ -795,6 +798,9 @@ module air_operators_setup
          else
             call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                   MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) &
+               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
          end if
          call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), PFLARE_MINUS_ONE, ierr)
       end if
@@ -922,8 +928,22 @@ module air_operators_setup
             
       ! Transpose the restrictor if needed
       if (air_data%options%symmetric) then
+
+         ! We always rebuild P rather than use MatTranspose with MAT_REUSE_MATRIX, as that 
+         ! gives a stale P with mpiaijkokkos once R has been updated in place on the device
+         call MatDestroy(air_data%prolongators(our_level), ierr)
          call MatTranspose(air_data%restrictors(our_level), MAT_INITIAL_MATRIX, air_data%prolongators(our_level), ierr)
-         call MatDestroy(air_data%restrictors(our_level), ierr)
+         ! The stored PtAP product refers to the old P, so it can't be reused
+         temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP)
+         if (.NOT. PetscObjectIsNull(temp_mat)) then
+            call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+         end if
+
+         ! Keep R if we're reusing the grid transfer operators (only amount=3)
+         ! as the reuse in compute_R_from_Z needs it
+         if (.NOT. air_data%options%reuse_sparsity .OR. air_data%options%reuse_amount < 3) then
+            call MatDestroy(air_data%restrictors(our_level), ierr)
+         end if
       end if
 
       ! ~~~~~~~~~~~
@@ -1025,9 +1045,15 @@ module air_operators_setup
 
             call MatMatMult(A, air_data%prolongators(our_level), &
                      MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount)) &
+               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
                      
             call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
                      MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)) &
+               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
          end if
          
          ! Delete temporary if not reusing

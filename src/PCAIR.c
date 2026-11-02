@@ -74,8 +74,10 @@ PETSC_EXTERN void PCAIRGetADrop_c(PC *pc, PetscReal *input_real);
 PETSC_EXTERN void PCAIRGetALump_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseSparsity_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReusePolyCoeffs_c(PC *pc, PetscBool *input_bool);
+PETSC_EXTERN void PCAIRGetDiagUpdate_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetReuseAmount_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size);
+PETSC_EXTERN void PCAIRSetPolyCoeffs_c(PC *pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size, int *err_code, PetscInt *min_rows);
 PETSC_EXTERN void PCAIRGetGridComplexity_c(PC *pc, PetscReal *complexity);
 PETSC_EXTERN void PCAIRGetOperatorComplexity_c(PC *pc, PetscReal *complexity);
 PETSC_EXTERN void PCAIRGetCycleComplexity_c(PC *pc, PetscReal *complexity);
@@ -128,6 +130,7 @@ PETSC_EXTERN void PCAIRSetADrop_c(PC *pc, PetscReal input_real);
 PETSC_EXTERN void PCAIRSetALump_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseSparsity_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReusePolyCoeffs_c(PC *pc, PetscBool input_bool);
+PETSC_EXTERN void PCAIRSetDiagUpdate_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetReuseAmount_c(PC *pc, PetscInt input_int);
 
 // ~~~~~~~~~~~~~
@@ -163,6 +166,22 @@ static PetscErrorCode PCApply_AIR_c(PC pc, Vec x, Vec y)
 
    // Just call the underlying pcshell apply
    PetscCall(PCApply(*pc_air_shell, x, y));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Transposed apply - this applies the exact transpose of what PCApply applies, so
+// the two are adjoints and KSPSolveTranspose works
+static PetscErrorCode PCApplyTranspose_AIR_c(PC pc, Vec x, Vec y)
+{
+   PetscFunctionBegin;
+   PC *pc_air_shell = (PC *)pc->data;
+
+   // Same reasoning as in PCApply_AIR_c - the shell tracks the pmat state itself
+   // so it has to see the reusepreconditioner flag
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+
+   // Just call the underlying pcshell transposed apply
+   PetscCall(PCApplyTranspose(*pc_air_shell, x, y));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -948,7 +967,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_rea
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: intermediate
 
@@ -970,7 +989,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: advanced
 
@@ -1124,7 +1143,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: intermediate
 
@@ -1357,6 +1376,28 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
    PCAIRGetReusePolyCoeffs_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+/*@
+  PCAIRGetDiagUpdate - Returns whether `PCAIR` updates the existing hierarchy, rather than rebuilding it, when the diagonal of the Pmat changes
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_bool - `PETSC_TRUE` if the hierarchy is updated
+
+  Level: advanced
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagUpdate()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC pc, PetscBool *input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetDiagUpdate_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 /*@C
   PCAIRGetPolyCoeffs - Returns the polynomial coefficients stored by `PCAIR` for a given level and inverse after the last `PCSetUp()`
 
@@ -1376,7 +1417,8 @@ PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC pc, PetscBool *input_bool
 
   Note:
   This routine returns a pointer into the `PCAIR` object itself, valid only until the next `PCSetUp()` or
-  `PCReset()` call; copy the coefficients yourself if you need to save or restore them later. This differs from
+  `PCReset()` call, or until `PCAIRSetPolyCoeffs()` changes the number of rows for the same petsc_level and
+  which_inverse; copy the coefficients yourself if you need to save or restore them later. This differs from
   the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
   It is an error to call this before `PCSetUp()`, with petsc_level outside [0, number of levels - 1], or for an
@@ -1872,7 +1914,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCIts(PC pc, PetscInt input_int)
 
   Input Parameters:
 + pc         - the `PCAIR` preconditioner context
-- input_real - the local fraction of F points to convert to C points, or (if negative) minus the diagonal-dominance ratio threshold
+- input_real - the local fraction of F points to convert to C points (at most 1), or (if negative) minus the diagonal-dominance ratio threshold
 
   Options Database Key:
 . -pc_air_ddc_fraction fraction - local fraction of F points converted to C by diagonal dominance; if negative, convert any row whose diagonal-dominance ratio is less than the absolute value; defaults to 0.1
@@ -1888,6 +1930,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDDCFraction(PC pc, PetscReal input_real)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // A positive value is a fraction of the local F points, so can't be more than all of them
+   PetscCheck(input_real <= 1.0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "DDC fraction %g must be <= 1", (double)input_real);
    PCAIRSetDDCFraction_c(&pc, input_real);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2262,10 +2306,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
+. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
 
   Level: intermediate
 
@@ -2289,10 +2333,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType inverse_t
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
+. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
 
   Level: advanced
 
@@ -2483,10 +2527,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, or `PFLAREINV_JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
+. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
 
   Level: intermediate
 
@@ -2762,13 +2806,23 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
 - input_bool - `PETSC_TRUE` to also reuse the GMRES polynomial coefficients
 
   Options Database Key:
-. -pc_air_reuse_poly_coeffs (true|false) - also reuse the GMRES polynomial coefficients when `-pc_air_reuse_sparsity` is set; defaults to false
+. -pc_air_reuse_poly_coeffs (true|false) - also reuse the GMRES polynomial coefficients when `-pc_air_reuse_sparsity` or `-pc_air_diag_update` is set; defaults to false
 
   Level: advanced
 
-  Note:
-  Only useful when regenerating the hierarchy for the same matrix, with coefficients stored and restored using
-  `PCAIRGetPolyCoeffs()` and `PCAIRSetPolyCoeffs()`; the coefficients are very sensitive to changes in the matrix.
+  Notes:
+  With `-pc_air_reuse_sparsity`, this is only useful when regenerating the hierarchy for the same matrix, with
+  coefficients stored and restored using `PCAIRGetPolyCoeffs()` and `PCAIRSetPolyCoeffs()`; the coefficients are very
+  sensitive to changes in the matrix.
+
+  With `-pc_air_diag_update`, a diagonal update keeps the polynomial coefficients rather than recomputing them, so an
+  update with matrix-free smoothing (`-pc_air_matrix_free_polys` and `-pc_air_coarsest_matrix_free_polys`) does
+  no matrix-vector products to build the smoothers. Only use this with diagonally scaled polynomials
+  (`-pc_air_diag_scale_polys` and `-pc_air_coarsest_diag_scale_polys`) and when the diagonal increases relative to the
+  Pmat the hierarchy was built from (e.g., when the time step shrinks). Kept unscaled polynomials, or a diagonal that
+  decreases (e.g., when the time step grows), can make the preconditioner diverge. This flag can be changed between
+  solves, so coefficients can also be stored for different diagonals (e.g., for bands of the time step) with
+  `PCAIRGetPolyCoeffs()` and restored with `PCAIRSetPolyCoeffs()`, see `docs/reuse.md`.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReusePolyCoeffs()`, `PCAIRSetReuseSparsity()`, `PCAIRGetPolyCoeffs()`, `PCAIRSetPolyCoeffs()`
 @*/
@@ -2777,6 +2831,50 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRSetReusePolyCoeffs_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRSetDiagUpdate - Sets whether `PCAIR` treats any change to the Pmat with the same nonzero pattern as a change
+  to its diagonal only, and updates the existing hierarchy rather than rebuilding it
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCAIR` preconditioner context
+- input_bool - `PETSC_TRUE` to update the hierarchy when the diagonal of the Pmat changes
+
+  Options Database Key:
+. -pc_air_diag_update (true|false) - update rather than rebuild the hierarchy when the diagonal of the Pmat changes; defaults to false
+
+  Level: advanced
+
+  Notes:
+  With this set, after the hierarchy is built from the Pmat, the user can change the diagonal of the Pmat in place
+  (e.g., with `MatShift()` or `MatDiagonalSet()`). On the next `PCSetUp()` (e.g., triggered by `KSPSolve()`) `PCAIR`
+  then updates the existing hierarchy with the change in the diagonal of the Pmat since the hierarchy was built,
+  rather than rebuilding it. `PCAIR` does not check that only the diagonal has changed: any change to the off-diagonal
+  entries is ignored, so the update can also be used when other entries change but the diagonal is the biggest change.
+
+  A change to the nonzero pattern of the Pmat rebuilds the hierarchy as normal, and subsequent updates are then
+  relative to that Pmat. With a single level, or with `-pc_air_full_smoothing_up_and_down`, the hierarchy is always
+  rebuilt. If `-pc_air_reuse_sparsity` is also set it takes priority, and the hierarchy is rebuilt with reuse. As with
+  any change to the Pmat, nothing happens if `KSPSetReusePreconditioner()` has been set.
+
+  The approximate inverses used in the smoothers are recomputed on each update, unless `-pc_air_reuse_poly_coeffs` is
+  also set, in which case the polynomial coefficients are kept (see `PCAIRSetReusePolyCoeffs()`).
+
+  Updates that decrease the diagonal a long way are the main failure mode, so where possible build the hierarchy from
+  the Pmat with the smallest diagonal it will be updated to, e.g., the Jacobian at the largest time step allowed in
+  implicit time stepping, at the cost of a denser hierarchy. C point smoothing is recommended (see
+  `PCAIRSetSmoothType()`), and `docs/reuse.md` has more details on using the update in time stepping.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`, `PCAIRSetReusePolyCoeffs()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC pc, PetscBool input_bool)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRSetDiagUpdate_c(&pc, input_bool);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2848,21 +2946,42 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
 
   Note:
   This routine copies the data from coeffs_ptr into the `PCAIR` object; the caller's array is not referenced after
-  this call and may be freed or modified. row_size and col_size must match the sizes returned by
-  `PCAIRGetPolyCoeffs()` for the same petsc_level and which_inverse, which must also be valid there.
+  this call and may be freed or modified. petsc_level and which_inverse must be valid for `PCAIRGetPolyCoeffs()`.
+  row_size and col_size must match the sizes it returns, except for the Newton types described below.
+
+  For the Newton types (`PFLAREINV_NEWTON` and `PFLAREINV_NEWTON_NO_EXTRA`) the coefficients are the real and
+  imaginary parts of the roots, in 2 columns. Only roots that are exactly zero are skipped when the polynomial is
+  applied or built; any non-zero root, however small, is used. The number of roots can differ between setups (the
+  extra roots `PFLAREINV_NEWTON` adds for stability depend on the matrix), so for these types row_size may differ
+  from the number of rows stored, as long as col_size is 2 and row_size is at least the polynomial order + 1. The
+  storage in `PCAIR` is then reallocated, which invalidates any pointer previously returned by
+  `PCAIRGetPolyCoeffs()` for this petsc_level and which_inverse.
+
+  A matrix-free polynomial inverse uses the new coefficients straight away. An assembled one keeps using the old
+  coefficients until it is rebuilt by the next setup, which happens with the new coefficients if
+  `PCAIRSetReusePolyCoeffs()` has been set.
+
+  Every rank must pass the same coefficients, with the same row_size and col_size. This is not checked, to keep
+  the call cheap (no reductions); different coefficients on different ranks give an inconsistent preconditioner,
+  and a different number of Newton roots can hang the matrix-free apply.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetPolyCoeffs()`, `PCAIRSetReusePolyCoeffs()`, `WhichInverseType`
 @*/
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC pc, PetscInt petsc_level, int which_inverse, PetscReal *coeffs_ptr, PetscInt row_size, PetscInt col_size)
 {
    PetscReal *coeffs_internal;
-   PetscInt   rows_internal, cols_internal;
+   PetscInt   rows_internal, cols_internal, min_rows;
+   int        err_code;
 
    PetscFunctionBegin;
+   // Errors if there are no coefficients stored for this level and inverse
    PetscCall(PCAIRGetPolyCoeffsPointer_Private(pc, petsc_level, which_inverse, &coeffs_internal, &rows_internal, &cols_internal));
-   PetscCheck(row_size == rows_internal && col_size == cols_internal, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT " but PCAIR stores %" PetscInt_FMT " x %" PetscInt_FMT " for which_inverse %d on petsc_level %" PetscInt_FMT, row_size, col_size, rows_internal, cols_internal, which_inverse, petsc_level);
    PetscAssertPointer(coeffs_ptr, 4);
-   PetscCall(PetscArraycpy(coeffs_internal, coeffs_ptr, rows_internal * cols_internal));
+   PetscCheck(row_size > 0 && col_size > 0, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT ", sizes must be positive", row_size, col_size);
+   // Copies in, reallocating the internal storage if a Newton polynomial is given a different number of roots
+   PCAIRSetPolyCoeffs_c(&pc, petsc_level, which_inverse, coeffs_ptr, row_size, col_size, &err_code, &min_rows);
+   PetscCheck(err_code != 1, PETSC_COMM_SELF, PETSC_ERR_PLIB, "PCAIR stores no polynomial coefficients for which_inverse %d on petsc_level %" PetscInt_FMT, which_inverse, petsc_level);
+   PetscCheck(err_code == 0, PETSC_COMM_SELF, PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT " but PCAIR stores %" PetscInt_FMT " x %" PetscInt_FMT " for which_inverse %d on petsc_level %" PetscInt_FMT "; only the Newton inverse types can change the number of rows, with 2 columns and at least %" PetscInt_FMT " rows", row_size, col_size, rows_internal, cols_internal, which_inverse, petsc_level, min_rows);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -2962,6 +3081,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsBool("-pc_air_reuse_poly_coeffs", "Reuses gmres polynomial coefficients during setup", "PCAIRSetReusePolyCoeffs", old_flag, &flg, NULL));
    PetscCall(PCAIRSetReusePolyCoeffs(pc, flg));
    // ~~~~
+   PetscCall(PCAIRGetDiagUpdate(pc, &old_flag));
+   flg = old_flag;
+   PetscCall(PetscOptionsBool("-pc_air_diag_update", "Update rather than rebuild the hierarchy when the diagonal of the Pmat changes", "PCAIRSetDiagUpdate", old_flag, &flg, NULL));
+   PetscCall(PCAIRSetDiagUpdate(pc, flg));
+   // ~~~~
    PetscCall(PCAIRGetReuseAmount(pc, &old_int));
    input_int = old_int;
    PetscCall(PetscOptionsRangeInt("-pc_air_reuse_amount", "Amount of data to reuse during setup with reuse_sparsity (1, 2, or 3 - 3 is store everything)", "PCAIRSetReuseAmount", old_int, &input_int, NULL, 1, 3));
@@ -3048,7 +3172,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsInt("-pc_air_auto_truncate_start_level", "Use auto truncation from this level", "PCAIRSetAutoTruncateStartLevel", old_int, &input_int, NULL));
    PetscCall(PCAIRSetAutoTruncateStartLevel(pc, input_int));
    // ~~~~ 
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PCAIRGetInverseType(pc, &old_type));
    type = old_type;
    PetscCall(PetscOptionsEnum("-pc_air_inverse_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
@@ -3171,6 +3295,8 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       }
       PetscCall(PCAIRGetReusePolyCoeffs(pc, &flg));
       if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Reusing gmres polynomial coefficients during setup \n"));
+      PetscCall(PCAIRGetDiagUpdate(pc, &flg));
+      if (flg) PetscCall(PetscViewerASCIIPrintf(viewer, "  Updating rather than rebuilding when the diagonal of the Pmat changes \n"));
 
       PetscCall(PCAIRGetProcessorAgglom(pc, &flg));
       PetscCall(PCAIRGetProcessorAgglomRatio(pc, &input_real));
@@ -3293,7 +3419,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    Unweighted Jacobi \n"));
          }
-         if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+         else if (input_type == PFLAREINV_L1JACOBI)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    l1 Jacobi \n"));
+         }
+         if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
          {
             // If matrix-free or not
             if (flg)
@@ -3388,8 +3518,12 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_JACOBI)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: Unweighted Jacobi \n"));      
-            }                  
-            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+            }
+            else if (input_type == PFLAREINV_L1JACOBI)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: l1 Jacobi \n"));
+            }
+            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
             {
                // If matrix-free or not
                if (flg)
@@ -3475,7 +3609,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: Unweighted Jacobi \n"));
             }
-            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+            else if (input_type == PFLAREINV_L1JACOBI)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: l1 Jacobi \n"));
+            }
+            if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
             {
                // If matrix-free or not
                if (flg)
@@ -3616,7 +3754,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    Unweighted Jacobi \n"));
       }
-      if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI)
+      else if (input_type == PFLAREINV_L1JACOBI)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    l1 Jacobi \n"));
+      }
+      if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
       {
          // If matrix-free or not
          if (flg)
@@ -3655,7 +3797,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 
   Options Database Keys:
 + -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type; defaults to product
-. -pc_air_inverse_type      (power|arnoldi|newton|neumann|sai|isai|wjacobi|jacobi) - approximate inverse used for smoothing; defaults to arnoldi
+. -pc_air_inverse_type      (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
 . -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc
@@ -3729,6 +3871,9 @@ PETSC_EXTERN PetscErrorCode PCCreate_AIR(PC pc)
    // Set the method functions
    pc->ops->apply               = PCApply_AIR_c;
    pc->ops->matapply            = PCMatApply_AIR_c;
+   // We deliberately don't set matapplytranspose - PCMatApplyTranspose falls back to
+   // applying PCApplyTranspose column by column when it is NULL, which is correct
+   pc->ops->applytranspose      = PCApplyTranspose_AIR_c;
    pc->ops->setup               = PCSetUp_AIR_c;
    pc->ops->destroy             = PCDestroy_AIR_c;
    pc->ops->view                = PCView_AIR_c;  

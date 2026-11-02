@@ -7,7 +7,9 @@ module cf_splitting
    use ddc_module, only: ddc
    use cr_splitting, only: cr_pass
    use sabs, only: generate_sabs
-   use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio
+   use iso_c_binding
+   use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio, &
+            copy_cf_markers_d2h
    use aggregation, only: generate_serial_aggregation
    use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
 
@@ -98,7 +100,7 @@ module cf_splitting
       logical, intent(in)                 :: skip_symmetrize
       PetscReal, intent(in)                    :: strong_threshold
       integer, intent(in)                 :: max_luby_steps, cf_splitting_type
-      integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
       ! Local
       PetscInt :: global_row_start, global_row_end_plus_one, i_loc
@@ -117,6 +119,9 @@ module cf_splitting
       PetscInt, parameter :: nz_ignore = -1
       type(tMat) :: Ad, Ao
       PetscInt, dimension(:), pointer :: colmap
+#if defined(PETSC_HAVE_KOKKOS)
+      MatType :: mat_type
+#endif
 
       ! ~~~~~~  
 
@@ -186,6 +191,17 @@ module cf_splitting
 
             ! Do distance 1 PMIS
             call pmisr(strength_mat, max_luby_steps, .TRUE., cf_markers_local)
+
+#if defined(PETSC_HAVE_KOKKOS)
+            ! The Kokkos pmisr leaves the cf_markers on the device (it only copies
+            ! them back to the host when debugging), but the boundary reset and 
+            ! aggregation below read the host cf_markers_local
+            call MatGetType(strength_mat, mat_type, ierr)
+            if ((mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+                  mat_type == MATAIJKOKKOS) .AND. .NOT. kokkos_debug()) then
+               call copy_cf_markers_d2h(c_loc(cf_markers_local))
+            end if
+#endif
 
             ! Get the sequential part of the matrix
             call MatMPIAIJGetSeqAIJ(strength_mat, Ad, Ao, colmap, ierr) 
@@ -295,8 +311,8 @@ module cf_splitting
             ! If kokkos debugging is on, the pmisr and ddc do
             ! copy to the host after they finish in order to do the comparisons
             ! and hence we do need the intermediate ISs
-            ! If doing pmis agg, the initial pmis will be on the device so always
-            ! trigger the d2h copy and build the intermediate is
+            ! If doing pmis agg, the initial pmis will be on the device so
+            ! first_pass_splitting always triggers the d2h copy and we build the intermediate is
             ! CR never runs the pmisr/ddc on the device (its heavy numerics are all
             ! default petsc ops that run on the device anyway) so its host
             ! cf_markers_local and ISs are always the authoritative ones

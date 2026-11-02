@@ -23,12 +23,13 @@
 . `PFLAREINV_SAI`             - sparse approximate inverse; cannot be applied matrix-free
 . `PFLAREINV_ISAI`            - incomplete sparse approximate inverse; cannot be applied matrix-free
 . `PFLAREINV_WJACOBI`         - weighted Jacobi
-- `PFLAREINV_JACOBI`          - unweighted Jacobi
+. `PFLAREINV_JACOBI`          - unweighted Jacobi
+- `PFLAREINV_L1JACOBI`        - l1 Jacobi
 
   Level: intermediate
 
   Note:
-  The two Jacobi types exist mainly for use as smoothers in `PCAIR`; for a standalone Jacobi
+  The Jacobi types exist mainly for use as smoothers in `PCAIR`; for a standalone Jacobi
   preconditioner use PETSc's `PCJACOBI`.
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCAIR`, `PCPFLAREINVSetType()`, `PCPFLAREINVGetType()`, `PCAIRSetInverseType()`, `PCAIRGetInverseType()`
@@ -43,6 +44,7 @@ typedef enum {
    PFLAREINV_ISAI,
    PFLAREINV_WJACOBI,
    PFLAREINV_JACOBI,
+   PFLAREINV_L1JACOBI,
 }  PCPFLAREINVType;
 
 /*E
@@ -189,6 +191,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetADrop(PC, PetscReal *);
 PETSC_EXTERN PetscErrorCode PCAIRGetALump(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseSparsity(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReusePolyCoeffs(PC, PetscBool *);
+PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetReuseAmount(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyCoeffs(PC, PetscInt, int, PetscReal **, PetscInt *, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetGridComplexity(PC, PetscReal *);
@@ -242,6 +245,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetADrop(PC, PetscReal);
 PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC, PetscBool);
+PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC, PetscInt, int, PetscReal *, PetscInt, PetscInt);
 
