@@ -23,6 +23,12 @@
      Can print the dt and the iteration count of every step with -print_steps
      Can error if the total number of linear iterations is above -max_total_its (default -1, don't check)
      Can check the final solution is within 1e-3 of the steady state u=1 with -verify_solution
+     Can store the PCAIR polynomial coefficients for bands of the time step [factor^k, factor^(k+1))
+       with -dt_bands factor (with -pc_air_diag_update), restoring them rather than recomputing them
+       when the time step returns to a band, see dt_bands.h; -dt_bands_check errors if the bands did nothing
+     Can build the preconditioner before time stepping from the Jacobian at a time step of -pc_setup_dt,
+       e.g., the largest time step allowed (with -ts_adapt_dt_max), so that with -pc_air_diag_update
+       the diagonal only ever increases relative to the Pmat the hierarchy was built from
 
      The preconditioner behaviour across steps is controlled by standard options:
        rebuilt every time J changes : the default
@@ -37,6 +43,7 @@ static char help[] = "Solves time dependent 2D advection with finite differences
 #include <petscts.h>
 
 #include "pflare.h"
+#include "dt_bands.h"
 
 typedef struct {
   Mat       L;
@@ -44,6 +51,7 @@ typedef struct {
   PetscReal shift;      // the shift currently in J
   PetscBool print_steps;
   PetscInt  its_last;
+  DtBands   bands;      // stored polynomial coefficients for bands of the time step
 } AppCtx;
 
 static PetscErrorCode ComputeL(DM da, Mat L, PetscReal u, PetscReal v, Vec m_diag, Vec b)
@@ -117,6 +125,8 @@ static PetscErrorCode IJacobian(TS ts, PetscReal t, Vec u, Vec udot, PetscReal s
   PetscCall(VecScale(ctx->work, shift));
   PetscCall(MatDiagonalSet(J, ctx->work, ADD_VALUES));
   ctx->shift = shift;
+  // Restore or compute the polynomial coefficients for the band of this time step
+  PetscCall(DtBandsPrepare(&ctx->bands, 1.0 / shift));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -144,7 +154,7 @@ int main(int argc, char **argv)
   Vec               x;
   AppCtx            ctx;
   PetscInt          steps, rejects, its, max_total_its = -1;
-  PetscReal         theta = PETSC_PI / 4.0;
+  PetscReal         theta = PETSC_PI / 4.0, pc_setup_dt = -1.0, dt_bands = -1.0;
   PetscBool         verify_solution = PETSC_FALSE;
   TSConvergedReason ts_reason;
   PetscLogDouble    time_start, time_end;
@@ -157,6 +167,9 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-theta", &theta, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-max_total_its", &max_total_its, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-verify_solution", &verify_solution, NULL));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-pc_setup_dt", &pc_setup_dt, NULL));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-dt_bands", &dt_bands, NULL));
+  PetscCall(DtBandsCreate(&ctx.bands, dt_bands));
   PetscCheck(theta <= PETSC_PI / 2.0 && theta >= 0.0, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONGSTATE, "Theta must be between 0 and pi/2");
 
   PetscCall(DMDACreate2d(PETSC_COMM_WORLD, DM_BOUNDARY_NONE, DM_BOUNDARY_NONE, DMDA_STENCIL_STAR, 11, 11, PETSC_DECIDE, PETSC_DECIDE, 1, 1, NULL, NULL, &da));
@@ -191,6 +204,32 @@ int main(int argc, char **argv)
 
   // Zero initial condition
   PetscCall(VecSet(x, 0.0));
+
+  // Attach the time step bands to the PC
+  if (dt_bands > 1.0) {
+    SNES snes;
+    KSP  ksp;
+    PetscCall(TSGetSNES(ts, &snes));
+    PetscCall(SNESGetKSP(snes, &ksp));
+    PetscCall(KSPSetFromOptions(ksp));
+    PetscCall(DtBandsSetKSP(&ctx.bands, ksp));
+  }
+
+  // Build the preconditioner from the Jacobian at pc_setup_dt
+  // The first step then changes the Jacobian to its own time step
+  if (pc_setup_dt > 0) {
+    SNES snes;
+    KSP  ksp;
+    PetscCall(IJacobian(ts, 0.0, x, NULL, 1.0 / pc_setup_dt, J, J, &ctx));
+    PetscCall(TSSetUp(ts));
+    PetscCall(TSGetSNES(ts, &snes));
+    PetscCall(SNESSetUp(snes));
+    PetscCall(SNESGetKSP(snes, &ksp));
+    PetscCall(KSPSetOperators(ksp, J, J));
+    PetscCall(KSPSetUp(ksp));
+    // We set up outside of KSPSolve, so store the coefficients for this band ourselves
+    PetscCall(DtBandsStore(&ctx.bands));
+  }
   PetscCall(PetscTime(&time_start));
   PetscCall(TSSolve(ts, x));
   PetscCall(PetscTime(&time_end));
@@ -214,6 +253,7 @@ int main(int argc, char **argv)
     PetscCheck(err_norm < 1e-3, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Solution verification FAILED: max|u - 1| = %g > 1e-3", (double)err_norm);
   }
 
+  PetscCall(DtBandsDestroy(&ctx.bands));
   PetscCall(TSDestroy(&ts));
   PetscCall(MatDestroy(&J));
   PetscCall(MatDestroy(&ctx.L));

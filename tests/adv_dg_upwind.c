@@ -46,6 +46,15 @@
         with -print_steps
         Can error if the total number of linear iterations is above
         -max_total_its (default -1, don't check)
+        Can store the PCAIR polynomial coefficients for bands of the time
+        step [factor^k, factor^(k+1)) with -dt_bands factor (with
+        -pc_air_diag_update), restoring them rather than recomputing them
+        when the time step returns to a band, see dt_bands.h;
+        -dt_bands_check errors if the bands did nothing
+        Can build the PC from the Jacobian at a time step of -pc_setup_dt,
+        e.g., the largest time step allowed (with -ts_adapt_dt_max), so
+        that with -pc_air_diag_update the diagonal only ever increases
+        relative to the Pmat the hierarchy was built from
         When -write_vtk is also set, one VTU is written per
         TS step (basename dg_solution_ts_XXXX).
 
@@ -113,6 +122,7 @@ static char help[] = "Solves steady advection with upwinded DG FEM.\n\n";
 #include <math.h>
 
 #include "pflare.h"
+#include "dt_bands.h"
 
 /* -----------------------------------------------------------------------
    Application context
@@ -1680,6 +1690,7 @@ typedef struct {
   PetscBool    print_steps;
   PetscInt     its_last;
   PetscReal    shift_pre;   /* the shift baked into A (= 1/dt for BEULER) */
+  DtBands      bands;       /* stored polynomial coefficients for bands of the time step */
 } TSAdvCtx;
 
 static PetscErrorCode IFunctionAdv(TS ts, PetscReal t, Vec u, Vec udot, Vec F, void *ctx_void)
@@ -1716,6 +1727,8 @@ static PetscErrorCode IJacobianAdv(TS ts, PetscReal t, Vec u, Vec udot, PetscRea
   if (c->M) PetscCall(MatAXPY(c->A, shift - c->shift_pre, c->M, SUBSET_NONZERO_PATTERN));
   else PetscCall(MatShift(c->A, shift - c->shift_pre));
   c->shift_pre = shift;
+  /* Restore or compute the polynomial coefficients for the band of this time step */
+  PetscCall(DtBandsPrepare(&c->bands, 1.0 / shift));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -2113,6 +2126,15 @@ int main(int argc, char **argv)
        a separate matrix. IFunctionAdv subtracts the
        pre-shift contribution back out so the residual is unchanged. */
     PetscCall(TSGetTimeStep(ts, &dt));
+    /* With -pc_setup_dt the preconditioner is built from the Jacobian at that time step,
+       e.g., the largest time step allowed (with -ts_adapt_dt_max), so that with -pc_air_diag_update
+       the diagonal only ever increases relative to the Pmat the hierarchy was built from.
+       The first step then changes the Jacobian to its own time step */
+    {
+      PetscReal pc_setup_dt = -1.0;
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-pc_setup_dt", &pc_setup_dt, NULL));
+      if (pc_setup_dt > 0) dt = pc_setup_dt;
+    }
     tsctx.shift_pre = 1.0 / dt;
     if (tsctx.M) PetscCall(MatAXPY(A, tsctx.shift_pre, tsctx.M, SUBSET_NONZERO_PATTERN));
     else PetscCall(MatShift(A, tsctx.shift_pre));
@@ -2143,7 +2165,20 @@ int main(int argc, char **argv)
     PetscCall(SNESSetUp(snes));
     PetscCall(SNESGetKSP(snes, &ksp_ts));
     PetscCall(KSPSetOperators(ksp_ts, A, A));
+    {
+      PetscReal dt_bands = -1.0;
+      PetscCall(PetscOptionsGetReal(NULL, NULL, "-dt_bands", &dt_bands, NULL));
+      PetscCall(DtBandsCreate(&tsctx.bands, dt_bands));
+      if (dt_bands > 1.0) {
+        PetscCall(KSPSetFromOptions(ksp_ts));
+        PetscCall(DtBandsSetKSP(&tsctx.bands, ksp_ts));
+      }
+    }
+    /* The PC is built from A at the time step 1/shift_pre */
+    PetscCall(DtBandsPrepare(&tsctx.bands, 1.0 / tsctx.shift_pre));
     PetscCall(KSPSetUp(ksp_ts));
+    /* We set up outside of KSPSolve, so store the coefficients for this band ourselves */
+    PetscCall(DtBandsStore(&tsctx.bands));
     if (ctx.second_solve) {
       // We do an initial KSPSolve here to trigger the GPU copy 
       PetscCall(KSPSolve(ksp_ts, b_rhs, x));
@@ -2166,6 +2201,7 @@ int main(int argc, char **argv)
       PetscCall(TSGetStepRejections(ts, &rejects));
       PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Steps %" PetscInt_FMT ", rejected steps %" PetscInt_FMT ", total linear iterations %" PetscInt_FMT ", average its per solve %.2f\n", steps, rejects, its, (double)its / (double)(steps + rejects)));
     }
+    PetscCall(DtBandsDestroy(&tsctx.bands));
     PetscCall(TSDestroy(&ts));
     PetscCall(MatDestroy(&tsctx.M));
     PetscCall(VecDestroy(&tsctx.work));

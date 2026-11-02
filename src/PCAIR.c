@@ -2820,7 +2820,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
   no matrix-vector products to build the smoothers. Only use this with diagonally scaled polynomials
   (`-pc_air_diag_scale_polys` and `-pc_air_coarsest_diag_scale_polys`) and when the diagonal increases relative to the
   Pmat the hierarchy was built from (e.g., when the time step shrinks). Kept unscaled polynomials, or a diagonal that
-  decreases (e.g., when the time step grows), can make the preconditioner diverge.
+  decreases (e.g., when the time step grows), can make the preconditioner diverge. This flag can be changed between
+  solves, so coefficients can also be stored for different diagonals (e.g., for bands of the time step) with
+  `PCAIRGetPolyCoeffs()` and restored with `PCAIRSetPolyCoeffs()`, see `docs/reuse.md`.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReusePolyCoeffs()`, `PCAIRSetReuseSparsity()`, `PCAIRGetPolyCoeffs()`, `PCAIRSetPolyCoeffs()`
 @*/
@@ -2860,6 +2862,11 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC pc, PetscBool input_bool)
 
   The approximate inverses used in the smoothers are recomputed on each update, unless `-pc_air_reuse_poly_coeffs` is
   also set, in which case the polynomial coefficients are kept (see `PCAIRSetReusePolyCoeffs()`).
+
+  Updates that decrease the diagonal a long way are the main failure mode, so where possible build the hierarchy from
+  the Pmat with the smallest diagonal it will be updated to, e.g., the Jacobian at the largest time step allowed in
+  implicit time stepping, at the cost of a denser hierarchy. C point smoothing is recommended (see
+  `PCAIRSetSmoothType()`), and `docs/reuse.md` has more details on using the update in time stepping.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetDiagUpdate()`, `PCAIRSetSmoothType()`, `PCAIRSetReusePolyCoeffs()`
 @*/
