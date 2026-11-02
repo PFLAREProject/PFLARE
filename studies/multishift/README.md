@@ -70,6 +70,26 @@ The 20–55% overhead over the shared-shift block apply comes from the extra den
 
 Full batched solves are currently about 2x slower than sequential solves. The cause is the test driver's batched GMRES, not the preconditioner: it freezes converged columns instead of deflating them (k = 64 ran 1472 column-applies where 858 were needed), and its Gram–Schmidt is a host loop. Raw log: `sweep_n200_cpu1.log`.
 
+## Outer Richardson: entirely within PETSc
+
+PETSc's block Richardson (`KSPMatSolve_Richardson`) only ever applies Amat through `MatProduct`. So a `MATSHELL` Amat whose dense product is `L X + D .* X` (`MatShellSetMatProductOperation`), combined with the multi-shift PCAIR, gives a batched multi-shift solve with **no driver loop and no PETSc change**. This is `-richardson` in the driver. The sequential comparison is an update plus a `KSPSolve` with `KSPRICHARDSON` for each shift. n = 200², one core, rtol 1e-10:
+
+| k | block its | max seq its | column-applies, block / needed | seq Richardson (s) | multi-shift Richardson (s) | seq GMRES (s) | max column rel. residual |
+|---|---|---|---|---|---|---|---|
+| 1 | 69 | 69 | 69/69 = 1.00 | 0.32 | 0.41 | 0.12 | 9.6e-11 |
+| 4 | 66 | 68 | 264/86 = 3.07 | 0.39 | 0.77 | 0.22 | 1.7e-10 |
+| 8 | 64 | 67 | 512/199 = 2.57 | 0.90 | 1.45 | 0.50 | 2.3e-10 |
+| 16 | 65 | 70 | 1040/454 = 2.29 | 2.04 | 3.37 | 1.07 | 3.3e-10 |
+| 32 | 67 | 73 | 2144/965 = 2.22 | 4.22 | 9.41 | 2.34 | 3.9e-10 |
+| 64 | 67 | 74 | 4288/1989 = 2.16 | 9.08 | 17.89 | 4.55 | 5.3e-10 |
+
+- **Iterations.** Richardson needs up to 74 iterations where GMRES needs 22–23, so GMRES remains the better outer method for these shifts.
+- **Stopping test.** PETSc's block Richardson stops on `||R||_F <= rtol ||B||_F`. The block therefore stops a few iterations before the slowest column would on its own (65 vs 70 at k = 16), and that column ends up to about 5x above rtol (5.3e-10). The fast columns over-converge to about 1e-14. Only `||r_j|| <= rtol ||B||_F` is guaranteed, which the test checks.
+- **Wasted work.** Every column runs every block iteration. The shifts converge in anything from 5 to 74 iterations, so the block does 2.2–3x the column-applies needed. On the CPU, the 1.1–2x gain per apply doesn't cover that, and the block is 1.6–2.2x slower than sequential. With shifts grouped into bands of similar convergence, the waste would largely disappear.
+- **Small PETSc change that would help.** A per-column stopping test in `KSPMatSolve_Richardson`, plus compacting the unconverged columns into a smaller block (`MatDenseGetSubMatrix` after a column permutation). The same deflation is what the batched GMRES needs.
+
+Raw log: `sweep_richardson_n200_cpu1.log`.
+
 ## What has to change
 
 ### In PETSc: nothing for the cycle
@@ -84,7 +104,7 @@ This is the only route in the prototype. `PCAIRSetMultiShift(pc, NULL)` puts the
 
 ### In PETSc: worth changing, though not required
 
-1. **Outer Krylov (the main gap).** `KSPMatSolve` with a non-block KSP falls back to one `KSPSolve` per column. Each of those calls `MatMult` on Amat, which cannot know which shift the column belongs to, and a single-RHS `PCApply`. Block methods (HPDDM BGMRES, block CG) mix the columns, which is wrong for different operators. What is needed is a *batched, non-block* matsolve: k independent Arnoldi processes in lockstep, using `MatProduct` on Amat (a shell can do `L X + D .* X`) and `PCMatApply`, with per-column convergence and deflation. Either add that to `KSPGMRES`/`KSPFGMRES`, or check whether HPDDM's non-block GMRES with several right-hand sides does exactly this. HPDDM is not in the CI image, so I couldn't test that.
+1. **Outer Krylov (the main gap).** An outer Richardson already works unchanged; see the section above. `KSPMatSolve` with a non-block KSP falls back to one `KSPSolve` per column. Each of those calls `MatMult` on Amat, which cannot know which shift the column belongs to, and a single-RHS `PCApply`. Block methods (HPDDM BGMRES, block CG) mix the columns, which is wrong for different operators. What is needed is a *batched, non-block* matsolve: k independent Arnoldi processes in lockstep, using `MatProduct` on Amat (a shell can do `L X + D .* X`) and `PCMatApply`, with per-column convergence and deflation. Either add that to `KSPGMRES`/`KSPFGMRES`, or check whether HPDDM's non-block GMRES with several right-hand sides does exactly this. HPDDM is not in the CI image, so I couldn't test that.
 2. **Dense column kernels.** A dense Hadamard product (`MatPointwiseMult` for `MATDENSE*` on all backends) and column-wise dot products (currently only `MatGetColumnNorms`). PFLARE can supply its own Kokkos kernels instead.
 3. **Optional tidy-up.** A PCMG per-level pre-restriction hook (or a dense-Mat `rscale` for `matapp`) would remove the shell wrapper and its extra copy of the coarse block.
 

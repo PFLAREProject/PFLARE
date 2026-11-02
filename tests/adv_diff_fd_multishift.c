@@ -20,6 +20,9 @@
          PCMatApply
      and prints the iteration counts per column and the wall times, erroring if any column of the
      multi-shift takes more than -max_extra_its (default 1) more iterations than sequential
+     With -richardson as well, also solves with an outer Richardson, sequentially with an update and
+     a KSPSolve for each shift, and with a single KSPMatSolve whose Amat is a matshell applying the
+     shifted operators to a dense block, ie PETSc's block Richardson with no changes
 
      ./adv_diff_fd_multishift -pc_type air
      Can control the grid size with -n (default 50), diffusion with -alpha (default 0.0),
@@ -179,6 +182,59 @@ static PetscErrorCode ShiftedMatMat(Mat L, Mat D, Mat X, Mat Y)
   PetscFunctionBeginUser;
   PetscCall(MatMatMult(L, X, MAT_REUSE_MATRIX, PETSC_DETERMINE, &Y));
   PetscCall(DenseHadamardAdd(Y, D, X));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// A matshell Amat for the k shifted operators, whose product with a dense block is
+// (L + diag(D(:,j))) X(:,j) column by column, ie one SpMM and a Hadamard product
+// With it KSPMatSolve with KSPRICHARDSON is a batched multi-shift solve, as the block
+// Richardson in PETSc only ever applies Amat through MatProduct
+// A MatMult has no column to pick the shift from, so it is an error
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+typedef struct {
+  Mat L, D, LX;
+} ShiftedCtx;
+
+static PetscErrorCode ShiftedMult(Mat S, Vec x, Vec y)
+{
+  PetscFunctionBeginUser;
+  SETERRQ(PetscObjectComm((PetscObject)S), PETSC_ERR_SUP, "The multi-shift operator can only be applied to a block of k columns");
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode ShiftedProductNumeric(Mat S, Mat X, Mat Y, void *data)
+{
+  ShiftedCtx *ctx;
+  PetscInt    kx, kl = -1;
+
+  PetscFunctionBeginUser;
+  PetscCall(MatShellGetContext(S, &ctx));
+  // L X goes into our own block, Y carries the product of the shell
+  PetscCall(MatGetSize(X, NULL, &kx));
+  if (ctx->LX) PetscCall(MatGetSize(ctx->LX, NULL, &kl));
+  if (kl != kx) {
+    PetscCall(MatDestroy(&ctx->LX));
+    PetscCall(MatMatMult(ctx->L, X, MAT_INITIAL_MATRIX, PETSC_DETERMINE, &ctx->LX));
+  } else PetscCall(MatMatMult(ctx->L, X, MAT_REUSE_MATRIX, PETSC_DETERMINE, &ctx->LX));
+  PetscCall(MatCopy(ctx->LX, Y, SAME_NONZERO_PATTERN));
+  PetscCall(DenseHadamardAdd(Y, ctx->D, X));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode CreateShiftedOperator(Mat L, Mat D, ShiftedCtx *ctx, Mat *S)
+{
+  PetscInt m, n, M, N;
+
+  PetscFunctionBeginUser;
+  ctx->L  = L;
+  ctx->D  = D;
+  ctx->LX = NULL;
+  PetscCall(MatGetLocalSize(L, &m, &n));
+  PetscCall(MatGetSize(L, &M, &N));
+  PetscCall(MatCreateShell(PetscObjectComm((PetscObject)L), m, n, M, N, ctx, S));
+  PetscCall(MatShellSetOperation(*S, MATOP_MULT, (PetscErrorCodeFn *)ShiftedMult));
+  PetscCall(MatShellSetMatProductOperation(*S, MATPRODUCT_AB, NULL, ShiftedProductNumeric, NULL, MATDENSE, MATDENSE));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -352,15 +408,17 @@ static PetscErrorCode BlockDiff(Mat Y1, Mat Y2, PetscReal *rel)
 
 // Sets up a KSP with PCAIR configured for diagonal updates with kept coefficients and
 // matrix-free, diagonally scaled polynomials, which is what the multi-shift reproduces
-static PetscErrorCode CreateKSP(Mat A, PetscReal rtol, KSP *ksp)
+static PetscErrorCode CreateKSP(Mat Amat, Mat A, KSPType type, PetscReal rtol, KSP *ksp)
 {
-  PC pc;
+  PC        pc;
+  PetscBool is_gmres;
 
   PetscFunctionBeginUser;
   PetscCall(KSPCreate(PETSC_COMM_WORLD, ksp));
-  PetscCall(KSPSetOperators(*ksp, A, A));
-  PetscCall(KSPSetType(*ksp, KSPGMRES));
-  PetscCall(KSPSetPCSide(*ksp, PC_RIGHT));
+  PetscCall(KSPSetOperators(*ksp, Amat, A));
+  PetscCall(KSPSetType(*ksp, type));
+  PetscCall(PetscStrcmp(type, KSPGMRES, &is_gmres));
+  if (is_gmres) PetscCall(KSPSetPCSide(*ksp, PC_RIGHT));
   PetscCall(KSPSetNormType(*ksp, KSP_NORM_UNPRECONDITIONED));
   PetscCall(KSPSetTolerances(*ksp, rtol, 1e-50, PETSC_DETERMINE, 1000));
   PetscCall(KSPGetPC(*ksp, &pc));
@@ -389,7 +447,7 @@ int main(int argc, char **argv)
   PetscInt      n = 50, k = MAX_SHIFTS, j, i, its_seq[MAX_SHIFTS], its_ms[MAX_SHIFTS], max_extra_its = 1, n_applies = 0, n_reps = 5, local_rows, global_rows;
   PetscReal     rel_clear, alpha = 0.0, tol = 1e-8, rtol = 1e-10, rel, max_rel = 0.0, max_rel_after, rel_zero;
   PetscReal     c_values[MAX_SHIFTS] = {0.0, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3};
-  PetscBool     flg, solve = PETSC_FALSE, print_cols = PETSC_FALSE;
+  PetscBool     flg, solve = PETSC_FALSE, print_cols = PETSC_FALSE, richardson = PETSC_FALSE;
   PetscLogDouble t0, t1, t_seq_solve = 0, t_ms_solve, t_ms_set, t_ms_apply, t_mrhs_apply, t_seq_apply, t_seq_update;
   KSPConvergedReason reason;
 
@@ -407,6 +465,7 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n_reps", &n_reps, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-solve", &solve, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_cols", &print_cols, NULL));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-richardson", &richardson, NULL));
   PetscCall(PetscOptionsGetRealArray(NULL, NULL, "-c_values", c_values, &k, &flg));
   if (!flg) k = 8;
 
@@ -446,8 +505,8 @@ int main(int argc, char **argv)
   }
 
   // Both hierarchies are built from L
-  PetscCall(CreateKSP(A_ms, rtol, &ksp_ms));
-  PetscCall(CreateKSP(A_seq, rtol, &ksp_seq));
+  PetscCall(CreateKSP(A_ms, A_ms, KSPGMRES, rtol, &ksp_ms));
+  PetscCall(CreateKSP(A_seq, A_seq, KSPGMRES, rtol, &ksp_seq));
   PetscCall(KSPGetPC(ksp_ms, &pc_ms));
   PetscCall(KSPGetPC(ksp_seq, &pc_seq));
 
@@ -558,6 +617,91 @@ int main(int argc, char **argv)
         PetscCheck(rnorm[j] <= 10 * rtol * bnorm[j], PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "Multi-shift column %" PetscInt_FMT " did not converge", j);
         if (max_extra_its >= 0) PetscCheck(its_ms[j] - its_seq[j] <= max_extra_its, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Multi-shift column %" PetscInt_FMT " took %" PetscInt_FMT " iterations, sequential %" PetscInt_FMT, j, its_ms[j], its_seq[j]);
       }
+    }
+
+    // ~~~~~~~~~~~~
+    // The same with an outer Richardson. The sequential solves are an update and a
+    // KSPSolve for each shift, the multi-shift one is a single KSPMatSolve with the
+    // shifted matshell as Amat, ie entirely through PETSc's block Richardson
+    // ~~~~~~~~~~~~
+    if (richardson) {
+      KSP        ksp_rseq, ksp_rms;
+      PC         pc_rms;
+      Mat        A_rseq, A_rms, S;
+      ShiftedCtx sctx;
+      PetscInt   its_rseq[MAX_SHIFTS], its_rms, max_rseq = 0;
+      PetscReal  rnorm[MAX_SHIFTS], bnorm[MAX_SHIFTS], max_rel_res = 0.0;
+      PetscLogDouble t_rseq = 0, t_rms;
+
+      PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_rseq));
+      PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_rms));
+      PetscCall(CreateKSP(A_rseq, A_rseq, KSPRICHARDSON, rtol, &ksp_rseq));
+      PetscCall(CreateShiftedOperator(L, Dshift, &sctx, &S));
+      PetscCall(CreateKSP(S, A_rms, KSPRICHARDSON, rtol, &ksp_rms));
+      PetscCall(KSPGetPC(ksp_rms, &pc_rms));
+
+      for (j = 0; j < k; j++) {
+        PetscCall(MatDenseGetColumnVecRead(Dshift, j, &col));
+        PetscCall(VecCopy(col, d_vec));
+        PetscCall(MatDenseRestoreColumnVecRead(Dshift, j, &col));
+        PetscCall(MatDenseGetColumnVecRead(B, j, &col));
+        PetscCall(VecCopy(col, b));
+        PetscCall(MatDenseRestoreColumnVecRead(B, j, &col));
+        PetscCall(PetscBarrier(NULL));
+        PetscCall(PetscTime(&t0));
+        PetscCall(MatCopy(L, A_rseq, SAME_NONZERO_PATTERN));
+        PetscCall(MatDiagonalSet(A_rseq, d_vec, ADD_VALUES));
+        PetscCall(VecSet(x, 0.0));
+        PetscCall(KSPSolve(ksp_rseq, b, x));
+        PetscCall(PetscTime(&t1));
+        t_rseq += t1 - t0;
+        PetscCall(KSPGetIterationNumber(ksp_rseq, &its_rseq[j]));
+        PetscCall(KSPGetConvergedReason(ksp_rseq, &reason));
+        PetscCheck(reason > 0, PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "Sequential Richardson %" PetscInt_FMT " did not converge, reason %d", j, (int)reason);
+        max_rseq = PetscMax(max_rseq, its_rseq[j]);
+      }
+
+      PetscCall(PetscBarrier(NULL));
+      PetscCall(PetscTime(&t0));
+      PetscCall(PCAIRSetMultiShift(pc_rms, Dshift));
+      PetscCall(MatZeroEntries(X_ms));
+      PetscCall(KSPMatSolve(ksp_rms, B, X_ms));
+      PetscCall(PetscTime(&t1));
+      t_rms = t1 - t0;
+      PetscCall(KSPGetIterationNumber(ksp_rms, &its_rms));
+      PetscCall(KSPGetConvergedReason(ksp_rms, &reason));
+      PetscCheck(reason > 0, PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "Multi-shift Richardson did not converge, reason %d", (int)reason);
+
+      // The block Richardson stops on the Frobenius norm of the whole block, so look at
+      // the true residual of each column
+      PetscCall(ShiftedMatMat(L, Dshift, X_ms, Y));
+      PetscCall(MatAYPX(Y, -1.0, B, SAME_NONZERO_PATTERN));
+      PetscCall(MatGetColumnNorms(Y, NORM_2, rnorm));
+      PetscCall(MatGetColumnNorms(B, NORM_2, bnorm));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Richardson: %12s %10s %12s\n", "c", "seq its", "multi ||r||/||b||"));
+      for (j = 0; j < k; j++) {
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "            %12.3e %10" PetscInt_FMT " %12.3e\n", (double)c_values[j], its_rseq[j], (double)(rnorm[j] / bnorm[j])));
+        max_rel_res = PetscMax(max_rel_res, rnorm[j] / bnorm[j]);
+      }
+      // What the Frobenius norm stopping test guarantees for each column
+      {
+        PetscReal bnorm_f = 0.0;
+        for (j = 0; j < k; j++) bnorm_f += bnorm[j] * bnorm[j];
+        bnorm_f = PetscSqrtReal(bnorm_f);
+        for (j = 0; j < k; j++) PetscCheck(rnorm[j] <= 1.01 * rtol * bnorm_f, PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "Multi-shift Richardson column %" PetscInt_FMT " has residual %g above rtol ||B||_F", j, (double)rnorm[j]);
+      }
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Richardson: multi-shift block its %" PetscInt_FMT ", max sequential its %" PetscInt_FMT ", max column ||r||/||b|| %.3e\n", its_rms, max_rseq, (double)max_rel_res));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Richardson solve time: sequential (k updates + k KSPSolve) %.4e s, multi-shift (set + KSPMatSolve) %.4e s\n", t_rseq, t_rms));
+      // The block stops when ||R||_F <= rtol ||B||_F, it iterates for as long as the slowest
+      // column needs to within a few iterations
+      if (max_extra_its >= 0) PetscCheck(its_rms <= max_rseq + max_extra_its, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The multi-shift Richardson took %" PetscInt_FMT " iterations, the slowest sequential %" PetscInt_FMT, its_rms, max_rseq);
+
+      PetscCall(KSPDestroy(&ksp_rseq));
+      PetscCall(KSPDestroy(&ksp_rms));
+      PetscCall(MatDestroy(&S));
+      PetscCall(MatDestroy(&sctx.LX));
+      PetscCall(MatDestroy(&A_rseq));
+      PetscCall(MatDestroy(&A_rms));
     }
 
     // ~~~~~~~~~~~~

@@ -1,0 +1,155 @@
+### k=1
+Richardson:            c    seq its multi ||r||/||b||
+               1.000e+00         69    9.570e-11
+Richardson: multi-shift block its 69, max sequential its 69, max column ||r||/||b|| 9.570e-11
+Richardson solve time: sequential (k updates + k KSPSolve) 3.1738e-01 s, multi-shift (set + KSPMatSolve) 4.1295e-01 s
+Solve time: sequential (k updates + k GMRES) 1.1981e-01 s, multi-shift (set + batched GMRES, 22 block applies) 1.5091e-01 s
+### k=4
+Richardson:            c    seq its multi ||r||/||b||
+               0.000e+00          6    1.787e-14
+               1.000e-04          7    1.789e-14
+               3.162e-01         68    1.676e-10
+               1.000e+03          5    5.193e-17
+Richardson: multi-shift block its 66, max sequential its 68, max column ||r||/||b|| 1.676e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 3.9271e-01 s, multi-shift (set + KSPMatSolve) 7.6692e-01 s
+Solve time: sequential (k updates + k GMRES) 2.2159e-01 s, multi-shift (set + batched GMRES, 22 block applies) 5.0181e-01 s
+### k=8
+Richardson:            c    seq its multi ||r||/||b||
+               0.000e+00          6    1.792e-14
+               1.000e-04          7    1.795e-14
+               1.468e-03         15    1.593e-14
+               2.154e-02         39    5.430e-15
+               3.162e-01         67    2.261e-10
+               4.642e+00         48    2.084e-13
+               6.813e+01         12    5.825e-17
+               1.000e+03          5    5.186e-17
+Richardson: multi-shift block its 64, max sequential its 67, max column ||r||/||b|| 2.261e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 9.0489e-01 s, multi-shift (set + KSPMatSolve) 1.4518e+00 s
+Solve time: sequential (k updates + k GMRES) 4.9597e-01 s, multi-shift (set + batched GMRES, 22 block applies) 1.0642e+00 s
+### k=16
+Richardson:            c    seq its multi ||r||/||b||
+               0.000e+00          6    1.804e-14
+               1.000e-04          7    1.778e-14
+               3.162e-04          9    1.770e-14
+               1.000e-03         13    1.662e-14
+               3.162e-03         20    1.339e-14
+               1.000e-02         31    8.380e-15
+               3.162e-02         43    4.384e-15
+               1.000e-01         56    2.947e-12
+               3.162e-01         67    1.582e-10
+               1.000e+00         70    3.287e-10
+               3.162e+00         57    7.214e-12
+               1.000e+01         35    6.521e-17
+               3.162e+01         18    5.808e-17
+               1.000e+02         10    5.137e-17
+               3.162e+02          7    5.423e-17
+               1.000e+03          5    5.228e-17
+Richardson: multi-shift block its 65, max sequential its 70, max column ||r||/||b|| 3.287e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 2.0419e+00 s, multi-shift (set + KSPMatSolve) 3.3719e+00 s
+Solve time: sequential (k updates + k GMRES) 1.0668e+00 s, multi-shift (set + batched GMRES, 22 block applies) 2.7821e+00 s
+### k=32
+Richardson:            c    seq its multi ||r||/||b||
+               0.000e+00          6    1.801e-14
+               1.000e-04          7    1.799e-14
+               1.711e-04          8    1.776e-14
+               2.929e-04          9    1.750e-14
+               5.012e-04         10    1.745e-14
+               8.577e-04         12    1.688e-14
+               1.468e-03         15    1.572e-14
+               2.512e-03         19    1.429e-14
+               4.299e-03         23    1.263e-14
+               7.356e-03         28    1.073e-14
+               1.259e-02         33    7.656e-15
+               2.154e-02         39    5.328e-15
+               3.687e-02         45    5.215e-15
+               6.310e-02         51    1.894e-13
+               1.080e-01         58    3.741e-12
+               1.848e-01         63    2.224e-11
+               3.162e-01         66    6.784e-11
+               5.412e-01         69    1.698e-10
+               9.261e-01         73    3.938e-10
+               1.585e+00         67    8.711e-11
+               2.712e+00         62    1.773e-11
+               4.642e+00         50    1.423e-13
+               7.943e+00         37    8.025e-17
+               1.359e+01         30    5.974e-17
+               2.326e+01         21    5.571e-17
+               3.981e+01         16    5.725e-17
+               6.813e+01         12    5.822e-17
+               1.166e+02         10    5.378e-17
+               1.995e+02          8    4.985e-17
+               3.415e+02          7    4.885e-17
+               5.843e+02          6    5.497e-17
+               1.000e+03          5    5.262e-17
+Richardson: multi-shift block its 67, max sequential its 73, max column ||r||/||b|| 3.938e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 4.2173e+00 s, multi-shift (set + KSPMatSolve) 9.4065e+00 s
+Solve time: sequential (k updates + k GMRES) 2.3383e+00 s, multi-shift (set + batched GMRES, 23 block applies) 5.9568e+00 s
+### k=64
+Richardson:            c    seq its multi ||r||/||b||
+               0.000e+00          6    1.801e-14
+               1.000e-04          7    1.799e-14
+               1.297e-04          7    1.781e-14
+               1.682e-04          8    1.760e-14
+               2.181e-04          8    1.766e-14
+               2.829e-04          9    1.755e-14
+               3.669e-04          9    1.724e-14
+               4.758e-04         10    1.730e-14
+               6.171e-04         11    1.692e-14
+               8.002e-04         12    1.680e-14
+               1.038e-03         13    1.661e-14
+               1.346e-03         14    1.572e-14
+               1.746e-03         16    1.533e-14
+               2.264e-03         18    1.454e-14
+               2.936e-03         20    1.345e-14
+               3.808e-03         22    1.287e-14
+               4.938e-03         24    1.224e-14
+               6.404e-03         27    1.131e-14
+               8.305e-03         29    1.002e-14
+               1.077e-02         32    7.910e-15
+               1.397e-02         35    7.438e-15
+               1.812e-02         37    6.633e-15
+               2.349e-02         40    4.471e-15
+               3.047e-02         42    4.160e-15
+               3.952e-02         46    8.131e-15
+               5.125e-02         48    3.034e-14
+               6.646e-02         52    3.372e-13
+               8.620e-02         54    7.896e-13
+               1.118e-01         57    2.915e-12
+               1.450e-01         61    1.244e-11
+               1.880e-01         63    2.613e-11
+               2.438e-01         65    4.864e-11
+               3.162e-01         68    1.083e-10
+               4.101e-01         68    1.238e-10
+               5.319e-01         72    2.882e-10
+               6.898e-01         71    2.550e-10
+               8.946e-01         74    5.264e-10
+               1.160e+00         71    2.471e-10
+               1.505e+00         70    1.829e-10
+               1.951e+00         66    5.922e-11
+               2.531e+00         63    2.425e-11
+               3.282e+00         57    4.129e-12
+               4.256e+00         49    1.187e-13
+               5.520e+00         45    1.183e-14
+               7.159e+00         41    6.692e-16
+               9.284e+00         37    6.905e-17
+               1.204e+01         31    5.750e-17
+               1.562e+01         27    6.255e-17
+               2.025e+01         24    5.956e-17
+               2.626e+01         21    5.630e-17
+               3.406e+01         17    6.053e-17
+               4.417e+01         15    5.305e-17
+               5.729e+01         13    5.518e-17
+               7.430e+01         12    5.763e-17
+               9.635e+01         11    4.997e-17
+               1.250e+02         10    5.423e-17
+               1.621e+02          9    5.380e-17
+               2.102e+02          8    5.074e-17
+               2.726e+02          7    5.562e-17
+               3.535e+02          7    4.780e-17
+               4.584e+02          6    5.266e-17
+               5.946e+02          6    5.502e-17
+               7.711e+02          6    4.771e-17
+               1.000e+03          5    5.129e-17
+Richardson: multi-shift block its 67, max sequential its 74, max column ||r||/||b|| 5.264e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 9.0796e+00 s, multi-shift (set + KSPMatSolve) 1.7895e+01 s
+Solve time: sequential (k updates + k GMRES) 4.5549e+00 s, multi-shift (set + batched GMRES, 23 block applies) 1.2581e+01 s
