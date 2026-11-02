@@ -1,0 +1,349 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{microtype}
+\sloppy
+\usepackage{booktabs,array,tabularx}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=4pt}
+\newtheorem{proposition}{Proposition}
+\newcommand{\Aff}{A_{ff}}
+
+\title{One hierarchy, many shifts\\[4pt]
+\large The PCAIR diagonal update: where it fits in the literature,\\
+which fields could use it, first capability studies, and a paper plan}
+\author{Assessment for PFLARE (branch \texttt{claude/dt-bands-diag-update-docs})}
+\date{November 2026}
+
+\begin{document}
+\maketitle
+
+\section*{Summary}
+\begin{itemize}
+\item \textbf{What is new.} PCAIR builds an AIR hierarchy for $A$ once. When the matrix becomes $A+D$ with $D$ diagonal, PCAIR updates that hierarchy in place, with $O(\mathrm{nnz})$ work and no matrix--matrix products. It sets the level diagonals, rescales the F-columns of $R$, lumps $d_{l+1}=R_l d_l$ down the levels, and recomputes or restores the smoother polynomials.
+\item \textbf{It fills a gap in the literature.} Cheap updates under a diagonal shift exist for one-level preconditioners: incomplete factorisations and approximate inverses \cite{Meurant01,BenziBert03,Bert04,DTT07,BBM11,BertDur16}. AMG reuse schemes keep $P$ (and sometimes $R$), but they always recompute the Galerkin products \cite{Demidov21,MueLuReuse}. The literature search found no in-place, SpGEMM-free update of a nonsymmetric multigrid hierarchy for a general diagonal, and nothing specific to AIR. The closest relative is lattice-QCD multigrid, which builds once at the critical (hardest) mass and reuses the hierarchy for heavier masses \cite{Babich10}. There the shift is a scalar and the coarse update is trivial.
+\item \textbf{Where to build is the key rule.} Build the hierarchy at the \emph{least diagonally dominant} operator, i.e.\ the streaming limit or the largest $\Delta t$, so every later change increases the diagonal. Our studies confirm it clearly. Built at $s=0$, every shift from $0$ to $10^3$ took 2--8 iterations. Built at $s=1$ or $s=10^3$, the smaller shifts failed to converge in 300 iterations (Fig.~\ref{fig:build}). For upwind (M-matrix) operators there is a short argument for why increases are safe (Prop.~\ref{prop:mono}).
+\item \textbf{First capability studies (CPU, CI image).} Problems: 2D/3D upwind advection with constant, curved and recirculating flow, removal contrasts up to $10^4$, advection--diffusion, multi-species transport over a growing time step, Radau IIA stage shifts, and 4 MPI ranks.
+  \begin{itemize}
+  \item Built at the smallest shift, every update converged: 3.6--6.1 iterations on average, against 2.2--4.8 for a rebuild.
+  \item An update cost 7--20 times less than a rebuild setup (6.7--20.2).
+  \item End-to-end it was 1.4--3.4 times faster on one CPU core.
+  \item With stored or kept smoother coefficients, the update cost fell a further 4--9 times with identical iteration counts.
+  \item The frozen hierarchy averaged 182 iterations and 9 of its 16 solves did not converge.
+  \end{itemize}
+\item \textbf{The GPU case is stronger.} On LUMI one update was about 10 times cheaper than a rebuild, and about 90\% of the update was host-side polynomial work. Bands or kept coefficients remove that work. This has not yet been measured on a GPU.
+\item \textbf{Is there a paper? Yes.} We recommend a methods paper framed as \emph{``one reduction-multigrid hierarchy for a whole family of shifted transport operators, on GPUs''}. Its claims would be:
+  \begin{enumerate}[label=(\roman*)]
+  \item the update algorithm and its cost model;
+  \item an analysis explaining the ``build at the least dominant operator'' rule;
+  \item reduction-free updates using coefficient bands;
+  \item a new \emph{multi-shift block apply} that combines the diagonal update with the existing multi-RHS capability: one V-cycle over $k$ columns, each column with its own diagonal;
+  \item applications at scale (multigroup Boltzmann, adaptive time stepping, multi-species transport, IRK).
+  \end{enumerate}
+  Item (iv) is not implemented yet. It is what would make the paper clearly more than ``a reuse option''.
+\end{itemize}
+
+\section{The capability in one page}
+We solve a sequence $(L+D_k)x_k=b_k$ with $L$ fixed and $D_k$ diagonal. PCAIR keeps the CF splitting, $\Aff^{(l)}$, $A_{fc}^{(l)}$, $R_l=[Z_l\;I]$ and $P_l=[W_l;I]$ on each level. Given $d_1=\mathrm{diag}(D)-\mathrm{diag}(D_{\rm base})$, it does the following on each level $l$:
+\begin{enumerate}
+\item adds $d_l|_F$ (and $d_l|_C$ with C-point smoothing) to the stored diagonals;
+\item rebuilds the smoother $M_{ff}\approx\Aff^{-1}$ on its fixed sparsity, or simply re-uses stored polynomial coefficients;
+\item rescales $Z_l\leftarrow Z_l^{(A)}\mathrm{diag}\big(\min(1,a_{ff}/(a_{ff}+d_f))\big)$, which is exact when $\Aff$ is diagonal;
+\item passes $d_{l+1}=R_l(d_l\circ P_l\mathbf 1)$ to the next level, which is just $R_l d_l$ for a one-point $P_l$.
+\end{enumerate}
+The implied coarse operator is $\mathrm{drop}(R_l^{(A)}A_lP_l)+\mathrm{diag}(d_{l+1})$ in place of the Galerkin $R_l(A_l+D_l)P_l$. An update costs about 1--4 V-cycles; it is about 1--2 V-cycles when coefficients are kept. There is no SpGEMM, no repartitioning and no PCMG rebuild.
+
+\paragraph{Why build at the least diagonally dominant operator.} There are three reasons. First, the rescaling only ever shrinks $Z$, and it is exact for a diagonal $\Aff$ whenever $d\ge 0$. Second, diagonally scaled smoother polynomials see their spectrum contract towards 1 when the diagonal grows: $D'^{-1}_{ff}A'_{ff}=I+S(D_{ff}^{-1}\Aff-I)$ with $0<S\le I$. Third, lumping preserves signs:
+
+\begin{proposition}[Increases stay increases on every level]\label{prop:mono}
+Suppose that on every level $A_{cf}\le 0$ and the approximation of $\Aff^{-1}$ used to build $Z_l$ is entrywise non-negative, so that $Z_l\ge 0$. Suppose also that $P_l\ge0$ (e.g.\ the one-point prolongator) and $a_{ff}>0$. Then $d_1\ge 0$ implies, for every level $l$: $d_l\ge 0$; the rescaling factors lie in $(0,1]$; and the updated $R_l$ stays non-negative.
+\end{proposition}
+\noindent\emph{Proof sketch.} By induction. If $d_l\ge0$, the factors $a_{ff}/(a_{ff}+d_f)$ lie in $(0,1]$, so the rescaled $Z_l$ stays $\ge0$. Then $d_{l+1}=R_l(d_l\circ P_l\mathbf 1)$ is a product of non-negative objects. \hfill$\square$
+
+\smallskip
+The hypotheses hold for upwind finite differences and first-order finite volumes (M-matrices) when $\Aff^{-1}$ is approximated by a Neumann-type series. When the diagonal \emph{decreases}, nothing stops a coarse diagonal from crossing zero. That is exactly the failure seen with DG, where $Z$ has mixed signs, and in single precision. A paper should turn this into a proper perturbation bound on the coarse operator in terms of $\|d\|/\|\mathrm{diag}(A)\|$. Theory exists for shift selection in Helmholtz problems \cite{GGS15,CG17}, and for setup at the critical mass in lattice QCD \cite{Babich10}. These give the natural comparison: our rule is the advective, nonsymmetric version of ``set up at the hardest shift''.
+
+\section{Where this sits in the literature}
+
+\begin{table}[h]\centering\small
+\begin{tabularx}{\textwidth}{>{\raggedright}p{4.3cm}X>{\raggedright\arraybackslash}p{3.2cm}}
+\toprule
+Approach & What is reused / how a new shift is handled & Limitation vs.\ ours\\\midrule
+Rebuild AMG/AIR per system (hypre $\ell$AIR, PFLARE default, MFEM-style) \cite{MRS18,MMRS19,Darg24} & Nothing; full setup each time & Setup is the GPU bottleneck \cite{Darg26,LSY21}\\
+Lagged/frozen preconditioner (SNES lag, JFNK) \cite{KnollKeyes04} & Everything, unchanged & Fails for large shifts: 182 its avg, 9/16 failed (Sec.~\ref{sec:studies})\\
+AMG setup reuse (AMGCL, Demidov; MueLu \texttt{reuse}; GAMG reuse interp.) \cite{Demidov21,AMGCL19,MueLuReuse} & Keep $P$ (and $R$); recompute $RAP$ and smoothers & Still SpGEMM; $R$ not adapted to the shift\\
+One-level updates of IC/ILU/AINV for $A+\alpha I$ or $A+D$ \cite{Meurant01,BenziBert03,Bert04,DTT07,BBM11}; interpolated preconditioners \cite{BertDur16} & Cheap algebraic update of factors & Single level; not scalable for transport\\
+Shifted Krylov / recycling \cite{FG98,Simoncini03,BvG15,PdS06,SSX14,Sood16} & One Krylov space for all shifts (or recycled) & Breaks with shift-dependent preconditioning; complementary\\
+Shifted-Laplacian MG (Helmholtz) \cite{EVO04,EOV06,GGS15,CG17} & MG of a shifted operator as preconditioner & SPD-like, complex shift; theory of ``which shift''\\
+Multi-mass lattice QCD MG \cite{Babich10,FKKLR14,ABF18} & Setup at critical mass, reused for all masses & Scalar shift, orthonormal aggregation, not AIR\\
+\textbf{PCAIR diagonal update} & In-place $O(\mathrm{nnz})$ update of every level; $R$ rescaled; lumped coarse shift; coefficient bands & Decreases and non-diagonal (e.g.\ DG mass) changes are harder\\
+\bottomrule
+\end{tabularx}
+\caption{Approaches to sequences of shifted systems.}\label{tab:lit}
+\end{table}
+
+\paragraph{AIR lineage.} AIR \cite{MRS18,MMRS19} and its later variants \cite{Ali24} are reduction-based nonsymmetric AMG methods for advection. hypre's $\ell$AIR has been used for $S_N$ transport \cite{Hanophy20} and space--time DG \cite{SSR21}. PFLARE's AIRG \cite{Darg24} uses fixed-sparsity GMRES polynomials for $\Aff^{-1}$. PMISR-DDC CF splittings target a well-conditioned $\Aff$. GPU AIRG weak-scales at 66--101\% in the solve but only 47--63\% in the setup \cite{Darg25,Darg26}. That setup gap is the main motivation for avoiding rebuilds.
+
+\paragraph{Many-shift solvers.} Fully implicit Runge--Kutta (IRK) methods split into real shifted solves $(\eta_i M+\Delta t L)$ \cite{SKPD22,PP17,SMN06,RHLMM21}. Southworth et al.\ used AIR for the advective cases \cite{SKPD22}, rebuilding it for each shift. ParaDiag and diagonalisation in time \cite{MR08,ParaDiag,MPW18}, and rational or exponential integrators \cite{GG13,Guettel13,TWS06}, need many shifted solves too, but those shifts are \emph{complex}.
+
+\paragraph{GPUs.} hypre had to reformulate the AMG setup as SpGEMMs to port it to GPUs \cite{FLSWY21,LSY21}. On GPUs the setup is commonly reported as lagging the solve \cite{LSY21,Darg26}. Blocking right-hand sides through a multigrid hierarchy gives large GPU gains, for example up to $20\times$ on Frontier in lattice QCD \cite{Boyle24,XAMG21}. Batched sparse solvers exist for many small systems that share a pattern \cite{KashiIPDPS22}, but they use simple preconditioners, not AMG.
+
+\section{Fields that could benefit}
+In each case below the operator $L$ (advection, streaming, or a transport matrix) is fixed and only a diagonal changes.
+
+\begin{table}[h]\centering\small
+\begin{tabularx}{\textwidth}{>{\raggedright}p{3.6cm}>{\raggedright}p{3.6cm}X}
+\toprule
+Field & Changing diagonal $D_k$ & Notes\\\midrule
+Multigroup neutron / photon transport ($S_N$, $P_N$) \cite{AdamsLarsen02,WWM04,Hanophy20,Darg24} & $\sigma_{t,g}(x)$ per group (10--100s of groups) & Within-group streaming+removal with scattering lagged. The streaming limit is the base. Also $k$-/$\alpha$-eigenvalue searches, where $\sigma_t+\alpha/v$ changes every iteration.\\
+Kinetic equations with speed groups (BGK, linear Boltzmann) & $\nu(v)/|v|$ & $|v|L_\omega+\nu = |v|(L_\omega+\nu/|v|)$: speed groups become diagonal shifts of one streaming operator.\\
+Thermal radiative transfer \cite{LKM13,TWM18,SOPB24} & $\sigma_{a,g}+1/(c\Delta t)$ + Fleck terms & Both group and time step change the diagonal.\\
+Implicit time stepping with adaptive $\Delta t$; pseudo-transient continuation & $M/\Delta t$ (lumped mass) & Build at $\Delta t_{\max}$; steady state is the least dominant limit.\\
+IRK / stage-parallel \cite{SKPD22,PP17} & $\eta_iM/\Delta t$ & One hierarchy for all stages and all steps (real-shift preconditioners of \cite{SKPD22}).\\
+Multi-species contaminant / reactive transport (PFLOTRAN, operator splitting) \cite{Steefel15,HLM14} & $(R_i/\Delta t+\lambda_i)M$: retardation, decay & 10--100 species share velocity. Identical $(R_i,\lambda_i)$ gives pure multi-RHS. Different values give a multi-shift solve.\\
+Ocean/atmosphere tracers; transport-matrix method; Newton--Krylov spin-up \cite{KVC05,LiPrimeau08,BPL14} & $\lambda_i I$ (decay, e.g.\ radiocarbon), $1/\Delta t$ & One transport operator for many tracers. Ocean models already reuse one matrix for many passive tracers.\\
+Parameter sweeps, UQ ensembles of reaction/absorption rates & sampled $\lambda(x;\xi)$ & Batched shifts are a natural fit for the multi-shift apply.\\
+\bottomrule
+\end{tabularx}
+\caption{Applications with a fixed transport operator and a changing diagonal.}\label{tab:fields}
+\end{table}
+
+\noindent\emph{Out of scope for now:}
+\begin{itemize}
+\item complex shifts (ParaDiag, contour integrals), which would need a complex-arithmetic or real-equivalent formulation;
+\item changes that are not diagonal (a consistent DG mass matrix, or a changing velocity);
+\item changes of direction in $S_N$, since each direction is a different $L$.
+\end{itemize}
+
+\section{First capability studies}\label{sec:studies}
+\paragraph{Setup.} Studies ran in the CI image (\texttt{stevendargaville/pflare:latest}) on one core of a 4-core container, except the 4-rank case, so timings are indicative only. The driver is \texttt{studies/shifted\_air/shift\_study.c}, and \texttt{run\_all.sh} reproduces everything.
+
+\emph{Problem.} $L$ is first-order upwind advection (plus optional diffusion $\alpha$) on a 2D/3D grid, with Dirichlet boundaries. The system is $(L+s_k W)x=\mathbf 1$, where $W$ is a checkerboard ``material'' with values $1$ and a contrast $c$. The velocity is constant ($\pi/4$), curved (bending from $+x$ to $+y$), or recirculating (``double glazing'', with $\alpha=10^{-3}$).
+
+\emph{Shifts.} Multigroup runs use $s\in\{0\}\cup\{10^{-4},\dots,10^{3}\}$, 16 shifts in all.
+
+\emph{Solver.} The options are those recommended in the report: GMRES with $\mathrm{rtol}=10^{-8}$; \texttt{fc} smoothing; matrix-free \texttt{newton\_no\_extra} smoothers and coarse solve; diagonally scaled polynomials. The update hierarchy is built at the smallest shift.
+
+\emph{Columns of Table~\ref{tab:mg}.} ``Its'' is the average number of iterations per system. ``Setup/sys'' is the rebuild setup time against the update time per system (the initial build is excluded but is counted in ``Total''). ``Total'' is the end-to-end time of rebuild over update.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{llrrrrrr}
+\toprule
+ & & \multicolumn{2}{c}{Its} & \multicolumn{2}{c}{Setup/sys (ms)} & Setup & Total\\
+Grid & flow, contrast & rebuild & update & rebuild & update & ratio & ratio\\\midrule
+2D $400^2$ & const, 1      & 3.25 & 4.25 & 951 & 99 & 9.6 & 2.24\\
+           & const, $10^2$ & 3.12 & 4.88 & 771 & 99 & 7.8 & 1.68\\
+           & const, $10^4$ & 2.94 & 5.19 & 648 & 97 & 6.7 & 1.38\\
+           & curved, 1     & 3.31 & 4.50 & 840 & 78 & 10.7 & 2.46\\
+           & curved, $10^2$& 3.12 & 5.25 & 715 & 79 & 9.0 & 1.91\\
+           & curved, $10^4$& 3.00 & 5.50 & 611 & 79 & 7.8 & 1.61\\
+           & recirc., 1    & 4.81 & 5.50 & 924 & 83 & 11.1 & 2.40\\
+           & recirc., $10^2$& 3.62 & 6.00 & 761 & 82 & 9.3 & 1.80\\
+           & recirc., $10^4$& 3.50 & 6.12 & 644 & 81 & 8.0 & 1.54\\\midrule
+3D $50^3$  & const, 1      & 2.94 & 3.88 & 1876 & 93 & 20.2 & 3.36\\
+           & const, $10^2$ & 2.88 & 4.25 & 1358 & 94 & 14.5 & 2.39\\
+           & curved, 1     & 3.12 & 4.00 & 1468 & 83 & 17.7 & 3.22\\
+           & curved, $10^2$& 3.25 & 4.69 & 1100 & 83 & 13.3 & 2.33\\
+\bottomrule
+\end{tabular}
+\caption{Multigroup-style sweeps, 16 shifts over seven decades. All updates converged.}\label{tab:mg}
+\end{table}
+
+\begin{figure}[h]\centering
+\begin{tikzpicture}
+\begin{loglogaxis}[width=0.78\textwidth,height=6.5cm,xlabel={shift $s$},ylabel={GMRES iterations},ymax=600,ymin=1.5,
+ legend style={font=\small,at={(0.5,-0.25)},anchor=north},legend columns=2,grid=major]
+\addplot+[mark=o,thick] table[x=s,y=re]{fig_build.dat}; \addlegendentry{rebuild at each $s$}
+\addplot+[mark=*,thick] table[x=s,y=b0]{fig_build.dat}; \addlegendentry{update, built at $s=0$}
+\addplot+[mark=square,thick] table[x=s,y=b1]{fig_build.dat}; \addlegendentry{update, built at $s=1$}
+\addplot+[mark=triangle,thick] table[x=s,y=b1000]{fig_build.dat}; \addlegendentry{update, built at $s=10^3$}
+\addplot+[mark=x,dashed] table[x=s,y=fr0]{fig_build.dat}; \addlegendentry{frozen, built at $s=0$}
+\end{loglogaxis}
+\end{tikzpicture}
+\caption{Where to build ($200^2$, curved flow, contrast $10^2$; 300 is the iteration cap). Every update that \emph{increases} the diagonal relative to the build stays at 2--8 iterations. Every large decrease fails.}\label{fig:build}
+\end{figure}
+
+\paragraph{Findings.}
+\begin{enumerate}
+\item \textbf{Robust across flows, contrast and dimension.}
+  \begin{itemize}
+  \item Every update in Tables~\ref{tab:mg}--\ref{tab:seq} converged, at 0.9--2.6 more iterations on average than a rebuild.
+  \item Recirculating flow and contrasts of $10^4$ add only about one iteration.
+  \item Adding diffusion ($\alpha=0.01,0.1,1$; $300^2$) gave 5.1, 4.9 and 4.9 iterations against 3.4, 3.4 and 3.8 for a rebuild, with total ratios of 2.1--2.5.
+  \end{itemize}
+\item \textbf{Build where the diagonal is smallest} (Fig.~\ref{fig:build}).
+  \begin{itemize}
+  \item Built at $s=1$, the update averaged 72 iterations and 3 solves failed. Built at $s=10^3$, it averaged 109 iterations and 5 failed.
+  \item Built at $s=0$, it averaged 5.1 iterations.
+  \item The frozen hierarchy averaged 182 iterations, and 9 of 16 solves failed.
+  \item Unscaled polynomials built at $10^3$ did better than scaled ones (49 against 109 iterations). This matches the report: scaled polynomials are unsafe for decreases.
+  \end{itemize}
+\item \textbf{Mild growth with refinement.} Curved flow, contrast $10^2$, at $n=100,200,400,800$ (up to 640k unknowns):
+  \begin{itemize}
+  \item update: 4.94, 5.06, 5.25, 5.50 iterations;
+  \item rebuild: 2.94, 2.94, 3.12, 3.31 iterations;
+  \item setup ratio about 9--10 at every size;
+  \item total ratio 2.3, 2.1, 2.0, 1.8.
+  \end{itemize}
+\item \textbf{Parallel.} On 4 ranks with $n=800$ the update took 5.38 iterations, against 5.50 in serial. The total time was 10.7\,s against 21.8\,s for rebuilding.
+\item \textbf{The price is a denser hierarchy.} Building at the streaming limit gives a cycle complexity of 35.6 (operator complexity 6.7). A build at $s=1$ gives 11.1 (2.1), and one at $s=10^3$ gives 7.2 (1.3). This is why an updated solve costs about twice a rebuilt one on the CPU. One fix is several \emph{anchor hierarchies}, each serving the shifts above it. For $s\ge1$, updating from an anchor at $s=1$ cut the solve time from 0.28\,s to 0.16\,s, with 17 iterations against 21 in total.
+\end{enumerate}
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lrrrr}
+\toprule
+Sequence (curved / recirc.\ flow, $300^2$) & systems & Its & update/sys (ms) & Total (s)\\\midrule
+\multicolumn{5}{l}{\emph{6 species $(R_i,\lambda_i)$ $\times$ 25 growing steps, $s=R_i/\Delta t+\lambda_i$}}\\
+\quad rebuild every system & 150 & 2.21 & 309 (setup) & 53.7\\
+\quad update, recompute coefficients & 150 & 3.62 & 40.0 & 21.6\\
+\quad update, bands $f=2$ (15 computed, 135 restored) & 150 & 3.62 & 8.0 & 15.9\\
+\quad update, keep one set of coefficients & 150 & 3.62 & 4.6 & 15.3\\\midrule
+\multicolumn{5}{l}{\emph{Radau IIA(3) real stage shifts $\{3.638,2.681\}/\Delta t$, 30 growing steps}}\\
+\quad rebuild every system & 60 & 2.38 & 357 (setup) & 24.8\\
+\quad update, recompute coefficients & 60 & 4.17 & 38.0 & 9.3\\
+\quad update, bands $f=2$ (10 computed) & 60 & 4.17 & 10.4 & 7.6\\
+\bottomrule
+\end{tabular}
+\caption{One hierarchy for a whole run: multi-species transport and IRK stages.}\label{tab:seq}
+\end{table}
+
+\paragraph{Multiple right-hand sides.} The study applied \texttt{KSPMatSolve} with Richardson to an \emph{updated} hierarchy ($400^2$). Against solving the columns one at a time, it was $2.0\times$ faster on one CPU core for 4--8 right-hand sides and $1.7\times$ for 64, with the same iteration counts. The GPU gains reported in \texttt{docs/gpus.md} are much larger. So updates and block solves already compose: for example, many species with identical $(R_i,\lambda_i)$, or many sources per group.
+
+\paragraph{Not covered.} No GPU runs, no DG or unstructured meshes, and no Boltzmann angle. The report already covers DG time stepping and unstructured meshes. Our results are complementary: they add heterogeneity, 3D, recirculation, species and IRK.
+
+\section{Is there a paper?}
+\textbf{Yes, with two additions:} GPU measurements and some analysis. The ingredients have precedents: one-level shift updates, reusing AMG transfers, and setting up at the hardest shift. No one has combined them into an SpGEMM-free update of a nonsymmetric reduction hierarchy. The application pull is broad (Table~\ref{tab:fields}), and the motivation (setup is the GPU bottleneck) is well documented.
+
+\paragraph{What reviewers will ask, and the answer to have ready.}
+\begin{itemize}
+\item \emph{``Isn't this just a reuse option?''} The answer is the analysis (Prop.~\ref{prop:mono}, generalised to a perturbation bound) plus the multi-shift block apply below, which no other AMG offers.
+\item \emph{Fair baselines.}
+  \begin{itemize}
+  \item a PFLARE rebuild;
+  \item a hypre $\ell$AIR rebuild;
+  \item a frozen or lagged hierarchy;
+  \item a ``keep $P,R$ and recompute $RAP$'' reuse (PFLARE's \texttt{-pc\_air\_reuse\_sparsity});
+  \item for the IRK case, the per-stage AIR of \cite{SKPD22}.
+  \end{itemize}
+\item \emph{The cost of building at the streaming limit.} The cycle complexity is 2--5$\times$ higher. Report work per solve as iterations $\times$ cycle complexity, and offer anchors or drop tolerances.
+\item \emph{Limits.} Decreases, block-diagonal (DG mass) changes and complex shifts. State them plainly, and cite the hybrid lumping prototype for decreases.
+\end{itemize}
+
+\section{Recommended paper}
+\paragraph{Working title.} \emph{One hierarchy, many shifts: in-place diagonal updates and multi-shift block solves for reduction multigrid on GPUs.}
+
+\paragraph{Novel contributions.}
+\begin{enumerate}
+\item An $O(\mathrm{nnz})$, SpGEMM-free, device-resident update of an AIR hierarchy for $A\to A+D$. It covers the restrictor rescaling, coarse lumping, and smoother rebuild or restore, with a cost model of about 1--4 V-cycles.
+\item Analysis:
+  \begin{itemize}
+  \item exactness for a diagonal $\Aff$;
+  \item sign and monotonicity preservation for increases (Prop.~\ref{prop:mono});
+  \item a bound on the deviation of the coarse operator from Galerkin;
+  \item the ``build at the least diagonally dominant operator'' rule, connected to setting up at the critical mass in lattice QCD and to the choice of shift in Helmholtz problems.
+  \end{itemize}
+\item Reduction-free updates: coefficient bands and kept scaled coefficients, which remove all host work and global reductions from an update on GPUs.
+\item \textbf{A multi-shift block V-cycle (to implement).} It applies PCAIR to $X\in\mathbb R^{n\times k}$ where column $j$ has its own diagonal $D_j$. All the SpMMs ($\Aff X$, $A_{fc}X$, $RX$, $PX$) are shared, and the shift enters only as a per-column Hadamard scaling $(\Aff+D_j)x_j=\Aff x_j+d_j\circ x_j$. The coarse shifts $d^{(j)}_{l+1}=R_l d^{(j)}_l$ form a single SpMM, and the restrictor rescaling is a per-column scaling of the F-rows of the input. Matrix-free Newton smoothers with per-column coefficients cost the same SpMMs. The outer Krylov method can be Richardson, or GMRES batched over columns, with the operator applied as $\mathcal A(X)=LX+W X\,\mathrm{diag}(s)$. This turns multigroup sweeps, species and IRK stages into one GPU-saturating solve, and needs no extra storage beyond the dense blocks.
+\item GPU results at scale (LUMI): update against rebuild time, and the multi-shift gain over sequential updates. Weak scaling of the update, which has no SpGEMM and no repartitioning, should scale like the solve (66--101\%) rather than the setup (47--63\%) \cite{Darg26}.
+\end{enumerate}
+
+\paragraph{Structure (about 25 pages, SISC Methods and Algorithms, or the Software and HPC section; JCP is an alternative).}
+\begin{enumerate}
+\item Introduction: sequences of shifted transport systems, why setup dominates on GPUs, contributions.
+\item Background: AIR/AIRG, PMISR-DDC, polynomial smoothers.
+\item The diagonal update: components, lumping, $R$ rescaling, smoothers.
+\item Analysis: exactness, monotonicity, coarse deviation bound, choice of base operator (with a figure like Fig.~\ref{fig:build}).
+\item Avoiding reductions: kept coefficients and bands.
+\item The multi-shift block apply, and its batched Krylov.
+\item Implementation in PETSc/Kokkos, with a cost model.
+\item Results:
+  \begin{enumerate}[label=(\alph*)]
+  \item steady shifted sweeps (heterogeneous, 2D/3D, recirculating);
+  \item adaptive time stepping (FD, DG, unstructured; from the existing report);
+  \item multigroup Boltzmann with angle in the matrix (PFLARE's home application);
+  \item multi-species transport, using the multi-shift apply;
+  \item IRK stages;
+  \item GPU strong and weak scaling on LUMI.
+  \end{enumerate}
+\item Limitations: decreases (hybrid lumping), DG mass, complex shifts.
+\item Conclusions.
+\end{enumerate}
+
+\paragraph{Plan.}
+\begin{itemize}
+\item \textbf{Weeks 1--3:} GPU timings of the existing update with bands and kept coefficients on LUMI; resize in \texttt{PCAIRSetPolyCoeffs} so bands work with \texttt{newton}.
+\item \textbf{Weeks 3--8:} implement and test the multi-shift block apply on top of the existing \texttt{PCMatApply} path.
+\item \textbf{Weeks 6--10:} analysis section; a multigroup Boltzmann test with heterogeneous $\sigma_{t,g}$; IRK and species drivers. The ones in \texttt{studies/} are a start.
+\item \textbf{Weeks 10--14:} scaling runs, baselines (hypre $\ell$AIR rebuild, reuse sparsity, frozen), writing.
+\end{itemize}
+
+\paragraph{Second paper (optional).} An application paper, e.g.\ multi-species contaminant or ocean tracer transport, or time-dependent multigroup radiation transport, in an application journal. It would use the multi-shift block solve as a black box.
+
+\section*{Reproducing the studies}
+The files are in \texttt{studies/shifted\_air/}: the driver \texttt{shift\_study.c}, the shift generators \texttt{gen\_shifts.py}, the runner \texttt{run\_all.sh}, raw logs in \texttt{results/}, and \texttt{summary\_table.txt}. To run them, build PFLARE in the CI image, then run \texttt{make shift\_study} and \texttt{./run\_all.sh} in that directory. The references were gathered by web search and checked against bibliographic records (DBLP, publishers, arXiv), not full texts; check page numbers and DOIs before citing them in a paper.
+
+\small
+\begin{thebibliography}{99}
+\bibitem{MRS18} T.A. Manteuffel, J. Ruge, B.S. Southworth. Nonsymmetric algebraic multigrid based on local approximate ideal restriction ($\ell$AIR). \emph{SIAM J. Sci. Comput.} 40(6):A4105--A4130, 2018.
+\bibitem{MMRS19} T.A. Manteuffel, S. M\"unzenmaier, J. Ruge, B.S. Southworth. Nonsymmetric reduction-based algebraic multigrid. \emph{SIAM J. Sci. Comput.} 41(5):S242--S268, 2019.
+\bibitem{Ali24} A. Ali, J.J. Brannick, K. Kahl, O.A. Krzysik, J.B. Schroder, B.S. Southworth. Constrained local approximate ideal restriction for advection-diffusion problems. \emph{SIAM J. Sci. Comput.} 46(5):S96--S122, 2024.
+\bibitem{Hanophy20} J. Hanophy, B.S. Southworth, R. Li, T. Manteuffel, J. Morel. Parallel approximate ideal restriction multigrid for solving the $S_N$ transport equations. \emph{Nucl. Sci. Eng.} 194(11), 2020.
+\bibitem{SSR21} A.A. Sivas, B.S. Southworth, S. Rhebergen. AIR algebraic multigrid for a space-time HDG discretization of advection(-diffusion). \emph{SIAM J. Sci. Comput.} 43(5):A3393--A3416, 2021.
+\bibitem{Darg24} S. Dargaville, R.P. Smedley-Stevenson, P.N. Smith, C.C. Pain. AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport. \emph{J. Comput. Phys.} 518:113342, 2024.
+\bibitem{Darg25} S. Dargaville et al. Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport. \emph{Int. J. High Perform. Comput. Appl.} 39(3):364--384, 2025.
+\bibitem{Darg26} S. Dargaville et al. Solving advection equations with reduction multigrids on GPUs. arXiv:2508.17517 (J. Comput. Phys., 2026).
+\bibitem{KnollKeyes04} D.A. Knoll, D.E. Keyes. Jacobian-free Newton--Krylov methods: a survey. \emph{J. Comput. Phys.} 193:357--397, 2004.
+\bibitem{Demidov21} D. Demidov. Partial reuse AMG setup cost amortization strategy for the solution of non-steady state problems. arXiv:2108.02054, 2021.
+\bibitem{AMGCL19} D. Demidov. AMGCL: an efficient, flexible, and extensible algebraic multigrid implementation. \emph{Lobachevskii J. Math.} 40(5):535--546, 2019.
+\bibitem{MueLuReuse} MueLu user documentation, \texttt{reuse: type} option (Sandia).
+\bibitem{Meurant01} G. Meurant. On the incomplete Cholesky decomposition of a class of perturbed matrices. \emph{SIAM J. Sci. Comput.} 23(2), 2001.
+\bibitem{BenziBert03} M. Benzi, D. Bertaccini. Approximate inverse preconditioning for shifted linear systems. \emph{BIT} 43:231--244, 2003.
+\bibitem{Bert04} D. Bertaccini. Efficient preconditioning for sequences of parametric complex symmetric linear systems. \emph{ETNA} 18:49--64, 2004.
+\bibitem{DTT07} J. Duintjer Tebbens, M. T\r{u}ma. Efficient preconditioning of sequences of nonsymmetric linear systems. \emph{SIAM J. Sci. Comput.} 29(5):1918--1941, 2007.
+\bibitem{BBM11} S. Bellavia, D. Bertaccini, B. Morini. Nonsymmetric preconditioner updates in Newton--Krylov methods for nonlinear systems. \emph{SIAM J. Sci. Comput.} 33(5):2595--2619, 2011.
+\bibitem{BertDur16} D. Bertaccini, F. Durastante. Interpolating preconditioners for the solution of sequence of linear systems. \emph{Comput. Math. Appl.} 72(4):1118--1130, 2016.
+\bibitem{FG98} A. Frommer, U. Gl\"assner. Restarted GMRES for shifted linear systems. \emph{SIAM J. Sci. Comput.} 19(1):15--26, 1998.
+\bibitem{Simoncini03} V. Simoncini. Restarted full orthogonalization method for shifted linear systems. \emph{BIT} 43(2):459--466, 2003.
+\bibitem{BvG15} M. Baumann, M.B. van Gijzen. Nested Krylov methods for shifted linear systems. \emph{SIAM J. Sci. Comput.} 37(5):S90--S112, 2015.
+\bibitem{PdS06} M.L. Parks, E. de Sturler, G. Mackey, D.D. Johnson, S. Maiti. Recycling Krylov subspaces for sequences of linear systems. \emph{SIAM J. Sci. Comput.} 28(5):1651--1674, 2006.
+\bibitem{SSX14} K.M. Soodhalter, D.B. Szyld, F. Xue. Krylov subspace recycling for sequences of shifted linear systems. \emph{Appl. Numer. Math.}, 2014.
+\bibitem{Sood16} K.M. Soodhalter. Block Krylov subspace recycling for shifted systems with unrelated right-hand sides. \emph{SIAM J. Sci. Comput.} 38(1):A302--A324, 2016.
+\bibitem{EVO04} Y.A. Erlangga, C. Vuik, C.W. Oosterlee. On a class of preconditioners for solving the Helmholtz equation. \emph{Appl. Numer. Math.} 50:409--425, 2004.
+\bibitem{EOV06} Y.A. Erlangga, C.W. Oosterlee, C. Vuik. A novel multigrid based preconditioner for heterogeneous Helmholtz problems. \emph{SIAM J. Sci. Comput.} 27(4):1471--1492, 2006.
+\bibitem{GGS15} M.J. Gander, I.G. Graham, E.A. Spence. Applying GMRES to the Helmholtz equation with shifted Laplacian preconditioning: what is the largest shift for which wavenumber-independent convergence is guaranteed? \emph{Numer. Math.} 131:567--614, 2015.
+\bibitem{CG17} P.-H. Cocquet, M.J. Gander. How large a shift is needed in the shifted Helmholtz preconditioner for its effective inversion by multigrid? \emph{SIAM J. Sci. Comput.} 39(2):A438--A478, 2017.
+\bibitem{Babich10} R. Babich, J. Brannick, R.C. Brower, M.A. Clark, T.A. Manteuffel, S.F. McCormick, J.C. Osborn, C. Rebbi. Adaptive multigrid algorithm for the lattice Wilson--Dirac operator. \emph{Phys. Rev. Lett.} 105:201602, 2010.
+\bibitem{FKKLR14} A. Frommer, K. Kahl, S. Krieg, B. Leder, M. Rottmann. Adaptive aggregation-based domain decomposition multigrid for the lattice Wilson--Dirac operator. \emph{SIAM J. Sci. Comput.} 36(4):A1581--A1608, 2014.
+\bibitem{ABF18} C. Alexandrou, S. Bacchio, J. Finkenrath. Multigrid approach in shifted linear systems for the non-degenerated twisted mass operator. arXiv:1805.09584, 2018.
+\bibitem{SKPD22} B.S. Southworth, O. Krzysik, W. Pazner, H. De Sterck. Fast solution of fully implicit Runge--Kutta and discontinuous Galerkin in time for numerical PDEs, Part I: the linear setting. \emph{SIAM J. Sci. Comput.} 44(1):A416--A443, 2022.
+\bibitem{PP17} W. Pazner, P.-O. Persson. Stage-parallel fully implicit Runge--Kutta solvers for discontinuous Galerkin fluid simulations. \emph{J. Comput. Phys.} 335:700--717, 2017.
+\bibitem{SMN06} G.A. Staff, K.-A. Mardal, T.K. Nilssen. Preconditioning of fully implicit Runge--Kutta schemes for parabolic PDEs. \emph{Model. Identif. Control} 27(2):109--123, 2006.
+\bibitem{RHLMM21} M.M. Rana, V.E. Howle, K. Long, A. Meek, W. Milestone. A new block preconditioner for implicit Runge--Kutta methods for parabolic PDE problems. \emph{SIAM J. Sci. Comput.} 43(5):S475--S495, 2021.
+\bibitem{MR08} Y. Maday, E.M. R{\o}nquist. Parallelization in time through tensor-product space--time solvers. \emph{C. R. Math.} 346:113--118, 2008.
+\bibitem{ParaDiag} M.J. Gander, J. Liu, S.-L. Wu, X. Yue, T. Zhou. ParaDiag: parallel-in-time algorithms based on the diagonalization technique. arXiv:2005.09158, 2020.
+\bibitem{MPW18} E. McDonald, J. Pestana, A. Wathen. Preconditioning and iterative solution of all-at-once systems for evolutionary PDEs. \emph{SIAM J. Sci. Comput.} 40(2):A1012--A1033, 2018.
+\bibitem{GG13} M.J. Gander, S. G\"uttel. PARAEXP: a parallel integrator for linear initial-value problems. \emph{SIAM J. Sci. Comput.} 35(2):C123--C142, 2013.
+\bibitem{Guettel13} S. G\"uttel. Rational Krylov approximation of matrix functions. \emph{GAMM-Mitt.} 36(1):8--31, 2013.
+\bibitem{TWS06} L.N. Trefethen, J.A.C. Weideman, T. Schmelzer. Talbot quadratures and rational approximations. \emph{BIT} 46:653--670, 2006.
+\bibitem{FLSWY21} R.D. Falgout, R. Li, B. Sj\"ogreen, L. Wang, U.M. Yang. Porting hypre to heterogeneous computer architectures. \emph{Parallel Comput.} 108:102840, 2021.
+\bibitem{LSY21} R. Li, B. Sj\"ogreen, U.M. Yang. A new class of AMG interpolation methods based on matrix-matrix multiplications. \emph{SIAM J. Sci. Comput.} 43(5), 2021.
+\bibitem{Boyle24} P.A. Boyle. Multiple right hand side multigrid for domain wall fermions with a multigrid preconditioned block conjugate gradient algorithm. arXiv:2409.03904, 2024.
+\bibitem{XAMG21} B. Krasnopolsky, A. Medvedev. XAMG: a library for solving linear systems with multiple right-hand side vectors. \emph{SoftwareX} 14:100695, 2021.
+\bibitem{KashiIPDPS22} A. Kashi, P. Nayak, D. Kulkarni, A. Scheinberg, P. Lin, H. Anzt. Batched sparse iterative solvers on GPU for the collision operator for fusion plasma simulations. \emph{IEEE IPDPS}, 2022.
+\bibitem{AdamsLarsen02} M.L. Adams, E.W. Larsen. Fast iterative methods for discrete-ordinates particle transport calculations. \emph{Prog. Nucl. Energy} 40(1):3--159, 2002.
+\bibitem{WWM04} J.S. Warsa, T.A. Wareing, J.E. Morel. Krylov iterative methods and the degraded effectiveness of DSA for multidimensional $S_N$ calculations in problems with material discontinuities. \emph{Nucl. Sci. Eng.} 147(3):218--248, 2004.
+\bibitem{LKM13} E.W. Larsen, A. Kumar, J.E. Morel. Properties of the implicitly time-differenced equations of thermal radiation transport. \emph{J. Comput. Phys.} 238:82--96, 2013.
+\bibitem{TWM18} A.T. Till, J.S. Warsa, J.E. Morel. Linear multifrequency-grey preconditioning for multigroup thermal radiative transfer. \emph{J. Comput. Phys.}, 2018 (doi:10.1016/j.jcp.2018.06.017; exact title to be checked).
+\bibitem{SOPB24} B.S. Southworth, S. Olivier, H. Park, T. Buvoli. One-sweep moment-based semi-implicit-explicit integration for gray thermal radiation transport. \emph{J. Comput. Phys.} 113349, 2024.
+\bibitem{Steefel15} C.I. Steefel et al. Reactive transport codes for subsurface environmental simulation. \emph{Comput. Geosci.} 19(3):445--478, 2015.
+\bibitem{HLM14} G.E. Hammond, P.C. Lichtner, R.T. Mills. Evaluating the performance of parallel subsurface simulators: an illustrative example with PFLOTRAN. \emph{Water Resour. Res.} 50(1):208--228, 2014.
+\bibitem{KVC05} S. Khatiwala, M. Visbeck, M.A. Cane. Accelerated simulation of passive tracers in ocean circulation models. \emph{Ocean Modelling} 9(1):51--69, 2005.
+\bibitem{LiPrimeau08} X. Li, F.W. Primeau. A fast Newton--Krylov solver for seasonally varying global ocean biogeochemistry models. \emph{Ocean Modelling} 23:13--20, 2008.
+\bibitem{BPL14} A. Bardin, F. Primeau, K. Lindsay. An offline implicit solver for simulating prebomb radiocarbon. \emph{Ocean Modelling} 73:45--58, 2014.
+\end{thebibliography}
+\end{document}

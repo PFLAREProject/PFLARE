@@ -1,0 +1,20 @@
+== e1_const_c10000: ./shift_study -n 400 -vel const -alpha 0 -contrast 10000 -shifts 0,0.0001,0.000316228,0.001,0.00316228,0.01,0.0316228,0.1,0.316228,1,3.16228,10,31.6228,100,316.228,1000 -ksp_type gmres -ksp_rtol 1e-8 -ksp_max_it 300 -ksp_gmres_restart 300 -pc_air_smooth_type fc -pc_air_inverse_type newton_no_extra -pc_air_matrix_free_polys -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
+initial build at s=0.: 1.639 s
+   k        shift | re_it re_setup re_solve | up_it up_setup up_solve
+   0   0.0000e+00 |     5   2.0126   0.3442 |     5   0.0992   0.3536
+   1   1.0000e-04 |     4   0.9003   0.1910 |     8   0.0956   0.5215
+   2   3.1623e-04 |     4   0.8312   0.1829 |     8   0.0958   0.5271
+   3   1.0000e-03 |     4   0.8047   0.1790 |     8   0.0958   0.5238
+   4   3.1623e-03 |     4   0.7732   0.1717 |     8   0.0969   0.5292
+   5   1.0000e-02 |     4   0.7312   0.1615 |     7   0.0969   0.4607
+   6   3.1623e-02 |     4   0.7161   0.1607 |     6   0.0961   0.4029
+   7   1.0000e-01 |     3   0.7095   0.1238 |     6   0.0965   0.3989
+   8   3.1623e-01 |     2   0.5702   0.0868 |     6   0.0960   0.4099
+   9   1.0000e+00 |     2   0.4456   0.0731 |     6   0.0964   0.4098
+  10   3.1623e+00 |     2   0.3962   0.0697 |     4   0.0983   0.2932
+  11   1.0000e+01 |     2   0.3666   0.0661 |     3   0.0950   0.2359
+  12   3.1623e+01 |     1   0.3484   0.0450 |     2   0.0970   0.1740
+  13   1.0000e+02 |     2   0.2493   0.0478 |     2   0.0963   0.1754
+  14   3.1623e+02 |     2   0.2502   0.0475 |     2   0.0958   0.1729
+  15   1.0000e+03 |     2   0.2567   0.0524 |     2   0.1042   0.1750
+SUMMARY nsys 16 | rebuild its/solve 2.94 setup 10.362 solve 2.003 total 12.365 fails 0 | update its/solve 5.19 setup 3.190 solve 5.764 total 8.954 fails 0 | frozen its/solve 0.00 solve 0.000 fails 0 | bands stored 0 restored 0

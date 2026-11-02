@@ -1,0 +1,7 @@
+== e9_mrhs32: ./shift_study -n 400 -vel curved -contrast 100 -shifts 0,1 -rebuild 0 -nrhs 32 -ksp_type gmres -ksp_rtol 1e-8 -ksp_max_it 300 -ksp_gmres_restart 300 -pc_air_smooth_type fc -pc_air_inverse_type newton_no_extra -pc_air_matrix_free_polys -pc_air_coarsest_inverse_type newton_no_extra -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
+initial build at s=0.: 1.294 s
+   k        shift | re_it re_setup re_solve | up_it up_setup up_solve
+   0   0.0000e+00 |    -1   0.0000   0.0000 |     5   0.0846   0.2661
+   1   1.0000e+00 |    -1   0.0000   0.0000 |     6   0.0748   0.3364
+SUMMARY nsys 2 | rebuild its/solve 0.00 setup 0.000 solve 0.000 total 0.000 fails 0 | update its/solve 5.50 setup 1.454 solve 0.602 total 2.056 fails 0 | frozen its/solve 0.00 solve 0.000 fails 0 | bands stored 0 restored 0
+MRHS nrhs 32 | block its 6 time 5.2041 | single total its 192 time 9.4226 | speedup 1.81

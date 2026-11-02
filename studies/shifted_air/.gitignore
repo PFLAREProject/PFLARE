@@ -1,0 +1,5 @@
+shift_study
+*.o
+report/*.aux
+report/*.log
+report/*.out
