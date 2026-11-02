@@ -20,6 +20,10 @@
          PCMatApply
      and prints the iteration counts per column and the wall times, erroring if any column of the
      multi-shift takes more than -max_extra_its (default 1) more iterations than sequential
+     With -frozen as well, also solves with the hierarchy built from the base applied unchanged to
+     every column (the plain PCMatApply of PCAIR), with at most -frozen_max_it (default 300) iterations
+     The frozen hierarchy is built from L + D(c_frozen), -c_frozen defaults to c_base
+     Can build the hierarchy from L + D(c_base) with -c_base (default 0), the shifts are then relative to it
      With -richardson as well, also solves with an outer Richardson, sequentially with an update and
      a KSPSolve for each shift, and with a single KSPMatSolve whose Amat is a matshell applying the
      shifted operators to a dense block, ie PETSc's block Richardson with no changes
@@ -441,14 +445,15 @@ int main(int argc, char **argv)
   KSP           ksp_ms, ksp_seq;
   PC            pc_ms, pc_seq;
   DM            da;
-  Mat           L, A_ms, A_seq, Dshift, B, Y, Y2, X_ms;
+  Mat           L, A_ms, A_fr, A_seq, Dshift, B, Y, Y2, X_ms, X_fr;
   Vec           x, b, d_vec, col, y;
   PetscRandom   rand;
-  PetscInt      n = 50, k = MAX_SHIFTS, j, i, its_seq[MAX_SHIFTS], its_ms[MAX_SHIFTS], max_extra_its = 1, n_applies = 0, n_reps = 5, local_rows, global_rows;
-  PetscReal     rel_clear, alpha = 0.0, tol = 1e-8, rtol = 1e-10, rel, max_rel = 0.0, max_rel_after, rel_zero;
+  PetscInt      n = 50, k = MAX_SHIFTS, j, i, its_seq[MAX_SHIFTS], its_ms[MAX_SHIFTS], max_extra_its = 1, n_applies = 0, n_reps = 5, frozen_max_it = 300, its_fr[MAX_SHIFTS], local_rows, global_rows;
+  PetscReal     rel_clear, c_base = 0.0, c_frozen, alpha = 0.0, tol = 1e-8, rtol = 1e-10, rel, max_rel = 0.0, max_rel_after, rel_zero;
   PetscReal     c_values[MAX_SHIFTS] = {0.0, 1e-3, 1e-2, 1e-1, 1.0, 1e1, 1e2, 1e3};
-  PetscBool     flg, solve = PETSC_FALSE, print_cols = PETSC_FALSE, richardson = PETSC_FALSE;
-  PetscLogDouble t0, t1, t_seq_solve = 0, t_ms_solve, t_ms_set, t_ms_apply, t_mrhs_apply, t_seq_apply, t_seq_update;
+  PetscBool     flg, solve = PETSC_FALSE, print_cols = PETSC_FALSE, richardson = PETSC_FALSE, frozen = PETSC_FALSE;
+  PetscReal     rnorm_fr[MAX_SHIFTS];
+  PetscLogDouble t_fr_solve = 0, t0, t1, t_seq_solve = 0, t_ms_solve, t_ms_set, t_ms_apply, t_mrhs_apply, t_seq_apply, t_seq_update;
   KSPConvergedReason reason;
 
   PetscCall(PetscInitialize(&argc, &argv, (char *)0, help));
@@ -466,6 +471,11 @@ int main(int argc, char **argv)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-solve", &solve, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-print_cols", &print_cols, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-richardson", &richardson, NULL));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-frozen", &frozen, NULL));
+  PetscCall(PetscOptionsGetInt(NULL, NULL, "-frozen_max_it", &frozen_max_it, NULL));
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-c_base", &c_base, NULL));
+  c_frozen = c_base;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-c_frozen", &c_frozen, NULL));
   PetscCall(PetscOptionsGetRealArray(NULL, NULL, "-c_values", c_values, &k, &flg));
   if (!flg) k = 8;
 
@@ -474,10 +484,24 @@ int main(int argc, char **argv)
   PetscCall(DMSetUp(da));
   PetscCall(DMCreateMatrix(da, &L));
   PetscCall(ComputeMat(da, L, alpha));
+  // From here on L is the base the hierarchy is built from, L + D(c_base)
+  if (c_base != 0.0) {
+    Vec d_base;
+    PetscCall(MatCreateVecs(L, &d_base, NULL));
+    PetscCall(ComputeDiag(d_base, c_base));
+    PetscCall(MatDiagonalSet(L, d_base, ADD_VALUES));
+    PetscCall(VecDestroy(&d_base));
+  }
   PetscCall(MatCreateVecs(L, &x, &b));
   PetscCall(VecDuplicate(x, &d_vec));
   PetscCall(VecDuplicate(x, &y));
   PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_ms));
+  // The matrix a frozen hierarchy is built from, L + D(c_frozen)
+  PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_fr));
+  if (c_frozen != c_base) {
+    PetscCall(ComputeDiag(d_vec, c_frozen - c_base));
+    PetscCall(MatDiagonalSet(A_fr, d_vec, ADD_VALUES));
+  }
   PetscCall(MatDuplicate(L, MAT_COPY_VALUES, &A_seq));
   PetscCall(VecGetLocalSize(b, &local_rows));
   PetscCall(VecGetSize(b, &global_rows));
@@ -488,6 +512,7 @@ int main(int argc, char **argv)
   PetscCall(MatDuplicate(Dshift, MAT_DO_NOT_COPY_VALUES, &Y));
   PetscCall(MatDuplicate(Dshift, MAT_DO_NOT_COPY_VALUES, &Y2));
   PetscCall(MatDuplicate(Dshift, MAT_DO_NOT_COPY_VALUES, &X_ms));
+  PetscCall(MatDuplicate(Dshift, MAT_DO_NOT_COPY_VALUES, &X_fr));
   PetscCall(PetscRandomCreate(PETSC_COMM_WORLD, &rand));
   PetscCall(PetscRandomSetFromOptions(rand));
   PetscCall(MatGetDiagonal(L, y));
@@ -495,7 +520,8 @@ int main(int argc, char **argv)
     // The shift exactly as a diagonal update sees it, diag(L + D_j) - diag(L), which
     // differs from D_j by rounding
     PetscCall(MatDenseGetColumnVecWrite(Dshift, j, &col));
-    PetscCall(ComputeDiag(col, c_values[j]));
+    // D(c) is linear in c, so the shift relative to the base is D(c_j - c_base)
+    PetscCall(ComputeDiag(col, c_values[j] - c_base));
     PetscCall(VecAXPY(col, 1.0, y));
     PetscCall(VecAXPY(col, -1.0, y));
     PetscCall(MatDenseRestoreColumnVecWrite(Dshift, j, &col));
@@ -604,6 +630,26 @@ int main(int argc, char **argv)
     PetscCall(PetscTime(&t1));
     t_ms_solve = t1 - t0;
 
+    // The frozen comparison, a hierarchy built from L + D(c_frozen) applied to every
+    // column with no update, which is just the plain PCMatApply of PCAIR
+    if (frozen) {
+      PetscInt n_applies_fr;
+      KSP      ksp_fr;
+      PC       pc_fr;
+      PetscCall(CreateKSP(A_fr, A_fr, KSPGMRES, rtol, &ksp_fr));
+      PetscCall(KSPGetPC(ksp_fr, &pc_fr));
+      PetscCall(PetscBarrier(NULL));
+      PetscCall(PetscTime(&t0));
+      PetscCall(BatchedGMRES(L, Dshift, pc_fr, B, X_fr, rtol, restart, frozen_max_it, its_fr, &n_applies_fr));
+      PetscCall(PetscTime(&t1));
+      PetscCall(KSPDestroy(&ksp_fr));
+      t_fr_solve = t1 - t0;
+      PetscCall(ShiftedMatMat(L, Dshift, X_fr, Y));
+      PetscCall(MatAYPX(Y, -1.0, B, SAME_NONZERO_PATTERN));
+      PetscCall(MatGetColumnNorms(Y, NORM_2, rnorm_fr));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Frozen solve time: batched GMRES with the hierarchy built at c_frozen %g, %" PetscInt_FMT " block applies, %.4e s\n", (double)c_frozen, n_applies_fr, t_fr_solve));
+    }
+
     // Check the true residuals of the batched solve
     PetscCall(ShiftedMatMat(L, Dshift, X_ms, Y));
     PetscCall(MatAYPX(Y, -1.0, B, SAME_NONZERO_PATTERN));
@@ -611,9 +657,10 @@ int main(int argc, char **argv)
       PetscReal rnorm[MAX_SHIFTS], bnorm[MAX_SHIFTS];
       PetscCall(MatGetColumnNorms(Y, NORM_2, rnorm));
       PetscCall(MatGetColumnNorms(B, NORM_2, bnorm));
-      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12s %10s %12s %12s\n", "c", "seq its", "multi its", "multi ||r||/||b||"));
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12s %10s %12s %12s %12s %12s\n", "c", "seq its", "multi its", "multi ||r||/||b||", "frozen its", "frozen ||r||/||b||"));
       for (j = 0; j < k; j++) {
-        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12.3e %10" PetscInt_FMT " %12" PetscInt_FMT " %12.3e\n", (double)c_values[j], its_seq[j], its_ms[j], (double)(rnorm[j] / bnorm[j])));
+        if (frozen) PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12.3e %10" PetscInt_FMT " %12" PetscInt_FMT " %12.3e %12" PetscInt_FMT " %12.3e\n", (double)c_values[j], its_seq[j], its_ms[j], (double)(rnorm[j] / bnorm[j]), its_fr[j], (double)(rnorm_fr[j] / bnorm[j])));
+        else PetscCall(PetscPrintf(PETSC_COMM_WORLD, "%12.3e %10" PetscInt_FMT " %12" PetscInt_FMT " %12.3e\n", (double)c_values[j], its_seq[j], its_ms[j], (double)(rnorm[j] / bnorm[j])));
         PetscCheck(rnorm[j] <= 10 * rtol * bnorm[j], PETSC_COMM_WORLD, PETSC_ERR_NOT_CONVERGED, "Multi-shift column %" PetscInt_FMT " did not converge", j);
         if (max_extra_its >= 0) PetscCheck(its_ms[j] - its_seq[j] <= max_extra_its, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Multi-shift column %" PetscInt_FMT " took %" PetscInt_FMT " iterations, sequential %" PetscInt_FMT, j, its_ms[j], its_seq[j]);
       }
@@ -696,6 +743,35 @@ int main(int argc, char **argv)
       // column needs to within a few iterations
       if (max_extra_its >= 0) PetscCheck(its_rms <= max_rseq + max_extra_its, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The multi-shift Richardson took %" PetscInt_FMT " iterations, the slowest sequential %" PetscInt_FMT, its_rms, max_rseq);
 
+      // The frozen comparison, a fresh PCAIR built from L + D(c_frozen) and never updated, with
+      // the same shifted Amat, so column j is solved for L + D_j preconditioned with that
+      if (frozen) {
+        KSP            ksp_rfr;
+        Mat            A_rfr;
+        PetscInt       its_rfr;
+        PetscLogDouble t_rfr;
+        PetscReal      max_fr = 0.0;
+
+        PetscCall(MatDuplicate(A_fr, MAT_COPY_VALUES, &A_rfr));
+        PetscCall(CreateKSP(S, A_rfr, KSPRICHARDSON, rtol, &ksp_rfr));
+        PetscCall(KSPSetTolerances(ksp_rfr, rtol, 1e-50, PETSC_DETERMINE, frozen_max_it));
+        PetscCall(PetscBarrier(NULL));
+        PetscCall(PetscTime(&t0));
+        PetscCall(MatZeroEntries(X_fr));
+        PetscCall(KSPMatSolve(ksp_rfr, B, X_fr));
+        PetscCall(PetscTime(&t1));
+        t_rfr = t1 - t0;
+        PetscCall(KSPGetIterationNumber(ksp_rfr, &its_rfr));
+        PetscCall(KSPGetConvergedReason(ksp_rfr, &reason));
+        PetscCall(ShiftedMatMat(L, Dshift, X_fr, Y));
+        PetscCall(MatAYPX(Y, -1.0, B, SAME_NONZERO_PATTERN));
+        PetscCall(MatGetColumnNorms(Y, NORM_2, rnorm));
+        for (j = 0; j < k; j++) max_fr = PetscMax(max_fr, rnorm[j] / bnorm[j]);
+        PetscCall(PetscPrintf(PETSC_COMM_WORLD, "Richardson: frozen block its %" PetscInt_FMT " (reason %d), max column ||r||/||b|| %.3e, time %.4e s\n", its_rfr, (int)reason, (double)max_fr, t_rfr));
+        PetscCall(KSPDestroy(&ksp_rfr));
+        PetscCall(MatDestroy(&A_rfr));
+      }
+
       PetscCall(KSPDestroy(&ksp_rseq));
       PetscCall(KSPDestroy(&ksp_rms));
       PetscCall(MatDestroy(&S));
@@ -755,12 +831,14 @@ int main(int argc, char **argv)
   PetscCall(KSPDestroy(&ksp_seq));
   PetscCall(MatDestroy(&L));
   PetscCall(MatDestroy(&A_ms));
+  PetscCall(MatDestroy(&A_fr));
   PetscCall(MatDestroy(&A_seq));
   PetscCall(MatDestroy(&Dshift));
   PetscCall(MatDestroy(&B));
   PetscCall(MatDestroy(&Y));
   PetscCall(MatDestroy(&Y2));
   PetscCall(MatDestroy(&X_ms));
+  PetscCall(MatDestroy(&X_fr));
   PetscCall(VecDestroy(&x));
   PetscCall(VecDestroy(&b));
   PetscCall(VecDestroy(&d_vec));

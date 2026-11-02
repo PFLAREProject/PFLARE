@@ -1,0 +1,720 @@
+### band [0.001, 4*0.001] c_base=0.001 c_frozen=0.001
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.001, 8 block applies, 6.9863e-01 s
+   1.000e-03          6            6    9.252e-11            6    9.252e-11
+   1.097e-03          7            7    3.187e-12            7    1.647e-12
+   1.203e-03          7            7    1.249e-11            7    2.258e-12
+   1.320e-03          7            7    5.426e-11            7    3.205e-12
+   1.447e-03          8            8    4.625e-12            7    4.318e-12
+   1.587e-03          8            8    1.636e-11            7    6.191e-12
+   1.741e-03          8            8    5.058e-11            7    9.426e-12
+   1.910e-03          9            9    5.344e-12            7    1.423e-11
+   2.095e-03          9            9    1.581e-11            7    1.989e-11
+   2.297e-03          9            9    4.271e-11            7    2.655e-11
+   2.520e-03         10           10    5.572e-12            7    3.710e-11
+   2.764e-03         10           10    1.472e-11            7    6.359e-11
+   3.031e-03         10           10    3.668e-11            8    2.462e-12
+   3.325e-03         10           10    8.865e-11            8    4.925e-12
+   3.647e-03         11           11    1.574e-11            8    1.074e-11
+   4.000e-03         11           11    3.707e-11            8    2.449e-11
+               1.000e-03          7    1.671e-14
+               1.097e-03          7    1.640e-14
+               1.203e-03          8    1.642e-14
+               1.320e-03          9    1.619e-14
+               1.447e-03          9    1.601e-14
+               1.587e-03         10    1.574e-14
+               1.741e-03         11    1.546e-14
+               1.910e-03         12    1.521e-14
+               2.095e-03         13    1.499e-14
+               2.297e-03         13    1.788e-14
+               2.520e-03         14    7.905e-14
+               2.764e-03         15    4.792e-13
+               3.031e-03         16    2.549e-12
+               3.325e-03         17    1.165e-11
+               3.647e-03         18    4.601e-11
+               4.000e-03         19    1.643e-10
+Richardson: multi-shift block its 18, max sequential its 19, max column ||r||/||b|| 1.643e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 9.5848e-01 s, multi-shift (set + KSPMatSolve) 9.9963e-01 s
+Richardson: frozen block its 10 (reason 2), max column ||r||/||b|| 1.006e-10, time 4.1103e-01 s
+Solve time: sequential (k updates + k GMRES) 8.4979e-01 s, multi-shift (set + batched GMRES, 11 block applies) 1.4879e+00 s
+Setup time: k diagonal updates 3.7063e-02 s, PCAIRSetMultiShift 3.5236e-02 s
+Apply time: k PCApply 7.1859e-02 s, multi-shift PCMatApply 5.1593e-02 s, shared-shift PCMatApply 3.2274e-02 s
+### band [0.001, 4*0.001] c_base=0.001 c_frozen=0.002
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.002, 7 block applies, 6.4212e-01 s
+   1.000e-03          6            6    9.252e-11            7    5.298e-11
+   1.097e-03          7            7    3.187e-12            7    3.649e-11
+   1.203e-03          7            7    1.249e-11            7    2.281e-11
+   1.320e-03          7            7    5.426e-11            7    1.335e-11
+   1.447e-03          8            8    4.625e-12            7    6.881e-12
+   1.587e-03          8            8    1.636e-11            7    3.381e-12
+   1.741e-03          8            8    5.058e-11            7    1.378e-12
+   1.910e-03          9            9    5.344e-12            6    6.940e-11
+   2.095e-03          9            9    1.581e-11            7    1.304e-12
+   2.297e-03          9            9    4.271e-11            7    2.469e-12
+   2.520e-03         10           10    5.572e-12            7    4.410e-12
+   2.764e-03         10           10    1.472e-11            7    7.996e-12
+   3.031e-03         10           10    3.668e-11            7    1.383e-11
+   3.325e-03         10           10    8.865e-11            7    2.385e-11
+   3.647e-03         11           11    1.574e-11            7    4.425e-11
+   4.000e-03         11           11    3.707e-11            7    8.179e-11
+               1.000e-03          7    1.671e-14
+               1.097e-03          7    1.640e-14
+               1.203e-03          8    1.642e-14
+               1.320e-03          9    1.619e-14
+               1.447e-03          9    1.601e-14
+               1.587e-03         10    1.574e-14
+               1.741e-03         11    1.546e-14
+               1.910e-03         12    1.521e-14
+               2.095e-03         13    1.499e-14
+               2.297e-03         13    1.788e-14
+               2.520e-03         14    7.905e-14
+               2.764e-03         15    4.792e-13
+               3.031e-03         16    2.549e-12
+               3.325e-03         17    1.165e-11
+               3.647e-03         18    4.601e-11
+               4.000e-03         19    1.643e-10
+Richardson: multi-shift block its 18, max sequential its 19, max column ||r||/||b|| 1.643e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 9.4917e-01 s, multi-shift (set + KSPMatSolve) 9.8620e-01 s
+Richardson: frozen block its 9 (reason 2), max column ||r||/||b|| 3.988e-11, time 3.0675e-01 s
+Solve time: sequential (k updates + k GMRES) 8.0031e-01 s, multi-shift (set + batched GMRES, 11 block applies) 1.2888e+00 s
+Setup time: k diagonal updates 3.7739e-02 s, PCAIRSetMultiShift 4.4819e-02 s
+Apply time: k PCApply 7.0637e-02 s, multi-shift PCMatApply 4.7779e-02 s, shared-shift PCMatApply 3.1140e-02 s
+### band [0.001, 4*0.001] c_base=0.001 c_frozen=0.004
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.004, 9 block applies, 7.5319e-01 s
+   1.000e-03          6            6    9.252e-11            9    8.986e-12
+   1.097e-03          7            7    3.187e-12            9    7.205e-12
+   1.203e-03          7            7    1.249e-11            9    5.723e-12
+   1.320e-03          7            7    5.426e-11            9    4.163e-12
+   1.447e-03          8            8    4.625e-12            9    2.912e-12
+   1.587e-03          8            8    1.636e-11            8    7.450e-11
+   1.741e-03          8            8    5.058e-11            8    4.997e-11
+   1.910e-03          9            9    5.344e-12            8    3.062e-11
+   2.095e-03          9            9    1.581e-11            8    1.799e-11
+   2.297e-03          9            9    4.271e-11            8    9.617e-12
+   2.520e-03         10           10    5.572e-12            8    4.482e-12
+   2.764e-03         10           10    1.472e-11            7    9.230e-11
+   3.031e-03         10           10    3.668e-11            7    3.660e-11
+   3.325e-03         10           10    8.865e-11            7    1.002e-11
+   3.647e-03         11           11    1.574e-11            7    2.009e-12
+   4.000e-03         11           11    3.707e-11            6    8.074e-11
+               1.000e-03          7    1.671e-14
+               1.097e-03          7    1.640e-14
+               1.203e-03          8    1.642e-14
+               1.320e-03          9    1.619e-14
+               1.447e-03          9    1.601e-14
+               1.587e-03         10    1.574e-14
+               1.741e-03         11    1.546e-14
+               1.910e-03         12    1.521e-14
+               2.095e-03         13    1.499e-14
+               2.297e-03         13    1.788e-14
+               2.520e-03         14    7.905e-14
+               2.764e-03         15    4.792e-13
+               3.031e-03         16    2.549e-12
+               3.325e-03         17    1.165e-11
+               3.647e-03         18    4.601e-11
+               4.000e-03         19    1.643e-10
+Richardson: multi-shift block its 18, max sequential its 19, max column ||r||/||b|| 1.643e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 9.2209e-01 s, multi-shift (set + KSPMatSolve) 8.9797e-01 s
+Richardson: frozen block its 12 (reason 2), max column ||r||/||b|| 3.815e-11, time 3.9673e-01 s
+Solve time: sequential (k updates + k GMRES) 7.7793e-01 s, multi-shift (set + batched GMRES, 11 block applies) 1.0664e+00 s
+Setup time: k diagonal updates 3.5753e-02 s, PCAIRSetMultiShift 3.1302e-02 s
+Apply time: k PCApply 6.8960e-02 s, multi-shift PCMatApply 4.6069e-02 s, shared-shift PCMatApply 2.9920e-02 s
+### band [0.01, 4*0.01] c_base=0.01 c_frozen=0.01
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.01, 16 block applies, 1.0766e+00 s
+   1.000e-02          6            6    8.573e-11            6    8.573e-11
+   1.097e-02          8            8    3.039e-12            7    8.969e-12
+   1.203e-02          8            8    9.096e-11            7    6.321e-11
+   1.320e-02          9            9    5.238e-11            8    1.923e-11
+   1.447e-02         10           10    2.261e-11            9    6.115e-12
+   1.587e-02         11           11    8.596e-12            9    5.788e-11
+   1.741e-02         11           11    3.224e-11           10    1.716e-11
+   1.910e-02         12           12    1.152e-11           11    5.596e-12
+   2.095e-02         12           12    3.690e-11           11    3.711e-11
+   2.297e-02         13           13    1.423e-11           12    1.246e-11
+   2.520e-02         13           13    3.847e-11           12    6.697e-11
+   2.764e-02         13           13    9.116e-11           13    2.486e-11
+   3.031e-02         14           14    3.096e-11           14    1.099e-11
+   3.325e-02         14           14    5.912e-11           14    5.239e-11
+   3.647e-02         15           15    2.038e-11           15    2.476e-11
+   4.000e-02         15           15    3.830e-11           16    1.211e-11
+               1.000e-02          7    8.471e-15
+               1.097e-02          9    8.067e-15
+               1.203e-02         12    7.996e-15
+               1.320e-02         14    7.699e-15
+               1.447e-02         15    7.404e-15
+               1.587e-02         17    7.057e-15
+               1.741e-02         18    6.870e-15
+               1.910e-02         20    8.117e-15
+               2.095e-02         21    4.308e-14
+               2.297e-02         23    2.954e-13
+               2.520e-02         24    1.518e-12
+               2.764e-02         25    5.625e-12
+               3.031e-02         26    1.860e-11
+               3.325e-02         28    4.813e-11
+               3.647e-02         29    1.226e-10
+               4.000e-02         30    2.974e-10
+Richardson: multi-shift block its 28, max sequential its 30, max column ||r||/||b|| 2.974e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 1.4923e+00 s, multi-shift (set + KSPMatSolve) 1.3779e+00 s
+Richardson: frozen block its 34 (reason 2), max column ||r||/||b|| 1.497e-10, time 1.1531e+00 s
+Solve time: sequential (k updates + k GMRES) 1.0006e+00 s, multi-shift (set + batched GMRES, 15 block applies) 1.3119e+00 s
+Setup time: k diagonal updates 3.7382e-02 s, PCAIRSetMultiShift 3.1558e-02 s
+Apply time: k PCApply 7.1094e-02 s, multi-shift PCMatApply 4.9409e-02 s, shared-shift PCMatApply 3.1584e-02 s
+### band [0.01, 4*0.01] c_base=0.01 c_frozen=0.02
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.02, 13 block applies, 9.3884e-01 s
+   1.000e-02          6            6    8.573e-11           12    8.006e-12
+   1.097e-02          8            8    3.039e-12           11    4.136e-11
+   1.203e-02          8            8    9.096e-11           11    1.033e-11
+   1.320e-02          9            9    5.238e-11           10    3.910e-11
+   1.447e-02         10           10    2.261e-11           10    5.866e-12
+   1.587e-02         11           11    8.596e-12            9    1.195e-11
+   1.741e-02         11           11    3.224e-11            8    1.450e-11
+   1.910e-02         12           12    1.152e-11            7    4.394e-12
+   2.095e-02         12           12    3.690e-11            7    3.428e-12
+   2.297e-02         13           13    1.423e-11            8    3.378e-12
+   2.520e-02         13           13    3.847e-11            9    5.828e-12
+   2.764e-02         13           13    9.116e-11           10    6.570e-12
+   3.031e-02         14           14    3.096e-11           11    5.702e-12
+   3.325e-02         14           14    5.912e-11           11    6.838e-11
+   3.647e-02         15           15    2.038e-11           12    4.302e-11
+   4.000e-02         15           15    3.830e-11           13    2.876e-11
+               1.000e-02          7    8.471e-15
+               1.097e-02          9    8.067e-15
+               1.203e-02         12    7.996e-15
+               1.320e-02         14    7.699e-15
+               1.447e-02         15    7.404e-15
+               1.587e-02         17    7.057e-15
+               1.741e-02         18    6.870e-15
+               1.910e-02         20    8.117e-15
+               2.095e-02         21    4.308e-14
+               2.297e-02         23    2.954e-13
+               2.520e-02         24    1.518e-12
+               2.764e-02         25    5.625e-12
+               3.031e-02         26    1.860e-11
+               3.325e-02         28    4.813e-11
+               3.647e-02         29    1.226e-10
+               4.000e-02         30    2.974e-10
+Richardson: multi-shift block its 28, max sequential its 30, max column ||r||/||b|| 2.974e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 1.4808e+00 s, multi-shift (set + KSPMatSolve) 1.4287e+00 s
+Richardson: frozen block its 24 (reason 2), max column ||r||/||b|| 1.037e-10, time 7.8688e-01 s
+Solve time: sequential (k updates + k GMRES) 1.0456e+00 s, multi-shift (set + batched GMRES, 15 block applies) 1.3852e+00 s
+Setup time: k diagonal updates 3.6693e-02 s, PCAIRSetMultiShift 3.2051e-02 s
+Apply time: k PCApply 7.0970e-02 s, multi-shift PCMatApply 4.9264e-02 s, shared-shift PCMatApply 3.1170e-02 s
+### band [0.01, 4*0.01] c_base=0.01 c_frozen=0.04
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.04, 17 block applies, 1.1117e+00 s
+   1.000e-02          6            6    8.573e-11           17    6.206e-11
+   1.097e-02          8            8    3.039e-12           17    3.351e-11
+   1.203e-02          8            8    9.096e-11           17    1.579e-11
+   1.320e-02          9            9    5.238e-11           16    6.205e-11
+   1.447e-02         10           10    2.261e-11           16    2.455e-11
+   1.587e-02         11           11    8.596e-12           15    7.991e-11
+   1.741e-02         11           11    3.224e-11           15    2.523e-11
+   1.910e-02         12           12    1.152e-11           14    6.498e-11
+   2.095e-02         12           12    3.690e-11           14    1.544e-11
+   2.297e-02         13           13    1.423e-11           13    3.095e-11
+   2.520e-02         13           13    3.847e-11           12    5.225e-11
+   2.764e-02         13           13    9.116e-11           11    6.863e-11
+   3.031e-02         14           14    3.096e-11           10    6.786e-11
+   3.325e-02         14           14    5.912e-11            9    3.871e-11
+   3.647e-02         15           15    2.038e-11            8    6.262e-12
+   4.000e-02         15           15    3.830e-11            6    1.868e-11
+               1.000e-02          7    8.471e-15
+               1.097e-02          9    8.067e-15
+               1.203e-02         12    7.996e-15
+               1.320e-02         14    7.699e-15
+               1.447e-02         15    7.404e-15
+               1.587e-02         17    7.057e-15
+               1.741e-02         18    6.870e-15
+               1.910e-02         20    8.117e-15
+               2.095e-02         21    4.308e-14
+               2.297e-02         23    2.954e-13
+               2.520e-02         24    1.518e-12
+               2.764e-02         25    5.625e-12
+               3.031e-02         26    1.860e-11
+               3.325e-02         28    4.813e-11
+               3.647e-02         29    1.226e-10
+               4.000e-02         30    2.974e-10
+Richardson: multi-shift block its 28, max sequential its 30, max column ||r||/||b|| 2.974e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 1.4981e+00 s, multi-shift (set + KSPMatSolve) 1.4334e+00 s
+Richardson: frozen block its 29 (reason 2), max column ||r||/||b|| 1.317e-10, time 9.3602e-01 s
+Solve time: sequential (k updates + k GMRES) 1.0237e+00 s, multi-shift (set + batched GMRES, 15 block applies) 1.2713e+00 s
+Setup time: k diagonal updates 3.6115e-02 s, PCAIRSetMultiShift 3.0904e-02 s
+Apply time: k PCApply 7.0774e-02 s, multi-shift PCMatApply 4.8448e-02 s, shared-shift PCMatApply 3.0790e-02 s
+### band [0.1, 4*0.1] c_base=0.1 c_frozen=0.1
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.1, 30 block applies, 1.8905e+00 s
+   1.000e-01          6            6    1.982e-12            6    1.982e-12
+   1.097e-01          7            7    2.983e-11            8    5.555e-12
+   1.203e-01          8            8    4.720e-11            9    7.979e-11
+   1.320e-01          9            9    3.370e-11           11    3.708e-11
+   1.447e-01         10           10    1.806e-11           13    1.803e-11
+   1.587e-01         10           10    8.719e-11           14    5.423e-11
+   1.741e-01         11           11    3.272e-11           16    2.574e-11
+   1.910e-01         11           11    9.660e-11           17    6.179e-11
+   2.095e-01         12           12    3.308e-11           19    3.258e-11
+   2.297e-01         12           12    7.956e-11           20    7.512e-11
+   2.520e-01         13           13    2.601e-11           22    4.534e-11
+   2.764e-01         13           13    5.858e-11           23    9.641e-11
+   3.031e-01         13           13    9.470e-11           25    6.611e-11
+   3.325e-01         14           14    3.231e-11           27    4.741e-11
+   3.647e-01         14           14    5.374e-11           29    4.220e-11
+   4.000e-01         14           14    9.241e-11           30    8.289e-11
+               1.000e-01          6    1.320e-15
+               1.097e-01          9    1.229e-15
+               1.203e-01         12    1.173e-15
+               1.320e-01         14    1.109e-15
+               1.447e-01         15    1.051e-15
+               1.587e-01         17    9.912e-16
+               1.741e-01         19    1.385e-15
+               1.910e-01         20    1.186e-14
+               2.095e-01         22    1.071e-13
+               2.297e-01         23    5.510e-13
+               2.520e-01         24    2.358e-12
+               2.764e-01         26    9.037e-12
+               3.031e-01         27    2.287e-11
+               3.325e-01         28    5.512e-11
+               3.647e-01         29    1.328e-10
+               4.000e-01         30    2.864e-10
+Richardson: multi-shift block its 28, max sequential its 30, max column ||r||/||b|| 2.864e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 1.4715e+00 s, multi-shift (set + KSPMatSolve) 1.5095e+00 s
+Richardson: frozen block its 11 (reason -4), max column ||r||/||b|| 8.559e+04, time 3.7518e-01 s
+Solve time: sequential (k updates + k GMRES) 8.9615e-01 s, multi-shift (set + batched GMRES, 14 block applies) 1.2769e+00 s
+Setup time: k diagonal updates 3.6251e-02 s, PCAIRSetMultiShift 4.8253e-02 s
+Apply time: k PCApply 6.7701e-02 s, multi-shift PCMatApply 5.0488e-02 s, shared-shift PCMatApply 3.0934e-02 s
+### band [0.1, 4*0.1] c_base=0.1 c_frozen=0.2
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.2, 19 block applies, 1.1781e+00 s
+   1.000e-01          6            6    1.982e-12           19    4.397e-11
+   1.097e-01          7            7    2.983e-11           17    5.101e-11
+   1.203e-01          8            8    4.720e-11           15    6.458e-11
+   1.320e-01          9            9    3.370e-11           14    1.900e-11
+   1.447e-01         10           10    1.806e-11           12    2.964e-11
+   1.587e-01         10           10    8.719e-11           10    5.332e-11
+   1.741e-01         11           11    3.272e-11            8    9.433e-11
+   1.910e-01         11           11    9.660e-11            6    6.314e-11
+   2.095e-01         12           12    3.308e-11            6    4.734e-11
+   2.297e-01         12           12    7.956e-11            8    6.733e-11
+   2.520e-01         13           13    2.601e-11           10    3.437e-11
+   2.764e-01         13           13    5.858e-11           12    1.704e-11
+   3.031e-01         13           13    9.470e-11           13    5.513e-11
+   3.325e-01         14           14    3.231e-11           15    3.025e-11
+   3.647e-01         14           14    5.374e-11           16    7.777e-11
+   4.000e-01         14           14    9.241e-11           18    4.980e-11
+               1.000e-01          6    1.320e-15
+               1.097e-01          9    1.229e-15
+               1.203e-01         12    1.173e-15
+               1.320e-01         14    1.109e-15
+               1.447e-01         15    1.051e-15
+               1.587e-01         17    9.912e-16
+               1.741e-01         19    1.385e-15
+               1.910e-01         20    1.186e-14
+               2.095e-01         22    1.071e-13
+               2.297e-01         23    5.510e-13
+               2.520e-01         24    2.358e-12
+               2.764e-01         26    9.037e-12
+               3.031e-01         27    2.287e-11
+               3.325e-01         28    5.512e-11
+               3.647e-01         29    1.328e-10
+               4.000e-01         30    2.864e-10
+Richardson: multi-shift block its 28, max sequential its 30, max column ||r||/||b|| 2.864e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 1.4540e+00 s, multi-shift (set + KSPMatSolve) 1.3539e+00 s
+Richardson: frozen block its 107 (reason 2), max column ||r||/||b|| 3.216e-10, time 3.1372e+00 s
+Solve time: sequential (k updates + k GMRES) 9.3271e-01 s, multi-shift (set + batched GMRES, 14 block applies) 1.2969e+00 s
+Setup time: k diagonal updates 3.3032e-02 s, PCAIRSetMultiShift 5.4096e-02 s
+Apply time: k PCApply 6.6066e-02 s, multi-shift PCMatApply 4.5386e-02 s, shared-shift PCMatApply 2.8657e-02 s
+### band [0.1, 4*0.1] c_base=0.1 c_frozen=0.4
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 0.4, 36 block applies, 2.0128e+00 s
+   1.000e-01          6            6    1.982e-12           36    8.771e-11
+   1.097e-01          7            7    2.983e-11           33    8.791e-11
+   1.203e-01          8            8    4.720e-11           30    9.348e-11
+   1.320e-01          9            9    3.370e-11           28    5.854e-11
+   1.447e-01         10           10    1.806e-11           25    8.836e-11
+   1.587e-01         10           10    8.719e-11           23    7.060e-11
+   1.741e-01         11           11    3.272e-11           21    5.944e-11
+   1.910e-01         11           11    9.660e-11           19    5.938e-11
+   2.095e-01         12           12    3.308e-11           17    6.950e-11
+   2.297e-01         12           12    7.956e-11           15    9.763e-11
+   2.520e-01         13           13    2.601e-11           14    3.348e-11
+   2.764e-01         13           13    5.858e-11           12    6.225e-11
+   3.031e-01         13           13    9.470e-11           11    1.735e-11
+   3.325e-01         14           14    3.231e-11            9    3.456e-11
+   3.647e-01         14           14    5.374e-11            7    4.841e-11
+   4.000e-01         14           14    9.241e-11            5    9.604e-13
+               1.000e-01          6    1.320e-15
+               1.097e-01          9    1.229e-15
+               1.203e-01         12    1.173e-15
+               1.320e-01         14    1.109e-15
+               1.447e-01         15    1.051e-15
+               1.587e-01         17    9.912e-16
+               1.741e-01         19    1.385e-15
+               1.910e-01         20    1.186e-14
+               2.095e-01         22    1.071e-13
+               2.297e-01         23    5.510e-13
+               2.520e-01         24    2.358e-12
+               2.764e-01         26    9.037e-12
+               3.031e-01         27    2.287e-11
+               3.325e-01         28    5.512e-11
+               3.647e-01         29    1.328e-10
+               4.000e-01         30    2.864e-10
+Richardson: multi-shift block its 28, max sequential its 30, max column ||r||/||b|| 2.864e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 1.4281e+00 s, multi-shift (set + KSPMatSolve) 1.3903e+00 s
+Richardson: frozen block its 72 (reason 2), max column ||r||/||b|| 2.934e-10, time 2.1112e+00 s
+Solve time: sequential (k updates + k GMRES) 9.0536e-01 s, multi-shift (set + batched GMRES, 14 block applies) 1.2438e+00 s
+Setup time: k diagonal updates 3.4884e-02 s, PCAIRSetMultiShift 3.0253e-02 s
+Apply time: k PCApply 6.7013e-02 s, multi-shift PCMatApply 4.6817e-02 s, shared-shift PCMatApply 2.9357e-02 s
+### band [1, 4*1] c_base=1 c_frozen=1
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 1., 23 block applies, 1.2902e+00 s
+   1.000e+00          4            4    3.673e-12            4    3.673e-12
+   1.097e+00          6            6    3.492e-11            7    1.329e-11
+   1.203e+00          7            7    3.316e-11            8    9.793e-11
+   1.320e+00          8            8    1.255e-11           10    2.005e-11
+   1.447e+00          8            8    6.675e-11           11    3.761e-11
+   1.587e+00          9            9    1.306e-11           12    5.663e-11
+   1.741e+00          9            9    3.707e-11           13    7.540e-11
+   1.910e+00          9            9    7.687e-11           14    9.320e-11
+   2.095e+00         10           10    1.105e-11           16    2.566e-11
+   2.297e+00         10           10    1.790e-11           17    3.234e-11
+   2.520e+00         10           10    3.112e-11           18    4.026e-11
+   2.764e+00         10           10    3.971e-11           19    4.780e-11
+   3.031e+00         10           10    5.135e-11           20    5.672e-11
+   3.325e+00         10           10    5.665e-11           21    6.494e-11
+   3.647e+00         10           10    6.277e-11           22    7.263e-11
+   4.000e+00         10           10    6.946e-11           23    7.954e-11
+               1.000e+00          4    1.584e-16
+               1.097e+00          8    1.633e-16
+               1.203e+00         10    1.600e-16
+               1.320e+00         12    1.021e-15
+               1.447e+00         13    2.662e-14
+               1.587e+00         14    2.705e-13
+               1.741e+00         15    1.477e-12
+               1.910e+00         15    5.070e-12
+               2.095e+00         16    1.377e-11
+               2.297e+00         17    2.927e-11
+               2.520e+00         17    5.321e-11
+               2.764e+00         17    7.721e-11
+               3.031e+00         17    9.901e-11
+               3.325e+00         18    1.151e-10
+               3.647e+00         18    1.271e-10
+               4.000e+00         18    1.444e-10
+Richardson: multi-shift block its 17, max sequential its 18, max column ||r||/||b|| 1.444e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 8.9870e-01 s, multi-shift (set + KSPMatSolve) 8.1991e-01 s
+Richardson: frozen block its 10 (reason -4), max column ||r||/||b|| 5.171e+04, time 2.9704e-01 s
+Solve time: sequential (k updates + k GMRES) 6.4860e-01 s, multi-shift (set + batched GMRES, 10 block applies) 6.8013e-01 s
+Setup time: k diagonal updates 3.2438e-02 s, PCAIRSetMultiShift 2.9128e-02 s
+Apply time: k PCApply 6.0193e-02 s, multi-shift PCMatApply 4.4299e-02 s, shared-shift PCMatApply 2.6121e-02 s
+### band [1, 4*1] c_base=1 c_frozen=2
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 2., 15 block applies, 8.5902e-01 s
+   1.000e+00          4            4    3.673e-12           15    4.658e-11
+   1.097e+00          6            6    3.492e-11           14    2.591e-11
+   1.203e+00          7            7    3.316e-11           12    8.905e-11
+   1.320e+00          8            8    1.255e-11           11    5.793e-11
+   1.447e+00          8            8    6.675e-11           10    3.290e-11
+   1.587e+00          9            9    1.306e-11            9    1.471e-11
+   1.741e+00          9            9    3.707e-11            7    8.127e-11
+   1.910e+00          9            9    7.687e-11            6    2.541e-12
+   2.095e+00         10           10    1.105e-11            6    2.277e-12
+   2.297e+00         10           10    1.790e-11            7    5.792e-11
+   2.520e+00         10           10    3.112e-11            9    7.427e-12
+   2.764e+00         10           10    3.971e-11           10    1.139e-11
+   3.031e+00         10           10    5.135e-11           11    1.298e-11
+   3.325e+00         10           10    5.665e-11           11    9.501e-11
+   3.647e+00         10           10    6.277e-11           12    7.342e-11
+   4.000e+00         10           10    6.946e-11           13    5.545e-11
+               1.000e+00          4    1.584e-16
+               1.097e+00          8    1.633e-16
+               1.203e+00         10    1.600e-16
+               1.320e+00         12    1.021e-15
+               1.447e+00         13    2.662e-14
+               1.587e+00         14    2.705e-13
+               1.741e+00         15    1.477e-12
+               1.910e+00         15    5.070e-12
+               2.095e+00         16    1.377e-11
+               2.297e+00         17    2.927e-11
+               2.520e+00         17    5.321e-11
+               2.764e+00         17    7.721e-11
+               3.031e+00         17    9.901e-11
+               3.325e+00         18    1.151e-10
+               3.647e+00         18    1.271e-10
+               4.000e+00         18    1.444e-10
+Richardson: multi-shift block its 17, max sequential its 18, max column ||r||/||b|| 1.444e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 8.7866e-01 s, multi-shift (set + KSPMatSolve) 7.6253e-01 s
+Richardson: frozen block its 300 (reason -3), max column ||r||/||b|| 3.834e-01, time 8.0345e+00 s
+Solve time: sequential (k updates + k GMRES) 6.4844e-01 s, multi-shift (set + batched GMRES, 10 block applies) 7.1440e-01 s
+Setup time: k diagonal updates 3.0011e-02 s, PCAIRSetMultiShift 2.9592e-02 s
+Apply time: k PCApply 5.6656e-02 s, multi-shift PCMatApply 4.1179e-02 s, shared-shift PCMatApply 2.4671e-02 s
+### band [1, 4*1] c_base=1 c_frozen=4
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 4., 23 block applies, 1.2181e+00 s
+   1.000e+00          4            4    3.673e-12           23    7.610e-11
+   1.097e+00          6            6    3.492e-11           22    3.771e-11
+   1.203e+00          7            7    3.316e-11           20    5.869e-11
+   1.320e+00          8            8    1.255e-11           19    3.448e-11
+   1.447e+00          8            8    6.675e-11           17    7.430e-11
+   1.587e+00          9            9    1.306e-11           16    5.041e-11
+   1.741e+00          9            9    3.707e-11           15    3.605e-11
+   1.910e+00          9            9    7.687e-11           14    2.671e-11
+   2.095e+00         10           10    1.105e-11           13    2.064e-11
+   2.297e+00         10           10    1.790e-11           12    1.661e-11
+   2.520e+00         10           10    3.112e-11           11    1.387e-11
+   2.764e+00         10           10    3.971e-11           10    1.104e-11
+   3.031e+00         10           10    5.135e-11            9    8.033e-12
+   3.325e+00         10           10    5.665e-11            7    9.964e-11
+   3.647e+00         10           10    6.277e-11            6    3.320e-11
+   4.000e+00         10           10    6.946e-11            3    9.996e-11
+               1.000e+00          4    1.584e-16
+               1.097e+00          8    1.633e-16
+               1.203e+00         10    1.600e-16
+               1.320e+00         12    1.021e-15
+               1.447e+00         13    2.662e-14
+               1.587e+00         14    2.705e-13
+               1.741e+00         15    1.477e-12
+               1.910e+00         15    5.070e-12
+               2.095e+00         16    1.377e-11
+               2.297e+00         17    2.927e-11
+               2.520e+00         17    5.321e-11
+               2.764e+00         17    7.721e-11
+               3.031e+00         17    9.901e-11
+               3.325e+00         18    1.151e-10
+               3.647e+00         18    1.271e-10
+               4.000e+00         18    1.444e-10
+Richardson: multi-shift block its 17, max sequential its 18, max column ||r||/||b|| 1.444e-10
+Richardson solve time: sequential (k updates + k KSPSolve) 9.4806e-01 s, multi-shift (set + KSPMatSolve) 8.0989e-01 s
+Richardson: frozen block its 75 (reason 2), max column ||r||/||b|| 3.607e-10, time 1.8981e+00 s
+Solve time: sequential (k updates + k GMRES) 6.2769e-01 s, multi-shift (set + batched GMRES, 10 block applies) 6.6396e-01 s
+Setup time: k diagonal updates 3.1739e-02 s, PCAIRSetMultiShift 2.8923e-02 s
+Apply time: k PCApply 5.7753e-02 s, multi-shift PCMatApply 4.4283e-02 s, shared-shift PCMatApply 2.6028e-02 s
+### band [10, 4*10] c_base=10 c_frozen=10
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 10., 10 block applies, 3.5167e-01 s
+   1.000e+01          3            3    1.799e-12            3    1.799e-12
+   1.097e+01          5            5    2.035e-12            5    8.256e-11
+   1.203e+01          5            5    3.547e-11            6    4.797e-11
+   1.320e+01          6            6    1.333e-12            7    1.414e-11
+   1.447e+01          6            6    3.749e-12            7    8.352e-11
+   1.587e+01          6            6    7.159e-12            8    1.547e-11
+   1.741e+01          6            6    1.087e-11            8    5.080e-11
+   1.910e+01          6            6    1.357e-11            9    8.699e-12
+   2.095e+01          6            6    1.515e-11            9    2.139e-11
+   2.297e+01          6            6    1.551e-11            9    4.567e-11
+   2.520e+01          6            6    1.484e-11            9    8.784e-11
+   2.764e+01          6            6    1.289e-11           10    1.359e-11
+   3.031e+01          6            6    1.083e-11           10    2.334e-11
+   3.325e+01          6            6    8.680e-12           10    3.732e-11
+   3.647e+01          6            6    6.812e-12           10    5.701e-11
+   4.000e+01          6            6    5.130e-12           10    8.298e-11
+               1.000e+01          3    6.185e-17
+               1.097e+01          6    1.652e-15
+               1.203e+01          7    1.489e-13
+               1.320e+01          7    1.397e-12
+               1.447e+01          8    5.239e-12
+               1.587e+01          8    1.161e-11
+               1.741e+01          8    1.954e-11
+               1.910e+01          8    2.580e-11
+               2.095e+01          8    2.866e-11
+               2.297e+01          8    2.913e-11
+               2.520e+01          8    2.661e-11
+               2.764e+01          8    2.244e-11
+               3.031e+01          8    1.721e-11
+               3.325e+01          8    1.285e-11
+               3.647e+01          8    9.100e-12
+               4.000e+01          8    6.417e-12
+Richardson: multi-shift block its 8, max sequential its 8, max column ||r||/||b|| 2.913e-11
+Richardson solve time: sequential (k updates + k KSPSolve) 3.3253e-01 s, multi-shift (set + KSPMatSolve) 3.2040e-01 s
+Richardson: frozen block its 10 (reason -4), max column ||r||/||b|| 5.300e+04, time 2.1272e-01 s
+Solve time: sequential (k updates + k GMRES) 3.1102e-01 s, multi-shift (set + batched GMRES, 6 block applies) 3.9632e-01 s
+Setup time: k diagonal updates 2.9045e-02 s, PCAIRSetMultiShift 2.7803e-02 s
+Apply time: k PCApply 3.7708e-02 s, multi-shift PCMatApply 3.1737e-02 s, shared-shift PCMatApply 1.8853e-02 s
+### band [10, 4*10] c_base=10 c_frozen=20
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 20., 9 block applies, 2.8902e-01 s
+   1.000e+01          3            3    1.799e-12            9    1.422e-11
+   1.097e+01          5            5    2.035e-12            8    5.017e-11
+   1.203e+01          5            5    3.547e-11            8    9.686e-12
+   1.320e+01          6            6    1.333e-12            7    3.906e-11
+   1.447e+01          6            6    3.749e-12            7    5.132e-12
+   1.587e+01          6            6    7.159e-12            6    2.039e-11
+   1.741e+01          6            6    1.087e-11            5    6.930e-11
+   1.910e+01          6            6    1.357e-11            4    7.090e-11
+   2.095e+01          6            6    1.515e-11            4    6.010e-11
+   2.297e+01          6            6    1.551e-11            5    3.853e-11
+   2.520e+01          6            6    1.484e-11            6    6.404e-12
+   2.764e+01          6            6    1.289e-11            6    3.830e-11
+   3.031e+01          6            6    1.083e-11            7    3.506e-12
+   3.325e+01          6            6    8.680e-12            7    1.096e-11
+   3.647e+01          6            6    6.812e-12            7    2.735e-11
+   4.000e+01          6            6    5.130e-12            7    5.768e-11
+               1.000e+01          3    6.185e-17
+               1.097e+01          6    1.652e-15
+               1.203e+01          7    1.489e-13
+               1.320e+01          7    1.397e-12
+               1.447e+01          8    5.239e-12
+               1.587e+01          8    1.161e-11
+               1.741e+01          8    1.954e-11
+               1.910e+01          8    2.580e-11
+               2.095e+01          8    2.866e-11
+               2.297e+01          8    2.913e-11
+               2.520e+01          8    2.661e-11
+               2.764e+01          8    2.244e-11
+               3.031e+01          8    1.721e-11
+               3.325e+01          8    1.285e-11
+               3.647e+01          8    9.100e-12
+               4.000e+01          8    6.417e-12
+Richardson: multi-shift block its 8, max sequential its 8, max column ||r||/||b|| 2.913e-11
+Richardson solve time: sequential (k updates + k KSPSolve) 3.2960e-01 s, multi-shift (set + KSPMatSolve) 3.1861e-01 s
+Richardson: frozen block its 300 (reason -3), max column ||r||/||b|| 8.494e-01, time 5.0500e+00 s
+Solve time: sequential (k updates + k GMRES) 3.0834e-01 s, multi-shift (set + batched GMRES, 6 block applies) 4.2480e-01 s
+Setup time: k diagonal updates 2.8963e-02 s, PCAIRSetMultiShift 2.9169e-02 s
+Apply time: k PCApply 3.7698e-02 s, multi-shift PCMatApply 3.1292e-02 s, shared-shift PCMatApply 1.9202e-02 s
+### band [10, 4*10] c_base=10 c_frozen=40
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 40., 10 block applies, 2.9249e-01 s
+   1.000e+01          3            3    1.799e-12           10    8.730e-11
+   1.097e+01          5            5    2.035e-12           10    2.900e-11
+   1.203e+01          5            5    3.547e-11           10    9.008e-12
+   1.320e+01          6            6    1.333e-12            9    3.472e-11
+   1.447e+01          6            6    3.749e-12            9    1.075e-11
+   1.587e+01          6            6    7.159e-12            8    5.487e-11
+   1.741e+01          6            6    1.087e-11            8    1.674e-11
+   1.910e+01          6            6    1.357e-11            8    4.589e-12
+   2.095e+01          6            6    1.515e-11            7    3.109e-11
+   2.297e+01          6            6    1.551e-11            7    7.785e-12
+   2.520e+01          6            6    1.484e-11            6    7.120e-11
+   2.764e+01          6            6    1.289e-11            6    1.439e-11
+   3.031e+01          6            6    1.083e-11            6    1.981e-12
+   3.325e+01          6            6    8.680e-12            5    1.642e-11
+   3.647e+01          6            6    6.812e-12            5    4.162e-13
+   4.000e+01          6            6    5.130e-12            3    3.610e-14
+               1.000e+01          3    6.185e-17
+               1.097e+01          6    1.652e-15
+               1.203e+01          7    1.489e-13
+               1.320e+01          7    1.397e-12
+               1.447e+01          8    5.239e-12
+               1.587e+01          8    1.161e-11
+               1.741e+01          8    1.954e-11
+               1.910e+01          8    2.580e-11
+               2.095e+01          8    2.866e-11
+               2.297e+01          8    2.913e-11
+               2.520e+01          8    2.661e-11
+               2.764e+01          8    2.244e-11
+               3.031e+01          8    1.721e-11
+               3.325e+01          8    1.285e-11
+               3.647e+01          8    9.100e-12
+               4.000e+01          8    6.417e-12
+Richardson: multi-shift block its 8, max sequential its 8, max column ||r||/||b|| 2.913e-11
+Richardson solve time: sequential (k updates + k KSPSolve) 3.3454e-01 s, multi-shift (set + KSPMatSolve) 3.1217e-01 s
+Richardson: frozen block its 75 (reason 2), max column ||r||/||b|| 3.825e-10, time 1.0966e+00 s
+Solve time: sequential (k updates + k GMRES) 3.3131e-01 s, multi-shift (set + batched GMRES, 6 block applies) 4.4645e-01 s
+Setup time: k diagonal updates 2.9593e-02 s, PCAIRSetMultiShift 3.4073e-02 s
+Apply time: k PCApply 3.7771e-02 s, multi-shift PCMatApply 3.2084e-02 s, shared-shift PCMatApply 1.9082e-02 s
+### band [100, 4*100] c_base=100 c_frozen=100
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 100., 6 block applies, 1.6494e-01 s
+   1.000e+02          3            3    3.509e-13            3    3.509e-13
+   1.097e+02          4            4    1.019e-13            4    2.501e-12
+   1.203e+02          4            4    9.393e-13            4    3.364e-11
+   1.320e+02          4            4    2.773e-12            5    5.813e-13
+   1.447e+02          4            4    5.100e-12            5    1.984e-12
+   1.587e+02          4            4    7.326e-12            5    4.974e-12
+   1.741e+02          4            4    9.009e-12            5    9.997e-12
+   1.910e+02          4            4    9.809e-12            5    1.768e-11
+   2.095e+02          4            4    9.851e-12            5    2.816e-11
+   2.297e+02          4            4    9.341e-12            5    4.158e-11
+   2.520e+02          4            4    8.490e-12            5    5.820e-11
+   2.764e+02          4            4    7.420e-12            5    7.738e-11
+   3.031e+02          4            4    6.275e-12            5    9.928e-11
+   3.325e+02          4            4    5.131e-12            6    1.487e-12
+   3.647e+02          4            4    4.142e-12            6    1.880e-12
+   4.000e+02          4            4    3.288e-12            6    2.310e-12
+               1.000e+02          3    5.279e-17
+               1.097e+02          4    1.177e-14
+               1.203e+02          4    1.873e-13
+               1.320e+02          5    7.216e-13
+               1.447e+02          5    1.550e-12
+               1.587e+02          5    2.429e-12
+               1.741e+02          5    3.096e-12
+               1.910e+02          5    3.476e-12
+               2.095e+02          5    3.455e-12
+               2.297e+02          5    3.263e-12
+               2.520e+02          5    2.901e-12
+               2.764e+02          5    2.472e-12
+               3.031e+02          5    1.959e-12
+               3.325e+02          5    1.534e-12
+               3.647e+02          5    1.180e-12
+               4.000e+02          5    8.816e-13
+Richardson: multi-shift block its 5, max sequential its 5, max column ||r||/||b|| 3.476e-12
+Richardson solve time: sequential (k updates + k KSPSolve) 1.1633e-01 s, multi-shift (set + KSPMatSolve) 1.1773e-01 s
+Richardson: frozen block its 10 (reason -4), max column ||r||/||b|| 5.704e+04, time 1.3924e-01 s
+Solve time: sequential (k updates + k GMRES) 1.2741e-01 s, multi-shift (set + batched GMRES, 4 block applies) 2.3827e-01 s
+Setup time: k diagonal updates 2.6736e-02 s, PCAIRSetMultiShift 2.6393e-02 s
+Apply time: k PCApply 1.7618e-02 s, multi-shift PCMatApply 1.5826e-02 s, shared-shift PCMatApply 1.0635e-02 s
+### band [100, 4*100] c_base=100 c_frozen=200
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 200., 5 block applies, 1.4370e-01 s
+   1.000e+02          3            3    3.509e-13            5    2.286e-11
+   1.097e+02          4            4    1.019e-13            5    8.771e-12
+   1.203e+02          4            4    9.393e-13            5    2.962e-12
+   1.320e+02          4            4    2.773e-12            5    8.495e-13
+   1.447e+02          4            4    5.100e-12            4    5.877e-11
+   1.587e+02          4            4    7.326e-12            4    1.281e-11
+   1.741e+02          4            4    9.009e-12            4    1.364e-12
+   1.910e+02          4            4    9.809e-12            3    3.500e-11
+   2.095e+02          4            4    9.851e-12            3    3.148e-11
+   2.297e+02          4            4    9.341e-12            4    7.962e-13
+   2.520e+02          4            4    8.490e-12            4    5.155e-12
+   2.764e+02          4            4    7.420e-12            4    1.665e-11
+   3.031e+02          4            4    6.275e-12            4    3.836e-11
+   3.325e+02          4            4    5.131e-12            4    7.150e-11
+   3.647e+02          4            4    4.142e-12            5    4.595e-13
+   4.000e+02          4            4    3.288e-12            5    7.724e-13
+               1.000e+02          3    5.279e-17
+               1.097e+02          4    1.177e-14
+               1.203e+02          4    1.873e-13
+               1.320e+02          5    7.216e-13
+               1.447e+02          5    1.550e-12
+               1.587e+02          5    2.429e-12
+               1.741e+02          5    3.096e-12
+               1.910e+02          5    3.476e-12
+               2.095e+02          5    3.455e-12
+               2.297e+02          5    3.263e-12
+               2.520e+02          5    2.901e-12
+               2.764e+02          5    2.472e-12
+               3.031e+02          5    1.959e-12
+               3.325e+02          5    1.534e-12
+               3.647e+02          5    1.180e-12
+               4.000e+02          5    8.816e-13
+Richardson: multi-shift block its 5, max sequential its 5, max column ||r||/||b|| 3.476e-12
+Richardson solve time: sequential (k updates + k KSPSolve) 1.2032e-01 s, multi-shift (set + KSPMatSolve) 1.1725e-01 s
+Richardson: frozen block its 300 (reason -3), max column ||r||/||b|| 8.846e-01, time 3.7317e+00 s
+Solve time: sequential (k updates + k GMRES) 1.2757e-01 s, multi-shift (set + batched GMRES, 4 block applies) 2.5435e-01 s
+Setup time: k diagonal updates 2.6936e-02 s, PCAIRSetMultiShift 2.7375e-02 s
+Apply time: k PCApply 1.7076e-02 s, multi-shift PCMatApply 1.6493e-02 s, shared-shift PCMatApply 1.0822e-02 s
+### band [100, 4*100] c_base=100 c_frozen=400
+Frozen solve time: batched GMRES with the hierarchy built at c_frozen 400., 6 block applies, 1.5672e-01 s
+   1.000e+02          3            3    3.509e-13            6    2.333e-12
+   1.097e+02          4            4    1.019e-13            5    9.686e-11
+   1.203e+02          4            4    9.393e-13            5    5.076e-11
+   1.320e+02          4            4    2.773e-12            5    2.593e-11
+   1.447e+02          4            4    5.100e-12            5    1.287e-11
+   1.587e+02          4            4    7.326e-12            5    6.219e-12
+   1.741e+02          4            4    9.009e-12            5    2.811e-12
+   1.910e+02          4            4    9.809e-12            5    1.209e-12
+   2.095e+02          4            4    9.851e-12            5    4.807e-13
+   2.297e+02          4            4    9.341e-12            4    5.415e-11
+   2.520e+02          4            4    8.490e-12            4    2.156e-11
+   2.764e+02          4            4    7.420e-12            4    7.270e-12
+   3.031e+02          4            4    6.275e-12            4    1.900e-12
+   3.325e+02          4            4    5.131e-12            4    3.069e-13
+   3.647e+02          4            4    4.142e-12            3    3.818e-11
+   4.000e+02          4            4    3.288e-12            3    8.586e-15
+               1.000e+02          3    5.279e-17
+               1.097e+02          4    1.177e-14
+               1.203e+02          4    1.873e-13
+               1.320e+02          5    7.216e-13
+               1.447e+02          5    1.550e-12
+               1.587e+02          5    2.429e-12
+               1.741e+02          5    3.096e-12
+               1.910e+02          5    3.476e-12
+               2.095e+02          5    3.455e-12
+               2.297e+02          5    3.263e-12
+               2.520e+02          5    2.901e-12
+               2.764e+02          5    2.472e-12
+               3.031e+02          5    1.959e-12
+               3.325e+02          5    1.534e-12
+               3.647e+02          5    1.180e-12
+               4.000e+02          5    8.816e-13
+Richardson: multi-shift block its 5, max sequential its 5, max column ||r||/||b|| 3.476e-12
+Richardson solve time: sequential (k updates + k KSPSolve) 1.1471e-01 s, multi-shift (set + KSPMatSolve) 1.1535e-01 s
+Richardson: frozen block its 76 (reason 2), max column ||r||/||b|| 3.025e-10, time 9.6188e-01 s
+Solve time: sequential (k updates + k GMRES) 1.2730e-01 s, multi-shift (set + batched GMRES, 4 block applies) 2.4432e-01 s
+Setup time: k diagonal updates 2.9111e-02 s, PCAIRSetMultiShift 2.6317e-02 s
+Apply time: k PCApply 1.7433e-02 s, multi-shift PCMatApply 1.6818e-02 s, shared-shift PCMatApply 1.1183e-02 s

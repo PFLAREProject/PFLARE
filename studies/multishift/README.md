@@ -90,6 +90,52 @@ PETSc's block Richardson (`KSPMatSolve_Richardson`) only ever applies Amat throu
 
 Raw log: `sweep_richardson_n200_cpu1.log`.
 
+## Against a frozen preconditioner, within shift bands
+
+The useful baseline is a *frozen* preconditioner: one PCAIR hierarchy applied unchanged to all k columns, which is just the plain `PCMatApply`. It costs the same per apply as the shared-shift block apply, so it is 20–55% cheaper per apply than the multi-shift, and needs no update.
+
+The test: 16 shifts spanning a factor of 4 (`c` log-spaced in `[c_lo, 4 c_lo]`). The multi-shift hierarchy is built at the bottom of the band (`-c_base c_lo`). The frozen hierarchy is a fresh build at the bottom, middle or top of the band (`-c_frozen`). n = 200², one core, rtol 1e-10. Times are for the batched solves: GMRES with my driver, and Richardson through `KSPMatSolve` with the shifted shell Amat. Sequential updates gave exactly the multi-shift iteration counts in every column.
+
+| band | frozen built at | GMRES its, multi-shift | GMRES its, frozen | GMRES time multi (of which set) / frozen (s) | Richardson its multi (seq max) | Richardson its frozen | Richardson time seq / multi / frozen (s) |
+|---|---|---|---|---|---|---|---|
+| [0.001, 0.004] | 0.001 | 6-11 | 6-8 | 1.49 (0.04) / 0.70 | 18 (19) | 10 | 0.96 / 1.00 / 0.41 |
+| [0.001, 0.004] | 0.002 | 6-11 | 6-7 | 1.29 (0.04) / 0.64 | 18 (19) | 9 | 0.95 / 0.99 / 0.31 |
+| [0.001, 0.004] | 0.004 | 6-11 | 6-9 | 1.07 (0.03) / 0.75 | 18 (19) | 12 | 0.92 / 0.90 / 0.40 |
+| [0.01, 0.04] | 0.01 | 6-15 | 6-16 | 1.31 (0.03) / 1.08 | 28 (30) | 34 | 1.49 / 1.38 / 1.15 |
+| [0.01, 0.04] | 0.02 | 6-15 | 7-13 | 1.39 (0.03) / 0.94 | 28 (30) | 24 | 1.48 / 1.43 / 0.79 |
+| [0.01, 0.04] | 0.04 | 6-15 | 6-17 | 1.27 (0.03) / 1.11 | 28 (30) | 29 | 1.50 / 1.43 / 0.94 |
+| [0.1, 0.4] | 0.1 | 6-14 | 6-30 | 1.28 (0.05) / 1.89 | 28 (30) | diverged | 1.47 / 1.51 / - |
+| [0.1, 0.4] | 0.2 | 6-14 | 6-19 | 1.30 (0.05) / 1.18 | 28 (30) | 107 | 1.45 / 1.35 / 3.14 |
+| [0.1, 0.4] | 0.4 | 6-14 | 5-36 | 1.24 (0.03) / 2.01 | 28 (30) | 72 | 1.43 / 1.39 / 2.11 |
+| [1, 4] | 1 | 4-10 | 4-23 | 0.68 (0.03) / 1.29 | 17 (18) | diverged | 0.90 / 0.82 / - |
+| [1, 4] | 2 | 4-10 | 6-15 | 0.71 (0.03) / 0.86 | 17 (18) | not conv. in 300 | 0.88 / 0.76 / - |
+| [1, 4] | 4 | 4-10 | 3-23 | 0.66 (0.03) / 1.22 | 17 (18) | 75 | 0.95 / 0.81 / 1.90 |
+| [10, 40] | 10 | 3-6 | 3-10 | 0.40 (0.03) / 0.35 | 8 (8) | diverged | 0.33 / 0.32 / - |
+| [10, 40] | 20 | 3-6 | 4-9 | 0.42 (0.03) / 0.29 | 8 (8) | not conv. in 300 | 0.33 / 0.32 / - |
+| [10, 40] | 40 | 3-6 | 3-10 | 0.45 (0.03) / 0.29 | 8 (8) | 75 | 0.33 / 0.31 / 1.10 |
+| [100, 400] | 100 | 3-4 | 3-6 | 0.24 (0.03) / 0.16 | 5 (5) | diverged | 0.12 / 0.12 / - |
+| [100, 400] | 200 | 3-4 | 3-5 | 0.25 (0.03) / 0.14 | 5 (5) | not conv. in 300 | 0.12 / 0.12 / - |
+| [100, 400] | 400 | 3-4 | 3-6 | 0.24 (0.03) / 0.16 | 5 (5) | 76 | 0.11 / 0.12 / 0.96 |
+
+**Outer GMRES.** Within a factor-4 band, a frozen preconditioner costs at most 1.3–3.6x more iterations, and less with a good anchor. GMRES absorbs the spread. On one CPU core the multi-shift's cheaper iterations (it needs fewer, with identical counts to sequential updates) roughly offset its 20–55% more expensive apply:
+
+- It wins clearly in the transition bands ([0.1, 0.4] and [1, 4]) against a bottom or top anchor.
+- It is roughly even against a mid-band anchor.
+- It loses at the small-shift and large-shift ends, where frozen needs almost the same iterations.
+
+**Outer Richardson.** This is where the multi-shift makes the difference. Once the shift matters, the frozen Richardson diverges with a bottom or mid-band anchor, and needs about 75 iterations with a top anchor, against 5–17 for the multi-shift. The 75 is not an AIR effect. When the diagonal dominates, `M A ≈ D_j / D_frozen`, which lies in `[1/4, 1]` for a top anchor, so the contraction is at best `1 - 1/4` and 1e-10 takes about 80 iterations. A bottom anchor gives `[1, 4]`, so `I - M A` has spectral radius up to 3 and diverges. The multi-shift gives every column its own diagonal, so its Richardson counts equal the sequential updates. Anywhere a stationary or fixed-iteration outer solve is used (time steppers with one or two iterations, or nested inner solves), a frozen band preconditioner is not robust and the multi-shift is.
+
+**A finding about the existing diagonal update, independent of the multi-shift.** For small shifts the update is *worse than not updating*. Built at c = 0.001 (GMRES / Richardson iterations):
+
+| c | fresh | update | frozen |
+|---|---|---|---|
+| 0.002 | 6 / 7 | 10 / 16 | 8 / 9 |
+| 0.003 | 6 / 7 | 11 / 19 | 8 / 11 |
+
+This is the same with recomputed coefficients. It is also unchanged with the R rescale switched off, and the R rescale is essential at large shifts (without it, c = 1e2 needs 195 GMRES iterations). So the cause is elsewhere in the update: the lumped coarse-grid shift or the smoothers' diagonal change. A cheap guard would be to skip the update when the relative shift is small, but that needs investigating.
+
+Raw log: `sweep_band_n200_cpu1.log`, script `sweep_band.sh`.
+
 ## What has to change
 
 ### In PETSc: nothing for the cycle

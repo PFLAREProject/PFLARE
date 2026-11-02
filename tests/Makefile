@@ -358,6 +358,9 @@ run_tests_no_load_short_serial:
 	./adv_diff_fd_multishift -n 30 -pc_air_symmetric -pc_air_inverse_type neumann
 	@echo "Test the multi-shift block V-cycle of AIRG in a batched GMRES and block Richardson against sequential diagonal updates"
 	./adv_diff_fd_multishift -n 30 -solve -richardson -ksp_rtol $(KSP_RTOL)
+	@echo "Test the multi-shift block V-cycle of AIRG in a shift band, against a frozen preconditioner"
+	./adv_diff_fd_multishift -n 30 -solve -richardson -frozen -frozen_max_it 50 -ksp_rtol $(KSP_RTOL) -c_base 1 \
+	 -c_frozen 4 -c_values 1,1.5,2,3,4
 	@echo "Test AIRG with a few steps of adaptive backward-Euler TS with upwind FD advection and a diagonal update"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_steps 10 -pc_air_diag_update
