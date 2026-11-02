@@ -1,11 +1,14 @@
 module pcair_shell
 
    use petscksp
-   use c_petsc_interfaces, only: c_PCGetStructureFlag, PCGetSetupCalled_c, PCMarkNotSetUp_c
+   use c_petsc_interfaces, only: c_PCGetStructureFlag, PCGetSetupCalled_c, PCMarkNotSetUp_c, &
+         create_multishift_restrictor_c
    use pcair_data_type, only: pc_air_multigrid_data, air_options
    use air_mg_setup, only: setup_air_pcmg
-   use air_data_type_routines, only: reset_air_data, destroy_air_data
+   use air_data_type_routines, only: reset_air_data, destroy_air_data, destroy_multishift_data
    use air_diagonal_update, only: update_air_diag
+   use air_multishift, only: setup_air_multishift
+   use iso_c_binding, only: c_int
    use air_mg_stats, only: print_stats
 
 #include "petsc/finclude/petscksp.h"
@@ -162,6 +165,10 @@ module pcair_shell
       ! ~~~~~~    
 
       call update_air_diag(pc_air_data%air_data, pmat)
+      ! A multi-shift is stored relative to the current hierarchy, so recompute it
+      if (pc_air_data%air_data%multishift_active) then
+         call set_multishift_pc_air_data(pc_air_data, pc_air_data%air_data%ms_dshift)
+      end if
       ! The polynomial orders can change with an update, so print the stats as a setup does
       ! This is collective so call it on all ranks
       if (pc_air_data%air_data%options%print_stats_timings) then
@@ -169,6 +176,100 @@ module pcair_shell
       end if
 
    end subroutine diag_update_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine set_multishift_pc_air_data(pc_air_data, dshift)
+
+      ! Sets up a multi-shift (see AIR_MultiShift.F90) from the dense block of shifts dshift
+      ! The block applies go through the underlying PCMG as normal, with the restrictors
+      ! of the PCMG swapped for matshells that apply the per column R scaling to a dense
+      ! block
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+      type(tMat), intent(in)                        :: dshift
+      ! ~~~~~~
+
+      ! Put back the original restrictors before the shells they are wrapped in go
+      call uninstall_multishift_pcmg(pc_air_data)
+      call setup_air_multishift(pc_air_data%air_data, dshift)
+      call install_multishift_pcmg(pc_air_data)
+
+   end subroutine set_multishift_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine clear_multishift_pc_air_data(pc_air_data)
+
+      ! Removes any multi-shift
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+      ! ~~~~~~
+
+      call uninstall_multishift_pcmg(pc_air_data)
+      call destroy_multishift_data(pc_air_data%air_data)
+
+   end subroutine clear_multishift_pc_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine install_multishift_pcmg(pc_air_data)
+
+      ! Swaps the restrictors of the PCMG for matshells that do R (C_l .* B) on a dense block
+      ! The smoothers and coarse grid solver are our own pcshells, which pick up the shifts
+      ! from the air data. With a symmetric hierarchy R = P^T is never scaled
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+
+      integer :: our_level, no_levels, errorcode
+      integer(c_int) :: error_int
+      PetscInt :: petsc_level
+      PetscErrorCode :: ierr
+      type(tMat) :: shell
+      ! ~~~~~~
+
+      if (pc_air_data%air_data%options%symmetric) return
+      no_levels = pc_air_data%air_data%no_levels
+      allocate(pc_air_data%air_data%ms_restrict_shell(no_levels))
+      do our_level = 1, no_levels - 1
+         call create_multishift_restrictor_c(pc_air_data%air_data%restrictors(our_level)%v, &
+                  pc_air_data%air_data%ms_rscale(our_level)%v, shell%v, error_int)
+         if (error_int /= 0) then
+            print *, "Failed to create the multi-shift restrictor"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         pc_air_data%air_data%ms_restrict_shell(our_level) = shell
+         petsc_level = no_levels - our_level
+         call PCMGSetRestriction(pc_air_data%pcmg, petsc_level, shell, ierr)
+      end do
+
+   end subroutine install_multishift_pcmg
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine uninstall_multishift_pcmg(pc_air_data)
+
+      ! Puts the original restrictors back in the PCMG
+
+      ! ~~~~~~
+      type(pc_air_multigrid_data), intent(inout)    :: pc_air_data
+
+      integer :: our_level, no_levels
+      PetscInt :: petsc_level
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      if (.NOT. allocated(pc_air_data%air_data%ms_restrict_shell)) return
+      no_levels = pc_air_data%air_data%no_levels
+      do our_level = 1, no_levels - 1
+         petsc_level = no_levels - our_level
+         call PCMGSetRestriction(pc_air_data%pcmg, petsc_level, pc_air_data%air_data%restrictors(our_level), ierr)
+      end do
+
+   end subroutine uninstall_multishift_pcmg
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

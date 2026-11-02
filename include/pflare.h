@@ -246,6 +246,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetReusePolyCoeffs(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC, PetscBool);
+PETSC_EXTERN PetscErrorCode PCAIRSetMultiShift(PC, Mat);
 PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyCoeffs(PC, PetscInt, int, PetscReal *, PetscInt, PetscInt);
 

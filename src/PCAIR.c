@@ -17,6 +17,7 @@ PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
 PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied, int *error_code);
 PETSC_EXTERN void pcair_shell_get_pcmg_c(PC *pc, PC *pcmg);
+PETSC_EXTERN void pcair_shell_set_multishift_c(PC *pc, Mat *D, int *error_code);
 PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, PetscReal fraction_swap,
@@ -2878,6 +2879,41 @@ PETSC_EXTERN PetscErrorCode PCAIRSetDiagUpdate(PC pc, PetscBool input_bool)
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRSetDiagUpdate_c(&pc, input_bool);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/*@
+  PCAIRSetMultiShift - (Prototype) Sets a block of diagonal shifts so that a subsequent `PCMatApply()` on k columns
+  preconditions column j for Pmat_base + diag(Dshift(:,j)), sharing every sparse matrix by dense matrix product
+  between the columns
+
+  Logically Collective
+
+  Input Parameters:
++ pc     - the preconditioner context
+- Dshift - dense n x k matrix with the row layout of the Pmat, column j is diag(D_j) - diag(Pmat the hierarchy was built from),
+           or `NULL` to clear the multi-shift
+
+  Notes:
+  Column j gets the hierarchy a diagonal update (`PCAIRSetDiagUpdate()`) with `-pc_air_reuse_poly_coeffs` to
+  Pmat_base + D_j would give. Requires `-pc_air_matrix_free_polys` and `-pc_air_coarsest_matrix_free_polys`.
+  The multi-shift is recomputed after any later diagonal update and cleared by a rebuild. `PCApply()` is unaffected.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetDiagUpdate()`, `PCMatApply()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetMultiShift(PC pc, Mat Dshift)
+{
+   PC *pc_air_shell;
+   int error_code = 0;
+
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   pc_air_shell = (PC *)pc->data;
+   PetscCall(PCSetUp(pc));
+   PetscCall(PCSetReusePreconditioner(*pc_air_shell, pc->reusepreconditioner));
+   PetscCall(PCSetUp(*pc_air_shell));
+   pcair_shell_set_multishift_c(pc_air_shell, &Dshift, &error_code);
+   PetscCall((PetscErrorCode)error_code);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@

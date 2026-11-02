@@ -63,6 +63,13 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_int) :: flag
       end subroutine c_PCGetStructureFlag
+
+      subroutine create_multishift_restrictor_c(R_array, C_array, shell_array, error_code) &
+         bind(c, name="create_multishift_restrictor_c")
+         use iso_c_binding
+         integer(c_long_long) :: R_array, C_array, shell_array
+         integer(c_int) :: error_code
+      end subroutine create_multishift_restrictor_c
  
    end interface
    

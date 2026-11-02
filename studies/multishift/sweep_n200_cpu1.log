@@ -1,0 +1,161 @@
+### k=1
+Max relative difference: zero shift vs PCMG 0.000e+00, multi-shift vs single rhs updates 1.424e-16, after an update 1.418e-16, cleared vs PCMG 0.000e+00
+           c    seq its    multi its multi ||r||/||b||
+   1.000e+00         22           22    9.195e-11
+Solve time: sequential (k updates + k GMRES) 1.3468e-01 s, multi-shift (set + batched GMRES, 22 block applies) 2.2380e-01 s
+Setup time: k diagonal updates 2.6068e-03 s, PCAIRSetMultiShift 1.0376e-02 s
+Apply time: k PCApply 4.1410e-03 s, multi-shift PCMatApply 4.9015e-03 s, shared-shift PCMatApply 4.7392e-03 s
+### k=4
+Max relative difference: zero shift vs PCMG 0.000e+00, multi-shift vs single rhs updates 1.835e-16, after an update 8.647e-14, cleared vs PCMG 1.590e-16
+           c    seq its    multi its multi ||r||/||b||
+   0.000e+00          6            6    2.306e-11
+   1.000e-04          7            7    1.535e-12
+   3.162e-01         22           22    6.583e-11
+   1.000e+03          5            5    9.313e-13
+Solve time: sequential (k updates + k GMRES) 2.2547e-01 s, multi-shift (set + batched GMRES, 22 block applies) 6.2894e-01 s
+Setup time: k diagonal updates 9.5683e-03 s, PCAIRSetMultiShift 2.7048e-02 s
+Apply time: k PCApply 1.6470e-02 s, multi-shift PCMatApply 9.3200e-03 s, shared-shift PCMatApply 7.7229e-03 s
+### k=8
+Max relative difference: zero shift vs PCMG 0.000e+00, multi-shift vs single rhs updates 1.835e-16, after an update 8.647e-14, cleared vs PCMG 1.575e-16
+           c    seq its    multi its multi ||r||/||b||
+   0.000e+00          6            6    2.306e-11
+   1.000e-04          7            7    1.535e-12
+   1.468e-03         10           10    6.780e-12
+   2.154e-02         17           17    4.901e-11
+   3.162e-01         22           22    6.514e-11
+   4.642e+00         19           19    3.758e-11
+   6.813e+01          8            8    7.120e-11
+   1.000e+03          5            5    1.024e-12
+Solve time: sequential (k updates + k GMRES) 4.8242e-01 s, multi-shift (set + batched GMRES, 22 block applies) 1.1776e+00 s
+Setup time: k diagonal updates 2.1181e-02 s, PCAIRSetMultiShift 1.6570e-02 s
+Apply time: k PCApply 3.9761e-02 s, multi-shift PCMatApply 1.9915e-02 s, shared-shift PCMatApply 1.4649e-02 s
+### k=16
+Max relative difference: zero shift vs PCMG 0.000e+00, multi-shift vs single rhs updates 1.835e-16, after an update 8.809e-14, cleared vs PCMG 1.668e-16
+           c    seq its    multi its multi ||r||/||b||
+   0.000e+00          6            6    2.306e-11
+   1.000e-04          7            7    1.535e-12
+   3.162e-04          7            7    5.286e-11
+   1.000e-03          9            9    1.261e-11
+   3.162e-03         11           11    9.703e-11
+   1.000e-02         15           15    3.587e-11
+   3.162e-02         18           18    2.770e-11
+   1.000e-01         20           20    8.803e-11
+   3.162e-01         22           22    6.651e-11
+   1.000e+00         22           22    9.892e-11
+   3.162e+00         20           20    7.762e-11
+   1.000e+01         15           15    5.904e-11
+   3.162e+01         11           11    1.313e-11
+   1.000e+02          8            8    5.066e-12
+   3.162e+02          6            6    4.664e-12
+   1.000e+03          5            5    8.351e-13
+Solve time: sequential (k updates + k GMRES) 1.0667e+00 s, multi-shift (set + batched GMRES, 22 block applies) 2.9129e+00 s
+Setup time: k diagonal updates 4.6423e-02 s, PCAIRSetMultiShift 1.1342e-01 s
+Apply time: k PCApply 7.0213e-02 s, multi-shift PCMatApply 5.1284e-02 s, shared-shift PCMatApply 3.2994e-02 s
+### k=32
+Max relative difference: zero shift vs PCMG 0.000e+00, multi-shift vs single rhs updates 1.865e-16, after an update 8.796e-14, cleared vs PCMG 1.746e-16
+           c    seq its    multi its multi ||r||/||b||
+   0.000e+00          6            6    2.306e-11
+   1.000e-04          7            7    1.535e-12
+   1.711e-04          7            7    6.152e-12
+   2.929e-04          7            7    3.877e-11
+   5.012e-04          8            8    8.546e-12
+   8.577e-04          9            9    4.999e-12
+   1.468e-03         10           10    6.806e-12
+   2.512e-03         11           11    1.905e-11
+   4.299e-03         12           12    7.709e-11
+   7.356e-03         14           14    3.914e-11
+   1.259e-02         16           16    2.239e-11
+   2.154e-02         17           17    4.769e-11
+   3.687e-02         18           18    5.997e-11
+   6.310e-02         20           20    3.365e-11
+   1.080e-01         21           21    3.657e-11
+   1.848e-01         21           21    7.657e-11
+   3.162e-01         22           22    5.954e-11
+   5.412e-01         23           23    4.070e-11
+   9.261e-01         23           23    5.082e-11
+   1.585e+00         22           22    6.567e-11
+   2.712e+00         21           21    5.167e-11
+   4.642e+00         19           19    3.930e-11
+   7.943e+00         16           16    5.612e-11
+   1.359e+01         14           14    3.670e-11
+   2.326e+01         12           12    1.940e-11
+   3.981e+01         10           10    2.272e-11
+   6.813e+01          8            8    7.787e-11
+   1.166e+02          7            7    5.044e-11
+   1.995e+02          6            6    4.563e-11
+   3.415e+02          6            6    2.488e-12
+   5.843e+02          5            5    1.356e-11
+   1.000e+03          5            5    8.738e-13
+Solve time: sequential (k updates + k GMRES) 2.3251e+00 s, multi-shift (set + batched GMRES, 23 block applies) 6.3266e+00 s
+Setup time: k diagonal updates 8.3793e-02 s, PCAIRSetMultiShift 3.1663e-01 s
+Apply time: k PCApply 1.3897e-01 s, multi-shift PCMatApply 1.1059e-01 s, shared-shift PCMatApply 7.2108e-02 s
+### k=64
+Max relative difference: zero shift vs PCMG 0.000e+00, multi-shift vs single rhs updates 1.889e-16, after an update 9.021e-14, cleared vs PCMG 1.999e-16
+           c    seq its    multi its multi ||r||/||b||
+   0.000e+00          6            6    2.306e-11
+   1.000e-04          7            7    1.535e-12
+   1.297e-04          7            7    2.835e-12
+   1.682e-04          7            7    5.769e-12
+   2.181e-04          7            7    1.353e-11
+   2.829e-04          7            7    3.440e-11
+   3.669e-04          7            7    9.573e-11
+   4.758e-04          8            8    6.573e-12
+   6.171e-04          8            8    2.347e-11
+   8.002e-04          8            8    9.145e-11
+   1.038e-03          9            9    1.578e-11
+   1.346e-03          9            9    7.717e-11
+   1.746e-03         10           10    2.234e-11
+   2.264e-03         11           11    8.897e-12
+   2.936e-03         11           11    5.805e-11
+   3.808e-03         12           12    3.325e-11
+   4.938e-03         13           13    2.145e-11
+   6.404e-03         14           14    1.522e-11
+   8.305e-03         14           14    8.337e-11
+   1.077e-02         15           15    4.560e-11
+   1.397e-02         16           16    3.772e-11
+   1.812e-02         17           17    2.407e-11
+   2.349e-02         17           17    6.772e-11
+   3.047e-02         18           18    2.726e-11
+   3.952e-02         18           18    9.398e-11
+   5.125e-02         19           19    5.107e-11
+   6.646e-02         20           20    3.751e-11
+   8.620e-02         20           20    6.002e-11
+   1.118e-01         21           21    3.634e-11
+   1.450e-01         21           21    6.223e-11
+   1.880e-01         21           21    8.542e-11
+   2.438e-01         22           22    4.007e-11
+   3.162e-01         22           22    6.492e-11
+   4.101e-01         22           22    7.345e-11
+   5.319e-01         23           23    4.436e-11
+   6.898e-01         23           23    3.951e-11
+   8.946e-01         23           23    4.689e-11
+   1.160e+00         23           23    4.007e-11
+   1.505e+00         22           22    7.764e-11
+   1.951e+00         22           22    4.536e-11
+   2.531e+00         21           21    5.878e-11
+   3.282e+00         20           20    6.292e-11
+   4.256e+00         19           19    3.957e-11
+   5.520e+00         18           18    3.507e-11
+   7.159e+00         17           17    3.876e-11
+   9.284e+00         16           16    2.893e-11
+   1.204e+01         14           14    8.901e-11
+   1.562e+01         13           13    6.344e-11
+   2.025e+01         12           12    6.333e-11
+   2.626e+01         11           11    6.670e-11
+   3.406e+01         10           10    6.382e-11
+   4.417e+01         10           10    1.060e-11
+   5.729e+01          9            9    1.760e-11
+   7.430e+01          8            8    3.522e-11
+   9.635e+01          8            8    6.909e-12
+   1.250e+02          7            7    3.140e-11
+   1.621e+02          7            7    5.606e-12
+   2.102e+02          6            6    4.660e-11
+   2.726e+02          6            6    8.547e-12
+   3.535e+02          6            6    1.768e-12
+   4.584e+02          5            5    4.390e-11
+   5.946e+02          5            5    1.196e-11
+   7.711e+02          5            5    2.793e-12
+   1.000e+03          5            5    9.953e-13
+Solve time: sequential (k updates + k GMRES) 4.6326e+00 s, multi-shift (set + batched GMRES, 23 block applies) 1.3297e+01 s
+Setup time: k diagonal updates 1.5704e-01 s, PCAIRSetMultiShift 5.6015e-01 s
+Apply time: k PCApply 2.7368e-01 s, multi-shift PCMatApply 2.4584e-01 s, shared-shift PCMatApply 1.7798e-01 s

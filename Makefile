@@ -161,6 +161,7 @@ OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/AIR_Operators_Setup.o \
 		  $(SRCDIR)/AIR_MG_Setup.o \
 		  $(SRCDIR)/AIR_Diagonal_Update.o \
+		  $(SRCDIR)/AIR_MultiShift.o \
 		  $(SRCDIR)/PCAIR_Shell.o \
 		  $(SRCDIR)/PCAIR_Interfaces.o \
 		  $(SRCDIR)/PFLARE.o \
@@ -194,6 +195,7 @@ export TEST_TARGETS = ex12f \
 		  pflareinv_sai_rank_deficient \
 		  adv_diff_fd \
 		  adv_diff_fd_diag_update \
+		  adv_diff_fd_multishift \
 		  adv_diff_fd_ts \
 		  ex6_cf_splitting \
 		  adv_diff_cg_supg \

@@ -413,3 +413,139 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Multi-shift restrictor (prototype, see AIR_MultiShift.F90)
+// A matshell that wraps the restrictor R of a level so that PCMG can do the multi-shift
+// restriction itself. MatMult (and friends) are just R, which is what the single rhs
+// cycle uses. A product with a dense block B (which is what MatMatRestrict, and hence
+// the PCMG block cycle, calls) instead gives R (Cscale .* B), where Cscale is the dense
+// block of per column F point scalings of R, so column j is restricted with R^(j)
+// No change to PETSc is needed, MatShellSetMatProductOperation does the plumbing
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+typedef struct {
+   Mat R, Cscale;
+   // Work blocks, W = Cscale .* B and RW = R W, built on the first product
+   Mat W, RW;
+} MultiShiftRestrictCtx;
+
+static PetscErrorCode MSR_Mult(Mat S, Vec x, Vec y)
+{
+   MultiShiftRestrictCtx *ctx;
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(S, &ctx));
+   PetscCall(MatMult(ctx->R, x, y));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+static PetscErrorCode MSR_MultAdd(Mat S, Vec x, Vec y, Vec z)
+{
+   MultiShiftRestrictCtx *ctx;
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(S, &ctx));
+   PetscCall(MatMultAdd(ctx->R, x, y, z));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+static PetscErrorCode MSR_MultTranspose(Mat S, Vec x, Vec y)
+{
+   MultiShiftRestrictCtx *ctx;
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(S, &ctx));
+   PetscCall(MatMultTranspose(ctx->R, x, y));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+static PetscErrorCode MSR_MultTransposeAdd(Mat S, Vec x, Vec y, Vec z)
+{
+   MultiShiftRestrictCtx *ctx;
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(S, &ctx));
+   PetscCall(MatMultTransposeAdd(ctx->R, x, y, z));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+static PetscErrorCode MSR_Destroy(Mat S)
+{
+   MultiShiftRestrictCtx *ctx;
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(S, &ctx));
+   PetscCall(MatDestroy(&ctx->R));
+   PetscCall(MatDestroy(&ctx->Cscale));
+   if (ctx->W) PetscCall(MatProductClear(ctx->RW));
+   PetscCall(MatDestroy(&ctx->RW));
+   PetscCall(MatDestroy(&ctx->W));
+   PetscCall(PetscFree(ctx));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// C = R (Cscale .* B)
+static PetscErrorCode MSR_ProductNumeric(Mat S, Mat B, Mat C, void *data)
+{
+   MultiShiftRestrictCtx *ctx;
+   PetscScalar *w;
+   const PetscScalar *c;
+   PetscInt m, k, ldw, ldc, i, j;
+   PetscBool same = PETSC_FALSE;
+
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(S, &ctx));
+   // (Re)build the work blocks if the block of rhs has changed shape or type
+   if (ctx->W) {
+      PetscInt kw, kb;
+      PetscCall(MatGetSize(ctx->W, NULL, &kw));
+      PetscCall(MatGetSize(B, NULL, &kb));
+      PetscCall(PetscObjectTypeCompare((PetscObject)ctx->W, ((PetscObject)B)->type_name, &same));
+      same = (PetscBool)(same && kw == kb);
+      if (!same) {
+         PetscCall(MatProductClear(ctx->RW));
+         PetscCall(MatDestroy(&ctx->RW));
+         PetscCall(MatDestroy(&ctx->W));
+      }
+   }
+   if (!ctx->W) {
+      PetscCall(MatDuplicate(B, MAT_DO_NOT_COPY_VALUES, &ctx->W));
+      PetscCall(MatProductCreate(ctx->R, ctx->W, NULL, &ctx->RW));
+      PetscCall(MatProductSetType(ctx->RW, MATPRODUCT_AB));
+      PetscCall(MatProductSetFromOptions(ctx->RW));
+      PetscCall(MatProductSymbolic(ctx->RW));
+   }
+   // W = Cscale .* B, on the host for this prototype
+   PetscCall(MatCopy(B, ctx->W, SAME_NONZERO_PATTERN));
+   PetscCall(MatGetLocalSize(ctx->W, &m, NULL));
+   PetscCall(MatGetSize(ctx->W, NULL, &k));
+   PetscCall(MatDenseGetLDA(ctx->W, &ldw));
+   PetscCall(MatDenseGetLDA(ctx->Cscale, &ldc));
+   PetscCall(MatDenseGetArray(ctx->W, &w));
+   PetscCall(MatDenseGetArrayRead(ctx->Cscale, &c));
+   for (j = 0; j < k; j++)
+      for (i = 0; i < m; i++) w[i + j * ldw] *= c[i + j * ldc];
+   PetscCall(MatDenseRestoreArrayRead(ctx->Cscale, &c));
+   PetscCall(MatDenseRestoreArray(ctx->W, &w));
+   PetscCall(MatProductNumeric(ctx->RW));
+   PetscCall(MatCopy(ctx->RW, C, SAME_NONZERO_PATTERN));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+PETSC_INTERN void create_multishift_restrictor_c(Mat *R, Mat *Cscale, Mat *shell, int *error_code)
+{
+   PetscErrorCode ierr;
+   MultiShiftRestrictCtx *ctx;
+   PetscInt m, n, M, N;
+   VecType vtype;
+
+   *error_code = 0;
+   ierr = PetscNew(&ctx); if (ierr) { *error_code = (int)ierr; return; }
+   ctx->R = *R;
+   ctx->Cscale = *Cscale;
+   ierr = PetscObjectReference((PetscObject)ctx->R); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = PetscObjectReference((PetscObject)ctx->Cscale); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatGetLocalSize(*R, &m, &n); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatGetSize(*R, &M, &N); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatCreateShell(PetscObjectComm((PetscObject)*R), m, n, M, N, ctx, shell); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatGetVecType(*R, &vtype); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetVecType(*shell, vtype); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetOperation(*shell, MATOP_MULT, (PetscErrorCodeFn *)MSR_Mult); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetOperation(*shell, MATOP_MULT_ADD, (PetscErrorCodeFn *)MSR_MultAdd); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetOperation(*shell, MATOP_MULT_TRANSPOSE, (PetscErrorCodeFn *)MSR_MultTranspose); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetOperation(*shell, MATOP_MULT_TRANSPOSE_ADD, (PetscErrorCodeFn *)MSR_MultTransposeAdd); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetOperation(*shell, MATOP_DESTROY, (PetscErrorCodeFn *)MSR_Destroy); if (ierr) { *error_code = (int)ierr; return; }
+   ierr = MatShellSetMatProductOperation(*shell, MATPRODUCT_AB, NULL, MSR_ProductNumeric, NULL, MATDENSE, MATDENSE); if (ierr) { *error_code = (int)ierr; return; }
+}

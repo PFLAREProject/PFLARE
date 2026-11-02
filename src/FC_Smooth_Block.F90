@@ -5,7 +5,7 @@ module fc_smooth_block
    use air_data_type, only: air_multigrid_data
    use petsc_helper, only: kokkos_debug
    use matshell_data_type, only: mat_ctxtype, attach_mat_product
-   use gmres_poly_apply, only: shell_poly_block_apply
+   use gmres_poly_apply, only: shell_poly_block_apply, mat_dense_pointwise_mult_add
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
          AIR_MAT_SOL, AIR_MAT_TEMP, AIR_MAT_RESIDUAL, AIR_MAT_RHS, AIR_MAT_OFF_DIAG
 
@@ -403,6 +403,39 @@ module fc_smooth_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine apply_inverse_block_shifted(inv_mat, x_mat, y_mat, shift_mat, recip_mat)
+
+      ! The multi-shift version of apply_inverse_block - column j of y_mat is the
+      ! polynomial (with the coefficients/roots stored in inv_mat) of the matrix
+      ! in inv_mat shifted by diag(shift_mat(:,j)), applied to column j of x_mat
+      ! Only the matrix-free polynomials can do this, an assembled inverse has the
+      ! polynomial of one matrix baked into its entries
+
+      ! ~~~~~~
+      type(tMat), intent(in)        :: inv_mat
+      type(tMat)                    :: x_mat, y_mat, shift_mat
+      type(tMat), optional          :: recip_mat
+
+      logical :: block_applied
+      integer :: errorcode
+      MatType :: inv_type
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      call MatGetType(inv_mat, inv_type, ierr)
+      block_applied = .FALSE.
+      if (inv_type == MATSHELL) then
+         call shell_poly_block_apply(inv_mat, x_mat, y_mat, block_applied, shift_mat, recip_mat)
+      end if
+      if (.NOT. block_applied) then
+         print *, "A multi-shift apply needs matrix-free polynomial inverses with a block product"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine apply_inverse_block_shifted
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine MatISCopyLocalWrapper(air_data, our_level, fine, xfull_mat, mode, xreduced_mat, &
                x_temp_full_mat)
 
@@ -644,6 +677,12 @@ module fc_smooth_block
 
       ierr = 0
       call PCShellGetContext(pc, air_data, ierr)
+      ! A multi-shift, see AIR_MultiShift.F90
+      if (air_data%multishift_active) then
+         call apply_shifted_inverse(air_data%inv_A_ff(air_data%no_levels), x, y, &
+                  air_data%ms_shift_f(air_data%no_levels), air_data%ms_recip_f(air_data%no_levels))
+         return
+      end if
       call apply_inverse_block(air_data%inv_A_ff(air_data%no_levels), x, y, ierr)
 
    end subroutine mg_coarse_shell_block_apply
@@ -714,6 +753,12 @@ module fc_smooth_block
       our_level = mat_ctx%our_level
       air_data => mat_ctx%air_data
 
+      ! A multi-shift, see AIR_MultiShift.F90
+      if (air_data%multishift_active) then
+         call fc_smooth_multishift(air_data, our_level, b, x)
+         return
+      end if
+
       ! The first time we go through any smooth, we need to pull out x_f and/or x_c
       first_smooth = PETSC_TRUE
 
@@ -752,7 +797,8 @@ module fc_smooth_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine f_smooths_block(b, x, guess_zero, first_smooth, air_data, our_level, its)
+   subroutine f_smooths_block(b, x, guess_zero, first_smooth, air_data, our_level, its, &
+                  shift_mat, recip_mat)
 
       ! The multiple rhs version of f_smooths - applies consecutive F smooths to a
       ! whole dense block of right hand sides
@@ -764,6 +810,10 @@ module fc_smooth_block
       type(air_multigrid_data), intent(inout) :: air_data
       integer, intent(in)                     :: our_level, its
       PetscBool, intent(in)                   :: guess_zero, first_smooth
+      ! Multi-shift (see AIR_MultiShift.F90) - if present, column j is smoothed with
+      ! the diagonal block shifted by diag(shift_mat(:,j)), and recip_mat (if present)
+      ! is the reciprocal of the shifted diagonal, used by diagonally scaled polynomials
+      type(tMat), optional                    :: shift_mat, recip_mat
 
       PetscErrorCode :: ierr
       integer :: f_its
@@ -802,15 +852,25 @@ module fc_smooth_block
 
          ! Then A_ff * x_f^n - this changes at each richardson iteration
          call MatProductNumeric(air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), ierr)
+         ! Multi-shift - (A_ff + diag(S_j)) x_f
+         if (present(shift_mat)) call mat_dense_pointwise_mult_add( &
+                  air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), shift_mat, &
+                  air_data%block_temp_fine(AIR_MAT_SOL)%array(our_level))
 
          ! This is b_f - A_fc * x_c - A_ff * x_f^n
          call MatAYPX(air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%block_temp_fine(AIR_MAT_RHS)%array(our_level), SAME_NONZERO_PATTERN, ierr)
 
          ! ! Compute A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
-         call apply_inverse_block_cached(air_data%inv_A_ff(our_level), &
-                  air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), &
-                  air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), ierr)
+         if (present(shift_mat)) then
+            call apply_inverse_block_shifted(air_data%inv_A_ff(our_level), &
+                     air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), &
+                     air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), shift_mat, recip_mat)
+         else
+            call apply_inverse_block_cached(air_data%inv_A_ff(our_level), &
+                     air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), &
+                     air_data%block_temp_fine(AIR_MAT_TEMP)%array(our_level), ierr)
+         end if
 
          ! Compute x_f^n + A_ff^{-1} ( b_f - A_fc * x_c - A_ff * x_f^n)
          call MatAXPY(air_data%block_temp_fine(AIR_MAT_SOL)%array(our_level), PFLARE_ONE, &
@@ -829,7 +889,8 @@ module fc_smooth_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine c_smooths_block(b, x, guess_zero, first_smooth, air_data, our_level, its)
+   subroutine c_smooths_block(b, x, guess_zero, first_smooth, air_data, our_level, its, &
+                  shift_mat, recip_mat)
 
       ! The multiple rhs version of c_smooths - applies consecutive C smooths to a
       ! whole dense block of right hand sides
@@ -839,6 +900,10 @@ module fc_smooth_block
       type(air_multigrid_data), intent(inout) :: air_data
       integer, intent(in)                     :: our_level, its
       PetscBool, intent(in)                   :: guess_zero, first_smooth
+      ! Multi-shift (see AIR_MultiShift.F90) - if present, column j is smoothed with
+      ! the diagonal block shifted by diag(shift_mat(:,j)), and recip_mat (if present)
+      ! is the reciprocal of the shifted diagonal, used by diagonally scaled polynomials
+      type(tMat), optional                    :: shift_mat, recip_mat
 
       PetscErrorCode :: ierr
       integer :: c_its
@@ -876,15 +941,25 @@ module fc_smooth_block
 
          ! Then A_cc * x_c^n - this changes at each richardson iteration
          call MatProductNumeric(air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), ierr)
+         ! Multi-shift - (A_cc + diag(S_j)) x_c
+         if (present(shift_mat)) call mat_dense_pointwise_mult_add( &
+                  air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), shift_mat, &
+                  air_data%block_temp_coarse(AIR_MAT_SOL)%array(our_level))
 
          ! This is b_c - A_cf * x_f^0 - A_cc * x_c^n
          call MatAYPX(air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), PFLARE_MINUS_ONE, &
                   air_data%block_temp_coarse(AIR_MAT_RHS)%array(our_level), SAME_NONZERO_PATTERN, ierr)
 
          ! ! Compute A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
-         call apply_inverse_block_cached(air_data%inv_A_cc(our_level), &
-                  air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), &
-                  air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), ierr)
+         if (present(shift_mat)) then
+            call apply_inverse_block_shifted(air_data%inv_A_cc(our_level), &
+                     air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), &
+                     air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), shift_mat, recip_mat)
+         else
+            call apply_inverse_block_cached(air_data%inv_A_cc(our_level), &
+                     air_data%block_temp_coarse(AIR_MAT_RESIDUAL)%array(our_level), &
+                     air_data%block_temp_coarse(AIR_MAT_TEMP)%array(our_level), ierr)
+         end if
 
          ! Compute x_c^n + A_cc^{-1} (b_c - A_cf * x_f^0 - A_cc * x_c^n)
          call MatAXPY(air_data%block_temp_coarse(AIR_MAT_SOL)%array(our_level), PFLARE_ONE, &
@@ -902,5 +977,71 @@ module fc_smooth_block
    end subroutine c_smooths_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine apply_shifted_inverse(inv_mat, x_mat, y_mat, shift_mat, recip_mat)
+
+      ! Calls apply_inverse_block_shifted, only passing recip_mat if it exists
+
+      ! ~~~~~~
+      type(tMat) :: inv_mat, x_mat, y_mat, shift_mat, recip_mat
+      ! ~~~~~~
+
+      if (PetscObjectIsNull(recip_mat)) then
+         call apply_inverse_block_shifted(inv_mat, x_mat, y_mat, shift_mat)
+      else
+         call apply_inverse_block_shifted(inv_mat, x_mat, y_mat, shift_mat, recip_mat)
+      end if
+
+   end subroutine apply_shifted_inverse
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine fc_smooth_multishift(air_data, our_level, b_mat, x_mat)
+
+      ! The multi-shift version of mg_FC_block_richardson - the same loop over the
+      ! smooth order, with the per column shifts handed to the smooths
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: our_level
+      type(tMat), intent(inout)               :: b_mat, x_mat
+
+      integer :: i, smooth_its
+      PetscBool :: first_smooth
+      type(tMat) :: recip_mat
+      ! ~~~~~~
+
+      first_smooth = PETSC_TRUE
+      do i = 1, size(air_data%smooth_order_levels(our_level)%array)
+
+         smooth_its = air_data%smooth_order_levels(our_level)%array(i)
+         if (smooth_its == 0) exit
+
+         if (smooth_its > 0) then
+            recip_mat = air_data%ms_recip_f(our_level)
+            if (PetscObjectIsNull(recip_mat)) then
+               call f_smooths_block(b_mat, x_mat, PETSC_FALSE, first_smooth, air_data, our_level, smooth_its, &
+                        air_data%ms_shift_f(our_level))
+            else
+               call f_smooths_block(b_mat, x_mat, PETSC_FALSE, first_smooth, air_data, our_level, smooth_its, &
+                        air_data%ms_shift_f(our_level), recip_mat)
+            end if
+         else
+            recip_mat = air_data%ms_recip_c(our_level)
+            if (PetscObjectIsNull(recip_mat)) then
+               call c_smooths_block(b_mat, x_mat, PETSC_FALSE, first_smooth, air_data, our_level, abs(smooth_its), &
+                        air_data%ms_shift_c(our_level))
+            else
+               call c_smooths_block(b_mat, x_mat, PETSC_FALSE, first_smooth, air_data, our_level, abs(smooth_its), &
+                        air_data%ms_shift_c(our_level), recip_mat)
+            end if
+         end if
+         first_smooth = PETSC_FALSE
+      end do
+
+   end subroutine fc_smooth_multishift
+
 
 end module fc_smooth_block

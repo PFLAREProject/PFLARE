@@ -3,7 +3,8 @@ module c_fortran_bindings
    use petscksp
    use iso_c_binding
    use pcair_data_type, only: pc_air_multigrid_data
-   use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell
+   use pcair_shell, only: PCReset_AIR_Shell, create_pc_air_shell, set_multishift_pc_air_data, &
+         clear_multishift_pc_air_data
    use approx_inverse_setup, only: calculate_and_build_approximate_inverse, reset_inverse_mat, &
          inverse_type_is_polynomial
    use gmres_poly_apply, only: shell_poly_block_apply
@@ -165,12 +166,49 @@ module c_fortran_bindings
       end if
 
       ! PCMG (or the single level PCMAT/PCJACOBI) does the rest
+      ! With a multi-shift the PCMG level shells apply the per column shifts
       call PCMatApply(pc_air_data%pcmg, x_mat, y_mat, ierr)
       error_int = int(ierr, c_int)
 
       applied_int = 1
 
    end subroutine pcair_shell_block_matapply_c
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pcair_shell_set_multishift_c(pc_ptr, d_ptr, error_int) &
+         bind(C,name='pcair_shell_set_multishift_c')
+
+      ! Sets (or with a null d_ptr clears) the multi-shift used by subsequent block
+      ! applies on the underlying PCShell, which must already have been set up
+      ! See AIR_MultiShift.F90
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(in) :: pc_ptr, d_ptr
+      integer(c_int), intent(out)      :: error_int
+
+      type(tPC)   :: pc
+      type(tMat)  :: d_mat
+      type(pc_air_multigrid_data), pointer :: pc_air_data => null()
+      PetscErrorCode :: ierr
+      ! ~~~~~~~~
+
+      pc%v    = pc_ptr
+      d_mat%v = d_ptr
+      error_int = 0
+      call PCShellGetContext(pc, pc_air_data, ierr)
+      if (ierr /= 0) then
+         error_int = int(ierr, c_int)
+         return
+      end if
+
+      if (PetscObjectIsNull(d_mat)) then
+         call clear_multishift_pc_air_data(pc_air_data)
+      else
+         call set_multishift_pc_air_data(pc_air_data, d_mat)
+      end if
+
+   end subroutine pcair_shell_set_multishift_c
 
    !------------------------------------------------------------------------------------------------------------------------
 

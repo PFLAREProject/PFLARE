@@ -151,6 +151,8 @@ module air_data_type_routines
 
       ! Any diagonal update is relative to the hierarchy we are about to throw away
       call destroy_diag_update_data(air_data)
+      ! As is any multi-shift
+      call destroy_multishift_data(air_data)
 
       ! Use if this data structure is allocated to determine if we setup anything
       if (allocated(air_data%allocated_matrices_A_ff)) then
@@ -352,6 +354,49 @@ module air_data_type_routines
       air_data%allocated_coarse_matrix = .FALSE.   
 
    end subroutine reset_air_data
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine destroy_multishift_data(air_data)
+
+      ! Destroys the data used by the multi-shift block V-cycle, see AIR_MultiShift.F90
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+
+      PetscErrorCode :: ierr
+      integer :: i_loc
+      type(tMat) :: temp_mat
+      ! ~~~~~~
+
+      call MatDestroy(air_data%ms_dshift, ierr)
+      call destroy_mat_array(air_data%ms_shift_f)
+      call destroy_mat_array(air_data%ms_recip_f)
+      call destroy_mat_array(air_data%ms_shift_c)
+      call destroy_mat_array(air_data%ms_recip_c)
+      call destroy_mat_array(air_data%ms_rscale)
+      call destroy_mat_array(air_data%ms_restrict_shell)
+      air_data%multishift_active = .FALSE.
+
+   contains
+
+      subroutine destroy_mat_array(mats)
+
+         type(tMat), allocatable, dimension(:), intent(inout) :: mats
+
+         if (allocated(mats)) then
+            do i_loc = 1, size(mats)
+               temp_mat = mats(i_loc)
+               if (.NOT. PetscObjectIsNull(temp_mat)) then
+                  call MatDestroy(temp_mat, ierr)
+               end if
+            end do
+            deallocate(mats)
+         end if
+
+      end subroutine destroy_mat_array
+
+   end subroutine destroy_multishift_data
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

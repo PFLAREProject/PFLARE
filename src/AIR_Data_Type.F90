@@ -406,6 +406,21 @@ module air_data_type
       ! so an update can use them as scratch. There is no x on the top grid or r on the coarsest
       type(tVec), allocatable, dimension(:) :: diag_update_x, diag_update_r
 
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      ! Data for a multi-shift block V-cycle, see AIR_MultiShift.F90
+      ! Column j of a block apply is preconditioned for Pmat_base + diag(ms_dshift(:,j))
+      ! ~~~~~~~~~~~~~~~~~~~~~~
+      logical :: multishift_active = .FALSE.
+      ! Copy of the dense n x k block of shifts relative to the base pmat
+      type(tMat) :: ms_dshift
+      ! Per level dense blocks, n_f x k (n_c x k for _c), index no_levels is the coarsest:
+      ! ms_shift_f : the shifted diagonal minus the current diagonal of A_ff
+      ! ms_recip_f : the reciprocal of the shifted diagonal of A_ff (diagonally scaled polys only)
+      ! ms_rscale  : full level size, the per column F point scaling of R (one at C points)
+      type(tMat), allocatable, dimension(:) :: ms_shift_f, ms_recip_f, ms_shift_c, ms_recip_c, ms_rscale
+      ! The matshell restrictors swapped into the PCMG that do the per column R scaling
+      type(tMat), allocatable, dimension(:) :: ms_restrict_shell
+
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse
 

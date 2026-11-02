@@ -549,7 +549,7 @@ module gmres_poly_apply
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine petsc_horner_block(mat_ctx, x_mat, y_mat, recip_diag, &
-                  neumann_inner, block_applied)
+                  neumann_inner, block_applied, shift_mat, recip_mat)
 
       ! Uses a horner iteration to apply
       ! y_mat = (coeff(1) + coeff(2) * B + coeff(3) * B^2 + ...) x_mat
@@ -572,6 +572,12 @@ module gmres_poly_apply
       ! In the scaled cases the caller must have already scaled the block of rhs,
       ! ie x_mat = D^-1 X
 
+      ! Multi-shift (see AIR_MultiShift.F90): if shift_mat is present, column j of the
+      ! block is instead acted on by the shifted matrix A + diag(shift_mat(:,j)), ie
+      ! every product A cur becomes A cur + shift_mat .* cur. If recip_mat is present
+      ! the diagonal scaling is per column too, D_j^-1 = recip_mat(:,j), and it is used
+      ! in place of recip_diag (which must still be non-null to say we are scaled)
+
       ! block_applied comes back false (with y_mat untouched) if the block of rhs we've
       ! been given has no product with mat, so the caller can fall back to a column by
       ! column apply
@@ -585,6 +591,7 @@ module gmres_poly_apply
       type(tVec)                       :: recip_diag
       logical, intent(in)              :: neumann_inner
       logical, intent(out)             :: block_applied
+      type(tMat), optional             :: shift_mat, recip_mat
 
       ! Local
       integer :: order, top_order
@@ -595,7 +602,7 @@ module gmres_poly_apply
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       block_applied = .FALSE.
-      scaled = .NOT. PetscObjectIsNull(recip_diag)
+      scaled = .NOT. PetscObjectIsNull(recip_diag) .OR. present(recip_mat)
 
       ! Only the leading (highest order) zero coefficients can be skipped - once we've
       ! hit a nonzero coefficient every lower order still needs its product
@@ -630,8 +637,15 @@ module gmres_poly_apply
          ! temporary, so which product runs is decided by which one is cur
          call MatProductNumeric(other_mat, ierr)
 
+         ! Multi-shift - other = (A + diag(S_j)) cur, column by column
+         if (present(shift_mat)) call mat_dense_pointwise_mult_add(other_mat, shift_mat, cur_mat)
+
          ! This is the arithmetic of the D^-1 A matshell, done blockwise
-         if (scaled) call MatDiagonalScale(other_mat, recip_diag, PETSC_NULL_VEC, ierr)
+         if (present(recip_mat)) then
+            call mat_dense_pointwise_mult(other_mat, recip_mat)
+         else if (scaled) then
+            call MatDiagonalScale(other_mat, recip_diag, PETSC_NULL_VEC, ierr)
+         end if
 
          ! The inner operator is I - D^-1 A rather than D^-1 A, so finish
          ! other = cur - D^-1 A cur
@@ -1031,7 +1045,8 @@ module gmres_poly_apply
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine petsc_newton_block(mat_ctx, x_mat, y_mat, recip_diag, block_applied)
+   subroutine petsc_newton_block(mat_ctx, x_mat, y_mat, recip_diag, block_applied, &
+                  shift_mat, recip_mat)
 
       ! Applies a gmres polynomial in the newton basis matrix-free as an inverse
       ! for a block of right hand sides, x_mat, ie the multiple rhs version of petsc_newton
@@ -1050,6 +1065,9 @@ module gmres_poly_apply
       ! and before the result is used for anything else - that is exactly the arithmetic
       ! of the inner D^-1 A matshell, done blockwise
 
+      ! Multi-shift: shift_mat and recip_mat are as in petsc_horner_block, every product
+      ! A v becomes A v + shift_mat .* v and the scaling is per column
+
       ! block_applied comes back false (with y_mat untouched) if the block of rhs we've
       ! been given has no product with mat, so the caller can fall back to a column by
       ! column apply
@@ -1062,6 +1080,7 @@ module gmres_poly_apply
       type(tMat)                          :: y_mat
       type(tVec)                          :: recip_diag
       logical, intent(out)                :: block_applied
+      type(tMat), optional                :: shift_mat, recip_mat
 
       ! Local
       PetscReal, dimension(:), pointer :: real_roots, imag_roots
@@ -1073,7 +1092,7 @@ module gmres_poly_apply
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       block_applied = .FALSE.
-      scaled = .NOT. PetscObjectIsNull(recip_diag)
+      scaled = .NOT. PetscObjectIsNull(recip_diag) .OR. present(recip_mat)
       real_roots => mat_ctx%real_roots
       imag_roots => mat_ctx%imag_roots
       nroots = size(real_roots)
@@ -1121,7 +1140,7 @@ module gmres_poly_apply
 
             ! temp_mat_two = A * temp_mat
             call MatProductNumeric(temp_mat_two, ierr)
-            if (scaled) call MatDiagonalScale(temp_mat_two, recip_diag, PETSC_NULL_VEC, ierr)
+            call shift_and_scale(temp_mat_two, temp_mat)
 
             ! temp_mat = temp_mat - theta_i * temp_mat_two
             call MatAXPY(temp_mat, &
@@ -1139,7 +1158,7 @@ module gmres_poly_apply
 
             ! temp_mat_two = A * temp_mat
             call MatProductNumeric(temp_mat_two, ierr)
-            if (scaled) call MatDiagonalScale(temp_mat_two, recip_diag, PETSC_NULL_VEC, ierr)
+            call shift_and_scale(temp_mat_two, temp_mat)
 
             ! temp_mat_two = 2 * Re(theta_i) * temp_mat - temp_mat_two
             call MatScale(temp_mat_two, PFLARE_MINUS_ONE, ierr)
@@ -1155,7 +1174,7 @@ module gmres_poly_apply
             if (i .le. nroots - 2) then
                ! temp_mat_three = A * temp_mat_two
                call MatProductNumeric(temp_mat_three, ierr)
-               if (scaled) call MatDiagonalScale(temp_mat_three, recip_diag, PETSC_NULL_VEC, ierr)
+               call shift_and_scale(temp_mat_three, temp_mat_two)
 
                ! temp_mat = temp_mat - 1/(Re(theta_i)^2 + Imag(theta_i)^2) * temp_mat_three
                call MatAXPY(temp_mat, &
@@ -1184,11 +1203,29 @@ module gmres_poly_apply
 
       block_applied = .TRUE.
 
+   contains
+
+      subroutine shift_and_scale(prod_mat, in_mat)
+
+         ! Finishes an inner operator apply after the product prod_mat = A in_mat
+         ! ie adds the multi-shift and does the diagonal scaling, if any
+
+         type(tMat) :: prod_mat, in_mat
+
+         if (present(shift_mat)) call mat_dense_pointwise_mult_add(prod_mat, shift_mat, in_mat)
+         if (present(recip_mat)) then
+            call mat_dense_pointwise_mult(prod_mat, recip_mat)
+         else if (scaled) then
+            call MatDiagonalScale(prod_mat, recip_diag, PETSC_NULL_VEC, ierr)
+         end if
+
+      end subroutine shift_and_scale
+
    end subroutine petsc_newton_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine shell_poly_block_apply(shell_mat, x_mat, y_mat, block_applied)
+   subroutine shell_poly_block_apply(shell_mat, x_mat, y_mat, block_applied, shift_mat, recip_mat)
 
       ! Applies one of the matrix-free gmres polynomial inverses to a block of
       ! right hand sides, x_mat, ie the multiple rhs version of the matvecs
@@ -1209,6 +1246,12 @@ module gmres_poly_apply
       ! Any new inner operator variant must add to that flag rather than reuse it,
       ! otherwise the bypass will silently give the wrong answer
 
+      ! Multi-shift (see AIR_MultiShift.F90): with shift_mat present, column j is given
+      ! the polynomial (with the same coefficients/roots) of A + diag(shift_mat(:,j))
+      ! rather than of A. If the polynomial is diagonally scaled, recip_mat must also be
+      ! present and hold the reciprocal of the diagonal of the shifted matrix for each
+      ! column, which then replaces D^-1
+
       ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
       ! Input
@@ -1216,10 +1259,11 @@ module gmres_poly_apply
       type(tMat)                :: x_mat
       type(tMat)                :: y_mat
       logical, intent(out)      :: block_applied
+      type(tMat), optional      :: shift_mat, recip_mat
 
       ! Local
       PetscErrorCode :: ierr
-      integer :: n_temps
+      integer :: n_temps, errorcode
       logical :: scaled
       type(mat_ctxtype), pointer :: mat_ctx => null()
       ! The block of rhs and the D^-1 we hand to the kernels
@@ -1282,32 +1326,103 @@ module gmres_poly_apply
       ! Make the dense temporaries, plus somewhere to put D^-1 X if we need it
       call ensure_block_temp_mats(mat_ctx, x_mat, n_temps, ierr, need_rhs=scaled)
 
+      ! A scaled polynomial with a shift needs the per column diagonal of the shifted matrix
+      if (scaled .AND. present(shift_mat) .AND. .NOT. present(recip_mat)) then
+         print *, "A shifted block apply of a diagonally scaled polynomial needs recip_mat"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
       ! Do the right diagonal scaling on the whole block, ie MF_MAT_RHS = D^-1 X
       if (scaled) then
          call MatCopy(x_mat, mat_ctx%mf_temp_mat(MF_MAT_RHS), SAME_NONZERO_PATTERN, ierr)
-         call MatDiagonalScale(mat_ctx%mf_temp_mat(MF_MAT_RHS), kernel_recip, PETSC_NULL_VEC, ierr)
+         if (present(recip_mat)) then
+            call mat_dense_pointwise_mult(mat_ctx%mf_temp_mat(MF_MAT_RHS), recip_mat)
+         else
+            call MatDiagonalScale(mat_ctx%mf_temp_mat(MF_MAT_RHS), kernel_recip, PETSC_NULL_VEC, ierr)
+         end if
          kernel_x = mat_ctx%mf_temp_mat(MF_MAT_RHS)
       end if
 
+      ! The optional shift_mat/recip_mat are passed straight through - an absent
+      ! optional argument stays absent in the callee
       if (mat_ctx%neumann_inner) then
 
          ! Neumann polynomial - horner with an inner operator of I - D^-1 A
          call petsc_horner_block(mat_ctx, kernel_x, y_mat, kernel_recip, &
-                  .TRUE., block_applied)
+                  .TRUE., block_applied, shift_mat, recip_mat)
 
       else if (associated(mat_ctx%real_roots)) then
 
          ! Newton basis
-         call petsc_newton_block(mat_ctx, kernel_x, y_mat, kernel_recip, block_applied)
+         call petsc_newton_block(mat_ctx, kernel_x, y_mat, kernel_recip, block_applied, &
+                  shift_mat, recip_mat)
 
       else
 
          ! Power/arnoldi basis
          call petsc_horner_block(mat_ctx, kernel_x, y_mat, kernel_recip, &
-                  .FALSE., block_applied)
+                  .FALSE., block_applied, shift_mat, recip_mat)
 
       end if
 
    end subroutine shell_poly_block_apply
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_dense_pointwise_mult(y_mat, d_mat)
+
+      ! The Hadamard product of two dense blocks with the same layout, y_mat = y_mat .* d_mat
+      ! PETSc has no dense-dense pointwise product, so this works on the local arrays
+      ! This goes through the host arrays, so on a device it syncs - a kokkos kernel is
+      ! needed for a production version
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      type(tMat) :: y_mat, d_mat
+
+      PetscErrorCode :: ierr
+      PetscInt :: local_rows, local_cols
+      PetscScalar, pointer :: y_array(:,:), d_array(:,:)
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      ! With no local rows petsc hands back an unassociated pointer
+      call MatGetLocalSize(y_mat, local_rows, local_cols, ierr)
+      if (local_rows == 0) return
+
+      call MatDenseGetArray(y_mat, y_array, ierr)
+      call MatDenseGetArrayRead(d_mat, d_array, ierr)
+      y_array = y_array * d_array
+      call MatDenseRestoreArrayRead(d_mat, d_array, ierr)
+      call MatDenseRestoreArray(y_mat, y_array, ierr)
+
+   end subroutine mat_dense_pointwise_mult
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_dense_pointwise_mult_add(y_mat, d_mat, x_mat)
+
+      ! y_mat = y_mat + d_mat .* x_mat for dense blocks with the same layout
+      ! This is how a per column diagonal shift is added to a product, ie
+      ! (A + diag(d_j)) x_j = A x_j + d_j .* x_j
+
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      type(tMat) :: y_mat, d_mat, x_mat
+
+      PetscErrorCode :: ierr
+      PetscInt :: local_rows, local_cols
+      PetscScalar, pointer :: y_array(:,:), d_array(:,:), x_array(:,:)
+      ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+      call MatGetLocalSize(y_mat, local_rows, local_cols, ierr)
+      if (local_rows == 0) return
+
+      call MatDenseGetArray(y_mat, y_array, ierr)
+      call MatDenseGetArrayRead(d_mat, d_array, ierr)
+      call MatDenseGetArrayRead(x_mat, x_array, ierr)
+      y_array = y_array + d_array * x_array
+      call MatDenseRestoreArrayRead(x_mat, x_array, ierr)
+      call MatDenseRestoreArrayRead(d_mat, d_array, ierr)
+      call MatDenseRestoreArray(y_mat, y_array, ierr)
+
+   end subroutine mat_dense_pointwise_mult_add
 
 end module gmres_poly_apply
