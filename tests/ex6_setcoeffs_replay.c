@@ -14,7 +14,8 @@ forward order, each time setting the recorded coefficients before the solve. The
 iteration count, PCApply and the stored coefficients must match those recorded.\n\
 \n\
 If -pc_air_reuse_poly_coeffs is given, it applies from the first setup, so the record\n\
-must keep the coefficients from the first Pmat for every later one. The number of\n\
+must keep the coefficients from the first Pmat for every later one, and the first setup\n\
+must compute the same coefficients as a PC without it. The number of\n\
 levels must not change between setups, at any -pc_air_reuse_amount. Only the inverses\n\
 that are computed as polynomials can have coefficients returned.\n\
 \n\
@@ -84,8 +85,8 @@ int main(int argc, char **args)
   Mat         L, P;
   Vec         d, work, x, b_solve, b, y;
   Vec         y_rec[MAX_C];
-  KSP         ksp;
-  PC          pc;
+  KSP         ksp, ksp_fresh = NULL;
+  PC          pc, pc_fresh = NULL;
   PetscInt    n = 10, n_c = MAX_C, k, k_idx, i, num_levels, lvl, its, its_rec[MAX_C], n_inv = 0, n_resized = 0, n_sets = 0, rows, cols, pass;
   PetscReal   alpha = 1.0, c_values[MAX_C] = {0.5, 8.0, 50.0}, norm_diff, norm_ref, max_rel_diff = 0.0;
   PetscBool   flg, require_resize = PETSC_FALSE, print_roots = PETSC_FALSE, reuse_sparsity, diag_update, same, reuse_from_start;
@@ -193,6 +194,28 @@ int main(int argc, char **args)
       }
       PetscCall(PetscMalloc1(inv[i].rows[k] * inv[i].cols[k], &inv[i].coeffs[k]));
       PetscCall(PetscArraycpy(inv[i].coeffs[k], ptr, inv[i].rows[k] * inv[i].cols[k]));
+      /* The first setup has nothing to reuse, so it must compute exactly what a PC without reuse does */
+      if (reuse_from_start && k == 0) {
+        PetscReal *ptr_fresh;
+        PetscInt   rows_fresh, cols_fresh;
+        if (i == 0) {
+          PetscCall(KSPCreate(PETSC_COMM_WORLD, &ksp_fresh));
+          PetscCall(KSPSetOperators(ksp_fresh, P, P));
+          PetscCall(KSPSetType(ksp_fresh, KSPGMRES));
+          PetscCall(KSPGetPC(ksp_fresh, &pc_fresh));
+          PetscCall(PCSetType(pc_fresh, PCAIR));
+          PetscCall(PCAIRSetInverseType(pc_fresh, PFLAREINV_NEWTON));
+          PetscCall(PCAIRSetPolyOrder(pc_fresh, 16));
+          PetscCall(KSPSetFromOptions(ksp_fresh));
+          PetscCall(PCAIRSetReusePolyCoeffs(pc_fresh, PETSC_FALSE));
+          PetscCall(KSPSetUp(ksp_fresh));
+        }
+        PetscCall(PCAIRGetPolyCoeffs(pc_fresh, inv[i].level, inv[i].which, &ptr_fresh, &rows_fresh, &cols_fresh));
+        PetscCheck(rows_fresh == inv[i].rows[0] && cols_fresh == inv[i].cols[0], PETSC_COMM_SELF, PETSC_ERR_PLIB, "First setup stored a different size on petsc_level %" PetscInt_FMT " which_inverse %d than without -pc_air_reuse_poly_coeffs", inv[i].level, inv[i].which);
+        PetscCall(PetscArraycmp(ptr, ptr_fresh, rows_fresh * cols_fresh, &same));
+        PetscCheck(same, PETSC_COMM_SELF, PETSC_ERR_PLIB, "First setup computed different coefficients on petsc_level %" PetscInt_FMT " which_inverse %d than without -pc_air_reuse_poly_coeffs", inv[i].level, inv[i].which);
+        if (i == n_inv - 1) PetscCall(KSPDestroy(&ksp_fresh));
+      }
       /* Reusing the coefficients from the first setup, so none of the later setups can have computed them */
       if (reuse_from_start && k > 0) {
         PetscCheck(inv[i].rows[k] == inv[i].rows[0] && inv[i].cols[k] == inv[i].cols[0], PETSC_COMM_SELF, PETSC_ERR_PLIB, "Stored size on petsc_level %" PetscInt_FMT " which_inverse %d changed with -pc_air_reuse_poly_coeffs", inv[i].level, inv[i].which);

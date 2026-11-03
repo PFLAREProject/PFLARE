@@ -156,28 +156,6 @@ module air_data_type_routines
          ! Loop over the levels
          do our_level = 1, size(air_data%allocated_matrices_A_ff)
 
-            ! The polynomial coefficients only depend on the CF splitting and the options, so
-            ! when reusing we keep them at every reuse_amount, even though the inverses built
-            ! from them are destroyed at amounts 1 and 2. This is independent of whether
-            ! A_ff/A_cc are currently allocated, which a reset with reuse at amounts 1 and 2 clears
-            if (.NOT. reuse) then
-               if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
-                  deallocate(air_data%inv_A_ff_poly_data(our_level)%coefficients)
-                  air_data%inv_A_ff_poly_data(our_level)%coefficients => null()
-               end if
-               air_data%inv_A_ff_poly_data(our_level)%coefficients_set = .FALSE.
-               if (associated(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
-                  deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
-                  air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
-               end if
-               air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients_set = .FALSE.
-               if (associated(air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
-                  deallocate(air_data%inv_A_cc_poly_data(our_level)%coefficients)
-                  air_data%inv_A_cc_poly_data(our_level)%coefficients => null()
-               end if
-               air_data%inv_A_cc_poly_data(our_level)%coefficients_set = .FALSE.
-            end if
-
             ! If we setup Aff
             if (air_data%allocated_matrices_A_ff(our_level)) then
 
@@ -297,6 +275,30 @@ module air_data_type_routines
                   end if
                end do
             end if
+
+            ! The polynomial coefficients only depend on the CF splitting and the options, so
+            ! when reusing we keep them at every reuse_amount, even though the inverses built
+            ! from them are destroyed at amounts 1 and 2. This is independent of whether
+            ! A_ff/A_cc are currently allocated, which a reset with reuse at amounts 1 and 2 clears
+            ! This comes after the inverses are reset above, as a matrix-free inverse points
+            ! at its coefficients
+            if (.NOT. reuse) then
+               if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
+                  deallocate(air_data%inv_A_ff_poly_data(our_level)%coefficients)
+                  air_data%inv_A_ff_poly_data(our_level)%coefficients => null()
+               end if
+               air_data%inv_A_ff_poly_data(our_level)%coefficients_set = .FALSE.
+               if (associated(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
+                  deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
+                  air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
+               end if
+               air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients_set = .FALSE.
+               if (associated(air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
+                  deallocate(air_data%inv_A_cc_poly_data(our_level)%coefficients)
+                  air_data%inv_A_cc_poly_data(our_level)%coefficients => null()
+               end if
+               air_data%inv_A_cc_poly_data(our_level)%coefficients_set = .FALSE.
+            end if
          end do
 
          ! The pools the temporary vectors are subvectors of - these go
@@ -319,16 +321,20 @@ module air_data_type_routines
                  .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
                call reset_inverse_mat(air_data%inv_A_ff(air_data%no_levels))
             end if
-            ! The coefficients are kept whenever we are reusing, as on the other levels
-            if (.NOT. reuse) then
-               if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
-                  deallocate(air_data%inv_coarsest_poly_data%coefficients)
-                  air_data%inv_coarsest_poly_data%coefficients => null()
-               end if
-               air_data%inv_coarsest_poly_data%coefficients_set = .FALSE.
-            end if
          end if
       end if 
+
+      ! The coarse grid coefficients and the level we auto truncated on are kept whenever
+      ! we are reusing, as on the other levels. This is outside the checks above, as
+      ! a reset with reuse sets no_levels to -1, so the next reset could skip this
+      if (.NOT. reuse) then
+         if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
+            deallocate(air_data%inv_coarsest_poly_data%coefficients)
+            air_data%inv_coarsest_poly_data%coefficients => null()
+         end if
+         air_data%inv_coarsest_poly_data%coefficients_set = .FALSE.
+         air_data%auto_truncated_level = -1
+      end if
 
       ! Reset data
       air_data%no_levels = -1

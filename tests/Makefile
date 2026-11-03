@@ -1004,9 +1004,9 @@ run_tests_no_load_serial:
 	@echo "Test AIRG with a diagonal update and reuse sparsity, where reuse takes priority"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
 	 -check_reuse
-	@echo "Test AIRG with a strong R threshold, keeping the polynomial coefficients from the first setup"
-	./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
-	 -pc_air_strong_r_threshold 0.1 -pc_air_reuse_poly_coeffs
+	@echo "Test AIRG with a strong R threshold and a diagonal update, keeping the polynomial coefficients from the first setup"
+	./ex6_setcoeffs_replay -pc_air_diag_update -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys \
+	 -pc_air_coarsest_diag_scale_polys -pc_air_strong_r_threshold 0.1
 	@echo "Test PCAIR keeping the polynomial coefficients of every inverse from the first setup, at each reuse amount"
 	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
 	 -pc_air_reuse_amount 1 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
@@ -1020,6 +1020,8 @@ run_tests_no_load_serial:
 	 -pc_air_reuse_amount 2 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
 	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
 	 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
+	 -c_values 8,0.5 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-2
 	@echo "Test PCAIR returns no polynomial coefficients for inverses that are not polynomials"
 	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_inverse_type jacobi
 	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
@@ -1736,9 +1738,9 @@ else
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
 	@echo "Test AIRG with a diagonal update recomputing the polynomial coefficients in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
-	@echo "Test AIRG with a strong R threshold, keeping the polynomial coefficients from the first setup in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
-	 -pc_air_strong_r_threshold 0.1 -pc_air_reuse_poly_coeffs
+	@echo "Test AIRG with a strong R threshold and a diagonal update, keeping the polynomial coefficients from the first setup in parallel"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_diag_update -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys \
+	 -pc_air_coarsest_diag_scale_polys -pc_air_strong_r_threshold 0.1
 	@echo "Test PCAIR keeping the polynomial coefficients of every inverse from the first setup, at each reuse amount in parallel"
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
 	 -pc_air_reuse_amount 1 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
@@ -1752,6 +1754,8 @@ else
 	 -pc_air_reuse_amount 2 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
 	 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
+	 -c_values 8,0.5 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-2
 	@echo "Test PCAIR returns no polynomial coefficients for inverses that are not polynomials in parallel"
 	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_inverse_type jacobi
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update in parallel"

@@ -80,9 +80,10 @@ module gmres_poly
       end if      
 
       ! Now we know the order we can create our coefficient vector
-      ! Existing coefficients are kept (they may be reused), unless they can't be the
-      ! coefficients of a polynomial of this order, e.g. if the coarsest grid changed size
+      ! Existing coefficients are kept (they may be reused), unless their storage is the wrong
+      ! size for a polynomial of this order, e.g. if the coarsest grid changed size
       ! A Newton polynomial can store more roots than poly_order + 1, but not fewer
+      ! Changing the options that set the order resets the PC, which frees the coefficients
       newton = inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
       if (associated(poly_data%coefficients)) then
          if (newton) then

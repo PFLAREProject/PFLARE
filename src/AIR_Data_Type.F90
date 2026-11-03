@@ -304,6 +304,9 @@ module air_data_type
 
       ! Actual number of levels in the hierarchy after coarsening
       integer :: no_levels = -1   
+      ! The level we auto truncated on, or -1 if we didn't. Kept when we reuse, so a later
+      ! setup truncates on the same level and keeps the same hierarchy
+      integer :: auto_truncated_level = -1
       ! Do we have a gpu matrix or one on the cpu 
       logical :: fast_veciscopy_exists = .FALSE.
       ! Can we reuse a one point classical prolongator

@@ -244,8 +244,12 @@ module air_mg_setup
             call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
 
             ! If it's good enough we can truncate on this level and our coarse solver has been computed
-            if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol) then
+            ! If we are reusing and truncated on this level last time, we truncate here again
+            ! whatever the test gives, so the hierarchy doesn't change
+            if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol .OR. &
+                  our_level == air_data%auto_truncated_level) then
                auto_truncated = .TRUE.
+               air_data%auto_truncated_level = our_level
 
                ! Delete temporary if not reusing
                if (.NOT. air_data%options%reuse_sparsity .OR. &
