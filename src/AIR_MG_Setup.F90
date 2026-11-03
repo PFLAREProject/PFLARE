@@ -16,7 +16,7 @@ module air_mg_setup
          PFLARE_KSP_RTOL_COARSE, PFLARE_MINUS_ONE
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
-         destroy_matrix_reuse
+         destroy_matrix_reuse, inverse_type_is_polynomial
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
@@ -82,7 +82,7 @@ module air_mg_setup
       type(tVec), dimension(:), allocatable :: left_null_vecs_c, right_null_vecs_c
       VecScatter :: vec_scatter
       VecType :: vec_type
-      logical :: auto_truncated, aff_diag, check_diag_only
+      logical :: auto_truncated, aff_diag, check_diag_only, truncate_without_test, truncated_here
       PetscRandom :: rctx
       MatType:: mat_type, mat_type_aff, mat_type_inv_aff
       integer(c_int) :: diag_only
@@ -159,7 +159,10 @@ module air_mg_setup
          ! Otherwise building assembled approximation inverses can be very expensive!      
          ! ~~~~~~~~~~
          ! We already know how many coarse levels we have if we are re-using
-         if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. &
+         ! The CF splitting is kept whenever we reuse, at any reuse_amount (unlike A_ff,
+         ! which is destroyed at amounts 1 and 2), so a level with one wasn't the coarsest
+         ! last time and we don't test it again. Otherwise the number of levels could change
+         if (.NOT. air_data%allocated_is(our_level) .AND. &
                      our_level .ge. air_data%options%auto_truncate_start_level .AND. &
                      air_data%options%auto_truncate_start_level /= -1) then         
 
@@ -175,25 +178,37 @@ module air_mg_setup
                      air_data%inv_coarsest_poly_data)  
 
             ! Start the approximate inverse we'll use on this level
-            call start_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%options%coarsest_diag_scale_polys, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)                       
+            ! If we are reusing the coefficients and have some, the truncation test uses those
+            if (.NOT. (air_data%inv_coarsest_poly_data%coefficients_set .AND. &
+                        air_data%options%reuse_poly_coeffs)) then
+               call start_approximate_inverse(air_data%coarse_matrix(our_level), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients)                       
+               air_data%inv_coarsest_poly_data%coefficients_set = &
+                     inverse_type_is_polynomial(air_data%inv_coarsest_poly_data%inverse_type)
+            end if
 
-            ! This will be a vec of randoms that differ from those used to create the gmres polynomials
-            ! We will solve Ax = rand_vec to test how good our coarse solver is
-            call PetscRandomCreate(MPI_COMM_MATRIX, rctx, ierr)
-            call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                     rand_vec, PETSC_NULL_VEC, ierr)            
+            ! If we are reusing and truncated on this level last time, we truncate here again
+            ! so the hierarchy doesn't change, and there is no need to test the coarse solver
+            truncate_without_test = our_level == air_data%auto_truncated_level
 
-            call VecSetRandom(rand_vec, rctx, ierr)
-            call PetscRandomDestroy(rctx, ierr)
-            call VecNorm(rand_vec, NORM_2, norm_b, ierr)
+            if (.NOT. truncate_without_test) then
+               ! This will be a vec of randoms that differ from those used to create the gmres polynomials
+               ! We will solve Ax = rand_vec to test how good our coarse solver is
+               call PetscRandomCreate(MPI_COMM_MATRIX, rctx, ierr)
+               call MatCreateVecs(air_data%coarse_matrix(our_level), &
+                        rand_vec, PETSC_NULL_VEC, ierr)            
 
-            call VecDuplicate(rand_vec, sol_vec, ierr)
-            call VecDuplicate(rand_vec, temp_vec, ierr)
+               call VecSetRandom(rand_vec, rctx, ierr)
+               call PetscRandomDestroy(rctx, ierr)
+               call VecNorm(rand_vec, NORM_2, norm_b, ierr)
+
+               call VecDuplicate(rand_vec, sol_vec, ierr)
+               call VecDuplicate(rand_vec, temp_vec, ierr)
+            end if
 
             ! Finish our approximate inverse
             call finish_approximate_inverse(air_data%coarse_matrix(our_level), &
@@ -208,35 +223,41 @@ module air_mg_setup
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
                   air_data%inv_A_ff(our_level))          
                   
-            ! We have a custom MF routine for computing just the residual 
-            ! when applying the Newton form of the gmres polynomial that saves some flops
-            ! We don't actually need the solution here as it's useless
-            if ((air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
-                  air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
-                  air_data%options%coarsest_matrix_free_polys) then
+            if (.NOT. truncate_without_test) then
+               ! We have a custom MF routine for computing just the residual 
+               ! when applying the Newton form of the gmres polynomial that saves some flops
+               ! We don't actually need the solution here as it's useless
+               if ((air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
+                     air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+                     air_data%options%coarsest_matrix_free_polys) then
 
-               if (air_data%options%coarsest_diag_scale_polys) then
-                  call petsc_matvec_right_scale_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
-               else
-                  call petsc_matvec_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
-               end if
-           else
+                  if (air_data%options%coarsest_diag_scale_polys) then
+                     call petsc_matvec_right_scale_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
+                  else
+                     call petsc_matvec_poly_newton_residual_mf(air_data%inv_A_ff(our_level), rand_vec, temp_vec)
+                  end if
+              else
 
-               ! sol_vec = A^-1 * rand_vec
-               call MatMult(air_data%inv_A_ff(our_level), rand_vec, sol_vec, ierr)
-               ! Now calculate a residual
-               ! A * sol_vec
-               call MatMult(air_data%coarse_matrix(our_level), sol_vec, temp_vec, ierr)
-               ! Now A * sol_vec - rand_vec
-               call VecAXPY(temp_vec, PFLARE_MINUS_ONE, rand_vec, ierr)  
-            end if 
+                  ! sol_vec = A^-1 * rand_vec
+                  call MatMult(air_data%inv_A_ff(our_level), rand_vec, sol_vec, ierr)
+                  ! Now calculate a residual
+                  ! A * sol_vec
+                  call MatMult(air_data%coarse_matrix(our_level), sol_vec, temp_vec, ierr)
+                  ! Now A * sol_vec - rand_vec
+                  call VecAXPY(temp_vec, PFLARE_MINUS_ONE, rand_vec, ierr)  
+               end if 
 
-            ! Get the achieved norm
-            call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
+               ! Get the achieved norm
+               call VecNorm(temp_vec, NORM_2, achieved_rel_tol, ierr)    
+            end if
 
             ! If it's good enough we can truncate on this level and our coarse solver has been computed
-            if (achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol) then
+            ! Short circuit, as achieved_rel_tol and norm_b aren't computed without the test
+            truncated_here = truncate_without_test
+            if (.NOT. truncated_here) truncated_here = achieved_rel_tol/norm_b < air_data%options%auto_truncate_tol
+            if (truncated_here) then
                auto_truncated = .TRUE.
+               air_data%auto_truncated_level = our_level
 
                ! Delete temporary if not reusing
                if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -257,11 +278,14 @@ module air_mg_setup
                   deallocate(air_data%inv_coarsest_poly_data%coefficients)
                   air_data%inv_coarsest_poly_data%coefficients => null()
                end if
+               air_data%inv_coarsest_poly_data%coefficients_set = .FALSE.
             end if
 
-            call VecDestroy(rand_vec, ierr)
-            call VecDestroy(sol_vec, ierr)
-            call VecDestroy(temp_vec, ierr)
+            if (.NOT. truncate_without_test) then
+               call VecDestroy(rand_vec, ierr)
+               call VecDestroy(sol_vec, ierr)
+               call VecDestroy(temp_vec, ierr)
+            end if
 
             call timer_finish(TIMER_ID_AIR_TRUNCATE)   
          end if
@@ -1003,8 +1027,7 @@ module air_mg_setup
                
       ! Start the inverse for the coarse grid
       ! These comms will be finished below
-      temp_mat = air_data%inv_A_ff(air_data%no_levels)
-      if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) &
+      if (.NOT. (air_data%inv_coarsest_poly_data%coefficients_set &
                   .AND. air_data%options%reuse_poly_coeffs)) then
 
          ! We've already created our coarse solver if we've auto truncated
@@ -1021,6 +1044,8 @@ module air_mg_setup
                   air_data%options%coarsest_diag_scale_polys, &
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients)         
+            air_data%inv_coarsest_poly_data%coefficients_set = &
+                  inverse_type_is_polynomial(air_data%inv_coarsest_poly_data%inverse_type)
             call timer_finish(TIMER_ID_AIR_INVERSE)
          end if
       end if

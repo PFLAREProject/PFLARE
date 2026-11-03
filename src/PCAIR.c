@@ -1422,8 +1422,9 @@ PETSC_EXTERN PetscErrorCode PCAIRGetDiagUpdate(PC pc, PetscBool *input_bool)
   the Fortran interface to this routine, which returns a copy in an allocatable array that knows its own size.
 
   It is an error to call this before `PCSetUp()`, with petsc_level outside [0, number of levels - 1], or for an
-  inverse that is not stored as a polynomial on that level (e.g. `COEFFS_INV_ACC` without C point smoothing).
-  petsc_level is ignored for `COEFFS_INV_COARSE`.
+  inverse that is not computed as a polynomial on that level (e.g. `COEFFS_INV_ACC` without C point smoothing,
+  `COEFFS_INV_AFF_DROPPED` without a strong R threshold or full smoothing, or an inverse type such as `PFLAREINV_JACOBI`
+  that has no coefficients). petsc_level is ignored for `COEFFS_INV_COARSE`.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRSetPolyCoeffs()`, `PCAIRGetReusePolyCoeffs()`, `WhichInverseType`, `PCSetUp()`
 @*/
@@ -2813,7 +2814,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseSparsity(PC pc, PetscBool input_bool)
   Notes:
   With `-pc_air_reuse_sparsity`, this is only useful when regenerating the hierarchy for the same matrix, with
   coefficients stored and restored using `PCAIRGetPolyCoeffs()` and `PCAIRSetPolyCoeffs()`; the coefficients are very
-  sensitive to changes in the matrix.
+  sensitive to changes in the matrix. The coefficients are kept at every `-pc_air_reuse_amount`, even though the
+  inverses built from them are rebuilt at amounts 1 and 2. If this is set before the first setup, the first setup
+  computes the coefficients and later setups keep them.
 
   With `-pc_air_diag_update`, a diagonal update keeps the polynomial coefficients rather than recomputing them, so an
   update with matrix-free smoothing (`-pc_air_matrix_free_polys` and `-pc_air_coarsest_matrix_free_polys`) does

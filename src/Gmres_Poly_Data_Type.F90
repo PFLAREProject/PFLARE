@@ -30,6 +30,10 @@ module gmres_poly_data_type
       ! from LAPACK geev) as two real columns, and the chain crosses three public
       ! API surfaces plus a raw TSQR pointer remap - retype is a separate follow-up.
       PetscReal, pointer, dimension(:, :), contiguous :: coefficients => null()
+      ! Whether coefficients holds values, computed by a setup or given by PCAIRSetPolyCoeffs
+      ! The storage is allocated before anything is written to it, so associated(coefficients)
+      ! can't tell us this. Has to be reset whenever coefficients is (re)allocated or freed
+      logical :: coefficients_set = .FALSE.
 
       ! Asynchronous buffers for the TSQR
       type(tsqr_buffers) :: buffers

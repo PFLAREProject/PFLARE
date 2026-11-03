@@ -200,6 +200,8 @@ The ``-pc_air_reuse_amount`` option trades memory for a slightly higher setup co
 - **2** — Store the CF splitting plus all matrices needed to guarantee stable SpGEMM sparsity (W, Z, W_DROP, Z_DROP, AP, RAP, RAP_DROP, and when ``strong_r_threshold != 0`` also the dropped submatrices). A_ff/A_fc/A_cf, prolongators and restrictors are rebuilt each setup. Moderate memory overhead.
 - **3** — Store everything, including the approximate inverse matrices and the grid-transfer operators. Fastest setup but highest memory (default).
 
+Every amount keeps the same hierarchy, and with ``-pc_air_reuse_poly_coeffs`` every amount keeps the polynomial coefficients; the amount only changes what is rebuilt from them. With auto truncation, a later setup truncates on the same level as the first, without testing the coarse grid solver again, so the number of levels doesn't change even if the matrix does.
+
 in Fortran:
 
      call PCAIRSetReuseSparsity(pc, PETSC_TRUE, ierr)

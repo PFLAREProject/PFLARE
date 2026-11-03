@@ -51,7 +51,9 @@ module gmres_poly
       integer, intent(in)                               :: poly_sparsity_order
       logical, intent(in)                               :: subcomm
       type(gmres_poly_data), intent(inout)              :: poly_data
-      ! ~~~~~~            
+
+      logical :: newton, wrong_size
+      ! ~~~~~~
 
       ! For gmres polynomial calculation we can move the reductions onto a subcomm
       if (inverse_type == PFLAREINV_POWER .OR. &
@@ -78,11 +80,33 @@ module gmres_poly
       end if      
 
       ! Now we know the order we can create our coefficient vector
-      if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+      ! Existing coefficients are kept (they may be reused), unless their storage is the wrong
+      ! size for a polynomial of this order, e.g. if the coarsest grid changed size
+      ! A Newton polynomial can store more roots than poly_order + 1, but not fewer
+      ! Changing the options that set the order resets the PC, which frees the coefficients
+      newton = inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+      if (associated(poly_data%coefficients)) then
+         if (newton) then
+            wrong_size = size(poly_data%coefficients, 2) /= 2 .OR. &
+                         size(poly_data%coefficients, 1) < poly_data%gmres_poly_order + 1
+         else
+            wrong_size = size(poly_data%coefficients, 2) /= 1 .OR. &
+                         size(poly_data%coefficients, 1) /= poly_data%gmres_poly_order + 1
+         end if
+         if (wrong_size) then
+            deallocate(poly_data%coefficients)
+            poly_data%coefficients => null()
+         end if
+      end if
+      if (.NOT. associated(poly_data%coefficients)) then
          ! Newton basis we have to store real and imag roots
-         if (.NOT. associated(poly_data%coefficients)) allocate(poly_data%coefficients(poly_data%gmres_poly_order + 1, 2))
-      else
-         if (.NOT. associated(poly_data%coefficients)) allocate(poly_data%coefficients(poly_data%gmres_poly_order + 1, 1))
+         if (newton) then
+            allocate(poly_data%coefficients(poly_data%gmres_poly_order + 1, 2))
+         else
+            allocate(poly_data%coefficients(poly_data%gmres_poly_order + 1, 1))
+         end if
+         ! Nothing has been written to them yet
+         poly_data%coefficients_set = .FALSE.
       end if
 
    end subroutine setup_gmres_poly_data

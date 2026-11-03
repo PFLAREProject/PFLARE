@@ -467,7 +467,9 @@ module pcair_interfaces
       ! the case if which_inverse is unknown, petsc_level is out of range, PCSetUp
       ! has not been called (or the PC has been reset since), or the requested
       ! inverse is not stored as a polynomial on that level (e.g. COEFFS_INV_ACC when
-      ! there is no C point smoothing)
+      ! there is no C point smoothing, COEFFS_INV_AFF_DROPPED when there is no strong
+      ! R threshold or full smoothing, or a non-polynomial inverse type), ie nothing
+      ! has written any coefficients
       ! petsc_level is ignored for COEFFS_INV_COARSE
 
       ! ~~~~~~~~
@@ -482,7 +484,10 @@ module pcair_interfaces
 
       coeffs_internal => null()
       call PCAIRGetPolyDataPointer(pc, petsc_level, which_inverse, poly_data, inv_matrix)
-      if (associated(poly_data)) coeffs_internal => poly_data%coefficients
+      if (associated(poly_data)) then
+         ! The storage can exist without anything having been written to it
+         if (poly_data%coefficients_set) coeffs_internal => poly_data%coefficients
+      end if
 
    end subroutine PCAIRGetPolyCoeffsPointer
 
@@ -531,7 +536,7 @@ module pcair_interfaces
          err_code = 1
          return
       end if
-      if (.NOT. associated(poly_data%coefficients)) then
+      if (.NOT. associated(poly_data%coefficients) .OR. .NOT. poly_data%coefficients_set) then
          err_code = 1
          return
       end if
@@ -548,6 +553,7 @@ module pcair_interfaces
       if (size(coeffs, 1) == size(poly_data%coefficients, 1) .AND. &
             size(coeffs, 2) == size(poly_data%coefficients, 2)) then
          poly_data%coefficients = coeffs
+         poly_data%coefficients_set = .TRUE.
          return
       end if
 
@@ -561,6 +567,7 @@ module pcair_interfaces
       old_coeffs => poly_data%coefficients
       allocate(poly_data%coefficients(size(coeffs, 1), 2))
       poly_data%coefficients = coeffs
+      poly_data%coefficients_set = .TRUE.
 
       ! If the inverse is a matrix-free Newton polynomial, it points at the old storage
       ! so point it at the new storage before we free the old

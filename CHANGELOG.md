@@ -28,6 +28,28 @@ for earlier changes please see the git history.
 - Fixed power basis GMRES polynomials failing on badly scaled matrices (eg
   bcsstk19); the coefficients no longer depend on the scale of the matrix, so
   iteration counts may change slightly
+- Fixed several problems with `-pc_air_reuse_poly_coeffs`. PCAIR now records
+  whether each set of polynomial coefficients has been computed (or set with
+  `PCAIRSetPolyCoeffs()`), rather than guessing from whether an inverse matrix
+  exists:
+  - the coefficients of the dropped A_ff inverse used to build the AIRG
+    grid-transfer operators (with `-pc_air_strong_r_threshold` or
+    `-pc_air_full_smoothing_up_and_down`) were never computed if
+    `-pc_air_reuse_poly_coeffs` was set before the first setup, so
+    uninitialised values were used, typically giving NaNs
+  - with `-pc_air_reuse_amount` 1 or 2 every set of coefficients was recomputed
+    on each setup, ignoring `-pc_air_reuse_poly_coeffs` and any coefficients
+    given with `PCAIRSetPolyCoeffs()`
+  - with auto truncation the coarse grid coefficients were always recomputed
+  - `PCAIRGetPolyCoeffs()` returned uninitialised values, rather than an
+    error, for an inverse that isn't computed as a polynomial (e.g.
+    `COEFFS_INV_AFF_DROPPED` without a strong R threshold, or a Jacobi inverse
+    type)
+- Behaviour change: when reusing, PCAIR now keeps the number of levels chosen by
+  auto truncation. Before, the truncation was tested again on each setup (on
+  every level with `-pc_air_reuse_amount` 1 or 2, on the truncated level with 3),
+  so the hierarchy could grow if the matrix changed, throwing away the kept coarse
+  grid coefficients, and a reuse setup that grew the hierarchy aborted
 - Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
   from a level that failed the truncation test, which gave the wrong coarse
   grid polynomial (or an out-of-bounds write with the power basis) when the
