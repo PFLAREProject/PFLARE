@@ -1819,7 +1819,8 @@ end if
       end if
 
       ! If we're constraining sparsity we've built a custom matrix-powers that assumes fixed sparsity
-      if (sparsity_order < size(coefficients, 1) - 1) then
+      ! A sparsity order of 0 always goes through here, as that builds a matdiagonal
+      if (sparsity_order == 0 .OR. sparsity_order < size(coefficients, 1) - 1) then
 
          ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
          ! so that it doen't have to do much comms
@@ -2088,16 +2089,18 @@ end if
          ! The matrix-free apply only applies the last root if it is non-zero
          if (coefficients(2,1) == 0d0) then
 
-            ! Set to zero
-            call MatScale(inv_matrix, PFLARE_ZERO, ierr)
-
-            ! Tricky case here as we want to pass out the identity with the 
-            ! sparsity of A
+            ! Tricky case here as we want to pass out the product so far with the
+            ! sparsity of A, as only the second root is skipped
+            ! ie I - A_ff/theta_1, which is the identity if the first root is also zero
             if (output_product) then
                call MatConvert(inv_matrix, MATSAME, MAT_INITIAL_MATRIX, mat_prod_or_temp, ierr)  
+               call MatScale(mat_prod_or_temp, -inv_theta_one, ierr)
                call MatShift(mat_prod_or_temp, PFLARE_ONE, ierr)
                status_output(1:2, 1) = 1
             end if                
+
+            ! Set to zero
+            call MatScale(inv_matrix, PFLARE_ZERO, ierr)
 
             ! Then add in the 0th order inverse
             call MatShift(inv_matrix, inv_theta_one, ierr)       

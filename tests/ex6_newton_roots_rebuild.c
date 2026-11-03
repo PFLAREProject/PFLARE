@@ -18,15 +18,20 @@ built from a different number of roots) and checked:\n\
   - fixed sparsity: the number of nonzeros in an assembled inverse is set by the requested\n\
     sparsity order, so doesn't change with the number of roots\n\
 \n\
+With -dense the matrix has a full nonzero pattern, so any sparsity order of at least 1\n\
+holds every power of the matrix and all the variants must be exact. It also adds variants\n\
+with fixed roots, so the layouts tested don't depend on the computed roots.\n\
+\n\
   -n : grid size (default 10)\n\
-  -c : diagonal shift (default 1)\n\n";
+  -c : diagonal shift (default 1)\n\
+  -dense : use a matrix with a full nonzero pattern\n\n";
 
 #include <petscksp.h>
 #include "pflare.h"
 
-#define MAX_VARIANTS 8
+#define MAX_VARIANTS 11
 
-static PetscErrorCode BuildMatrix(PetscInt n, PetscReal c, Mat *A)
+static PetscErrorCode BuildMatrix(PetscInt n, PetscReal c, PetscBool dense, Mat *A)
 {
   PetscInt  Istart, Iend, row, i, j;
   PetscReal alpha = 1.0;
@@ -35,10 +40,15 @@ static PetscErrorCode BuildMatrix(PetscInt n, PetscReal c, Mat *A)
   PetscCall(MatCreate(PETSC_COMM_WORLD, A));
   PetscCall(MatSetSizes(*A, PETSC_DECIDE, PETSC_DECIDE, n * n, n * n));
   PetscCall(MatSetFromOptions(*A));
-  PetscCall(MatSeqAIJSetPreallocation(*A, 5, NULL));
-  PetscCall(MatMPIAIJSetPreallocation(*A, 5, NULL, 5, NULL));
+  PetscCall(MatSeqAIJSetPreallocation(*A, dense ? n * n : 5, NULL));
+  PetscCall(MatMPIAIJSetPreallocation(*A, dense ? n * n : 5, NULL, dense ? n * n : 5, NULL));
   PetscCall(MatGetOwnershipRange(*A, &Istart, &Iend));
   for (row = Istart; row < Iend; row++) {
+    if (dense) {
+      /* Non-symmetric and diagonally dominant */
+      for (j = 0; j < n * n; j++) PetscCall(MatSetValue(*A, row, j, j == row ? 6.0 + 0.3 * row : (j < row ? -0.4 : -0.1) / (1.0 + PetscAbsInt(row - j)), INSERT_VALUES));
+      continue;
+    }
     i = row % n;
     j = row / n;
     PetscCall(MatSetValue(*A, row, row, 2.0 + 4.0 * alpha + c * (1.0 + 0.5 * PetscSinReal((PetscReal)row)), INSERT_VALUES));
@@ -101,7 +111,7 @@ int main(int argc, char **args)
   PC               pc;
   PetscInt         n = 10, n0, cols0, i, v, w, nv = 0, po, sp, nr[MAX_VARIANTS], first_real = -1, first_complex = -1, k;
   PetscReal        c = 1.0, *roots0, *ptr, *var[MAX_VARIANTS], norm_b, norm_e, max_exact = 0.0, max_hist = 0.0, tol;
-  PetscBool        matrix_free, exact, is_diag, verbose = PETSC_FALSE;
+  PetscBool        matrix_free, exact, is_diag, dense = PETSC_FALSE, verbose = PETSC_FALSE;
   PetscLogDouble   nz_first = 0.0;
   MatInfo          info;
   PCPFLAREINVType  type;
@@ -114,7 +124,9 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-c", &c, NULL));
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-verbose", &verbose, NULL));
 
-  PetscCall(BuildMatrix(n, c, &A));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-dense", &dense, NULL));
+
+  PetscCall(BuildMatrix(n, c, dense, &A));
   PetscCall(MatCreateVecs(A, &y, &b));
   PetscCall(VecDuplicate(b, &r));
   PetscCall(VecDuplicate(b, &Ay));
@@ -210,6 +222,43 @@ int main(int argc, char **args)
     for (i = 0; i <= po; i++) Put(var[nv], nr[nv], i, roots0[i], roots0[n0 + i]);
     nv++;
   }
+  /* A single root, which only has to work with a sparsity order of 0 as the matrix then stays diagonal */
+  if (sp == 0 && po > 0) {
+    names[nv] = "single root";
+    nr[nv]    = 1;
+    PetscCall(PetscCalloc1(2 * nr[nv], &var[nv]));
+    Put(var[nv], nr[nv], 0, roots0[first_real >= 0 ? first_real : 0], 0.0);
+    nv++;
+  }
+  if (dense && sp > 0) {
+    /* A zero root straight after a real root */
+    names[nv] = "real root then zero root";
+    nr[nv]    = po + 3;
+    PetscCall(PetscCalloc1(2 * nr[nv], &var[nv]));
+    Put(var[nv], nr[nv], 0, 6.0, 0.0);
+    for (i = 2; i < nr[nv]; i++) Put(var[nv], nr[nv], i, 6.0 + 0.5 * i, 0.0);
+    nv++;
+    /* The first root of a conjugate pair falls on the power of the sparsity order */
+    names[nv] = "pair across the sparsity order";
+    nr[nv]    = PetscMax(po, sp) + 3;
+    PetscCall(PetscCalloc1(2 * nr[nv], &var[nv]));
+    for (i = 0; i < sp; i++) Put(var[nv], nr[nv], i, 6.0 + 0.5 * i, 0.0);
+    Put(var[nv], nr[nv], sp, 7.0, 1.0);
+    Put(var[nv], nr[nv], sp + 1, 7.0, -1.0);
+    for (i = sp + 2; i < nr[nv]; i++) Put(var[nv], nr[nv], i, 6.0 + 0.5 * i, 0.0);
+    nv++;
+    /* Starting with a pair, with a real root between it and the next pair */
+    names[nv] = "pairs first";
+    nr[nv]    = po + 6;
+    PetscCall(PetscCalloc1(2 * nr[nv], &var[nv]));
+    Put(var[nv], nr[nv], 0, 7.0, 1.0);
+    Put(var[nv], nr[nv], 1, 7.0, -1.0);
+    Put(var[nv], nr[nv], 2, 6.0, 0.0);
+    Put(var[nv], nr[nv], 3, 8.0, 2.0);
+    Put(var[nv], nr[nv], 4, 8.0, -2.0);
+    for (i = 5; i < nr[nv]; i++) Put(var[nv], nr[nv], i, 6.0 + 0.5 * i, 0.0);
+    nv++;
+  }
 
   PetscCall(PCPFLAREINVSetReusePolyCoeffs(pc, PETSC_TRUE));
   tol = 1e4 * PETSC_MACHINE_EPSILON;
@@ -221,7 +270,7 @@ int main(int argc, char **args)
     PetscCall(PetscObjectStateIncrease((PetscObject)A));
     PetscCall(PCSetUp(pc));
     PetscCall(PCApply(pc, b, y));
-    exact = (PetscBool)(matrix_free || nr[v] - 1 <= PetscMin(sp, po));
+    exact = (PetscBool)(matrix_free || nr[v] - 1 <= PetscMin(sp, po) || (dense && sp > 0));
     if (exact) {
       PetscCall(ResidualPoly(A, var[v], nr[v], b, r));
       /* e = A y - (b - r) */
