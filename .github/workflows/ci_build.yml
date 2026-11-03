@@ -40,11 +40,20 @@ jobs:
 
       - name: free disk space
         run: |
-          docker system prune --volumes -af            
+          docker system prune --volumes -af
+
+  # Gate between the two CI stages: the fast opt builds listed here run first and
+  # the remaining slower builds need this job, so only start once these have passed
+  opt_stage:
+    runs-on: ubuntu-22.04
+    needs: [gnu_opt, gnu_opt_64_bit, gnu_opt_kokkos, gnu_opt_kokkos_malloc_dump, gnu_opt_64_bit_kokkos, intel_opt]
+    steps:
+      - name: Opt stage passed
+        run: echo "All opt builds passed"
 
   gnu_debug:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -62,7 +71,7 @@ jobs:
 
   gnu_debug_malloc_dump:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -80,7 +89,7 @@ jobs:
 
   gnu_debug_valgrind:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -250,7 +259,7 @@ jobs:
         
   gnu_debug_kokkos_valgrind:
     runs-on: ubuntu-22.04
-    needs: [setup]
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -267,7 +276,7 @@ jobs:
 
   gnu_debug_kokkos_single_prefix:
     runs-on: ubuntu-22.04
-    needs: setup
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -303,7 +312,7 @@ jobs:
   # Use 2 OMP threads by default as the github action runners have 2 cores by default
   gnu_opt_omp_kokkos:
     runs-on: ubuntu-22.04
-    needs: [setup]
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -321,7 +330,7 @@ jobs:
             
   gnu_debug_no_mpi_kokkos:
     runs-on: ubuntu-22.04
-    needs: [setup]
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -373,7 +382,7 @@ jobs:
   # for PFLARE to the hash from the merge commit for this branch
   gnu_petsc_config:
     runs-on: ubuntu-24.04
-    needs: [setup]
+    needs: [setup, opt_stage]
     env:
       BRANCH: ${{ needs.setup.outputs.branch }}
       COMMIT: ${{ needs.setup.outputs.commit }}
@@ -494,7 +503,7 @@ jobs:
   # so it will rebuild petsc only if there is a new main
   macos_debug:
     runs-on: macos-15
-    needs: [setup]
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -584,7 +593,7 @@ jobs:
   # 64 bit macos build with kokkos
   macos_64_bit_kokkos:
     runs-on: macos-15
-    needs: [setup]
+    needs: [opt_stage]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
