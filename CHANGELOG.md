@@ -6,6 +6,9 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Assembled Newton inverses now always have the sparsity of the requested order,
+  capped at the polynomial order. Extra roots are added within that sparsity
+  rather than being ignored or growing it, which also fixes crashes on reuse.
 - Added `-pc_air_diag_update` (`PCAIRSetDiagUpdate()`). When only the diagonal
   of the Pmat changes in place, PCAIR updates the existing hierarchy rather than
   rebuilding it, with no matrix-matrix products; see `docs/reuse.md`

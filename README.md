@@ -31,8 +31,8 @@ PFLARE adds new methods to PETSc, including:
 
 - MPI parallel
 - Single or double precision
-- Block solves for multiple right-hand sides through `KSPMatSolve`, using sparse-dense products for improved throughput
-- Transposed solves through `KSPSolveTranspose`, e.g. for adjoint problems, with the exact transpose of the forward preconditioner
+- Block solves for multiple right-hand sides through `KSPMatSolve`
+- Transposed solves through `KSPSolveTranspose`
 - GPU support via Kokkos on Nvidia, AMD and Intel GPUs; solves run entirely on the device
 - C/C++, Fortran and Python interfaces
 
@@ -42,7 +42,7 @@ You can get started with PFLARE in one of five ways:
 
 * PFLARE is available directly through the PETSc configure (from the PETSc 3.25 release) with: `--download-pflare`, see [docs/installation.md](docs/installation.md)
 * PFLARE is available in the Spack package repository with: `spack install pflare`
-* To run the Jupyter notebooks in `notebooks/` in your browser without requiring a local install, click the Binder badge above
+* To run the Jupyter notebooks in `notebooks/` in your browser, click the Binder badge above
 * To download a Docker image with PFLARE installed, run `docker run -it stevendargaville/pflare`, then `make check` inside the container
 * To build from source, see [docs/installation.md](docs/installation.md) 
 

@@ -984,6 +984,23 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_serial:
+	@echo "Test rebuilding Newton polynomial inverses from more roots than the sparsity order keeps the requested sparsity"
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 0 -pc_pflareinv_sparsity_order 0
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 2 -pc_pflareinv_sparsity_order 2
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 6
+	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 4 -pc_pflareinv_sparsity_order 0
+	@echo "Test the values of Newton polynomial inverses rebuilt from more roots than the sparsity order on a matrix with a full nonzero pattern"
+	./ex6_newton_roots_rebuild -dense -n 4 -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
+	./ex6_newton_roots_rebuild -dense -n 4 -pc_pflareinv_poly_order 3 -pc_pflareinv_sparsity_order 1
+	./ex6_newton_roots_rebuild -dense -n 4 -pc_pflareinv_poly_order 3 -pc_pflareinv_sparsity_order 2
+	./ex6_newton_roots_rebuild -dense -n 4 -pc_pflareinv_poly_order 3 -pc_pflareinv_sparsity_order 3
+	@echo "Test a first setup with zero Newton roots still builds the inverse with the requested sparsity"
+	$(SKIP_SINGLE) ./ex6_newton_roots_rebuild -zero_root_first -pc_pflareinv_poly_order 8 -pc_pflareinv_sparsity_order 8
+	$(SKIP_SINGLE) ./ex6_newton_roots_rebuild -zero_root_first -pc_pflareinv_poly_order 16 -pc_pflareinv_sparsity_order 15
+	$(SKIP_SINGLE) ./ex6_newton_roots_rebuild -zero_root_first -pc_pflareinv_poly_order 16 -pc_pflareinv_sparsity_order 16
+	@echo "Test PCAIR replaying a growing number of Newton roots with the sparsity order equal to the polynomial order"
+	./ex6_setcoeffs_replay -require_resize -pc_air_reuse_sparsity -pc_air_inverse_sparsity_order 16 -c_values 50,8,2,0.5
 #
 	@echo ""
 	@echo "Test AIRG with a diagonal update with a diagonal Aff"
@@ -1727,6 +1744,16 @@ run_tests_no_load_parallel:
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
 else
+	@echo "Test rebuilding Newton polynomial inverses from more roots than the sparsity order keeps the requested sparsity in parallel"
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 2
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 6
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 4 -pc_pflareinv_sparsity_order 0
+	@echo "Test a first setup with zero Newton roots still builds the inverse with the requested sparsity in parallel"
+	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -zero_root_first -pc_pflareinv_poly_order 8 -pc_pflareinv_sparsity_order 8
+	@echo "Test the values of Newton polynomial inverses rebuilt from more roots than the sparsity order on a matrix with a full nonzero pattern in parallel"
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -dense -n 4 -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
+	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -dense -n 4 -pc_pflareinv_poly_order 3 -pc_pflareinv_sparsity_order 2
 #
 	@echo ""
 	@echo "Test AIRG with a diagonal update in parallel with F point smoothing, with processor agglomeration"
