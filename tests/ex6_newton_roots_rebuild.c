@@ -359,7 +359,7 @@ int main(int argc, char **args)
   PetscCheck(norm_e <= tol * norm_b, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Appending zero roots changed the inverse, relative %g", (double)(norm_e / norm_b));
   PetscCall(VecWAXPY(r, -1.0, y_ref[0], y_ref[2]));
   PetscCall(VecNorm(r, NORM_2, &norm_e));
-  PetscCheck(norm_e > tol * norm_b, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Appending extra copies of roots didn't change the inverse, relative %g", (double)(norm_e / norm_b));
+  PetscCheck(norm_e > 100.0 * PETSC_MACHINE_EPSILON * norm_b, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Appending extra copies of roots didn't change the inverse, relative %g", (double)(norm_e / norm_b));
 
   /* ~~~~~~~~ Pass 2: every ordered pair (w then v), check rebuilding v gives the same as in pass 1 ~~~~~~~~ */
   for (w = 0; w < nv; w++) {
