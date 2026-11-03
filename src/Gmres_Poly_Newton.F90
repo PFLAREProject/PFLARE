@@ -1643,7 +1643,7 @@ end if
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
-      integer :: comm_size, errorcode
+      integer :: comm_size, errorcode, sparsity_order
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       VecType :: vtype
@@ -1778,8 +1778,13 @@ end if
          diag_scaled_mat = matrix
       end if   
 
+      ! The sparsity is set by the requested order, never by the number of roots, which can
+      ! be more than poly_order + 1 and change between setups. This keeps the sparsity fixed
+      ! when reusing, and matrix products of the inverse rely on that
+      sparsity_order = min(poly_sparsity_order, poly_order)
+
       ! If we're zeroth order poly this is trivial as it's just 1/theta_1 I
-      if (poly_order == 0) then
+      if (poly_order == 0 .AND. size(coefficients, 1) == 1) then
 
          call build_gmres_polynomial_newton_inverse_0th_order(diag_scaled_mat, poly_order, coefficients, &
                inv_matrix)
@@ -1793,8 +1798,8 @@ end if
          ! Then just return
          return      
 
-      ! For poly_order 1 and poly_sparsity_order 1 this is easy
-      else if (poly_order == 1 .AND. poly_sparsity_order == 1) then
+      ! For poly_order 1 and poly_sparsity_order 1 this is easy if there are only two roots
+      else if (poly_order == 1 .AND. poly_sparsity_order == 1 .AND. size(coefficients, 1) == 2) then
 
          ! Duplicate & copy the matrix, but ensure there is a diagonal present
          call mat_duplicate_copy_plus_diag(diag_scaled_mat, reuse_triggered, inv_matrix)         
@@ -1814,11 +1819,11 @@ end if
       end if
 
       ! If we're constraining sparsity we've built a custom matrix-powers that assumes fixed sparsity
-      if (poly_sparsity_order < poly_order) then    
+      if (sparsity_order < size(coefficients, 1) - 1) then
 
          ! This routine is a custom one that builds our matrix powers and assumes fixed sparsity
          ! so that it doen't have to do much comms
-         call mat_mult_powers_share_sparsity_newton(diag_scaled_mat, poly_order, poly_sparsity_order, coefficients, &
+         call mat_mult_powers_share_sparsity_newton(diag_scaled_mat, poly_order, sparsity_order, coefficients, &
                   reuse_mat, reuse_submatrices, inv_matrix)
 
          if (diag_scale_polys) then
@@ -2430,14 +2435,9 @@ end if
                end if
 
                ! Then add the scaled version of each product
-               if (reuse_triggered) then
-                  ! If doing reuse we know our nonzeros are a subset
-                  call MatAXPY(mat_product, -square_sum, &
-                           temp_mat_three, SUBSET_NONZERO_PATTERN, ierr)
-               else
-                  ! Have to use the DIFFERENT_NONZERO_PATTERN here
-                  call MatAXPYWrapper(mat_product, -square_sum, temp_mat_three)
-               end if               
+               ! Even if doing reuse this isn't a subset, as mat_product was built here and
+               ! temp_mat_three has a higher power of A
+               call MatAXPYWrapper(mat_product, -square_sum, temp_mat_three)
 
                ! We copy out the last part of the product if we're doing this as part of a fixed sparsity multiply
                if (output_product .AND. .NOT. first_complex) then

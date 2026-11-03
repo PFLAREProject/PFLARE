@@ -7,12 +7,16 @@ and in the middle, and the roots truncated back to the polynomial order + 1.\n\
 For each variant the inverse is rebuilt (reusing the existing inverse matrix, which was\n\
 built from a different number of roots) and checked:\n\
   - exactness, when the inverse should be exactly the polynomial (matrix-free, or\n\
-    assembled with -pc_pflareinv_sparsity_order >= -pc_pflareinv_poly_order):\n\
+    assembled with no more roots than the sparsity order, capped at the polynomial\n\
+    order, plus one):\n\
         A p(A) b = b - prod_i (I - A/theta_i) b\n\
     with the product computed here with matvecs, skipping zero roots and taking\n\
     complex conjugate pairs together\n\
   - history independence: rebuilding from the same roots gives the same inverse,\n\
     whatever set of roots the reused inverse was built from before\n\
+  - extra roots: extra copies of roots change the inverse, while zero roots don't\n\
+  - fixed sparsity: the number of nonzeros in an assembled inverse is set by the requested\n\
+    sparsity order, so doesn't change with the number of roots\n\
 \n\
   -n : grid size (default 10)\n\
   -c : diagonal shift (default 1)\n\n";
@@ -97,7 +101,9 @@ int main(int argc, char **args)
   PC               pc;
   PetscInt         n = 10, n0, cols0, i, v, w, nv = 0, po, sp, nr[MAX_VARIANTS], first_real = -1, first_complex = -1, k;
   PetscReal        c = 1.0, *roots0, *ptr, *var[MAX_VARIANTS], norm_b, norm_e, max_exact = 0.0, max_hist = 0.0, tol;
-  PetscBool        matrix_free, exact, verbose = PETSC_FALSE;
+  PetscBool        matrix_free, exact, is_diag, verbose = PETSC_FALSE;
+  PetscLogDouble   nz_first = 0.0;
+  MatInfo          info;
   PCPFLAREINVType  type;
   PetscRandom      rctx;
   const char      *names[MAX_VARIANTS];
@@ -130,7 +136,6 @@ int main(int argc, char **args)
   PetscCall(PCPFLAREINVGetPolyOrder(pc, &po));
   PetscCall(PCPFLAREINVGetSparsityOrder(pc, &sp));
   PetscCheck(type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "Needs a Newton type");
-  exact = (PetscBool)(matrix_free || sp >= po);
 
   PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &ptr, &n0, &cols0));
   PetscCall(PetscMalloc1(2 * n0, &roots0));
@@ -216,6 +221,7 @@ int main(int argc, char **args)
     PetscCall(PetscObjectStateIncrease((PetscObject)A));
     PetscCall(PCSetUp(pc));
     PetscCall(PCApply(pc, b, y));
+    exact = (PetscBool)(matrix_free || nr[v] - 1 <= PetscMin(sp, po));
     if (exact) {
       PetscCall(ResidualPoly(A, var[v], nr[v], b, r));
       /* e = A y - (b - r) */
@@ -232,8 +238,23 @@ int main(int argc, char **args)
     if (!matrix_free) {
       PetscCall(PCPFLAREINVGetInverseMat(pc, &inv_mat));
       PetscCall(MatDuplicate(inv_mat, MAT_COPY_VALUES, &inv_ref[v]));
+      PetscCall(PetscObjectTypeCompare((PetscObject)inv_mat, MATDIAGONAL, &is_diag));
+      if (!is_diag) {
+        PetscCall(MatGetInfo(inv_mat, MAT_GLOBAL_SUM, &info));
+        if (v == 0) nz_first = info.nz_used;
+        PetscCheck(info.nz_used == nz_first, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Variant '%s' (%" PetscInt_FMT " roots) changed the inverse's nonzeros from %g to %g", names[v], nr[v], (double)nz_first, (double)info.nz_used);
+      }
     }
   }
+
+  /* Zero roots are skipped so don't change the inverse, but extra copies of roots must */
+  PetscCall(VecNorm(y_ref[0], NORM_2, &norm_b));
+  PetscCall(VecWAXPY(r, -1.0, y_ref[0], y_ref[1]));
+  PetscCall(VecNorm(r, NORM_2, &norm_e));
+  PetscCheck(norm_e <= tol * norm_b, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Appending zero roots changed the inverse, relative %g", (double)(norm_e / norm_b));
+  PetscCall(VecWAXPY(r, -1.0, y_ref[0], y_ref[2]));
+  PetscCall(VecNorm(r, NORM_2, &norm_e));
+  PetscCheck(norm_e > tol * norm_b, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Appending extra copies of roots didn't change the inverse, relative %g", (double)(norm_e / norm_b));
 
   /* ~~~~~~~~ Pass 2: every ordered pair (w then v), check rebuilding v gives the same as in pass 1 ~~~~~~~~ */
   for (w = 0; w < nv; w++) {
@@ -269,7 +290,7 @@ int main(int argc, char **args)
 
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "OK: order %" PetscInt_FMT " sparsity %" PetscInt_FMT " %s, %" PetscInt_FMT " computed roots, %" PetscInt_FMT " variants (rows", po, sp, matrix_free ? "matrix-free" : "assembled", n0, nv));
   for (v = 0; v < nv; v++) PetscCall(PetscPrintf(PETSC_COMM_WORLD, " %" PetscInt_FMT, nr[v]));
-  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "), max exactness error %.2g%s, max history difference %.2g\n", (double)max_exact, exact ? "" : " (not checked)", (double)max_hist));
+  PetscCall(PetscPrintf(PETSC_COMM_WORLD, "), max exactness error %.2g, max history difference %.2g\n", (double)max_exact, (double)max_hist));
 
   for (v = 0; v < nv; v++) {
     PetscCall(PetscFree(var[v]));
