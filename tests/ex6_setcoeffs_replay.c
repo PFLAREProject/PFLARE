@@ -13,6 +13,9 @@ Replay: with PCAIRSetReusePolyCoeffs, the Pmats are visited again in reverse and
 forward order, each time setting the recorded coefficients before the solve. The\n\
 iteration count, PCApply and the stored coefficients must match those recorded.\n\
 \n\
+If -pc_air_reuse_poly_coeffs is given, it applies from the first setup, so the record\n\
+must keep the coefficients from the first Pmat for every later one.\n\
+\n\
   -c_values c1,c2,...  : the c_k (default 0.5,8,50)\n\
   -require_resize      : error if no replay changed the number of stored roots\n\
   -print_roots         : print the recorded roots\n\
@@ -83,7 +86,7 @@ int main(int argc, char **args)
   PC          pc;
   PetscInt    n = 10, n_c = MAX_C, k, k_idx, i, num_levels, lvl, its, its_rec[MAX_C], n_inv = 0, n_resized = 0, n_sets = 0, rows, cols, pass;
   PetscReal   alpha = 1.0, c_values[MAX_C] = {0.5, 8.0, 50.0}, norm_diff, norm_ref, max_rel_diff = 0.0;
-  PetscBool   flg, require_resize = PETSC_FALSE, print_roots = PETSC_FALSE, reuse_sparsity, diag_update, same;
+  PetscBool   flg, require_resize = PETSC_FALSE, print_roots = PETSC_FALSE, reuse_sparsity, diag_update, same, reuse_from_start;
   PetscRandom rctx;
   PetscReal  *ptr;
   PetscErrorCode ierr;
@@ -124,6 +127,7 @@ int main(int argc, char **args)
   PetscCall(PCAIRSetInverseType(pc, PFLAREINV_NEWTON));
   PetscCall(PCAIRSetPolyOrder(pc, 16));
   PetscCall(KSPSetFromOptions(ksp));
+  PetscCall(PCAIRGetReusePolyCoeffs(pc, &reuse_from_start));
 
   /* ~~~~~~~~ Record ~~~~~~~~ */
   for (k = 0; k < n_c; k++) {
@@ -177,6 +181,12 @@ int main(int argc, char **args)
       }
       PetscCall(PetscMalloc1(inv[i].rows[k] * inv[i].cols[k], &inv[i].coeffs[k]));
       PetscCall(PetscArraycpy(inv[i].coeffs[k], ptr, inv[i].rows[k] * inv[i].cols[k]));
+      /* Reusing the coefficients from the first setup, so none of the later setups can have computed them */
+      if (reuse_from_start && k > 0) {
+        PetscCheck(inv[i].rows[k] == inv[i].rows[0] && inv[i].cols[k] == inv[i].cols[0], PETSC_COMM_SELF, PETSC_ERR_PLIB, "Stored size on petsc_level %" PetscInt_FMT " which_inverse %d changed with -pc_air_reuse_poly_coeffs", inv[i].level, inv[i].which);
+        PetscCall(PetscArraycmp(ptr, inv[i].coeffs[0], inv[i].rows[k] * inv[i].cols[k], &same));
+        PetscCheck(same, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Coefficients on petsc_level %" PetscInt_FMT " which_inverse %d changed with -pc_air_reuse_poly_coeffs, c = %g", inv[i].level, inv[i].which, (double)c_values[k]);
+      }
     }
   }
 

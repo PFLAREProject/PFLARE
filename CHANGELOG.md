@@ -28,6 +28,12 @@ for earlier changes please see the git history.
 - Fixed power basis GMRES polynomials failing on badly scaled matrices (eg
   bcsstk19); the coefficients no longer depend on the scale of the matrix, so
   iteration counts may change slightly
+- Fixed PCAIR never computing the polynomial coefficients of the dropped A_ff
+  inverse used to build AIRG grid-transfer operators when
+  `-pc_air_reuse_poly_coeffs` was set before the first setup (or after a setup
+  without reuse) along with `-pc_air_strong_r_threshold` or
+  `-pc_air_full_smoothing_up_and_down`; uninitialised coefficients were used,
+  typically giving NaNs
 - Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
   from a level that failed the truncation test, which gave the wrong coarse
   grid polynomial (or an out-of-bounds write with the power basis) when the

@@ -138,7 +138,9 @@ module air_operators_setup
                (air_data%options%strong_r_threshold /= 0d0 .OR. &
                 air_data%options%full_smoothing_up_and_down)) then
 
-         temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP)
+         ! The dropped inverse isn't kept, but its coefficients are computed and
+         ! freed alongside inv_A_ff, so use that to tell if we have them
+         temp_mat = air_data%inv_A_ff(our_level)
          if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) .AND. &
                      air_data%options%reuse_poly_coeffs)) then
             call start_approximate_inverse(air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
