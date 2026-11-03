@@ -65,3 +65,17 @@ references:
     year: 2026
     pages: "115177"
     doi: "10.1016/j.jcp.2026.115177"
+  - type: article
+    title: "A comparison of parallel iterative methods for ILU triangular solves"
+    authors:
+      - family-names: "Dargaville"
+        given-names: "S."
+      - family-names: "Pain"
+        given-names: "C. C."
+    journal: "arXiv preprint"
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2611.00552"
+    url: "https://arxiv.org/abs/2611.00552"
+    doi: "10.48550/arXiv.2611.00552"
