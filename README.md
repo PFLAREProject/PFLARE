@@ -86,7 +86,7 @@ Contributions and bug reports are very welcome! Please see [CONTRIBUTING.md](.gi
 
 ## References \& citing
 
-Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-3].
+Please see the references below for more details. If you use PFLARE in your work, please consider citing [1-4].
 
 1. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, AIR multigrid with GMRES polynomials (AIRG) and additive preconditioners for Boltzmann transport, _Journal of Computational Physics_ 518 (2024) 113342  
 2. S. Dargaville, R. P. Smedley-Stevenson, P. N. Smith, C. C. Pain, Coarsening and parallelism with reduction multigrids for hyperbolic Boltzmann transport, _The International Journal of High Performance Computing Applications_ 39(3) (2025) 364-384  
