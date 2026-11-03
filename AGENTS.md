@@ -29,3 +29,5 @@ If Kokkos code changed:
 
 CI
 1. If asked to check a CI pipeline, use the prebuilt Docker image the CI runs off; always pull the latest image before running. Details in `docs/dev/ci.md`.
+
+Cloud (`CLAUDE_CODE_REMOTE` set): no PETSc on host. Build/test in the pre-pulled CI image: `docker run --rm -v $PWD:/build/PFLARE -w /build/PFLARE stevendargaville/petsc:latest bash -c '<make targets>'`. For Kokkos (or other CI images in `docs/dev/ci.md`), `docker pull` the image first.
