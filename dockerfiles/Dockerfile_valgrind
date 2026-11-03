@@ -19,8 +19,10 @@ COPY . /build/PFLARE
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Build PFLARE and run tests_short with valgrind --leak-check=full
-# Inject valgrind into test invocations via sed:
+# Inject valgrind into test invocations via sed, by wrapping every word starting with ./
+# so any prefix in front of the executable is covered:
 #   - Serial tests:   <tab>./executable -> <tab>valgrind ... ./executable
+#   - Prefixed tests: $(SKIP_SINGLE) ./executable -> $(SKIP_SINGLE) valgrind ... ./executable
 #   - Parallel tests: $(MPIEXEC) -n N ./executable -> $(MPIEXEC) -n N valgrind ... ./executable
 # --error-exitcode=1 causes valgrind to return non-zero on errors or leaks
 # --errors-for-leak-kinds=definite,indirect ensures definitely/indirectly lost memory is treated as an error
@@ -28,8 +30,7 @@ RUN set -euo pipefail; \
     cd PFLARE && \
     make clean && \
     make -j2 build_tests && \
-    sed -i 's|\t\./|\tvalgrind --leak-check=full --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \./|g' tests/Makefile && \
-    sed -i 's|\$(MPIEXEC) -n \([0-9]*\) \./|\$(MPIEXEC) -n \1 valgrind --leak-check=full --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \./|g' tests/Makefile && \
+    sed -i 's|\([[:space:]@]\)\./|\1valgrind --leak-check=full --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \./|g' tests/Makefile && \
     make tests_short
 
 WORKDIR /build/PFLARE
