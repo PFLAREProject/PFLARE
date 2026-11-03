@@ -2,6 +2,10 @@
 
 Workflow: `.github/workflows/ci_build.yml` (push/PR to main, monthly cron, manual dispatch). Every job builds a Docker image and runs the full test suite inside it.
 
+Stages
+- First: `gnu_opt`, `gnu_opt_64_bit`, `gnu_opt_kokkos`, `gnu_opt_kokkos_malloc_dump`, `gnu_opt_64_bit_kokkos`, `intel_opt` (each typically under 11 minutes).
+- The `opt_stage` job needs all of those, and every other build needs `opt_stage`, so a failure in the first stage skips the slower builds. `gnu_opt_omp_kokkos` is in the second stage as it takes over 20 minutes. `notebook_tutorial` only needs `gnu_opt`.
+
 Jobs, grouped
 - GNU debug/opt: `gnu_debug`, `gnu_opt` (pushes `stevendargaville/pflare:latest` on non-PR events), `gnu_opt_64_bit`.
 - Leak/memory checks: `*_malloc_dump` variants run with `-malloc_dump` and fail if `PetscTrMalloc` appears in the test log; `gnu_debug_valgrind`, `gnu_debug_kokkos_valgrind`.
