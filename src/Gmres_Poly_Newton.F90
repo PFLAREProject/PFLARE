@@ -2163,6 +2163,30 @@ end if
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine add_sparsity_only(inv_matrix, mat_product)
+
+      ! Adds the sparsity of mat_product to inv_matrix without changing any values
+      ! MatAXPY with zero does nothing, so we have to add explicit zeros
+
+      ! ~~~~~~
+      type(tMat), intent(inout) :: inv_matrix
+      type(tMat), intent(in)    :: mat_product
+
+      ! Local variables
+      PetscErrorCode :: ierr
+      type(tMat) :: mat_zero
+
+      ! ~~~~~~
+
+      call MatConvert(mat_product, MATSAME, MAT_INITIAL_MATRIX, mat_zero, ierr)
+      call MatScale(mat_zero, PFLARE_ZERO, ierr)
+      call MatAXPYWrapper(inv_matrix, PFLARE_ONE, mat_zero)
+      call MatDestroy(mat_zero, ierr)
+
+   end subroutine add_sparsity_only
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine build_gmres_polynomial_newton_inverse_full(matrix, poly_order, coefficients, &
                   inv_matrix, mat_prod_or_temp, poly_sparsity_order, output_first_complex, &
                   status_output, mat_product_save)
@@ -2465,7 +2489,13 @@ end if
             ! Add in the final term multiplied by 1/theta_poly_order
 
             ! Skips zero eigenvalues
-            if (coefficients(i_sparse,1) /= 0d0) then     
+            ! We still need the sparsity if we're not reusing, as this root may be
+            ! non-zero when we reuse. This product has the sparsity of all the previous ones
+            if (coefficients(i_sparse,1) == 0d0) then
+
+               if (.NOT. reuse_triggered) call add_sparsity_only(inv_matrix, mat_product)
+
+            else
                
                if (reuse_triggered) then
                   ! If doing reuse we know our nonzeros are a subset

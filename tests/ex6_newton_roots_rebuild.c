@@ -15,8 +15,8 @@ built from a different number of roots) and checked:\n\
   - history independence: rebuilding from the same roots gives the same inverse,\n\
     whatever set of roots the reused inverse was built from before\n\
   - extra roots: extra copies of roots change the inverse, while zero roots don't\n\
-  - fixed sparsity: the number of nonzeros in an assembled inverse is set by the requested\n\
-    sparsity order, so doesn't change with the number of roots\n\
+  - fixed sparsity: the nonzeros in an assembled inverse are those of the matrix to the\n\
+    power of the sparsity order, capped at the polynomial order, whatever the roots\n\
 \n\
 With -dense the matrix has a full nonzero pattern, so any sparsity order of at least 1\n\
 holds every power of the matrix and all the variants must be exact. It also adds variants\n\
@@ -24,7 +24,11 @@ with fixed roots, so the layouts tested don't depend on the computed roots.\n\
 \n\
   -n : grid size (default 10)\n\
   -c : diagonal shift (default 1)\n\
-  -dense : use a matrix with a full nonzero pattern\n\n";
+  -dense : use a matrix with a full nonzero pattern\n\
+  -zero_root_first : the first setup is on a badly scaled matrix, which gives zero roots at\n\
+                     the end. The inverse must still have its full sparsity, as the setups\n\
+                     after it use the unscaled matrix and reuse the inverse\n\
+  -verbose : print each rebuild\n\n";
 
 #include <petscksp.h>
 #include "pflare.h"
@@ -59,6 +63,25 @@ static PetscErrorCode BuildMatrix(PetscInt n, PetscReal c, PetscBool dense, Mat 
   }
   PetscCall(MatAssemblyBegin(*A, MAT_FINAL_ASSEMBLY));
   PetscCall(MatAssemblyEnd(*A, MAT_FINAL_ASSEMBLY));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+/* The number of nonzeros in A^power, which needs A to have a full diagonal */
+static PetscErrorCode NnzOfPower(Mat A, PetscInt power, PetscLogDouble *nz)
+{
+  Mat     B, C;
+  MatInfo info;
+
+  PetscFunctionBeginUser;
+  PetscCall(MatDuplicate(A, MAT_COPY_VALUES, &B));
+  for (PetscInt k = 1; k < power; k++) {
+    PetscCall(MatMatMult(A, B, MAT_INITIAL_MATRIX, PETSC_DETERMINE, &C));
+    PetscCall(MatDestroy(&B));
+    B = C;
+  }
+  PetscCall(MatGetInfo(B, MAT_GLOBAL_SUM, &info));
+  *nz = info.nz_used;
+  PetscCall(MatDestroy(&B));
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -97,7 +120,7 @@ static PetscErrorCode ResidualPoly(Mat A, const PetscReal *roots, PetscInt nr, V
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-/* Copies the set src (nsrc rows) into dst, which has room for nmax rows */
+/* Sets row i of the roots in dst, which has nd rows */
 static void Put(PetscReal *dst, PetscInt nd, PetscInt i, PetscReal re, PetscReal im)
 {
   dst[i]      = re;
@@ -106,13 +129,13 @@ static void Put(PetscReal *dst, PetscInt nd, PetscInt i, PetscReal re, PetscReal
 
 int main(int argc, char **args)
 {
-  Mat              A, inv_mat, inv_ref[MAX_VARIANTS];
+  Mat              A, A_unscaled = NULL, inv_mat, inv_ref[MAX_VARIANTS];
   Vec              b, y, r, Ay, y_ref[MAX_VARIANTS];
   PC               pc;
-  PetscInt         n = 10, n0, cols0, i, v, w, nv = 0, po, sp, nr[MAX_VARIANTS], first_real = -1, first_complex = -1, k;
+  PetscInt         rstart, rend, n = 10, n0, cols0, i, v, w, nv = 0, po, sp, nr[MAX_VARIANTS], first_real = -1, first_complex = -1, k;
   PetscReal        c = 1.0, *roots0, *ptr, *var[MAX_VARIANTS], norm_b, norm_e, max_exact = 0.0, max_hist = 0.0, tol;
-  PetscBool        matrix_free, exact, is_diag, dense = PETSC_FALSE, verbose = PETSC_FALSE;
-  PetscLogDouble   nz_first = 0.0;
+  PetscBool        matrix_free, exact, is_diag, dense = PETSC_FALSE, zero_root_first = PETSC_FALSE, verbose = PETSC_FALSE;
+  PetscLogDouble   nz_power = 0.0;
   MatInfo          info;
   PCPFLAREINVType  type;
   PetscRandom      rctx;
@@ -125,6 +148,7 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-verbose", &verbose, NULL));
 
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-dense", &dense, NULL));
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-zero_root_first", &zero_root_first, NULL));
 
   PetscCall(BuildMatrix(n, c, dense, &A));
   PetscCall(MatCreateVecs(A, &y, &b));
@@ -142,12 +166,45 @@ int main(int argc, char **args)
   PetscCall(PCSetType(pc, PCPFLAREINV));
   PetscCall(PCPFLAREINVSetType(pc, PFLAREINV_NEWTON));
   PetscCall(PCSetFromOptions(pc));
+  if (zero_root_first) {
+    /* Scale most of the rows so the Krylov space is too small for all the roots */
+    Vec scale;
+
+    PetscCall(MatDuplicate(A, MAT_COPY_VALUES, &A_unscaled));
+    PetscCall(VecDuplicate(b, &scale));
+    PetscCall(VecGetOwnershipRange(scale, &rstart, &rend));
+    for (i = rstart; i < rend; i++) PetscCall(VecSetValue(scale, i, i % 3 == 0 ? 1.0 : 1e-10, INSERT_VALUES));
+    PetscCall(VecAssemblyBegin(scale));
+    PetscCall(VecAssemblyEnd(scale));
+    PetscCall(MatDiagonalScale(A, scale, NULL));
+    PetscCall(VecDestroy(&scale));
+  }
   PetscCall(PCSetUp(pc));
   PetscCall(PCPFLAREINVGetType(pc, &type));
   PetscCall(PCPFLAREINVGetMatrixFree(pc, &matrix_free));
   PetscCall(PCPFLAREINVGetPolyOrder(pc, &po));
   PetscCall(PCPFLAREINVGetSparsityOrder(pc, &sp));
   PetscCheck(type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "Needs a Newton type");
+  if (!matrix_free && PetscMin(sp, po) > 0) PetscCall(NnzOfPower(A, PetscMin(sp, po), &nz_power));
+
+  if (zero_root_first) {
+    PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &ptr, &n0, &cols0));
+    PetscCheck(ptr[n0 - 1] == 0.0 && ptr[2 * n0 - 1] == 0.0, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "The first setup needs a zero root at the end to test this");
+    if (verbose) {
+      for (i = 0, k = 0; i < n0; i++) k += (ptr[i] == 0.0 && ptr[n0 + i] == 0.0) ? 1 : 0;
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "first setup has %" PetscInt_FMT " zero roots of %" PetscInt_FMT "\n", k, n0));
+    }
+    if (!matrix_free && PetscMin(sp, po) > 0) {
+      PetscCall(PCPFLAREINVGetInverseMat(pc, &inv_mat));
+      PetscCall(MatGetInfo(inv_mat, MAT_GLOBAL_SUM, &info));
+      PetscCheck(info.nz_used == nz_power, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Zero roots gave the inverse %g nonzeros rather than %g", (double)info.nz_used, (double)nz_power);
+    }
+    /* The next setup has non-zero roots and reuses the inverse */
+    PetscCall(MatCopy(A_unscaled, A, SAME_NONZERO_PATTERN));
+    PetscCall(MatDestroy(&A_unscaled));
+    PetscCall(PCSetOperators(pc, A, A));
+    PetscCall(PCSetUp(pc));
+  }
 
   PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &ptr, &n0, &cols0));
   PetscCall(PetscMalloc1(2 * n0, &roots0));
@@ -290,8 +347,7 @@ int main(int argc, char **args)
       PetscCall(PetscObjectTypeCompare((PetscObject)inv_mat, MATDIAGONAL, &is_diag));
       if (!is_diag) {
         PetscCall(MatGetInfo(inv_mat, MAT_GLOBAL_SUM, &info));
-        if (v == 0) nz_first = info.nz_used;
-        PetscCheck(info.nz_used == nz_first, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Variant '%s' (%" PetscInt_FMT " roots) changed the inverse's nonzeros from %g to %g", names[v], nr[v], (double)nz_first, (double)info.nz_used);
+        PetscCheck(info.nz_used == nz_power, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Variant '%s' (%" PetscInt_FMT " roots) gave the inverse %g nonzeros rather than %g", names[v], nr[v], (double)info.nz_used, (double)nz_power);
       }
     }
   }
