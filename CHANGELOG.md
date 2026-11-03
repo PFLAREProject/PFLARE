@@ -28,12 +28,25 @@ for earlier changes please see the git history.
 - Fixed power basis GMRES polynomials failing on badly scaled matrices (eg
   bcsstk19); the coefficients no longer depend on the scale of the matrix, so
   iteration counts may change slightly
-- Fixed PCAIR never computing the polynomial coefficients of the dropped A_ff
-  inverse used to build AIRG grid-transfer operators when
-  `-pc_air_reuse_poly_coeffs` was set before the first setup (or after a setup
-  without reuse) along with `-pc_air_strong_r_threshold` or
-  `-pc_air_full_smoothing_up_and_down`; uninitialised coefficients were used,
-  typically giving NaNs
+- Fixed several problems with `-pc_air_reuse_poly_coeffs`. PCAIR now records
+  whether each set of polynomial coefficients has been computed (or set with
+  `PCAIRSetPolyCoeffs()`), rather than guessing from whether an inverse matrix
+  exists:
+  - the coefficients of the dropped A_ff inverse used to build the AIRG
+    grid-transfer operators (with `-pc_air_strong_r_threshold` or
+    `-pc_air_full_smoothing_up_and_down`) were never computed if
+    `-pc_air_reuse_poly_coeffs` was set before the first setup, so
+    uninitialised values were used, typically giving NaNs
+  - with `-pc_air_reuse_amount` 1 or 2 every set of coefficients was recomputed
+    on each setup, ignoring `-pc_air_reuse_poly_coeffs` and any coefficients
+    given with `PCAIRSetPolyCoeffs()`
+  - with auto truncation the coarse grid coefficients were always recomputed,
+    and with `-pc_air_reuse_amount` 1 or 2 the truncation was redone on each
+    setup, so the number of levels could change despite reusing the hierarchy
+  - `PCAIRGetPolyCoeffs()` returned uninitialised values, rather than an
+    error, for an inverse that isn't computed as a polynomial (e.g.
+    `COEFFS_INV_AFF_DROPPED` without a strong R threshold, or a Jacobi inverse
+    type)
 - Fixed PCAIR auto truncation keeping the coarse grid polynomial coefficients
   from a level that failed the truncation test, which gave the wrong coarse
   grid polynomial (or an out-of-bounds write with the power basis) when the

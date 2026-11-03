@@ -3,7 +3,8 @@ module air_operators_setup
    use petscksp
    use constrain_z_or_w, only: constrain_grid_transfer
    use approx_inverse_setup, only: &
-         start_approximate_inverse, finish_approximate_inverse, destroy_matrix_reuse
+         start_approximate_inverse, finish_approximate_inverse, destroy_matrix_reuse, &
+         inverse_type_is_polynomial
    use pflare_parameters, only: &
          TIMER_ID_AIR_DROP, TIMER_ID_AIR_EXTRACT, TIMER_ID_AIR_INVERSE, &
          TIMER_ID_AIR_CONSTRAIN, TIMER_ID_AIR_PROLONG, TIMER_ID_AIR_RAP, &
@@ -119,9 +120,8 @@ module air_operators_setup
       end if
 
       ! Compute the inverse for smoothing
-      ! If we are re-using the polynomial coefficients then we don't have to do this
-      temp_mat = air_data%inv_A_ff(our_level)
-      if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) .AND. &
+      ! If we are re-using the polynomial coefficients and we have some then we don't have to do this
+      if (.NOT. (air_data%inv_A_ff_poly_data(our_level)%coefficients_set .AND. &
                   air_data%options%reuse_poly_coeffs)) then
          call start_approximate_inverse(smoothing_mat, &
                   air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
@@ -129,6 +129,8 @@ module air_operators_setup
                   air_data%options%diag_scale_polys, &
                   air_data%inv_A_ff_poly_data(our_level)%buffers, &
                   air_data%inv_A_ff_poly_data(our_level)%coefficients)        
+         air_data%inv_A_ff_poly_data(our_level)%coefficients_set = &
+                  inverse_type_is_polynomial(air_data%inv_A_ff_poly_data(our_level)%inverse_type)
       end if
 
       ! If we are doing AIRG
@@ -138,10 +140,8 @@ module air_operators_setup
                (air_data%options%strong_r_threshold /= 0d0 .OR. &
                 air_data%options%full_smoothing_up_and_down)) then
 
-         ! The dropped inverse isn't kept, but its coefficients are computed and
-         ! freed alongside inv_A_ff, so use that to tell if we have them
-         temp_mat = air_data%inv_A_ff(our_level)
-         if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) .AND. &
+         ! The dropped A_ff has its own polynomial, so check its own coefficients
+         if (.NOT. (air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients_set .AND. &
                      air_data%options%reuse_poly_coeffs)) then
             call start_approximate_inverse(air_data%reuse(our_level)%reuse_mat(MAT_AFF_DROP), &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type, &
@@ -149,6 +149,8 @@ module air_operators_setup
                   air_data%options%diag_scale_polys, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)          
+            air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients_set = &
+                  inverse_type_is_polynomial(air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type)
          end if
       end if
 
@@ -179,8 +181,7 @@ module air_operators_setup
          call timer_start(TIMER_ID_AIR_INVERSE)    
 
          ! Compute the inverse for smoothing
-         temp_mat = air_data%inv_A_cc(our_level)
-         if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) &
+         if (.NOT. (air_data%inv_A_cc_poly_data(our_level)%coefficients_set &
                      .AND. air_data%options%reuse_poly_coeffs)) then
             call start_approximate_inverse(air_data%A_cc(our_level), &
                   air_data%inv_A_cc_poly_data(our_level)%inverse_type, &
@@ -188,6 +189,8 @@ module air_operators_setup
                   air_data%options%diag_scale_polys, &
                   air_data%inv_A_cc_poly_data(our_level)%buffers, &
                   air_data%inv_A_cc_poly_data(our_level)%coefficients)  
+            air_data%inv_A_cc_poly_data(our_level)%coefficients_set = &
+                  inverse_type_is_polynomial(air_data%inv_A_cc_poly_data(our_level)%inverse_type)
          end if
 
          call timer_finish(TIMER_ID_AIR_INVERSE)

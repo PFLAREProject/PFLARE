@@ -8,7 +8,7 @@ module air_diagonal_update
          TIMER_ID_AIR_RAP
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use approx_inverse_setup, only: start_approximate_inverse, finish_approximate_inverse, &
-         destroy_matrix_reuse
+         destroy_matrix_reuse, inverse_type_is_polynomial
    use fc_smooth, only: VecISCopyLocalWrapper
 
 #include "petsc/finclude/petscksp.h"
@@ -448,13 +448,14 @@ module air_diagonal_update
 
       ! If we are re-using the polynomial coefficients then we don't have to compute
       ! them, exactly as the setup does
-      if (.NOT. air_data%options%reuse_poly_coeffs) then
+      if (.NOT. (poly_data%coefficients_set .AND. air_data%options%reuse_poly_coeffs)) then
          call start_approximate_inverse(matrix, &
                   poly_data%inverse_type, &
                   poly_data%gmres_poly_order, &
                   diag_scale_polys, &
                   poly_data%buffers, &
                   poly_data%coefficients)
+         poly_data%coefficients_set = inverse_type_is_polynomial(poly_data%inverse_type)
       end if
 
       call finish_approximate_inverse(matrix, &

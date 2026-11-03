@@ -14,7 +14,9 @@ forward order, each time setting the recorded coefficients before the solve. The
 iteration count, PCApply and the stored coefficients must match those recorded.\n\
 \n\
 If -pc_air_reuse_poly_coeffs is given, it applies from the first setup, so the record\n\
-must keep the coefficients from the first Pmat for every later one.\n\
+must keep the coefficients from the first Pmat for every later one. The number of\n\
+levels must not change between setups, at any -pc_air_reuse_amount. Only the inverses\n\
+that are computed as polynomials can have coefficients returned.\n\
 \n\
   -c_values c1,c2,...  : the c_k (default 0.5,8,50)\n\
   -require_resize      : error if no replay changed the number of stored roots\n\
@@ -93,7 +95,9 @@ int main(int argc, char **args)
   InvRecord  *inv;
   PCAIRZType  z_type;
   PetscReal   strong_r;
-  PetscBool   full_smooth, dropped_used;
+  PetscBool   full_smooth, dropped_used, aff_poly;
+  PetscInt    num_levels_k;
+  PCPFLAREINVType inv_type;
   int         which_list[3] = {COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC};
 
   PetscCall(PetscInitialize(&argc, &args, NULL, help));
@@ -149,13 +153,18 @@ int main(int argc, char **args)
       PetscCall(PCAIRGetStrongRThreshold(pc, &strong_r));
       PetscCall(PCAIRGetFullSmoothingUpAndDown(pc, &full_smooth));
       dropped_used = (PetscBool)(z_type == AIR_Z_PRODUCT && (strong_r != 0.0 || full_smooth));
+      PetscCall(PCAIRGetInverseType(pc, &inv_type));
+      aff_poly = (PetscBool)(inv_type != PFLAREINV_SAI && inv_type != PFLAREINV_ISAI && inv_type != PFLAREINV_WJACOBI &&
+                             inv_type != PFLAREINV_JACOBI && inv_type != PFLAREINV_L1JACOBI);
       /* Find every inverse that stores coefficients; errors are returned while probing */
       for (lvl = 0; lvl < num_levels; lvl++) {
         for (i = 0; i < 3; i++) {
-          if (which_list[i] == COEFFS_INV_AFF_DROPPED && !dropped_used) continue;
           PetscCall(PetscPushErrorHandler(PetscReturnErrorHandler, NULL));
           ierr = PCAIRGetPolyCoeffs(pc, lvl, which_list[i], &ptr, &rows, &cols);
           PetscCall(PetscPopErrorHandler());
+          /* Nothing computes these, so there must be no coefficients to return */
+          if (which_list[i] == COEFFS_INV_AFF_DROPPED && !dropped_used) PetscCheck(ierr != PETSC_SUCCESS, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Coefficients returned for the dropped A_ff inverse on petsc_level %" PetscInt_FMT ", which isn't computed", lvl);
+          if (which_list[i] != COEFFS_INV_ACC && !aff_poly) PetscCheck(ierr != PETSC_SUCCESS, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Coefficients returned for which_inverse %d on petsc_level %" PetscInt_FMT ", which isn't a polynomial", which_list[i], lvl);
           if (ierr == PETSC_SUCCESS) {
             PetscCheck(n_inv < MAX_INV, PETSC_COMM_SELF, PETSC_ERR_PLIB, "Too many inverses");
             inv[n_inv].level = lvl;
@@ -171,6 +180,9 @@ int main(int argc, char **args)
         inv[n_inv++].which = COEFFS_INV_COARSE;
       }
     }
+    /* The reuse keeps the hierarchy, so the number of levels can't change */
+    PetscCall(PCAIRGetNumLevels(pc, &num_levels_k));
+    PetscCheck(num_levels_k == num_levels || !reuse_sparsity, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "With reuse the number of levels changed from %" PetscInt_FMT " to %" PetscInt_FMT " for c = %g", num_levels, num_levels_k, (double)c_values[k]);
     for (i = 0; i < n_inv; i++) {
       PetscCall(PCAIRGetPolyCoeffs(pc, inv[i].level, inv[i].which, &ptr, &inv[i].rows[k], &inv[i].cols[k]));
       if (print_roots) {

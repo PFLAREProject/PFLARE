@@ -1005,17 +1005,23 @@ run_tests_no_load_serial:
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type ffc -pc_air_reuse_sparsity \
 	 -check_reuse
 	@echo "Test AIRG with a strong R threshold, keeping the polynomial coefficients from the first setup"
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
-	 -pc_air_strong_r_threshold 0.1 -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
+	./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
 	 -pc_air_strong_r_threshold 0.1 -pc_air_reuse_poly_coeffs
-	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_strong_r_threshold 0.1 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
-	@echo "Test AIRG with full smoothing, keeping the polynomial coefficients from the first setup"
-	./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_full_smoothing_up_and_down \
-	 -pc_air_reuse_poly_coeffs
-	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_full_smoothing_up_and_down \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
+	@echo "Test PCAIR keeping the polynomial coefficients of every inverse from the first setup, at each reuse amount"
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_reuse_amount 1 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_reuse_amount 2 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_full_smoothing_up_and_down
+	@echo "Test PCAIR keeping the number of levels and the coarse grid polynomial coefficients with auto truncation"
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
+	 -pc_air_reuse_amount 2 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
+	 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
+	@echo "Test PCAIR returns no polynomial coefficients for inverses that are not polynomials"
+	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_inverse_type jacobi
 	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
 	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
@@ -1731,17 +1737,23 @@ else
 	@echo "Test AIRG with a diagonal update recomputing the polynomial coefficients in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
 	@echo "Test AIRG with a strong R threshold, keeping the polynomial coefficients from the first setup in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
-	 -pc_air_strong_r_threshold 0.1 -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 25 -da_grid_y 25 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_inverse_type newton \
 	 -pc_air_strong_r_threshold 0.1 -pc_air_reuse_poly_coeffs
-	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_strong_r_threshold 0.1 \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
-	@echo "Test AIRG with full smoothing, keeping the polynomial coefficients from the first setup in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_full_smoothing_up_and_down \
-	 -pc_air_reuse_poly_coeffs
-	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_full_smoothing_up_and_down \
-	 -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys
+	@echo "Test PCAIR keeping the polynomial coefficients of every inverse from the first setup, at each reuse amount in parallel"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_reuse_amount 1 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_reuse_amount 2 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys \
+	 -pc_air_strong_r_threshold 0.1 -pc_air_smooth_type fc -pc_air_c_inverse_type newton -pc_air_coarsest_inverse_type newton
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -pc_air_full_smoothing_up_and_down
+	@echo "Test PCAIR keeping the number of levels and the coarse grid polynomial coefficients with auto truncation in parallel"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
+	 -pc_air_reuse_amount 2 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_reuse_poly_coeffs -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -n 20 \
+	 -pc_air_coarsest_inverse_type newton -pc_air_auto_truncate_start_level 1 -pc_air_auto_truncate_tol 1e-1
+	@echo "Test PCAIR returns no polynomial coefficients for inverses that are not polynomials in parallel"
+	$(MPIEXEC) -n 2 ./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_inverse_type jacobi
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_time 3 -verify_solution -pc_air_diag_update -max_total_its 1700

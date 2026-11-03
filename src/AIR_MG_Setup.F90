@@ -16,7 +16,7 @@ module air_mg_setup
          PFLARE_KSP_RTOL_COARSE, PFLARE_MINUS_ONE
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
-         destroy_matrix_reuse
+         destroy_matrix_reuse, inverse_type_is_polynomial
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
@@ -159,7 +159,10 @@ module air_mg_setup
          ! Otherwise building assembled approximation inverses can be very expensive!      
          ! ~~~~~~~~~~
          ! We already know how many coarse levels we have if we are re-using
-         if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. &
+         ! The CF splitting is kept whenever we reuse, at any reuse_amount (unlike A_ff,
+         ! which is destroyed at amounts 1 and 2), so a level with one wasn't the coarsest
+         ! last time and we don't test it again. Otherwise the number of levels could change
+         if (.NOT. air_data%allocated_is(our_level) .AND. &
                      our_level .ge. air_data%options%auto_truncate_start_level .AND. &
                      air_data%options%auto_truncate_start_level /= -1) then         
 
@@ -175,12 +178,18 @@ module air_mg_setup
                      air_data%inv_coarsest_poly_data)  
 
             ! Start the approximate inverse we'll use on this level
-            call start_approximate_inverse(air_data%coarse_matrix(our_level), &
-                  air_data%inv_coarsest_poly_data%inverse_type, &
-                  air_data%inv_coarsest_poly_data%gmres_poly_order, &
-                  air_data%options%coarsest_diag_scale_polys, &
-                  air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)                       
+            ! If we are reusing the coefficients and have some, the truncation test uses those
+            if (.NOT. (air_data%inv_coarsest_poly_data%coefficients_set .AND. &
+                        air_data%options%reuse_poly_coeffs)) then
+               call start_approximate_inverse(air_data%coarse_matrix(our_level), &
+                     air_data%inv_coarsest_poly_data%inverse_type, &
+                     air_data%inv_coarsest_poly_data%gmres_poly_order, &
+                     air_data%options%coarsest_diag_scale_polys, &
+                     air_data%inv_coarsest_poly_data%buffers, &
+                     air_data%inv_coarsest_poly_data%coefficients)                       
+               air_data%inv_coarsest_poly_data%coefficients_set = &
+                     inverse_type_is_polynomial(air_data%inv_coarsest_poly_data%inverse_type)
+            end if
 
             ! This will be a vec of randoms that differ from those used to create the gmres polynomials
             ! We will solve Ax = rand_vec to test how good our coarse solver is
@@ -257,6 +266,7 @@ module air_mg_setup
                   deallocate(air_data%inv_coarsest_poly_data%coefficients)
                   air_data%inv_coarsest_poly_data%coefficients => null()
                end if
+               air_data%inv_coarsest_poly_data%coefficients_set = .FALSE.
             end if
 
             call VecDestroy(rand_vec, ierr)
@@ -1003,8 +1013,7 @@ module air_mg_setup
                
       ! Start the inverse for the coarse grid
       ! These comms will be finished below
-      temp_mat = air_data%inv_A_ff(air_data%no_levels)
-      if (.NOT. (.NOT. PetscObjectIsNull(temp_mat) &
+      if (.NOT. (air_data%inv_coarsest_poly_data%coefficients_set &
                   .AND. air_data%options%reuse_poly_coeffs)) then
 
          ! We've already created our coarse solver if we've auto truncated
@@ -1021,6 +1030,8 @@ module air_mg_setup
                   air_data%options%coarsest_diag_scale_polys, &
                   air_data%inv_coarsest_poly_data%buffers, &
                   air_data%inv_coarsest_poly_data%coefficients)         
+            air_data%inv_coarsest_poly_data%coefficients_set = &
+                  inverse_type_is_polynomial(air_data%inv_coarsest_poly_data%inverse_type)
             call timer_finish(TIMER_ID_AIR_INVERSE)
          end if
       end if

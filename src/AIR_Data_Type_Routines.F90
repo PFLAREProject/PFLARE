@@ -156,22 +156,35 @@ module air_data_type_routines
          ! Loop over the levels
          do our_level = 1, size(air_data%allocated_matrices_A_ff)
 
+            ! The polynomial coefficients only depend on the CF splitting and the options, so
+            ! when reusing we keep them at every reuse_amount, even though the inverses built
+            ! from them are destroyed at amounts 1 and 2. This is independent of whether
+            ! A_ff/A_cc are currently allocated, which a reset with reuse at amounts 1 and 2 clears
+            if (.NOT. reuse) then
+               if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
+                  deallocate(air_data%inv_A_ff_poly_data(our_level)%coefficients)
+                  air_data%inv_A_ff_poly_data(our_level)%coefficients => null()
+               end if
+               air_data%inv_A_ff_poly_data(our_level)%coefficients_set = .FALSE.
+               if (associated(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
+                  deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
+                  air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
+               end if
+               air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients_set = .FALSE.
+               if (associated(air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
+                  deallocate(air_data%inv_A_cc_poly_data(our_level)%coefficients)
+                  air_data%inv_A_cc_poly_data(our_level)%coefficients => null()
+               end if
+               air_data%inv_A_cc_poly_data(our_level)%coefficients_set = .FALSE.
+            end if
+
             ! If we setup Aff
             if (air_data%allocated_matrices_A_ff(our_level)) then
 
-               ! Destroy data that depends on the CF splitting and poly coefficients
-               ! only when not reusing (the IS device copy and poly coefficients
-               ! remain valid across setups when reusing)
+               ! Destroy data that depends on the CF splitting only when not reusing
+               ! (the IS device copy remains valid across setups when reusing)
                if (.NOT. reuse) then
                   call destroy_VecISCopyLocalWrapper(air_data, our_level)
-                  if (associated(air_data%inv_A_ff_poly_data(our_level)%coefficients)) then
-                     deallocate(air_data%inv_A_ff_poly_data(our_level)%coefficients)
-                     air_data%inv_A_ff_poly_data(our_level)%coefficients => null()
-                  end if
-                  if (associated(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)) then
-                     deallocate(air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)
-                     air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients => null()
-                  end if
                end if
 
                ! temp_vecs are sized from A_ff/A_fc; they must be destroyed whenever
@@ -238,10 +251,6 @@ module air_data_type_routines
                if (.NOT. reuse .OR. air_data%options%reuse_amount < 3) then
                   call MatDestroy(air_data%A_cc(our_level), ierr)
                   call reset_inverse_mat(air_data%inv_A_cc(our_level))
-                  if (associated(air_data%inv_A_cc_poly_data(our_level)%coefficients)) then
-                     deallocate(air_data%inv_A_cc_poly_data(our_level)%coefficients)
-                     air_data%inv_A_cc_poly_data(our_level)%coefficients => null()
-                  end if
                   air_data%allocated_matrices_A_cc(our_level) = .FALSE.
                end if
             end if
@@ -309,10 +318,14 @@ module air_data_type_routines
             if (.NOT. reuse .OR. &
                  .NOT. REUSE_MAT_ACTIVE(MAT_INV_AFF, air_data%options%reuse_amount)) then
                call reset_inverse_mat(air_data%inv_A_ff(air_data%no_levels))
+            end if
+            ! The coefficients are kept whenever we are reusing, as on the other levels
+            if (.NOT. reuse) then
                if (associated(air_data%inv_coarsest_poly_data%coefficients)) then
                   deallocate(air_data%inv_coarsest_poly_data%coefficients)
                   air_data%inv_coarsest_poly_data%coefficients => null()
                end if
+               air_data%inv_coarsest_poly_data%coefficients_set = .FALSE.
             end if
          end if
       end if 
