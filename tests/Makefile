@@ -1747,6 +1747,9 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_parallel:
+ifeq ($(PETSC_HAVE_MPIUNI),1)
+	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
+else
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	$(MPIEXEC) -n 2 ./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
 	$(MPIEXEC) -n 2 ./diag_update_check -laplacian -pc_air_symmetric
@@ -1754,9 +1757,6 @@ run_tests_no_load_parallel:
 	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 500
 	$(MPIEXEC) -n 4 ./diag_update_check -n 200 -ksp_max_it 5 -laplacian -pc_air_symmetric -pc_air_processor_agglom 1 \
 	 -pc_air_processor_agglom_ratio 1.01 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 500
-ifeq ($(PETSC_HAVE_MPIUNI),1)
-	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
-else
 	@echo "Test rebuilding Newton polynomial inverses from more roots than the sparsity order keeps the requested sparsity in parallel"
 	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
 	$(MPIEXEC) -n 2 ./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 6 -pc_pflareinv_sparsity_order 2
