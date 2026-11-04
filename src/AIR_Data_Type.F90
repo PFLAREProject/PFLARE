@@ -340,6 +340,8 @@ module air_data_type
       ! GMRES polynomial data for inv_A_cc
       type(gmres_poly_data), allocatable, dimension(:)   :: inv_A_cc_poly_data      
       ! Boolean to tell whether we have allocated petsc matrices
+      ! Has the coarse matrix below this level been repartitioned
+      logical, allocatable, dimension(:)                 :: repartitioned
       logical, allocatable, dimension(:)                 :: allocated_matrices_A_ff, allocated_matrices_A_cc 
       logical, allocatable, dimension(:)                 :: allocated_is
 
