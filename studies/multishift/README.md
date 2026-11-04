@@ -14,7 +14,7 @@ Every sparse matrix product is shared between the columns. The per-column terms 
 |---|---|---|
 | `A_ff`, `A_cc` | set the diagonal | `A_ff X + S .* X`, with S = shifted diagonal minus current diagonal |
 | Restrictor | scale R's F columns by `min(1, a/(a+d))` | `R (C .* X)`, with C = that scaling relative to the current R |
-| Coarse shifts | `R (d .* P1)`, SpMV | `R^(j) (D .* P1)`, one SpMM per level at setup |
+| Coarse shifts | `max(R (d .* P1), d on the C points)`, SpMV | `max(R^(j) (D .* P1), D on the C points)`, one SpMM per level at setup |
 | Polynomial smoothers and coarse solve | same coefficients, new matrix | the same coefficients applied to `A + diag(S_j)`. Diagonal scaling uses a dense reciprocal block |
 
 `setup_air_multishift` is the batched analogue of `update_air_diag`. Because the shifts are stored relative to the *current* hierarchy, a later diagonal update recomputes them automatically.
@@ -135,6 +135,32 @@ The test: 16 shifts spanning a factor of 4 (`c` log-spaced in `[c_lo, 4 c_lo]`).
 This is the same with recomputed coefficients. It is also unchanged with the R rescale switched off, and the R rescale is essential at large shifts (without it, c = 1e2 needs 195 GMRES iterations). So the cause is elsewhere in the update: the lumped coarse-grid shift or the smoothers' diagonal change. A cheap guard would be to skip the update when the relative shift is small, but that needs investigating.
 
 Raw log: `sweep_band_n200_cpu1.log`, script `sweep_band.sh`.
+
+## After rebasing onto `claude/diag-update-inject-decreases`
+
+That branch keeps the coarse perturbation of a diagonal update above the injected one, `max(R (d .* P1), d_C)`. When the next level is repartitioned, the injected value comes from R applied to d on the C points. The multi-shift setup now does the same per column with a dense max (`dense_max` in `AIR_MultiShift.F90`), so column j still matches a single-RHS update to rounding:
+- decreases: 1.8e-16 serial;
+- 2 and 4 ranks with agglomeration: 1.8e-15;
+- symmetric R: 1.9e-16.
+
+Without that change, decreases differed by up to 78%. New tests cover decreases serially and on 2 ranks with agglomeration.
+
+**Earlier results are unchanged.** All the results above use shifts at or above the base. On this FD problem the lumped value is never below the injected one there, so the max does nothing. Re-running gave identical per-column iteration counts for the k = 16 GMRES sweep and for every run in the band sweep, GMRES and Richardson. Only the timings move, by noise.
+
+**Decreases (hierarchy built at the top of each band).** 16 shifts in `[c_lo, 4 c_lo]`, `-c_base 4 c_lo`, n = 200², rtol 1e-10. "Before" is the pre-rebase code, which is the update without the max; "after" includes it. The multi-shift matched the sequential updates exactly in every column both before and after.
+
+| band | GMRES its, before | GMRES its, after | GMRES frozen at top | Richardson its multi (seq max), before | after | Richardson frozen at top |
+|---|---|---|---|---|---|---|
+| [0.01, 0.04] | 6-21 | 6-17 | 6-17 | sequential diverged | 25 (26) | 29 |
+| [0.1, 0.4] | 5-22 | 5-31 | 5-36 | sequential diverged | 44 (46) | 72 |
+| [1, 4] | 3-16 | 3-16 | 3-23 | sequential diverged | 17 (18) | 75 |
+| [10, 40] | 3-8 | 3-7 | 3-10 | 13 (14) | 7 (8) | 75 |
+
+- **Richardson.** The fix turns decreases from divergent into convergent. Before it, the sequential Richardson diverged on the first column of the first three bands. After it, the multi-shift Richardson needs 7–44 iterations, against 29–75 for a frozen preconditioner built at the top.
+- **GMRES.** The fix changes the counts either way: it is better in [0.01, 0.04] and [10, 40], worse in [0.1, 0.4] (31 vs 22, the FD cost the commit message mentions), and the same in [1, 4].
+- **Building at the bottom is still better.** For the same band, the hierarchy built at the bottom (increases, the table above) needs fewer GMRES iterations than one built at the top. For [1, 4] it is 4-10 against 3-16, which agrees with the advice to build from the smallest diagonal.
+
+Raw logs: `sweep_decrease_n200_cpu1.log` (after) and `sweep_decrease_n200_cpu1_before.log`; script `sweep_decrease.sh`.
 
 ## What has to change
 
