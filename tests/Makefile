@@ -356,6 +356,8 @@ run_tests_no_load_short_serial:
 	./adv_diff_fd_multishift -n 30 -pc_air_smooth_type ffc -pc_air_inverse_type newton \
 	 -pc_air_coarsest_inverse_type newton
 	./adv_diff_fd_multishift -n 30 -pc_air_symmetric -pc_air_inverse_type neumann
+	@echo "Test the multi-shift block V-cycle of AIRG with shifts that decrease the diagonal of the base"
+	./adv_diff_fd_multishift -n 30 -c_base 1 -c_values 0.1,0.5,0.9,1,2,10 -pc_air_smooth_type ffc
 	@echo "Test the multi-shift block V-cycle of AIRG in a batched GMRES and block Richardson against sequential diagonal updates"
 	./adv_diff_fd_multishift -n 30 -solve -richardson -ksp_rtol $(KSP_RTOL)
 	@echo "Test the multi-shift block V-cycle of AIRG in a shift band, against a frozen preconditioner"
@@ -1273,6 +1275,8 @@ else
 	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys
 	@echo "Test the multi-shift block V-cycle of AIRG in parallel, with processor agglomeration"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_multishift -n 30 -pc_air_smooth_type fc -pc_air_process_eq_limit 400
+	$(MPIEXEC) -n 2 ./adv_diff_fd_multishift -n 30 -pc_air_smooth_type fc -pc_air_process_eq_limit 400 -c_base 1 \
+	 -c_values 0.1,0.5,0.9,1,2,10
 	$(MPIEXEC) -n 2 ./adv_diff_fd_multishift -n 30 -solve -richardson -ksp_rtol $(KSP_RTOL)
 #
 	@echo ""

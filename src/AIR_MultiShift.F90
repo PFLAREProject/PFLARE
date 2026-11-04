@@ -25,7 +25,8 @@ module air_multishift
    !    shift, applied as A_ff x + S .* x
    !  - the F point columns of R are scaled per column by the clipped a_ff / (a_ff + d_f),
    !    applied as R (C .* x), with the scaling relative to the current R
-   !  - the coarse grid shifts are the row sum lumping R^(j) (d .* P 1), one SpMM per level
+   !  - the coarse grid shifts are the row sum lumping R^(j) (d .* P 1), one SpMM per level,
+   !    but never less than the injected shifts (d on the C points), as in update_air_diag
    !  - the smoothers are the matrix-free polynomials of the shifted matrices with the
    !    coefficients of the current hierarchy (shared between the columns)
    ! The shifts are stored relative to the current state of the hierarchy, so if the
@@ -102,6 +103,30 @@ module air_multishift
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine dense_max(y_mat, x_mat)
+
+      ! y_mat = max(y_mat, x_mat) elementwise, for dense blocks with the same layout
+
+      ! ~~~~~~
+      type(tMat), intent(inout) :: y_mat, x_mat
+
+      PetscErrorCode :: ierr
+      PetscInt :: local_rows, local_cols
+      PetscScalar, pointer :: y_array(:,:), x_array(:,:)
+      ! ~~~~~~
+
+      call MatGetLocalSize(y_mat, local_rows, local_cols, ierr)
+      if (local_rows == 0) return
+      call MatDenseGetArray(y_mat, y_array, ierr)
+      call MatDenseGetArrayRead(x_mat, x_array, ierr)
+      y_array = max(y_array, x_array)
+      call MatDenseRestoreArrayRead(x_mat, x_array, ierr)
+      call MatDenseRestoreArray(y_mat, y_array, ierr)
+
+   end subroutine dense_max
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    logical function is_shell_inverse(inv_mat)
 
       ! Is this approximate inverse a matshell, which a multi-shift needs
@@ -134,7 +159,7 @@ module air_multishift
       integer :: our_level, no_levels, errorcode
       PetscErrorCode :: ierr
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      type(tMat) :: d_copy, d_cur, d_next, w_mat, af_mat, temp_mat, null_mat
+      type(tMat) :: d_copy, d_cur, d_next, w_mat, af_mat, temp_mat, null_mat, inj_mat, c_mat
       type(tVec) :: f_vec, c_vec, ones_coarse, p_one, temp_vec
       logical :: nonsym, scaled, c_update
       ! ~~~~~~
@@ -277,6 +302,33 @@ module air_multishift
          call VecDestroy(ones_coarse, ierr)
          call VecDestroy(p_one, ierr)
 
+         ! The injected shifts, d on the C points, in the layout of the next level
+         ! P has the identity on the C points, so these are the C rows of w = d .* P 1
+         inj_mat = null_mat
+         call create_air_block_temp(air_data%prolongators(our_level), .TRUE., dshift, &
+                  local_cols, global_cols, inj_mat, ierr)
+         if (air_data%repartitioned(our_level)) then
+            ! The C points aren't in the layout of the next level, but R (and P^T) has the 
+            ! identity on the C points so we can apply it to the C rows to get them there
+            c_mat = null_mat
+            call create_air_block_temp(air_data%A_fc(our_level), .TRUE., dshift, &
+                     local_cols, global_cols, c_mat, ierr)
+            call MatISCopyLocalWrapper(air_data, our_level, .FALSE., w_mat, SCATTER_REVERSE, c_mat)
+            call MatDuplicate(w_mat, MAT_DO_NOT_COPY_VALUES, temp_mat, ierr)
+            call MatZeroEntries(temp_mat, ierr)
+            call MatISCopyLocalWrapper(air_data, our_level, .FALSE., temp_mat, SCATTER_FORWARD, c_mat, &
+                     air_data%block_temp_full(1)%array(our_level))
+            if (nonsym) then
+               call mat_product_block(air_data%restrictors(our_level), temp_mat, inj_mat, .FALSE., ierr)
+            else
+               call mat_product_block(air_data%prolongators(our_level), temp_mat, inj_mat, .TRUE., ierr)
+            end if
+            call MatDestroy(temp_mat, ierr)
+            call MatDestroy(c_mat, ierr)
+         else
+            call MatISCopyLocalWrapper(air_data, our_level, .FALSE., w_mat, SCATTER_REVERSE, inj_mat)
+         end if
+
          d_next = null_mat
          call create_air_block_temp(air_data%prolongators(our_level), .TRUE., dshift, &
                   local_cols, global_cols, d_next, ierr)
@@ -286,6 +338,11 @@ module air_multishift
          else
             call mat_product_block(air_data%prolongators(our_level), w_mat, d_next, .TRUE., ierr)
          end if
+         ! As in update_air_diag, the coarse shifts are never less than the injected ones,
+         ! as with the off-diagonals frozen the lumping can take the coarse diagonal through
+         ! zero on a decrease
+         call dense_max(d_next, inj_mat)
+         call MatDestroy(inj_mat, ierr)
          call MatDestroy(w_mat, ierr)
          call MatDestroy(d_cur, ierr)
          d_cur = d_next
