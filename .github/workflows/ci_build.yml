@@ -359,6 +359,10 @@ jobs:
           push: false
           context: .
           file: ./dockerfiles/Dockerfile_intel
+          # Intel MPI maps a ~1.4 GB intranode pool from /dev/shm and backs pages as
+          # message traffic touches them. The default 64 MB /dev/shm of a build step
+          # can run out mid-test (more so with matrix-free polys), giving a SIGBUS
+          shm-size: 2g
           build-args: |
             ARCH=arch-linux-intel
 

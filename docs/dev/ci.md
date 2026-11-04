@@ -12,6 +12,7 @@ Jobs, grouped
 - Fortran runtime checks: `gnu_debug` builds with `EXTRA_FFLAGS="-fcheck=all -g -fbacktrace"` (a `dockerfiles/Dockerfile` build arg) and runs the full suite, so out-of-bounds indexing, unallocated/unassociated arrays and non-conforming array assignments abort with a `Fortran runtime error`. To reproduce locally, add those flags to `FFLAGS`.
 - Kokkos: `gnu_opt_kokkos`, `gnu_opt_64_bit_kokkos`, `gnu_opt_omp_kokkos`, `gnu_debug_no_mpi_kokkos`, `gnu_debug_kokkos_single_prefix` (single precision).
 - Other: `intel_opt`, `macos_debug`, `macos_64_bit_kokkos`, `notebook_tutorial`, `gnu_petsc_config` (builds PETSc `main` with `--download-pflare` and gates the Sphinx doc build).
+- `intel_opt` builds with `shm-size: 2g`: Intel MPI backs its intranode pool with `/dev/shm`, and the default 64 MB of a Docker build step runs out in the longer parallel tests, which crash with a SIGBUS (signal 7). To reproduce locally, run the image with `--shm-size=64m` (the default) vs `--shm-size=2g`.
 
 Images
 - Base images: `stevendargaville/petsc` (`dockerfiles/Dockerfile`) and `stevendargaville/petsc_kokkos` (`dockerfiles/Dockerfile_kokkos`); published result: `stevendargaville/pflare:latest`.
