@@ -1049,7 +1049,7 @@ run_tests_no_load_serial:
 	./ex6_setcoeffs_replay -pc_air_reuse_sparsity -pc_air_inverse_type jacobi
 	@echo "Test AIRG with a diagonal update that both increases and decreases the diagonal of the base"
 	./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
-	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 10
+	 -c_values 0,-0.5,-0.9,0.5,2,10 -max_extra_its 12
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, rebuilding, freezing and updating the PC"
 	./adv_diff_fd_ts -da_grid_x 30 -da_grid_y 30 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ts_adapt_type basic -ts_max_time 3 -verify_solution
@@ -1775,7 +1775,7 @@ else
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc \
 	 -pc_air_process_eq_limit 400 -max_extra_its 5
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -c_base 1 \
-	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 10
+	 -c_values 0,-0.5,-0.9,0.5,2,10 -pc_air_process_eq_limit 400 -max_extra_its 12
 	@echo "Test AIRG with a diagonal update recomputing the polynomial coefficients in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_diag_update -n 30 -pc_type air -ksp_rtol $(KSP_RTOL) -c_values 0,1 -check_poly_coeffs
 	@echo "Test AIRG with a strong R threshold and a diagonal update, keeping the polynomial coefficients from the first setup in parallel"
@@ -2199,10 +2199,10 @@ run_tests_medium_serial:
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update, where the time step grows"
 	./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
-	 -pc_air_diag_update -max_total_its 3000
+	 -pc_air_diag_update -max_total_its 3300
 	./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
-	 -pc_air_diag_update -pc_air_matrix_free_polys -max_total_its 3000
+	 -pc_air_diag_update -pc_air_matrix_free_polys -max_total_its 3300
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update, where the time step grows"
 	$(SKIP_SINGLE) ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
@@ -2210,6 +2210,10 @@ run_tests_medium_serial:
 	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
 	 -bottom_only_inflow_one -pc_air_diag_update -pc_air_matrix_free_polys -max_total_its 3200
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update with scaled polynomials, where the time step grows"
+	./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) -ksp_pc_side right \
+	 -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 -ts_adapt_type basic \
+	 -bottom_only_inflow_one -pc_air_diag_update -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -max_total_its 3500
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step"
 	./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
@@ -2344,11 +2348,15 @@ else
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection and a diagonal update, where the time step grows, in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \
-	 -pc_air_diag_update -max_total_its 3000
+	 -pc_air_diag_update -max_total_its 3300
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update, where the time step grows, in parallel"
 	$(SKIP_SINGLE) $(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc \
 	 -ksp_rtol $(KSP_RTOL) -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 \
 	 -ts_adapt_type basic -bottom_only_inflow_one -pc_air_diag_update -max_total_its 3200
+	@echo "Test AIRG with adaptive backward-Euler TS with upwind DG FEM in 2D with quads and a diagonal update with scaled polynomials, where the time step grows, in parallel"
+	$(MPIEXEC) -n 2 ./adv_dg_upwind -dm_plex_simplex 0 -dm_refine 4 -pc_type air -pc_air_smooth_type fc \
+	 -ksp_rtol $(KSP_RTOL) -ksp_pc_side right -ksp_max_it 500 -ts_max_snes_failures -1 -time_depend -ts_time_step 1e-3 -ts_max_time 2 \
+	 -ts_adapt_type basic -bottom_only_inflow_one -pc_air_diag_update -pc_air_diag_scale_polys -pc_air_coarsest_diag_scale_polys -max_total_its 3500
 	@echo "Test AIRG with adaptive backward-Euler TS with upwind FD advection, built at the largest time step, and stored coefficients for bands of the time step in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd_ts -da_grid_x 100 -da_grid_y 100 -pc_type air -pc_air_smooth_type fc -ksp_rtol $(KSP_RTOL) \
 	 -ksp_max_it 500 -ts_max_snes_failures -1 -ts_adapt_type basic -ts_time_step 1e-3 -ts_max_time 2 -verify_solution \

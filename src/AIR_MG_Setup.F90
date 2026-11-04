@@ -702,6 +702,7 @@ module air_mg_setup
          ! Do processor agglomeration if desired
          ! We stay on the existing communicator with some cores just having zero dofs
          ! ~~~~~~~~~~~~
+         air_data%repartitioned(our_level) = .FALSE.
          if (air_data%options%processor_agglom) then
 
             ! If we're in parallel and we haven't already agglomerated down to one processor
@@ -766,6 +767,8 @@ module air_mg_setup
 
                   ! If we agglomerate down to one processor
                   if (proc_stride > comm_size) proc_stride = comm_size
+
+                  air_data%repartitioned(our_level) = .TRUE.
 
                   ! Calculate the IS with the repartitioning if we haven't already
                   ! This is expensive as it calls the graph partitioner (e.g., parmetis)
@@ -1314,6 +1317,7 @@ module air_mg_setup
             do our_level = 1, no_levels
                petsc_level = no_levels - our_level
                ! PCMG doesn't let us set an x on the top grid and has no r on the coarsest
+               ! The update only needs an r on the coarsest if it has been repartitioned
                if (our_level > 1) then
                   call MatCreateVecs(air_data%coarse_matrix(our_level), &
                            air_data%diag_update_x(our_level), PETSC_NULL_VEC, ierr)
@@ -1323,6 +1327,9 @@ module air_mg_setup
                   call MatCreateVecs(air_data%coarse_matrix(our_level), &
                            air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
                   call PCMGSetR(pcmg_input, petsc_level, air_data%diag_update_r(our_level), ierr)
+               else if (air_data%repartitioned(no_levels - 1)) then
+                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
+                           air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
                end if
             end do
          end if

@@ -1,6 +1,6 @@
 !
 !  Checks the coarse perturbations computed by the PCAIR diagonal update against an explicit
-!  calculation on every level, d_{l+1} = R_l (d_l .* P_l 1)
+!  calculation on every level, d_{l+1} = max(R_l (d_l .* P_l 1), R_l (d_l on the C points))
 !  The update on the top grid doesn't compute the C points of d_1 .* P_1 1, as it relies on
 !  the C point rows of P_1 summing to exactly one, so this also checks that on every level
 !  directly. Use with any PCAIR options on the command line, including -mat_type
@@ -115,9 +115,11 @@
       ! Update and check, moving the diagonal up and down from what it was built with 
       ! The solves leave other values in the PCMG work vectors
       ! ~~~~~~~~~~~~~~
-      no_updates = 3
+      no_updates = 4
       do update = 1, no_updates
          scale = merge(r_one, merge(0.01_PETSC_REAL_KIND, 10 * r_one, update == 2), update == 1)
+         ! A decrease, that leaves the diagonal of the top grid positive
+         if (update == 4) scale = -0.1_PETSC_REAL_KIND
          do row = row_start, row_end - 1
             val = scale * (1 + mod(row, 7 * one))
             call VecSetValues(d, one, [row], [val], INSERT_VALUES, ierr)
@@ -190,7 +192,7 @@
          integer :: our_level, no_levels, errorcode
          PetscErrorCode :: ierr
          PetscReal :: norm, norm_exact, tol
-         Vec :: d_level, d_coarse, coarse_one, p_one, computed
+         Vec :: d_level, d_coarse, coarse_one, p_one, computed, injected, p_one_f
 
          no_levels = pc_air_data%air_data%no_levels
          tol = 1000 * epsilon(tol)
@@ -203,11 +205,23 @@
             call VecSet(coarse_one, r_one, ierr)
             call MatMult(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr)
             call VecPointwiseMult(p_one, p_one, d_level, ierr)
+            call VecDuplicate(d_coarse, injected, ierr)
             if (pc_air_data%air_data%options%symmetric) then
                call MatMultTranspose(pc_air_data%air_data%prolongators(our_level), p_one, d_coarse, ierr)
             else
                call MatMult(pc_air_data%air_data%restrictors(our_level), p_one, d_coarse, ierr)
             end if
+            ! R has the identity on the C points, so this works if the next level is repartitioned
+            call VecGetSubVector(p_one, pc_air_data%air_data%IS_fine_index(our_level), p_one_f, ierr)
+            call VecSet(p_one_f, 0.0_PETSC_REAL_KIND, ierr)
+            call VecRestoreSubVector(p_one, pc_air_data%air_data%IS_fine_index(our_level), p_one_f, ierr)
+            if (pc_air_data%air_data%options%symmetric) then
+               call MatMultTranspose(pc_air_data%air_data%prolongators(our_level), p_one, injected, ierr)
+            else
+               call MatMult(pc_air_data%air_data%restrictors(our_level), p_one, injected, ierr)
+            end if
+            call VecPointwiseMax(d_coarse, d_coarse, injected, ierr)
+            call VecDestroy(injected, ierr)
 
             ! The update leaves the perturbation in the x on each level, except the
             ! coarsest where it has the baseline added

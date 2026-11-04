@@ -17,6 +17,9 @@ for earlier changes please see the git history.
   when this is appropriate
 - A PCAIR diagonal update no longer allocates a temporary vector, it uses the
   PCMG level vectors, which PCAIR now creates with `-pc_air_diag_update`
+- A PCAIR diagonal update now keeps each coarse perturbation at least as large as
+  its injected value, which makes large decreases of the diagonal much more robust
+  on DG; building from the smallest diagonal is still recommended
 - `PCAIRSetPolyCoeffs()` (C, Fortran and Python) now accepts a different number
   of roots than PCAIR stores for the Newton inverse types (`newton`,
   `newton_no_extra`), whose number of roots can differ between setups; the

@@ -25,8 +25,9 @@ module air_diagonal_update
    ! only the diagonals of A_ff, A_cc and the coarsest matrix change on each level,
    ! along with the approximate inverses built from them
    ! The diagonal perturbation is carried down to the coarse grids by row sum lumping 
-   ! R diag(d) P, and the F point columns of the restrictors are rescaled to account for 
-   ! the change in A_ff, though only ever shrunk
+   ! R diag(d) P, though never below the perturbation on that C point, and the F point 
+   ! columns of the restrictors are rescaled to account for the change in A_ff, though 
+   ! only ever shrunk
    ! The update is always relative to the hierarchy built from A (ie it is not cumulative),
    ! so applying D = 0 gives back the original hierarchy
    ! -------------------------------------------------------------------------------------------------------------------------------
@@ -53,6 +54,7 @@ module air_diagonal_update
       MPIU_Comm :: MPI_COMM_MATRIX
       type(tVec) :: temp_vec, d_vec, d_coarse, work, f_new, f_old, c_vec
       logical :: update_acc
+      PetscReal, parameter :: zero = 0.0
       ! ~~~~~~
 
       no_levels = air_data%no_levels
@@ -180,6 +182,10 @@ module air_diagonal_update
          ! Row sum lumping of R diag(d) P, ie R (d .* P 1), which keeps the action 
          ! of R diag(d) P on the constant
          ! P 1 is one matvec with P, so we just recompute it rather than store it
+         ! The off-diagonals of the coarse matrix are frozen, so on a decrease they are too small
+         ! and the lumping has to make up for that on the diagonal, which can take it through zero
+         ! on DG, where the diagonal blocks of the level aren't dominant. So the perturbation is 
+         ! never less than the injected one, which is d on the C points
          call timer_start(TIMER_ID_AIR_RAP)
          call VecSet(d_coarse, PFLARE_ONE, ierr)
          call MatMult(air_data%prolongators(our_level), d_coarse, work, ierr)
@@ -208,6 +214,26 @@ module air_diagonal_update
          else
             call MatMult(air_data%restrictors(our_level), work, d_coarse, ierr)
          end if
+         ! P has the identity on the C points so work has d there
+         c_vec = air_data%temp_vecs_coarse(1)%array(our_level)
+         call VecISCopyLocalWrapper(air_data, our_level, .FALSE., work, SCATTER_REVERSE, c_vec)
+         if (air_data%repartitioned(our_level)) then
+            ! The C points aren't in the layout of the next level, but R has the identity 
+            ! on the C points so we can apply it to get them there
+            call VecSet(work, zero, ierr)
+            if (air_data%fast_veciscopy_exists) then
+               call VecISCopyLocalWrapper(air_data, our_level, .FALSE., work, SCATTER_FORWARD, c_vec)
+            else
+               call VecISCopy(work, air_data%IS_coarse_index(our_level), SCATTER_FORWARD, c_vec, ierr)
+            end if
+            c_vec = air_data%diag_update_r(our_level + 1)
+            if (air_data%options%symmetric) then
+               call MatMultTranspose(air_data%prolongators(our_level), work, c_vec, ierr)
+            else
+               call MatMult(air_data%restrictors(our_level), work, c_vec, ierr)
+            end if
+         end if
+         call pointwise_max(d_coarse, c_vec)
          call timer_finish(TIMER_ID_AIR_RAP)
 
          ! The coarse perturbation becomes the perturbation on the next level
@@ -245,6 +271,29 @@ module air_diagonal_update
       end if
 
    end subroutine update_air_diag
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pointwise_max(vec, other)
+
+      ! Replaces each entry of vec with max(vec, other), written as
+      ! (vec + other + |vec - other|) / 2 with vector operations that run on the device, 
+      ! as VecPointwiseMax doesn't, and without a temporary. Other is overwritten
+
+      ! ~~~~~~
+      type(tVec), intent(inout) :: vec, other
+
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      ! other = vec + other, vec = vec - other
+      call VecAXPY(other, PFLARE_ONE, vec, ierr)
+      call VecAXPBY(vec, PFLARE_MINUS_ONE, 2 * PFLARE_ONE, other, ierr)
+      call VecAbs(vec, ierr)
+      call VecAXPY(vec, PFLARE_ONE, other, ierr)
+      call VecScale(vec, PFLARE_HALF, ierr)
+
+   end subroutine pointwise_max
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

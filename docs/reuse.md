@@ -107,10 +107,10 @@ where $a_\textrm{ff}$ and $d_\textrm{f}$ are the diagonals of $\mathbf{A}_\textr
 **The coarse matrix:** the Galerkin coarse matrix of $\mathbf{A} + \mathbf{D}$ would be $\mathbf{R}\mathbf{A}\mathbf{P} + \mathbf{R}\mathbf{D}\mathbf{P}$. Rather than computing $\mathbf{R}\mathbf{D}\mathbf{P}$ with matrix-matrix products, it is lumped onto the diagonal with a row sum, which preserves its action on the constant vector
 
 $$
-\mathbf{d}_\textrm{coarse} = \mathbf{R}(\mathbf{d} \circ \mathbf{P}\mathbf{1}),
+\mathbf{d}_\textrm{coarse} = \max\left(\mathbf{R}(\mathbf{d} \circ \mathbf{P}\mathbf{1}), \mathbf{d}_\textrm{c}\right),
 $$
 
-where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, $\mathbf{1}$ is the vector of ones and $\circ$ is the entrywise product. With the default one-point prolongator $\mathbf{P}\mathbf{1} = \mathbf{1}$, so this is just one matrix-vector product with the (rescaled) restrictor, $\mathbf{d}_\textrm{coarse} = \mathbf{R}\mathbf{d}$. The coarse matrix becomes $\mathbf{R}\mathbf{A}\mathbf{P} + \textrm{diag}(\mathbf{d}_\textrm{coarse})$ and the diagonal update can proceed on the next level. 
+where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, the subscript c denotes its C points, $\mathbf{1}$ is the vector of ones, $\circ$ is the entrywise product and the maximum is entrywise. The maximum applies on a decrease: the off-diagonals of the coarse matrix are frozen, so the lumping on its own can take a coarse diagonal through zero. With the default one-point prolongator $\mathbf{P}\mathbf{1} = \mathbf{1}$, so this is just one matrix-vector product with the (rescaled) restrictor, $\mathbf{d}_\textrm{coarse} = \mathbf{R}\mathbf{d}$. The coarse matrix becomes $\mathbf{R}\mathbf{A}\mathbf{P} + \textrm{diag}(\mathbf{d}_\textrm{coarse})$ and the diagonal update can proceed on the next level. 
 
 **The smoothers:** the approximate inverses of $\mathbf{A}_\textrm{ff} + \mathbf{D}_\textrm{f}$ (and of $\mathbf{A}_\textrm{cc} + \mathbf{D}_\textrm{c}$) used in the smoothers are rebuilt. The updated $\mathbf{R}$ and coarse matrix do not depend on an updated approximation to $\mathbf{A}_\textrm{ff}^{-1}$, so with matrix-free smoothing (``-pc_air_matrix_free_polys`` and ``-pc_air_coarsest_matrix_free_polys``) an update does not assemble any approximate inverses and only computes the new polynomial coefficients.
 

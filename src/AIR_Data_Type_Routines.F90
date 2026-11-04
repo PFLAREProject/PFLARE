@@ -69,6 +69,7 @@ module air_data_type_routines
       allocate(air_data%coarse_matrix_nnzs(air_data%options%max_levels))
 
       allocate(air_data%allocated_matrices_A_ff(air_data%options%max_levels))
+      allocate(air_data%repartitioned(air_data%options%max_levels))
       allocate(air_data%allocated_matrices_A_cc(air_data%options%max_levels))
       allocate(air_data%allocated_is(air_data%options%max_levels))
       allocate(air_data%allocated_coarse_matrix(air_data%options%max_levels))   
@@ -113,6 +114,7 @@ module air_data_type_routines
       air_data%coarse_matrix_nnzs   = 0   
       air_data%allocated_matrices_A_ff = .FALSE.
       air_data%allocated_is = .FALSE.
+      air_data%repartitioned = .FALSE.
       air_data%allocated_matrices_A_cc = .FALSE. 
       air_data%allocated_coarse_matrix = .FALSE.
      
@@ -498,6 +500,7 @@ module air_data_type_routines
          deallocate(air_data%A_cc) 
 
          deallocate(air_data%allocated_matrices_A_ff)
+         deallocate(air_data%repartitioned)
          deallocate(air_data%allocated_matrices_A_cc)      
          deallocate(air_data%allocated_is)
          deallocate(air_data%allocated_coarse_matrix)    
