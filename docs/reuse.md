@@ -82,19 +82,19 @@ Consider a single level, with the level matrix split into fine (F) and coarse (C
 $$
 \mathbf{A} = 
 \begin{bmatrix}
-\mathbf{A}_\textrm{ff} & \mathbf{A}_\textrm{fc} \\
-\mathbf{A}_\textrm{cf} & \mathbf{A}_\textrm{cc}
+\mathbf A_\textrm{ff} & \mathbf A_\textrm{fc} \\
+\mathbf A_\textrm{cf} & \mathbf A_\textrm{cc}
 \end{bmatrix}, \quad
 \mathbf{D} = 
 \begin{bmatrix}
-\mathbf{D}_\textrm{f} & \\
- & \mathbf{D}_\textrm{c}
+\mathbf D_\textrm{f} & \\
+ & \mathbf D_\textrm{c}
 \end{bmatrix},
 $$
 
-with restrictor $\mathbf{R} = [\mathbf{Z} \;\; \mathbf{I}]$, where $\mathbf{Z} \approx -\mathbf{A}_\textrm{cf} \mathbf{A}_\textrm{ff}^{-1}$, and prolongator $\mathbf{P} = [\mathbf{W} ;\; \mathbf{I}]$. If we rebuilt the hierarchy from $\mathbf{A} + \mathbf{D}$ everything on the level would change. Instead, the update keeps the CF splitting, $\mathbf{P}$, $\mathbf{A}_\textrm{fc}$, $\mathbf{A}_\textrm{cf}$ and the sparsity of every matrix, and changes only:
+with restrictor $\mathbf{R} = [\mathbf{Z} \;\; \mathbf{I}]$, where $\mathbf{Z} \approx -\mathbf A_\textrm{cf} \mathbf A_\textrm{ff}^{-1}$, and prolongator $\mathbf{P} = [\mathbf{W} ;\; \mathbf{I}]$. If we rebuilt the hierarchy from $\mathbf{A} + \mathbf{D}$ everything on the level would change. Instead, the update keeps the CF splitting, $\mathbf{P}$, $\mathbf A_\textrm{fc}$, $\mathbf A_\textrm{cf}$ and the sparsity of every matrix, and changes only:
 
-**The diagonal blocks:** $\mathbf{A}_\textrm{ff} \leftarrow \mathbf{A}_\textrm{ff} + \mathbf{D}_\textrm{f}$ and, if C point smoothing is used, $\mathbf{A}_\textrm{cc} \leftarrow \mathbf{A}_\textrm{cc} + \mathbf{D}_\textrm{c}$. 
+**The diagonal blocks:** $\mathbf A_\textrm{ff} \leftarrow \mathbf A_\textrm{ff} + \mathbf D_\textrm{f}$ and, if C point smoothing is used, $\mathbf A_\textrm{cc} \leftarrow \mathbf A_\textrm{cc} + \mathbf D_\textrm{c}$. 
 
 **The restrictor:** The F point columns of $\mathbf{R}$ are therefore rescaled
 
@@ -102,17 +102,17 @@ $$
 \mathbf{Z} \leftarrow \mathbf{Z} \, \textrm{diag}\left( \min\left(1, \frac{a_\textrm{ff}}{a_\textrm{ff} + d_\textrm{f}}\right) \right),
 $$
 
-where $a_\textrm{ff}$ and $d_\textrm{f}$ are the diagonals of $\mathbf{A}_\textrm{ff}$ and $\mathbf{D}_\textrm{f}$. Without the $\min$ this is exact if $\mathbf{A}_\textrm{ff}$ is diagonal and a good approximation when $\mathbf{A}_\textrm{ff}$ is strongly diagonally dominant, as the CF splittings in PCAIR aim for. Taking the $\min$ with 1 clips the scaling so that $\mathbf{Z}$ is only ever shrunk, never grown. When the diagonal decreases (e.g., when the time step grows in implicit time stepping), if we don't clip the iteration count grows substantially. With ``-pc_air_symmetric`` the restrictor is $\mathbf{P}^T$ and is not rescaled.
+where $a_\textrm{ff}$ and $d_\textrm{f}$ are the diagonals of $\mathbf A_\textrm{ff}$ and $\mathbf D_\textrm{f}$. Without the $\min$ this is exact if $\mathbf A_\textrm{ff}$ is diagonal and a good approximation when $\mathbf A_\textrm{ff}$ is strongly diagonally dominant, as the CF splittings in PCAIR aim for. Taking the $\min$ with 1 clips the scaling so that $\mathbf{Z}$ is only ever shrunk, never grown. When the diagonal decreases (e.g., when the time step grows in implicit time stepping), if we don't clip the iteration count grows substantially. With ``-pc_air_symmetric`` the restrictor is $\mathbf{P}^T$ and is not rescaled.
 
 **The coarse matrix:** the Galerkin coarse matrix of $\mathbf{A} + \mathbf{D}$ would be $\mathbf{R}\mathbf{A}\mathbf{P} + \mathbf{R}\mathbf{D}\mathbf{P}$. Rather than computing $\mathbf{R}\mathbf{D}\mathbf{P}$ with matrix-matrix products, it is lumped onto the diagonal with a row sum, which preserves its action on the constant vector
 
 $$
-\mathbf{d}_\textrm{coarse} = \max\left(\mathbf{R}(\mathbf{d} \circ \mathbf{P}\mathbf{1}), \mathbf{d}_\textrm{c}\right),
+\mathbf d_\textrm{coarse} = \max\left(\mathbf{R}(\mathbf{d} \circ \mathbf{P}\mathbf{1}), \mathbf d_\textrm{c}\right),
 $$
 
-where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, the subscript c denotes its C points, $\mathbf{1}$ is the vector of ones, $\circ$ is the entrywise product and the maximum is entrywise. The maximum applies on a decrease: the off-diagonals of the coarse matrix are frozen, so the lumping on its own can take a coarse diagonal through zero. With the default one-point prolongator $\mathbf{P}\mathbf{1} = \mathbf{1}$, so this is just one matrix-vector product with the (rescaled) restrictor, $\mathbf{d}_\textrm{coarse} = \mathbf{R}\mathbf{d}$. The coarse matrix becomes $\mathbf{R}\mathbf{A}\mathbf{P} + \textrm{diag}(\mathbf{d}_\textrm{coarse})$ and the diagonal update can proceed on the next level. 
+where $\mathbf{d}$ is the diagonal of $\mathbf{D}$, the subscript c denotes its C points, $\mathbf{1}$ is the vector of ones, $\circ$ is the entrywise product and the maximum is entrywise. The maximum applies on a decrease: the off-diagonals of the coarse matrix are frozen, so the lumping on its own can take a coarse diagonal through zero. With the default one-point prolongator $\mathbf{P}\mathbf{1} = \mathbf{1}$, so this is just one matrix-vector product with the (rescaled) restrictor, $\mathbf d_\textrm{coarse} = \mathbf{R}\mathbf{d}$. The coarse matrix becomes $\mathbf{R}\mathbf{A}\mathbf{P} + \textrm{diag}(\mathbf d_\textrm{coarse})$ and the diagonal update can proceed on the next level. 
 
-**The smoothers:** the approximate inverses of $\mathbf{A}_\textrm{ff} + \mathbf{D}_\textrm{f}$ (and of $\mathbf{A}_\textrm{cc} + \mathbf{D}_\textrm{c}$) used in the smoothers are rebuilt. The updated $\mathbf{R}$ and coarse matrix do not depend on an updated approximation to $\mathbf{A}_\textrm{ff}^{-1}$, so with matrix-free smoothing (``-pc_air_matrix_free_polys`` and ``-pc_air_coarsest_matrix_free_polys``) an update does not assemble any approximate inverses and only computes the new polynomial coefficients.
+**The smoothers:** the approximate inverses of $\mathbf A_\textrm{ff} + \mathbf D_\textrm{f}$ (and of $\mathbf A_\textrm{cc} + \mathbf D_\textrm{c}$) used in the smoothers are rebuilt. The updated $\mathbf{R}$ and coarse matrix do not depend on an updated approximation to $\mathbf A_\textrm{ff}^{-1}$, so with matrix-free smoothing (``-pc_air_matrix_free_polys`` and ``-pc_air_coarsest_matrix_free_polys``) an update does not assemble any approximate inverses and only computes the new polynomial coefficients.
 
 If ``-pc_air_reuse_poly_coeffs`` is also set, an update keeps the polynomial coefficients rather than recomputing them, so with matrix-free smoothing, no rebuild of the smoothers is required. This should only be used with diagonally scaled polynomials (``-pc_air_diag_scale_polys`` and ``-pc_air_coarsest_diag_scale_polys``) and when the diagonal increases relative to the Pmat the hierarchy was built from (e.g., when the time step shrinks). See below for how to arrange this in time stepping.
 
