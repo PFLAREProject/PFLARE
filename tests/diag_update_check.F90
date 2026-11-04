@@ -31,21 +31,21 @@
       PetscInt, parameter :: one = 1
       PetscReal, parameter :: r_one = 1.0_PETSC_REAL_KIND
 
-      PetscCallA(PetscInitialize(ierr))
+      call PetscInitialize(ierr)
       n = 60
-      PetscCallA(PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, '-n', n, flg, ierr))
-      PetscCallA(PetscOptionsHasName(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, '-laplacian', laplacian, ierr))
+      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, '-n', n, flg, ierr)
+      call PetscOptionsHasName(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, '-laplacian', laplacian, ierr)
       nn = n * n
 
       ! ~~~~~~~~~~~~~~
       ! Assemble a 5 point operator
       ! ~~~~~~~~~~~~~~
-      PetscCallA(MatCreate(PETSC_COMM_WORLD, A, ierr))
-      PetscCallA(MatSetSizes(A, PETSC_DECIDE, PETSC_DECIDE, nn, nn, ierr))
-      PetscCallA(MatSetFromOptions(A, ierr))
-      PetscCallA(MatSeqAIJSetPreallocation(A, 5 * one, PETSC_NULL_INTEGER_ARRAY, ierr))
-      PetscCallA(MatMPIAIJSetPreallocation(A, 5 * one, PETSC_NULL_INTEGER_ARRAY, 2 * one, PETSC_NULL_INTEGER_ARRAY, ierr))
-      PetscCallA(MatGetOwnershipRange(A, row_start, row_end, ierr))
+      call MatCreate(PETSC_COMM_WORLD, A, ierr)
+      call MatSetSizes(A, PETSC_DECIDE, PETSC_DECIDE, nn, nn, ierr)
+      call MatSetFromOptions(A, ierr)
+      call MatSeqAIJSetPreallocation(A, 5 * one, PETSC_NULL_INTEGER_ARRAY, ierr)
+      call MatMPIAIJSetPreallocation(A, 5 * one, PETSC_NULL_INTEGER_ARRAY, 2 * one, PETSC_NULL_INTEGER_ARRAY, ierr)
+      call MatGetOwnershipRange(A, row_start, row_end, ierr)
       do row = row_start, row_end - 1
          i = mod(row, n)
          j = row / n
@@ -79,30 +79,30 @@
             cols(ncols) = row + n
             vals(ncols) = val
          end if
-         PetscCallA(MatSetValues(A, one, [row], ncols, cols, vals, INSERT_VALUES, ierr))
+         call MatSetValues(A, one, [row], ncols, cols, vals, INSERT_VALUES, ierr)
       end do
-      PetscCallA(MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY, ierr))
-      PetscCallA(MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY, ierr))
+      call MatAssemblyBegin(A, MAT_FINAL_ASSEMBLY, ierr)
+      call MatAssemblyEnd(A, MAT_FINAL_ASSEMBLY, ierr)
 
-      PetscCallA(MatCreateVecs(A, x, b, ierr))
-      PetscCallA(VecSet(b, r_one, ierr))
-      PetscCallA(VecDuplicate(x, d, ierr))
-      PetscCallA(VecDuplicate(x, diag, ierr))
+      call MatCreateVecs(A, x, b, ierr)
+      call VecSet(b, r_one, ierr)
+      call VecDuplicate(x, d, ierr)
+      call VecDuplicate(x, diag, ierr)
 
       ! ~~~~~~~~~~~~~~
       ! Build the hierarchy
       ! ~~~~~~~~~~~~~~
-      PetscCallA(KSPCreate(PETSC_COMM_WORLD, ksp, ierr))
-      PetscCallA(KSPSetOperators(ksp, A, A, ierr))
-      PetscCallA(KSPGetPC(ksp, pc, ierr))
+      call KSPCreate(PETSC_COMM_WORLD, ksp, ierr)
+      call KSPSetOperators(ksp, A, A, ierr)
+      call KSPGetPC(ksp, pc, ierr)
       call PCRegister_PFLARE()
-      PetscCallA(PCSetType(pc, PCAIR, ierr))
-      PetscCallA(PCAIRSetDiagUpdate(pc, PETSC_TRUE, ierr))
-      PetscCallA(KSPSetFromOptions(ksp, ierr))
-      PetscCallA(KSPSetUp(ksp, ierr))
+      call PCSetType(pc, PCAIR, ierr)
+      call PCAIRSetDiagUpdate(pc, PETSC_TRUE, ierr)
+      call KSPSetFromOptions(ksp, ierr)
+      call KSPSetUp(ksp, ierr)
 
       call PCAIRGetPCShell(pc, pc_shell)
-      PetscCallA(PCShellGetContext(pc_shell, pc_air_data, ierr))
+      call PCShellGetContext(pc_shell, pc_air_data, ierr)
 
       if (pc_air_data%air_data%no_levels < 2) then
          print *, "The hierarchy needs at least two levels for this test"
@@ -120,29 +120,29 @@
          scale = merge(r_one, merge(0.01_PETSC_REAL_KIND, 10 * r_one, update == 2), update == 1)
          do row = row_start, row_end - 1
             val = scale * (1 + mod(row, 7 * one))
-            PetscCallA(VecSetValues(d, one, [row], [val], INSERT_VALUES, ierr))
+            call VecSetValues(d, one, [row], [val], INSERT_VALUES, ierr)
          end do
-         PetscCallA(VecAssemblyBegin(d, ierr))
-         PetscCallA(VecAssemblyEnd(d, ierr))
-         PetscCallA(VecWAXPY(diag, r_one, pc_air_data%air_data%diag_update_base_pmat, d, ierr))
-         PetscCallA(MatDiagonalSet(A, diag, INSERT_VALUES, ierr))
-         PetscCallA(PCSetUp(pc, ierr))
+         call VecAssemblyBegin(d, ierr)
+         call VecAssemblyEnd(d, ierr)
+         call VecWAXPY(diag, r_one, pc_air_data%air_data%diag_update_base_pmat, d, ierr)
+         call MatDiagonalSet(A, diag, INSERT_VALUES, ierr)
+         call PCSetUp(pc, ierr)
 
          call check_perturbations(pc_air_data, d)
          call check_c_rows(pc_air_data)
 
-         PetscCallA(KSPSolve(ksp, b, x, ierr))
+         call KSPSolve(ksp, b, x, ierr)
       end do
 
-      PetscCallA(PetscPrintf(PETSC_COMM_WORLD, "Diagonal update checks passed\n", ierr))
+      call PetscPrintf(PETSC_COMM_WORLD, "Diagonal update checks passed\n", ierr)
 
-      PetscCallA(VecDestroy(x, ierr))
-      PetscCallA(VecDestroy(b, ierr))
-      PetscCallA(VecDestroy(d, ierr))
-      PetscCallA(VecDestroy(diag, ierr))
-      PetscCallA(MatDestroy(A, ierr))
-      PetscCallA(KSPDestroy(ksp, ierr))
-      PetscCallA(PetscFinalize(ierr))
+      call VecDestroy(x, ierr)
+      call VecDestroy(b, ierr)
+      call VecDestroy(d, ierr)
+      call VecDestroy(diag, ierr)
+      call MatDestroy(A, ierr)
+      call KSPDestroy(ksp, ierr)
+      call PetscFinalize(ierr)
 
       contains
 
@@ -158,18 +158,18 @@
          Vec :: coarse_one, p_one, p_one_c, temp
 
          do our_level = 1, pc_air_data%air_data%no_levels - 1
-            PetscCall(MatCreateVecs(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr))
-            PetscCall(VecSet(coarse_one, r_one, ierr))
-            PetscCall(MatMult(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr))
-            PetscCall(VecGetSubVector(p_one, pc_air_data%air_data%IS_coarse_index(our_level), p_one_c, ierr))
-            PetscCall(VecDuplicate(p_one_c, temp, ierr))
-            PetscCall(VecCopy(p_one_c, temp, ierr))
-            PetscCall(VecShift(temp, -r_one, ierr))
-            PetscCall(VecNorm(temp, NORM_INFINITY, norm, ierr))
-            PetscCall(VecDestroy(temp, ierr))
-            PetscCall(VecRestoreSubVector(p_one, pc_air_data%air_data%IS_coarse_index(our_level), p_one_c, ierr))
-            PetscCall(VecDestroy(coarse_one, ierr))
-            PetscCall(VecDestroy(p_one, ierr))
+            call MatCreateVecs(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr)
+            call VecSet(coarse_one, r_one, ierr)
+            call MatMult(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr)
+            call VecGetSubVector(p_one, pc_air_data%air_data%IS_coarse_index(our_level), p_one_c, ierr)
+            call VecDuplicate(p_one_c, temp, ierr)
+            call VecCopy(p_one_c, temp, ierr)
+            call VecShift(temp, -r_one, ierr)
+            call VecNorm(temp, NORM_INFINITY, norm, ierr)
+            call VecDestroy(temp, ierr)
+            call VecRestoreSubVector(p_one, pc_air_data%air_data%IS_coarse_index(our_level), p_one_c, ierr)
+            call VecDestroy(coarse_one, ierr)
+            call VecDestroy(p_one, ierr)
             ! Exact, as these entries are a single one times a one
             if (norm /= 0.0) then
                print *, "C point rows of P don't sum to one on level", our_level, "error", norm
@@ -194,44 +194,44 @@
 
          no_levels = pc_air_data%air_data%no_levels
          tol = 1000 * epsilon(tol)
-         PetscCall(VecDuplicate(d_top, d_level, ierr))
-         PetscCall(VecCopy(d_top, d_level, ierr))
+         call VecDuplicate(d_top, d_level, ierr)
+         call VecCopy(d_top, d_level, ierr)
 
          do our_level = 1, no_levels - 1
-            PetscCall(MatCreateVecs(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr))
-            PetscCall(VecDuplicate(coarse_one, d_coarse, ierr))
-            PetscCall(VecSet(coarse_one, r_one, ierr))
-            PetscCall(MatMult(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr))
-            PetscCall(VecPointwiseMult(p_one, p_one, d_level, ierr))
+            call MatCreateVecs(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr)
+            call VecDuplicate(coarse_one, d_coarse, ierr)
+            call VecSet(coarse_one, r_one, ierr)
+            call MatMult(pc_air_data%air_data%prolongators(our_level), coarse_one, p_one, ierr)
+            call VecPointwiseMult(p_one, p_one, d_level, ierr)
             if (pc_air_data%air_data%options%symmetric) then
-               PetscCall(MatMultTranspose(pc_air_data%air_data%prolongators(our_level), p_one, d_coarse, ierr))
+               call MatMultTranspose(pc_air_data%air_data%prolongators(our_level), p_one, d_coarse, ierr)
             else
-               PetscCall(MatMult(pc_air_data%air_data%restrictors(our_level), p_one, d_coarse, ierr))
+               call MatMult(pc_air_data%air_data%restrictors(our_level), p_one, d_coarse, ierr)
             end if
 
             ! The update leaves the perturbation in the x on each level, except the
             ! coarsest where it has the baseline added
-            PetscCall(VecDuplicate(d_coarse, computed, ierr))
-            PetscCall(VecCopy(pc_air_data%air_data%diag_update_x(our_level + 1), computed, ierr))
+            call VecDuplicate(d_coarse, computed, ierr)
+            call VecCopy(pc_air_data%air_data%diag_update_x(our_level + 1), computed, ierr)
             if (our_level + 1 == no_levels) then
-               PetscCall(VecAXPY(computed, -r_one, pc_air_data%air_data%diag_update_base_aff(no_levels), ierr))
+               call VecAXPY(computed, -r_one, pc_air_data%air_data%diag_update_base_aff(no_levels), ierr)
             end if
-            PetscCall(VecAXPY(computed, -r_one, d_coarse, ierr))
-            PetscCall(VecNorm(computed, NORM_INFINITY, norm, ierr))
-            PetscCall(VecNorm(d_coarse, NORM_INFINITY, norm_exact, ierr))
+            call VecAXPY(computed, -r_one, d_coarse, ierr)
+            call VecNorm(computed, NORM_INFINITY, norm, ierr)
+            call VecNorm(d_coarse, NORM_INFINITY, norm_exact, ierr)
             ! The coarsest level has gone through a sum with the baseline
             if (norm > tol * max(norm_exact, r_one)) then
                print *, "Perturbation on level", our_level + 1, "error", norm, "size", norm_exact
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
             end if
 
-            PetscCall(VecDestroy(computed, ierr))
-            PetscCall(VecDestroy(coarse_one, ierr))
-            PetscCall(VecDestroy(p_one, ierr))
-            PetscCall(VecDestroy(d_level, ierr))
+            call VecDestroy(computed, ierr)
+            call VecDestroy(coarse_one, ierr)
+            call VecDestroy(p_one, ierr)
+            call VecDestroy(d_level, ierr)
             d_level = d_coarse
          end do
-         PetscCall(VecDestroy(d_level, ierr))
+         call VecDestroy(d_level, ierr)
 
       end subroutine check_perturbations
 
