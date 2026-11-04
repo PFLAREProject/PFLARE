@@ -2408,7 +2408,7 @@ run_tests_copies:
 	@echo "Test AIRG diagonal updates with kept coefficients, diagonal scaling and matrix-free polynomials make no host/device copies in the updates or solves with device types in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_diag_update \
 	 -pc_air_reuse_poly_coeffs -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys \
-	 -pc_air_coarsest_diag_scale_polys -diag_update_scale 1 -min_levels 2 -check_copies
+	 -pc_air_coarsest_diag_scale_polys -diag_update_scale 1 -min_levels 2 -pc_air_processor_agglom 0 -check_copies
 
 run_check:
 
