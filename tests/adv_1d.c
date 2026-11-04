@@ -23,7 +23,7 @@ int main(int argc, char **args)
   PetscCount  counter;
   KSPConvergedReason reason;
   PetscLogStage setup, gpu_copy;
-  PetscLogEvent second_solve_event;
+  PetscLogEvent second_solve_event, diag_update_event;
 
   PetscFunctionBeginUser;
   PetscCall(PetscInitialize(&argc, &args, (char*)0, help));
@@ -37,6 +37,11 @@ int main(int argc, char **args)
   PetscBool check_copies = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
   if (check_copies) second_solve = PETSC_TRUE;
+  // Before the second solve scale the diagonal of the matrix by 1 + this and setup the PC, which
+  // is an update with -pc_air_diag_update, then do the same again as a repeat update
+  // Each setup and solve is checked by -check_copies
+  PetscReal diag_update_scale = 0.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-diag_update_scale", &diag_update_scale, NULL));
   // Use a central difference advection operator (skew-symmetric off-diagonals) with
   // a shifted diagonal, rather than the upwind operator
   PetscBool skew = PETSC_FALSE;
@@ -58,6 +63,7 @@ int main(int argc, char **args)
   PetscCall(PetscLogStageRegister("Setup", &setup));
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve", &gpu_copy));
   PetscCall(PetscLogEventRegister("SecondSolve", KSP_CLASSID, &second_solve_event));
+  PetscCall(PetscLogEventRegister("DiagUpdate", PC_CLASSID, &diag_update_event));
 
   /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
@@ -210,14 +216,28 @@ int main(int argc, char **args)
   // gpu implementation and we don't want a copy occuring back to the cpu    
   if (second_solve)
   {
-   PetscCall(VecSet(x, 1.0));
-   PetscCall(PetscLogEventBegin(second_solve_event, 0, 0, 0, 0));
-   if (transpose_solve) {
-     PetscCall(KSPSolveTranspose(ksp, b, x));
-   } else {
-     PetscCall(KSPSolve(ksp, b, x));
+   for (i = 0; i < (diag_update_scale != 0.0 ? 2 : 1); i++) {
+    if (diag_update_scale != 0.0) {
+     Vec diag_vec;
+
+     PetscCall(VecDuplicate(x, &diag_vec));
+     PetscCall(MatGetDiagonal(A, diag_vec));
+     PetscCall(VecScale(diag_vec, 1.0 + diag_update_scale));
+     PetscCall(MatDiagonalSet(A, diag_vec, INSERT_VALUES));
+     PetscCall(VecDestroy(&diag_vec));
+     PetscCall(PetscLogEventBegin(diag_update_event, 0, 0, 0, 0));
+     PetscCall(PCSetUp(pc));
+     PetscCall(PetscLogEventEnd(diag_update_event, 0, 0, 0, 0));
+    }
+    PetscCall(VecSet(x, 1.0));
+    PetscCall(PetscLogEventBegin(second_solve_event, 0, 0, 0, 0));
+    if (transpose_solve) {
+      PetscCall(KSPSolveTranspose(ksp, b, x));
+    } else {
+      PetscCall(KSPSolve(ksp, b, x));
+    }
+    PetscCall(PetscLogEventEnd(second_solve_event, 0, 0, 0, 0));
    }
-   PetscCall(PetscLogEventEnd(second_solve_event, 0, 0, 0, 0));
   }
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
@@ -237,6 +257,10 @@ int main(int argc, char **args)
    PetscCall(PetscLogEventGetPerfInfo(PETSC_DETERMINE, second_solve_event, &info));
    PetscCheck(info.GpuToCpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected GPU to CPU copies (%g bytes) in the second KSPSolve", info.GpuToCpuCount, info.GpuToCpuSize);
    PetscCheck(info.CpuToGpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected CPU to GPU copies (%g bytes) in the second KSPSolve", info.CpuToGpuCount, info.CpuToGpuSize);
+
+   PetscCall(PetscLogEventGetPerfInfo(PETSC_DETERMINE, diag_update_event, &info));
+   PetscCheck(info.GpuToCpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected GPU to CPU copies (%g bytes) in the diagonal updates", info.GpuToCpuCount, info.GpuToCpuSize);
+   PetscCheck(info.CpuToGpuCount == 0, PETSC_COMM_SELF, PETSC_ERR_PLIB, "%g unexpected CPU to GPU copies (%g bytes) in the diagonal updates", info.CpuToGpuCount, info.CpuToGpuSize);
   }
 #endif
 

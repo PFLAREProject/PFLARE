@@ -369,6 +369,8 @@ module air_data_type_routines
       call VecDestroy(air_data%diag_update_base_pmat, ierr)
       call destroy_vec_array(air_data%diag_update_base_aff)
       call destroy_vec_array(air_data%diag_update_base_acc)
+      call destroy_vec_array(air_data%diag_update_x)
+      call destroy_vec_array(air_data%diag_update_r)
       air_data%diag_update_initialised = .FALSE.
 
    contains

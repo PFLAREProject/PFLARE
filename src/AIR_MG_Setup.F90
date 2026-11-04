@@ -1303,6 +1303,30 @@ module air_mg_setup
          call PCSetUp(pc_coarse_solver, ierr)
          call KSPSetUp(ksp_coarse_solver, ierr)
 
+         ! A diagonal update uses the x and r on each level as scratch, so we create them here
+         ! which stops PCSetUp_MG creating its own. This has to be the same condition
+         ! as the one for doing an update in can_diag_update_pc_air_data
+         if (air_data%options%diag_update .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                  .NOT. air_data%options%full_smoothing_up_and_down) then
+
+            allocate(air_data%diag_update_x(no_levels))
+            allocate(air_data%diag_update_r(no_levels))
+            do our_level = 1, no_levels
+               petsc_level = no_levels - our_level
+               ! PCMG doesn't let us set an x on the top grid and has no r on the coarsest
+               if (our_level > 1) then
+                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
+                           air_data%diag_update_x(our_level), PETSC_NULL_VEC, ierr)
+                  call PCMGSetX(pcmg_input, petsc_level, air_data%diag_update_x(our_level), ierr)
+               end if
+               if (our_level < no_levels) then
+                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
+                           air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
+                  call PCMGSetR(pcmg_input, petsc_level, air_data%diag_update_r(our_level), ierr)
+               end if
+            end do
+         end if
+
       ! If we've only got one level 
       else
          ! Precondition with the "coarse grid" solver we used to determine auto truncation

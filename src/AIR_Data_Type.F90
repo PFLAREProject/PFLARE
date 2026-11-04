@@ -399,6 +399,10 @@ module air_data_type
       ! coarsest matrix (stored in diag_update_base_aff(no_levels)) before any update
       ! Everything else an update needs is temporary
       type(tVec), allocatable, dimension(:) :: diag_update_base_aff, diag_update_base_acc
+      ! The x and r on each level, which we create and give to PCMG rather than it creating 
+      ! them, as it has no public way to get them back. They're only used during a PCApply, 
+      ! so an update can use them as scratch. There is no x on the top grid or r on the coarsest
+      type(tVec), allocatable, dimension(:) :: diag_update_x, diag_update_r
 
       ! Temporary reuse
       type(air_reuse_data), allocatable, dimension(:) :: reuse
