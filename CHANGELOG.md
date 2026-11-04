@@ -15,6 +15,8 @@ for earlier changes please see the git history.
 - A PCAIR diagonal update now honours `-pc_air_reuse_poly_coeffs`, keeping the
   polynomial coefficients rather than recomputing them; see `docs/reuse.md` for
   when this is appropriate
+- A PCAIR diagonal update no longer allocates a temporary vector, it uses the
+  PCMG level vectors, which PCAIR now creates with `-pc_air_diag_update`
 - `PCAIRSetPolyCoeffs()` (C, Fortran and Python) now accepts a different number
   of roots than PCAIR stores for the Newton inverse types (`newton`,
   `newton_no_extra`), whose number of roots can differ between setups; the

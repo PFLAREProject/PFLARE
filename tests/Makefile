@@ -984,6 +984,12 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_serial:
+	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
+	./diag_update_check
+	./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
+	./diag_update_check -pc_air_smooth_type fc -pc_air_constrain_w -pc_air_constrain_z -pc_air_one_point_classical_prolong 0
+	./diag_update_check -laplacian -pc_air_symmetric
+	./diag_update_check -laplacian -pc_air_symmetric -pc_air_constrain_z -pc_air_smooth_type fc
 	@echo "Test rebuilding Newton polynomial inverses from more roots than the sparsity order keeps the requested sparsity"
 	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 0 -pc_pflareinv_sparsity_order 0
 	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
@@ -1741,6 +1747,13 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_parallel:
+	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
+	$(MPIEXEC) -n 2 ./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
+	$(MPIEXEC) -n 2 ./diag_update_check -laplacian -pc_air_symmetric
+	$(MPIEXEC) -n 4 ./diag_update_check -n 200 -ksp_max_it 5 -pc_air_processor_agglom 1 -pc_air_processor_agglom_ratio 1.01 \
+	 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 500
+	$(MPIEXEC) -n 4 ./diag_update_check -n 200 -ksp_max_it 5 -laplacian -pc_air_symmetric -pc_air_processor_agglom 1 \
+	 -pc_air_processor_agglom_ratio 1.01 -pc_air_processor_agglom_factor 2 -pc_air_process_eq_limit 500
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
 else
@@ -2374,6 +2387,10 @@ run_tests_copies:
 	@echo "Test multiple RHS block solve with a Richardson KSP and matrix-free PCAIR makes no host/device copies with device types"
 	./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) \
 	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -check_copies
+	@echo "Test AIRG diagonal updates with kept coefficients, diagonal scaling and matrix-free polynomials make no host/device copies in the updates or solves with device types"
+	./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_diag_update \
+	 -pc_air_reuse_poly_coeffs -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys \
+	 -pc_air_coarsest_diag_scale_polys -diag_update_scale 1 -min_levels 2 -check_copies
 #
 	@echo ""
 	@echo "Test AIRG with default options makes no host/device copies in a second Richardson solve with device types in parallel"
@@ -2388,6 +2405,10 @@ run_tests_copies:
 	 -pc_air_coarsest_matrix_free_polys -transpose_solve -check_copies
 	@echo "Test multiple RHS block solve with a Richardson KSP and PCAIR makes no host/device copies with device types in parallel"
 	$(MPIEXEC) -n 2 ./adv_1d_multi_rhs -n 500 -nrhs 5 -pc_type air -ksp_type richardson -ksp_rtol $(KSP_RTOL) -check_copies
+	@echo "Test AIRG diagonal updates with kept coefficients, diagonal scaling and matrix-free polynomials make no host/device copies in the updates or solves with device types in parallel"
+	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_diag_update \
+	 -pc_air_reuse_poly_coeffs -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys \
+	 -pc_air_coarsest_diag_scale_polys -diag_update_scale 1 -min_levels 2 -check_copies
 
 run_check:
 
