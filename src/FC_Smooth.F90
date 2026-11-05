@@ -69,6 +69,59 @@ module fc_smooth
 
    !------------------------------------------------------------------------------------------------------------------------
 
+   subroutine mg_coarse_shell_richardson(pc, b, x, w, rtol, abstol, dtol, maxits, guess_zero, its, conv_reason, ierr)
+
+      ! The richardson fast path of the coarse grid solver, x = x + inv_A_ff (b - A x)
+      ! for maxits iterations, with inv_A_ff = inv_A_ff(no_levels)
+      ! The coarse ksp is a richardson rather than a preonly because KSPSolve_PREONLY
+      ! always calls PCReduceFailedReason, an MPI_Allreduce in every v-cycle that
+      ! our shell never needs (it never sets a failed reason). This fast path stops
+      ! the richardson costing anything more than the preonly did: with a zero
+      ! initial guess and one iteration it is just the y = inv_A_ff x the preonly
+      ! did, with no copy, axpy or residual
+      ! This is only registered when the coarse ksp has no norm (see setup_air_pcmg),
+      ! as the tolerances are only used with a norm and we ignore them here
+      ! w is a work vector with the layout of the coarse grid
+
+      ! ~~~~~~
+      type(tPC) :: pc
+      type(tVec) :: b, x, w
+      PetscReal :: rtol, abstol, dtol
+      PetscInt :: maxits, its
+      PetscBool :: guess_zero
+      PCRichardsonConvergedReason :: conv_reason
+      PetscErrorCode :: ierr
+
+      type(tMat) :: mat, pmat
+      type(air_multigrid_data), pointer :: air_data => null()
+      PetscInt :: i_loc
+      ! ~~~~~~
+
+      ierr = 0
+      its = maxits
+      conv_reason = PCRICHARDSON_CONVERGED_ITS
+
+      call PCShellGetContext(pc, air_data, ierr)
+      call PCGetOperators(pc, mat, pmat, ierr)
+
+      do i_loc = 1, maxits
+         ! The first iteration from a zero initial guess is just the apply
+         if (i_loc == 1 .AND. guess_zero) then
+            call MatMult(air_data%inv_A_ff(air_data%no_levels), b, x, ierr)
+         else
+            ! w = b - A x, then x = x + inv_A_ff w
+            call MatResidual(mat, b, x, w, ierr)
+            call MatMultAdd(air_data%inv_A_ff(air_data%no_levels), w, x, x, ierr)
+         end if
+      end do
+
+      ! have to return zero here!
+      ierr = 0
+
+   end subroutine mg_coarse_shell_richardson
+
+   !------------------------------------------------------------------------------------------------------------------------
+
    subroutine mg_smooth_shell_apply(pc, x, y, ierr)
 
       ! PCShell apply used for the level smoothers when doing full smoothing up
