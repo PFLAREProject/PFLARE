@@ -82,6 +82,15 @@ module fc_smooth_block
       type(tMat) :: temp_mat
       ! ~~~~~~
 
+      ! The placeholder the coarse grid inverse product is bound to between applies
+      ! A product still holding it keeps it alive, but without it the next apply
+      ! attaches the product again
+      temp_mat = air_data%coarse_block_placeholder
+      if (.NOT. PetscObjectIsNull(temp_mat)) then
+         call MatDestroy(temp_mat, ierr)
+         air_data%coarse_block_placeholder = temp_mat
+      end if
+
       ! The outer arrays are only allocated in create_air_data
       if (.NOT. allocated(air_data%block_temp_full(1)%array)) return
 
@@ -650,6 +659,111 @@ module fc_smooth_block
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine apply_coarse_inverse_block_cached(air_data, x_mat, y_mat, ierr)
+
+      ! y_mat = inv_A_ff(no_levels) x_mat for a dense block, the coarse grid
+      ! version of apply_inverse_block_cached, where x_mat and y_mat are the PCMG
+      ! coarse blocks, which persist between applies
+      ! An assembled (or diagonal) coarse inverse keeps its product attached to
+      ! y_mat, so only the first apply (or one after y_mat or the inverse change)
+      ! runs the symbolic phase. Running the symbolic phase every apply, as
+      ! apply_inverse_block does, costs an MPI_Allreduce in every block v-cycle
+      ! The matrix-free matshells go through the blockwise shell apply, which
+      ! already keeps its products attached to the scratch in the matshell context
+      !
+      ! Between applies the input of the product is bound to an empty placeholder
+      ! rather than x_mat, as PCMG does with the products it keeps. The PCMG
+      ! level blocks are chained together through those products (the coarse block
+      ! of rhs is restricted from a block that depends on the coarse block of
+      ! solutions), so a product on y_mat holding x_mat would close a cycle of
+      ! references and none of them would ever be freed. Rebinding an input of the
+      ! same type keeps the symbolic phase, so this costs nothing
+      ! The decision to attach again only depends on things that are the same on
+      ! every rank (the identity of the collective objects, global sizes, types and
+      ! the nonzero state, which mpiaij reduces during its assembly), as attaching
+      ! is collective
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      type(tMat)                              :: x_mat, y_mat
+      PetscErrorCode, intent(inout)           :: ierr
+
+      type(tMat) :: inv_mat, a_mat, b_mat, placeholder
+      MatType :: inv_type, x_type
+      VecType :: vec_type
+      PetscObjectState :: nz_state
+      PetscInt :: global_cols, local_cols, placeholder_cols
+      PetscInt, parameter :: zero = 0
+      PetscBool :: same_type
+      MPIU_Comm :: MPI_COMM_MATRIX
+      logical :: reuse
+      ! ~~~~~~
+
+      inv_mat = air_data%inv_A_ff(air_data%no_levels)
+      call MatGetType(inv_mat, inv_type, ierr)
+
+      if (inv_type == MATSHELL) then
+         call shell_block_apply_or_columns(inv_mat, x_mat, y_mat, ierr)
+         return
+      end if
+
+      call MatGetSize(x_mat, PETSC_NULL_INTEGER, global_cols, ierr)
+      call MatGetType(x_mat, x_type, ierr)
+      call MatGetNonzeroState(inv_mat, nz_state, ierr)
+
+      ! Is the product attached to y_mat ours, still bound to our placeholder, and
+      ! still matching x_mat and the inverse
+      ! The inverse can be rebuilt in place (e.g., by a diagonal update), so its
+      ! nonzero state has to match too
+      placeholder = air_data%coarse_block_placeholder
+      reuse = .NOT. PetscObjectIsNull(placeholder)
+      if (reuse) then
+         call MatProductGetMats(y_mat, a_mat, b_mat, PETSC_NULL_MAT, ierr)
+         reuse = .NOT. PetscObjectIsNull(a_mat) .AND. .NOT. PetscObjectIsNull(b_mat)
+      end if
+      if (reuse) then
+         call MatGetSize(placeholder, PETSC_NULL_INTEGER, placeholder_cols, ierr)
+         call PetscObjectTypeCompare(placeholder, x_type, same_type, ierr)
+         reuse = a_mat%v == inv_mat%v .AND. b_mat%v == placeholder%v .AND. &
+                  nz_state == air_data%coarse_block_inv_nz_state .AND. &
+                  placeholder_cols == global_cols .AND. same_type
+      end if
+
+      if (reuse) then
+         ! Bind the product back to x_mat for the numeric phase
+         call MatProductReplaceMats(PETSC_NULL_MAT, x_mat, PETSC_NULL_MAT, y_mat, ierr)
+      else
+         ! An empty placeholder of the same type as x_mat
+         if (.NOT. PetscObjectIsNull(placeholder)) call MatDestroy(placeholder, ierr)
+         call PetscObjectGetComm(x_mat, MPI_COMM_MATRIX, ierr)
+         call MatGetLocalSize(x_mat, PETSC_NULL_INTEGER, local_cols, ierr)
+         call MatGetVecType(x_mat, vec_type, ierr)
+         call MatCreateDenseFromVecType(MPI_COMM_MATRIX, vec_type, zero, local_cols, &
+                  zero, global_cols, PETSC_DECIDE, PETSC_NULL_SCALAR, &
+                  placeholder, ierr)
+         air_data%coarse_block_placeholder = placeholder
+         air_data%coarse_block_inv_nz_state = nz_state
+
+         call MatProductClear(y_mat, ierr)
+         call attach_mat_product(inv_mat, x_mat, .FALSE., y_mat, ierr)
+      end if
+
+      call MatProductNumeric(y_mat, ierr)
+
+      ! Bind the input to the placeholder until the next apply, if they have the
+      ! same type (a different type would redo the symbolic phase with the empty
+      ! placeholder), otherwise drop the product so it can't hold on to x_mat
+      call PetscObjectTypeCompare(placeholder, x_type, same_type, ierr)
+      if (same_type) then
+         call MatProductReplaceMats(PETSC_NULL_MAT, placeholder, PETSC_NULL_MAT, y_mat, ierr)
+      else
+         call MatProductClear(y_mat, ierr)
+      end if
+
+   end subroutine apply_coarse_inverse_block_cached
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine mg_coarse_shell_block_richardson(pc, b, x, w, rtol, abstol, dtol, maxits, guess_zero, its, conv_reason, ierr)
 
       ! The multiple rhs version of mg_coarse_shell_richardson, X = X + inv_A_ff (B - A X)
@@ -687,8 +801,10 @@ module fc_smooth_block
       call PCGetOperators(pc, mat, pmat, ierr)
 
       ! The first iteration from a zero initial guess is just the apply
+      ! b and x are the PCMG coarse blocks, which persist between applies, so
+      ! the product can be kept attached to x
       if (guess_zero .AND. maxits > 0) then
-         call apply_inverse_block(air_data%inv_A_ff(air_data%no_levels), b, x, ierr)
+         call apply_coarse_inverse_block_cached(air_data, b, x, ierr)
       end if
       if (maxits == 0 .OR. (guess_zero .AND. maxits == 1)) then
          ierr = 0

@@ -382,6 +382,11 @@ module air_data_type
       ! we're given or the products would have incompatible layouts
       PetscInt :: block_ncols = -1
       PetscInt :: block_local_ncols = -1
+      ! The empty dense block the input of the cached coarse grid inverse block
+      ! product is bound to between applies, and the nonzero state of the inverse
+      ! when the product was attached, see apply_coarse_inverse_block_cached
+      type(tMat) :: coarse_block_placeholder
+      PetscObjectState :: coarse_block_inv_nz_state = 0
 
       ! Per-PCAIR opaque handle to the kokkos-side IS view storage. Set up by
       ! create_VecISCopyLocal_kokkos, torn down by destroy_VecISCopyLocal_kokkos.
