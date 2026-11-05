@@ -22,16 +22,16 @@ static inline PetscErrorCode CheckCollectivesCalibrate(Vec v)
 {
   PetscReal   norm;
   PetscMPIInt size;
-  // In debug builds MPIU_Allreduce does an extra reduction to check every rank
-  // called it from the same line
-  const int norm_reductions = PetscDefined(USE_DEBUG) ? 2 : 1;
 
   PetscFunctionBeginUser;
   PetscCheck(getenv("PFLARE_COUNT_COLLECTIVES_LOADED"), PetscObjectComm((PetscObject)v), PETSC_ERR_USER,
              "-check_collectives needs libcount_collectives.so preloaded, see make tests_collectives");
   PetscCallMPI(MPI_Comm_size(PetscObjectComm((PetscObject)v), &size));
   PetscCheck(size > 1, PetscObjectComm((PetscObject)v), PETSC_ERR_USER, "-check_collectives needs more than one rank");
-  PetscCallMPI(MPI_Pcontrol(norm_reductions + 1));
+  // Expect the one reduction in a VecNorm (level is the count + 1), and in
+  // debug builds MPIU_Allreduce does an extra one to check every rank called
+  // it from the same line
+  PetscCallMPI(MPI_Pcontrol(PetscDefined(USE_DEBUG) ? 3 : 2));
   PetscCall(VecNorm(v, NORM_2, &norm));
   PetscCallMPI(MPI_Pcontrol(0));
   PetscFunctionReturn(PETSC_SUCCESS);

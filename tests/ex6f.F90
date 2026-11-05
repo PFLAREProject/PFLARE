@@ -309,15 +309,34 @@
 
 !     One reduction from Fortran and those in a VecNorm from C
       a = 1
-      call MPI_Pcontrol(norm_reductions + 2)
+      call collectives_window(norm_reductions + 2)
       call MPI_Allreduce(a, a_sum, 1, MPI_INTEGER, MPI_SUM, PETSC_COMM_WORLD, err)
       call VecNorm(b, NORM_2, norm, ierr)
-      call MPI_Pcontrol(0)
+      call collectives_window(0)
 
 !     The v-cycle, after the solves have done any setup it needs
       call KSPGetPC(ksp, pc, ierr)
-      call MPI_Pcontrol(1)
+      call collectives_window(1)
       call PCApply(pc, b, x, ierr)
-      call MPI_Pcontrol(0)
+      call collectives_window(0)
+
+      end
+
+! ----------------------------------------------------------------------------
+      subroutine collectives_window(level)
+#include "petsc/finclude/petscsys.h"
+      use petscsys
+      implicit none
+
+!
+!   Opens (level > 0) or closes (level 0) a counting window with MPI_Pcontrol
+!   MPIUNI has no Fortran MPI_Pcontrol, but the check needs two ranks, so it
+!   never runs without MPI
+!
+      integer :: level
+
+#if !defined(PETSC_HAVE_MPIUNI)
+      call MPI_Pcontrol(level)
+#endif
 
       end
