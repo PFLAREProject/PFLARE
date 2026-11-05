@@ -728,7 +728,8 @@ module fc_smooth_block
       reuse = .NOT. PetscObjectIsNull(placeholder)
       if (reuse) then
          call MatProductGetMats(y_mat, a_mat, b_mat, PETSC_NULL_MAT, ierr)
-         reuse = .NOT. PetscObjectIsNull(a_mat) .AND. .NOT. PetscObjectIsNull(b_mat)
+         reuse = .NOT. PetscObjectIsNull(a_mat)
+         if (reuse) reuse = .NOT. PetscObjectIsNull(b_mat)
       end if
       if (reuse) then
          call MatGetSize(placeholder, PETSC_NULL_INTEGER, placeholder_cols, ierr)
