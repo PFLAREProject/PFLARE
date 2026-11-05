@@ -3,13 +3,20 @@ ARG BASE_IMAGE=stevendargaville/petsc
 FROM ${BASE_IMAGE}
 # Use the optimised petsc build
 ARG ARCH=arch-linux-c-opt
+# -on_error_abort ensures any test failures are caught and the build fails
+# The kokkos job (BASE_IMAGE=stevendargaville/petsc_kokkos) adds the kokkos
+# mat and vec types here, and -std=c++20 to the CXXFLAGS
+ARG TEST_PETSC_OPTIONS="-on_error_abort -fp_trap on"
+ARG EXTRA_CXXFLAGS=""
 
 LABEL maintainer="Steven Dargaville"
 LABEL description="PFLARE_collectives"
 
 ENV PETSC_ARCH=$ARCH
-# -on_error_abort ensures any test failures are caught and the build fails
-ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"
+ENV PETSC_OPTIONS=$TEST_PETSC_OPTIONS
+ENV OMP_NUM_THREADS=1
+# Never the kokkos debug comparisons, their norms are reductions
+ENV PFLARE_KOKKOS_DEBUG=0
 
 WORKDIR /build
 
@@ -24,7 +31,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # tests preload, see tests/count_collectives.c
 RUN set -euo pipefail; \
     cd PFLARE && \
-    make -j2 build_tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" && \
+    make -j2 build_tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall ${EXTRA_CXXFLAGS}" CPPFLAGS="-Werror -Wall" && \
     make tests_collectives CFLAGS="-Werror -Wall"
 
 WORKDIR /build/PFLARE

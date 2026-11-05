@@ -3,13 +3,13 @@
 Workflow: `.github/workflows/ci_build.yml` (push/PR to main, monthly cron, manual dispatch). Every job builds a Docker image and runs the full test suite inside it.
 
 Stages
-- First: `gnu_opt`, `gnu_opt_64_bit`, `gnu_opt_kokkos`, `gnu_opt_kokkos_malloc_dump`, `gnu_opt_64_bit_kokkos`, `intel_opt`, `gnu_opt_collectives` (each typically under 11 minutes).
+- First: `gnu_opt`, `gnu_opt_64_bit`, `gnu_opt_kokkos`, `gnu_opt_kokkos_malloc_dump`, `gnu_opt_64_bit_kokkos`, `intel_opt`, `gnu_opt_collectives`, `gnu_opt_kokkos_collectives` (each typically under 11 minutes).
 - The `opt_stage` job needs all of those, and every other build needs `opt_stage`, so a failure in the first stage skips the slower builds. `gnu_opt_omp_kokkos` is in the second stage as it takes over 20 minutes. `notebook_tutorial` only needs `gnu_opt`.
 
 Jobs, grouped
 - GNU debug/opt: `gnu_debug`, `gnu_opt` (pushes `stevendargaville/pflare:latest` on non-PR events), `gnu_opt_64_bit`.
 - Leak/memory checks: `*_malloc_dump` variants run with `-malloc_dump` and fail if `PetscTrMalloc` appears in the test log; `gnu_debug_valgrind`, `gnu_debug_kokkos_valgrind`.
-- MPI collective checks: `gnu_opt_collectives` (`dockerfiles/Dockerfile_collectives`, `stevendargaville/petsc` base) builds and runs `make tests_collectives`, which fails if a PCAIR v-cycle (forward, transposed or block, from C or Fortran) or a matrix-free diagonal update with kept coefficients calls any MPI collective, e.g., a global reduction. See `docs/dev/testing.md`. `-log_view` can't be used for this, as with an MPI that has large count support (MPICH 4 in the image) PETSc's reductions go through `MPI_Allreduce_c`, which its logging doesn't count.
+- MPI collective checks: `gnu_opt_collectives` (`dockerfiles/Dockerfile_collectives`, `stevendargaville/petsc` base) builds and runs `make tests_collectives`, which fails if a PCAIR v-cycle (forward, transposed or block, from C or Fortran) or a matrix-free diagonal update with kept coefficients calls any MPI collective, e.g., a global reduction. `gnu_opt_kokkos_collectives` runs the same checks on the `stevendargaville/petsc_kokkos` base with kokkos mat and vec types. See `docs/dev/testing.md`. `-log_view` can't be used for this, as with an MPI that has large count support (MPICH 4 in the image) PETSc's reductions go through `MPI_Allreduce_c`, which its logging doesn't count.
 - Fortran runtime checks: `gnu_debug` builds with `EXTRA_FFLAGS="-fcheck=all -g -fbacktrace"` (a `dockerfiles/Dockerfile` build arg) and runs the full suite, so out-of-bounds indexing, unallocated/unassociated arrays and non-conforming array assignments abort with a `Fortran runtime error`. To reproduce locally, add those flags to `FFLAGS`.
 - Kokkos: `gnu_opt_kokkos`, `gnu_opt_64_bit_kokkos`, `gnu_opt_omp_kokkos`, `gnu_debug_no_mpi_kokkos`, `gnu_debug_kokkos_single_prefix` (single precision).
 - Other: `intel_opt`, `macos_debug`, `macos_64_bit_kokkos`, `notebook_tutorial`, `gnu_petsc_config` (builds PETSc `main` with `--download-pflare` and gates the Sphinx doc build).
