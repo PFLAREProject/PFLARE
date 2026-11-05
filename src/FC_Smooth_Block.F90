@@ -642,6 +642,11 @@ module fc_smooth_block
 
       ! The multiple rhs version of mg_coarse_shell_apply - applies our polynomial
       ! approximate inverse of the coarse matrix to a whole dense block
+      ! This is what the coarse ksp calls when the richardson fast path isn't used,
+      ! e.g., petsc's block richardson with -mg_coarse_ksp_max_it 3, or a preonly.
+      ! Both give us blocks that persist between applies (petsc's richardson caches
+      ! its work blocks, and a preonly gets the PCMG coarse blocks), so the product
+      ! is kept attached rather than running its symbolic phase every apply
 
       ! ~~~~~~
       type(tPC)                             :: pc
@@ -653,7 +658,7 @@ module fc_smooth_block
 
       ierr = 0
       call PCShellGetContext(pc, air_data, ierr)
-      call apply_inverse_block(air_data%inv_A_ff(air_data%no_levels), x, y, ierr)
+      call apply_coarse_inverse_block_cached(air_data, x, y, ierr)
 
    end subroutine mg_coarse_shell_block_apply
 
@@ -662,8 +667,10 @@ module fc_smooth_block
    subroutine apply_coarse_inverse_block_cached(air_data, x_mat, y_mat, ierr)
 
       ! y_mat = inv_A_ff(no_levels) x_mat for a dense block, the coarse grid
-      ! version of apply_inverse_block_cached, where x_mat and y_mat are the PCMG
-      ! coarse blocks, which persist between applies
+      ! version of apply_inverse_block_cached, where x_mat and y_mat are blocks that
+      ! persist between applies (the PCMG coarse blocks, or the work blocks petsc's
+      ! block richardson caches). Applies to other blocks are still right, but
+      ! attach the product again every time they change
       ! An assembled (or diagonal) coarse inverse keeps its product attached to
       ! y_mat, so only the first apply (or one after y_mat or the inverse change)
       ! runs the symbolic phase. Running the symbolic phase every apply, as
@@ -675,9 +682,11 @@ module fc_smooth_block
       ! rather than x_mat, as PCMG does with the products it keeps. The PCMG
       ! level blocks are chained together through those products (the coarse block
       ! of rhs is restricted from a block that depends on the coarse block of
-      ! solutions), so a product on y_mat holding x_mat would close a cycle of
-      ! references and none of them would ever be freed. Rebinding an input of the
-      ! same type keeps the symbolic phase, so this costs nothing
+      ! solutions), and petsc's block richardson keeps a residual product that 
+      ! takes its block of preconditioned vectors as input, so a product on y_mat
+      ! holding x_mat would close a cycle of references and none of them would
+      ! ever be freed. Rebinding an input of the same type keeps the symbolic phase,
+      ! so this costs nothing
       ! The decision to attach again only depends on things that are the same on
       ! every rank (the identity of the collective objects, global sizes, types and
       ! the nonzero state, which mpiaij reduces during its assembly), as attaching
@@ -801,8 +810,6 @@ module fc_smooth_block
       end if
 
       call PCShellGetContext(pc, air_data, ierr)
-      ! b and x are the PCMG coarse blocks, which persist between applies, so
-      ! the product can be kept attached to x
       call apply_coarse_inverse_block_cached(air_data, b, x, ierr)
 
       ! have to return zero here!
