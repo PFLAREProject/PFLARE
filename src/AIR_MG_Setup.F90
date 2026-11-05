@@ -87,6 +87,9 @@ module air_mg_setup
       MatType:: mat_type, mat_type_aff, mat_type_inv_aff
       integer(c_int) :: diag_only
       KSPNormType :: coarse_norm_type
+      PetscReal :: coarse_rtol, coarse_atol, coarse_dtol
+      PetscInt :: coarse_maxits
+      PetscBool :: coarse_guess_nonzero
 
       ! ~~~~~~     
 
@@ -1372,17 +1375,23 @@ module air_mg_setup
       ! ~~~~~~~~~
       ! This has to come after the PCSetUp, as that is where PCSetUp_MG calls
       ! KSPSetFromOptions on the coarse ksp, so we can see what the user asked for
-      ! The fast path ignores the tolerances, so we only use it when the coarse ksp
-      ! has no norm, as then richardson only uses the number of iterations too.
-      ! Otherwise (e.g., -mg_coarse_ksp_norm_type unpreconditioned) petsc's own 
-      ! richardson runs, along with the reductions its norms need 
+      ! The fast path only does the default, one iteration from a zero initial
+      ! guess with no norm. Anything else the user asks for (e.g., 
+      ! -mg_coarse_ksp_max_it 3 or -mg_coarse_ksp_norm_type unpreconditioned) runs
+      ! petsc's own richardson instead
+      ! Both versions have to be registered or neither, as with only the single 
+      ! rhs one a KSPMatSolve would apply it column by column
       ! Petsc also skips the fast path if there is a monitor, a non-unit scale 
       ! or a null space, and a PC type other than our shell (e.g., -mg_coarse_pc_type lu)
       ! never has one, as PCShellSetApplyRichardson does nothing to it
       if (no_levels > 1) then
          call PCMGGetCoarseSolve(pcmg_input, ksp_coarse_solver, ierr)
          call KSPGetNormType(ksp_coarse_solver, coarse_norm_type, ierr)
-         if (coarse_norm_type == KSP_NORM_NONE) then
+         call KSPGetTolerances(ksp_coarse_solver, coarse_rtol, coarse_atol, coarse_dtol, &
+                  coarse_maxits, ierr)
+         call KSPGetInitialGuessNonzero(ksp_coarse_solver, coarse_guess_nonzero, ierr)
+         if (coarse_norm_type == KSP_NORM_NONE .AND. coarse_maxits == 1 .AND. &
+                  .NOT. coarse_guess_nonzero) then
             call KSPGetPC(ksp_coarse_solver, pc_coarse_solver, ierr)
             call PCShellSetApplyRichardson(pc_coarse_solver, mg_coarse_shell_richardson, ierr)
             ! The multiple rhs version, without this a KSPMatSolve would run the

@@ -71,17 +71,15 @@ module fc_smooth
 
    subroutine mg_coarse_shell_richardson(pc, b, x, w, rtol, abstol, dtol, maxits, guess_zero, its, conv_reason, ierr)
 
-      ! The richardson fast path of the coarse grid solver, x = x + inv_A_ff (b - A x)
-      ! for maxits iterations, with inv_A_ff = inv_A_ff(no_levels)
+      ! The richardson fast path of the coarse grid solver, one iteration from a
+      ! zero initial guess, which is just x = inv_A_ff(no_levels) b
       ! The coarse ksp is a richardson rather than a preonly because KSPSolve_PREONLY
       ! always calls PCReduceFailedReason, an MPI_Allreduce in every v-cycle that
       ! our shell never needs (it never sets a failed reason). This fast path stops
-      ! the richardson costing anything more than the preonly did: with a zero
-      ! initial guess and one iteration it is just the y = inv_A_ff x the preonly
-      ! did, with no copy, axpy or residual
-      ! This is only registered when the coarse ksp has no norm (see setup_air_pcmg),
-      ! as the tolerances are only used with a norm and we ignore them here
-      ! w is a work vector with the layout of the coarse grid
+      ! the richardson costing anything more than the preonly did, with no copy, 
+      ! axpy or residual
+      ! This is only registered for one iteration from a zero initial guess with
+      ! no norm (see setup_air_pcmg), otherwise petsc's own richardson runs
 
       ! ~~~~~~
       type(tPC) :: pc
@@ -92,28 +90,23 @@ module fc_smooth
       PCRichardsonConvergedReason :: conv_reason
       PetscErrorCode :: ierr
 
-      type(tMat) :: mat, pmat
       type(air_multigrid_data), pointer :: air_data => null()
-      PetscInt :: i_loc
+      integer :: errorcode
       ! ~~~~~~
 
       ierr = 0
       its = maxits
       conv_reason = PCRICHARDSON_CONVERGED_ITS
 
-      call PCShellGetContext(pc, air_data, ierr)
-      call PCGetOperators(pc, mat, pmat, ierr)
+      ! Can come in here with zero maxits, have to do nothing
+      if (maxits == 0) return
+      if (maxits /= 1 .OR. .NOT. guess_zero) then
+         print *, "The coarse richardson fast path only does one iteration from a zero initial guess"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
-      do i_loc = 1, maxits
-         ! The first iteration from a zero initial guess is just the apply
-         if (i_loc == 1 .AND. guess_zero) then
-            call MatMult(air_data%inv_A_ff(air_data%no_levels), b, x, ierr)
-         else
-            ! w = b - A x, then x = x + inv_A_ff w
-            call MatResidual(mat, b, x, w, ierr)
-            call MatMultAdd(air_data%inv_A_ff(air_data%no_levels), w, x, x, ierr)
-         end if
-      end do
+      call PCShellGetContext(pc, air_data, ierr)
+      call MatMult(air_data%inv_A_ff(air_data%no_levels), b, x, ierr)
 
       ! have to return zero here!
       ierr = 0

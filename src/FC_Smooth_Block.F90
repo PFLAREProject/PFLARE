@@ -766,17 +766,15 @@ module fc_smooth_block
 
    subroutine mg_coarse_shell_block_richardson(pc, b, x, w, rtol, abstol, dtol, maxits, guess_zero, its, conv_reason, ierr)
 
-      ! The multiple rhs version of mg_coarse_shell_richardson, X = X + inv_A_ff (B - A X)
-      ! for maxits iterations
+      ! The multiple rhs version of mg_coarse_shell_richardson, one iteration
+      ! from a zero initial guess, which is just X = inv_A_ff B
       ! Without this a KSPMatSolve on the coarse richardson would run the block
       ! richardson iteration, which does an MPI_Allreduce every call to decide if
       ! it can reuse its work blocks (and then a copy and an axpy), or would fall
       ! back to the single rhs fast path on each column, which also reduces
+      ! This is only registered for one iteration from a zero initial guess (see
+      ! setup_air_pcmg), otherwise petsc's own block richardson runs
       ! w is the block of work vectors and may be null, we never use it
-      ! With a zero initial guess and one iteration (the default) this is just the
-      ! block apply the preonly did and needs no work blocks. Anything else
-      ! creates its own, as it is only reached if the user asks for more coarse
-      ! iterations or a nonzero initial guess
 
       ! ~~~~~~
       type(tPC) :: pc
@@ -787,50 +785,25 @@ module fc_smooth_block
       PCRichardsonConvergedReason :: conv_reason
       PetscErrorCode :: ierr
 
-      type(tMat) :: mat, pmat, r_mat, z_mat
       type(air_multigrid_data), pointer :: air_data => null()
-      PetscInt :: i_loc
-      MatType :: inv_type
+      integer :: errorcode
       ! ~~~~~~
 
       ierr = 0
       its = maxits
       conv_reason = PCRICHARDSON_CONVERGED_ITS
 
-      call PCShellGetContext(pc, air_data, ierr)
-      call PCGetOperators(pc, mat, pmat, ierr)
+      ! Can come in here with zero maxits, have to do nothing
+      if (maxits == 0) return
+      if (maxits /= 1 .OR. .NOT. guess_zero) then
+         print *, "The coarse richardson fast path only does one iteration from a zero initial guess"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
-      ! The first iteration from a zero initial guess is just the apply
+      call PCShellGetContext(pc, air_data, ierr)
       ! b and x are the PCMG coarse blocks, which persist between applies, so
       ! the product can be kept attached to x
-      if (guess_zero .AND. maxits > 0) then
-         call apply_coarse_inverse_block_cached(air_data, b, x, ierr)
-      end if
-      if (maxits == 0 .OR. (guess_zero .AND. maxits == 1)) then
-         ierr = 0
-         return
-      end if
-
-      call MatDuplicate(b, MAT_DO_NOT_COPY_VALUES, r_mat, ierr)
-      call MatDuplicate(b, MAT_DO_NOT_COPY_VALUES, z_mat, ierr)
-      ! Attach the products once so every iteration only runs their numeric phase
-      call attach_mat_product(mat, x, .FALSE., r_mat, ierr)
-      call MatGetType(air_data%inv_A_ff(air_data%no_levels), inv_type, ierr)
-      if (inv_type /= MATSHELL) then
-         call attach_mat_product(air_data%inv_A_ff(air_data%no_levels), r_mat, .FALSE., z_mat, ierr)
-      end if
-      do i_loc = 1, maxits
-         if (i_loc == 1 .AND. guess_zero) cycle
-         ! R = B - A X
-         call MatProductNumeric(r_mat, ierr)
-         call MatAYPX(r_mat, PFLARE_MINUS_ONE, b, SAME_NONZERO_PATTERN, ierr)
-         ! X = X + inv_A_ff R
-         call apply_inverse_block_cached(air_data%inv_A_ff(air_data%no_levels), r_mat, z_mat, ierr)
-         call MatAXPY(x, PFLARE_ONE, z_mat, SAME_NONZERO_PATTERN, ierr)
-      end do
-      ! Destroying the blocks also clears the products attached to them
-      call MatDestroy(r_mat, ierr)
-      call MatDestroy(z_mat, ierr)
+      call apply_coarse_inverse_block_cached(air_data, b, x, ierr)
 
       ! have to return zero here!
       ierr = 0
