@@ -21,6 +21,7 @@ python/*.egg-info/
 # Run artifacts
 tools/slurm-*.out
 tests/solution.vts
+tests/libcount_collectives.so
 
 # Compiled test executables (add new ones here as tests are added)
 tests/adv_1d

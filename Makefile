@@ -342,6 +342,13 @@ tests_medium: build_tests
 tests_copies: build_tests
 	$(MAKE) -C tests run_tests_copies
 
+# Checks that PCAIR v-cycles and diagonal updates call no MPI collectives,
+# with a counting library preloaded with LD_PRELOAD, so linux only. Deliberately
+# not part of make tests, it is its own CI job
+.PHONY: tests_collectives
+tests_collectives: build_tests
+	$(MAKE) -C tests run_tests_collectives
+
 # Build and run all the tests
 # The python tests only run if the python module has been built
 .PHONY: tests

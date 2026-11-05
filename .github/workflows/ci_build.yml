@@ -46,7 +46,7 @@ jobs:
   # the remaining slower builds need this job, so only start once these have passed
   opt_stage:
     runs-on: ubuntu-22.04
-    needs: [gnu_opt, gnu_opt_64_bit, gnu_opt_kokkos, gnu_opt_kokkos_malloc_dump, gnu_opt_64_bit_kokkos, intel_opt]
+    needs: [gnu_opt, gnu_opt_64_bit, gnu_opt_kokkos, gnu_opt_kokkos_malloc_dump, gnu_opt_64_bit_kokkos, intel_opt, gnu_opt_collectives]
     steps:
       - name: Opt stage passed
         run: echo "All opt builds passed"
@@ -198,6 +198,25 @@ jobs:
           python3 -c "import pflare; assert pflare.pcair_set_z_type.__doc__"
           python3 /build/PFLARE/python/ex2.py -ksp_max_it 5
           EOF
+
+  # Checks PCAIR v-cycles and diagonal updates call no MPI collectives, with
+  # tests/libcount_collectives.so preloaded into the tests
+  gnu_opt_collectives:
+    runs-on: ubuntu-22.04
+    needs: [setup]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image and check for MPI collectives in PCAIR v-cycles
+        uses: docker/build-push-action@v6
+        with:
+          platforms: linux/amd64
+          push: false
+          context: .
+          file: ./dockerfiles/Dockerfile_collectives
+          build-args: |
+            ARCH=arch-linux-c-opt
 
   gnu_opt_64_bit:
     runs-on: ubuntu-22.04

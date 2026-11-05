@@ -1,0 +1,30 @@
+ARG BASE_IMAGE=stevendargaville/petsc
+
+FROM ${BASE_IMAGE}
+# Use the optimised petsc build
+ARG ARCH=arch-linux-c-opt
+
+LABEL maintainer="Steven Dargaville"
+LABEL description="PFLARE_collectives"
+
+ENV PETSC_ARCH=$ARCH
+# -on_error_abort ensures any test failures are caught and the build fails
+ENV PETSC_OPTIONS="-on_error_abort -fp_trap on"
+
+WORKDIR /build
+
+COPY . /build/PFLARE
+
+# Ensure pipelines fail if any stage fails
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Build PFLARE and check that PCAIR v-cycles (forward, transposed and block, from
+# C and Fortran) and diagonal updates call no MPI collectives, e.g., no global
+# reductions. The counting is done by tests/libcount_collectives.so, which the
+# tests preload, see tests/count_collectives.c
+RUN set -euo pipefail; \
+    cd PFLARE && \
+    make -j2 build_tests FFLAGS="-Werror -Wall -ffree-line-length-132 -ffixed-line-length-132" CFLAGS="-Werror -Wall" CXXFLAGS="-Werror -Wall" CPPFLAGS="-Werror -Wall" && \
+    make tests_collectives CFLAGS="-Werror -Wall"
+
+WORKDIR /build/PFLARE

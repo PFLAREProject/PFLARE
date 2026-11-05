@@ -21,6 +21,7 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
 */
 #include <petscksp.h>
 #include "pflare.h"
+#include "check_collectives.h"
 
 // Tolerance for the comparison against the column-by-column reference solve
 #if defined(PETSC_USE_REAL_SINGLE)
@@ -107,6 +108,10 @@ int main(int argc, char **args)
   PetscBool check_copies = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
   if (check_copies) second_solve = PETSC_TRUE;
+  // Check a PCMatApply after the block solves does no MPI collectives
+  // Needs libcount_collectives.so preloaded, see make tests_collectives
+  PetscBool check_collectives = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_collectives", &check_collectives, NULL));
   // Create the dense blocks with MatCreateDense, so they are host MATDENSE
   // regardless of the type of the operator
   PetscBool host_blocks = PETSC_FALSE;
@@ -277,6 +282,25 @@ int main(int argc, char **args)
   PetscCall(PetscLogStagePop());
 
   PetscCall(KSPGetConvergedReason(ksp, &reason));
+
+  // A block v-cycle, after the block solves above have done any setup it needs
+  // It goes into its own block of solutions, as the check below compares X
+  if (check_collectives) {
+    PC  pc_check;
+    Mat Y;
+    Vec col;
+
+    PetscCall(KSPGetPC(ksp, &pc_check));
+    PetscCall(MatDuplicate(X, MAT_DO_NOT_COPY_VALUES, &Y));
+    PetscCall(MatDenseGetColumnVecRead(B, 0, &col));
+    PetscCall(CheckCollectivesCalibrate(col));
+    PetscCall(MatDenseRestoreColumnVecRead(B, 0, &col));
+    PetscCall(PCMatApply(pc_check, B, Y));
+    PetscCallMPI(CheckCollectivesBegin());
+    PetscCall(PCMatApply(pc_check, B, Y));
+    PetscCallMPI(CheckCollectivesEnd());
+    PetscCall(MatDestroy(&Y));
+  }
 
 #if PetscDefined(HAVE_DEVICE)
   // The earlier block solves have already moved everything the solve needs onto
