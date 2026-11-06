@@ -424,7 +424,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
 
                // In serial there is no reduction, so we can
                // update cf_markers_d directly as before.
-               if (cf_markers_d(i) == loops_through)
+               // Atomic as other teams in this kernel compare and exchange on cf_markers_d
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
