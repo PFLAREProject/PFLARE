@@ -57,13 +57,17 @@ extern PetscScalarKokkosView diag_dom_ratio_local_d;
 
 // ~~~~~~~~~~~~~~~~~~
 // Ordering PetscSF comms on Kokkos views
-// PetscSF packs and unpacks on the stream of the current PETSc device context. By default
-// that is also the stream of PetscGetKokkosExecutionSpace(), and then nothing extra is needed.
-// If they differ (PETSc using per-context or nonblocking streams), fence the PETSc execution
-// space before Begin (kernels writing the root or reading the old leaf are done) and
-// synchronize the device context after End (the unpack into the leaf is done)
-// This matches PetscSFSynchronizeKokkos_Private in PETSc, which we can't call
-// Without a CUDA/HIP device context we always sync, which is cheap on the host
+// PetscSF packs and unpacks on the PETSc execution space with the Kokkos SF backend, and on
+// the stream of the current PETSc device context with the native CUDA/HIP backend (the
+// default for CUDA/HIP once PETSc MR !9662 is in). By default both are the same stream as
+// PetscGetKokkosExecutionSpace(), and then nothing extra is needed. If the current context's
+// stream differs, fence the PETSc execution space before Begin (kernels writing the root or
+// reading the old leaf are done) and synchronize the device context after End (the unpack
+// into the leaf is done)
+// This mirrors PetscSFSynchronizeKokkos_Private from that MR, which is internal to PETSc, but
+// doesn't check the SF backend; with the Kokkos backend the extra sync is just redundant
+// Without a CUDA/HIP device context (host or SYCL builds) we always sync, which costs a fence
+// on SYCL but keeps the ordering safe
 // ~~~~~~~~~~~~~~~~~~
 static inline PetscErrorCode petsc_streams_differ_kokkos(PetscDeviceContext *dctx, PetscBool *differ)
 {
