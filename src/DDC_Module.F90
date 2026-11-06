@@ -255,7 +255,7 @@ module ddc_module
       PetscReal, dimension(:), allocatable :: diag_dom_ratio_measure
       integer, dimension(:), allocatable :: cf_markers_local_aff
       PetscInt, dimension(:), pointer :: is_pointer
-      PetscReal :: swap_dom_val
+      PetscReal :: swap_dom_val, scaled_ratio
       integer, dimension(1000) :: dom_bins
       MPIU_Comm :: MPI_COMM_MATRIX
       logical :: trigger_dd_ratio_compute
@@ -426,11 +426,13 @@ module ddc_module
          do ifree = 1, local_rows
 
             ! Bin the entries between 0 and 1
-            ! The top bin has entries greater than 0.9 (including greater than 1)
-            bin = min(floor(diag_dom_ratio(ifree) * size(dom_bins)) + 1, size(dom_bins))
-            ! If the diagonal dominance ratio is really large the expression above will overflow
-            ! the int to negative, so we just stick that in the top bin            
-            if (bin < 0) then
+            ! The top bin has entries greater than 0.999, along with ratios greater than 1
+            ! and negative or NaN ratios
+            ! We test in floating point first so we never convert NaN or a huge value to an integer
+            scaled_ratio = diag_dom_ratio(ifree) * size(dom_bins)
+            if (scaled_ratio >= 0 .AND. scaled_ratio < size(dom_bins) - 1) then
+               bin = floor(scaled_ratio) + 1
+            else
                bin = size(dom_bins)
             end if
             dom_bins(bin) = dom_bins(bin) + 1
