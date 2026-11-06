@@ -6,6 +6,7 @@
 #include <petscmat_kokkos.hpp>
 #include <petsc_kokkos.hpp>
 #include "petsc.h"
+#include <petscdevice.h>
 #include <Kokkos_StdAlgorithms.hpp>
 #include <Kokkos_Random.hpp>
 #include <Kokkos_Core.hpp>
@@ -53,6 +54,79 @@ PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void
 
 extern intKokkosView cf_markers_local_d;
 extern PetscScalarKokkosView diag_dom_ratio_local_d;
+
+// ~~~~~~~~~~~~~~~~~~
+// Ordering PetscSF comms on Kokkos views
+// PetscSF packs and unpacks on the PETSc execution space with the Kokkos SF backend, and on
+// the stream of the current PETSc device context with the native CUDA/HIP backend (the
+// default for CUDA/HIP once PETSc MR !9662 is in). By default both are the same stream as
+// PetscGetKokkosExecutionSpace(), and then nothing extra is needed. If the current context's
+// stream differs, fence the PETSc execution space before Begin (kernels writing the root or
+// reading the old leaf are done) and synchronize the device context after End (the unpack
+// into the leaf is done)
+// This mirrors PetscSFSynchronizeKokkos_Private from that MR, which is internal to PETSc, but
+// doesn't check the SF backend; with the Kokkos backend the extra sync is just redundant
+// Without a CUDA/HIP device context (host or SYCL builds) we always sync, which costs a fence
+// on SYCL but keeps the ordering safe
+// ~~~~~~~~~~~~~~~~~~
+static inline PetscErrorCode petsc_streams_differ_kokkos(PetscDeviceContext *dctx, PetscBool *differ)
+{
+   PetscFunctionBegin;
+   *differ = PETSC_TRUE;
+   PetscCall(PetscDeviceContextGetCurrentContext(dctx));
+#if (defined(KOKKOS_ENABLE_CUDA) && PetscDefined(HAVE_CUDA)) || (defined(KOKKOS_ENABLE_HIP) && PetscDefined(HAVE_HIP))
+   PetscDeviceType type;
+   PetscCall(PetscDeviceContextGetDeviceType(*dctx, &type));
+   #if defined(KOKKOS_ENABLE_CUDA) && PetscDefined(HAVE_CUDA)
+   if (type == PETSC_DEVICE_CUDA)
+   {
+      cudaStream_t *stream;
+      PetscCall(PetscDeviceContextGetStreamHandle(*dctx, reinterpret_cast<void **>(&stream)));
+      *differ = *stream != PetscGetKokkosExecutionSpace().cuda_stream() ? PETSC_TRUE : PETSC_FALSE;
+   }
+   #else
+   if (type == PETSC_DEVICE_HIP)
+   {
+      hipStream_t *stream;
+      PetscCall(PetscDeviceContextGetStreamHandle(*dctx, reinterpret_cast<void **>(&stream)));
+      *differ = *stream != PetscGetKokkosExecutionSpace().hip_stream() ? PETSC_TRUE : PETSC_FALSE;
+   }
+   #endif
+#endif
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_before_begin_kokkos()
+{
+   PetscDeviceContext dctx;
+   PetscBool differ;
+
+   PetscFunctionBegin;
+   PetscCall(petsc_streams_differ_kokkos(&dctx, &differ));
+   if (differ) PetscGetKokkosExecutionSpace().fence();
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Wait for work on the current PETSc device context stream if that is not the stream of
+// the PETSc execution space, e.g. before Kokkos kernels use data produced by native
+// CUDA/HIP PETSc objects
+static inline PetscErrorCode sync_device_context_if_streams_differ_kokkos()
+{
+   PetscDeviceContext dctx;
+   PetscBool differ;
+
+   PetscFunctionBegin;
+   PetscCall(petsc_streams_differ_kokkos(&dctx, &differ));
+   if (differ) PetscCall(PetscDeviceContextSynchronize(dctx));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_after_end_kokkos()
+{
+   PetscFunctionBegin;
+   PetscCall(sync_device_context_if_streams_differ_kokkos());
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 // ~~~~~~~~~~~~~~~~~~
 // Some custom reductions we use 

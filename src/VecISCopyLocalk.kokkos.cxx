@@ -180,8 +180,10 @@ PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_in
    {
       ConstPetscScalarKokkosView vreduced_d;
       PetscCallVoid(VecGetKokkosView(*vreduced, &vreduced_d));
+      // Only the rows in the IS are written, the rest of vfull is left alone,
+      // so we can't take write only access here
       PetscScalarKokkosView vfull_d;
-      PetscCallVoid(VecGetKokkosViewWrite(*vfull, &vfull_d));
+      PetscCallVoid(VecGetKokkosView(*vfull, &vfull_d));
 
       Kokkos::parallel_for(
          Kokkos::RangePolicy<>(exec, 0, is_d.extent(0)), KOKKOS_LAMBDA(PetscInt i) {
@@ -189,10 +191,10 @@ PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_in
       });
 
       PetscCallVoid(VecRestoreKokkosView(*vreduced, &vreduced_d));
-      PetscCallVoid(VecRestoreKokkosViewWrite(*vfull, &vfull_d));
+      PetscCallVoid(VecRestoreKokkosView(*vfull, &vfull_d));
    }
-   // Ensure we're done before we exit
-   Kokkos::fence();
+   // No fence: everything that uses these Kokkos Vecs next (PETSc's VecKokkos ops, PetscSF,
+   // a device to host copy) runs on or waits for the PETSc execution space this kernel used
 
    return;
 }
@@ -267,6 +269,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
       PetscCallVoid(MatDenseGetArrayReadAndMemType(*xfull, &full_ptr, &mtype));
       // Every entry of the reduced block is overwritten
       PetscCallVoid(MatDenseGetArrayWriteAndMemType(*xreduced, &reduced_ptr, &mtype));
+      // The dense matrices may have been produced on the device context stream
+      PetscCallVoid(sync_device_context_if_streams_differ_kokkos());
 
       Kokkos::View<const PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xfull_d(full_ptr, lda_full * global_cols);
       Kokkos::View<PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xreduced_d(reduced_ptr, lda_reduced * global_cols);
@@ -294,6 +298,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
       // Only the rows in the IS are written, the rest of the full block is left
       // alone, so we can't take write only access here
       PetscCallVoid(MatDenseGetArrayAndMemType(*xfull, &full_ptr, &mtype));
+      // The dense matrices may have been produced on the device context stream
+      PetscCallVoid(sync_device_context_if_streams_differ_kokkos());
 
       Kokkos::View<const PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xreduced_d(reduced_ptr, lda_reduced * global_cols);
       Kokkos::View<PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xfull_d(full_ptr, lda_full * global_cols);
@@ -311,7 +317,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
       PetscCallVoid(MatDenseRestoreArrayAndMemType(*xfull, &full_ptr));
       PetscCallVoid(MatDenseRestoreArrayReadAndMemType(*xreduced, &reduced_ptr));
    }
-   // Ensure we're done before we exit
+   // Ensure we're done before we exit, as the dense matrices may next be used
+   // on the stream of the PETSc device context rather than the execution space
    Kokkos::fence();
    *done = 1;
 

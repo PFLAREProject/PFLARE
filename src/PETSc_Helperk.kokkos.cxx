@@ -44,7 +44,7 @@ static void rewrite_j_global_to_local_device(PetscInt colmap_max_size, PetscInt 
       {
          PetscIntKokkosView j_nonlocal_d_sorted("j_nonlocal_d_sorted", j_nonlocal_d.extent(0));
          Kokkos::deep_copy(exec, j_nonlocal_d_sorted, j_nonlocal_d);
-         Kokkos::sort(j_nonlocal_d_sorted);
+         Kokkos::sort(exec, j_nonlocal_d_sorted);
 
          // Unique copy returns a copy of sorted j_nonlocal_d_sorted in order, but with all the duplicate entries removed
          auto unique_end_it = Kokkos::Experimental::unique_copy(exec, j_nonlocal_d_sorted, colmap_output_d);
@@ -764,13 +764,13 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
       if (added_any_diagonal) 
       {
          KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
-         KokkosSparse::sort_crs_matrix(csrmat_local); 
+         KokkosSparse::sort_crs_matrix(exec, csrmat_local);
          
          if (mpi)
          {
             // j_nonlocal_d now contains local indices; use col_ao_output as numCols
             KokkosCsrMatrix csrmat_nonlocal = KokkosCsrMatrix("csrmat_nonlocal", local_rows, col_ao_output, a_nonlocal_d.extent(0), a_nonlocal_d, i_nonlocal_d, j_nonlocal_d);
-            KokkosSparse::sort_crs_matrix(csrmat_nonlocal);
+            KokkosSparse::sort_crs_matrix(exec, csrmat_nonlocal);
          }
       }
    }
@@ -1551,7 +1551,7 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
       KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
-      KokkosSparse::sort_crs_matrix(csrmat_local);       
+      KokkosSparse::sort_crs_matrix(exec, csrmat_local);
 
       // Let's make sure everything on the device is finished
       Kokkos::fence();       
@@ -2158,8 +2158,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, \
          // Kokkos version of ISGetSeqIS_SameColDist_Private (mpiaij.c)
          // The new global column indices are sent as PetscInt through the matrix mult SF,
          // as encoding them in PetscScalar loses exactness above 2^24 in single precision.
-         // Every kernel touching the SF buffers runs on the PETSc execution space, which is
-         // the stream PetscSF uses, so the comms are ordered after the fill and before the reads.
          PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
 
          /* (1) cmap[is_col(i)] = i + isstart (global index of iscol[i]), rest = -1 */
@@ -2173,9 +2171,8 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, \
          });
 
          /* (2) Broadcast cmap to get the off-process portions */
-         // Ensure the send buffer is filled before Begin
-         exec.fence();
          // While Begin/End is in flight, do not touch the send/recv buffers
+         PetscCallVoid(sf_sync_before_begin_kokkos());
          PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPIU_INT,
                      PETSC_MEMTYPE_KOKKOS, cmap_d.data(),
                      PETSC_MEMTYPE_KOKKOS, lcmap_d.data(),
@@ -2190,6 +2187,7 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, \
 
          // cmap broadcast completed: lcmap_d is now safe to read
          PetscCallVoid(PetscSFBcastEnd(sf, MPIU_INT, cmap_d.data(), lcmap_d.data(), MPI_REPLACE));
+         PetscCallVoid(sf_sync_after_end_kokkos());
 
          if (cols_ao > 0)
          {

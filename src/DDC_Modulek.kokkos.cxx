@@ -131,10 +131,12 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
             Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
 
             // Let's bin the entry
+            // The top bin also takes ratios above one, along with negative or NaN ratios
+            // We test in floating point first so we never convert NaN or a huge value to an int
             int bin;
-            int test_bin = floor(diag_dom_ratio_d(i) * double(dom_bins_d.extent(0))) + 1;
-            if (test_bin < int(dom_bins_d.extent(0)) && test_bin >= 0) {
-               bin = test_bin;
+            const double scaled = diag_dom_ratio_d(i) * double(dom_bins_d.extent(0));
+            if (scaled >= 0.0 && scaled < double(dom_bins_d.extent(0) - 1)) {
+               bin = int(floor(scaled)) + 1;
             }
             else {
                bin = dom_bins_d.extent(0);

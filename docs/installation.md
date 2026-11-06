@@ -6,6 +6,8 @@ If you wish to run in parallel, configure PETSc with MPI. For good performance i
 
 If you wish to run PFLARE on GPUs, configure PETSc with Kokkos and the relevant GPU backend. 
 
+On AMD GPUs with GPU-aware MPI, also add `--download-kokkos-cmake-arguments=-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF` to the PETSc configure. With ROCm older than 7, Kokkos otherwise allocates device memory from the `hipMallocAsync` pool, which gives intermittent "Memory access fault by GPU" crashes in parallel runs with GPU-aware MPI (seen on LUMI with Cray MPICH). PETSc already turns off the CUDA equivalent for the same reason.
+
 Please choose one of the build methods below. If you wish to contribute to PFLARE we would recommend building from the source.
 
 ### PETSc configure build

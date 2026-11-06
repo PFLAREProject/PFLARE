@@ -6,6 +6,9 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- On AMD GPUs, configure PETSc with Kokkos' `hipMallocAsync` pool off; see
+  `docs/installation.md`. Several Kokkos comms in the CF splittings go back to
+  direct PetscSF calls on device views, with fewer fences and temporary Vecs
 - The PCAIR coarse grid `KSP` is now a `KSPRICHARDSON` (one iteration, no norm)
   rather than a `KSPPREONLY`, with a fast path that does the same work. This
   removes the one global reduction (from `PCReduceFailedReason`) in every PCAIR
