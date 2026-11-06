@@ -371,7 +371,8 @@ PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, co
                // Check if this node was assigned during this top loop.
                // We read the temporary buffer here so we do not race with the
                // reduction into cf_markers_d.
-               if (cf_markers_temp_d(i) == 2)
+               // Atomic as other teams in this kernel do atomic_max on cf_markers_temp_d
+               if (Kokkos::atomic_load(&cf_markers_temp_d(i)) == 2)
                {
                   const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
 
@@ -952,7 +953,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                const PetscInt i = t.league_rank();
 
                // Check if this node has been assigned during this top loop
-               if (cf_markers_d(i) == loops_through)
+               // Atomic as other teams in this kernel store to cf_markers_d
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   // Do the strong dependencies and influences
                   PetscInt ncols_local = device_local_i_spst[i + 1] - device_local_i_spst[i];
@@ -963,8 +965,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                         const PetscInt col = device_local_j_spst[device_local_i_spst[i] + j];
 
                         // Skip the diagonal - we don't want to mark ourselves as a neighbor
-                        // Needs to be atomic as may being set by many threads
-                        if (cf_markers_d(col) != 1 && col != i)
+                        // Needs to be atomic as may being set by many threads, and the read
+                        // is atomic as other threads may be storing to the same entry
+                        if (col != i && Kokkos::atomic_load(&cf_markers_d(col)) != 1)
                         {
                            Kokkos::atomic_store(&cf_markers_d(col), 1);
                         }
@@ -1052,8 +1055,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                      Kokkos::parallel_for(
                         Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
-                           // Needs to be atomic as may being set by many threads
-                           if (cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]) != 1)
+                           // Needs to be atomic as may being set by many threads, and the read
+                           // is atomic as other threads may be storing to the same entry
+                           if (Kokkos::atomic_load(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j])) != 1)
                            {
                               Kokkos::atomic_store(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 1);
                            }
@@ -1074,7 +1078,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                const PetscInt i = t.league_rank();
 
                // Check if this node has been assigned during this top loop
-               if (cf_markers_d(i) == loops_through)
+               // Atomic as other teams in this kernel store to cf_markers_d
+               if (Kokkos::atomic_load(&cf_markers_d(i)) == loops_through)
                {
                   // Do the strong dependencies and influences
                   PetscInt ncols_local = device_local_i_spst[i + 1] - device_local_i_spst[i];
@@ -1085,8 +1090,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                         const PetscInt col = device_local_j_spst[device_local_i_spst[i] + j];
 
                         // Skip the diagonal - we don't want to mark ourselves as a neighbor
-                        // Needs to be atomic as may being set by many threads
-                        if (cf_markers_d(col) != 1 && col != i)
+                        // Needs to be atomic as may being set by many threads, and the read
+                        // is atomic as other threads may be storing to the same entry
+                        if (col != i && Kokkos::atomic_load(&cf_markers_d(col)) != 1)
                         {
                            Kokkos::atomic_store(&cf_markers_d(col), 1);
                         }
