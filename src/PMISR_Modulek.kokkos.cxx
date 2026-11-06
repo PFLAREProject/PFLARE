@@ -966,12 +966,10 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                         const PetscInt col = device_local_j_spst[device_local_i_spst[i] + j];
 
                         // Skip the diagonal - we don't want to mark ourselves as a neighbor
-                        // Needs to be atomic as may being set by many threads, and the read
-                        // is atomic as other threads may be storing to the same entry
-                        if (col != i && Kokkos::atomic_load(&cf_markers_d(col)) != 1)
-                        {
-                           Kokkos::atomic_store(&cf_markers_d(col), 1);
-                        }
+                        // Needs to be atomic as may being set by many threads
+                        // Only unassigned neighbours become C, like the CPU version which
+                        // never changes the marker of an assigned node
+                        if (col != i) Kokkos::atomic_compare_exchange(&cf_markers_d(col), 0, 1);
                   });
                }
          });
@@ -1032,7 +1030,8 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
          // If this node has been veto'd, then set it to not in the set
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-               if (veto_local_d(i)) {
+               // Only unassigned nodes become C, like the CPU version
+               if (veto_local_d(i) && cf_markers_d(i) == 0) {
                   cf_markers_d(i) = 1;
                }
          });
@@ -1056,12 +1055,9 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                      Kokkos::parallel_for(
                         Kokkos::TeamThreadRange(t, ncols_nonlocal), [&](const PetscInt j) {
 
-                           // Needs to be atomic as may being set by many threads, and the read
-                           // is atomic as other threads may be storing to the same entry
-                           if (Kokkos::atomic_load(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j])) != 1)
-                           {
-                              Kokkos::atomic_store(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 1);
-                           }
+                           // Needs to be atomic as may being set by many threads
+                           // Only unassigned nodes become C, like the CPU version
+                           Kokkos::atomic_compare_exchange(&cf_markers_d(device_nonlocal_j_transpose[device_nonlocal_i_transpose[i] + j]), 0, 1);
                      });
                   }
             });
@@ -1091,12 +1087,10 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
                         const PetscInt col = device_local_j_spst[device_local_i_spst[i] + j];
 
                         // Skip the diagonal - we don't want to mark ourselves as a neighbor
-                        // Needs to be atomic as may being set by many threads, and the read
-                        // is atomic as other threads may be storing to the same entry
-                        if (col != i && Kokkos::atomic_load(&cf_markers_d(col)) != 1)
-                        {
-                           Kokkos::atomic_store(&cf_markers_d(col), 1);
-                        }
+                        // Needs to be atomic as may being set by many threads
+                        // Only unassigned neighbours become C, like the CPU version which
+                        // never changes the marker of an assigned node
+                        if (col != i) Kokkos::atomic_compare_exchange(&cf_markers_d(col), 0, 1);
                   });
                }
          });
