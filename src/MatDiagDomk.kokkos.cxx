@@ -24,10 +24,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
 
    Mat mat_local = NULL, mat_nonlocal = NULL;
-   // The matrix's own mult SF (the borrowed mvctx) drives the halo scatter;
-   // we build a matching leaf Vec locally and destroy it once done.
+   // The matrix's own mult SF (the borrowed mvctx) drives the halo broadcast
    PetscSF sf = NULL;
-   Vec leaf_vec = NULL;
 
    PetscInt rows_ao, cols_ao;
    if (mpi)
@@ -44,7 +42,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // regions on the device
    intKokkosView cf_markers_d = cf_markers_local_d;   
    intKokkosView cf_markers_nonlocal_d;
-   Vec scatter_root_vec = NULL;
    PetscIntKokkosView is_fine_local_d;
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -70,27 +67,17 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    {
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
 
-      // Borrowed mult SF + locally-built leaf Vec (sized/typed to match Ao)
       PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
-      PetscCallVoid(MatCreateVecs(mat_nonlocal, &leaf_vec, NULL));
 
-      // Scatter cf_markers via VecScatter (int -> PetscScalar conversion required)
-      PetscCallVoid(MatCreateVecs(*input_mat, &scatter_root_vec, NULL));
-      {
-         PetscScalarKokkosView root_scalar_d;
-         PetscCallVoid(VecGetKokkosViewWrite(scatter_root_vec, &root_scalar_d));
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
-               root_scalar_d(i) = (PetscScalar)cf_markers_d(i);
-         });
-         PetscCallVoid(VecRestoreKokkosViewWrite(scatter_root_vec, &root_scalar_d));
-      }
-
-      // Start comms, then overlap with local-only work below.
-      // The SF must have only one active comm at a time.
-      // Ensure send/receive buffers are stable before Begin.
-      Kokkos::fence();
-      PetscCallVoid(VecScatterBegin(sf, scatter_root_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
+      // Start the broadcast of the cf splitting, then overlap with local-only work below.
+      // The local work only reads the root cf_markers_d, which is allowed while the
+      // broadcast is in flight. Nothing may touch the leaf until End.
+      // Be careful these aren't petscints
+      PetscCallVoid(sf_sync_before_begin_kokkos());
+      PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPI_INT,
+                  PETSC_MEMTYPE_KOKKOS, cf_markers_d.data(),
+                  PETSC_MEMTYPE_KOKKOS, cf_markers_nonlocal_d.data(),
+                  MPI_REPLACE));
    }
 
    // ~~~~~~~~~~~~~~~
@@ -159,23 +146,11 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       });  
    }
 
-   // Finish the in-flight scatter and only then read from the receive buffer.
+   // Finish the in-flight broadcast and only then read from the leaf
    if (mpi)
    {
-      PetscCallVoid(VecScatterEnd(sf, scatter_root_vec, leaf_vec, INSERT_VALUES, SCATTER_FORWARD));
-      {
-         ConstPetscScalarKokkosView lvec_scalar_d;
-         PetscCallVoid(VecGetKokkosView(leaf_vec, &lvec_scalar_d));
-         Kokkos::parallel_for(
-            Kokkos::RangePolicy<>(exec, 0, cols_ao), KOKKOS_LAMBDA(PetscInt i) {
-               cf_markers_nonlocal_d(i) = (int)lvec_scalar_d(i);
-         });
-         PetscCallVoid(VecRestoreKokkosView(leaf_vec, &lvec_scalar_d));
-      }
-      // Fence after the kernel converting the scattered leaf values to ints - the Vecs backing its views are destroyed next
-      Kokkos::fence();
-      PetscCallVoid(VecDestroy(&scatter_root_vec));
-      PetscCallVoid(VecDestroy(&leaf_vec));
+      PetscCallVoid(PetscSFBcastEnd(sf, MPI_INT, cf_markers_d.data(), cf_markers_nonlocal_d.data(), MPI_REPLACE));
+      PetscCallVoid(sf_sync_after_end_kokkos());
    }
 
    // ~~~~~~~~~~~~~~~
