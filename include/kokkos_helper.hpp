@@ -6,6 +6,7 @@
 #include <petscmat_kokkos.hpp>
 #include <petsc_kokkos.hpp>
 #include "petsc.h"
+#include <petscdevice.h>
 #include <Kokkos_StdAlgorithms.hpp>
 #include <Kokkos_Random.hpp>
 #include <Kokkos_Core.hpp>
@@ -53,6 +54,31 @@ PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void
 
 extern intKokkosView cf_markers_local_d;
 extern PetscScalarKokkosView diag_dom_ratio_local_d;
+
+// ~~~~~~~~~~~~~~~~~~
+// Ordering PetscSF comms on Kokkos views
+// PetscSF packs and unpacks on the stream of the current PETSc device context. By default
+// that is also the stream of PetscGetKokkosExecutionSpace(), but not once PETSc uses
+// per-context or nonblocking streams. So fence the PETSc execution space before Begin
+// (kernels writing the root or reading the old leaf are done) and synchronize the device
+// context after End (the unpack into the leaf is done)
+// ~~~~~~~~~~~~~~~~~~
+static inline PetscErrorCode sf_sync_before_begin_kokkos()
+{
+   PetscFunctionBegin;
+   PetscGetKokkosExecutionSpace().fence();
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_after_end_kokkos()
+{
+   PetscDeviceContext dctx;
+
+   PetscFunctionBegin;
+   PetscCall(PetscDeviceContextGetCurrentContext(&dctx));
+   PetscCall(PetscDeviceContextSynchronize(dctx));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 // ~~~~~~~~~~~~~~~~~~
 // Some custom reductions we use 
