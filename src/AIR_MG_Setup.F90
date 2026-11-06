@@ -22,9 +22,9 @@ module air_mg_setup
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, create_smooth_temp_vecs, mg_FC_point_richardson, mg_coarse_shell_apply, &
          mg_smooth_shell_apply, mg_coarse_shell_apply_transpose, mg_smooth_shell_apply_transpose, &
-         mg_FC_point_apply_transpose, mg_FC_point_residual_transpose
+         mg_FC_point_apply_transpose, mg_FC_point_residual_transpose, mg_coarse_shell_richardson
    use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
-         mg_smooth_shell_block_apply
+         mg_smooth_shell_block_apply, mg_coarse_shell_block_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
    use air_operators_setup, only: &
          get_submatrices_start_poly_coeff_comms, &
@@ -86,6 +86,10 @@ module air_mg_setup
       PetscRandom :: rctx
       MatType:: mat_type, mat_type_aff, mat_type_inv_aff
       integer(c_int) :: diag_only
+      KSPNormType :: coarse_norm_type
+      PetscReal :: coarse_rtol, coarse_atol, coarse_dtol
+      PetscInt :: coarse_maxits
+      PetscBool :: coarse_guess_nonzero
 
       ! ~~~~~~     
 
@@ -1237,9 +1241,12 @@ module air_mg_setup
          ! ~~~~~~~~~~~    
 
          call PCMGGetCoarseSolve(pcmg_input, ksp_coarse_solver, ierr)
-         ! If you want to apply more iterations of the coarse solver, change this to 
-         ! a richardson (can do via command line -mg_coarse_ksp_type richardson)
-         call KSPSetType(ksp_coarse_solver, KSPPREONLY, ierr)
+         ! A richardson rather than a preonly, as KSPSolve_PREONLY always does an
+         ! MPI_Allreduce (PCReduceFailedReason) in every v-cycle. With the coarse
+         ! richardson fast path registered below this does exactly the work a 
+         ! preonly would, with no global reductions in the v-cycle
+         ! More iterations of the coarse solver can be applied with -mg_coarse_ksp_max_it
+         call KSPSetType(ksp_coarse_solver, KSPRICHARDSON, ierr)
          ! Apply one iteration of the coarse solver by default
          call KSPSetTolerances(ksp_coarse_solver, PFLARE_KSP_RTOL_COARSE, PFLARE_KSP_ATOL_COARSE, PETSC_DEFAULT_REAL, one, ierr)
 
@@ -1297,11 +1304,13 @@ module air_mg_setup
          call PCSetType(pc_coarse_solver, PCSHELL, ierr)
          call PCShellSetContext(pc_coarse_solver, air_data, ierr)
          call PCShellSetApply(pc_coarse_solver, mg_coarse_shell_apply, ierr)
-         ! The multiple rhs version - the coarse ksp is a preonly, which does have
-         ! a matsolve, so this is what makes the coarse solve a real block apply
+         ! The multiple rhs version - this is what makes the coarse solve a real block
+         ! apply if the coarse richardson fast path isn't used (or the user picks a 
+         ! ksp like preonly instead)
          call PCShellSetMatApply(pc_coarse_solver, mg_coarse_shell_block_apply, ierr)
          ! The transposed apply - this is what a KSPSolveTranspose on the coarse ksp
-         ! ends up calling in our transposed cycle
+         ! ends up calling in our transposed cycle, as the richardson fast path is 
+         ! skipped for a transposed solve
          call PCShellSetApplyTranspose(pc_coarse_solver, mg_coarse_shell_apply_transpose, ierr)
          call PCSetUp(pc_coarse_solver, ierr)
          call KSPSetUp(ksp_coarse_solver, ierr)
@@ -1360,6 +1369,36 @@ module air_mg_setup
 
       ! Call the setup on our PC
       call PCSetUp(pcmg_input, ierr)
+
+      ! ~~~~~~~~~
+      ! The coarse richardson fast path
+      ! ~~~~~~~~~
+      ! This has to come after the PCSetUp, as that is where PCSetUp_MG calls
+      ! KSPSetFromOptions on the coarse ksp, so we can see what the user asked for
+      ! The fast path only does the default, one iteration from a zero initial
+      ! guess with no norm. Anything else the user asks for (e.g., 
+      ! -mg_coarse_ksp_max_it 3 or -mg_coarse_ksp_norm_type unpreconditioned) runs
+      ! petsc's own richardson instead
+      ! Both versions have to be registered or neither, as with only the single 
+      ! rhs one a KSPMatSolve would apply it column by column
+      ! Petsc also skips the fast path if there is a monitor, a non-unit scale 
+      ! or a null space, and a PC type other than our shell (e.g., -mg_coarse_pc_type lu)
+      ! never has one, as PCShellSetApplyRichardson does nothing to it
+      if (no_levels > 1) then
+         call PCMGGetCoarseSolve(pcmg_input, ksp_coarse_solver, ierr)
+         call KSPGetNormType(ksp_coarse_solver, coarse_norm_type, ierr)
+         call KSPGetTolerances(ksp_coarse_solver, coarse_rtol, coarse_atol, coarse_dtol, &
+                  coarse_maxits, ierr)
+         call KSPGetInitialGuessNonzero(ksp_coarse_solver, coarse_guess_nonzero, ierr)
+         if (coarse_norm_type == KSP_NORM_NONE .AND. coarse_maxits == 1 .AND. &
+                  .NOT. coarse_guess_nonzero) then
+            call KSPGetPC(ksp_coarse_solver, pc_coarse_solver, ierr)
+            call PCShellSetApplyRichardson(pc_coarse_solver, mg_coarse_shell_richardson, ierr)
+            ! The multiple rhs version, without this a KSPMatSolve would run the
+            ! block richardson iteration, which reduces every call
+            call PCShellSetMatApplyRichardson(pc_coarse_solver, mg_coarse_shell_block_richardson, ierr)
+         end if
+      end if
 
       ! ~~~~~~~~~
       ! Build the temporary data we use during smoothing

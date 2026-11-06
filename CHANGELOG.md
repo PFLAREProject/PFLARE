@@ -9,6 +9,13 @@ for earlier changes please see the git history.
 - On AMD GPUs, configure PETSc with Kokkos' `hipMallocAsync` pool off; see
   `docs/installation.md`. Several Kokkos comms in the CF splittings go back to
   direct PetscSF calls on device views, with fewer fences and temporary Vecs
+- The PCAIR coarse grid `KSP` is now a `KSPRICHARDSON` (one iteration, no norm)
+  rather than a `KSPPREONLY`, with a fast path that does the same work. This
+  removes the one global reduction (from `PCReduceFailedReason`) in every PCAIR
+  V-cycle, forward and transposed, and one from every block V-cycle; the result
+  is bitwise unchanged. Behaviour change: `-mg_coarse_ksp_max_it` now applies
+  more coarse iterations on its own, without `-mg_coarse_ksp_type richardson`,
+  and `-mg_coarse_ksp_type preonly` gives the previous default
 - Assembled Newton inverses now always have the sparsity of the requested order,
   capped at the polynomial order. Extra roots are added within that sparsity
   rather than being ignored or growing it, which also fixes crashes on reuse.

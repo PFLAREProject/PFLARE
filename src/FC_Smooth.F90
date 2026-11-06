@@ -69,6 +69,52 @@ module fc_smooth
 
    !------------------------------------------------------------------------------------------------------------------------
 
+   subroutine mg_coarse_shell_richardson(pc, b, x, w, rtol, abstol, dtol, maxits, guess_zero, its, conv_reason, ierr)
+
+      ! The richardson fast path of the coarse grid solver, one iteration from a
+      ! zero initial guess, which is just x = inv_A_ff(no_levels) b
+      ! The coarse ksp is a richardson rather than a preonly because KSPSolve_PREONLY
+      ! always calls PCReduceFailedReason, an MPI_Allreduce in every v-cycle that
+      ! our shell never needs (it never sets a failed reason). This fast path stops
+      ! the richardson costing anything more than the preonly did, with no copy, 
+      ! axpy or residual
+      ! This is only registered for one iteration from a zero initial guess with
+      ! no norm (see setup_air_pcmg), otherwise petsc's own richardson runs
+
+      ! ~~~~~~
+      type(tPC) :: pc
+      type(tVec) :: b, x, w
+      PetscReal :: rtol, abstol, dtol
+      PetscInt :: maxits, its
+      PetscBool :: guess_zero
+      PCRichardsonConvergedReason :: conv_reason
+      PetscErrorCode :: ierr
+
+      type(air_multigrid_data), pointer :: air_data => null()
+      integer :: errorcode
+      ! ~~~~~~
+
+      ierr = 0
+      its = maxits
+      conv_reason = PCRICHARDSON_CONVERGED_ITS
+
+      ! Can come in here with zero maxits, have to do nothing
+      if (maxits == 0) return
+      if (maxits /= 1 .OR. .NOT. guess_zero) then
+         print *, "The coarse richardson fast path only does one iteration from a zero initial guess"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      call PCShellGetContext(pc, air_data, ierr)
+      call MatMult(air_data%inv_A_ff(air_data%no_levels), b, x, ierr)
+
+      ! have to return zero here!
+      ierr = 0
+
+   end subroutine mg_coarse_shell_richardson
+
+   !------------------------------------------------------------------------------------------------------------------------
+
    subroutine mg_smooth_shell_apply(pc, x, y, ierr)
 
       ! PCShell apply used for the level smoothers when doing full smoothing up

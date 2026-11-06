@@ -2418,6 +2418,68 @@ run_tests_copies:
 	 -pc_air_reuse_poly_coeffs -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys \
 	 -pc_air_coarsest_diag_scale_polys -diag_update_scale 1 -min_levels 2 -pc_air_processor_agglom 0 -check_copies
 
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+# The MPI collective counting library the -check_collectives tests preload,
+# see count_collectives.c. It is preloaded rather than linked into the tests
+libcount_collectives.so: count_collectives.c
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $< -ldl
+
+# Runs a test with the counting library preloaded on every rank
+COLLECTIVES_PRELOAD = env LD_PRELOAD=$(CURDIR)/libcount_collectives.so
+
+# Checks that PCAIR v-cycles (forward, transposed and block) and diagonal
+# updates call no MPI collectives (e.g., no global reductions), in parallel only
+# as the counting ignores communicators with a single rank
+# Not part of make tests, it needs LD_PRELOAD (so linux) and is its own CI job
+run_tests_collectives: libcount_collectives.so
+	@echo ""
+	@echo "--- Running MPI collective checks ---"
+	@echo "Test a PCAIR v-cycle does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -check_collectives
+	@echo "Test a PCAIR v-cycle does no MPI collectives on 4 ranks"
+	$(MPIEXEC) -n 4 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -check_collectives
+	@echo "Test a transposed PCAIR v-cycle does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -transpose_solve -check_collectives
+	@echo "Test a PCAIR v-cycle with matrix-free polynomials does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -check_collectives
+	@echo "Test a transposed PCAIR v-cycle with matrix-free polynomials does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_matrix_free_polys \
+	 -pc_air_coarsest_matrix_free_polys -transpose_solve -check_collectives
+	@echo "Test a PCAIR v-cycle with C point smoothing does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_smooth_type fcf -check_collectives
+	@echo "Test a PCAIR v-cycle with Newton polynomials and a Jacobi coarse grid solver does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_inverse_type newton \
+	 -pc_air_coarsest_inverse_type jacobi -check_collectives
+	@echo "Test a PCAIR v-cycle with lAIR does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_z_type lair -check_collectives
+	@echo "Test a PCAIR v-cycle with full smoothing up and down does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_full_smoothing_up_and_down -check_collectives
+	@echo "Test a transposed PCAIR v-cycle with full smoothing up and down does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_full_smoothing_up_and_down \
+	 -transpose_solve -check_collectives
+	@echo "Test a PCAIR v-cycle with processor agglomeration does no MPI collectives on 4 ranks"
+	$(MPIEXEC) -n 4 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_process_eq_limit 200 -check_collectives
+	@echo "Test a PCAIR v-cycle with processor agglomeration onto a subcomm does no MPI collectives on 4 ranks"
+	$(MPIEXEC) -n 4 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_process_eq_limit 200 -pc_air_subcomm -check_collectives
+	@echo "Test PCAIR diagonal updates with kept coefficients and matrix-free polynomials and the v-cycles after them do no MPI collectives"
+	@echo "(an update without kept coefficients recomputes them, which needs reductions, and one with assembled"
+	@echo " polynomials rebuilds them with MatCreateSubMatrices, which also does)"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d -n 1000 -pc_air_smooth_type fc -pc_air_diag_update \
+	 -pc_air_reuse_poly_coeffs -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys \
+	 -diag_update_scale 1 -min_levels 2 -check_collectives
+	@echo "Test a block PCAIR v-cycle does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air -check_collectives
+	@echo "Test a block PCAIR v-cycle with matrix-free polynomials does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air \
+	 -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -check_collectives
+	@echo "Test a block PCAIR v-cycle with C point smoothing does no MPI collectives"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./adv_1d_multi_rhs -n 1000 -nrhs 5 -pc_type air \
+	 -pc_air_smooth_type fcf -check_collectives
+	@echo "Test a PCAIR v-cycle called from Fortran does no MPI collectives, and that Fortran collectives are counted"
+	$(MPIEXEC) -n 2 $(COLLECTIVES_PRELOAD) ./ex6f -m 20 -n 20 -check_collectives
+
 run_check:
 
 #

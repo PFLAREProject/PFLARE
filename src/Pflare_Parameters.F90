@@ -228,7 +228,7 @@ module pflare_parameters
    ! Smoother / coarse-solver KSP tolerances
    PetscReal, parameter :: PFLARE_KSP_ATOL_SMOOTH    = 1e-6
    PetscReal, parameter :: PFLARE_KSP_ATOL_COARSE    = 1e-6
-   ! Coarse KSPPREONLY rtol (value irrelevant for preonly; kept for kind-correctness)
+   ! Coarse KSP rtol (value irrelevant as the coarse KSP has no norm by default; kept for kind-correctness)
    PetscReal, parameter :: PFLARE_KSP_RTOL_COARSE    = 1e-3
    ! "atol effectively off" sentinel (1d-50 underflows single)
    PetscReal, parameter :: PFLARE_KSP_ATOL_OFF       = 1e-30
