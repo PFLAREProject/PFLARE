@@ -1139,7 +1139,7 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
       // Now we have to sort the local column indices, as we add in the identity at the 
       // end of our local j indices      
       KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_rows_z, local_full_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);  
-      KokkosSparse::sort_crs_matrix(csrmat_local);
+      KokkosSparse::sort_crs_matrix(exec, csrmat_local);
       
       // Let's make sure everything on the device is finished
       Kokkos::fence();       
