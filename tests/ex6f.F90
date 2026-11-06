@@ -31,7 +31,7 @@
       PetscInt Istart,Iend
       PetscInt nsteps,one
       PetscErrorCode ierr
-      PetscBool  flg, check, regen
+      PetscBool  flg, check, regen, check_collectives
       PetscScalar  v
 
 
@@ -132,6 +132,13 @@
       do 100 i=1,nsteps
          call solve1(ksp,A,x,b,u,i,nsteps, regen,A2,ierr)
  100  continue
+
+!  Check a v-cycle after the solves does no MPI collectives
+!  Needs libcount_collectives.so preloaded, see make tests_collectives
+
+      call PetscOptionsHasName(PETSC_NULL_OPTIONS,PETSC_NULL_CHARACTER, &
+               '-check_collectives',check_collectives,ierr)
+      if (check_collectives) call check_vcycle_collectives(ksp,b,x)
 
 !  Free work space.  All PETSc objects should be destroyed when they
 !  are no longer needed.
@@ -255,5 +262,81 @@
 
  100  format('previous matrix: preconditioning')
  110  format('next matrix: defines linear system')
+
+      end
+
+! -----------------------------------------------------------------------
+
+      subroutine check_vcycle_collectives(ksp,b,x)
+#include "petsc/finclude/petscksp.h"
+      use petscksp
+      implicit none
+
+!
+!   Fails the run if a PCApply calls any MPI collectives, with the counting
+!   done by libcount_collectives.so (see tests/count_collectives.c), which
+!   has to be preloaded. The windows it counts in are opened and closed with
+!   MPI_Pcontrol, see tests/check_collectives.h for the C version
+!   This is the Fortran driver, so the calibration window also makes sure
+!   the library sees the collectives called from Fortran
+!
+      KSP ksp
+      Vec b,x
+      PC pc
+      PetscErrorCode ierr
+      PetscReal norm
+      PetscMPIInt size
+      integer :: status, a, a_sum, norm_reductions, err
+
+      call get_environment_variable('PFLARE_COUNT_COLLECTIVES_LOADED', status=status)
+      if (status /= 0) then
+         print *, '-check_collectives needs libcount_collectives.so preloaded, see make tests_collectives'
+         error stop 1
+      end if
+      call MPI_Comm_size(PETSC_COMM_WORLD, size, ierr)
+      if (size < 2) then
+         print *, '-check_collectives needs more than one rank'
+         error stop 1
+      end if
+
+!     In debug builds MPIU_Allreduce does an extra reduction to check every
+!     rank called it from the same line
+#if defined(PETSC_USE_DEBUG)
+      norm_reductions = 2
+#else
+      norm_reductions = 1
+#endif
+
+!     One reduction from Fortran and those in a VecNorm from C
+      a = 1
+      call collectives_window(norm_reductions + 2)
+      call MPI_Allreduce(a, a_sum, 1, MPI_INTEGER, MPI_SUM, PETSC_COMM_WORLD, err)
+      call VecNorm(b, NORM_2, norm, ierr)
+      call collectives_window(0)
+
+!     The v-cycle, after the solves have done any setup it needs
+      call KSPGetPC(ksp, pc, ierr)
+      call collectives_window(1)
+      call PCApply(pc, b, x, ierr)
+      call collectives_window(0)
+
+      end
+
+! ----------------------------------------------------------------------------
+      subroutine collectives_window(level)
+#include "petsc/finclude/petscsys.h"
+      use petscsys
+      implicit none
+
+!
+!   Opens (level > 0) or closes (level 0) a counting window with MPI_Pcontrol
+!   MPIUNI has no Fortran MPI_Pcontrol, but the check needs two ranks, so it
+!   never runs without MPI
+!
+      integer :: level
+
+#if !defined(PETSC_HAVE_MPIUNI)
+      call MPI_Pcontrol(level)
+#endif
 
       end

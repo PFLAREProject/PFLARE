@@ -11,6 +11,7 @@ static char help[] = "Solves a one-dimensional steady upwind advection system wi
 */
 #include <petscksp.h>
 #include "pflare.h"
+#include "check_collectives.h"
 
 int main(int argc, char **args)
 {
@@ -37,6 +38,12 @@ int main(int argc, char **args)
   PetscBool check_copies = PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_copies", &check_copies, NULL));
   if (check_copies) second_solve = PETSC_TRUE;
+  // Check the diagonal updates (with -diag_update_scale) and a PCApply (or
+  // PCApplyTranspose with -transpose_solve) after the solves do no MPI collectives
+  // Needs libcount_collectives.so preloaded, see make tests_collectives
+  PetscBool check_collectives = PETSC_FALSE;
+  PetscCall(PetscOptionsGetBool(NULL, NULL, "-check_collectives", &check_collectives, NULL));
+  if (check_collectives) second_solve = PETSC_TRUE;
   // Before the second solve scale the diagonal of the matrix by 1 + this and setup the PC, which
   // is an update with -pc_air_diag_update, then do the same again as a repeat update
   // Each setup and solve is checked by -check_copies
@@ -214,6 +221,7 @@ int main(int argc, char **args)
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
   // We set x to 1 rather than random as the vecrandom doesn't yet have a
   // gpu implementation and we don't want a copy occuring back to the cpu    
+  if (check_collectives) PetscCall(CheckCollectivesCalibrate(x));
   if (second_solve)
   {
    for (i = 0; i < (diag_update_scale != 0.0 ? 2 : 1); i++) {
@@ -226,7 +234,9 @@ int main(int argc, char **args)
      PetscCall(MatDiagonalSet(A, diag_vec, INSERT_VALUES));
      PetscCall(VecDestroy(&diag_vec));
      PetscCall(PetscLogEventBegin(diag_update_event, 0, 0, 0, 0));
+     if (check_collectives) PetscCallMPI(CheckCollectivesBegin());
      PetscCall(PCSetUp(pc));
+     if (check_collectives) PetscCallMPI(CheckCollectivesEnd());
      PetscCall(PetscLogEventEnd(diag_update_event, 0, 0, 0, 0));
     }
     PetscCall(VecSet(x, 1.0));
@@ -241,6 +251,21 @@ int main(int argc, char **args)
   }
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
+
+  // A v-cycle, after the solves above have done any setup it needs
+  if (check_collectives) {
+    Vec y;
+
+    PetscCall(VecDuplicate(x, &y));
+    PetscCallMPI(CheckCollectivesBegin());
+    if (transpose_solve) {
+      PetscCall(PCApplyTranspose(pc, x, y));
+    } else {
+      PetscCall(PCApply(pc, x, y));
+    }
+    PetscCallMPI(CheckCollectivesEnd());
+    PetscCall(VecDestroy(&y));
+  }
 
   PetscCall(PCAIRGetNumLevels(pc, &num_levels));
   PetscCheck(num_levels >= min_levels, PETSC_COMM_WORLD, PETSC_ERR_PLIB,

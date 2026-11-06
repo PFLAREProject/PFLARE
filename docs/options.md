@@ -86,7 +86,7 @@ All options can be set either through command line arguments or programmatically
 
 #### Coarse grid solver options
 
-By default the coarse grid is solved with one application of a polynomial approximate inverse, controlled by the ``-pc_air_coarsest_*`` options below. `PCAIR` is built on PETSc's `PCMG`, so the coarse grid `KSP`/`PC` can also be overridden with the standard PETSc ``-mg_coarse_*`` options. For example, ``-mg_coarse_pc_type lu`` uses a direct solve on the coarse grid, while ``-mg_coarse_ksp_type richardson -mg_coarse_ksp_max_it 5`` applies several iterations of the default polynomial coarse solver. These follow the options prefix of the `PCAIR` in the usual PETSc way: for a `PCAIR` (or its `KSP`) with prefix ``-foo_`` the coarse solver options are ``-foo_mg_coarse_*``, and the unprefixed ``-mg_coarse_*`` options are not read by it.
+By default the coarse grid is solved with one application of a polynomial approximate inverse, controlled by the ``-pc_air_coarsest_*`` options below. `PCAIR` is built on PETSc's `PCMG`, so the coarse grid `KSP`/`PC` can also be overridden with the standard PETSc ``-mg_coarse_*`` options. For example, ``-mg_coarse_pc_type lu`` uses a direct solve on the coarse grid, while ``-mg_coarse_ksp_max_it 5`` applies several iterations of the default polynomial coarse solver. These follow the options prefix of the `PCAIR` in the usual PETSc way: for a `PCAIR` (or its `KSP`) with prefix ``-foo_`` the coarse solver options are ``-foo_mg_coarse_*``, and the unprefixed ``-mg_coarse_*`` options are not read by it.
 
    | Command line  | Routine | Description | Default |
    | ------------- | -- | ------------- | --- |
