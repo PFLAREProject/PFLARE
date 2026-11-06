@@ -191,8 +191,8 @@ PETSC_INTERN void VecISCopyLocal_kokkos(void *handle, int our_level, int fine_in
       PetscCallVoid(VecRestoreKokkosView(*vreduced, &vreduced_d));
       PetscCallVoid(VecRestoreKokkosViewWrite(*vfull, &vfull_d));
    }
-   // Ensure we're done before we exit
-   Kokkos::fence();
+   // No fence: everything that uses these Kokkos Vecs next (PETSc's VecKokkos ops, PetscSF,
+   // a device to host copy) runs on or waits for the PETSc execution space this kernel used
 
    return;
 }
@@ -311,7 +311,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
       PetscCallVoid(MatDenseRestoreArrayAndMemType(*xfull, &full_ptr));
       PetscCallVoid(MatDenseRestoreArrayReadAndMemType(*xreduced, &reduced_ptr));
    }
-   // Ensure we're done before we exit
+   // Ensure we're done before we exit, as the dense matrices may next be used
+   // on the stream of the PETSc device context rather than the execution space
    Kokkos::fence();
    *done = 1;
 
