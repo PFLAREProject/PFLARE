@@ -65,7 +65,7 @@ extern PetscScalarKokkosView diag_dom_ratio_local_d;
 // This matches PetscSFSynchronizeKokkos_Private in PETSc, which we can't call
 // Without a CUDA/HIP device context we always sync, which is cheap on the host
 // ~~~~~~~~~~~~~~~~~~
-static inline PetscErrorCode sf_streams_differ_kokkos(PetscDeviceContext *dctx, PetscBool *differ)
+static inline PetscErrorCode petsc_streams_differ_kokkos(PetscDeviceContext *dctx, PetscBool *differ)
 {
    PetscFunctionBegin;
    *differ = PETSC_TRUE;
@@ -98,19 +98,29 @@ static inline PetscErrorCode sf_sync_before_begin_kokkos()
    PetscBool differ;
 
    PetscFunctionBegin;
-   PetscCall(sf_streams_differ_kokkos(&dctx, &differ));
+   PetscCall(petsc_streams_differ_kokkos(&dctx, &differ));
    if (differ) PetscGetKokkosExecutionSpace().fence();
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static inline PetscErrorCode sf_sync_after_end_kokkos()
+// Wait for work on the current PETSc device context stream if that is not the stream of
+// the PETSc execution space, e.g. before Kokkos kernels use data produced by native
+// CUDA/HIP PETSc objects
+static inline PetscErrorCode sync_device_context_if_streams_differ_kokkos()
 {
    PetscDeviceContext dctx;
    PetscBool differ;
 
    PetscFunctionBegin;
-   PetscCall(sf_streams_differ_kokkos(&dctx, &differ));
+   PetscCall(petsc_streams_differ_kokkos(&dctx, &differ));
    if (differ) PetscCall(PetscDeviceContextSynchronize(dctx));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_after_end_kokkos()
+{
+   PetscFunctionBegin;
+   PetscCall(sync_device_context_if_streams_differ_kokkos());
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

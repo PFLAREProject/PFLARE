@@ -269,6 +269,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
       PetscCallVoid(MatDenseGetArrayReadAndMemType(*xfull, &full_ptr, &mtype));
       // Every entry of the reduced block is overwritten
       PetscCallVoid(MatDenseGetArrayWriteAndMemType(*xreduced, &reduced_ptr, &mtype));
+      // The dense matrices may have been produced on the device context stream
+      PetscCallVoid(sync_device_context_if_streams_differ_kokkos());
 
       Kokkos::View<const PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xfull_d(full_ptr, lda_full * global_cols);
       Kokkos::View<PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xreduced_d(reduced_ptr, lda_reduced * global_cols);
@@ -296,6 +298,8 @@ PETSC_INTERN void mat_iscopy_local_kokkos(void *handle, int our_level, int fine_
       // Only the rows in the IS are written, the rest of the full block is left
       // alone, so we can't take write only access here
       PetscCallVoid(MatDenseGetArrayAndMemType(*xfull, &full_ptr, &mtype));
+      // The dense matrices may have been produced on the device context stream
+      PetscCallVoid(sync_device_context_if_streams_differ_kokkos());
 
       Kokkos::View<const PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xreduced_d(reduced_ptr, lda_reduced * global_cols);
       Kokkos::View<PetscScalar *, DefaultMemorySpace, Kokkos::MemoryUnmanaged> xfull_d(full_ptr, lda_full * global_cols);
