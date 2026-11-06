@@ -58,25 +58,59 @@ extern PetscScalarKokkosView diag_dom_ratio_local_d;
 // ~~~~~~~~~~~~~~~~~~
 // Ordering PetscSF comms on Kokkos views
 // PetscSF packs and unpacks on the stream of the current PETSc device context. By default
-// that is also the stream of PetscGetKokkosExecutionSpace(), but not once PETSc uses
-// per-context or nonblocking streams. So fence the PETSc execution space before Begin
-// (kernels writing the root or reading the old leaf are done) and synchronize the device
-// context after End (the unpack into the leaf is done)
+// that is also the stream of PetscGetKokkosExecutionSpace(), and then nothing extra is needed.
+// If they differ (PETSc using per-context or nonblocking streams), fence the PETSc execution
+// space before Begin (kernels writing the root or reading the old leaf are done) and
+// synchronize the device context after End (the unpack into the leaf is done)
+// This matches PetscSFSynchronizeKokkos_Private in PETSc, which we can't call
+// Without a CUDA/HIP device context we always sync, which is cheap on the host
 // ~~~~~~~~~~~~~~~~~~
-static inline PetscErrorCode sf_sync_before_begin_kokkos()
+static inline PetscErrorCode sf_streams_differ_kokkos(PetscDeviceContext *dctx, PetscBool *differ)
 {
    PetscFunctionBegin;
-   PetscGetKokkosExecutionSpace().fence();
+   *differ = PETSC_TRUE;
+   PetscCall(PetscDeviceContextGetCurrentContext(dctx));
+#if (defined(KOKKOS_ENABLE_CUDA) && PetscDefined(HAVE_CUDA)) || (defined(KOKKOS_ENABLE_HIP) && PetscDefined(HAVE_HIP))
+   PetscDeviceType type;
+   PetscCall(PetscDeviceContextGetDeviceType(*dctx, &type));
+   #if defined(KOKKOS_ENABLE_CUDA) && PetscDefined(HAVE_CUDA)
+   if (type == PETSC_DEVICE_CUDA)
+   {
+      cudaStream_t *stream;
+      PetscCall(PetscDeviceContextGetStreamHandle(*dctx, reinterpret_cast<void **>(&stream)));
+      *differ = *stream != PetscGetKokkosExecutionSpace().cuda_stream() ? PETSC_TRUE : PETSC_FALSE;
+   }
+   #else
+   if (type == PETSC_DEVICE_HIP)
+   {
+      hipStream_t *stream;
+      PetscCall(PetscDeviceContextGetStreamHandle(*dctx, reinterpret_cast<void **>(&stream)));
+      *differ = *stream != PetscGetKokkosExecutionSpace().hip_stream() ? PETSC_TRUE : PETSC_FALSE;
+   }
+   #endif
+#endif
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_before_begin_kokkos()
+{
+   PetscDeviceContext dctx;
+   PetscBool differ;
+
+   PetscFunctionBegin;
+   PetscCall(sf_streams_differ_kokkos(&dctx, &differ));
+   if (differ) PetscGetKokkosExecutionSpace().fence();
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
 static inline PetscErrorCode sf_sync_after_end_kokkos()
 {
    PetscDeviceContext dctx;
+   PetscBool differ;
 
    PetscFunctionBegin;
-   PetscCall(PetscDeviceContextGetCurrentContext(&dctx));
-   PetscCall(PetscDeviceContextSynchronize(dctx));
+   PetscCall(sf_streams_differ_kokkos(&dctx, &differ));
+   if (differ) PetscCall(PetscDeviceContextSynchronize(dctx));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
