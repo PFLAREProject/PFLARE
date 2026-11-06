@@ -1090,7 +1090,14 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   dense block of right-hand sides at once; on the GPU backends this keeps a multiple
   right-hand side solve on the device.
 
-.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCAIR`, `PCGAMG`, `PCMatApply()`, `KSPMatSolve()`
+  `PCPFLAREINV` implements `PCApplyTranspose()`, so it can be used with `KSPSolveTranspose()`
+  (for example in an adjoint solve), for every inverse type. It applies the exact transpose
+  of the forward approximate inverse, not a separate inverse built for the transposed operator.
+  A matrix-free transposed apply requires the operator to support `MatMultTranspose()`.
+  `PCMatApplyTranspose()` is not implemented directly, so a transposed block solve applies
+  `PCApplyTranspose()` column by column.
+
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCAIR`, `PCGAMG`, `PCMatApply()`, `KSPMatSolve()`, `PCApplyTranspose()`, `KSPSolveTranspose()`
 M*/
 
 // Creates the structure we need for this PC

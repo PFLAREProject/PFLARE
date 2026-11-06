@@ -3830,10 +3830,17 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
   sides at once, with sparse matrix by dense matrix products throughout; on the GPU
   backends this keeps a multiple right-hand side solve on the device.
 
+  `PCAIR` implements `PCApplyTranspose()`, so it can be used with `KSPSolveTranspose()`
+  (for example in an adjoint solve). It applies the exact transpose of the forward
+  multigrid cycle, not a separate hierarchy built for the transposed operator, so the
+  forward and transposed applications are adjoints of each other. `PCMatApplyTranspose()`
+  is not implemented directly, so a transposed block solve applies `PCApplyTranspose()`
+  column by column.
+
   If you use `PCAIR` please cite S. Dargaville et al., "AIR multigrid with GMRES polynomials
   (AIRG) and additive preconditioners for Boltzmann transport", J. Comput. Phys. 518 (2024) 113342.
 
-.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`, `PCMatApply()`, `KSPMatSolve()`
+.seealso: [](ch_ksp), `PCCreate()`, `PCSetType()`, `PCType`, `PC`, `PCPFLAREINV`, `PCHYPRE`, `PCGAMG`, `PCMG`, `PCMatApply()`, `KSPMatSolve()`, `PCApplyTranspose()`, `KSPSolveTranspose()`
 M*/
 
 // Creates the structure we need for this PC
