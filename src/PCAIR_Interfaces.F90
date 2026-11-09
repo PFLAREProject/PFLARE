@@ -1713,6 +1713,15 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The number of active ranks is divided by the factor until there are enough unknowns
+      ! on each, so a factor of one would never get there and anything less makes no sense
+      if (factor < 2) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Processor agglomeration factor must be at least 2")
+         return
+      end if
+
       call PCAIRGetProcessorAgglomFactor(pc, old_int, ierr)
       if (old_int == factor) then
          ierr = 0

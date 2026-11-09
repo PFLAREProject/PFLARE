@@ -1790,6 +1790,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessorAgglomFactor(PC pc, PetscInt input_
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   // The number of active ranks is divided by the factor until there are enough unknowns on each,
+   // so a factor of one would never get there and anything less makes no sense
+   PetscCheck(input_int >= 2, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Processor agglomeration factor %" PetscInt_FMT " must be at least 2", input_int);
    PCAIRSetProcessorAgglomFactor_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }

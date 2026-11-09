@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- `-pc_air_processor_agglom_factor` must now be at least 2; a factor of 1 hung
+  the setup and smaller values crashed it
 - Fixed PCAIR writing outside its per-level storage when `-pc_air_max_levels`
   was raised above the default of 300 and the hierarchy had more than 300 levels
 - Fixed a crash building an assembled fixed sparsity GMRES polynomial inverse
