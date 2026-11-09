@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the `diag_dom` CF splitting never finishing with a negative strong
+  threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
   1, are now refused by PCAIR and PCPFLAREINV rather than crashing the setup
 - `-pc_air_processor_agglom_factor` must now be at least 2; a factor of 1 hung
