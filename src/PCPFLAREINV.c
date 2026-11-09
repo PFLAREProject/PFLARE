@@ -346,6 +346,7 @@ PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
+   PetscCheck(poly_order >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Polynomial order %" PetscInt_FMT " must not be negative", poly_order);
    PetscCall(PCPFLAREINVGetPolyOrder(pc, &old_order));
    if (old_order == poly_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
@@ -391,6 +392,7 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
+   PetscCheck(inverse_sparsity_order >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Sparsity order %" PetscInt_FMT " must not be negative", inverse_sparsity_order);
    PetscCall(PCPFLAREINVGetSparsityOrder(pc, &old_order));
    if (old_order == inverse_sparsity_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));

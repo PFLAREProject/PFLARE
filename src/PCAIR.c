@@ -1623,6 +1623,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetMaxLevels(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 1, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Maximum number of levels %" PetscInt_FMT " must be at least 1", input_int);
    PCAIRSetMaxLevels_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2438,6 +2439,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Polynomial order %" PetscInt_FMT " must not be negative", input_int);
    PCAIRSetPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2465,6 +2467,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseSparsityOrder(PC pc, PetscInt input_i
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Inverse sparsity order %" PetscInt_FMT " must not be negative", input_int);
    PCAIRSetInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2493,6 +2496,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= -1, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "C point polynomial order %" PetscInt_FMT " must not be negative (or -1 to follow the F point value)", input_int);
    PCAIRSetCPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2521,6 +2525,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= -1, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "C point inverse sparsity order %" PetscInt_FMT " must not be negative (or -1 to follow the F point value)", input_int);
    PCAIRSetCInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2575,6 +2580,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC pc, PetscInt input_int)
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Coarsest polynomial order %" PetscInt_FMT " must not be negative", input_int);
    PCAIRSetCoarsestPolyOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -2603,6 +2609,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PC pc, PetscInt
 {
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Coarsest inverse sparsity order %" PetscInt_FMT " must not be negative", input_int);
    PCAIRSetCoarsestInverseSparsityOrder_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }

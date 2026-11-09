@@ -1522,6 +1522,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! A hierarchy has at least one level
+      if (max_levels < 1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Maximum number of levels must be at least 1")
+         return
+      end if
+
       call PCAIRGetMaxLevels(pc, old_int, ierr)
       if (old_int == max_levels) then
          ierr = 0
@@ -2533,6 +2541,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Polynomial order must not be negative")
+         return
+      end if
+
       call PCAIRGetPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
          ierr = 0
@@ -2564,6 +2580,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Inverse sparsity order must not be negative")
+         return
+      end if
+
       call PCAIRGetInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
          ierr = 0
@@ -2594,6 +2618,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! -1 is how an unset value is stored, ie it follows the F point value
+      if (order < -1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "C point polynomial order must not be negative (or -1 to follow the F point value)")
+         return
+      end if
 
       call PCAIRGetCPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
@@ -2629,6 +2661,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! -1 is how an unset value is stored, ie it follows the F point value
+      if (order < -1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "C point inverse sparsity order must not be negative (or -1 to follow the F point value)")
+         return
+      end if
 
       call PCAIRGetCInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
@@ -2696,6 +2736,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Coarsest polynomial order must not be negative")
+         return
+      end if
+
       call PCAIRGetCoarsestPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
          ierr = 0
@@ -2726,6 +2774,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Coarsest inverse sparsity order must not be negative")
+         return
+      end if
 
       call PCAIRGetCoarsestInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
