@@ -2785,8 +2785,11 @@ PETSC_EXTERN PetscErrorCode PCAIRSetALump(PC pc, PetscBool input_bool)
 
   Level: advanced
 
-  Note:
+  Notes:
   If the matrix has changed too much, convergence may suffer.
+
+  Changing this on a `PCAIR` that has already been set up resets the hierarchy, as the data needed for
+  reuse is only stored by a setup that had reuse turned on.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetReuseSparsity()`, `PCAIRSetReusePolyCoeffs()`, `PCAIRSetReuseAmount()`
 @*/

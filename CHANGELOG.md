@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed a crash when `PCAIRSetReuseSparsity()` changed the setting on a PCAIR
+  that was already set up; the hierarchy is now reset, as with the other options
 - On AMD GPUs, configure PETSc with Kokkos' `hipMallocAsync` pool off; see
   `docs/installation.md`. Several Kokkos comms in the CF splittings go back to
   direct PetscSF calls on device views, with fewer fences and temporary Vecs

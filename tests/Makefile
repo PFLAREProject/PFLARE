@@ -984,6 +984,10 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_serial:
+	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
+	./pcair_option_changes -toggle_reuse_sparsity
+	./pcair_option_changes -toggle_reuse_sparsity -pc_air_reuse_sparsity
+	./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	./diag_update_check
 	./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
@@ -1750,6 +1754,9 @@ run_tests_no_load_parallel:
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
 else
+	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
+	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity
+	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	$(MPIEXEC) -n 2 ./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
 	$(MPIEXEC) -n 2 ./diag_update_check -laplacian -pc_air_symmetric

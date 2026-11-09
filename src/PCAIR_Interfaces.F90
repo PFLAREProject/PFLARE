@@ -2918,10 +2918,26 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
-      ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetReuseSparsity(pc, old_bool, ierr)
+      if (old_bool .eqv. reuse) then
+         ierr = 0
+         return
+      end if
+
+      ! The reuse data is only stored by a setup that had reuse sparsity on, and
+      ! the diagonal update data only by one that had it off, so an existing
+      ! hierarchy can't be carried across a change - the next setup with the
+      ! same nonzero pattern would otherwise reuse (or update) data that was
+      ! never stored
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)
+
       options%reuse_sparsity = reuse
       ierr = 0
 
