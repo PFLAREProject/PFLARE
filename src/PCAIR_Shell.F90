@@ -4,7 +4,7 @@ module pcair_shell
    use c_petsc_interfaces, only: c_PCGetStructureFlag, PCGetSetupCalled_c, PCMarkNotSetUp_c
    use pcair_data_type, only: pc_air_multigrid_data, air_options
    use air_mg_setup, only: setup_air_pcmg
-   use air_data_type_routines, only: reset_air_data, destroy_air_data
+   use air_data_type_routines, only: reset_air_data, destroy_air_data, resize_air_data
    use air_diagonal_update, only: update_air_diag
    use air_mg_stats, only: print_stats
 
@@ -331,6 +331,31 @@ module pcair_shell
 
    end subroutine PCReset_AIR_Shell   
    
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCSetMaxLevels_AIR_Shell(pc, max_levels, ierr)
+
+      ! Reset our shell PC and change the maximum number of levels it can have,
+      ! which reallocates the per-level storage
+
+      ! ~~~~~~
+      type(tPC), intent(in)    :: pc
+      integer, intent(in)      :: max_levels
+      PetscErrorCode, intent(inout)   :: ierr
+
+      type(pc_air_multigrid_data), pointer  :: pc_air_data=>null()
+
+      ! ~~~~~~
+
+      ! Get the PC context
+      call PCShellGetContext(pc, pc_air_data, ierr)
+      ! Destroy the air data
+      call reset_pc_air_data(pc_air_data)
+      ! And then its storage
+      call resize_air_data(pc_air_data%air_data, max_levels)
+
+   end subroutine PCSetMaxLevels_AIR_Shell
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine PCView_AIR_Shell(pc, viewer, ierr)

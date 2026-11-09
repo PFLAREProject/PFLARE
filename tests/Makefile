@@ -988,6 +988,9 @@ run_tests_no_load_serial:
 	./pcair_option_changes -toggle_reuse_sparsity
 	./pcair_option_changes -toggle_reuse_sparsity -pc_air_reuse_sparsity
 	./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
+	@echo "Test PCAIR with more levels than the default maximum number of levels"
+	./pcair_option_changes -complete_graph -m 18 -nsteps 2 -min_levels 310 -pc_air_max_levels 400 \
+	 -pc_air_a_drop 0 -pc_air_r_drop 0 -pc_air_ddc_its 0
 	@echo "Test PCPFLAREINVSetPolyCoeffs leaves the inverse that is already built alone until the next setup"
 	./pflareinv_setcoeffs -pc_pflareinv_type arnoldi
 	./pflareinv_setcoeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free

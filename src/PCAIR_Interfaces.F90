@@ -2,7 +2,8 @@ module pcair_interfaces
 
    use iso_c_binding
    use petscksp
-   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
+   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c, &
+         PCSetMaxLevels_AIR_Shell
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE, &
          PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA
@@ -1533,12 +1534,12 @@ module pcair_interfaces
       ! in our pcshell though as pcshell doesn't offer a way to 
       ! give a custom reset function     
       call PCReset(pc_shell, ierr)
-      ! Call the destroy routine
-      call PCReset_AIR_Shell(pc_shell, ierr)
+      ! Call the destroy routine and set the new maximum - the per-level storage
+      ! is sized by it, so this reallocates that too
+      call PCSetMaxLevels_AIR_Shell(pc_shell, int(max_levels), ierr)
       ! Have to mark that the outer setup must be called again
       call PCMarkNotSetUp_c(pc%v)      
 
-      options%max_levels = int(max_levels)
       ierr = 0
 
    end subroutine PCAIRSetMaxLevels

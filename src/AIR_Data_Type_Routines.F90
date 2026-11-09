@@ -1,6 +1,6 @@
 module air_data_type_routines
 
-   use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
+   use air_data_type, only: air_multigrid_data, air_options, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use pflare_parameters, only: PFLAREINV_ARNOLDI, AIR_Z_PRODUCT, MAT_RAP_DROP, MAT_INV_AFF, &
          PFLARE_TOL_AUTO_TRUNCATE
    use approx_inverse_setup, only: reset_inverse_mat, destroy_matrix_reuse
@@ -119,6 +119,32 @@ module air_data_type_routines
       air_data%allocated_coarse_matrix = .FALSE.
      
    end subroutine create_air_data    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine resize_air_data(air_data, max_levels)
+
+      ! Changes the maximum number of levels, keeping every other option
+      ! The per-level storage is sized by max_levels when it is allocated in
+      ! create_air_data, so it has to be reallocated or a deeper hierarchy
+      ! would run off the end of it
+      ! Any existing hierarchy is destroyed
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(inout) :: air_data
+      integer, intent(in)                     :: max_levels
+
+      type(air_options) :: options
+      ! ~~~~~~
+
+      ! Destroying resets all the options to their defaults
+      options = air_data%options
+      call destroy_air_data(air_data)
+      air_data%options = options
+      air_data%options%max_levels = max_levels
+      call create_air_data(air_data)
+
+   end subroutine resize_air_data
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

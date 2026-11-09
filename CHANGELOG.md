@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed PCAIR writing outside its per-level storage when `-pc_air_max_levels`
+  was raised above the default of 300 and the hierarchy had more than 300 levels
 - Fixed a crash building an assembled fixed sparsity GMRES polynomial inverse
   of a matrix with rows that have no stored entries
 - `PCPFLAREINVSetPolyCoeffs()` now errors if given the wrong number of columns
