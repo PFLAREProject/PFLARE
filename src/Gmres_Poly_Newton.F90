@@ -1343,7 +1343,10 @@ end if
             
             ! Search for the matching column
             ! We're intersecting the global column indices of mat_sparsity_match (cols) and matrix (cols_two_ptr)
-            call intersect_pre_sorted_indices_only(cols(1:ncols), cols_two_ptr, cols_index_one, cols_index_two, match_counter)      
+            ! An empty row of matrix leaves cols_two_ptr untouched by MatGetRow (ie stale),
+            ! so we have to give its length rather than rely on its size
+            call intersect_pre_sorted_indices_only(cols(1:ncols), cols_two_ptr(1:ncols_two), &
+                     cols_index_one, cols_index_two, match_counter)
             
             ! Don't need to do anything if we have no matches
             if (match_counter == 0) then 

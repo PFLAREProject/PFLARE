@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed a crash building an assembled fixed sparsity GMRES polynomial inverse
+  of a matrix with rows that have no stored entries
 - `PCPFLAREINVSetPolyCoeffs()` now errors if given the wrong number of columns
   for the inverse type, rather than the next setup reading outside the array
 - Fixed a matrix-free PCPFLAREINV reading freed memory after
