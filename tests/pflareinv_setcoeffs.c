@@ -3,6 +3,7 @@ static char help[] = "Tests PCPFLAREINVSetPolyCoeffs on a PCPFLAREINV that is al
 Setting coefficients doesn't trigger a rebuild, so the inverse that is already built\n\
 (assembled or matrix-free) must keep applying the coefficients it was built with until\n\
 the next PCSetUp, which with PCPFLAREINVSetReusePolyCoeffs must then use the ones set.\n\
+Coefficients with the wrong number of columns for the inverse type must be refused.\n\
 \n\
   -n : number of unknowns (default 60)\n\n";
 
@@ -39,6 +40,7 @@ int main(int argc, char **args)
   PetscInt   n = 60, rows, cols, rows_new, cols_new, i;
   PetscReal *coeffs, *saved, *scratch, diff, expected;
   PCPFLAREINVType type;
+  PetscErrorCode ierr;
 
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
@@ -119,6 +121,19 @@ int main(int argc, char **args)
     PetscCheck(coeffs[i] == expected, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Coefficient %" PetscInt_FMT " was not reused, %g vs %g", i, (double)coeffs[i], (double)expected);
   }
   PetscCall(PCApply(pc, b, y_after));
+
+  // ~~~~~~~~~~~~~~~~~~
+  // Coefficients with the wrong number of columns for the inverse type must be
+  // refused and leave the stored ones alone - the next setup would otherwise read
+  // outside of them
+  // ~~~~~~~~~~~~~~~~~~
+  PetscCall(PetscPushErrorHandler(PetscReturnErrorHandler, NULL));
+  if (cols == 1) ierr = PCPFLAREINVSetPolyCoeffs(pc, saved, rows / 2, 2);
+  else ierr = PCPFLAREINVSetPolyCoeffs(pc, saved, rows, 1);
+  PetscCall(PetscPopErrorHandler());
+  PetscCheck(ierr != PETSC_SUCCESS, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "PCPFLAREINVSetPolyCoeffs accepted the wrong number of columns");
+  PetscCall(PCPFLAREINVGetPolyCoeffs(pc, &coeffs, &rows_new, &cols_new));
+  PetscCheck(rows_new == rows && cols_new == cols, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "A refused PCPFLAREINVSetPolyCoeffs changed the stored coefficients");
 
   PetscCall(PetscPrintf(PETSC_COMM_WORLD, "OK - %" PetscInt_FMT " x %" PetscInt_FMT " coefficients\n", rows, cols));
 

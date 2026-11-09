@@ -6,6 +6,8 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- `PCPFLAREINVSetPolyCoeffs()` now errors if given the wrong number of columns
+  for the inverse type, rather than the next setup reading outside the array
 - Fixed a matrix-free PCPFLAREINV reading freed memory after
   `PCPFLAREINVSetPolyCoeffs()` when its inverse had been rebuilt from stored
   coefficients; the inverse now keeps its own copy until the next setup
