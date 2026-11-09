@@ -346,6 +346,7 @@ PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
+   PetscCheck(poly_order >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Polynomial order %" PetscInt_FMT " must not be negative", poly_order);
    PetscCall(PCPFLAREINVGetPolyOrder(pc, &old_order));
    if (old_order == poly_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
@@ -391,6 +392,7 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
+   PetscCheck(inverse_sparsity_order >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Sparsity order %" PetscInt_FMT " must not be negative", inverse_sparsity_order);
    PetscCall(PCPFLAREINVGetSparsityOrder(pc, &old_order));
    if (old_order == inverse_sparsity_order) PetscFunctionReturn(PETSC_SUCCESS);
    PetscCall(PCReset_PFLAREINV_c(pc));
@@ -555,13 +557,16 @@ static PetscErrorCode PCPFLAREINVGetPolyCoeffs_PFLAREINV(PC pc, PetscReal **coef
 
   Level: advanced
 
-  Note:
+  Notes:
   This routine copies the data from coeffs into the `PCPFLAREINV` object; the caller's array is not referenced
   after this call and may be freed or modified. It does not itself trigger a rebuild of the approximate inverse -
   combine with `PCPFLAREINVSetReusePolyCoeffs()` to have the next `PCSetUp()` reuse these coefficients.
 
   For the Newton types the coefficients are the real and imaginary parts of the roots. Only roots that are exactly
   zero are skipped when the polynomial is applied or built; any non-zero root, however small, is used.
+
+  The number of columns must match the current inverse type, so set the type with `PCPFLAREINVSetType()` first
+  (changing the type or the polynomial order discards the stored coefficients).
 
 .seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetPolyCoeffs()`, `PCPFLAREINVSetReusePolyCoeffs()`
 @*/
@@ -576,9 +581,22 @@ static PetscErrorCode PCPFLAREINVSetPolyCoeffs_PFLAREINV(PC pc, PetscReal *coeff
 {
    PC_PFLAREINV *inv_data;
    PetscReal    *new_coeffs;
+   int           is_polynomial;
+   PetscInt      cols_needed;
 
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;
+   PetscCheck(rows > 0 && cols > 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_SIZ, "Coefficient array is %" PetscInt_FMT " x %" PetscInt_FMT ", sizes must be positive", rows, cols);
+   // The Newton types read the real and imaginary parts of the roots from two columns, the
+   // other polynomials their coefficients from one, so the wrong number of columns would
+   // have the next setup read outside the array. Changing the type resets the stored
+   // coefficients, so the type we have now is the one they will be used with
+   // The non-polynomial types never read the coefficients
+   inverse_type_is_polynomial_c(inv_data->inverse_type, &is_polynomial);
+   if (is_polynomial) {
+      cols_needed = (inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA) ? 2 : 1;
+      PetscCheck(cols == cols_needed, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_SIZ, "Coefficient array has %" PetscInt_FMT " columns but this inverse type needs %" PetscInt_FMT, cols, cols_needed);
+   }
    // Copy into a new buffer before freeing the old one, as coeffs may be the
    // pointer returned by PCPFLAREINVGetPolyCoeffs (ie it may alias poly_coeffs)
    new_coeffs = (PetscReal *)malloc((size_t)rows * (size_t)cols * sizeof(PetscReal));

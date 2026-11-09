@@ -2,7 +2,8 @@ module pcair_interfaces
 
    use iso_c_binding
    use petscksp
-   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c
+   use pcair_shell, only: air_options, pc_air_multigrid_data, PCReset_AIR_Shell, PCMarkNotSetUp_c, &
+         PCSetMaxLevels_AIR_Shell
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE, &
          PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA
@@ -1521,6 +1522,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! A hierarchy has at least one level
+      if (max_levels < 1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Maximum number of levels must be at least 1")
+         return
+      end if
+
       call PCAIRGetMaxLevels(pc, old_int, ierr)
       if (old_int == max_levels) then
          ierr = 0
@@ -1533,12 +1542,12 @@ module pcair_interfaces
       ! in our pcshell though as pcshell doesn't offer a way to 
       ! give a custom reset function     
       call PCReset(pc_shell, ierr)
-      ! Call the destroy routine
-      call PCReset_AIR_Shell(pc_shell, ierr)
+      ! Call the destroy routine and set the new maximum - the per-level storage
+      ! is sized by it, so this reallocates that too
+      call PCSetMaxLevels_AIR_Shell(pc_shell, int(max_levels), ierr)
       ! Have to mark that the outer setup must be called again
       call PCMarkNotSetUp_c(pc%v)      
 
-      options%max_levels = int(max_levels)
       ierr = 0
 
    end subroutine PCAIRSetMaxLevels
@@ -1711,6 +1720,15 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! The number of active ranks is divided by the factor until there are enough unknowns
+      ! on each, so a factor of one would never get there and anything less makes no sense
+      if (factor < 2) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Processor agglomeration factor must be at least 2")
+         return
+      end if
 
       call PCAIRGetProcessorAgglomFactor(pc, old_int, ierr)
       if (old_int == factor) then
@@ -2523,6 +2541,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Polynomial order must not be negative")
+         return
+      end if
+
       call PCAIRGetPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
          ierr = 0
@@ -2554,6 +2580,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Inverse sparsity order must not be negative")
+         return
+      end if
+
       call PCAIRGetInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
          ierr = 0
@@ -2584,6 +2618,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! -1 is how an unset value is stored, ie it follows the F point value
+      if (order < -1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "C point polynomial order must not be negative (or -1 to follow the F point value)")
+         return
+      end if
 
       call PCAIRGetCPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
@@ -2619,6 +2661,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! -1 is how an unset value is stored, ie it follows the F point value
+      if (order < -1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "C point inverse sparsity order must not be negative (or -1 to follow the F point value)")
+         return
+      end if
 
       call PCAIRGetCInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
@@ -2686,6 +2736,14 @@ module pcair_interfaces
       PetscInt                   :: old_int
       ! ~~~~~~~~
 
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Coarsest polynomial order must not be negative")
+         return
+      end if
+
       call PCAIRGetCoarsestPolyOrder(pc, old_int, ierr)
       if (old_int == order) then
          ierr = 0
@@ -2716,6 +2774,14 @@ module pcair_interfaces
       type(tPC)                  :: pc_shell      
       PetscInt                   :: old_int
       ! ~~~~~~~~
+
+      ! The order sizes the storage for the coefficients and the matrix powers
+      if (order < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Coarsest inverse sparsity order must not be negative")
+         return
+      end if
 
       call PCAIRGetCoarsestInverseSparsityOrder(pc, old_int, ierr)
       if (old_int == order) then
@@ -2918,10 +2984,26 @@ module pcair_interfaces
       PetscErrorCode, intent(out)   :: ierr
 
       type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell
+      PetscBool                  :: old_bool
       ! ~~~~~~~~
 
-      ! Set the options
-      call PCAIRGetOptions(pc, options)    
+      call PCAIRGetReuseSparsity(pc, old_bool, ierr)
+      if (old_bool .eqv. reuse) then
+         ierr = 0
+         return
+      end if
+
+      ! The reuse data is only stored by a setup that had reuse sparsity on, and
+      ! the diagonal update data only by one that had it off, so an existing
+      ! hierarchy can't be carried across a change - the next setup with the
+      ! same nonzero pattern would otherwise reuse (or update) data that was
+      ! never stored
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)
+
       options%reuse_sparsity = reuse
       ierr = 0
 

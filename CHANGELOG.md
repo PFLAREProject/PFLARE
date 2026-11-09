@@ -6,6 +6,23 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed the `diag_dom` CF splitting never finishing with a negative strong
+  threshold (its target diagonal dominance ratio)
+- Negative polynomial and sparsity orders, and a maximum number of levels below
+  1, are now refused by PCAIR and PCPFLAREINV rather than crashing the setup
+- `-pc_air_processor_agglom_factor` must now be at least 2; a factor of 1 hung
+  the setup and smaller values crashed it
+- Fixed PCAIR writing outside its per-level storage when `-pc_air_max_levels`
+  was raised above the default of 300 and the hierarchy had more than 300 levels
+- Fixed a crash building an assembled fixed sparsity GMRES polynomial inverse
+  of a matrix with rows that have no stored entries
+- `PCPFLAREINVSetPolyCoeffs()` now errors if given the wrong number of columns
+  for the inverse type, rather than the next setup reading outside the array
+- Fixed a matrix-free PCPFLAREINV reading freed memory after
+  `PCPFLAREINVSetPolyCoeffs()` when its inverse had been rebuilt from stored
+  coefficients; the inverse now keeps its own copy until the next setup
+- Fixed a crash when `PCAIRSetReuseSparsity()` changed the setting on a PCAIR
+  that was already set up; the hierarchy is now reset, as with the other options
 - On AMD GPUs, configure PETSc with Kokkos' `hipMallocAsync` pool off; see
   `docs/installation.md`. Several Kokkos comms in the CF splittings go back to
   direct PetscSF calls on device views, with fewer fences and temporary Vecs

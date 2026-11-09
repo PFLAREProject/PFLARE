@@ -984,6 +984,24 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_serial:
+	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
+	./pcair_option_changes -toggle_reuse_sparsity
+	./pcair_option_changes -toggle_reuse_sparsity -pc_air_reuse_sparsity
+	./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
+	@echo "Test PCAIR with more levels than the default maximum number of levels"
+	./pcair_option_changes -complete_graph -m 18 -nsteps 2 -min_levels 310 -pc_air_max_levels 400 \
+	 -pc_air_a_drop 0 -pc_air_r_drop 0 -pc_air_ddc_its 0
+	@echo "Test PCPFLAREINVSetPolyCoeffs leaves the inverse that is already built alone until the next setup"
+	./pflareinv_setcoeffs -pc_pflareinv_type arnoldi
+	./pflareinv_setcoeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+	./pflareinv_setcoeffs -pc_pflareinv_type newton
+	./pflareinv_setcoeffs -pc_pflareinv_type newton -pc_pflareinv_matrix_free
+	./pflareinv_setcoeffs -pc_pflareinv_type neumann
+	./pflareinv_setcoeffs -pc_pflareinv_type neumann -pc_pflareinv_matrix_free
+	@echo "Test the assembled fixed sparsity polynomial inverses on a matrix with empty rows"
+	./pflareinv_empty_rows -pc_pflareinv_type arnoldi
+	$(SKIP_SINGLE) ./pflareinv_empty_rows -pc_pflareinv_type power
+	./pflareinv_empty_rows -pc_pflareinv_type newton
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	./diag_update_check
 	./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
@@ -1750,6 +1768,15 @@ run_tests_no_load_parallel:
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
 else
+	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
+	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity
+	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
+	@echo "Test PCPFLAREINVSetPolyCoeffs leaves the inverse that is already built alone until the next setup"
+	$(MPIEXEC) -n 2 ./pflareinv_setcoeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+	$(MPIEXEC) -n 2 ./pflareinv_setcoeffs -pc_pflareinv_type newton -pc_pflareinv_matrix_free
+	@echo "Test the assembled fixed sparsity polynomial inverses on a matrix with empty rows"
+	$(MPIEXEC) -n 2 ./pflareinv_empty_rows -pc_pflareinv_type arnoldi
+	$(MPIEXEC) -n 2 ./pflareinv_empty_rows -pc_pflareinv_type newton
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	$(MPIEXEC) -n 2 ./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
 	$(MPIEXEC) -n 2 ./diag_update_check -laplacian -pc_air_symmetric

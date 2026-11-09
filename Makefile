@@ -205,6 +205,9 @@ export TEST_TARGETS = ex12f \
 		  ex6_two_airg \
 		  ilu_factors \
 		  reuse_preconditioner \
+		  pcair_option_changes \
+		  pflareinv_setcoeffs \
+		  pflareinv_empty_rows \
 		  operator_refcount \
 		  pcair_reuse_amount_range \
 		  comm_self_then_world \

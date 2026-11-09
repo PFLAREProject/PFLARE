@@ -381,8 +381,12 @@ module cf_splitting
       ! Only do the DDC pass if we're doing PMISR_DDC
       ! and if we haven't requested an exact independent set, ie strong threshold is not zero
       ! as this gives diagonal Aff)
-      if (strong_threshold /= 0d0 .AND. &
-            (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM)) then
+      ! For CF_DIAG_DOM the strong threshold is the target ratio, and a ratio is never
+      ! negative, so a target that isn't positive could never be met and the loop below
+      ! would never exit - the independent set from the first pass (everything is
+      ! strong with a threshold that isn't positive) is already the best we can do
+      if ((cf_splitting_type == CF_PMISR_DDC .AND. strong_threshold /= 0d0) .OR. &
+            (cf_splitting_type == CF_DIAG_DOM .AND. strong_threshold > 0d0)) then
 
          ! Do a set number of DDC iterations for PMISR_DDC.
          ! For CF_DIAG_DOM, iterate until the requested strong_threshold ratio is reached.
