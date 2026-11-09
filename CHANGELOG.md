@@ -6,6 +6,9 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- Fixed a matrix-free PCPFLAREINV reading freed memory after
+  `PCPFLAREINVSetPolyCoeffs()` when its inverse had been rebuilt from stored
+  coefficients; the inverse now keeps its own copy until the next setup
 - Fixed a crash when `PCAIRSetReuseSparsity()` changed the setting on a PCAIR
   that was already set up; the hierarchy is now reset, as with the other options
 - On AMD GPUs, configure PETSc with Kokkos' `hipMallocAsync` pool off; see

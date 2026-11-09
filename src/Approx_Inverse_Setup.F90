@@ -57,11 +57,12 @@ module approx_inverse_setup
       !     start_approximate_inverse is skipped entirely. buffers is set up manually
       !     (subcomm=.FALSE., buffers%matrix = matrix with ref incremented) so that
       !     finish_approximate_inverse can clean up normally. For a matrix-free inverse
-      !     the matshell does NOT take ownership (the caller owns them).
+      !     the matshell takes (and owns) a copy, the caller keeps ownership of theirs.
       !   - If present but not associated on entry: fresh coefficients are computed, a
       !     heap allocation is made, and on return the pointer is associated with that
-      !     allocation. For matrix-free the matshell also does NOT take ownership (the
-      !     caller takes ownership via the returned pointer).
+      !     allocation. For matrix-free the matshell owns that allocation and frees it
+      !     in reset_inverse_mat, so the caller must take a copy rather than keep the
+      !     pointer (the C binding does); otherwise the caller takes ownership of it.
       !   - If absent: existing behaviour. The matshell takes ownership of heap-allocated
       !     coefficients (matrix-free case) or stack storage is used (assembled case).
       !   - Non-polynomial inverse types (SAI, ISAI, WJACOBI, JACOBI, L1JACOBI) have no coefficients:
@@ -160,7 +161,17 @@ module approx_inverse_setup
          ! Replicate the non-subcomm setup that start_approximate_inverse
          ! would have done so that finish_approximate_inverse can clean up normally.
          ! ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-         work_coefficients => coefficients
+         ! A matshell points at its coefficients for as long as it lives, but the
+         ! caller is free to replace theirs before the next setup (e.g.,
+         ! PCPFLAREINVSetPolyCoeffs frees the stored ones), so give the matshell a
+         ! copy of its own, just like it has in the fresh path below
+         ! The builders free any coefficients the matshell already owns
+         if (matrix_free_shell) then
+            allocate(work_coefficients(size(coefficients, 1), size(coefficients, 2)))
+            work_coefficients = coefficients
+         else
+            work_coefficients => coefficients
+         end if
          buffers%on_subcomm = .FALSE.
          buffers%matrix     = matrix
          call PetscObjectReference(matrix, ierr)
@@ -169,10 +180,13 @@ module approx_inverse_setup
                      buffers, work_coefficients, &
                      matrix_free, diag_scale_polys, &
                      reuse_mat, reuse_submatrices, inv_matrix_temp)
-         ! Caller owns the coefficient memory; matshell must not free it
+         ! The matshell owns its copy and frees it in reset_inverse_mat
          if (matrix_free_shell) then
             call MatShellGetContext(inv_matrix_temp, mat_ctx, ierr)
-            mat_ctx%own_coefficients = .FALSE.
+            mat_ctx%own_coefficients = .TRUE.
+            ! The caller's coefficients are always the ones the inverse applies
+            ! (the Neumann polynomial sets its own to one)
+            coefficients = work_coefficients
          end if
 
       else

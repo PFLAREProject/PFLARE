@@ -988,6 +988,13 @@ run_tests_no_load_serial:
 	./pcair_option_changes -toggle_reuse_sparsity
 	./pcair_option_changes -toggle_reuse_sparsity -pc_air_reuse_sparsity
 	./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
+	@echo "Test PCPFLAREINVSetPolyCoeffs leaves the inverse that is already built alone until the next setup"
+	./pflareinv_setcoeffs -pc_pflareinv_type arnoldi
+	./pflareinv_setcoeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+	./pflareinv_setcoeffs -pc_pflareinv_type newton
+	./pflareinv_setcoeffs -pc_pflareinv_type newton -pc_pflareinv_matrix_free
+	./pflareinv_setcoeffs -pc_pflareinv_type neumann
+	./pflareinv_setcoeffs -pc_pflareinv_type neumann -pc_pflareinv_matrix_free
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	./diag_update_check
 	./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
@@ -1757,6 +1764,9 @@ else
 	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
 	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity
 	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
+	@echo "Test PCPFLAREINVSetPolyCoeffs leaves the inverse that is already built alone until the next setup"
+	$(MPIEXEC) -n 2 ./pflareinv_setcoeffs -pc_pflareinv_type arnoldi -pc_pflareinv_matrix_free
+	$(MPIEXEC) -n 2 ./pflareinv_setcoeffs -pc_pflareinv_type newton -pc_pflareinv_matrix_free
 	@echo "Test the coarse perturbations of a PCAIR diagonal update against an explicit calculation, and the C point rows of P"
 	$(MPIEXEC) -n 2 ./diag_update_check -pc_air_smooth_type fc -pc_air_one_point_classical_prolong 0
 	$(MPIEXEC) -n 2 ./diag_update_check -laplacian -pc_air_symmetric
