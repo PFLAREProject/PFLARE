@@ -729,7 +729,6 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_Z, global_row_end_plus_one_Z;
-   PetscInt global_col_start_Z, global_col_end_plus_one_Z;
    PetscInt local_coarse_size, local_fine_size, local_full_cols;
    PetscInt global_coarse_size, global_fine_size, global_full_cols;
    PetscInt rows_ao, cols_ao, rows_ad, cols_ad, size_cols;
@@ -782,7 +781,6 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscCallVoid(MatGetSize(*input_mat, &global_rows_z, &global_cols_z));
 
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_Z, &global_row_end_plus_one_Z));
-   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_Z, &global_col_end_plus_one_Z));
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    PetscCallVoid(MatGetSize(mat_local, &rows_ad, &cols_ad));   
@@ -790,45 +788,36 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    // We can reuse the orig_fine_col_indices as they can be expensive to generate in parallel
    if (!reuse_indices_int)
    {
-      PetscInt *col_indices_off_proc_array;
-      IS col_indices;
+      // The local columns of Z are the local fine points in order, so their original
+      // indices are just the local entries of is_fine and need no comms
+      // Only the off-processor columns have to be looked up on other ranks
+      PetscInt *orig_indices_array;
+      const PetscInt *fine_indices_local;
+      size_cols = mpi ? cols_ad + cols_ao : cols_ad;
 
-      // Build these on the host as we need to call host routines 
-      // on them anyway, we can transfer the result to the device
+      PetscCallVoid(PetscMalloc1(size_cols, &orig_indices_array));
+      PetscCallVoid(ISGetIndices(*is_fine, &fine_indices_local));
+      PetscCallVoid(PetscArraycpy(orig_indices_array, fine_indices_local, cols_ad));
+      PetscCallVoid(ISRestoreIndices(*is_fine, &fine_indices_local));
+
       if (mpi)
       {
-         PetscCallVoid(PetscMalloc1(cols_ad + cols_ao, &col_indices_off_proc_array));
-         size_cols = cols_ad + cols_ao;
-         for (PetscInt i = 0; i < cols_ad; i++)
-         {
-            col_indices_off_proc_array[i] = global_col_start_Z + i;
-         }
-         for (PetscInt i = 0; i < cols_ao; i++)
-         {
-            col_indices_off_proc_array[cols_ad + i] = colmap_input[i];
-         }                   
-      }
-      else
-      {
-         PetscCallVoid(PetscMalloc1(cols_ad, &col_indices_off_proc_array));
-         size_cols = cols_ad;
-         for (PetscInt i = 0; i < cols_ad; i++)
-         {
-            col_indices_off_proc_array[i] = global_col_start_Z + i;
-         }
+         IS col_indices, orig_nonlocal;
+         const PetscInt *orig_nonlocal_ptr;
+
+         // Has to be called on every rank, even those without off-processor columns, as it is collective
+         PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, cols_ao, colmap_input, PETSC_USE_POINTER, &col_indices));
+         // This could be expensive as the number of off-processor columns in Z grows!
+         PetscCallVoid(ISCreateSubIS(*is_fine, col_indices, &orig_nonlocal));
+         PetscCallVoid(ISGetIndices(orig_nonlocal, &orig_nonlocal_ptr));
+         PetscCallVoid(PetscArraycpy(orig_indices_array + cols_ad, orig_nonlocal_ptr, cols_ao));
+         PetscCallVoid(ISRestoreIndices(orig_nonlocal, &orig_nonlocal_ptr));
+         PetscCallVoid(ISDestroy(&orig_nonlocal));
+         PetscCallVoid(ISDestroy(&col_indices));
       }
 
-      // Create the IS we want with the cols we want (written as global indices)
-      PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, size_cols, col_indices_off_proc_array, PETSC_USE_POINTER, &col_indices));
-
-      // Now let's do the comms to get what the original column indices in the full matrix are, given these indices for all 
-      // the columns of Z - ie we need to check in the original fine indices at the positions given by col_indices_off_proc_array
-      // This could be expensive as the number of off-processor columns in Z grows!
-      PetscCallVoid(ISCreateSubIS(*is_fine, col_indices, orig_fine_col_indices));
-
-      // We've now built the original fine indices
-      PetscCallVoid(ISDestroy(&col_indices));
-      PetscCallVoid(PetscFree(col_indices_off_proc_array));
+      // The original fine indices of all the columns of Z, local then off-processor
+      PetscCallVoid(ISCreateGeneral(MPI_COMM_MATRIX, size_cols, orig_indices_array, PETSC_OWN_POINTER, orig_fine_col_indices));
    }
    else
    {

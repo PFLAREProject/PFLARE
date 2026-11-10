@@ -593,7 +593,6 @@ module grid_transfer
       logical, intent(in) :: identity, reuse
 
       PetscInt :: global_row_start_Z, global_row_end_plus_one_Z
-      PetscInt :: global_col_start_Z, global_col_end_plus_one_Z
       PetscInt :: local_coarse_size, local_fine_size, local_full_cols
       PetscInt :: i_loc, ncols, max_ncols
       PetscInt :: global_coarse_size, global_fine_size, global_full_cols
@@ -612,9 +611,10 @@ module grid_transfer
       PetscInt, dimension(:), pointer :: colmap
       PetscInt, parameter :: nz_ignore = -1, one=1, zero=0
       type(tMat) :: Ad, Ao
-      PetscInt, dimension(:), pointer :: col_indices_off_proc_array
-      type(tIS) :: col_indices
+      PetscInt, allocatable, dimension(:) :: orig_indices_array
+      type(tIS) :: col_indices, orig_nonlocal
       PetscInt, dimension(:), pointer :: is_pointer_orig_fine_col, is_pointer_coarse, is_pointer_fine
+      PetscInt, dimension(:), pointer :: is_pointer_orig_nonlocal
       integer(c_long_long) :: A_array
       MatType:: mat_type
 
@@ -639,7 +639,6 @@ module grid_transfer
       call MatGetSize(Z, global_rows_z, global_cols_z, ierr) 
       
       call MatGetOwnershipRange(Z, global_row_start_Z, global_row_end_plus_one_Z, ierr)  
-      call MatGetOwnershipRangeColumn(Z, global_col_start_Z, global_col_end_plus_one_Z, ierr)   
 
       call MatGetType(Z, mat_type, ierr)
 
@@ -661,46 +660,35 @@ module grid_transfer
       ! We can reuse the orig_fine_col_indices as they can be expensive to generate in parallel
       if (PetscObjectIsNull(orig_fine_col_indices)) then
             
-         ! Now we need the global off-processor column indices in Z
-         if (comm_size /= 1) then 
-            
-            ! These are the global indices of the columns we want
-            allocate(col_indices_off_proc_array(cols_ad + cols_ao))
-            size_cols = cols_ad + cols_ao
-            ! Local rows (as global indices)
-            do i_loc = 1, cols_ad
-               col_indices_off_proc_array(i_loc) = global_col_start_Z + i_loc - 1
-            end do
-            ! Off diagonal rows we want (as global indices)
-            do i_loc = 1, cols_ao
-               col_indices_off_proc_array(cols_ad + i_loc) = colmap(i_loc)
-            end do            
-            ! These indices are not sorted, we deliberately have the local ones first then the 
-            ! off processor ones, as we insert Z into the full matrix in pieces
-            ! with Ad, then Ao, so that way we can index into orig_fine_col_indices in that order
+         ! The local columns of Z are the local fine points in order, so their original
+         ! indices are just the local entries of is_fine and need no comms
+         ! We deliberately have the local ones first then the off processor ones, as we
+         ! insert Z into the full matrix in pieces with Ad, then Ao, so that way we can
+         ! index into orig_fine_col_indices in that order
+         size_cols = cols_ad
+         if (comm_size /= 1) size_cols = cols_ad + cols_ao
+         allocate(orig_indices_array(size_cols))
+         orig_indices_array(1:cols_ad) = is_pointer_fine(1:cols_ad)
 
-         else
+         ! Only the off-processor columns have to be looked up on other ranks
+         if (comm_size /= 1) then
 
-            ! These are the global indices of the columns we want
-            allocate(col_indices_off_proc_array(cols_ad))
-            size_cols = cols_ad
-            ! Local rows (as global indices)
-            do i_loc = 1, cols_ad
-               col_indices_off_proc_array(i_loc) = global_col_start_Z + i_loc - 1
-            end do
+            ! Has to be called on every rank, even those without off-processor columns, as it is collective
+            call ISCreateGeneral(MPI_COMM_MATRIX, cols_ao, colmap, PETSC_USE_POINTER, col_indices, ierr)
+            ! This could be expensive as the number of off-processor columns in Z grows!
+            call ISCreateSubIS(is_fine, col_indices, orig_nonlocal, ierr)
+            call ISGetIndices(orig_nonlocal, is_pointer_orig_nonlocal, ierr)
+            orig_indices_array(cols_ad + 1:size_cols) = is_pointer_orig_nonlocal(1:cols_ao)
+            call ISRestoreIndices(orig_nonlocal, is_pointer_orig_nonlocal, ierr)
+            call ISDestroy(orig_nonlocal, ierr)
+            call ISDestroy(col_indices, ierr)
+
          end if
 
-         ! Create the IS we want with the cols we want (written as global indices)
-         call ISCreateGeneral(MPI_COMM_MATRIX, size_cols, col_indices_off_proc_array, PETSC_USE_POINTER, col_indices, ierr)
-
-         ! Now let's do the comms to get what the original column indices in the full matrix are, given these indices for all 
-         ! the columns of Z - ie we need to check in the original fine indices at the positions given by col_indices_off_proc_array
-         ! This could be expensive as the number of off-processor columns in Z grows!
-         call ISCreateSubIS(is_fine, col_indices, orig_fine_col_indices, ierr)
-
-         ! We've now built the original fine indices
-         call ISDestroy(col_indices, ierr)
-         deallocate(col_indices_off_proc_array)  
+         ! The original fine indices of all the columns of Z, local then off-processor
+         call ISCreateGeneral(MPI_COMM_MATRIX, size_cols, orig_indices_array, PETSC_COPY_VALUES, &
+                  orig_fine_col_indices, ierr)
+         deallocate(orig_indices_array)
 
       end if
 
