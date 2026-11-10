@@ -729,7 +729,6 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_Z, global_row_end_plus_one_Z;
-   PetscInt global_col_start_Z, global_col_end_plus_one_Z;
    PetscInt local_coarse_size, local_fine_size, local_full_cols;
    PetscInt global_coarse_size, global_fine_size, global_full_cols;
    PetscInt rows_ao, cols_ao, rows_ad, cols_ad, size_cols;
@@ -782,7 +781,6 @@ PETSC_INTERN void compute_R_from_Z_kokkos(Mat *input_mat, PetscInt global_row_st
    PetscCallVoid(MatGetSize(*input_mat, &global_rows_z, &global_cols_z));
 
    PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_Z, &global_row_end_plus_one_Z));
-   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_Z, &global_col_end_plus_one_Z));
 
    PetscCallVoid(MatGetType(*input_mat, &mat_type));
    PetscCallVoid(MatGetSize(mat_local, &rows_ad, &cols_ad));   
