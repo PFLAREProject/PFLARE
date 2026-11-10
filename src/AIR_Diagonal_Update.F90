@@ -155,14 +155,14 @@ module air_diagonal_update
 
             call timer_start(TIMER_ID_AIR_RESTRICT)
             ! The scaling a_ff / (a_ff + d_f) clipped at one
+            temp_vec = air_data%temp_vecs_fine(3)%array(our_level)
+            call VecSet(temp_vec, PFLARE_ONE, ierr)
             call VecPointwiseDivide(f_new, air_data%diag_update_base_aff(our_level), f_new, ierr)
-            call clip_at_one(f_new, air_data%temp_vecs_fine(3)%array(our_level), &
-                     air_data%temp_vecs_fine(4)%array(our_level))
+            call VecPointwiseMin(f_new, f_new, temp_vec, ierr)
             ! R has already been scaled by the clipped a_ff / (a_ff + d_f_old), so scale by 
             ! the ratio of the new scaling to that
             call VecPointwiseDivide(f_old, air_data%diag_update_base_aff(our_level), f_old, ierr)
-            call clip_at_one(f_old, air_data%temp_vecs_fine(3)%array(our_level), &
-                     air_data%temp_vecs_fine(4)%array(our_level))
+            call VecPointwiseMin(f_old, f_old, temp_vec, ierr)
             call VecPointwiseDivide(f_old, f_new, f_old, ierr)
             ! The scaling on all the points on this level, one on the C points
             call VecSet(work, PFLARE_ONE, ierr)
@@ -233,7 +233,7 @@ module air_diagonal_update
                call MatMult(air_data%restrictors(our_level), work, c_vec, ierr)
             end if
          end if
-         call pointwise_max(d_coarse, c_vec)
+         call VecPointwiseMax(d_coarse, d_coarse, c_vec, ierr)
          call timer_finish(TIMER_ID_AIR_RAP)
 
          ! The coarse perturbation becomes the perturbation on the next level
@@ -271,53 +271,6 @@ module air_diagonal_update
       end if
 
    end subroutine update_air_diag
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine pointwise_max(vec, other)
-
-      ! Replaces each entry of vec with max(vec, other), written as
-      ! (vec + other + |vec - other|) / 2 with vector operations that run on the device, 
-      ! as VecPointwiseMax doesn't, and without a temporary. Other is overwritten
-
-      ! ~~~~~~
-      type(tVec), intent(inout) :: vec, other
-
-      PetscErrorCode :: ierr
-      ! ~~~~~~
-
-      ! other = vec + other, vec = vec - other
-      call VecAXPY(other, PFLARE_ONE, vec, ierr)
-      call VecAXPBY(vec, PFLARE_MINUS_ONE, 2 * PFLARE_ONE, other, ierr)
-      call VecAbs(vec, ierr)
-      call VecAXPY(vec, PFLARE_ONE, other, ierr)
-      call VecScale(vec, PFLARE_HALF, ierr)
-
-   end subroutine pointwise_max
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine clip_at_one(vec, temp_a, temp_b)
-
-      ! Replaces each entry of vec with min(1, vec), written as 
-      ! vec - (vec - 1 + |vec - 1|) / 2 with vector operations that run on the device
-      ! Where an entry is at most one, vec - 1 + |vec - 1| is exactly zero, so it doesn't change
-      ! The temporaries must have the same layout as vec
-
-      ! ~~~~~~
-      type(tVec), intent(inout) :: vec, temp_a, temp_b
-
-      PetscErrorCode :: ierr
-      ! ~~~~~~
-
-      call VecCopy(vec, temp_a, ierr)
-      call VecShift(temp_a, PFLARE_MINUS_ONE, ierr)
-      call VecCopy(temp_a, temp_b, ierr)
-      call VecAbs(temp_b, ierr)
-      call VecAXPY(temp_a, PFLARE_ONE, temp_b, ierr)
-      call VecAXPY(vec, -PFLARE_HALF, temp_a, ierr)
-
-   end subroutine clip_at_one
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
