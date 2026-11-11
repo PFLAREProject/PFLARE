@@ -228,6 +228,19 @@ module c_petsc_interfaces
    end interface     
 
    interface   
+
+      subroutine pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, measure_local) &
+         bind(c, name="pmisr_from_matrix_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscReal, value :: strong_threshold
+         integer(c_int), value :: max_luby_steps
+         type(c_ptr), value :: measure_local
+      end subroutine pmisr_from_matrix_kokkos
+
+   end interface     
+
+   interface   
       
       subroutine MatDiagDomRatio_kokkos(A_array, max_dd_ratio_achieved, local_rows_aff) &
          bind(c, name="MatDiagDomRatio_kokkos")

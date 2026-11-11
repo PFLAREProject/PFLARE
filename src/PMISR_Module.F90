@@ -3,7 +3,7 @@ module pmisr_module
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug
-   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h
+   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h, pmisr_from_matrix_kokkos
    use pflare_parameters, only: C_POINT, F_POINT
 
 #include "petsc/finclude/petscmat.h"
@@ -116,6 +116,67 @@ module pmisr_module
 
    end subroutine pmisr
    
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_from_matrix(input_mat, strong_threshold, max_luby_steps, cf_markers_local)
+
+      ! First pass PMISR straight from the level matrix, without building the strength
+      ! matrix or its transpose. The cf markers are left on the device, as with pmisr
+      ! The measure uses the same random numbers as pmisr, so the result matches
+      ! generate_sabs followed by pmisr
+
+      ! ~~~~~~
+
+      type(tMat), target, intent(in)      :: input_mat
+      PetscReal, intent(in)               :: strong_threshold
+      integer, intent(in)                 :: max_luby_steps
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
+
+      integer :: errorcode
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer(c_long_long) :: A_array
+      integer :: seed_size, kfree, comm_rank
+      integer, dimension(:), allocatable :: seed
+      PetscReal, dimension(:), allocatable, target :: measure_local
+      PetscInt :: local_rows, local_cols
+#endif
+
+      ! ~~~~~~~~~~
+
+      if (max_luby_steps == 0) then
+         print *, "max_luby_steps must be positive or negative (0 is invalid)"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+#if defined(PETSC_HAVE_KOKKOS)
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
+      call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+
+      allocate(measure_local(local_rows))
+      call random_seed(size=seed_size)
+      allocate(seed(seed_size))
+      do kfree = 1, seed_size
+         seed(kfree) = comm_rank + 1 + kfree
+      end do
+      call random_seed(put=seed)
+      call random_number(measure_local)
+      deallocate(seed)
+
+      allocate(cf_markers_local(local_rows))
+
+      A_array = input_mat%v
+      call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, c_loc(measure_local))
+      deallocate(measure_local)
+#else
+      print *, "pmisr_from_matrix needs PETSc built with Kokkos"
+      call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+#endif
+
+   end subroutine pmisr_from_matrix
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine pmisr_cpu(strength_mat, max_luby_steps, pmis, &
