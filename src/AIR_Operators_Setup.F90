@@ -1032,7 +1032,12 @@ module air_operators_setup
          else
 
             call MatPtap(A, air_data%prolongators(our_level), &
-                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)          
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+            ! The product data references A and P, so clear it if we're not reusing
+            ! MAT_RAP may become the coarse matrix if nothing is dropped
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)) &
+               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
          end if
 
       ! ~~~~~~~~~~~
