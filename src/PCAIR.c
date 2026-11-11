@@ -17,6 +17,8 @@ PETSC_EXTERN void create_pc_air_data_c(void **pc_air_data);
 PETSC_EXTERN void create_pc_air_shell_c(void **pc_air_data, PC *pc);
 PETSC_EXTERN void pcair_shell_block_matapply_c(PC *pc, Mat *X, Mat *Y, int *applied, int *error_code);
 PETSC_EXTERN void pcair_shell_get_pcmg_c(PC *pc, PC *pcmg);
+PETSC_INTERN PetscErrorCode PFLARENoInodesBegin_c(Mat mat, PetscBool *pushed);
+PETSC_INTERN PetscErrorCode PFLARENoInodesEnd_c(PetscBool pushed);
 PETSC_EXTERN void compute_cf_splitting_c(Mat *input_mat, int skip_symmetrize_int,
    PetscReal strong_threshold, int max_luby_steps, int cf_splitting_type,
    int ddc_its, PetscReal fraction_swap,
@@ -269,7 +271,13 @@ static PetscErrorCode PCSetUp_AIR_c(PC pc)
 
    // Now we should be able to call the pcshell setup
    // that builds the air hierarchy
-   PetscCall(PCSetUp(*pc_air_shell));
+   // With Kokkos matrices we skip PETSc's host inode check on every matrix built during it,
+   // and always undo that before returning, even if the setup fails
+   PetscBool no_inodes_pushed;
+   PetscCall(PFLARENoInodesBegin_c(pc->pmat, &no_inodes_pushed));
+   PetscErrorCode setup_err = PCSetUp(*pc_air_shell);
+   PetscCall(PFLARENoInodesEnd_c(no_inodes_pushed));
+   PetscCall(setup_err);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

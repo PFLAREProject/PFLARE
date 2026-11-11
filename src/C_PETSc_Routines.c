@@ -413,3 +413,36 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// PETSc checks every new SeqAIJ matrix for inodes on the host when it is assembled, which for
+// Kokkos matrices built on the device is host work that buys nothing, as the device kernels never
+// use inodes. The check happens inside PETSc as each matrix is created (including PETSc's own
+// product matrices), so it can't be switched off per matrix with MAT_USE_INODES. Instead, while a
+// PFLARE setup runs on a Kokkos matrix, we set -mat_no_inode in the global options database (as
+// if it were given on the command line) and remove it afterwards. If the user has set
+// -mat_no_inode themselves, either way, we leave it alone
+// This could be removed if PETSc skipped the inode check for Kokkos matrices
+PETSC_INTERN PetscErrorCode PFLARENoInodesBegin_c(Mat mat, PetscBool *pushed)
+{
+   PetscBool is_kokkos, user_set;
+
+   PetscFunctionBegin;
+   *pushed = PETSC_FALSE;
+   PetscCall(PetscObjectTypeCompareAny((PetscObject)mat, &is_kokkos, MATSEQAIJKOKKOS, MATMPIAIJKOKKOS, ""));
+   if (!is_kokkos) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PetscOptionsHasName(NULL, NULL, "-mat_no_inode", &user_set));
+   if (user_set) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PetscOptionsSetValue(NULL, "-mat_no_inode", NULL));
+   *pushed = PETSC_TRUE;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Undoes PFLARENoInodesBegin_c
+PETSC_INTERN PetscErrorCode PFLARENoInodesEnd_c(PetscBool pushed)
+{
+   PetscFunctionBegin;
+   if (pushed) PetscCall(PetscOptionsClearValue(NULL, "-mat_no_inode"));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}

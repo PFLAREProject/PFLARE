@@ -9,6 +9,9 @@ for earlier changes please see the git history.
 - The first pass of the PMISR DDC and diagonal dominance CF splittings now runs
   straight from the matrix with Kokkos, without building the strength matrix,
   which cuts the GPU coarsening time; the CF splitting is unchanged
+- With Kokkos matrices, PCAIR and PCPFLAREINV setups skip PETSc's host inode
+  check on the matrices they build, as if `-mat_no_inode` were set (unless the
+  user sets it); the device kernels never use inodes
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
