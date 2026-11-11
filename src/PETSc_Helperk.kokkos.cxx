@@ -324,9 +324,13 @@ static void launch_drop_small_rows(const DropSmallRowsFunctor &functor, const in
 //------------------------------------------------------------------------------------------------------------------------
 
 // Drop according to a tolerance but with kokkos - keeping everything on the device
+// If allow_alias_int is set and nothing would be dropped (or added) on any rank, the output
+// is the input itself with its reference count increased, rather than an identical copy
+// Only set it if the caller doesn't modify or reuse either matrix in a way that needs them to be separate
 PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscReal tol, Mat *output_mat, \
                   const int relative_max_row_tolerance_int, const int lump_int, \
-                  const int allow_drop_diagonal_int, const int allow_diag_strength_int)
+                  const int allow_drop_diagonal_int, const int allow_diag_strength_int, \
+                  const int allow_alias_int)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_rows, global_cols;
@@ -450,6 +454,48 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
          nnzs_match_nonlocal);
    }
 
+   // Did we add a diagonal to any row for lumping
+   bool added_any_diagonal = false;
+   if (lump_int)
+   {
+      boolKokkosView existing_diag_d = functor.existing_diag_d;
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(exec, 0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, bool& thread_result) {
+            // If this row had a diagonal added, set the result to true
+            if (!existing_diag_d(i)) thread_result = true;
+         },
+         Kokkos::LOr<bool>(added_any_diagonal)
+      );
+   }
+
+   // ~~~~~~~~~~~~
+   // If we're allowed, check whether the output would just be a copy of the input
+   // ~~~~~~~~~~~~
+   // If every entry is kept and no diagonal is added, the kept values are the input values and
+   // a lumped diagonal is just the diagonal, so the output would be identical to the input
+   // Every rank has to agree as the output is a parallel matrix
+   if (allow_alias_int)
+   {
+      MatInfo info_local, info_nonlocal;
+      PetscCallVoid(MatGetInfo(mat_local, MAT_LOCAL, &info_local));
+      if (mpi) PetscCallVoid(MatGetInfo(mat_nonlocal, MAT_LOCAL, &info_nonlocal));
+      const PetscInt nnz_in_local = static_cast<PetscInt>(info_local.nz_used);
+      const PetscInt nnz_in_nonlocal = mpi ? static_cast<PetscInt>(info_nonlocal.nz_used) : 0;
+      int unchanged_local = !added_any_diagonal && nnzs_match_local == nnz_in_local && \
+                  nnzs_match_nonlocal == nnz_in_nonlocal;
+      int unchanged = 0;
+      PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&unchanged_local, &unchanged, 1, MPI_INT, MPI_LAND, MPI_COMM_MATRIX));
+      if (unchanged)
+      {
+         PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
+         if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+         PetscCallVoid(PetscObjectReference((PetscObject)*input_mat));
+         *output_mat = *input_mat;
+         return;
+      }
+   }
+
    // ~~~~~~~~~~~~
    // Fill the output i, j and values
    // ~~~~~~~~~~~~
@@ -495,18 +541,6 @@ PETSC_INTERN void remove_small_from_sparse_kokkos(Mat *input_mat, const PetscRea
    // Now we may have to sort the column indices
    if (lump_int)
    {
-      // Reduce to see if we ever added a diagonal
-      bool added_any_diagonal = false;
-      boolKokkosView existing_diag_d = functor.existing_diag_d;
-      Kokkos::parallel_reduce(
-         Kokkos::RangePolicy<>(exec, 0, local_rows),
-         KOKKOS_LAMBDA(const PetscInt i, bool& thread_result) {
-            // If this row had a diagonal added, set the result to true
-            if (!existing_diag_d(i)) thread_result = true;
-         },
-         Kokkos::LOr<bool>(added_any_diagonal)
-      );
-
       // If we did add a diagonal, it got added to the end of the columns on each row, so will have to sort
       // It also could have been added to either the local or nonlocal components given not square
       if (added_any_diagonal)
