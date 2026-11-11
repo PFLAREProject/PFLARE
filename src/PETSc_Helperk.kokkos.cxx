@@ -1776,18 +1776,93 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Does a MatGetSubMatrix for a sequential Kokkos matrix - the petsc version currently uses the host making it very slow
+// Row kernels for MatCreateSubMatrix_Seq_kokkos
+// Each team handles team_size rows, one thread per row, with vector lanes over the
+// columns in that row
+struct SubMatrixRowsFunctor {
+   struct CountTag {};
+   struct FillTag {};
+
+   PetscIntKokkosView is_row;
+   const PetscInt *in_i = nullptr, *in_j = nullptr;
+   Kokkos::View<const PetscScalar *> in_a;
+   // smap(col) is the output column + 1, or 0 if the column isn't kept
+   PetscIntKokkosView smap;
+   PetscInt nrows = 0;
+   // Count: number of kept entries in each row goes into count_out[row + 1]
+   PetscInt *count_out = nullptr;
+   // Fill: start of each output row, and the output j (only written if not null) and values
+   const PetscInt *out_i = nullptr;
+   PetscInt *out_j = nullptr;
+   PetscScalar *out_a = nullptr;
+
+   KOKKOS_INLINE_FUNCTION void operator()(const CountTag &, const KokkosTeamMemberType &t) const
+   {
+      const PetscInt row_start = t.league_rank() * t.team_size();
+      const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt i_idx_is_row) {
+         const PetscInt i = is_row(i_idx_is_row);
+         const PetscInt row_offset = in_i[i];
+         PetscInt row_count = 0;
+         Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, in_i[i + 1] - row_offset),
+            [&](const PetscInt k, PetscInt &count) {
+               if (smap(in_j[row_offset + k])) count++;
+            }, row_count);
+         Kokkos::single(Kokkos::PerThread(t), [&]() { count_out[i_idx_is_row + 1] = row_count; });
+      });
+   }
+
+   // The vector lanes do an exclusive scan over the kept flags to find their output position,
+   // so the kept entries stay in the order of the input row
+   KOKKOS_INLINE_FUNCTION void operator()(const FillTag &, const KokkosTeamMemberType &t) const
+   {
+      const PetscInt row_start = t.league_rank() * t.team_size();
+      const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt i_idx_is_row) {
+         const PetscInt i = is_row(i_idx_is_row);
+         const PetscInt row_offset = in_i[i];
+         const PetscInt out_offset = out_i[i_idx_is_row];
+         Kokkos::parallel_scan(Kokkos::ThreadVectorRange(t, in_i[i + 1] - row_offset),
+            [&](const PetscInt k, PetscInt &partial_sum, const bool is_final) {
+               const PetscInt col = smap(in_j[row_offset + k]);
+               if (col) {
+                  if (is_final) {
+                     if (out_j) out_j[out_offset + partial_sum] = col - 1;
+                     out_a[out_offset + partial_sum] = in_a(row_offset + k);
+                  }
+                  partial_sum++;
+               }
+            });
+      });
+   }
+};
+
+// Launches one of the SubMatrixRowsFunctor kernels over all the rows
+template <class Tag>
+static void launch_submatrix_rows(const SubMatrixRowsFunctor &functor, const int vector_length)
+{
+   if (functor.nrows == 0) return;
+   auto exec = PetscGetKokkosExecutionSpace();
+   Kokkos::TeamPolicy<Tag> probe(exec, 1, 1, vector_length);
+   int team_size = std::max(1, 256 / vector_length);
+   team_size = std::min(team_size, probe.team_size_max(functor, Kokkos::ParallelForTag()));
+   const int league_size = static_cast<int>((functor.nrows + team_size - 1) / team_size);
+   Kokkos::parallel_for(Kokkos::TeamPolicy<Tag>(exec, league_size, team_size, vector_length), functor);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Does a MatCreateSubMatrix on a sequential Kokkos matrix
 // is_row_d_d and is_col_d_d must have the local indices in them
 // is_col must be sorted
 PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
 {
    PetscInt local_rows, local_cols;
-   PetscInt nnzs_match_local;
-   auto exec = PetscGetKokkosExecutionSpace();   
+   auto exec = PetscGetKokkosExecutionSpace();
 
    PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
-   PetscInt local_rows_row = is_row_d_d.extent(0), local_cols_col = is_col_d_d.extent(0);
-   
+   const PetscInt local_rows_row = is_row_d_d.extent(0), local_cols_col = is_col_d_d.extent(0);
+
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos view to the values
    // ~~~~~~~~~~~~
@@ -1797,290 +1872,99 @@ PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosVi
    Kokkos::View<const PetscScalar *> device_local_vals;
    PetscCallVoid(MatSeqAIJGetKokkosView(*input_mat, &device_local_vals));
 
-   PetscIntKokkosView nnz_match_local_row_d;
+   // If no columns are kept the output has no entries, so there is nothing to compute
+   // This is common for the off-diagonal block, where it saves launching kernels over every row
+   const bool no_cols = local_cols_col == 0;
 
-   // Get device views
-   Kokkos::View<PetscScalar *> a_local_d;
-   Kokkos::View<PetscInt *> i_local_d;  
-   Kokkos::View<PetscInt *> j_local_d;    
-
-   // ~~~~~~~~~~~~
-   // Get the number of nnzs
-   // ~~~~~~~~~~~~
-   nnzs_match_local = 0;
-
-   // We need to know how many entries are in each row 
-   nnz_match_local_row_d = PetscIntKokkosView("nnz_match_local_row_d", local_rows_row);
-   // We may have identity
-   Kokkos::deep_copy(exec, nnz_match_local_row_d, 0);
+   SubMatrixRowsFunctor functor;
+   functor.is_row = is_row_d_d;
+   functor.in_i = device_local_i;
+   functor.in_j = device_local_j;
+   functor.in_a = device_local_vals;
+   functor.nrows = local_rows_row;
 
    // Map which columns in the original mat are in is_col
-   PetscIntKokkosView smap_d = PetscIntKokkosView("smap_d", local_cols);
-   Kokkos::deep_copy(exec, smap_d, 0);
-   // Loop over all the cols in is_col
-   Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {      
-
-         smap_d(is_col_d_d(i)) = i + 1; 
-   });     
-   
-   // ~~~~~~~~~~~~
-   // Need to count the number of nnzs we end up with, on each row and in total
-   // ~~~~~~~~~~~~
-   // Only loop over the number of rows in is_row
-   if (!reuse_int)
+   if (!no_cols)
    {
-      Kokkos::parallel_reduce(
-         Kokkos::TeamPolicy<>(exec, local_rows_row, Kokkos::AUTO()),
-         KOKKOS_LAMBDA(const KokkosTeamMemberType &t, PetscInt& thread_total) {
-
-         const PetscInt i_idx_is_row = t.league_rank();
-         const PetscInt i   = is_row_d_d(i_idx_is_row);
-         const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-
-         // nnz count for this row
-         PetscInt row_result = 0;
-
-         // Reduce over all the columns
-         Kokkos::parallel_reduce(
-            Kokkos::TeamThreadRange(t, ncols_local),
-            [&](const PetscInt j, PetscInt& thread_data) {
-
-               // Get this local column in the input_mat
-               PetscInt target_col = device_local_j[device_local_i[i] + j];
-               if (smap_d(target_col))
-               {
-                  thread_data++;
-               }
-            }, row_result
-         );
-
-         // We're finished our parallel reduction for this row
-         // Only want one thread in the team to write the result
-         Kokkos::single(Kokkos::PerTeam(t), [&]() {
-            nnz_match_local_row_d(i_idx_is_row) = row_result;
-            thread_total += row_result;
-         });
-         },
-         nnzs_match_local
-      );
-   }
-
-   // ~~~~~~~~~~~~  
-
-   // Find maximum non-zeros over each of the is_row of the input mat for sizing scratch memory
-   PetscInt max_nnz_local = 0;
-   if (local_rows_row > 0) {
-
-      Kokkos::parallel_reduce("FindMaxNNZ", Kokkos::RangePolicy<>(exec, 0, local_rows_row),
-         KOKKOS_LAMBDA(const PetscInt i_idx_is_row, PetscInt& thread_max) {
-            // The indices in is_row will be global, but we want the local index
-            const PetscInt i = is_row_d_d(i_idx_is_row);
-            PetscInt row_nnz = device_local_i[i + 1] - device_local_i[i];
-            thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
-         },
-         Kokkos::Max<PetscInt>(max_nnz_local)
-      );
-   }     
-
-   // Create a team policy with scratch memory allocation
-   // We want scratch space for each row
-   // We will ncols+1 of integers which tell us what the matching indices we have
-   const size_t per_view_local = ScratchIntView::shmem_size(max_nnz_local+1);
-
-   Kokkos::TeamPolicy<> policy(exec, local_rows_row, Kokkos::AUTO());
-   // We're gonna use the level 1 scratch as our column data is probably bigger than the level 0
-   policy.set_scratch_size(1, Kokkos::PerTeam(per_view_local));    
-
-   // Only need things to do with the sparsity pattern if we're not reusing
-   if (!reuse_int)
-   {
-      // Need to do a scan on nnz_match_local_row_d to get where each row starts
-      Kokkos::parallel_scan (Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA (const PetscInt i_idx_is_row, PetscInt& update, const bool final) {
-         // Inclusive scan
-         update += nnz_match_local_row_d(i_idx_is_row);         
-         if (final) {
-            nnz_match_local_row_d(i_idx_is_row) = update; // only update array on final pass
-         }
-      });
-
-      // ~~~~~~~~~~~~~~~~~  
-      // We need to assemble our i,j, vals so we can build our matrix
-      // ~~~~~~~~~~~~~~~~~
-      // Create memory on the device and host
-      a_local_d = Kokkos::View<PetscScalar *>("a_local_d", nnzs_match_local);
-      i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows_row+1);
-      j_local_d = Kokkos::View<PetscInt *>("j_local_d", nnzs_match_local);
-
-      // Initialize first entry to zero - the rest get set below
-      Kokkos::deep_copy(exec, Kokkos::subview(i_local_d, 0), 0);
-
-      // ~~~~~~~~~~~~~~~
-      // Create i indices
-      // ~~~~~~~~~~~~~~~
+      // Zero initialised on exec
+      PetscIntKokkosView smap_d(Kokkos::view_alloc(exec, "smap_d"), local_cols);
       Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(PetscInt i_idx_is_row) {      
-
-            // The start of our row index comes from the scan
-            i_local_d(i_idx_is_row + 1) = nnz_match_local_row_d(i_idx_is_row);   
-      });    
-
-      // Execute with scratch memory
-      Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-         
-         // i_idx_is_row is the row index into the output
-         const PetscInt i_idx_is_row = t.league_rank();
-         // i is the row index into the input
-         const PetscInt i = is_row_d_d(i_idx_is_row);       
-
-         // number of columns
-         PetscInt ncols_local;
-         ncols_local = device_local_i[i + 1] - device_local_i[i];
-         ScratchIntView scratch_indices;
-
-         // Allocate views directly on scratch memory
-         // Have to use views here given alignment issues
-         // We have of size ncols+1 to account for the exclusive scan
-         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);  
-         
-         // Initialize scratch
-         Kokkos::parallel_for(Kokkos::TeamVectorRange(t, ncols_local+1), [&](const PetscInt j) {
-            scratch_indices(j) = 0;
-         });
-
-         // Team barrier to ensure all threads have finished filling the scratch space
-         t.team_barrier();
-
-         // Now go and mark which values we're keeping
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-            // Mark this as a match
-            if (smap_d(device_local_j[device_local_i[i] + j])){
-               scratch_indices(j) = 1;
-            }     
-         });    
-
-         // Team barrier to ensure all threads have finished filling the scratch space
-         t.team_barrier(); 
-         
-         // Perform exclusive scan over scratch_indices to get our output indices in this row
-         // Have to be careful to go up to ncols_local+1
-         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local+1), 
-            [&](const PetscInt j, int& partial_sum, const bool is_final) {
-               const int input_value = scratch_indices(j);
-               if (is_final) {
-                     scratch_indices(j) = partial_sum;  // Write exclusive prefix
-               }
-               partial_sum += input_value;  // Update running total
-         });
-
-         // Team barrier to ensure all threads have finished scanning scratch_indices
-         t.team_barrier();
-
-         // Now go and write to the output
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-            // We can tell if scratch_indices had 1 in it in this position by comparing the result
-            // of the exclusive scan for this index and the next one
-            if (scratch_indices(j+1) > scratch_indices(j))
-            {
-               // Be careful to use the correct i_idx_is_row index into i_local_d here
-               j_local_d(i_local_d(i_idx_is_row) + scratch_indices(j)) = smap_d(device_local_j[device_local_i[i] + j]) - 1;
-               a_local_d(i_local_d(i_idx_is_row) + scratch_indices(j)) = device_local_vals(device_local_i[i] + j);            
-            }
-         });
-      });  
+         Kokkos::RangePolicy<>(exec, 0, local_cols_col), KOKKOS_LAMBDA(PetscInt i) {
+            smap_d(is_col_d_d(i)) = i + 1;
+      });
+      functor.smap = smap_d;
    }
-   // If we're reusing, we can just write directly to the existing views
-   else
+
+   // The vector length comes from the average row length, so short rows don't leave most
+   // of the threads idle and long rows still get some parallelism
+   // The host backends run the vector lanes serially, so there it makes no difference
+   MatInfo info;
+   PetscCallVoid(MatGetInfo(*input_mat, MAT_LOCAL, &info));
+   const double avg_row_nnz = local_rows > 0 ? info.nz_used / local_rows : 0.0;
+   int vector_length = 1;
+   while (2 * vector_length <= avg_row_nnz && vector_length < 32) vector_length *= 2;
+   vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
+
+   if (!reuse_int)
+   {
+      // Zero initialised on exec, which is the output if no columns are kept
+      Kokkos::View<PetscInt *> i_local_d(Kokkos::view_alloc(exec, "i_local_d"), local_rows_row+1);
+      PetscInt nnzs_match_local = 0;
+
+      if (!no_cols)
+      {
+         functor.count_out = i_local_d.data();
+         launch_submatrix_rows<SubMatrixRowsFunctor::CountTag>(functor, vector_length);
+
+         // Inclusive scan of the row counts gives the row pointers
+         // Each index only reads and writes its own entry, so this is safe in place
+         Kokkos::parallel_scan(
+            Kokkos::RangePolicy<>(exec, 0, local_rows_row),
+            KOKKOS_LAMBDA(const PetscInt i_idx_is_row, PetscInt &update, const bool final) {
+               update += i_local_d(i_idx_is_row + 1);
+               if (final) i_local_d(i_idx_is_row + 1) = update;
+            },
+            nnzs_match_local);
+      }
+
+      // Every entry is written by the fill below
+      Kokkos::View<PetscScalar *> a_local_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "a_local_d"), nnzs_match_local);
+      Kokkos::View<PetscInt *> j_local_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "j_local_d"), nnzs_match_local);
+
+      if (nnzs_match_local > 0)
+      {
+         functor.out_i = i_local_d.data();
+         functor.out_j = j_local_d.data();
+         functor.out_a = a_local_d.data();
+         launch_submatrix_rows<SubMatrixRowsFunctor::FillTag>(functor, vector_length);
+      }
+
+      // Let's make sure everything on the device is finished
+      exec.fence();
+
+      // Create the matrix given the sorted csr
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_row, local_cols_col, i_local_d, j_local_d, a_local_d, output_mat));
+   }
+   // If we're reusing, we can just write directly to the existing values
+   // With no kept columns the output has no values, so there is nothing to write
+   else if (!no_cols)
    {
       // Get device pointers for the existing i array
       const PetscInt *device_local_i_output = nullptr;
-      PetscMemType mtype;
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(*output_mat, &device_local_i_output, NULL, NULL, &mtype));
       // Output values are fully overwritten below (one write per output entry)
       Kokkos::View<PetscScalar *> device_local_a_output;
       PetscCallVoid(MatSeqAIJGetKokkosViewWrite(*output_mat, &device_local_a_output));
 
-      // Execute with scratch memory
-      Kokkos::parallel_for(policy, KOKKOS_LAMBDA(const KokkosTeamMemberType& t) {
-            
-         // i_idx_is_row is the row index into the output
-         const PetscInt i_idx_is_row = t.league_rank();
-         // i is the row index into the input
-         const PetscInt i = is_row_d_d(i_idx_is_row);     
+      functor.out_i = device_local_i_output;
+      functor.out_a = device_local_a_output.data();
+      launch_submatrix_rows<SubMatrixRowsFunctor::FillTag>(functor, vector_length);
 
-         // number of columns
-         PetscInt ncols_local;
-         ncols_local = device_local_i[i + 1] - device_local_i[i];
-         ScratchIntView scratch_indices;
-
-         // Allocate views directly on scratch memory
-         // Have to use views here given alignment issues
-         // We have of size ncols+1 to account for the exclusive scan
-         scratch_indices = ScratchIntView(t.team_scratch(1), ncols_local+1);  
-         
-         // Initialize scratch
-         Kokkos::parallel_for(Kokkos::TeamVectorRange(t, ncols_local+1), [&](const PetscInt j) {
-            scratch_indices(j) = 0;
-         });
-
-         // Team barrier to ensure all threads have finished filling the scratch space
-         t.team_barrier();
-
-         // Now go and mark which values we're keeping
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-            // Mark this as a match
-            if (smap_d(device_local_j[device_local_i[i] + j])){
-               scratch_indices(j) = 1;
-            }     
-         });    
-
-         // Team barrier to ensure all threads have finished filling the scratch space
-         t.team_barrier(); 
-         
-         // Perform exclusive scan over scratch_indices to get our output indices in this row
-         // Have to be careful to go up to ncols_local+1
-         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, ncols_local+1), 
-            [&](const PetscInt j, int& partial_sum, const bool is_final) {
-               const int input_value = scratch_indices(j);
-               if (is_final) {
-                     scratch_indices(j) = partial_sum;  // Write exclusive prefix
-               }
-               partial_sum += input_value;  // Update running total
-         });
-
-         // Team barrier to ensure all threads have finished scanning scratch_indices
-         t.team_barrier();
-
-         // Now go and write to the output
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, ncols_local), [&](const PetscInt j) {
-            // We can tell if scratch_indices had 1 in it in this position by comparing the result
-            // of the exclusive scan for this index and the next one
-            if (scratch_indices(j+1) > scratch_indices(j))
-            {
-               // Be careful to use the correct i_idx_is_row index into device_local_i_output here
-               device_local_a_output(device_local_i_output[i_idx_is_row] + scratch_indices(j)) = device_local_vals(device_local_i[i] + j);
-            }
-         });
-      });
-
-      Kokkos::fence();
+      exec.fence();
 
       // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
       // marks device modified, invalidates transpose/hermitian, bumps object state).
       PetscCallVoid(MatSeqAIJRestoreKokkosViewWrite(*output_mat, &device_local_a_output));
-
-   }
-
-   // Let's make sure everything on the device is finished
-   Kokkos::fence();   
-
-   // ~~~~~~~~~~~~~~~
-   // ~~~~~~~~~~~~~~~   
-
-   if (!reuse_int)
-   {
-      // Create the matrix given the sorted csr
-      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_row, local_cols_col, i_local_d, j_local_d, a_local_d, output_mat));
    }
 
    PetscCallVoid(MatSeqAIJRestoreKokkosView(*input_mat, &device_local_vals));
