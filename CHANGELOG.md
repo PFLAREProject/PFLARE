@@ -12,6 +12,8 @@ for earlier changes please see the git history.
 - With Kokkos matrices, PCAIR and PCPFLAREINV setups skip PETSc's host inode
   check on the matrices they build, as if `-mat_no_inode` were set (unless the
   user sets it); the device kernels never use inodes
+- Faster submatrix extraction with Kokkos (Aff, Afc, Acf and friends in the
+  PCAIR setup), with the same output
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
