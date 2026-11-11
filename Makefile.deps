@@ -33,7 +33,7 @@ src/PCPFLAREINV_Interfaces.o : src/PCPFLAREINV_Interfaces.F90
 src/PETSc_Helper.o : src/PETSc_Helper.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o 
 src/PFLARE.o : src/PFLARE.F90 src/Pflare_Parameters.o src/PCAIR_Interfaces.o src/PCPFLAREINV_Interfaces.o 
 src/Pflare_Parameters.o : src/Pflare_Parameters.F90 
-src/PMISR_Module.o : src/PMISR_Module.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
+src/PMISR_Module.o : src/PMISR_Module.F90 src/SAbs.o src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 
 src/Repartition.o : src/Repartition.F90 src/Pflare_Parameters.o src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/SAbs.o : src/SAbs.F90 src/Pflare_Parameters.o src/PETSc_Helper.o 
 src/SAI_Z.o : src/SAI_Z.F90 src/Pflare_Parameters.o src/PETSc_Helper.o src/C_PETSc_Interfaces.o src/Sorting.o src/Binary_Tree.o 
