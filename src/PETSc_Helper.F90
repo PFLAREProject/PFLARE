@@ -106,9 +106,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
    !------------------------------------------------------------------------------------------------------------------------
    
    subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tol_int, &
-                  lump, drop_diagonal_int, diag_strength_int)
+                  lump, drop_diagonal_int, diag_strength_int, allow_alias)
 
       ! Wrapper around remove_small_from_sparse_cpu and remove_small_from_sparse_kokkos
+      ! If allow_alias is true and nothing would be dropped, the Kokkos version may return
+      ! output_mat as the input matrix with its reference count increased, rather than a copy
+      ! Only pass it if neither matrix is modified or reused afterwards in a way that needs
+      ! them to be separate objects
    
       ! ~~~~~~~~~~
       ! Input 
@@ -117,10 +121,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, intent(in) :: tol
       logical, intent(in), optional :: lump
       integer, intent(in), optional :: relative_max_row_tol_int, drop_diagonal_int, diag_strength_int
+      logical, intent(in), optional :: allow_alias
       
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array
       integer :: lump_int, allow_drop_diagonal_int, allow_diag_strength_int, rel_max_row_tol_int, errorcode
+      integer :: allow_alias_int
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
@@ -158,11 +164,17 @@ logical, protected :: kokkos_debug_global = .FALSE.
             allow_diag_strength_int = diag_strength_int
          end if                    
 
+         ! Never return the input by default
+         allow_alias_int = 0
+         if (present(allow_alias)) then
+            if (allow_alias) allow_alias_int = 1
+         end if
+
          A_array = input_mat%v             
          call remove_small_from_sparse_kokkos(A_array, tol, &
                   B_array, rel_max_row_tol_int, &
                   lump_int, allow_drop_diagonal_int, &
-                  allow_diag_strength_int) 
+                  allow_diag_strength_int, allow_alias_int) 
          output_mat%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results

@@ -876,9 +876,14 @@ module air_operators_setup
          
       ! First time so just drop according to a tolerance 
       else
+         ! If nothing is dropped MAT_Z_DROP can just be MAT_Z, as long as we
+         ! aren't keeping either for reuse
          call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
                      air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
-                     relative_max_row_tol_int= 1)  
+                     relative_max_row_tol_int= 1, &
+                     allow_alias = .NOT. air_data%options%reuse_sparsity .OR. &
+                        (.NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount) .AND. &
+                         .NOT. REUSE_MAT_ACTIVE(MAT_Z_DROP, air_data%options%reuse_amount)))
       end if
 
       call timer_finish(TIMER_ID_AIR_DROP)
@@ -1092,9 +1097,13 @@ module air_operators_setup
          ! If we know we're not reusing MAT_RAP_DROP, compute directly into coarse_matrix
          if (.NOT. air_data%options%reuse_sparsity .OR. &
              .NOT. REUSE_MAT_ACTIVE(MAT_RAP_DROP, air_data%options%reuse_amount)) then
+            ! If nothing is dropped the coarse matrix can just be MAT_RAP, as long as
+            ! we aren't keeping MAT_RAP for reuse
             call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                      air_data%options%a_drop, coarse_matrix, &
-                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
+                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump, &
+                     allow_alias = .NOT. air_data%options%reuse_sparsity .OR. &
+                        .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount))
          else
             call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                      air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &

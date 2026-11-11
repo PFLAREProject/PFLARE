@@ -15,7 +15,8 @@ for earlier changes please see the git history.
 - Faster submatrix extraction with Kokkos (Aff, Afc, Acf and friends in the
   PCAIR setup), with the same output
 - Faster dropping of small entries with Kokkos (Z, W, the coarse matrices and
-  the strength matrix in the PCAIR setup)
+  the strength matrix in the PCAIR setup); without sparsity reuse, Z and the
+  coarse matrices are no longer copied on levels where nothing is dropped
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
