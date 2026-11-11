@@ -5,6 +5,7 @@ module pmisr_module
    use petsc_helper, only: kokkos_debug
    use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h, pmisr_from_matrix_kokkos
    use pflare_parameters, only: C_POINT, F_POINT
+   use sabs, only: generate_sabs
 
 #include "petsc/finclude/petscmat.h"
 
@@ -124,6 +125,7 @@ module pmisr_module
       ! matrix or its transpose. The cf markers are left on the device, as with pmisr
       ! The measure uses the same random numbers as pmisr, so the result matches
       ! generate_sabs followed by pmisr
+      ! Without Kokkos this is never called, but it falls back to exactly that CPU path
 
       ! ~~~~~~
 
@@ -133,14 +135,16 @@ module pmisr_module
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
       integer :: errorcode
-#if defined(PETSC_HAVE_KOKKOS)
       PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
       MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array
       integer :: seed_size, kfree, comm_rank
       integer, dimension(:), allocatable :: seed
       PetscReal, dimension(:), allocatable, target :: measure_local
       PetscInt :: local_rows, local_cols
+#else
+      type(tMat) :: strength_mat
 #endif
 
       ! ~~~~~~~~~~
@@ -171,8 +175,9 @@ module pmisr_module
       call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, c_loc(measure_local))
       deallocate(measure_local)
 #else
-      print *, "pmisr_from_matrix needs PETSc built with Kokkos"
-      call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
+      call pmisr_cpu(strength_mat, max_luby_steps, .FALSE., cf_markers_local)
+      call MatDestroy(strength_mat, ierr)
 #endif
 
    end subroutine pmisr_from_matrix
