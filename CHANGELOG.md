@@ -6,6 +6,9 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
+- The first pass of the PMISR DDC and diagonal dominance CF splittings now runs
+  straight from the matrix with Kokkos, without building the strength matrix,
+  which cuts the GPU coarsening time; the CF splitting is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

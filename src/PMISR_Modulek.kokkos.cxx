@@ -1149,6 +1149,435 @@ PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// First pass PMISR straight from the level matrix A, without building S, S^T or S+S^T as
+// PETSc matrices. Produces the same cf markers as generate_sabs + pmisr_kokkos on any number
+// of ranks. Strength is evaluated on the fly with the same test as remove_small_from_sparse_kokkos
+// and every edge of the symmetrized strong graph is handled from whichever row stores it, writing
+// in both directions, so no local transpose is needed. A transpose is only needed for the strong
+// entries that cross ranks, to get the exact degree of the mutual pairs
+PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal strong_threshold, const int max_luby_steps, PetscReal *measure_local)
+{
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscInt local_rows, local_cols, global_rows, global_cols;
+   PetscInt global_row_start_temp, global_row_end_plus_one_temp, global_col_start_temp, global_col_end_plus_one_temp;
+   PetscInt rows_ao = 0, cols_ao = 0;
+   MatType mat_type;
+
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   // Are we in parallel?
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+   PetscSF sf = NULL;
+   const PetscInt *colmap = NULL;
+
+   if (mpi)
+   {
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap));
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
+   }
+   else
+   {
+      mat_local = *input_mat;
+   }
+
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
+   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp));
+   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp));
+   // This path only sees square level matrices, where row and column ownership match
+   // and hence the local index of a column is also the local index of its row
+   if (global_row_start_temp != global_col_start_temp || local_rows != local_cols) {
+      SETERRABORT(MPI_COMM_MATRIX, PETSC_ERR_ARG_SIZ, "pmisr_from_matrix_kokkos needs a square matrix with matching row and column layouts");
+   }
+   const PetscInt global_row_start = global_row_start_temp;
+
+   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
+   Kokkos::View<const PetscScalar *> device_local_vals, device_nonlocal_vals;
+   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local, &device_local_vals));
+   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal, &device_nonlocal_vals));
+
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   PetscIntKokkosView colmap_d;
+   if (mpi)
+   {
+      colmap_d = PetscIntKokkosView("colmap_d", cols_ao);
+      Kokkos::deep_copy(exec, colmap_d, PetscIntConstKokkosViewHost(colmap, cols_ao));
+      PetscCallVoid(PetscLogCpuToGpu(cols_ao * sizeof(PetscInt)));
+   }
+
+   // ~~~~~~~~~~~~
+   // The relative row tolerance, identical to the -1 relative_max_row_tolerance_int branch
+   // of remove_small_from_sparse_kokkos: the max is over the off-diagonal entries in both blocks
+   // ~~~~~~~~~~~~
+   PetscScalarKokkosView row_tol_d("row_tol_d", local_rows);
+   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+      PetscScalar max_val = -1.0;
+      for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+         if (device_local_j[k] == i) continue;
+         const PetscScalar val = Kokkos::abs(device_local_vals(k));
+         if (val > max_val) max_val = val;
+      }
+      if (mpi) {
+         for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+            const PetscScalar val = Kokkos::abs(device_nonlocal_vals(k));
+            if (val > max_val) max_val = val;
+         }
+      }
+      row_tol_d(i) = strong_threshold * max_val;
+   });
+
+   // ~~~~~~~~~~~~
+   // The degree of each node in the symmetrized strong graph, with mutual pairs counted once
+   // degree_local_d and degree_nonlocal_d are the row sizes of the local and non-local blocks
+   // of S+S^T. They are kept separate so the measure is summed in the same order as pmisr_kokkos
+   // ~~~~~~~~~~~~
+   intKokkosView degree_local_d("degree_local_d", local_rows);
+   intKokkosView degree_nonlocal_d("degree_nonlocal_d", local_rows);
+   PetscIntKokkosView strong_nonlocal_d;
+   if (mpi) strong_nonlocal_d = PetscIntKokkosView("strong_nonlocal_d", local_rows);
+
+   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+      int out_minus_mutual = 0;
+      for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+         const PetscInt col = device_local_j[k];
+         if (col == i || Kokkos::abs(device_local_vals(k)) < row_tol_d(i)) continue;
+         out_minus_mutual++;
+         Kokkos::atomic_inc(&degree_local_d(col));
+         // Is the reverse entry strong as well? Then this pair was counted twice
+         for (PetscInt m = device_local_i[col]; m < device_local_i[col + 1]; m++) {
+            if (device_local_j[m] == i) {
+               if (Kokkos::abs(device_local_vals(m)) >= row_tol_d(col)) out_minus_mutual--;
+               break;
+            }
+         }
+      }
+      Kokkos::atomic_add(&degree_local_d(i), out_minus_mutual);
+
+      if (mpi) {
+         PetscInt strong_count = 0;
+         for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+            if (Kokkos::abs(device_nonlocal_vals(k)) >= row_tol_d(i)) strong_count++;
+         }
+         strong_nonlocal_d(i) = strong_count;
+         degree_nonlocal_d(i) = static_cast<int>(strong_count);
+      }
+   });
+
+   // The strong entries in the transpose that cross ranks and their mutual pairs need comms.
+   // We let MatTranspose do that on a small matrix that only holds the strong non-local entries
+   if (mpi)
+   {
+      PetscInt strong_nonlocal_nnz = 0, strong_nonlocal_nnz_global = 0;
+      Kokkos::parallel_reduce(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update) {
+         update += strong_nonlocal_d(i);
+      }, strong_nonlocal_nnz);
+      PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&strong_nonlocal_nnz, &strong_nonlocal_nnz_global, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
+
+      if (strong_nonlocal_nnz_global > 0)
+      {
+         Kokkos::View<PetscInt *> i_nonlocal_d("i_nonlocal_d", local_rows + 1);
+         Kokkos::View<PetscInt *> j_nonlocal_d("j_nonlocal_d", strong_nonlocal_nnz);
+         Kokkos::View<PetscScalar *> a_nonlocal_d("a_nonlocal_d", strong_nonlocal_nnz);
+         Kokkos::View<PetscInt *> i_local_d("i_local_d", local_rows + 1);
+         Kokkos::View<PetscInt *> j_local_d("j_local_d", 0);
+         Kokkos::View<PetscScalar *> a_local_d("a_local_d", 0);
+         Kokkos::deep_copy(exec, a_nonlocal_d, 1.0);
+
+         Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update, const bool final) {
+            update += strong_nonlocal_d(i);
+            if (final) i_nonlocal_d(i + 1) = update;
+         });
+         // Global column indices, compactified below
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            PetscInt pos = i_nonlocal_d(i);
+            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+               if (Kokkos::abs(device_nonlocal_vals(k)) >= row_tol_d(i)) j_nonlocal_d(pos++) = colmap_d(device_nonlocal_j[k]);
+            }
+         });
+         Kokkos::fence();
+
+         PetscInt cols_strong = 0;
+         PetscInt *garray_strong = NULL;
+         // This fences internally
+         rewrite_j_global_to_local(cols_ao, cols_strong, j_nonlocal_d, &garray_strong);
+
+         Mat strong_local, strong_nonlocal, strong_mat, strong_transpose, transpose_local, transpose_nonlocal;
+         PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &strong_local));
+         PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, cols_strong, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &strong_nonlocal));
+         PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, strong_local, strong_nonlocal, garray_strong, &strong_mat));
+         PetscCallVoid(MatTranspose(strong_mat, MAT_INITIAL_MATRIX, &strong_transpose));
+
+         const PetscInt *colmap_transpose = NULL;
+         PetscInt rows_t, cols_t;
+         PetscCallVoid(MatMPIAIJGetSeqAIJ(strong_transpose, &transpose_local, &transpose_nonlocal, &colmap_transpose));
+         PetscCallVoid(MatGetSize(transpose_nonlocal, &rows_t, &cols_t));
+
+         const PetscInt *t_i = nullptr, *t_j = nullptr;
+         PetscCallVoid(MatSeqAIJGetCSRAndMemType(transpose_nonlocal, &t_i, &t_j, NULL, &mtype));
+         PetscIntKokkosView colmap_transpose_d("colmap_transpose_d", cols_t);
+         Kokkos::deep_copy(exec, colmap_transpose_d, PetscIntConstKokkosViewHost(colmap_transpose, cols_t));
+         PetscCallVoid(PetscLogCpuToGpu(cols_t * sizeof(PetscInt)));
+         auto j_strong_global_d = PetscIntKokkosView("j_strong_global_d", strong_nonlocal_nnz);
+         {
+            PetscIntKokkosView garray_strong_d("garray_strong_d", cols_strong);
+            Kokkos::deep_copy(exec, garray_strong_d, PetscIntConstKokkosViewHost(garray_strong, cols_strong));
+            PetscCallVoid(PetscLogCpuToGpu(cols_strong * sizeof(PetscInt)));
+            Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, strong_nonlocal_nnz), KOKKOS_LAMBDA(const PetscInt k) {
+               j_strong_global_d(k) = garray_strong_d(j_nonlocal_d(k));
+            });
+         }
+
+         // in_nonlocal is the row size of the transpose. A mutual pair has its global column
+         // in both row i of the strong entries and row i of their transpose
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            int in_minus_mutual = static_cast<int>(t_i[i + 1] - t_i[i]);
+            for (PetscInt k = t_i[i]; k < t_i[i + 1]; k++) {
+               const PetscInt global_col = colmap_transpose_d(t_j[k]);
+               for (PetscInt m = i_nonlocal_d(i); m < i_nonlocal_d(i + 1); m++) {
+                  if (j_strong_global_d(m) == global_col) {
+                     in_minus_mutual--;
+                     break;
+                  }
+               }
+            }
+            degree_nonlocal_d(i) += in_minus_mutual;
+         });
+         Kokkos::fence();
+
+         PetscCallVoid(MatDestroy(&strong_transpose));
+         // MatCreateMPIAIJWithSeqAIJ took ownership of the blocks and garray
+         PetscCallVoid(MatDestroy(&strong_mat));
+      }
+   }
+
+   // Device memory for the global variable cf_markers_local_d - be careful these aren't petsc ints
+   cf_markers_local_d = intKokkosView("cf_markers_local_d", local_rows);
+   intKokkosView cf_markers_d = cf_markers_local_d;
+
+   // The measure is random + row sizes of S+S^T, summed in the same order as pmisr_kokkos
+   PetscScalarKokkosViewHost measure_local_h(measure_local, local_rows);
+   PetscScalarKokkosView measure_local_d("measure_local_d", local_rows);
+   Kokkos::deep_copy(exec, measure_local_d, measure_local_h);
+   PetscCallVoid(PetscLogCpuToGpu(local_rows * sizeof(PetscReal)));
+
+   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+      measure_local_d(i) += degree_local_d(i);
+      if (mpi) measure_local_d(i) += degree_nonlocal_d(i);
+   });
+
+   intKokkosView veto_d("veto_d", local_rows);
+   intKokkosView cf_markers_nonlocal_d, veto_nonlocal_d;
+   PetscScalarKokkosView measure_nonlocal_d;
+   if (mpi) {
+      measure_nonlocal_d = PetscScalarKokkosView("measure_nonlocal_d", cols_ao);
+      cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
+      veto_nonlocal_d = intKokkosView("veto_nonlocal_d", cols_ao);
+   }
+
+   // The measure is only read by everything below, so this overlaps with the initial count
+   if (mpi)
+   {
+      PetscCallVoid(sf_sync_before_begin_kokkos());
+      PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPIU_SCALAR,
+                  PETSC_MEMTYPE_KOKKOS, measure_local_d.data(),
+                  PETSC_MEMTYPE_KOKKOS, measure_nonlocal_d.data(),
+                  MPI_REPLACE));
+   }
+
+   // Nodes with no strong neighbours are F points
+   PetscInt counter_in_set_start = 0;
+   Kokkos::parallel_reduce("Reduction", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update) {
+      if (Kokkos::abs(measure_local_d[i]) < 1)
+      {
+         cf_markers_d(i) = -1;
+         update++;
+      }
+   }, counter_in_set_start);
+
+   if (mpi)
+   {
+      PetscCallVoid(PetscSFBcastEnd(sf, MPIU_SCALAR, measure_local_d.data(), measure_nonlocal_d.data(), MPI_REPLACE));
+      PetscCallVoid(sf_sync_after_end_kokkos());
+   }
+
+   PetscInt counter_undecided, counter_parallel;
+   if (max_luby_steps < 0) {
+      counter_undecided = local_rows - counter_in_set_start;
+      PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
+      counter_undecided = counter_parallel;
+   }
+   else {
+      // With fixed steps we still enter the loop for the collective scatters on empty ranks
+      counter_undecided = 1;
+   }
+
+   // ~~~~~~~~~~~~
+   // The outer Luby loop. Each edge of the symmetrized strong graph is seen from the row that
+   // stores it, which vetoes whichever of its two end points loses. Larger measure loses, with
+   // a tie broken on the global index
+   // ~~~~~~~~~~~~
+   int loops_through = -1;
+   do
+   {
+      if (counter_undecided == 0) break;
+      if (max_luby_steps > 0 && max_luby_steps + 1 == -loops_through) break;
+
+      // Reading cf_markers_d during the broadcast is fine, it isn't written before the End
+      if (mpi) {
+         PetscCallVoid(sf_sync_before_begin_kokkos());
+         PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPI_INT,
+                     PETSC_MEMTYPE_KOKKOS, cf_markers_d.data(),
+                     PETSC_MEMTYPE_KOKKOS, cf_markers_nonlocal_d.data(),
+                     MPI_REPLACE));
+      }
+
+      // Anything assigned already can't be in the set
+      Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         veto_d(i) = (cf_markers_d(i) != 0);
+      });
+
+      // Local edges
+      Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         if (cf_markers_d(i) != 0) return;
+         for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+            const PetscInt col = device_local_j[k];
+            if (col == i || Kokkos::abs(device_local_vals(k)) < row_tol_d(i) || cf_markers_d(col) != 0) continue;
+            const bool i_loses = measure_local_d(i) > measure_local_d(col) || (measure_local_d(i) == measure_local_d(col) && i > col);
+            Kokkos::atomic_store(&veto_d(i_loses ? i : col), 1);
+         }
+      });
+
+      if (mpi) {
+         PetscCallVoid(PetscSFBcastEnd(sf, MPI_INT, cf_markers_d.data(), cf_markers_nonlocal_d.data(), MPI_REPLACE));
+         PetscCallVoid(sf_sync_after_end_kokkos());
+
+         // Cross-rank edges: the row side knows its own loser, and vetoes a ghost through the reduce
+         Kokkos::deep_copy(exec, veto_nonlocal_d, 0);
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            if (cf_markers_d(i) != 0) return;
+            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+               const PetscInt col = device_nonlocal_j[k];
+               if (Kokkos::abs(device_nonlocal_vals(k)) < row_tol_d(i) || cf_markers_nonlocal_d(col) != 0) continue;
+               if (measure_local_d(i) > measure_nonlocal_d(col) || (measure_local_d(i) == measure_nonlocal_d(col) && global_row_start + i > colmap_d(col))) {
+                  Kokkos::atomic_store(&veto_d(i), 1);
+               } else {
+                  Kokkos::atomic_store(&veto_nonlocal_d(col), 1);
+               }
+            }
+         });
+
+         PetscCallVoid(sf_sync_before_begin_kokkos());
+         PetscCallVoid(PetscSFReduceWithMemTypeBegin(sf, MPI_INT,
+                     PETSC_MEMTYPE_KOKKOS, veto_nonlocal_d.data(),
+                     PETSC_MEMTYPE_KOKKOS, veto_d.data(),
+                     MPI_LOR));
+         PetscCallVoid(PetscSFReduceEnd(sf, MPI_INT, veto_nonlocal_d.data(), veto_d.data(), MPI_LOR));
+         PetscCallVoid(sf_sync_after_end_kokkos());
+      }
+
+      // Anything not veto'd is in the set
+      Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         if (!veto_d(i)) cf_markers_d(i) = loops_through;
+      });
+
+      // ~~~~~~~~
+      // Neighbours of nodes that just entered the set become C. Each edge is handled from the
+      // row that stores it, again in both directions
+      // ~~~~~~~~
+      Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         const int cf_i = Kokkos::atomic_load(&cf_markers_d(i));
+         if (cf_i != loops_through && cf_i != 0) return;
+         for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+            const PetscInt col = device_local_j[k];
+            if (col == i || Kokkos::abs(device_local_vals(k)) < row_tol_d(i)) continue;
+            if (cf_i == loops_through) {
+               Kokkos::atomic_compare_exchange(&cf_markers_d(col), 0, 1);
+            } else if (Kokkos::atomic_load(&cf_markers_d(col)) == loops_through) {
+               Kokkos::atomic_compare_exchange(&cf_markers_d(i), 0, 1);
+            }
+         }
+      });
+
+      if (mpi) {
+         // The ghosts need to know who just entered the set
+         Kokkos::deep_copy(exec, veto_nonlocal_d, 0);
+         PetscCallVoid(sf_sync_before_begin_kokkos());
+         PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPI_INT,
+                     PETSC_MEMTYPE_KOKKOS, cf_markers_d.data(),
+                     PETSC_MEMTYPE_KOKKOS, cf_markers_nonlocal_d.data(),
+                     MPI_REPLACE));
+
+         // Nodes in the set mark their ghosts as C. This only reads the root
+         // cf_markers_d so it overlaps with the broadcast
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            if (cf_markers_d(i) != loops_through) return;
+            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+               if (Kokkos::abs(device_nonlocal_vals(k)) >= row_tol_d(i)) Kokkos::atomic_store(&veto_nonlocal_d(device_nonlocal_j[k]), 1);
+            }
+         });
+
+         PetscCallVoid(PetscSFBcastEnd(sf, MPI_INT, cf_markers_d.data(), cf_markers_nonlocal_d.data(), MPI_REPLACE));
+         PetscCallVoid(sf_sync_after_end_kokkos());
+
+         Kokkos::deep_copy(exec, veto_d, 0);
+         PetscCallVoid(sf_sync_before_begin_kokkos());
+         PetscCallVoid(PetscSFReduceWithMemTypeBegin(sf, MPI_INT,
+                     PETSC_MEMTYPE_KOKKOS, veto_nonlocal_d.data(),
+                     PETSC_MEMTYPE_KOKKOS, veto_d.data(),
+                     MPI_LOR));
+
+         // Undecided nodes with a ghost in the set become C. This doesn't touch
+         // the data in the reduction so it overlaps with it
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            if (cf_markers_d(i) != 0) return;
+            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+               if (Kokkos::abs(device_nonlocal_vals(k)) >= row_tol_d(i) && cf_markers_nonlocal_d(device_nonlocal_j[k]) == loops_through) {
+                  cf_markers_d(i) = 1;
+                  return;
+               }
+            }
+         });
+
+         PetscCallVoid(PetscSFReduceEnd(sf, MPI_INT, veto_nonlocal_d.data(), veto_d.data(), MPI_LOR));
+         PetscCallVoid(sf_sync_after_end_kokkos());
+
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            if (veto_d(i) && cf_markers_d(i) == 0) cf_markers_d(i) = 1;
+         });
+      }
+
+      loops_through = loops_through - 1;
+
+      if (max_luby_steps < 0) {
+         counter_undecided = 0;
+         Kokkos::parallel_reduce("ReductionCounter_undecided", Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update) {
+            if (cf_markers_d(i) == 0) update++;
+         }, counter_undecided);
+         PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&counter_undecided, &counter_parallel, 1, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
+         counter_undecided = counter_parallel;
+      }
+   }
+   while (counter_undecided != 0);
+
+   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+      if (cf_markers_d(i) < 0) cf_markers_d(i) = -1;
+      else cf_markers_d(i) = 1;
+   });
+   Kokkos::fence();
+
+   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
+   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // PMISR cf splitting but on the device
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
