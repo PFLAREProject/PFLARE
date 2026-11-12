@@ -6,9 +6,10 @@ module petsc_helper
          remove_from_sparse_match_kokkos, &
          MatSetAllValues_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
-         MatAXPY_kokkos, MatCreateSubMatrix_kokkos
+         MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
-         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE
+         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
+         PFLARE_PTAP_FILL
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -1168,6 +1169,99 @@ logical, protected :: kokkos_debug_global = .FALSE.
      
          
    end subroutine MatAXPYWrapper   
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_one_entry_per_row(A, P, AP)
+
+      ! Computes AP = A * P, always as a new matrix that isn't a PETSc product (so it
+      ! can't be refilled with MAT_REUSE_MATRIX)
+      ! With Kokkos, if every row of P has at most one entry (e.g., the one point classical
+      ! prolongator) this relabels the columns of A rather than doing a matrix-matrix product
+      ! Otherwise it's MatMatMult
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: A, P
+      type(tMat), intent(inout) :: AP
+
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer :: errorcode
+      integer(c_long_long) :: A_array, B_array, C_array
+      integer(c_int) :: success_int
+      MatType :: mat_type
+      type(tMat) :: temp_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         A_array = A%v
+         B_array = P%v
+         call mat_mult_one_entry_per_row_kokkos(A_array, B_array, success_int, C_array)
+
+         ! Some row of P has more than one entry
+         if (success_int == 0) then
+            call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, AP, ierr)
+            call MatProductClear(AP, ierr)
+            return
+         end if
+         AP%v = C_array
+
+         ! If debugging do a comparison against the matrix-matrix product
+         if (kokkos_debug()) then
+
+            call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+            call MatProductClear(temp_mat, ierr)
+
+            ! Same sparsity
+            call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+            call get_nnzs_petsc_sparse(AP, nnzs_out)
+            if (nnzs_ref /= nnzs_out) then
+               print *, "Diff nnzs Kokkos mat_mult_one_entry_per_row and MatMatMult", &
+                     nnzs_out, nnzs_ref
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            ! Same values up to the order of the sums
+            call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, AP, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
+            if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+                  .OR. normy/=normy) then
+               print *, "Diff Kokkos mat_mult_one_entry_per_row and MatMatMult", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, AP, ierr)
+         call MatProductClear(AP, ierr)
+
+      end if
+#else
+      call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, AP, ierr)
+      call MatProductClear(AP, ierr)
+#endif
+
+   end subroutine mat_mult_one_entry_per_row
 
 !------------------------------------------------------------------------------------------------------------------------
    

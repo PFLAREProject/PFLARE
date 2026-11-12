@@ -21,6 +21,9 @@ for earlier changes please see the git history.
   is built straight from Afc, without building W first; P is unchanged
 - Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos (the
   Aff inverse used to build Z in AIRG); the result only changes by rounding
+- With Kokkos and a one point classical prolongator, the A*P product in the
+  coarse matrix is now a relabelling of the columns of A rather than a sparse
+  matrix-matrix product; the coarse matrix only changes by rounding
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

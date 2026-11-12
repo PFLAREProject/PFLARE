@@ -23,7 +23,7 @@ module air_operators_setup
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
-         remove_from_sparse_match, mat_mat_symbolic
+         remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row
 
 #include "petsc/finclude/petscksp.h"
 
@@ -1073,11 +1073,20 @@ module air_operators_setup
          ! First time
          else
 
-            call MatMatMult(A, air_data%prolongators(our_level), &
-                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
-            if (.NOT. air_data%options%reuse_sparsity .OR. &
-                .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount)) &
-               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
+            ! A one point P has at most one entry per row, so A*P is a relabelling of the
+            ! columns of A, as long as we don't need MAT_AP to be a product for reuse
+            if (air_data%options%one_point_classical_prolong .AND. &
+                  (.NOT. air_data%options%reuse_sparsity .OR. &
+                   .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount))) then
+               call mat_mult_one_entry_per_row(A, air_data%prolongators(our_level), &
+                        air_data%reuse(our_level)%reuse_mat(MAT_AP))
+            else
+               call MatMatMult(A, air_data%prolongators(our_level), &
+                        MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
+               if (.NOT. air_data%options%reuse_sparsity .OR. &
+                   .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount)) &
+                  call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
+            end if
                      
             call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
                      MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
