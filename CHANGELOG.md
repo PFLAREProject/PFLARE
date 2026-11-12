@@ -19,6 +19,8 @@ for earlier changes please see the git history.
   coarse matrices are no longer copied on levels where nothing is dropped
 - With Kokkos and without sparsity reuse, the one point classical prolongator
   is built straight from Afc, without building W first; P is unchanged
+- Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos (the
+  Aff inverse used to build Z in AIRG); the result only changes by rounding
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
