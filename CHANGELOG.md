@@ -37,6 +37,9 @@ for earlier changes please see the git history.
 - With Kokkos, on levels where the Aff inverse used for Z is diagonal (and
   without sparsity reuse, `constrain_z` or `improve_z`), R is built straight
   from the operator, without extracting Acf or building Z; R is unchanged
+- With Kokkos, a one point classical prolongator and without sparsity reuse,
+  the coarse matrix R*(A*P) is computed without building A*P as a matrix;
+  the coarse matrix is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

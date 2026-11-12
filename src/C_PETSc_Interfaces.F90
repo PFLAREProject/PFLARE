@@ -488,6 +488,18 @@ module c_petsc_interfaces
 
    end interface
 
+   interface
+
+      subroutine mat_mult_r_one_point_ap_kokkos(R_array, A_array, B_array, success_int, C_array) &
+         bind(c, name="mat_mult_r_one_point_ap_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: R_array, A_array, B_array
+         integer(c_int) :: success_int
+         integer(c_long_long) :: C_array
+      end subroutine mat_mult_r_one_point_ap_kokkos
+
+   end interface
+
    interface   
       
       subroutine MatAXPY_kokkos(A_array, alpha, B_array) &

@@ -7,6 +7,7 @@ module petsc_helper
          MatSetAllValues_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
+         mat_mult_r_one_point_ap_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
          mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
@@ -1334,6 +1335,97 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif
 
    end subroutine mat_mult_one_entry_per_row
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_r_one_point_ap(R, A, P, RAP, done)
+
+      ! Computes RAP = R * (A * P) as a new matrix that isn't a PETSc product (so it can't be
+      ! refilled with MAT_REUSE_MATRIX), when every row of P has at most one entry (e.g., the one
+      ! point classical prolongator), with Kokkos
+      ! A * P is a relabelling of the columns of A (see mat_mult_one_entry_per_row), but here it is
+      ! never made into a PETSc matrix: the product with R repeats the steps of PETSc's device
+      ! MatMatMult on it, so RAP is the same as MatMatMult(R, mat_mult_one_entry_per_row(A, P))
+      ! done is .FALSE. (and RAP isn't set) if R or A aren't Kokkos matrices or some row of P has
+      ! more than one entry
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: R, A, P
+      type(tMat), intent(inout) :: RAP
+      logical, intent(out)      :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: R_array, A_array, B_array, C_array
+      integer(c_int) :: success_int
+      MatType :: mat_type, mat_type_r
+      type(tMat) :: temp_ap, temp_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+      done = .FALSE.
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A, mat_type, ierr)
+      call MatGetType(R, mat_type_r, ierr)
+      if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS)) return
+      if (.NOT. (mat_type_r == MATMPIAIJKOKKOS .OR. mat_type_r == MATSEQAIJKOKKOS .OR. &
+            mat_type_r == MATAIJKOKKOS)) return
+
+      R_array = R%v
+      A_array = A%v
+      B_array = P%v
+      call mat_mult_r_one_point_ap_kokkos(R_array, A_array, B_array, success_int, C_array)
+      ! Some row of P has more than one entry
+      if (success_int == 0) return
+      RAP%v = C_array
+      done = .TRUE.
+
+      ! If debugging do a comparison against the product with an assembled A * P
+      if (kokkos_debug()) then
+
+         call mat_mult_one_entry_per_row(A, P, temp_ap)
+         call MatMatMult(R, temp_ap, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+         call MatProductClear(temp_mat, ierr)
+         call MatDestroy(temp_ap, ierr)
+
+         ! Same sparsity
+         call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+         call get_nnzs_petsc_sparse(RAP, nnzs_out)
+         if (nnzs_ref /= nnzs_out) then
+            print *, "Diff nnzs Kokkos mat_mult_r_one_point_ap and MatMatMult", &
+                  nnzs_out, nnzs_ref
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+
+         ! Same values
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, RAP, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+
+         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos mat_mult_r_one_point_ap and MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+      end if
+#endif
+
+   end subroutine mat_mult_r_one_point_ap
 
 !------------------------------------------------------------------------------------------------------------------------
    
