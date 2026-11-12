@@ -1869,6 +1869,403 @@ static void compute_R_from_Z_drop_kokkos(Mat *input_mat, PetscInt global_row_sta
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Row kernels for compute_R_from_A_diag_kokkos
+// Each team handles team_size coarse rows, one thread per row, with vector lanes over the
+// entries in that row of A
+// Z = -A_cf * D, with D the diagonal inverse of Aff, is never built: the entries of a coarse
+// row of A in fine columns are Z's entries (in the same order), with the value -(a * d), which
+// is what MatDiagonalScale followed by MatScale with -1 give
+// The drop is the one in RFromZDropFunctor, with Z's global row the coarse index of the row
+// and Z's global column the fine index of the column
+struct RFromADiagFunctor {
+   struct CountTag {};
+   struct FillTag {};
+
+   // Number of local coarse rows
+   PetscInt nrows = 0;
+   // Global coarse index of the first local coarse row (Z's row ownership start)
+   PetscInt coarse_start = 0;
+   PetscReal tol = 0.0;
+   bool mpi = false;
+
+   // Input local and nonlocal blocks of A
+   const PetscInt *l_i = nullptr, *l_j = nullptr, *nl_i = nullptr, *nl_j = nullptr;
+   Kokkos::View<const PetscScalar *> l_a, nl_a;
+   // Local row of A of each local coarse row
+   PetscIntKokkosView coarse_d;
+   // For each local (l) and off-processor (nl) column of A, its global fine index or -1 if it
+   // is a coarse point, and the entry of D for it
+   PetscIntKokkosView fine_global_l_d, fine_global_nl_d;
+   PetscScalarKokkosView d_l_d, d_nl_d;
+
+   // Written by count, as in RFromZDropFunctor
+   PetscScalarKokkosView rel_row_tol_d;
+   PetscInt *counts_l = nullptr, *counts_nl = nullptr;
+
+   // Fill: start of each output row, and the output j and values
+   // The local j are local columns of A (and R), the nonlocal j are the nonlocal columns of A
+   const PetscInt *out_l_i = nullptr, *out_nl_i = nullptr;
+   PetscInt *out_l_j = nullptr, *out_nl_j = nullptr;
+   PetscScalar *out_l_a = nullptr, *out_nl_a = nullptr;
+
+   KOKKOS_INLINE_FUNCTION PetscScalar z_local(const PetscInt k) const
+   {
+      const PetscScalar val = l_a(k) * d_l_d(l_j[k]);
+      return -val;
+   }
+   KOKKOS_INLINE_FUNCTION PetscScalar z_nonlocal(const PetscInt k) const
+   {
+      const PetscScalar val = nl_a(k) * d_nl_d(nl_j[k]);
+      return -val;
+   }
+   // Is this entry of A in a fine column, and if so do we keep it
+   KOKKOS_INLINE_FUNCTION bool keep_local(const PetscInt k, const PetscScalar row_tol, const PetscInt row_global) const
+   {
+      const PetscInt fine_col = fine_global_l_d(l_j[k]);
+      if (fine_col < 0) return false;
+      return Kokkos::abs(z_local(k)) >= row_tol || fine_col == row_global;
+   }
+   KOKKOS_INLINE_FUNCTION bool keep_nonlocal(const PetscInt k, const PetscScalar row_tol, const PetscInt row_global) const
+   {
+      const PetscInt fine_col = fine_global_nl_d(nl_j[k]);
+      if (fine_col < 0) return false;
+      return Kokkos::abs(z_nonlocal(k)) >= row_tol || fine_col == row_global;
+   }
+
+   KOKKOS_INLINE_FUNCTION void operator()(const CountTag &, const KokkosTeamMemberType &t) const
+   {
+      const PetscInt row_start = t.league_rank() * t.team_size();
+      const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt i) {
+         const PetscInt row_global = i + coarse_start;
+         const PetscInt row = coarse_d(i);
+         const PetscInt l_start = l_i[row], l_len = l_i[row + 1] - l_start;
+         const PetscInt nl_start = mpi ? nl_i[row] : 0, nl_len = mpi ? nl_i[row + 1] - nl_start : 0;
+
+         // The biggest abs(val) of Z in the row, local and nonlocal
+         // The Max reducer starts from the lowest value, so an empty block gives a negative max
+         PetscScalar max_l, max_nl = Kokkos::reduction_identity<PetscScalar>::max();
+         Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, l_len),
+            [&](const PetscInt k, PetscScalar &thread_max) {
+               if (fine_global_l_d(l_j[l_start + k]) < 0) return;
+               const PetscScalar val = Kokkos::abs(z_local(l_start + k));
+               if (val > thread_max) thread_max = val;
+            }, Kokkos::Max<PetscScalar>(max_l));
+         if (mpi) {
+            Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, nl_len),
+               [&](const PetscInt k, PetscScalar &thread_max) {
+                  if (fine_global_nl_d(nl_j[nl_start + k]) < 0) return;
+                  const PetscScalar val = Kokkos::abs(z_nonlocal(nl_start + k));
+                  if (val > thread_max) thread_max = val;
+               }, Kokkos::Max<PetscScalar>(max_nl));
+         }
+         const PetscScalar max_val = max_nl > max_l ? max_nl : max_l;
+         const PetscScalar row_tol = tol * max_val;
+
+         PetscInt count_l = 0, count_nl = 0;
+         Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, l_len),
+            [&](const PetscInt k, PetscInt &thread_count) {
+               if (keep_local(l_start + k, row_tol, row_global)) thread_count++;
+            }, count_l);
+         if (mpi) {
+            Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, nl_len),
+               [&](const PetscInt k, PetscInt &thread_count) {
+                  if (keep_nonlocal(nl_start + k, row_tol, row_global)) thread_count++;
+               }, count_nl);
+         }
+
+         Kokkos::single(Kokkos::PerThread(t), [&]() {
+            rel_row_tol_d(i) = row_tol;
+            // One extra for the identity
+            counts_l[i + 1] = count_l + 1;
+            if (mpi) counts_nl[i + 1] = count_nl;
+         });
+      });
+   }
+
+   // The vector lanes do an exclusive scan over the kept flags to find their output position,
+   // so the kept entries stay in the order of the row of A
+   KOKKOS_INLINE_FUNCTION void operator()(const FillTag &, const KokkosTeamMemberType &t) const
+   {
+      const PetscInt row_start = t.league_rank() * t.team_size();
+      const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt i) {
+         const PetscInt row_global = i + coarse_start;
+         const PetscInt row = coarse_d(i);
+         const PetscInt l_start = l_i[row], l_len = l_i[row + 1] - l_start;
+         const PetscInt nl_start = mpi ? nl_i[row] : 0, nl_len = mpi ? nl_i[row + 1] - nl_start : 0;
+         const PetscScalar row_tol = rel_row_tol_d(i);
+
+         const PetscInt out_l_offset = out_l_i[i];
+         Kokkos::parallel_scan(Kokkos::ThreadVectorRange(t, l_len),
+            [&](const PetscInt k, PetscInt &partial_sum, const bool is_final) {
+               if (keep_local(l_start + k, row_tol, row_global)) {
+                  if (is_final) {
+                     out_l_j[out_l_offset + partial_sum] = l_j[l_start + k];
+                     out_l_a[out_l_offset + partial_sum] = z_local(l_start + k);
+                  }
+                  partial_sum++;
+               }
+            });
+         if (mpi) {
+            const PetscInt out_nl_offset = out_nl_i[i];
+            Kokkos::parallel_scan(Kokkos::ThreadVectorRange(t, nl_len),
+               [&](const PetscInt k, PetscInt &partial_sum, const bool is_final) {
+                  if (keep_nonlocal(nl_start + k, row_tol, row_global)) {
+                     if (is_final) {
+                        out_nl_j[out_nl_offset + partial_sum] = nl_j[nl_start + k];
+                        out_nl_a[out_nl_offset + partial_sum] = z_nonlocal(nl_start + k);
+                     }
+                     partial_sum++;
+                  }
+               });
+         }
+
+         // The identity goes at the end of the local row and we sort after
+         Kokkos::single(Kokkos::PerThread(t), [&]() {
+            out_l_j[out_l_i[i + 1] - 1] = row;
+            out_l_a[out_l_i[i + 1] - 1] = 1.0;
+         });
+      });
+   }
+};
+
+// Launches one of the RFromADiagFunctor kernels over all the coarse rows
+template <class Tag>
+static void launch_r_from_a_diag(const RFromADiagFunctor &functor, const int vector_length)
+{
+   if (functor.nrows == 0) return;
+   auto exec = PetscGetKokkosExecutionSpace();
+   Kokkos::TeamPolicy<Tag> probe(exec, 1, 1, vector_length);
+   int team_size = std::max(1, 256 / vector_length);
+   team_size = std::min(team_size, probe.team_size_max(functor, Kokkos::ParallelForTag()));
+   const int league_size = static_cast<int>((functor.nrows + team_size - 1) / team_size);
+   Kokkos::parallel_for(Kokkos::TeamPolicy<Tag>(exec, league_size, team_size, vector_length), functor);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Build R straight from the square matrix A when Aff^-1 is the diagonal D (a fine-sized Kokkos
+// vector of its entries), without building A_cf or Z
+// Gives the same R as Z = -A_cf * D (MatMatMult with a MATDIAGONAL and MatScale), the drop
+// with relative row tolerance tol, and compute_R_from_Z_kokkos with identity and without reuse
+// The fine and coarse points of our_level come from the per-PCAIR IS views
+PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_views_handle, const int our_level, \
+                  Vec *inv_diag_vec, const PetscReal tol, Mat *output_mat)
+{
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscInt local_rows, local_cols, global_rows, global_cols, rows_ao = 0, cols_ao = 0;
+   MatType mat_type;
+   Mat output_mat_local, output_mat_nonlocal;
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
+
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+   const PetscInt *colmap_input = NULL;
+   if (mpi)
+   {
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap_input));
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+   }
+   else
+   {
+      mat_local = *input_mat;
+   }
+
+   // The local indices of the fine and coarse points, in the order of is_fine and is_coarse
+   PetscIntKokkosView is_fine_d = VecISCopyLocal_kokkos_get_view(kokkos_is_views_handle, our_level, 1);
+   PetscIntKokkosView is_coarse_d = VecISCopyLocal_kokkos_get_view(kokkos_is_views_handle, our_level, 0);
+   const PetscInt local_fine = is_fine_d.extent(0), local_coarse = is_coarse_d.extent(0);
+
+   // The global fine and coarse indices start where the previous ranks' end
+   PetscInt local_counts[2] = {local_fine, local_coarse}, starts[2] = {0, 0}, global_counts[2] = {0, 0};
+   PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Scan(local_counts, starts, 2, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
+   PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(local_counts, global_counts, 2, MPIU_INT, MPI_SUM, MPI_COMM_MATRIX));
+   const PetscInt fine_start = starts[0] - local_fine, coarse_start = starts[1] - local_coarse;
+   const PetscInt global_coarse = global_counts[1];
+
+   // The global fine index and the entry of D of each local column of A
+   ConstPetscScalarKokkosView inv_diag_d;
+   PetscCallVoid(VecGetKokkosView(*inv_diag_vec, &inv_diag_d));
+   PetscIntKokkosView fine_global_l_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "fine_global_l_d"), local_cols);
+   PetscScalarKokkosView d_l_d(Kokkos::view_alloc(exec, "d_l_d"), local_cols);
+   Kokkos::deep_copy(exec, fine_global_l_d, -1);
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, local_fine), KOKKOS_LAMBDA(PetscInt i) {
+         fine_global_l_d(is_fine_d(i)) = fine_start + i;
+         d_l_d(is_fine_d(i)) = inv_diag_d(i);
+   });
+
+   // And of each off-processor column of A, through the matrix mult SF
+   PetscIntKokkosView fine_global_nl_d;
+   PetscScalarKokkosView d_nl_d;
+   if (mpi)
+   {
+      PetscSF sf = NULL;
+      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
+      fine_global_nl_d = PetscIntKokkosView("fine_global_nl_d", cols_ao);
+      d_nl_d = PetscScalarKokkosView("d_nl_d", cols_ao);
+      // While Begin/End is in flight, do not touch the send/recv buffers
+      PetscCallVoid(sf_sync_before_begin_kokkos());
+      PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPIU_INT,
+                  PETSC_MEMTYPE_KOKKOS, fine_global_l_d.data(),
+                  PETSC_MEMTYPE_KOKKOS, fine_global_nl_d.data(),
+                  MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastEnd(sf, MPIU_INT, fine_global_l_d.data(), fine_global_nl_d.data(), MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPIU_SCALAR,
+                  PETSC_MEMTYPE_KOKKOS, d_l_d.data(),
+                  PETSC_MEMTYPE_KOKKOS, d_nl_d.data(),
+                  MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastEnd(sf, MPIU_SCALAR, d_l_d.data(), d_nl_d.data(), MPI_REPLACE));
+      PetscCallVoid(sf_sync_after_end_kokkos());
+   }
+
+   // ~~~~~~~~~~~~
+   // Get pointers to the i,j on the device and Kokkos views to the values
+   // ~~~~~~~~~~~~
+   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
+   Kokkos::View<const PetscScalar *> device_local_vals;
+   Kokkos::View<const PetscScalar *> device_nonlocal_vals;
+   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local, &device_local_vals));
+   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal, &device_nonlocal_vals));
+
+   RFromADiagFunctor functor;
+   functor.nrows = local_coarse;
+   functor.coarse_start = coarse_start;
+   functor.tol = tol;
+   functor.mpi = mpi;
+   functor.l_i = device_local_i;
+   functor.l_j = device_local_j;
+   functor.l_a = device_local_vals;
+   functor.coarse_d = is_coarse_d;
+   functor.fine_global_l_d = fine_global_l_d;
+   functor.d_l_d = d_l_d;
+   if (mpi)
+   {
+      functor.nl_i = device_nonlocal_i;
+      functor.nl_j = device_nonlocal_j;
+      functor.nl_a = device_nonlocal_vals;
+      functor.fine_global_nl_d = fine_global_nl_d;
+      functor.d_nl_d = d_nl_d;
+   }
+
+   // The vector length comes from the average row length of A (local plus nonlocal)
+   // The host backends run the vector lanes serially, so there it makes no difference
+   MatInfo info;
+   PetscCallVoid(MatGetInfo(*input_mat, MAT_LOCAL, &info));
+   const double avg_row_nnz = local_rows > 0 ? info.nz_used / local_rows : 0.0;
+   int vector_length = 1;
+   while (2 * vector_length <= avg_row_nnz && vector_length < 32) vector_length *= 2;
+   vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
+
+   // ~~~~~~~~~~~~
+   // Count the entries of R in each row
+   // ~~~~~~~~~~~~
+   // Zero initialised on exec, the counts go into entry row + 1
+   Kokkos::View<PetscInt *> i_local_d(Kokkos::view_alloc(exec, "i_local_d"), local_coarse + 1);
+   Kokkos::View<PetscInt *> i_nonlocal_d;
+   if (mpi) i_nonlocal_d = Kokkos::View<PetscInt *>(Kokkos::view_alloc(exec, "i_nonlocal_d"), local_coarse + 1);
+   // Every entry is written by the count
+   functor.rel_row_tol_d = PetscScalarKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "rel_row_tol_d"), local_coarse);
+   functor.counts_l = i_local_d.data();
+   if (mpi) functor.counts_nl = i_nonlocal_d.data();
+   launch_r_from_a_diag<RFromADiagFunctor::CountTag>(functor, vector_length);
+
+   // Inclusive scans of the row counts give the row pointers
+   // Each index only reads and writes its own entry, so this is safe in place
+   PetscInt nnzs_local = 0, nnzs_nonlocal = 0;
+   Kokkos::parallel_scan(
+      Kokkos::RangePolicy<>(exec, 0, local_coarse),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &update, const bool final) {
+         update += i_local_d(i + 1);
+         if (final) i_local_d(i + 1) = update;
+      },
+      nnzs_local);
+   if (mpi)
+   {
+      Kokkos::parallel_scan(
+         Kokkos::RangePolicy<>(exec, 0, local_coarse),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &update, const bool final) {
+            update += i_nonlocal_d(i + 1);
+            if (final) i_nonlocal_d(i + 1) = update;
+         },
+         nnzs_nonlocal);
+   }
+
+   // ~~~~~~~~~~~~
+   // Fill the output i, j and values
+   // ~~~~~~~~~~~~
+   // Every entry is written by the fill
+   Kokkos::View<PetscScalar *> a_local_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "a_local_d"), nnzs_local);
+   Kokkos::View<PetscInt *> j_local_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "j_local_d"), nnzs_local);
+   Kokkos::View<PetscScalar *> a_nonlocal_d;
+   Kokkos::View<PetscInt *> j_nonlocal_d;
+   if (mpi)
+   {
+      a_nonlocal_d = Kokkos::View<PetscScalar *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "a_nonlocal_d"), nnzs_nonlocal);
+      j_nonlocal_d = Kokkos::View<PetscInt *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "j_nonlocal_d"), nnzs_nonlocal);
+   }
+
+   functor.out_l_i = i_local_d.data();
+   functor.out_l_j = j_local_d.data();
+   functor.out_l_a = a_local_d.data();
+   if (mpi)
+   {
+      functor.out_nl_i = i_nonlocal_d.data();
+      functor.out_nl_j = j_nonlocal_d.data();
+      functor.out_nl_a = a_nonlocal_d.data();
+   }
+   launch_r_from_a_diag<RFromADiagFunctor::FillTag>(functor, vector_length);
+
+   // Let's make sure everything on the device is finished
+   exec.fence();
+   PetscCallVoid(VecRestoreKokkosView(*inv_diag_vec, &inv_diag_d));
+
+   // The identity was added at the end of each local row
+   KokkosCsrMatrix csrmat_local = KokkosCsrMatrix("csrmat_local", local_coarse, local_cols, a_local_d.extent(0), a_local_d, i_local_d, j_local_d);
+   KokkosSparse::sort_crs_matrix(exec, csrmat_local);
+   exec.fence();
+
+   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_coarse, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
+
+   if (mpi)
+   {
+      // The nonlocal j are the nonlocal columns of A, compact them to the ones we kept
+      // This keeps their order, so the rows stay in the order of A
+      // kept_cols_host holds which nonlocal columns of A we kept, in increasing order
+      PetscInt *kept_cols_host = NULL;
+      PetscInt col_ao_output = 0;
+      // This fences internally
+      rewrite_j_global_to_local(cols_ao, col_ao_output, j_nonlocal_d, &kept_cols_host);
+
+      // The garray of R is the global columns of A we kept
+      PetscInt *garray_host = NULL;
+      PetscCallVoid(PetscMalloc1(col_ao_output, &garray_host));
+      for (PetscInt k = 0; k < col_ao_output; k++) garray_host[k] = colmap_input[kept_cols_host[k]];
+      PetscCallVoid(PetscFree(kept_cols_host));
+
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_coarse, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
+      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_coarse, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+   }
+   else
+   {
+      *output_mat = output_mat_local;
+   }
+
+   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
+   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Stick Z in a full sized R but with kokkos - keeping everything on the device
 // If drop_int is set, small entries of Z are dropped first (see compute_R_from_Z_drop_kokkos)
 // without building the dropped Z, only without reuse

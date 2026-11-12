@@ -19,7 +19,7 @@ module air_operators_setup
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
-         compute_P_from_W, compute_R_from_Z, generate_one_point_P_from_sparse
+         compute_P_from_W, compute_R_from_Z, generate_one_point_P_from_sparse, compute_R_from_A_diag
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
@@ -31,6 +31,36 @@ module air_operators_setup
    public
 
    contains
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   logical function r_from_a_diag_possible(input_mat, our_level, air_data)
+
+      ! Can R be built straight from A on this level, without A_cf or Z
+      ! (compute_R_from_A_diag) if the Aff inverse turns out to be a matdiagonal
+      ! That needs a Kokkos matrix, a diagonal Aff, Z = -A_cf * Aff^-1 with A_cf itself
+      ! and nothing else that needs Z or the dropped Z
+
+      type(tMat), intent(in)                    :: input_mat
+      integer, intent(in)                       :: our_level
+      type(air_multigrid_data), intent(in)      :: air_data
+
+      PetscErrorCode :: ierr
+      MatType :: mat_type, mat_type_aff
+
+      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
+      r_from_a_diag_possible = (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+                  mat_type == MATAIJKOKKOS) .AND. &
+               mat_type_aff == MATDIAGONAL .AND. &
+               air_data%options%z_type == AIR_Z_PRODUCT .AND. &
+               air_data%options%strong_r_threshold == 0d0 .AND. &
+               .NOT. air_data%options%full_smoothing_up_and_down .AND. &
+               .NOT. air_data%options%reuse_sparsity .AND. &
+               .NOT. air_data%options%constrain_z .AND. &
+               air_data%options%improve_z_its == 0
+
+   end function r_from_a_diag_possible
 
    !------------------------------------------------------------------------------------------------------------------------
    
@@ -222,11 +252,16 @@ module air_operators_setup
                air_data%A_fc(our_level), &
                our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
                kokkos_is_views_handle = air_data%kokkos_is_views_handle)
-         call MatCreateSubMatrixWrapper(input_mat, &
-               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_cf(our_level), &
-               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
-               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+         ! If R can be built straight from A, A_cf is only needed for C smoothing
+         ! If the Aff inverse turns out not to be diagonal, A_cf is extracted when Z is built
+         if (air_data%options%any_c_smooths .OR. &
+               .NOT. r_from_a_diag_possible(input_mat, our_level, air_data)) then
+            call MatCreateSubMatrixWrapper(input_mat, &
+                  air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                  air_data%A_cf(our_level), &
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+         end if
       end if
 
       call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -236,10 +271,13 @@ module air_operators_setup
       ! ~~~~~~~~~~~~~~
       if (air_data%options%strong_r_threshold == 0d0) then
 
-         ! Copy the original pointer
-         air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
-         ! Increase the reference counter
-         call PetscObjectReference(air_data%A_cf(our_level), ierr)
+         ! Copy the original pointer (A_cf may not have been extracted)
+         temp_mat = air_data%A_cf(our_level)
+         if (.NOT. PetscObjectIsNull(temp_mat)) then
+            air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
+            ! Increase the reference counter
+            call PetscObjectReference(air_data%A_cf(our_level), ierr)
+         end if
          air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP) = air_data%A_fc(our_level)
          ! Increase the reference counter
          call PetscObjectReference(air_data%A_fc(our_level), ierr)        
@@ -321,7 +359,7 @@ module air_operators_setup
       type(tMat) :: C_mat
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
-      logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct, fuse_z_drop
+      logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct, fuse_z_drop, r_from_a_diag
       MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
@@ -491,6 +529,13 @@ module air_operators_setup
          end if
 
          call MatGetType(inv_dropped_Aff, mat_type_inv_aff, ierr)
+      end if
+
+      ! Can we build R straight from A, without A_cf or Z
+      r_from_a_diag = .FALSE.
+      if (air_data%options%z_type == AIR_Z_PRODUCT) then
+         r_from_a_diag = mat_type_inv_aff == MATDIAGONAL .AND. &
+               r_from_a_diag_possible(A, our_level, air_data)
       end if
 
       call timer_finish(TIMER_ID_AIR_INVERSE)           
@@ -809,8 +854,26 @@ module air_operators_setup
             call MatDestroy(sparsity_mat_cf, ierr)        
          end if
 
+      ! With a diagonal Aff inverse we may not need Z at all, R is built straight from A below
+      else if (r_from_a_diag) then
+
       ! For AIRG - we do a matmatmult with our approximate A_ff inverse
       else         
+
+         ! If A_cf wasn't extracted as we hoped to build R straight from A, extract it now
+         temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP)
+         if (PetscObjectIsNull(temp_mat)) then
+            call timer_start(TIMER_ID_AIR_EXTRACT)
+            call MatCreateSubMatrixWrapper(A, &
+                  air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                  air_data%A_cf(our_level), &
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+            call timer_finish(TIMER_ID_AIR_EXTRACT)
+            air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
+            call PetscObjectReference(air_data%A_cf(our_level), ierr)
+         end if
+
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z)       
          if (.NOT. PetscObjectIsNull(temp_mat)) then
             call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
@@ -914,7 +977,8 @@ module air_operators_setup
             call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
          end if
       end if
-      if (air_data%options%z_type == AIR_Z_PRODUCT .AND. destroy_mat) then
+      ! If we build R straight from A we still need the Aff inverse
+      if (air_data%options%z_type == AIR_Z_PRODUCT .AND. destroy_mat .AND. .NOT. r_from_a_diag) then
          call MatDestroy(inv_dropped_Aff, ierr)
       end if 
 
@@ -939,7 +1003,14 @@ module air_operators_setup
       ! Calculate R
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~    
-      if (fuse_z_drop) then
+      if (r_from_a_diag) then
+         call compute_R_from_A_diag(A, inv_dropped_Aff, our_level, air_data%kokkos_is_views_handle, &
+                  global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%options%r_drop, &
+                  air_data%restrictors(our_level))
+         if (destroy_mat) call MatDestroy(inv_dropped_Aff, ierr)
+      else if (fuse_z_drop) then
          call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z), global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
                   air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &

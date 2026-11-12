@@ -34,6 +34,9 @@ for earlier changes please see the git history.
   while R is built from it, without building the dropped Z; R is unchanged
 - With Kokkos, a diagonal Aff is built as a `MATDIAGONAL` straight from the
   diagonal of the operator, without extracting Aff first; Aff is unchanged
+- With Kokkos, on levels where the Aff inverse used for Z is diagonal (and
+  without sparsity reuse, `constrain_z` or `improve_z`), R is built straight
+  from the operator, without extracting Acf or building Z; R is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

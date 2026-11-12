@@ -404,6 +404,16 @@ module c_petsc_interfaces
          integer(c_int), value :: identity_int, reuse_int, reuse_indices_int, drop_int
          PetscReal, value :: tol
       end subroutine compute_R_from_Z_kokkos         
+
+      subroutine compute_R_from_A_diag_kokkos(A_array, kokkos_is_views_handle, our_level, &
+                     inv_diag_vec, tol, B_array) &
+         bind(c, name="compute_R_from_A_diag_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, inv_diag_vec, B_array
+         type(c_ptr), value :: kokkos_is_views_handle
+         integer(c_int), value :: our_level
+         PetscReal, value :: tol
+      end subroutine compute_R_from_A_diag_kokkos
  
    end interface
    
