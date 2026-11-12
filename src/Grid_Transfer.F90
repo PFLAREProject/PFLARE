@@ -3,8 +3,9 @@ module grid_transfer
    use petscmat
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos, generate_one_point_P_from_sparse_kokkos
-   use petsc_helper, only: kokkos_debug
-   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE
+   use petsc_helper, only: kokkos_debug, assemble_one_point_shell
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
+         PFLARE_TWO
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -335,7 +336,8 @@ module grid_transfer
       ! Builds the one point classical prolongator P = [W I]' straight from A_fc, where W has
       ! a one in the column of the biggest entry in each row of A_fc
       ! The same as generate_one_point_with_one_entry_from_sparse followed by compute_P_from_W
-      ! with the identity, but with Kokkos it doesn't build W
+      ! with the identity, but with Kokkos it doesn't build W, and P is matrix-free
+      ! (a MATSHELL, see assemble_one_point_shell for the places that need it assembled)
       ! Always creates a new P (no reuse)
 
       ! ~~~~~~~~~~
@@ -351,10 +353,14 @@ module grid_transfer
       integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse
       integer :: errorcode
       MatType :: mat_type
-      type(tMat) :: temp_mat
+      type(tMat) :: temp_mat, P_assembled
       PetscScalar :: normy
       type(tVec) :: max_vec
       PetscInt :: row_loc
+      integer(c_int) :: shell_int
+      type(tVec) :: x_coarse, x_fine, y_coarse, y_fine, x_coarse_ref, x_fine_ref
+      PetscRandom :: rctx
+      PetscReal :: norm_fine, norm_coarse
 #endif
       ! ~~~~~~~~~~
 
@@ -367,8 +373,9 @@ module grid_transfer
          A_array = A_fc%v
          indices_fine = is_fine%v
          indices_coarse = is_coarse%v
+         shell_int = 1
          call generate_one_point_P_from_sparse_kokkos(A_array, global_row_start, &
-                     indices_fine, indices_coarse, B_array)
+                     indices_fine, indices_coarse, shell_int, B_array)
          P%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -379,7 +386,8 @@ module grid_transfer
                      .TRUE., .FALSE., temp_mat)
             call MatDestroy(W, ierr)
 
-            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, P, DIFFERENT_NONZERO_PATTERN, ierr)
+            call assemble_one_point_shell(P, P_assembled)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, P_assembled, DIFFERENT_NONZERO_PATTERN, ierr)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
             call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
@@ -390,6 +398,43 @@ module grid_transfer
                print *, "Diff Kokkos and CPU generate_one_point_P_from_sparse", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
             end if
+
+            ! The matrix-free P applied to a random vector (forward, adding and transposed)
+            ! should match the assembled P
+            call PetscRandomCreate(MPI_COMM_WORLD, rctx, ierr)
+            call MatCreateVecs(P_assembled, x_coarse, x_fine, ierr)
+            call VecDuplicate(x_coarse, y_coarse, ierr)
+            call VecDuplicate(x_fine, y_fine, ierr)
+            call VecDuplicate(x_coarse, x_coarse_ref, ierr)
+            call VecDuplicate(x_fine, x_fine_ref, ierr)
+            call VecSetRandom(x_coarse, rctx, ierr)
+            call VecSetRandom(x_fine, rctx, ierr)
+            call MatMult(P, x_coarse, y_fine, ierr)
+            call MatMultAdd(P, x_coarse, y_fine, y_fine, ierr)
+            call MatMultTranspose(P, x_fine, y_coarse, ierr)
+            call MatMultTransposeAdd(P, x_fine, y_coarse, y_coarse, ierr)
+            ! y_fine should be 2 P x_coarse, y_coarse 2 P^T x_fine
+            call VecScale(x_coarse, PFLARE_TWO, ierr)
+            call VecScale(x_fine, PFLARE_TWO, ierr)
+            call MatMult(P_assembled, x_coarse, x_fine_ref, ierr)
+            call MatMultTranspose(P_assembled, x_fine, x_coarse_ref, ierr)
+            call VecAXPY(y_fine, PFLARE_MINUS_ONE, x_fine_ref, ierr)
+            call VecAXPY(y_coarse, PFLARE_MINUS_ONE, x_coarse_ref, ierr)
+            call VecNorm(y_fine, NORM_INFINITY, norm_fine, ierr)
+            call VecNorm(y_coarse, NORM_INFINITY, norm_coarse, ierr)
+            if (norm_fine .gt. PFLARE_TOL_MATFREE_12 .OR. norm_fine/=norm_fine .OR. &
+                  norm_coarse .gt. PFLARE_TOL_MATFREE_12 .OR. norm_coarse/=norm_coarse) then
+               print *, "Diff matrix-free and assembled one point P", norm_fine, norm_coarse
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call VecDestroy(x_coarse, ierr)
+            call VecDestroy(x_fine, ierr)
+            call VecDestroy(y_coarse, ierr)
+            call VecDestroy(y_fine, ierr)
+            call VecDestroy(x_coarse_ref, ierr)
+            call VecDestroy(x_fine_ref, ierr)
+            call PetscRandomDestroy(rctx, ierr)
+            call MatDestroy(P_assembled, ierr)
             call MatDestroy(temp_mat, ierr)
          end if
 

@@ -6,7 +6,8 @@ module petsc_helper
          remove_from_sparse_match_kokkos, &
          MatSetAllValues_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
-         MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos
+         MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
+         one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
          PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
          PFLARE_PTAP_FILL
@@ -1172,6 +1173,69 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 !------------------------------------------------------------------------------------------------------------------------
 
+   function is_one_point_shell(P)
+
+      ! Is P a matrix-free one point prolongator (see generate_one_point_P_from_sparse)
+      ! rather than any other MATSHELL
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in) :: P
+      logical :: is_one_point_shell
+
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
+      integer(c_int) :: result_int
+#endif
+      ! ~~~~~~~~~~
+
+      is_one_point_shell = .FALSE.
+      call MatGetType(P, mat_type, ierr)
+#if defined(PETSC_HAVE_KOKKOS)
+      if (mat_type == MATSHELL) then
+         A_array = P%v
+         call is_one_point_shell_kokkos(A_array, result_int)
+         is_one_point_shell = result_int == 1
+      end if
+#endif
+
+   end function is_one_point_shell
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   subroutine assemble_one_point_shell(P, P_assembled)
+
+      ! Assembles a matrix-free one point prolongator (see generate_one_point_P_from_sparse)
+      ! as a Kokkos matrix, for the places that need P as a matrix
+      ! Anything else is just duplicated
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: P
+      type(tMat), intent(inout) :: P_assembled
+
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      if (is_one_point_shell(P)) then
+         A_array = P%v
+         call one_point_shell_assemble_kokkos(A_array, B_array)
+         P_assembled%v = B_array
+         return
+      end if
+#endif
+      call MatDuplicate(P, MAT_COPY_VALUES, P_assembled, ierr)
+
+   end subroutine assemble_one_point_shell
+
+!------------------------------------------------------------------------------------------------------------------------
+
    subroutine mat_mult_one_entry_per_row(A, P, AP)
 
       ! Computes AP = A * P, always as a new matrix that isn't a PETSc product (so it
@@ -1191,7 +1255,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer(c_long_long) :: A_array, B_array, C_array
       integer(c_int) :: success_int
       MatType :: mat_type
-      type(tMat) :: temp_mat
+      type(tMat) :: temp_mat, P_assembled
       PetscScalar :: normy
       PetscReal :: norm_ref
       type(tVec) :: max_vec
@@ -1221,7 +1285,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
          ! If debugging do a comparison against the matrix-matrix product
          if (kokkos_debug()) then
 
-            call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+            ! A matrix-free one point P has to be assembled for the product
+            if (is_one_point_shell(P)) then
+               call assemble_one_point_shell(P, P_assembled)
+               call MatMatMult(A, P_assembled, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+               call MatDestroy(P_assembled, ierr)
+            else
+               call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+            end if
             call MatProductClear(temp_mat, ierr)
 
             ! Same sparsity
@@ -1653,6 +1724,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, dimension(:), pointer :: colmap => null(), ia => null(), ja => null()
       PetscInt :: n, shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
+#endif
       ! ~~~~~~~~~~
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
@@ -1665,6 +1739,14 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatGetLocalSize(input_mat, nnzs_local, PETSC_NULL_INTEGER, ierr)
          return
       end if
+#if defined(PETSC_HAVE_KOKKOS)
+      ! A matrix-free one point prolongator
+      if (is_one_point_shell(input_mat)) then
+         A_array = input_mat%v
+         call one_point_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal)
+         return
+      end if
+#endif
 
       if (comm_size /= 1) then
          call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr)

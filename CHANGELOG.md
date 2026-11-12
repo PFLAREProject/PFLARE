@@ -24,6 +24,9 @@ for earlier changes please see the git history.
 - With Kokkos and a one point classical prolongator, the A*P product in the
   coarse matrix is now a relabelling of the columns of A rather than a sparse
   matrix-matrix product; the coarse matrix only changes by rounding
+- With Kokkos and without sparsity reuse, the one point classical prolongator
+  is now matrix-free (a `MATSHELL` applied on the device), so the
+  interpolation PCAIR gives PCMG is a shell rather than an assembled matrix
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

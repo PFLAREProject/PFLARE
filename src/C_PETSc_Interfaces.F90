@@ -334,13 +334,46 @@ module c_petsc_interfaces
    interface
 
       subroutine generate_one_point_P_from_sparse_kokkos(A_array, global_row_start, indices_fine, &
-                     indices_coarse, B_array) &
+                     indices_coarse, shell_int, B_array) &
          bind(c, name="generate_one_point_P_from_sparse_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array, indices_fine, indices_coarse
          integer(c_long_long) :: B_array
          PetscInt, value :: global_row_start
+         integer(c_int), value :: shell_int
       end subroutine generate_one_point_P_from_sparse_kokkos
+
+   end interface
+
+   interface
+
+      subroutine one_point_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal) &
+         bind(c, name="one_point_shell_nnzs_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt :: nnzs_local, nnzs_nonlocal
+      end subroutine one_point_shell_nnzs_kokkos
+
+   end interface
+
+   interface
+
+      subroutine one_point_shell_assemble_kokkos(A_array, B_array) &
+         bind(c, name="one_point_shell_assemble_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+      end subroutine one_point_shell_assemble_kokkos
+
+   end interface
+
+   interface
+
+      subroutine is_one_point_shell_kokkos(A_array, result_int) &
+         bind(c, name="is_one_point_shell_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int) :: result_int
+      end subroutine is_one_point_shell_kokkos
 
    end interface
    

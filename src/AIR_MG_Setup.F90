@@ -34,7 +34,8 @@ module air_mg_setup
          petsc_matvec_right_scale_poly_newton_residual_mf, &
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
-   use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper
+   use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
+         is_one_point_shell
 
 #include "petsc/finclude/petscksp.h"
 
@@ -828,6 +829,12 @@ module air_mg_setup
                   ! ~~~~~~~~~~~~~~~~~~
                   ! Repartition the prolongator matrix
                   ! ~~~~~~~~~~~~~~~~~~
+                  ! A matrix-free one point prolongator has to be assembled to be repartitioned
+                  if (is_one_point_shell(air_data%prolongators(our_level))) then
+                     call assemble_one_point_shell(air_data%prolongators(our_level), temp_mat)
+                     call MatDestroy(air_data%prolongators(our_level), ierr)
+                     air_data%prolongators(our_level) = temp_mat
+                  end if
                   temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_P_REPARTITIONED)
                   if (.NOT. PetscObjectIsNull(temp_mat)) then
 

@@ -399,12 +399,412 @@ struct OnePointMaxRowFunctor {
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Matrix-free one point classical prolongator
+// Every row of P has at most one entry, a one, so applying P is a gather from the coarse vector
+// and applying P^T is a scatter-add into it
+// For each fine row the context stores the local coarse column of its entry (-1 if the row is
+// empty or its entry is on another rank). The rows whose entry is on another rank are listed
+// separately, with the index of their column in garray (the off-rank coarse columns, sorted),
+// and sf moves the coarse values of those columns between their owners and ghost_d
+struct OnePointShellCtx {
+   // Whether P is an MPI matrix (from the type of A_fc, not the comm size)
+   bool mpi = false;
+   PetscInt local_rows = 0, local_cols = 0, col_start = 0;
+   PetscIntKokkosView target_d;
+   PetscInt n_ghost_rows = 0, n_ghost_cols = 0;
+   PetscIntKokkosView ghost_rows_d, ghost_idx_d, garray_d;
+   PetscScalarKokkosView ghost_d;
+   PetscSF sf = NULL;
+   // Host copies, only made if P is applied to vectors in host memory on a device build
+   bool host_made = false;
+   PetscIntKokkosViewHost target_h, ghost_rows_h, ghost_idx_h;
+   PetscScalarKokkosViewHost ghost_h;
+};
+
+static PetscErrorCode one_point_shell_destroy(PetscCtxRt ctx)
+{
+   PetscFunctionBegin;
+   OnePointShellCtx *c = *reinterpret_cast<OnePointShellCtx **>(ctx);
+   if (c->sf) PetscCall(PetscSFDestroy(&c->sf));
+   PetscCallCXX(delete c);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Can the default execution space use host memory directly (host backends)
+static constexpr bool default_space_host_accessible = Kokkos::SpaceAccessibility<Kokkos::DefaultExecutionSpace, Kokkos::HostSpace>::accessible;
+
+static PetscErrorCode one_point_shell_make_host(OnePointShellCtx *c)
+{
+   PetscFunctionBegin;
+   if (!c->host_made) {
+      c->target_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c->target_d);
+      c->ghost_rows_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c->ghost_rows_d);
+      c->ghost_idx_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), c->ghost_idx_d);
+      c->ghost_h = PetscScalarKokkosViewHost("ghost_h", c->n_ghost_cols);
+      size_t bytes = (c->target_d.extent(0) + c->ghost_rows_d.extent(0) + c->ghost_idx_d.extent(0)) * sizeof(PetscInt);
+      PetscCall(PetscLogGpuToCpu(bytes));
+      c->host_made = true;
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// y = P x (add = false) or y += P x (add = true), on the given execution space
+template <class ExecSpace>
+static PetscErrorCode one_point_shell_gather(const ExecSpace &exec, OnePointShellCtx *c, const PetscInt *target, \
+                  const PetscInt *ghost_rows, const PetscInt *ghost_idx, PetscScalar *ghost, PetscMemType ghost_mtype, \
+                  const PetscScalar *x, PetscMemType x_mtype, PetscScalar *y, const bool add)
+{
+   PetscFunctionBegin;
+   // Start sending the coarse values that other ranks need, the local rows don't need them
+   if (c->sf) {
+      if (PetscMemTypeDevice(x_mtype)) PetscCall(sf_sync_before_begin_kokkos());
+      PetscCall(PetscSFBcastWithMemTypeBegin(c->sf, MPIU_SCALAR, x_mtype, x, ghost_mtype, ghost, MPI_REPLACE));
+   }
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<ExecSpace>(exec, 0, c->local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         const PetscInt t = target[i];
+         const PetscScalar val = t >= 0 ? x[t] : 0.0;
+         if (add) y[i] += val;
+         else y[i] = val;
+   });
+   if (c->sf) {
+      PetscCall(PetscSFBcastEnd(c->sf, MPIU_SCALAR, x, ghost, MPI_REPLACE));
+      if (PetscMemTypeDevice(x_mtype)) PetscCall(sf_sync_after_end_kokkos());
+      // Rows with off-rank entries were zero (or unchanged) above
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<ExecSpace>(exec, 0, c->n_ghost_rows), KOKKOS_LAMBDA(const PetscInt k) {
+            y[ghost_rows[k]] += ghost[ghost_idx[k]];
+      });
+   }
+   // On the device everything is ordered on the PETSc stream, so only the host waits
+   if (PetscMemTypeHost(ghost_mtype)) exec.fence();
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// y += P^T x, on the given execution space
+// Entries that land on the same coarse point are summed with atomics
+template <class ExecSpace>
+static PetscErrorCode one_point_shell_scatter(const ExecSpace &exec, OnePointShellCtx *c, const PetscInt *target, \
+                  const PetscInt *ghost_rows, const PetscInt *ghost_idx, PetscScalar *ghost, PetscMemType ghost_mtype, \
+                  const PetscScalar *x, PetscScalar *y, PetscMemType y_mtype)
+{
+   PetscFunctionBegin;
+   if (c->sf) {
+      const PetscInt n_ghost_cols = c->n_ghost_cols;
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<ExecSpace>(exec, 0, n_ghost_cols), KOKKOS_LAMBDA(const PetscInt k) {
+            ghost[k] = 0.0;
+      });
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<ExecSpace>(exec, 0, c->n_ghost_rows), KOKKOS_LAMBDA(const PetscInt k) {
+            Kokkos::atomic_add(&ghost[ghost_idx[k]], x[ghost_rows[k]]);
+      });
+      // The sums have to be finished before they are sent
+      if (PetscMemTypeHost(ghost_mtype)) exec.fence();
+      else PetscCall(sf_sync_before_begin_kokkos());
+      // Start sending the sums to their owners
+      PetscCall(PetscSFReduceWithMemTypeBegin(c->sf, MPIU_SCALAR, ghost_mtype, ghost, y_mtype, y, MPI_SUM));
+   }
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<ExecSpace>(exec, 0, c->local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         const PetscInt t = target[i];
+         if (t >= 0) Kokkos::atomic_add(&y[t], x[i]);
+   });
+   // On the device the unpack into y is ordered after this on the PETSc stream
+   if (PetscMemTypeHost(ghost_mtype)) exec.fence();
+   if (c->sf) {
+      PetscCall(PetscSFReduceEnd(c->sf, MPIU_SCALAR, ghost, y, MPI_SUM));
+      if (PetscMemTypeDevice(y_mtype)) PetscCall(sf_sync_after_end_kokkos());
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Applies P or P^T to vectors, with or without adding to y, on the device or on the host
+// depending on where the vectors live
+static PetscErrorCode one_point_shell_apply(Mat P, Vec x, Vec y, const bool add, const bool transpose)
+{
+   OnePointShellCtx *c;
+   const PetscScalar *x_ptr;
+   PetscScalar *y_ptr;
+   PetscMemType x_mtype, y_mtype;
+
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(P, &c));
+   // The transpose always adds into y, so it needs the old values
+   const bool read_y = add || transpose;
+   PetscCall(VecGetArrayReadAndMemType(x, &x_ptr, &x_mtype));
+   if (read_y) PetscCall(VecGetArrayAndMemType(y, &y_ptr, &y_mtype));
+   else PetscCall(VecGetArrayWriteAndMemType(y, &y_ptr, &y_mtype));
+   // If one vector is on the host and the other on the device, do it all on the host
+   const bool mixed = PetscMemTypeHost(x_mtype) != PetscMemTypeHost(y_mtype);
+   if (mixed) {
+      PetscCall(VecRestoreArrayReadAndMemType(x, &x_ptr));
+      if (read_y) PetscCall(VecRestoreArrayAndMemType(y, &y_ptr));
+      else PetscCall(VecRestoreArrayWriteAndMemType(y, &y_ptr));
+      PetscCall(VecGetArrayRead(x, &x_ptr));
+      if (read_y) PetscCall(VecGetArray(y, &y_ptr));
+      else PetscCall(VecGetArrayWrite(y, &y_ptr));
+      x_mtype = y_mtype = PETSC_MEMTYPE_HOST;
+   }
+
+   if (!PetscMemTypeHost(x_mtype) || default_space_host_accessible) {
+      // Device (or a host backend that can use the vectors directly)
+      auto exec = PetscGetKokkosExecutionSpace();
+      const PetscMemType ghost_mtype = default_space_host_accessible ? PETSC_MEMTYPE_HOST : PETSC_MEMTYPE_KOKKOS;
+      if (transpose) {
+         PetscCall(one_point_shell_scatter(exec, c, c->target_d.data(), c->ghost_rows_d.data(), c->ghost_idx_d.data(), \
+                  c->ghost_d.data(), ghost_mtype, x_ptr, y_ptr, y_mtype));
+      } else {
+         PetscCall(one_point_shell_gather(exec, c, c->target_d.data(), c->ghost_rows_d.data(), c->ghost_idx_d.data(), \
+                  c->ghost_d.data(), ghost_mtype, x_ptr, x_mtype, y_ptr, add));
+      }
+   }
+   else {
+      // Host vectors on a device build
+      PetscCall(one_point_shell_make_host(c));
+      Kokkos::DefaultHostExecutionSpace host_exec;
+      if (transpose) {
+         PetscCall(one_point_shell_scatter(host_exec, c, c->target_h.data(), c->ghost_rows_h.data(), c->ghost_idx_h.data(), \
+                  c->ghost_h.data(), PETSC_MEMTYPE_HOST, x_ptr, y_ptr, y_mtype));
+      } else {
+         PetscCall(one_point_shell_gather(host_exec, c, c->target_h.data(), c->ghost_rows_h.data(), c->ghost_idx_h.data(), \
+                  c->ghost_h.data(), PETSC_MEMTYPE_HOST, x_ptr, x_mtype, y_ptr, add));
+      }
+   }
+
+   if (mixed) {
+      PetscCall(VecRestoreArrayRead(x, &x_ptr));
+      if (read_y) PetscCall(VecRestoreArray(y, &y_ptr));
+      else PetscCall(VecRestoreArrayWrite(y, &y_ptr));
+   } else {
+      PetscCall(VecRestoreArrayReadAndMemType(x, &x_ptr));
+      if (read_y) PetscCall(VecRestoreArrayAndMemType(y, &y_ptr));
+      else PetscCall(VecRestoreArrayWriteAndMemType(y, &y_ptr));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode one_point_shell_mult(Mat P, Vec x, Vec y)
+{
+   PetscFunctionBegin;
+   PetscCall(one_point_shell_apply(P, x, y, false, false));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode one_point_shell_mult_add(Mat P, Vec x, Vec y, Vec z)
+{
+   PetscFunctionBegin;
+   if (z != y) PetscCall(VecCopy(y, z));
+   PetscCall(one_point_shell_apply(P, x, z, true, false));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode one_point_shell_mult_transpose(Mat P, Vec x, Vec y)
+{
+   PetscFunctionBegin;
+   PetscCall(VecZeroEntries(y));
+   PetscCall(one_point_shell_apply(P, x, y, true, true));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode one_point_shell_mult_transpose_add(Mat P, Vec x, Vec y, Vec z)
+{
+   PetscFunctionBegin;
+   if (z != y) PetscCall(VecCopy(y, z));
+   PetscCall(one_point_shell_apply(P, x, z, true, true));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// C = P B for dense B, one column at a time, wherever B lives
+// (PETSc's default for shells would bind B and C to the CPU on CUDA builds)
+static PetscErrorCode one_point_shell_mat_mult_dense(Mat P, Mat B, Mat C, void *)
+{
+   PetscInt K;
+
+   PetscFunctionBegin;
+   PetscCall(MatGetSize(B, NULL, &K));
+   for (PetscInt k = 0; k < K; k++) {
+      Vec x, y;
+      PetscCall(MatDenseGetColumnVecRead(B, k, &x));
+      PetscCall(MatDenseGetColumnVecWrite(C, k, &y));
+      PetscCall(one_point_shell_apply(P, x, y, false, false));
+      PetscCall(MatDenseRestoreColumnVecRead(B, k, &x));
+      PetscCall(MatDenseRestoreColumnVecWrite(C, k, &y));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Wrap the context as a MATSHELL
+static PetscErrorCode one_point_shell_create(MPI_Comm comm, PetscInt global_rows, PetscInt global_cols, OnePointShellCtx *c, Mat *P)
+{
+   PetscFunctionBegin;
+   PetscCall(MatCreateShell(comm, c->local_rows, c->local_cols, global_rows, global_cols, c, P));
+   PetscCall(MatShellSetContextDestroy(*P, one_point_shell_destroy));
+   PetscCall(MatShellSetOperation(*P, MATOP_MULT, (PetscErrorCodeFn *)one_point_shell_mult));
+   PetscCall(MatShellSetOperation(*P, MATOP_MULT_ADD, (PetscErrorCodeFn *)one_point_shell_mult_add));
+   PetscCall(MatShellSetOperation(*P, MATOP_MULT_TRANSPOSE, (PetscErrorCodeFn *)one_point_shell_mult_transpose));
+   PetscCall(MatShellSetOperation(*P, MATOP_MULT_TRANSPOSE_ADD, (PetscErrorCodeFn *)one_point_shell_mult_transpose_add));
+   PetscCall(MatShellSetVecType(*P, VECKOKKOS));
+   const MatType dense_types[] = {MATSEQDENSE, MATMPIDENSE, MATSEQDENSECUDA, MATMPIDENSECUDA, MATSEQDENSEHIP, MATMPIDENSEHIP};
+   for (const MatType t : dense_types) {
+      PetscCall(MatShellSetMatProductOperation(*P, MATPRODUCT_AB, NULL, one_point_shell_mat_mult_dense, NULL, t, t));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Is this one of our one point shells
+static bool is_one_point_shell(Mat P)
+{
+   PetscBool shell;
+   PetscCallAbort(PETSC_COMM_SELF, PetscObjectTypeCompare((PetscObject)P, MATSHELL, &shell));
+   if (!shell) return false;
+   PetscErrorCodeFn *f;
+   PetscCallAbort(PETSC_COMM_SELF, MatShellGetOperation(P, MATOP_MULT, &f));
+   return f == (PetscErrorCodeFn *)one_point_shell_mult;
+}
+
+// For Fortran: is this one of our one point shells
+PETSC_INTERN void is_one_point_shell_kokkos(Mat *P, int *result)
+{
+   *result = is_one_point_shell(*P) ? 1 : 0;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// The global column and value of the entry in each local row of a one point shell P
+// (the sentinel column and a zero for an empty row), for mat_mult_one_entry_per_row_kokkos
+// Returns false if P isn't a one point shell
+PETSC_VISIBILITY_INTERNAL bool one_point_shell_targets_kokkos(Mat P, const PetscInt sentinel, PetscIntKokkosView &target_global_d, PetscScalarKokkosView &weight_d)
+{
+   if (!is_one_point_shell(P)) return false;
+   OnePointShellCtx *c;
+   PetscCallAbort(PETSC_COMM_SELF, MatShellGetContext(P, &c));
+   auto exec = PetscGetKokkosExecutionSpace();
+   target_global_d = PetscIntKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "target_global_d"), c->local_rows);
+   weight_d = PetscScalarKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "weight_d"), c->local_rows);
+   auto target_d = c->target_d;
+   auto ghost_rows_d = c->ghost_rows_d, ghost_idx_d = c->ghost_idx_d, garray_d = c->garray_d;
+   const PetscInt col_start = c->col_start;
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, c->local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         const PetscInt t = target_d(i);
+         target_global_d(i) = t >= 0 ? t + col_start : sentinel;
+         weight_d(i) = t >= 0 ? 1.0 : 0.0;
+   });
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, c->n_ghost_rows), KOKKOS_LAMBDA(const PetscInt k) {
+         target_global_d(ghost_rows_d(k)) = garray_d(ghost_idx_d(k));
+         weight_d(ghost_rows_d(k)) = 1.0;
+   });
+   exec.fence();
+   return true;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// The number of local and nonlocal nonzeros in a one point shell P
+PETSC_INTERN void one_point_shell_nnzs_kokkos(Mat *P, PetscInt *nnzs_local, PetscInt *nnzs_nonlocal)
+{
+   OnePointShellCtx *c;
+   PetscCallVoid(MatShellGetContext(*P, &c));
+   auto exec = PetscGetKokkosExecutionSpace();
+   auto target_d = c->target_d;
+   PetscInt count = 0;
+   Kokkos::parallel_reduce(
+      Kokkos::RangePolicy<>(exec, 0, c->local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update) {
+         if (target_d(i) >= 0) update++;
+   }, count);
+   *nnzs_local = count;
+   *nnzs_nonlocal = c->n_ghost_rows;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Assemble a one point shell P as a MATAIJKOKKOS, for the places that need P as a matrix
+PETSC_INTERN void one_point_shell_assemble_kokkos(Mat *P, Mat *output_mat)
+{
+   OnePointShellCtx *c;
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscInt global_rows, global_cols;
+   Mat output_mat_local, output_mat_nonlocal;
+   PetscCallVoid(MatShellGetContext(*P, &c));
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*P, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetSize(*P, &global_rows, &global_cols));
+   auto exec = PetscGetKokkosExecutionSpace();
+   const PetscInt local_rows = c->local_rows;
+   auto target_d = c->target_d;
+   auto ghost_rows_d = c->ghost_rows_d, ghost_idx_d = c->ghost_idx_d;
+
+   // Zero initialised, the counts go into entry row + 1
+   Kokkos::View<PetscInt *> i_local_d(Kokkos::view_alloc(exec, "i_local_d"), local_rows + 1);
+   Kokkos::View<PetscInt *> i_nonlocal_d(Kokkos::view_alloc(exec, "i_nonlocal_d"), local_rows + 1);
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         if (target_d(i) >= 0) i_local_d(i + 1) = 1;
+   });
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, c->n_ghost_rows), KOKKOS_LAMBDA(const PetscInt k) {
+         i_nonlocal_d(ghost_rows_d(k) + 1) = 1;
+   });
+   PetscInt nnzs_local = 0, nnzs_nonlocal = 0;
+   Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update, const bool final) {
+      update += i_local_d(i + 1);
+      if (final) i_local_d(i + 1) = update;
+   }, nnzs_local);
+   Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update, const bool final) {
+      update += i_nonlocal_d(i + 1);
+      if (final) i_nonlocal_d(i + 1) = update;
+   }, nnzs_nonlocal);
+
+   Kokkos::View<PetscInt *> j_local_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "j_local_d"), nnzs_local);
+   Kokkos::View<PetscScalar *> a_local_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "a_local_d"), nnzs_local);
+   Kokkos::View<PetscInt *> j_nonlocal_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "j_nonlocal_d"), nnzs_nonlocal);
+   Kokkos::View<PetscScalar *> a_nonlocal_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "a_nonlocal_d"), nnzs_nonlocal);
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         if (target_d(i) >= 0) {
+            j_local_d(i_local_d(i)) = target_d(i);
+            a_local_d(i_local_d(i)) = 1.0;
+         }
+   });
+   // The ghost rows are in increasing order, so entry k is the k-th nonlocal entry
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, c->n_ghost_rows), KOKKOS_LAMBDA(const PetscInt k) {
+         j_nonlocal_d(k) = ghost_idx_d(k);
+         a_nonlocal_d(k) = 1.0;
+   });
+   exec.fence();
+
+   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, c->local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
+   // The same type as an assembled P would have had
+   if (c->mpi)
+   {
+      PetscInt *garray_host = NULL;
+      PetscCallVoid(PetscMalloc1(c->n_ghost_cols, &garray_host));
+      if (c->n_ghost_cols > 0)
+      {
+         PetscIntKokkosViewHost garray_h(garray_host, c->n_ghost_cols);
+         Kokkos::deep_copy(garray_h, c->garray_d);
+         PetscCallVoid(PetscLogGpuToCpu(c->n_ghost_cols * sizeof(PetscInt)));
+      }
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, c->n_ghost_cols, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
+      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+   }
+   else
+   {
+      *output_mat = output_mat_local;
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Build the one point classical prolongator P = [W I]' straight from A_fc, where W has a
 // one in the column of the biggest entry in each row of A_fc
 // This gives the same matrix as generate_one_point_with_one_entry_from_sparse_kokkos followed
 // by compute_P_from_W_kokkos with the identity, without building W
+// If shell_int is 1, P is matrix-free (a MATSHELL that applies P and P^T on the device)
 PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscInt global_row_start, IS *is_fine, \
-                  IS *is_coarse, Mat *output_mat)
+                  IS *is_coarse, const int shell_int, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows_fine, local_rows_coarse, local_rows, global_rows_fine, global_cols_coarse;
@@ -572,6 +972,54 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
    // Let's make sure everything on the device is finished
    exec.fence();
 
+   if (shell_int)
+   {
+      OnePointShellCtx *c = new OnePointShellCtx();
+      c->mpi = mpi;
+      c->local_rows = local_rows;
+      c->local_cols = local_rows_coarse;
+      PetscInt *garray_host = NULL;
+      if (mpi)
+      {
+         // Build garray and rewrite the j_nonlocal_d indices so they index into it
+         // This fences internally
+         rewrite_j_global_to_local(cols_ao, c->n_ghost_cols, j_nonlocal_d, &garray_host);
+         c->n_ghost_rows = nnzs_nonlocal;
+         c->ghost_idx_d = j_nonlocal_d;
+         c->garray_d = PetscIntKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "garray_d"), c->n_ghost_cols);
+         Kokkos::deep_copy(exec, c->garray_d, PetscIntConstKokkosViewHost(garray_host, c->n_ghost_cols));
+         PetscCallVoid(PetscLogCpuToGpu(c->n_ghost_cols * sizeof(PetscInt)));
+         c->ghost_d = PetscScalarKokkosView("ghost_d", c->n_ghost_cols);
+      }
+      // The local column of each row's entry, or -1, and the rows with an off-rank entry
+      // in increasing order
+      c->target_d = PetscIntKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "target_d"), local_rows);
+      c->ghost_rows_d = PetscIntKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "ghost_rows_d"), c->n_ghost_rows);
+      auto target_d = c->target_d;
+      auto ghost_rows_d = c->ghost_rows_d;
+      Kokkos::parallel_for(
+         Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(PetscInt i) {
+            target_d(i) = i_local_d(i + 1) > i_local_d(i) ? j_local_d(i_local_d(i)) : -1;
+            if (mpi && i_nonlocal_d(i + 1) > i_nonlocal_d(i)) ghost_rows_d(i_nonlocal_d(i)) = i;
+      });
+      exec.fence();
+
+      PetscCallVoid(one_point_shell_create(MPI_COMM_MATRIX, global_rows, global_cols_coarse, c, output_mat));
+      PetscLayout cmap;
+      PetscCallVoid(MatGetLayouts(*output_mat, NULL, &cmap));
+      PetscCallVoid(PetscLayoutGetRange(cmap, &c->col_start, NULL));
+      if (mpi)
+      {
+         // The halo of coarse values, from their owners to the ranks with rows pointing at them
+         PetscCallVoid(PetscSFCreate(MPI_COMM_MATRIX, &c->sf));
+         PetscCallVoid(PetscSFSetGraphLayout(c->sf, cmap, c->n_ghost_cols, NULL, PETSC_COPY_VALUES, garray_host));
+         PetscCallVoid(PetscSFSetUp(c->sf));
+         PetscCallVoid(PetscFree(garray_host));
+      }
+   }
+   else
+   {
+
    // We can create our local diagonal block matrix directly on the device
    PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_rows_coarse, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
@@ -593,6 +1041,7 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
    else
    {
       *output_mat = output_mat_local;
+   }
    }
 
    PetscCallVoid(ISRestoreIndices(*is_fine, &fine_indices_ptr));
