@@ -19,7 +19,7 @@ module air_operators_setup
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
-         compute_P_from_W, compute_R_from_Z
+         compute_P_from_W, compute_R_from_Z, generate_one_point_P_from_sparse
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
@@ -321,7 +321,7 @@ module air_operators_setup
       type(tMat) :: C_mat
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
-      logical :: destroy_mat, reuse_grid_transfer
+      logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct
       MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
@@ -334,7 +334,14 @@ module air_operators_setup
       ! Get some sizes
       ! ~~~~~~~~~~~
 
-      call MatGetOwnershipRange(A, global_row_start, global_row_end_plus_one, ierr)  
+      call MatGetOwnershipRange(A, global_row_start, global_row_end_plus_one, ierr)
+
+      ! A one point classical prolongator can be built straight from A_fc without building
+      ! W, as long as nothing needs W: no constraints on W and W isn't kept for reuse
+      one_point_p_direct = air_data%options%one_point_classical_prolong .AND. &
+               .NOT. air_data%options%symmetric .AND. &
+               .NOT. air_data%options%constrain_w .AND. &
+               .NOT. air_data%options%reuse_sparsity
       
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~
@@ -357,10 +364,17 @@ module air_operators_setup
             ! The one point classical prolongator will never change if 
             ! we are reusing
             
+         ! If nothing needs W, build P straight from A_fc without building W
+         ! We don't reuse here, so the reset has already destroyed any old P
+         else if (one_point_p_direct) then
+            call generate_one_point_P_from_sparse(air_data%A_fc(our_level), &
+                     global_row_start, &
+                     air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                     air_data%prolongators(our_level))
          ! First time
          else
             call generate_one_point_with_one_entry_from_sparse(air_data%A_fc(our_level), &
-                     air_data%reuse(our_level)%reuse_mat(MAT_W_DROP)) 
+                     air_data%reuse(our_level)%reuse_mat(MAT_W_DROP))
          end if         
          
          call timer_finish(TIMER_ID_AIR_PROLONG)                
@@ -671,7 +685,8 @@ module air_operators_setup
 
          ! If we've got a one point classical prolongator computed already we can just reuse the prolongator
          ! without change
-         if (.NOT. air_data%reuse_one_point_classical_prolong) then
+         ! (or we built it straight from A_fc above)
+         if (.NOT. air_data%reuse_one_point_classical_prolong .AND. .NOT. one_point_p_direct) then
             call compute_P_from_W(air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), &
                      global_row_start, &
                      air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &

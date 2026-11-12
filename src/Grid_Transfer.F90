@@ -2,7 +2,7 @@ module grid_transfer
 
    use petscmat
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
-         compute_P_from_W_kokkos, compute_R_from_Z_kokkos
+         compute_P_from_W_kokkos, compute_R_from_Z_kokkos, generate_one_point_P_from_sparse_kokkos
    use petsc_helper, only: kokkos_debug
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE
 
@@ -326,7 +326,87 @@ module grid_transfer
 #endif  
 
          
-   end subroutine compute_P_from_W         
+   end subroutine compute_P_from_W
+
+  !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine generate_one_point_P_from_sparse(A_fc, global_row_start, is_fine, is_coarse, P)
+
+      ! Builds the one point classical prolongator P = [W I]' straight from A_fc, where W has
+      ! a one in the column of the biggest entry in each row of A_fc
+      ! The same as generate_one_point_with_one_entry_from_sparse followed by compute_P_from_W
+      ! with the identity, but with Kokkos it doesn't build W
+      ! Always creates a new P (no reuse)
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: A_fc
+      type(tMat), intent(inout) :: P
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      PetscInt, intent(in)      :: global_row_start
+
+      type(tMat) :: W
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse
+      integer :: errorcode
+      MatType :: mat_type
+      type(tMat) :: temp_mat
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A_fc, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         A_array = A_fc%v
+         indices_fine = is_fine%v
+         indices_coarse = is_coarse%v
+         call generate_one_point_P_from_sparse_kokkos(A_array, global_row_start, &
+                     indices_fine, indices_coarse, B_array)
+         P%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            call generate_one_point_with_one_entry_from_sparse_cpu(A_fc, W)
+            call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+                     .TRUE., .FALSE., temp_mat)
+            call MatDestroy(W, ierr)
+
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, P, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
+               print *, "Diff Kokkos and CPU generate_one_point_P_from_sparse", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call generate_one_point_with_one_entry_from_sparse(A_fc, W)
+         call compute_P_from_W(W, global_row_start, is_fine, is_coarse, .TRUE., .FALSE., P)
+         call MatDestroy(W, ierr)
+
+      end if
+#else
+      call generate_one_point_with_one_entry_from_sparse(A_fc, W)
+      call compute_P_from_W(W, global_row_start, is_fine, is_coarse, .TRUE., .FALSE., P)
+      call MatDestroy(W, ierr)
+#endif
+
+   end subroutine generate_one_point_P_from_sparse
 
   !------------------------------------------------------------------------------------------------------------------------
    

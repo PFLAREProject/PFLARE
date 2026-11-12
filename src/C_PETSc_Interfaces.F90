@@ -327,9 +327,22 @@ module c_petsc_interfaces
          bind(c, name="generate_one_point_with_one_entry_from_sparse_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array, B_array
-      end subroutine generate_one_point_with_one_entry_from_sparse_kokkos         
- 
-   end interface    
+      end subroutine generate_one_point_with_one_entry_from_sparse_kokkos
+
+   end interface
+
+   interface
+
+      subroutine generate_one_point_P_from_sparse_kokkos(A_array, global_row_start, indices_fine, &
+                     indices_coarse, B_array) &
+         bind(c, name="generate_one_point_P_from_sparse_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, indices_fine, indices_coarse
+         integer(c_long_long) :: B_array
+         PetscInt, value :: global_row_start
+      end subroutine generate_one_point_P_from_sparse_kokkos
+
+   end interface
    
    interface   
       
