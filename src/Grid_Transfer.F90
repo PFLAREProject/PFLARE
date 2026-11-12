@@ -3,7 +3,7 @@ module grid_transfer
    use petscmat
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos, generate_one_point_P_from_sparse_kokkos
-   use petsc_helper, only: kokkos_debug, assemble_one_point_shell
+   use petsc_helper, only: kokkos_debug, assemble_one_point_shell, remove_small_from_sparse_cpu
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
          PFLARE_TWO
 
@@ -584,9 +584,13 @@ module grid_transfer
    subroutine compute_R_from_Z(Z, global_row_start, is_fine, is_coarse, &
                      orig_fine_col_indices, &
                      identity, reuse, &
-                     R)
+                     R, drop_tol)
 
       ! Wrapper around compute_R_from_Z_kokkos and compute_R_from_Z_cpu
+      ! If drop_tol is present, R is built from Z with its small entries dropped, as
+      ! remove_small_from_sparse with relative_max_row_tol_int = 1 would drop them
+      ! With Kokkos this is done in one pass without building the dropped Z
+      ! drop_tol needs identity, no reuse and a null orig_fine_col_indices
    
       ! ~~~~~~~~~~
       ! Input 
@@ -595,18 +599,34 @@ module grid_transfer
       type(tIS), intent(in)     :: is_fine, is_coarse
       type(tIS), intent(inout)  :: orig_fine_col_indices
       logical, intent(in) :: identity, reuse
+      PetscReal, intent(in), optional :: drop_tol
 
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      type(tMat) :: Z_drop
+      logical :: have_indices
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse, orig_indices
-      integer :: identity_int, reuse_int, reuse_indices_int, errorcode
-      PetscErrorCode :: ierr
+      integer :: identity_int, reuse_int, reuse_indices_int, drop_int
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
       PetscScalar :: normy
+      PetscReal :: tol
       type(tVec) :: max_vec
+      type(tIS) :: temp_is
       PetscInt :: row_loc      
+      MatInfo :: info_kokkos, info_cpu
 #endif        
       ! ~~~~~~~~~~
+
+      if (present(drop_tol)) then
+         ! PetscObjectIsNull is a macro, so keep it on a short line
+         have_indices = .NOT. PetscObjectIsNull(orig_fine_col_indices)
+         if (.NOT. identity .OR. reuse .OR. have_indices) then
+            print *, "compute_R_from_Z with drop_tol needs identity and no reuse"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if
 
 
 #if defined(PETSC_HAVE_KOKKOS)    
@@ -623,6 +643,12 @@ module grid_transfer
          if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) then
             reuse_indices_int = 1
          end if
+         drop_int = 0
+         tol = 0
+         if (present(drop_tol)) then
+            drop_int = 1
+            tol = drop_tol
+         end if
 
          A_array = Z%v             
          indices_fine = is_fine%v
@@ -632,12 +658,49 @@ module grid_transfer
          call compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, indices_coarse, &
                         orig_indices, &
                         identity_int, reuse_int, reuse_indices_int, &
+                        drop_int, tol, &
                         B_array)
          R%v = B_array
          orig_fine_col_indices%v = orig_indices
+
+         ! If debugging the fused drop, compare against the CPU drop followed by the CPU R
+         if (kokkos_debug() .AND. present(drop_tol)) then
+
+            call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+            call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                           temp_is, &
+                           identity, .FALSE., &
+                           temp_mat)
+            call MatDestroy(Z_drop, ierr)
+            call ISDestroy(temp_is, ierr)
+
+            ! The same entries have to be kept
+            call MatGetInfo(R, MAT_GLOBAL_SUM, info_kokkos, ierr)
+            call MatGetInfo(temp_mat, MAT_GLOBAL_SUM, info_cpu, ierr)
+            if (info_kokkos%NZ_USED /= info_cpu%NZ_USED) then
+               print *, "Diff Kokkos and CPU compute_R_from_Z with drop nnzs", &
+                        info_kokkos%NZ_USED, info_cpu%NZ_USED
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, R, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
+               print *, "Diff Kokkos and CPU compute_R_from_Z with drop", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            call MatDestroy(R, ierr)
+            R = temp_mat
          
          ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+         else if (kokkos_debug()) then
 
             ! If we're doing reuse and debug, then the cpu version reuses the output
             ! matrix itself (as that has the sparsity the cpu version expects) and so
@@ -683,17 +746,35 @@ module grid_transfer
 
       else
 
-         call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
-                        orig_fine_col_indices, &
-                        identity, reuse, &
-                        R)       
+         if (present(drop_tol)) then
+            call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+            call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                           orig_fine_col_indices, &
+                           identity, reuse, &
+                           R)
+            call MatDestroy(Z_drop, ierr)
+         else
+            call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                           orig_fine_col_indices, &
+                           identity, reuse, &
+                           R)
+         end if
 
       end if
 #else
-      call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
-                     orig_fine_col_indices, &
-                     identity, reuse, &
-                     R)
+      if (present(drop_tol)) then
+         call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+         call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                        orig_fine_col_indices, &
+                        identity, reuse, &
+                        R)
+         call MatDestroy(Z_drop, ierr)
+      else
+         call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                        orig_fine_col_indices, &
+                        identity, reuse, &
+                        R)
+      end if
 #endif 
          
          

@@ -321,7 +321,7 @@ module air_operators_setup
       type(tMat) :: C_mat
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
-      logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct
+      logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct, fuse_z_drop
       MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
@@ -878,34 +878,41 @@ module air_operators_setup
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~
 
-      call timer_start(TIMER_ID_AIR_DROP)    
+      ! Without reuse or constraints nothing needs the dropped Z, so the drop is done
+      ! while building R, without building the dropped Z as a matrix
+      fuse_z_drop = .NOT. air_data%options%reuse_sparsity .AND. .NOT. air_data%options%constrain_z
 
-      ! If we want to reuse, we have to match the original sparsity
-      ! which might be different if the matrix has changed (but the sparsity is the same)
-      ! so we can't just drop with a drop tolerance
-      temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP)
-      if (.NOT. PetscObjectIsNull(temp_mat)) then
+      if (.NOT. fuse_z_drop) then
 
-         call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
-                  air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP))     
-         
-      ! First time so just drop according to a tolerance 
-      else
-         ! If nothing is dropped MAT_Z_DROP can just be MAT_Z, as long as we
-         ! aren't keeping either for reuse
-         call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
-                     air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
-                     relative_max_row_tol_int= 1, &
-                     allow_alias = .NOT. air_data%options%reuse_sparsity .OR. &
-                        (.NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount) .AND. &
-                         .NOT. REUSE_MAT_ACTIVE(MAT_Z_DROP, air_data%options%reuse_amount)))
-      end if
+         call timer_start(TIMER_ID_AIR_DROP)    
 
-      call timer_finish(TIMER_ID_AIR_DROP)
-      ! Delete temporary if not reusing
-      if (.NOT. air_data%options%reuse_sparsity .OR. &
-          .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) then
-         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+         ! If we want to reuse, we have to match the original sparsity
+         ! which might be different if the matrix has changed (but the sparsity is the same)
+         ! so we can't just drop with a drop tolerance
+         temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP)
+         if (.NOT. PetscObjectIsNull(temp_mat)) then
+
+            call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                     air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP))     
+            
+         ! First time so just drop according to a tolerance 
+         else
+            ! If nothing is dropped MAT_Z_DROP can just be MAT_Z, as long as we
+            ! aren't keeping either for reuse
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                        air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
+                        relative_max_row_tol_int= 1, &
+                        allow_alias = .NOT. air_data%options%reuse_sparsity .OR. &
+                           (.NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount) .AND. &
+                            .NOT. REUSE_MAT_ACTIVE(MAT_Z_DROP, air_data%options%reuse_amount)))
+         end if
+
+         call timer_finish(TIMER_ID_AIR_DROP)
+         ! Delete temporary if not reusing
+         if (.NOT. air_data%options%reuse_sparsity .OR. &
+             .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) then
+            call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+         end if
       end if
       if (air_data%options%z_type == AIR_Z_PRODUCT .AND. destroy_mat) then
          call MatDestroy(inv_dropped_Aff, ierr)
@@ -932,12 +939,23 @@ module air_operators_setup
       ! Calculate R
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~    
-      call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), global_row_start, &
-               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
-               air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
-               .TRUE., &
-               reuse_grid_transfer, &
-               air_data%restrictors(our_level))
+      if (fuse_z_drop) then
+         call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z), global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  .TRUE., &
+                  reuse_grid_transfer, &
+                  air_data%restrictors(our_level), &
+                  drop_tol = air_data%options%r_drop)
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+      else
+         call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  .TRUE., &
+                  reuse_grid_transfer, &
+                  air_data%restrictors(our_level))
+      end if
 
       call timer_finish(TIMER_ID_AIR_RESTRICT) 
       

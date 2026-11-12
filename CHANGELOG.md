@@ -30,6 +30,8 @@ for earlier changes please see the git history.
 - Faster diagonal dominance ratios in the DDC pass with Kokkos; the ratios are
   now computed in the same order as on the CPU, so they match it exactly and
   the GPU CF splitting can differ slightly from before
+- Without sparsity reuse or `constrain_z`, the small entries of Z are dropped
+  while R is built from it, without building the dropped Z; R is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
