@@ -430,6 +430,17 @@ module c_petsc_interfaces
          integer(c_int), value :: reuse_int_cmat, reuse_int_reuse_mat
       end subroutine mat_mult_powers_share_sparsity_kokkos
 
+      subroutine mat_mult_powers_share_sparsity_raw_kokkos(A_array, poly_order, &
+                  coefficients, reuse_int_reuse_mat, reuse_array, raw_handle) &
+         bind(c, name="mat_mult_powers_share_sparsity_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: reuse_array, raw_handle
+         integer(c_int), value :: poly_order
+         type(c_ptr), value :: coefficients
+         integer(c_int), value :: reuse_int_reuse_mat
+      end subroutine mat_mult_powers_share_sparsity_raw_kokkos
+
    end interface
 
    interface
@@ -542,6 +553,19 @@ module c_petsc_interfaces
          integer(c_long_long) :: raw_handle
          integer(c_long_long) :: B_array
       end subroutine raw_copy_to_mat_kokkos
+
+      subroutine mat_mult_mat_raw_kokkos(A_array, b_handle, raw_handle) &
+         bind(c, name="mat_mult_mat_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: b_handle, raw_handle
+      end subroutine mat_mult_mat_raw_kokkos
+
+      subroutine raw_free_kokkos(raw_handle) &
+         bind(c, name="raw_free_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+      end subroutine raw_free_kokkos
 
       subroutine compute_R_from_raw_Z_drop_kokkos(raw_handle, scale, global_row_start, indices_fine, &
                      indices_coarse, indices_orig, tol, B_array) &

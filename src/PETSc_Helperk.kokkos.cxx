@@ -1641,6 +1641,23 @@ PETSC_INTERN void mat_mult_raw_kokkos(Mat *a_mat, Mat *b_mat, void **raw_handle)
    *raw_handle = out;
 }
 
+// Computes C = A * B as mat_mult_raw_kokkos does, but with B given in b_handle as device views (a
+// RawAIJKokkos); b_handle is unchanged and still owned by the caller
+PETSC_INTERN void mat_mult_mat_raw_kokkos(Mat *a_mat, void **b_handle, void **raw_handle)
+{
+   const RawAIJKokkos *B = static_cast<const RawAIJKokkos *>(*b_handle);
+   RawAIJKokkos *out = new RawAIJKokkos();
+   spgemm_mat_raw_kokkos(a_mat, *B, *out);
+   *raw_handle = out;
+}
+
+// Frees a RawAIJKokkos handle
+PETSC_INTERN void raw_free_kokkos(void **raw_handle)
+{
+   delete static_cast<RawAIJKokkos *>(*raw_handle);
+   *raw_handle = NULL;
+}
+
 // Makes a PETSc matrix from a copy of the matrix in raw_handle (raw_handle is unchanged and still owned
 // by the caller), for debug compares
 PETSC_INTERN void raw_copy_to_mat_kokkos(void **raw_handle, Mat *output_mat)
@@ -2097,7 +2114,10 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscScalar val)
 //------------------------------------------------------------------------------------------------------------------------
 
 // Duplicate and copy a matrix ensuring it always has a diagonal but with kokkos - keeping everything on the device
-PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int reuse_int, Mat *output_mat)
+// If raw_out is set (and not reusing), the output is returned there as device views and output_mat
+// isn't created
+static void mat_duplicate_copy_plus_diag_impl_kokkos(Mat *input_mat, const int reuse_int, Mat *output_mat, \
+                  RawAIJKokkos *raw_out)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt global_row_start_temp, global_row_end_plus_one_temp;
@@ -2452,6 +2472,37 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
       // Let's make sure everything on the device is finished
       Kokkos::fence();       
 
+      if (raw_out)
+      {
+         // The output as device views, with the input's garray
+         raw_out->mpi = mpi;
+         raw_out->comm = MPI_COMM_MATRIX;
+         raw_out->local_rows = local_rows;
+         raw_out->local_cols = local_cols;
+         raw_out->global_rows = global_rows;
+         raw_out->global_cols = global_cols;
+         raw_out->row_start = global_row_start;
+         raw_out->col_start = global_col_start;
+         raw_out->col_end = global_col_end_plus_one_temp;
+         raw_out->i_l = i_local_d;
+         raw_out->j_l = j_local_d;
+         raw_out->a_l = a_local_d;
+         if (mpi)
+         {
+            raw_out->i_nl = i_nonlocal_d;
+            raw_out->j_nl = j_nonlocal_d;
+            raw_out->a_nl = a_nonlocal_d;
+            raw_out->col_ao = cols_ao;
+            raw_out->garray_d = PetscIntKokkosView("garray_d", cols_ao);
+            Kokkos::deep_copy(exec, raw_out->garray_d, PetscIntConstKokkosViewHost(colmap_input, cols_ao));
+            PetscCallVoid(PetscLogCpuToGpu(cols_ao * sizeof(PetscInt)));
+            exec.fence();
+         }
+         PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
+         if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+         return;
+      }
+
       // Create the matrix given the sorted csr
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
@@ -2485,6 +2536,17 @@ PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int 
    return;
 }
 
+
+PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *input_mat, const int reuse_int, Mat *output_mat)
+{
+   mat_duplicate_copy_plus_diag_impl_kokkos(input_mat, reuse_int, output_mat, nullptr);
+}
+
+// mat_duplicate_copy_plus_diag_kokkos without reuse, returning the output as device views
+PETSC_VISIBILITY_INTERNAL void mat_duplicate_copy_plus_diag_raw_kokkos(Mat *input_mat, RawAIJKokkos &out)
+{
+   mat_duplicate_copy_plus_diag_impl_kokkos(input_mat, 0, NULL, &out);
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 

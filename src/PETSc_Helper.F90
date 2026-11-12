@@ -8,7 +8,7 @@ module petsc_helper
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
          mat_mult_r_one_point_ap_kokkos, mat_mult_r_one_point_ap_raw_kokkos, rap_raw_drop_kokkos, &
-         mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, &
+         mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
          mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
@@ -1556,6 +1556,100 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif
 
    end subroutine mat_mult_raw
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_mat_raw(A, b_handle, raw_handle)
+
+      ! Computes A * B as mat_mult_raw does, with B given as device data in b_handle (e.g. from
+      ! build_gmres_polynomial_inverse_raw), and leaves the result as device data in raw_handle
+      ! b_handle is unchanged and still has to be freed (raw_free). Only with Kokkos
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)          :: A
+      integer(kind=8), intent(inout)  :: b_handle
+      integer(kind=8), intent(out)    :: raw_handle
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: A_array, b_h, handle, C_array
+      type(tMat) :: temp_mat, raw_mat, b_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+      raw_handle = 0
+#if defined(PETSC_HAVE_KOKKOS)
+      A_array = A%v
+      b_h = b_handle
+      call mat_mult_mat_raw_kokkos(A_array, b_h, handle)
+      raw_handle = handle
+
+      ! If debugging do a comparison against MatMatMult with B made into a matrix
+      if (kokkos_debug()) then
+
+         call raw_copy_to_mat_kokkos(b_h, C_array)
+         b_mat%v = C_array
+         call MatMatMult(A, b_mat, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+         call MatProductClear(temp_mat, ierr)
+         call MatDestroy(b_mat, ierr)
+         call raw_copy_to_mat_kokkos(handle, C_array)
+         raw_mat%v = C_array
+
+         ! Same sparsity
+         call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+         call get_nnzs_petsc_sparse(raw_mat, nnzs_out)
+         if (nnzs_ref /= nnzs_out) then
+            print *, "Diff nnzs Kokkos mat_mult_mat_raw and MatMatMult", nnzs_out, nnzs_ref
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+
+         ! Same values
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, raw_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos mat_mult_mat_raw and MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(raw_mat, ierr)
+      end if
+#endif
+
+   end subroutine mat_mult_mat_raw
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine raw_free(raw_handle)
+
+      ! Frees device data from one of the *_raw routines
+
+      ! ~~~~~~~~~~
+      integer(kind=8), intent(inout)  :: raw_handle
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: handle
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      handle = raw_handle
+      if (handle /= 0) call raw_free_kokkos(handle)
+#endif
+      raw_handle = 0
+
+   end subroutine raw_free
 
    !------------------------------------------------------------------------------------------------------------------------
 

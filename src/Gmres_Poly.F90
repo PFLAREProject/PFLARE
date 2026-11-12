@@ -2,7 +2,8 @@ module gmres_poly
 
    use petscmat
    use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
-   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
+   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos, mat_mult_powers_share_sparsity_raw_kokkos, &
+         raw_copy_to_mat_kokkos
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
@@ -929,6 +930,110 @@ end if
       ! ~~~~~~~~~~
       
    end subroutine mat_mult_powers_share_sparsity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine build_gmres_polynomial_inverse_raw(matrix, inverse_type, poly_order, poly_sparsity_order, &
+                  buffers, coefficients, diag_scale_polys, reuse_mat, reuse_submatrices, raw_handle, done)
+
+      ! The assembled (not matrix-free) GMRES polynomial inverse that finish_approximate_inverse builds
+      ! for the power and Arnoldi bases with sparsity order 1 (mat_mult_powers_share_sparsity), but
+      ! left as device data in raw_handle rather than made into a PETSc matrix. The same steps and
+      ! arithmetic, so the same values
+      ! done is .FALSE. (and nothing is built) unless: Kokkos AIJ matrix, power or Arnoldi, sparsity
+      ! order 1, polynomial order > 1 and no diagonal scaling. raw_handle has to be freed (raw_free)
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: inverse_type, poly_order, poly_sparsity_order
+      type(tsqr_buffers), intent(inout)                  :: buffers
+      PetscReal, dimension(:, :), pointer, contiguous, intent(inout) :: coefficients
+      logical, intent(in)                                :: diag_scale_polys
+      type(tMat), intent(inout)                          :: reuse_mat
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
+      integer(kind=8), intent(out)                       :: raw_handle
+      logical, intent(out)                               :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, reuse_array, handle, C_array
+      integer :: errorcode, reuse_int_reuse_mat
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      type(tMat) :: temp_mat, raw_mat, reuse_mat_cpu
+      type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
+      PetscScalar :: normy
+      type(c_ptr)  :: coefficients_ptr
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      logical :: reuse_triggered
+#if defined(PETSC_USE_MPI_F08)
+      MPIU_Status :: status
+#else
+      MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
+#endif
+#endif
+      ! ~~~~~~
+
+      done = .FALSE.
+      raw_handle = 0
+
+#if defined(PETSC_HAVE_KOKKOS)
+      if (inverse_type /= PFLAREINV_POWER .AND. inverse_type /= PFLAREINV_ARNOLDI) return
+      if (poly_sparsity_order /= 1 .OR. poly_order < 2 .OR. diag_scale_polys) return
+      call MatGetType(matrix, mat_type, ierr)
+      if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS)) return
+
+      ! As finish_approximate_inverse
+      if (buffers%on_subcomm .AND. buffers%request /= MPI_REQUEST_NULL) then
+         call mpi_wait(buffers%request, status, errorcode)
+         if (errorcode /= MPI_SUCCESS) then
+            print *, "mpi_wait failed"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         buffers%request = MPI_REQUEST_NULL
+      end if
+
+      ! As mat_mult_powers_share_sparsity
+      call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients(:, 1))
+      A_array = matrix%v
+      ! PetscObjectIsNull is a macro, so keep it on a short line
+      reuse_triggered = .NOT. PetscObjectIsNull(reuse_mat)
+      reuse_int_reuse_mat = 0
+      if (reuse_triggered) reuse_int_reuse_mat = 1
+      reuse_array = reuse_mat%v
+      coefficients_ptr = c_loc(coefficients(1, 1))
+      call mat_mult_powers_share_sparsity_raw_kokkos(A_array, poly_order, &
+               coefficients_ptr, reuse_int_reuse_mat, reuse_array, handle)
+      reuse_mat%v = reuse_array
+      raw_handle = handle
+      done = .TRUE.
+
+      ! If debugging do a comparison against the CPU version
+      if (kokkos_debug()) then
+         reuse_submatrices_cpu => null()
+         call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+                  buffers, coefficients(:, 1), reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+         call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)
+         call raw_copy_to_mat_kokkos(handle, C_array)
+         raw_mat%v = C_array
+         call MatAXPYWrapper(temp_mat, PFLARE_MINUS_ONE, raw_mat)
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
+            print *, "Diff Kokkos and CPU build_gmres_polynomial_inverse_raw", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(raw_mat, ierr)
+      end if
+
+      ! As finish_approximate_inverse
+      call MatDestroy(buffers%matrix, ierr)
+#endif
+
+   end subroutine build_gmres_polynomial_inverse_raw
 
 !------------------------------------------------------------------------------------------------------------------------
    

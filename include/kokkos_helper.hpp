@@ -67,6 +67,8 @@ PETSC_INTERN void delete_device_diag_dom_ratio();
 // Not PETSC_INTERN: that forces extern "C" linkage, which is incompatible with
 // returning a C++ Kokkos View. Callers are all C++ (.kokkos.cxx).
 PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int);
+// mat_duplicate_copy_plus_diag_kokkos without reuse, returning the output as device views (PETSc_Helperk)
+PETSC_VISIBILITY_INTERNAL void mat_duplicate_copy_plus_diag_raw_kokkos(Mat *input_mat, RawAIJKokkos &out);
 // The global column and value of each row's entry in a one point shell prolongator
 // (Grid_Transferk), false if P isn't one
 PETSC_VISIBILITY_INTERNAL bool one_point_shell_targets_kokkos(Mat P, const PetscInt sentinel, PetscIntKokkosView &target_global_d, PetscScalarKokkosView &weight_d);

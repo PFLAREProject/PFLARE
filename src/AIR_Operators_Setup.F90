@@ -25,7 +25,9 @@ module air_operators_setup
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
-         mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw
+         mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw, &
+         mat_mult_mat_raw, raw_free
+   use gmres_poly, only: build_gmres_polynomial_inverse_raw
 
 #include "petsc/finclude/petscksp.h"
 
@@ -362,8 +364,8 @@ module air_operators_setup
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct, fuse_z_drop, r_from_a_diag
-      logical :: z_raw, z_raw_possible
-      integer(kind=8) :: z_raw_handle
+      logical :: z_raw, z_raw_possible, inv_raw, inv_raw_possible
+      integer(kind=8) :: z_raw_handle, inv_raw_handle
       MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
@@ -465,6 +467,8 @@ module air_operators_setup
       end if              
       
       destroy_mat = .FALSE.
+      inv_raw = .FALSE.
+      inv_raw_handle = 0
       ! If we are doing AIRG, then we also need an A_ff^-1 for the grid
       ! transfer operators (may be the same used for the smoother)
       if (air_data%options%z_type == AIR_Z_PRODUCT) then
@@ -505,8 +509,29 @@ module air_operators_setup
             ! We can just re-call finish_approximate_inverse, as the requests will have been resolved 
             ! and hence it will just build an assembled version, which we store in inv_dropped_Aff
             if (air_data%options%matrix_free_polys) then            
+               ! If this inverse only feeds Z, and R is built from Z without Z being a matrix
+               ! (see z_raw_possible below), it doesn't have to be a matrix either
+               ! PetscObjectIsNull is a macro, so keep it on a short line
+               temp_is = air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS)
+               inv_raw_possible = PetscObjectIsNull(temp_is)
+               inv_raw_possible = inv_raw_possible .AND. air_data%options%one_point_classical_prolong .AND. &
+                     .NOT. air_data%options%symmetric .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                     .NOT. air_data%options%constrain_z .AND. air_data%options%improve_z_its == 0
+               if (inv_raw_possible) then
+                  call build_gmres_polynomial_inverse_raw(air_data%A_ff(our_level), &
+                        air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+                        air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+                        air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+                        air_data%inv_A_ff_poly_data(our_level)%buffers, &
+                        air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                        air_data%options%diag_scale_polys, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
+                        inv_raw_handle, inv_raw)
+               end if
                ! Making sure to give it the non dropped A_ff here
-               call finish_approximate_inverse(air_data%A_ff(our_level), &
+               if (.NOT. inv_raw) then
+                  call finish_approximate_inverse(air_data%A_ff(our_level), &
                         air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
@@ -517,6 +542,7 @@ module air_operators_setup
                         air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
                         air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
                         inv_dropped_Aff)
+               end if
                destroy_mat = .TRUE.
 
                ! Delete temporary if not reusing
@@ -532,7 +558,12 @@ module air_operators_setup
             end if
          end if
 
-         call MatGetType(inv_dropped_Aff, mat_type_inv_aff, ierr)
+         ! A raw inverse is assembled and has the sparsity of A_ff, so it isn't diagonal
+         if (inv_raw) then
+            mat_type_inv_aff = MATAIJKOKKOS
+         else
+            call MatGetType(inv_dropped_Aff, mat_type_inv_aff, ierr)
+         end if
       end if
 
       ! Can we build R straight from A, without A_cf or Z
@@ -892,7 +923,14 @@ module air_operators_setup
             z_raw_possible = PetscObjectIsNull(temp_is)
             z_raw_possible = z_raw_possible .AND. .NOT. air_data%options%reuse_sparsity .AND. &
                   .NOT. air_data%options%constrain_z .AND. air_data%options%improve_z_its == 0
-            if (z_raw_possible) then
+            if (inv_raw) then
+               ! The raw inverse is only built when z_raw_possible holds
+               call mat_mult_mat_raw(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_raw_handle, &
+                        z_raw_handle)
+               z_raw = .TRUE.
+               call raw_free(inv_raw_handle)
+               inv_raw = .FALSE.
+            else if (z_raw_possible) then
                call mat_mult_raw(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                         z_raw_handle, z_raw)
             end if

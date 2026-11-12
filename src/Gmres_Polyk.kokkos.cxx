@@ -182,8 +182,11 @@ struct PowersShareSparsityFunctor {
 //------------------------------------------------------------------------------------------------------------------------
 
 // Compute matrix-matrix product with fixed order sparsity but with kokkos - keeping everything on the device
-PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
-               const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
+// If raw_out is set (only with poly_sparsity_order 1 and no reuse of output_mat), the output is
+// returned there as device views and output_mat isn't created; MatScale and MatShift are then done
+// on the views with the same arithmetic
+static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
+               const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat, RawAIJKokkos *raw_out)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
@@ -238,7 +241,16 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
    // Copy in the highest unconstrained power
    // Duplicate & copy the matrix, but ensure there is a diagonal present
-   mat_duplicate_copy_plus_diag_kokkos(mat_sparsity_match, reuse_int_cmat, output_mat);
+   if (raw_out)
+   {
+      PetscCheckAbort(poly_sparsity_order == 1 && !reuse_int_cmat, MPI_COMM_MATRIX, PETSC_ERR_ARG_WRONG, \
+                  "The raw output needs sparsity order 1 and no reuse");
+      mat_duplicate_copy_plus_diag_raw_kokkos(mat_sparsity_match, *raw_out);
+   }
+   else
+   {
+      mat_duplicate_copy_plus_diag_kokkos(mat_sparsity_match, reuse_int_cmat, output_mat);
+   }
 
    PetscInt *col_indices_off_proc_array;
    const PetscInt *colmap_mat_sparsity_match;
@@ -314,26 +326,69 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
    // Get the existing output mat
    Mat mat_local_output = NULL, mat_nonlocal_output = NULL;   
-   if (mpi)
+   if (raw_out)
    {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*output_mat, &mat_local_output, &mat_nonlocal_output, NULL));  
+      // Scale the highest constrained power, as MatScale does (KokkosBlas::scal on both blocks):
+      // nothing for 1, exact zeros for 0, otherwise c * a
+      const PetscScalar c_scale = coefficients[poly_sparsity_order];
+      auto out_a_l = raw_out->a_l;
+      if (c_scale != 1.0)
+      {
+         const bool scale_zero = c_scale == 0.0;
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, out_a_l.extent(0)), KOKKOS_LAMBDA(const PetscInt k) {
+            out_a_l(k) = scale_zero ? 0.0 : c_scale * out_a_l(k);
+         });
+         if (mpi)
+         {
+            auto out_a_nl = raw_out->a_nl;
+            Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, out_a_nl.extent(0)), KOKKOS_LAMBDA(const PetscInt k) {
+               out_a_nl(k) = scale_zero ? 0.0 : c_scale * out_a_nl(k);
+            });
+         }
+      }
+      // No lower powers to add in with sparsity order 1
+      // Add in the 0th order term, as MatShift does (each diagonal plus the shift; every row has
+      // its diagonal in the local block, mat_duplicate_copy_plus_diag made sure of it)
+      // MatShift does nothing for a zero shift
+      const PetscScalar c_shift = coefficients[0];
+      auto out_i_l = raw_out->i_l;
+      auto out_j_l = raw_out->j_l;
+      const PetscInt diag_offset = raw_out->row_start - raw_out->col_start;
+      if (c_shift != 0.0) Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         const PetscInt diag_col = i + diag_offset;
+         for (PetscInt k = out_i_l(i); k < out_i_l(i + 1); k++)
+         {
+            if (out_j_l(k) == diag_col)
+            {
+               out_a_l(k) = out_a_l(k) + c_shift;
+               break;
+            }
+         }
+      });
    }
    else
    {
-      mat_local_output = *output_mat;
-   }    
+      if (mpi)
+      {
+         PetscCallVoid(MatMPIAIJGetSeqAIJ(*output_mat, &mat_local_output, &mat_nonlocal_output, NULL));
+      }
+      else
+      {
+         mat_local_output = *output_mat;
+      }
 
-   // Scale the highest constrained power
-   PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
+      // Scale the highest constrained power
+      PetscCallVoid(MatScale(*output_mat, coefficients[poly_sparsity_order]));
 
-   // Then go backwards and add in each of the coefficients * A^order from the second highest order down
-   for (int i = poly_sparsity_order-1; i > 0; i--)
-   {
-      PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
+      // Then go backwards and add in each of the coefficients * A^order from the second highest order down
+      for (int i = poly_sparsity_order-1; i > 0; i--)
+      {
+         PetscCallVoid(MatAXPY(*output_mat, coefficients[i], matrix_powers[i-1], SUBSET_NONZERO_PATTERN));
+      }
+
+      // Add in the 0th order term
+      PetscCallVoid(MatShift(*output_mat, coefficients[0]));
    }
-
-   // Add in the 0th order term
-   PetscCallVoid(MatShift(*output_mat, coefficients[0]));
 
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos views to the values
@@ -362,13 +417,28 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_sparsity, &device_nonlocal_vals_sparsity));
 
    const PetscInt *device_local_i_output = nullptr, *device_local_j_output = nullptr, *device_nonlocal_i_output = nullptr, *device_nonlocal_j_output = nullptr;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, NULL, &mtype));
    // Output values are accumulated into via += so we need read-write access
    Kokkos::View<PetscScalar *> device_local_vals_output;
    Kokkos::View<PetscScalar *> device_nonlocal_vals_output;
-   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local_output, &device_local_vals_output));
-   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
+   if (raw_out)
+   {
+      device_local_i_output = raw_out->i_l.data();
+      device_local_j_output = raw_out->j_l.data();
+      device_local_vals_output = raw_out->a_l;
+      if (mpi)
+      {
+         device_nonlocal_i_output = raw_out->i_nl.data();
+         device_nonlocal_j_output = raw_out->j_nl.data();
+         device_nonlocal_vals_output = raw_out->a_nl;
+      }
+   }
+   else
+   {
+      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local_output, &device_local_i_output, &device_local_j_output, NULL, &mtype));
+      if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal_output, &device_nonlocal_i_output, &device_nonlocal_j_output, NULL, &mtype));
+      PetscCallVoid(MatSeqAIJGetKokkosView(mat_local_output, &device_local_vals_output));
+      if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
+   }
 
    // ~~~~~~~~~~~~~~
    // The kernel below looks up entries of the input mat in the column space of the sparsity
@@ -563,8 +633,15 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
 
    // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
    // marks device modified, invalidates transpose/hermitian, bumps object state).
-   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local_output, &device_local_vals_output));
-   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
+   if (raw_out)
+   {
+      exec.fence();
+   }
+   else
+   {
+      PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local_output, &device_local_vals_output));
+      if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
+   }
 
    for (int i = 1; i < poly_sparsity_order; i++)
    {
@@ -579,4 +656,25 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    PetscCallVoid(PetscFree(col_indices_off_proc_array));
 
    return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const int poly_order, const int poly_sparsity_order, PetscReal *coefficients, \
+               const int reuse_int_reuse_mat, Mat *reuse_mat, const int reuse_int_cmat, Mat *output_mat)
+{
+   mat_mult_powers_share_sparsity_impl_kokkos(input_mat, poly_order, poly_sparsity_order, coefficients, \
+               reuse_int_reuse_mat, reuse_mat, reuse_int_cmat, output_mat, nullptr);
+}
+
+// mat_mult_powers_share_sparsity_kokkos with poly_sparsity_order 1 and no reuse of the output, which
+// is returned in raw_handle as device views (a RawAIJKokkos) rather than a PETSc matrix
+// raw_handle has to be freed (raw_free_kokkos)
+PETSC_INTERN void mat_mult_powers_share_sparsity_raw_kokkos(Mat *input_mat, const int poly_order, PetscReal *coefficients, \
+               const int reuse_int_reuse_mat, Mat *reuse_mat, void **raw_handle)
+{
+   RawAIJKokkos *raw = new RawAIJKokkos();
+   mat_mult_powers_share_sparsity_impl_kokkos(input_mat, poly_order, 1, coefficients, \
+               reuse_int_reuse_mat, reuse_mat, 0, NULL, raw);
+   *raw_handle = raw;
 }

@@ -44,6 +44,9 @@ for earlier changes please see the git history.
   as a matrix first, unless nothing is dropped; the coarse matrix is unchanged
 - With Kokkos, where R is built from Z with the drop in one pass, Z is
   computed without building it as a matrix; R is unchanged
+- In the same case, with a power or Arnoldi inverse of sparsity order 1, the
+  assembled Aff inverse used for Z is not built as a matrix either; R is
+  unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
