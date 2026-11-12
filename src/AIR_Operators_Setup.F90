@@ -19,12 +19,13 @@ module air_operators_setup
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
-         compute_P_from_W, compute_R_from_Z, generate_one_point_P_from_sparse, compute_R_from_A_diag
+         compute_P_from_W, compute_R_from_Z, generate_one_point_P_from_sparse, compute_R_from_A_diag, &
+         compute_R_from_raw_Z
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
-         mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop
+         mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw
 
 #include "petsc/finclude/petscksp.h"
 
@@ -361,6 +362,8 @@ module air_operators_setup
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
       logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct, fuse_z_drop, r_from_a_diag
+      logical :: z_raw, z_raw_possible
+      integer(kind=8) :: z_raw_handle
       MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
@@ -534,6 +537,8 @@ module air_operators_setup
 
       ! Can we build R straight from A, without A_cf or Z
       r_from_a_diag = .FALSE.
+      z_raw = .FALSE.
+      z_raw_handle = 0
       if (air_data%options%z_type == AIR_Z_PRODUCT) then
          r_from_a_diag = mat_type_inv_aff == MATDIAGONAL .AND. &
                r_from_a_diag_possible(A, our_level, air_data)
@@ -880,13 +885,27 @@ module air_operators_setup
             call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                   MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
          else
-            call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
-                  MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
-            if (.NOT. air_data%options%reuse_sparsity .OR. &
-                .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) &
-               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+            ! If R is built from Z with the drop in one pass (see fuse_z_drop below) and nothing else
+            ! needs Z, Z doesn't have to be a matrix
+            ! PetscObjectIsNull is a macro, so keep it on a short line
+            temp_is = air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS)
+            z_raw_possible = PetscObjectIsNull(temp_is)
+            z_raw_possible = z_raw_possible .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                  .NOT. air_data%options%constrain_z .AND. air_data%options%improve_z_its == 0
+            if (z_raw_possible) then
+               call mat_mult_raw(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
+                        z_raw_handle, z_raw)
+            end if
+            if (.NOT. z_raw) then
+               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+               if (.NOT. air_data%options%reuse_sparsity .OR. &
+                   .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) &
+                  call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+            end if
          end if
-         call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), PFLARE_MINUS_ONE, ierr)
+         ! A raw Z is scaled when R is built from it
+         if (.NOT. z_raw) call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), PFLARE_MINUS_ONE, ierr)
       end if
 
       ! Destroy the copies, this only decrements the reference counter
@@ -1011,6 +1030,12 @@ module air_operators_setup
                   air_data%options%r_drop, &
                   air_data%restrictors(our_level))
          if (destroy_mat) call MatDestroy(inv_dropped_Aff, ierr)
+      else if (z_raw) then
+         call compute_R_from_raw_Z(z_raw_handle, global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  air_data%restrictors(our_level), &
+                  air_data%options%r_drop)
       else if (fuse_z_drop) then
          call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z), global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &

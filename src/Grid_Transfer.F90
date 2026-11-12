@@ -3,7 +3,7 @@ module grid_transfer
    use petscmat
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos, generate_one_point_P_from_sparse_kokkos, &
-         compute_R_from_A_diag_kokkos
+         compute_R_from_A_diag_kokkos, compute_R_from_raw_Z_drop_kokkos, raw_copy_to_mat_kokkos
    use petsc_helper, only: kokkos_debug, assemble_one_point_shell, remove_small_from_sparse_cpu
    use iso_c_binding, only: c_ptr
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
@@ -781,6 +781,86 @@ module grid_transfer
          
          
    end subroutine compute_R_from_Z   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine compute_R_from_raw_Z(raw_handle, global_row_start, is_fine, is_coarse, &
+                     orig_fine_col_indices, R, drop_tol)
+
+      ! compute_R_from_Z with identity, no reuse and drop_tol, with Z = -1 times the product in
+      ! raw_handle (from mat_mult_raw, which never made it a PETSc matrix), as MatScale with -1
+      ! would give. Only with Kokkos. raw_handle is freed
+
+      ! ~~~~~~~~~~
+      ! Input
+      integer(kind=8), intent(inout) :: raw_handle
+      PetscInt, intent(in)      :: global_row_start
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      type(tIS), intent(inout)  :: orig_fine_col_indices
+      type(tMat), intent(inout) :: R
+      PetscReal, intent(in)     :: drop_tol
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: handle, B_array, indices_fine, indices_coarse, orig_indices, Z_array
+      type(tMat) :: Z_ref, R_ref
+      type(tIS) :: orig_ref
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      PetscReal :: norm_ref
+      ! Z is -1 times the product
+      PetscReal, parameter :: z_scale = -1.0_PETSC_REAL_KIND
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      handle = raw_handle
+
+      ! If debugging, build R the old way from a copy of Z made into a matrix
+      if (kokkos_debug()) then
+         call raw_copy_to_mat_kokkos(handle, Z_array)
+         Z_ref%v = Z_array
+         call MatScale(Z_ref, PFLARE_MINUS_ONE, ierr)
+         orig_ref = PETSC_NULL_IS
+         call compute_R_from_Z(Z_ref, global_row_start, is_fine, is_coarse, orig_ref, &
+                  .TRUE., .FALSE., R_ref, drop_tol = drop_tol)
+         call MatDestroy(Z_ref, ierr)
+         call ISDestroy(orig_ref, ierr)
+      end if
+
+      indices_fine = is_fine%v
+      indices_coarse = is_coarse%v
+      call compute_R_from_raw_Z_drop_kokkos(handle, z_scale, global_row_start, indices_fine, &
+               indices_coarse, orig_indices, drop_tol, B_array)
+      R%v = B_array
+      orig_fine_col_indices%v = orig_indices
+      raw_handle = 0
+
+      if (kokkos_debug()) then
+         call MatNorm(R_ref, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(R_ref, PFLARE_MINUS_ONE, R, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(R_ref, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(R_ref, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos compute_R_from_raw_Z and compute_R_from_Z", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(R_ref, ierr)
+      end if
+#else
+      ! Only made with Kokkos, so never called without it
+      raw_handle = 0
+      R = PETSC_NULL_MAT
+      orig_fine_col_indices = PETSC_NULL_IS
+#endif
+
+   end subroutine compute_R_from_raw_Z
 
 !------------------------------------------------------------------------------------------------------------------------
    

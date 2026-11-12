@@ -37,6 +37,22 @@ using ViewPetscIntPtr = std::shared_ptr<PetscIntKokkosView>;
 using KokkosTeamMemberType = Kokkos::TeamPolicy<DefaultExecutionSpace>::member_type;
 using KokkosCsrMatrix = KokkosSparse::CrsMatrix<PetscScalar, PetscInt, DefaultMemorySpace, void, PetscInt>;
 
+// The blocks of a parallel (or serial) AIJ matrix as device views, not (yet) a PETSc matrix
+struct RawAIJKokkos {
+   bool mpi = false;
+   MPI_Comm comm = MPI_COMM_NULL;
+   PetscInt local_rows = 0, local_cols = 0, global_rows = 0, global_cols = 0;
+   PetscInt row_start = 0, col_start = 0, col_end = 0;
+   // The local block, with local columns
+   Kokkos::View<PetscInt *> i_l, j_l;
+   Kokkos::View<PetscScalar *> a_l;
+   // The nonlocal block, with local columns into garray_d (sorted global columns)
+   Kokkos::View<PetscInt *> i_nl, j_nl;
+   Kokkos::View<PetscScalar *> a_nl;
+   PetscIntKokkosView garray_d;
+   PetscInt col_ao = 0;
+};
+
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d);

@@ -527,6 +527,36 @@ module c_petsc_interfaces
 
    end interface
 
+   interface
+
+      subroutine mat_mult_raw_kokkos(A_array, B_array, raw_handle) &
+         bind(c, name="mat_mult_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+         integer(c_long_long) :: raw_handle
+      end subroutine mat_mult_raw_kokkos
+
+      subroutine raw_copy_to_mat_kokkos(raw_handle, B_array) &
+         bind(c, name="raw_copy_to_mat_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         integer(c_long_long) :: B_array
+      end subroutine raw_copy_to_mat_kokkos
+
+      subroutine compute_R_from_raw_Z_drop_kokkos(raw_handle, scale, global_row_start, indices_fine, &
+                     indices_coarse, indices_orig, tol, B_array) &
+         bind(c, name="compute_R_from_raw_Z_drop_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         PetscReal, value :: scale
+         PetscInt, value :: global_row_start
+         integer(c_long_long) :: indices_fine, indices_coarse, indices_orig
+         PetscReal, value :: tol
+         integer(c_long_long) :: B_array
+      end subroutine compute_R_from_raw_Z_drop_kokkos
+
+   end interface
+
    interface   
       
       subroutine MatAXPY_kokkos(A_array, alpha, B_array) &

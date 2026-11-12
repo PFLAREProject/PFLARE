@@ -42,6 +42,8 @@ for earlier changes please see the git history.
   the coarse matrix is unchanged
 - In the same case, small entries are dropped from R*(A*P) without building it
   as a matrix first, unless nothing is dropped; the coarse matrix is unchanged
+- With Kokkos, where R is built from Z with the drop in one pass, Z is
+  computed without building it as a matrix; R is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
