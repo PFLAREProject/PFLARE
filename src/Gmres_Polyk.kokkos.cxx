@@ -7,14 +7,15 @@
 // Row kernel for mat_mult_powers_share_sparsity_kokkos
 // Each team handles team_size rows, one thread per row, with vector lanes over the
 // entries in the row of the sparsity mat
-// Each thread keeps the current power of its row in per-thread scratch (vals_prev) and
-// accumulates the next power in vals_temp
+// Each thread keeps the current power of its row in per-thread scratch and computes the next
+// power into a second scratch row, swapping the two after each power
+// Each lane computes only its own entry l of the next power, summing over the entries j of
+// the row in order, so there are no atomics and the summation order is fixed
 struct PowersShareSparsityFunctor {
 
    PetscInt nrows = 0;
    bool mpi = false;
    PetscInt cols_ad = 0, max_nnz = 0;
-   PetscInt colmap_not_found = 0;
    int poly_sparsity_order = 0, poly_order = 0, scratch_level = 0;
 
    // The sparsity mat
@@ -23,21 +24,71 @@ struct PowersShareSparsityFunctor {
    // The input mat
    const PetscInt *in_l_i = nullptr, *in_l_j = nullptr, *in_nl_i = nullptr, *in_nl_j = nullptr;
    Kokkos::View<const PetscScalar *> in_l_a, in_nl_a;
-   // The nonlocal rows of the input mat we need
+   // The nonlocal rows of the input mat we need, with columns in the submat column space
+   // [0..cols_ad-1 for local cols; cols_ad+k for sparsity colmap[k]]
    const PetscInt *sub_i = nullptr, *sub_j = nullptr;
    Kokkos::View<const PetscScalar *> sub_a;
    // The output mat, which we add into
    const PetscInt *out_l_i = nullptr, *out_l_j = nullptr, *out_nl_i = nullptr;
    Kokkos::View<PetscScalar *> out_l_a, out_nl_a;
 
-   PetscIntKokkosView found_diag_row_d, input_nonlocal_to_submat_col_d;
+   // For each entry k of the sparsity colmap, the nonlocal column of the input mat with the
+   // same global column, or -1 if the input mat doesn't have it
+   PetscIntKokkosView found_diag_row_d, submat_col_to_input_nonlocal_col_d;
    PetscScalarKokkosView coefficients_d;
+
+   // Finds key in the sorted j[start..end), returns false if it isn't there
+   // Checks the first and last entries before searching, as most lookups miss
+   KOKKOS_INLINE_FUNCTION static bool find_col(const PetscInt *j, PetscInt start, PetscInt end, const PetscInt key,
+                                               PetscInt &pos)
+   {
+      if (start == end || key < j[start] || key > j[end - 1]) return false;
+      while (start < end)
+      {
+         const PetscInt mid = start + (end - start) / 2;
+         if (j[mid] < key) start = mid + 1;
+         else end = mid;
+      }
+      pos = start;
+      return j[start] == key;
+   }
+
+   // Finds the entry of the input mat in row row_of_col (a local row if row_local, otherwise a
+   // row of submat) and column col (in the submat column space)
+   // col_input is col as a nonlocal column of the input mat (or -1 if the input mat doesn't
+   // have it), only used when col is nonlocal
+   // Returns false if there is no such entry
+   KOKKOS_INLINE_FUNCTION bool input_entry(const bool row_local, const PetscInt row_of_col, const PetscInt col,
+                                           const PetscInt col_input, PetscScalar &val) const
+   {
+      PetscInt pos = 0;
+      if (row_local)
+      {
+         if (col < cols_ad)
+         {
+            if (!find_col(in_l_j, in_l_i[row_of_col], in_l_i[row_of_col + 1], col, pos)) return false;
+            val = in_l_a(pos);
+         }
+         else
+         {
+            if (col_input < 0) return false;
+            if (!find_col(in_nl_j, in_nl_i[row_of_col], in_nl_i[row_of_col + 1], col_input, pos)) return false;
+            val = in_nl_a(pos);
+         }
+      }
+      else
+      {
+         if (!find_col(sub_j, sub_i[row_of_col], sub_i[row_of_col + 1], col, pos)) return false;
+         val = sub_a(pos);
+      }
+      return true;
+   }
 
    KOKKOS_INLINE_FUNCTION void operator()(const KokkosTeamMemberType &t) const
    {
       // Each thread gets its own scratch, which we reuse for every row it handles
-      ScratchScalarView vals_prev(t.thread_scratch(scratch_level), max_nnz);
-      ScratchScalarView vals_temp(t.thread_scratch(scratch_level), max_nnz);
+      ScratchScalarView vals_a(t.thread_scratch(scratch_level), max_nnz);
+      ScratchScalarView vals_b(t.thread_scratch(scratch_level), max_nnz);
 
       const PetscInt row_start = static_cast<PetscInt>(t.league_rank()) * t.team_size();
       const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
@@ -50,181 +101,79 @@ struct PowersShareSparsityFunctor {
          PetscInt ncols_row_i = local_cols_row_i;
          if (mpi) ncols_row_i += sp_nl_i[i + 1] - sp_nl_i[i];
 
-         // Fill vals_prev with this row of the sparsity mat and zero vals_temp
+         // Fill the first power with this row of the sparsity mat
          Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i), [&](const PetscInt j) {
             if (j < local_cols_row_i)
             {
-               vals_prev[j] = sp_l_a(sp_l_i[i] + j);
+               vals_a[j] = sp_l_a(sp_l_i[i] + j);
             }
             // Nonlocal part
             else
             {
-               vals_prev[j] = sp_nl_a(sp_nl_i[i] + (j - local_cols_row_i));
+               vals_a[j] = sp_nl_a(sp_nl_i[i] + (j - local_cols_row_i));
             }
-            vals_temp[j] = 0;
          });
 
-         // ~~~~~~~~~~~~~~~~~~~~~~
-         // Now in the loop below we recompute which indices match every time for each power
-         // ~~~~~~~~~~~~~~~~~~~~~~
-
          // Loop over any matrix powers
-         // vals_prev stores the value of A^(term-1) for this row, and we update this as we go through
-         // the term loop
+         // vals_prev holds A^(term-1) for this row and we compute A^term into vals_next
+         // restricted to the sparsity of row i
+         ScratchScalarView vals_prev = vals_a, vals_next = vals_b;
          for (int term = poly_sparsity_order + 1; term <= poly_order; term++)
          {
-            const PetscReal coeff_term = coefficients_d(term);
+            const PetscScalar coeff_term = coefficients_d(term);
 
-            // Now compute the sums in vals_temp
-            // This goes over all the local and non-local columns in row i
-            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i), [&](const PetscInt j) {
+            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i), [&](const PetscInt l) {
 
-               // Get the row index for this column in sparsity mat
-               PetscInt row_of_col_j;
-               // Do we have this row locally or have we retrieved it from other ranks?
-               const bool row_of_col_j_local = j < local_cols_row_i;
-               // This is only accesssed below if row_of_col_j_local is true
-               PetscInt local_cols_row_of_col_j = 0;
-               if (row_of_col_j_local)
+               // The column of entry l, in the submat column space
+               const PetscInt col_l = l < local_cols_row_i ? sp_l_j[sp_l_i[i] + l] : \
+                        sp_nl_j[sp_nl_i[i] + (l - local_cols_row_i)] + cols_ad;
+               // The same column as a nonlocal column of the input mat, if col_l is nonlocal
+               const PetscInt col_input_l = col_l < cols_ad ? -1 : submat_col_to_input_nonlocal_col_d(col_l - cols_ad);
+
+               // Sum over the entries j of row i in order
+               // A^term(i, col_l) = sum_j A^(term-1)(i, col_j) * A(col_j, col_l)
+               PetscScalar sum = 0;
+               for (PetscInt j = 0; j < ncols_row_i; j++)
                {
-                  row_of_col_j = sp_l_j[sp_l_i[i] + j];
-                  local_cols_row_of_col_j = in_l_i[row_of_col_j + 1] - in_l_i[row_of_col_j];
+                  // The row of column j, which we either have locally or have retrieved
+                  // from other ranks in submat
+                  const bool row_of_col_j_local = j < local_cols_row_i;
+                  const PetscInt row_of_col_j = row_of_col_j_local ? sp_l_j[sp_l_i[i] + j] : \
+                           sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
+                  PetscScalar val_target;
+                  if (input_entry(row_of_col_j_local, row_of_col_j, col_l, col_input_l, val_target)) sum += vals_prev[j] * val_target;
                }
-               else
-               {
-                  row_of_col_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
-               }
-
-               // Get how many local and non-local columns there are in the row of column j
-               PetscInt ncols_row_of_col_j = 0;
-               if (row_of_col_j_local)
-               {
-                  ncols_row_of_col_j = local_cols_row_of_col_j;
-                  if (mpi) ncols_row_of_col_j += in_nl_i[row_of_col_j + 1] - in_nl_i[row_of_col_j];
-               }
-               else
-               {
-                  ncols_row_of_col_j = sub_i[row_of_col_j + 1] - sub_i[row_of_col_j];
-               }
-
-               // This is just an intersection between row i in the sparsity mat
-               // and the row of column j in the input mat
-               // This assumes column indices are already sorted
-               PetscInt idx_col_of_row_i = 0;  // Index into original row i columns
-               PetscInt idx_col_of_row_j = 0;  // Index into target row of column j
-
-               while (idx_col_of_row_i < ncols_row_i && idx_col_of_row_j < ncols_row_of_col_j) {
-
-                  // The col_target is the column we are trying to match in the row of column j
-                  // We convert everything to the submat "local" column space for comparison, ie
-                  // the column indexing of [0..cols_ad-1 for local cols; cols_ad+k for sparsity colmap[k]]
-                  PetscInt col_target;
-                  if (row_of_col_j_local)
-                  {
-                     if (idx_col_of_row_j < local_cols_row_of_col_j)
-                     {
-                        col_target = in_l_j[in_l_i[row_of_col_j] + idx_col_of_row_j];
-                     }
-                     else
-                     {
-                        // Nonlocal columns in local rows of the input mat need the mapping
-                        // to the "local" column index of submat
-                        col_target = input_nonlocal_to_submat_col_d(in_nl_j[in_nl_i[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j]);
-                     }
-                  }
-                  else
-                  {
-                     col_target = sub_j[sub_i[row_of_col_j] + idx_col_of_row_j];
-                  }
-
-                  PetscInt col_orig;
-                  // If we're in the local part of the matrix
-                  if (idx_col_of_row_i < local_cols_row_i)
-                  {
-                     col_orig = sp_l_j[sp_l_i[i] + idx_col_of_row_i];
-                  }
-                  // Nonlocal part
-                  else
-                  {
-                     // Convert to "local" column index of submat by adding cols_ad
-                     col_orig = sp_nl_j[sp_nl_i[i] + (idx_col_of_row_i - local_cols_row_i)] + cols_ad;
-                  }
-
-                  // Skip entries where the input column doesn't exist in the sparsity pattern
-                  if (col_target == colmap_not_found) {
-                     idx_col_of_row_j++;
-                  } else {
-                     if (col_orig < col_target) {
-                        idx_col_of_row_i++;
-                     } else if (col_orig > col_target) {
-                        idx_col_of_row_j++;
-                     // We've found a matching index and hence we can do our compute
-                     } else {
-
-                        PetscReal val_target;
-                        if (row_of_col_j_local)
-                        {
-                           if (idx_col_of_row_j < local_cols_row_of_col_j)
-                           {
-                              val_target = in_l_a(in_l_i[row_of_col_j] + idx_col_of_row_j);
-                           }
-                           else
-                           {
-                              val_target = in_nl_a(in_nl_i[row_of_col_j] + idx_col_of_row_j - local_cols_row_of_col_j);
-                           }
-                        }
-                        else
-                        {
-                           val_target = sub_a(sub_i[row_of_col_j] + idx_col_of_row_j);
-                        }
-
-                        // Has to be atomic as the other vector lanes in this row may add
-                        // into the same entry
-                        Kokkos::atomic_add(&vals_temp[idx_col_of_row_i], vals_prev[j] * val_target);
-
-                        // Move forward in both arrays
-                        idx_col_of_row_i++;
-                        idx_col_of_row_j++;
-                     }
-                  }
-               }
-            });
-
-            // ~~~~~~~~~~~
-            // Now can add the value of coeff * A^(term-1) to our matrix
-            // Each lane only touches its own entry j here
-            // ~~~~~~~~~~~
-            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i), [&](const PetscInt j) {
+               vals_next[l] = sum;
 
                // Skip any zero coefficients
-               // Still have to compute the A^(term-1) above though for the next time through
+               // Still have to compute the A^term above though for the next time through
                if (coeff_term != 0.0)
                {
                   // If we're in the local part of the matrix
-                  if (j < local_cols_row_i)
+                  if (l < local_cols_row_i)
                   {
                      // We need to increment the index we access by one
                      // if we don't have a diagonal in the sparsity matrix
                      // as we have one in the output_mat
                      PetscInt diag_increm = 0;
-                     if (found_diag_row_d(i) == 0 && out_l_j[out_l_i[i] + j] >= i)
+                     if (found_diag_row_d(i) == 0 && out_l_j[out_l_i[i] + l] >= i)
                      {
                         diag_increm = 1;
                      }
-                     out_l_a(out_l_i[i] + j + diag_increm) += coeff_term * vals_temp[j];
+                     out_l_a(out_l_i[i] + l + diag_increm) += coeff_term * sum;
                   }
                   // Nonlocal part
                   else
                   {
-                     out_nl_a(out_nl_i[i] + (j - local_cols_row_i)) += coeff_term * vals_temp[j];
+                     out_nl_a(out_nl_i[i] + (l - local_cols_row_i)) += coeff_term * sum;
                   }
                }
-
-               // This should now have the value of A^(term-1) in it
-               vals_prev[j] = vals_temp[j];
-               // Zero for the next power
-               vals_temp[j] = 0;
             });
+
+            // Swap the two rows for the next power
+            const ScratchScalarView swap = vals_prev;
+            vals_prev = vals_next;
+            vals_next = swap;
          }
       });
    }
@@ -422,69 +371,50 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
    if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
 
    // ~~~~~~~~~~~~~~
-   // Build a mapping from the input matrix's nonlocal column indices to the 
-   // sparsity matrix's column space ("local" submat column space), which is defined as:
+   // The kernel below looks up entries of the input mat in the column space of the sparsity
+   // mat ("local" submat column space), which is defined as:
    //   [0..cols_ad-1] for local columns, [cols_ad..cols_ad+cols_ao-1] for sparsity colmap columns
-   // 
-   // When doing the matrix-matrix product:
-   // 1. We need to compare local cols from local rows 
-   // We need to access the local input matrix and we 
-   // can do that directly given local indices are the same
    //
-   // 2. We need to compare nonlocal cols from non-local rows
-   // We need to access submat for this which now only has the non-local rows in it
-   // Those will have a "local" column index that matches col_indices_off_proc_array given 
-   // we create it with MatCreateSubMatrices
-   //
-   // 3. We need to compare nonlocal cols from local rows
-   // We need to access the input_matrix for this
-   // But (for higher order fixed sparsity) the colmap of the input matrix is not the same
-   // as the colmap of the sparsity matrix
-   // So below we create a mapping that converts from the input matrix's nonlocal column indices
-   // to the "local" column indices of the submat (which correspond to the sparsity matrix's column space) for the nonlocal columns
-   // If there are not matching entries in the sparsity colmap, we use a large sentinel value that will never
-   // match any col_orig and preserves sorted order.
-   //
-   // This mapping is needed because the input matrix and sparsity matrix may have
-   // different colmaps when poly_sparsity_order >= 2.
+   // 1. Local columns of local rows: the local input matrix has the same local indices
+   // 2. Any column of nonlocal rows: submat only has the nonlocal rows in it, and its column
+   // indices match col_indices_off_proc_array given we create it with MatCreateSubMatrices
+   // 3. Nonlocal columns of local rows: the nonlocal block of the input matrix, but
+   // (for higher order fixed sparsity) the colmap of the input matrix is not the same
+   // as the colmap of the sparsity matrix, so below we create a mapping from the sparsity
+   // colmap to the nonlocal columns of the input matrix
    // ~~~~~~~~~~~~~~
 
-   // Use a sentinel larger than any valid column index
-   const PetscInt COLMAP_NOT_FOUND = cols_ad + cols_ao + 1;
-
-   auto input_nonlocal_to_submat_col_d = PetscIntKokkosView("input_nonlocal_to_submat_col_d", mpi ? cols_ao_input : 1);
-   if (mpi && cols_ao_input > 0)
+   // For each entry of the sparsity colmap, the nonlocal column of the input mat with the
+   // same global column, or -1 if the input mat doesn't have that column
+   auto submat_col_to_input_nonlocal_col_d = PetscIntKokkosView("submat_col_to_input_nonlocal_col_d", (mpi && cols_ao > 0) ? cols_ao : 1);
+   if (mpi && cols_ao > 0)
    {
       // Build the mapping on the host
       // Both colmaps are sorted, so we can do a merge-style scan
-      auto input_nonlocal_to_submat_col_h = Kokkos::create_mirror_view(input_nonlocal_to_submat_col_d);
-      PetscInt sparsity_colmap_idx = 0;
-      for (PetscInt k = 0; k < cols_ao_input; k++)
+      auto submat_col_to_input_nonlocal_col_h = Kokkos::create_mirror_view(submat_col_to_input_nonlocal_col_d);
+      PetscInt input_colmap_idx = 0;
+      for (PetscInt k = 0; k < cols_ao; k++)
       {
-         PetscInt global_col = colmap_input_mat[k];
-         // Advance the sparsity colmap index (both are sorted)
-         while (sparsity_colmap_idx < cols_ao && colmap_mat_sparsity_match[sparsity_colmap_idx] < global_col)
+         const PetscInt global_col = colmap_mat_sparsity_match[k];
+         // Advance the input colmap index (both are sorted)
+         while (input_colmap_idx < cols_ao_input && colmap_input_mat[input_colmap_idx] < global_col)
          {
-            sparsity_colmap_idx++;
+            input_colmap_idx++;
          }
-         if (sparsity_colmap_idx < cols_ao && colmap_mat_sparsity_match[sparsity_colmap_idx] == global_col)
+         if (input_colmap_idx < cols_ao_input && colmap_input_mat[input_colmap_idx] == global_col)
          {
-            input_nonlocal_to_submat_col_h(k) = cols_ad + sparsity_colmap_idx;
+            submat_col_to_input_nonlocal_col_h(k) = input_colmap_idx;
          }
          else
          {
-            // Not found — use sentinel value that preserves sort order
-            // Since colmap_input is sorted and colmap_sparsity is sorted,
-            // if an entry is missing it's between two found entries,
-            // so we assign a value that maintains monotonicity
-            input_nonlocal_to_submat_col_h(k) = COLMAP_NOT_FOUND;
+            submat_col_to_input_nonlocal_col_h(k) = -1;
          }
       }
-      Kokkos::deep_copy(exec, input_nonlocal_to_submat_col_d, input_nonlocal_to_submat_col_h);
+      Kokkos::deep_copy(exec, submat_col_to_input_nonlocal_col_d, submat_col_to_input_nonlocal_col_h);
       // Log copy with petsc
-      bytes = input_nonlocal_to_submat_col_h.extent(0) * sizeof(PetscInt);
+      bytes = submat_col_to_input_nonlocal_col_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));
-      // Fence after the async copy of the input->submat colmap mapping to the device - the host mirror is freed at scope exit
+      // Fence after the async copy of the mapping to the device - the host mirror is freed at scope exit
       Kokkos::fence();
    }
 
@@ -567,7 +497,6 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
       functor.mpi = mpi;
       functor.cols_ad = cols_ad;
       functor.max_nnz = sparsity_max_nnz;
-      functor.colmap_not_found = COLMAP_NOT_FOUND;
       functor.poly_sparsity_order = poly_sparsity_order;
       functor.poly_order = poly_order;
       functor.sp_l_i = device_local_i_sparsity;
@@ -594,7 +523,7 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_kokkos(Mat *input_mat, const in
          functor.out_nl_a = device_nonlocal_vals_output;
       }
       functor.found_diag_row_d = found_diag_row_d;
-      functor.input_nonlocal_to_submat_col_d = input_nonlocal_to_submat_col_d;
+      functor.submat_col_to_input_nonlocal_col_d = submat_col_to_input_nonlocal_col_d;
       functor.coefficients_d = coefficients_d;
 
       MatInfo info;
