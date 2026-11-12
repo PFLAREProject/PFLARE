@@ -40,6 +40,8 @@ for earlier changes please see the git history.
 - With Kokkos, a one point classical prolongator and without sparsity reuse,
   the coarse matrix R*(A*P) is computed without building A*P as a matrix;
   the coarse matrix is unchanged
+- In the same case, small entries are dropped from R*(A*P) without building it
+  as a matrix first, unless nothing is dropped; the coarse matrix is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

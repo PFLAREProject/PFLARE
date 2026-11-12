@@ -500,6 +500,33 @@ module c_petsc_interfaces
 
    end interface
 
+   interface
+
+      subroutine mat_mult_r_one_point_ap_raw_kokkos(R_array, A_array, B_array, success_int, raw_handle) &
+         bind(c, name="mat_mult_r_one_point_ap_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: R_array, A_array, B_array
+         integer(c_int) :: success_int
+         integer(c_long_long) :: raw_handle
+      end subroutine mat_mult_r_one_point_ap_raw_kokkos
+
+   end interface
+
+   interface
+
+      subroutine rap_raw_drop_kokkos(raw_handle, tol, B_array, relative_max_row_tol_int, lump_int, &
+               allow_drop_diagonal_int, allow_diag_strength_int, allow_alias_int) &
+         bind(c, name="rap_raw_drop_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         PetscReal, value :: tol
+         integer(c_long_long) :: B_array
+         integer(c_int), value :: relative_max_row_tol_int, lump_int, allow_drop_diagonal_int
+         integer(c_int), value :: allow_diag_strength_int, allow_alias_int
+      end subroutine rap_raw_drop_kokkos
+
+   end interface
+
    interface   
       
       subroutine MatAXPY_kokkos(A_array, alpha, B_array) &

@@ -7,7 +7,7 @@ module petsc_helper
          MatSetAllValues_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
-         mat_mult_r_one_point_ap_kokkos, &
+         mat_mult_r_one_point_ap_kokkos, mat_mult_r_one_point_ap_raw_kokkos, rap_raw_drop_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
          mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
@@ -1426,6 +1426,125 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif
 
    end subroutine mat_mult_r_one_point_ap
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_r_one_point_ap_raw(R, A, P, raw_handle, done)
+
+      ! Computes R * (A * P) as mat_mult_r_one_point_ap does, but leaves the result as device data
+      ! in raw_handle rather than making it a PETSc matrix
+      ! raw_handle has to be passed to rap_raw_drop, which makes the dropped matrix from it and frees it
+      ! done is .FALSE. (and raw_handle isn't set) if R or A aren't Kokkos matrices or some row of P
+      ! has more than one entry
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)        :: R, A, P
+      integer(kind=8), intent(out)  :: raw_handle
+      logical, intent(out)          :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: R_array, A_array, B_array, handle
+      integer(c_int) :: success_int
+      MatType :: mat_type, mat_type_r
+#endif
+      ! ~~~~~~~~~~
+
+      done = .FALSE.
+      raw_handle = 0
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A, mat_type, ierr)
+      call MatGetType(R, mat_type_r, ierr)
+      if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS)) return
+      if (.NOT. (mat_type_r == MATMPIAIJKOKKOS .OR. mat_type_r == MATSEQAIJKOKKOS .OR. &
+            mat_type_r == MATAIJKOKKOS)) return
+
+      R_array = R%v
+      A_array = A%v
+      B_array = P%v
+      call mat_mult_r_one_point_ap_raw_kokkos(R_array, A_array, B_array, success_int, handle)
+      ! Some row of P has more than one entry
+      if (success_int == 0) return
+      raw_handle = handle
+      done = .TRUE.
+#endif
+
+   end subroutine mat_mult_r_one_point_ap_raw
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine rap_raw_drop(raw_handle, R, A, P, tol, output_mat, lump)
+
+      ! Drops the entries smaller than tol relative to the biggest in each row (optionally lumping them
+      ! onto the diagonal) from the R * (A * P) in raw_handle (from mat_mult_r_one_point_ap_raw), as
+      ! remove_small_from_sparse with relative_max_row_tol_int = 1 and allow_alias does on that matrix,
+      ! and frees raw_handle. If nothing is dropped on any rank, output_mat is R * (A * P) itself
+      ! R, A and P are only used by the Kokkos debug compare
+
+      ! ~~~~~~~~~~
+      ! Input
+      integer(kind=8), intent(inout) :: raw_handle
+      type(tMat), intent(in)         :: R, A, P
+      PetscReal, intent(in)          :: tol
+      type(tMat), intent(inout)      :: output_mat
+      logical, intent(in)            :: lump
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode, lump_int
+      integer(c_long_long) :: handle, B_array
+      type(tMat) :: temp_ap, temp_rap, temp_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      lump_int = 0
+      if (lump) lump_int = 1
+      handle = raw_handle
+      call rap_raw_drop_kokkos(handle, tol, B_array, 1, lump_int, 0, 0, 1)
+      output_mat%v = B_array
+      raw_handle = 0
+
+      ! If debugging do a comparison against the CPU drop of the product with an assembled A * P
+      if (kokkos_debug()) then
+
+         call mat_mult_one_entry_per_row(A, P, temp_ap)
+         call MatMatMult(R, temp_ap, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_rap, ierr)
+         call MatProductClear(temp_rap, ierr)
+         call MatDestroy(temp_ap, ierr)
+         call remove_small_from_sparse_cpu(temp_rap, tol, temp_mat, relative_max_row_tol_int = 1, lump = lump)
+         call MatDestroy(temp_rap, ierr)
+
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+
+         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos rap_raw_drop and CPU drop of MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+      end if
+#else
+      ! Only made with Kokkos, so never called without it
+      raw_handle = 0
+      output_mat = PETSC_NULL_MAT
+#endif
+
+   end subroutine rap_raw_drop
 
 !------------------------------------------------------------------------------------------------------------------------
    

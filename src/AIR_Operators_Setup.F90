@@ -24,7 +24,7 @@ module air_operators_setup
    use sai_z, only: calculate_and_build_sai_z
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
-         mat_mult_r_one_point_ap
+         mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop
 
 #include "petsc/finclude/petscksp.h"
 
@@ -1111,7 +1111,8 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: temp_mat
-      logical :: rap_done
+      logical :: rap_done, rap_raw, rap_drop_reused
+      integer(kind=8) :: rap_raw_handle
 
       ! ~~~~~~~~~~
 
@@ -1122,7 +1123,16 @@ module air_operators_setup
       ! Z A_ff W + A_cf W + Z A_fc + A_cc
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~
-      call timer_start(TIMER_ID_AIR_RAP)                          
+      rap_raw = .FALSE.
+      rap_raw_handle = 0
+      ! Is the dropped coarse matrix kept (or to be kept) for sparsity reuse
+      temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP)
+      rap_drop_reused = .NOT. PetscObjectIsNull(temp_mat)
+      if (air_data%options%reuse_sparsity) then
+         if (REUSE_MAT_ACTIVE(MAT_RAP_DROP, air_data%options%reuse_amount)) rap_drop_reused = .TRUE.
+      end if
+
+      call timer_start(TIMER_ID_AIR_RAP)
 
       ! Can just do PtAP
       if (air_data%options%symmetric) then  
@@ -1171,8 +1181,16 @@ module air_operators_setup
                   (.NOT. air_data%options%reuse_sparsity .OR. &
                    (.NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount) .AND. &
                     .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)))) then
-               call mat_mult_r_one_point_ap(air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
-                        air_data%reuse(our_level)%reuse_mat(MAT_RAP), rap_done)
+               ! If the coarse matrix is just dropped from it (not kept for reuse), R * (A * P) doesn't
+               ! have to be a matrix either
+               if (.NOT. rap_drop_reused) then
+                  call mat_mult_r_one_point_ap_raw(air_data%restrictors(our_level), A, &
+                           air_data%prolongators(our_level), rap_raw_handle, rap_done)
+                  rap_raw = rap_done
+               else
+                  call mat_mult_r_one_point_ap(air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
+                           air_data%reuse(our_level)%reuse_mat(MAT_RAP), rap_done)
+               end if
             end if
 
             if (.NOT. rap_done) then
@@ -1215,7 +1233,14 @@ module air_operators_setup
       ! which might be different if the matrix has changed (but the sparsity is the same)
       ! so we can't just drop with a drop tolerance
       temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP)
-      if (.NOT. PetscObjectIsNull(temp_mat)) then
+      ! R * (A * P) was left as device data, drop straight from it
+      ! This is the same as the remove_small_from_sparse with allow_alias below
+      if (rap_raw) then
+
+         call rap_raw_drop(rap_raw_handle, air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
+                  air_data%options%a_drop, coarse_matrix, air_data%options%a_lump)
+
+      else if (.NOT. PetscObjectIsNull(temp_mat)) then
 
          ! Duplicate the sparsity
          call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
