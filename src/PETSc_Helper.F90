@@ -7,7 +7,8 @@ module petsc_helper
          MatSetAllValues_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
-         one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos
+         one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
+         mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
          PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
          PFLARE_PTAP_FILL
@@ -1458,6 +1459,56 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #endif  
          
    end subroutine MatCreateSubMatrixWrapper   
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   function mat_fine_block_diagonal_only(input_mat, is_fine, our_level, kokkos_is_views_handle) result(diag_only)
+
+      ! Is the fine-fine block of a square Kokkos matrix only a diagonal (stored entries), the
+      ! same answer MatGetDiagonalOnly_c gives on the extracted Aff, but without extracting it
+      ! Only for Kokkos matrices, with the fine views of our_level already in kokkos_is_views_handle
+      ! Collective
+
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in)        :: input_mat
+      type(tIS), intent(in)         :: is_fine
+      integer, intent(in)           :: our_level
+      type(c_ptr), intent(in)       :: kokkos_is_views_handle
+      logical                       :: diag_only
+
+      integer :: errorcode
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, Aff_array
+      integer(c_int) :: diag_only_int, diag_only_cpu_int
+      PetscErrorCode :: ierr
+      type(tMat) :: temp_mat
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      A_array = input_mat%v
+      call mat_fine_block_diagonal_only_kokkos(A_array, kokkos_is_views_handle, our_level, diag_only_int)
+      diag_only = diag_only_int == 1
+
+      ! If debugging compare against the check on the extracted Aff
+      if (kokkos_debug()) then
+         call MatCreateSubMatrix(input_mat, is_fine, is_fine, MAT_INITIAL_MATRIX, temp_mat, ierr)
+         Aff_array = temp_mat%v
+         ierr = MatGetDiagonalOnly_c(Aff_array, diag_only_cpu_int)
+         call MatDestroy(temp_mat, ierr)
+         if (diag_only_cpu_int /= diag_only_int) then
+            print *, "Diff Kokkos and CPU fine block diagonal only", diag_only_int, diag_only_cpu_int
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if
+#else
+      diag_only = .FALSE.
+      print *, "mat_fine_block_diagonal_only needs Kokkos"
+      call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+#endif
+
+   end function mat_fine_block_diagonal_only
 
    !------------------------------------------------------------------------------------------------------------------------
    

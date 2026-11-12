@@ -22,7 +22,8 @@ module air_mg_setup
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, create_smooth_temp_vecs, mg_FC_point_richardson, mg_coarse_shell_apply, &
          mg_smooth_shell_apply, mg_coarse_shell_apply_transpose, mg_smooth_shell_apply_transpose, &
-         mg_FC_point_apply_transpose, mg_FC_point_residual_transpose, mg_coarse_shell_richardson
+         mg_FC_point_apply_transpose, mg_FC_point_residual_transpose, mg_coarse_shell_richardson, &
+         VecISCopyLocalWrapper
    use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
          mg_smooth_shell_block_apply, mg_coarse_shell_block_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
@@ -35,7 +36,7 @@ module air_mg_setup
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
    use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
-         is_one_point_shell
+         is_one_point_shell, mat_fine_block_diagonal_only
 
 #include "petsc/finclude/petscksp.h"
 
@@ -84,8 +85,9 @@ module air_mg_setup
       VecScatter :: vec_scatter
       VecType :: vec_type
       logical :: auto_truncated, aff_diag, check_diag_only, truncate_without_test, truncated_here
+      logical :: aff_diag_direct, aff_diag_checked
       PetscRandom :: rctx
-      MatType:: mat_type, mat_type_aff, mat_type_inv_aff
+      MatType:: mat_type, mat_type_aff, mat_type_inv_aff, mat_type_coarse
       integer(c_int) :: diag_only
       KSPNormType :: coarse_norm_type
       PetscReal :: coarse_rtol, coarse_atol, coarse_dtol
@@ -429,6 +431,7 @@ module air_mg_setup
 
          call timer_start(TIMER_ID_AIR_EXTRACT)             
 
+         aff_diag_checked = .FALSE.
          ! Pull out A_ff
          if (air_data%allocated_matrices_A_ff(our_level)) then
             call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
@@ -468,11 +471,50 @@ module air_mg_setup
                      kokkos_is_views_handle = air_data%kokkos_is_views_handle)
             end if
          else
-            call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
-                  air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                  air_data%A_ff(our_level), &
-                  our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
-                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+
+            ! With Kokkos, if Aff is only a diagonal we build it as a matdiagonal straight from
+            ! the diagonal of the coarse matrix, rather than extracting it and converting it below
+            ! We can only do that if the inverse type can use a matdiagonal
+            aff_diag_direct = .FALSE.
+            call MatGetType(air_data%coarse_matrix(our_level), mat_type_coarse, ierr)
+            if ((mat_type_coarse == MATMPIAIJKOKKOS .OR. mat_type_coarse == MATSEQAIJKOKKOS .OR. &
+                  mat_type_coarse == MATAIJKOKKOS) .AND. &
+                  air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
+                  air_data%options%inverse_type /= PFLAREINV_ISAI) then
+
+               ! Same reasoning as the check below for when Aff has to be diagonal
+               if (air_data%options%strong_threshold == 0d0 .AND. &
+                     (air_data%options%cf_splitting_type == CF_PMISR_DDC .OR. &
+                      air_data%options%cf_splitting_type == CF_DIAG_DOM)) then
+                  aff_diag_direct = .TRUE.
+               else
+                  aff_diag_direct = mat_fine_block_diagonal_only(air_data%coarse_matrix(our_level), &
+                        air_data%IS_fine_index(our_level), our_level, air_data%kokkos_is_views_handle)
+                  aff_diag_checked = .TRUE.
+               end if
+            end if
+
+            if (aff_diag_direct) then
+               call MatCreateVecs(air_data%coarse_matrix(our_level), diag_vec, PETSC_NULL_VEC, ierr)
+               call MatGetDiagonal(air_data%coarse_matrix(our_level), diag_vec, ierr)
+               call VecCreate(MPI_COMM_MATRIX, diag_vec_aff, ierr)
+               call VecSetSizes(diag_vec_aff, local_fine_is_size, global_fine_is_size, ierr)
+               ! Kokkos, as the extracted Aff's vectors would be
+               call VecSetType(diag_vec_aff, VECKOKKOS, ierr)
+               ! Pull out the F points of the diagonal
+               call VecISCopyLocalWrapper(air_data, our_level, .TRUE., diag_vec, &
+                        SCATTER_REVERSE, diag_vec_aff)
+               call VecDestroy(diag_vec, ierr)
+               ! The matrix takes ownership of diag_vec_aff and increases ref counter
+               call MatCreateDiagonal(diag_vec_aff, air_data%A_ff(our_level), ierr)
+               call VecDestroy(diag_vec_aff, ierr)
+            else
+               call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
+                     air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                     air_data%A_ff(our_level), &
+                     our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
+                     kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+            end if
          end if
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -500,7 +542,10 @@ module air_mg_setup
          end if
 
          ! Check if Aff is only a diagonal
-         if (check_diag_only) then      
+         ! If we already checked before extracting it, we know it isn't
+         if (aff_diag_checked .AND. mat_type_aff /= MATDIAGONAL) then
+            aff_diag = .FALSE.
+         else if (check_diag_only) then      
 
             ierr = MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
             ! Don't carry on with a garbage diag_only if petsc failed in the c routine
@@ -523,7 +568,8 @@ module air_mg_setup
                   inverse_type_aff /= PFLAREINV_ISAI) then
 
             ! We've already updated Aff above if we are reusing and it is matdiagonal already
-            if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
+            ! or if we built it as a matdiagonal directly
+            if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. mat_type_aff /= MATDIAGONAL) then
                call MatCreateVecs(air_data%A_ff(our_level), diag_vec_aff, PETSC_NULL_VEC, ierr)
                call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)               
 

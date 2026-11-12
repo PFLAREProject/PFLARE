@@ -95,9 +95,23 @@ module c_petsc_interfaces
          integer(c_long_long) :: A_array
          integer(c_int) :: diag_only
          PetscErrorCode :: MatGetDiagonalOnly_c
-      end function MatGetDiagonalOnly_c         
- 
-   end interface   
+      end function MatGetDiagonalOnly_c
+
+   end interface
+
+   interface
+
+      subroutine mat_fine_block_diagonal_only_kokkos(A_array, kokkos_is_views_handle, &
+                     our_level, diag_only) &
+         bind(c, name="mat_fine_block_diagonal_only_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         type(c_ptr), value :: kokkos_is_views_handle
+         integer(c_int), value :: our_level
+         integer(c_int) :: diag_only
+      end subroutine mat_fine_block_diagonal_only_kokkos
+
+   end interface
 
    interface   
       

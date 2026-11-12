@@ -2483,3 +2483,96 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos(Mat *input_mat, IS *is_row, IS *is_c
 
    return;
 }
+//------------------------------------------------------------------------------------------------------------------------
+
+// Checks whether the fine-fine block Aff of a square matrix is only a diagonal, without extracting it
+// diag_only is 1 if on every rank every fine row has its diagonal stored and no other entry
+// in a fine column (local or off-processor), which is what MatGetDiagonalOnly_c checks on the
+// extracted Aff (stored entries, whatever their value)
+// The fine points of our_level are read from the per-PCAIR IS views, as MatCreateSubMatrix_kokkos does
+PETSC_INTERN void mat_fine_block_diagonal_only_kokkos(Mat *input_mat, void *kokkos_is_views_handle, \
+                  const int our_level, int *diag_only)
+{
+   MPI_Comm MPI_COMM_MATRIX;
+   PetscInt local_rows, local_cols, rows_ao, cols_ao = 0;
+   MatType mat_type;
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+   if (mpi)
+   {
+      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+   }
+   else
+   {
+      mat_local = *input_mat;
+   }
+
+   // The local indices of the fine points, which are both rows and columns as the matrix is square
+   PetscIntKokkosView is_fine_d = VecISCopyLocal_kokkos_get_view(kokkos_is_views_handle, our_level, 1);
+   const PetscInt local_fine = is_fine_d.extent(0);
+
+   // Mark the local fine columns
+   PetscIntKokkosView fine_col_d(Kokkos::view_alloc(exec, "fine_col_d"), local_cols);
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, local_fine), KOKKOS_LAMBDA(PetscInt i) {
+         fine_col_d(is_fine_d(i)) = 1;
+   });
+
+   // Get the marks for the off-processor columns through the matrix mult SF
+   PetscIntKokkosView fine_col_o_d;
+   if (mpi)
+   {
+      PetscSF sf = NULL;
+      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
+      fine_col_o_d = PetscIntKokkosView("fine_col_o_d", cols_ao);
+      // While Begin/End is in flight, do not touch the send/recv buffers
+      PetscCallVoid(sf_sync_before_begin_kokkos());
+      PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPIU_INT,
+                  PETSC_MEMTYPE_KOKKOS, fine_col_d.data(),
+                  PETSC_MEMTYPE_KOKKOS, fine_col_o_d.data(),
+                  MPI_REPLACE));
+      PetscCallVoid(PetscSFBcastEnd(sf, MPIU_INT, fine_col_d.data(), fine_col_o_d.data(), MPI_REPLACE));
+      PetscCallVoid(sf_sync_after_end_kokkos());
+   }
+
+   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
+   PetscMemType mtype;
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
+   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
+
+   // Count the fine rows that break the diagonal pattern: a fine row without its diagonal, or
+   // with any other entry in a fine column
+   // Like the extraction of Aff, this assumes the row and column layouts of the matrix are the same
+   PetscInt bad_rows = 0;
+   Kokkos::parallel_reduce("FineBlockDiagonalOnly", Kokkos::RangePolicy<>(exec, 0, local_fine),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_bad) {
+         const PetscInt row = is_fine_d(i);
+         bool found_diag = false, other = false;
+         for (PetscInt k = device_local_i[row]; k < device_local_i[row + 1]; k++)
+         {
+            const PetscInt col = device_local_j[k];
+            if (!fine_col_d(col)) continue;
+            if (col == row) found_diag = true;
+            else other = true;
+         }
+         if (mpi)
+         {
+            for (PetscInt k = device_nonlocal_i[row]; k < device_nonlocal_i[row + 1]; k++)
+            {
+               if (fine_col_o_d(device_nonlocal_j[k])) other = true;
+            }
+         }
+         if (!found_diag || other) thread_bad++;
+      }, Kokkos::Sum<PetscInt>(bad_rows));
+
+   // Every rank has to agree
+   int diag_only_local = bad_rows == 0;
+   PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&diag_only_local, diag_only, 1, MPI_INT, MPI_LAND, MPI_COMM_MATRIX));
+}
