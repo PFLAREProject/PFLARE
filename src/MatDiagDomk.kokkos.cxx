@@ -91,60 +91,35 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    PetscScalar *device_local_vals = nullptr;
    PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
 
-   // Have to store the diagonal entry
-   PetscScalarKokkosView diag_entry_d = PetscScalarKokkosView("diag_entry_d", local_rows_row);   
-   Kokkos::deep_copy(exec, diag_entry_d, 0);
+   // Have to store the diagonal entry, every entry is written by the local kernel
+   PetscScalarKokkosView diag_entry_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "diag_entry_d"), local_rows_row);
 
-   // Scoping to reduce peak memory
-   {
-      // We now go and do a reduce to get the diagonal entry, while also 
-      // summing up the local non-diagonals into diag_dom_ratio_d
-      Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(exec, local_rows_row, Kokkos::AUTO()),
-         KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+   // Get the diagonal entry of each fine row, while also summing up the
+   // local non-diagonal fine entries into diag_dom_ratio_d
+   // One thread per row, summing in the row's order into a single accumulator
+   // (continued by the nonlocal kernel below), which is exactly the order of
+   // MatDiagDomRatio_cpu, so the device ratios are bitwise the same as the CPU ones
+   // The DDC compares these ratios against bin edges and many sit exactly on one,
+   // so a different summation order would change the CF splitting
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(const PetscInt i_idx_is_row) {
 
-            const PetscInt i_idx_is_row = t.league_rank();
-            const PetscInt i = is_fine_local_d(i_idx_is_row);
-            const PetscInt ncols_local = device_local_i[i + 1] - device_local_i[i];
-
-            PetscScalar sum_val = 0.0;
-
-            // Reduce over local columns
-            Kokkos::parallel_reduce(
-               Kokkos::TeamVectorRange(t, ncols_local),
-               [&](const PetscInt j, PetscScalar& thread_sum) {
-
-                  // Get this local column in the input_mat
-                  const PetscInt target_col = device_local_j[device_local_i[i] + j];
-                  // Is this column fine? F_POINT == -1
-                  if (cf_markers_d(target_col) == -1)
-                  {               
-                     // Is this column the diagonal
-                     const bool is_diagonal = i == target_col;
-
-                     // Get the abs value of the entry
-                     PetscScalar val = Kokkos::abs(device_local_vals[device_local_i[i] + j]);   
-                     
-                     // We have found a diagonal in this row
-                     if (is_diagonal) {
-                        // Will only happen for one thread
-                        diag_entry_d(i_idx_is_row) = val;                     
-                     }                
-                     else
-                     {
-                        thread_sum += val;
-                     }
-                  }
-               },
-               Kokkos::Sum<PetscScalar>(sum_val)
-            );
-
-            // Only want one thread in the team to write the result
-            Kokkos::single(Kokkos::PerTeam(t), [&]() {
-               diag_dom_ratio_d(i_idx_is_row) = sum_val;
-            });
-      });  
-   }
+         const PetscInt i = is_fine_local_d(i_idx_is_row);
+         PetscScalar sum_val = 0.0, diag_val = 0.0;
+         for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++)
+         {
+            const PetscInt target_col = device_local_j[k];
+            // Is this column fine? F_POINT == -1
+            if (cf_markers_d(target_col) == -1)
+            {
+               const PetscScalar val = Kokkos::abs(device_local_vals[k]);
+               if (target_col == i) diag_val = val;
+               else sum_val += val;
+            }
+         }
+         diag_entry_d(i_idx_is_row) = diag_val;
+         diag_dom_ratio_d(i_idx_is_row) = sum_val;
+   });
 
    // Finish the in-flight broadcast and only then read from the leaf
    if (mpi)
@@ -170,42 +145,26 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
 
       // Sum up the nonlocal matching entries into diag_dom_ratio_d
-      if (cols_ao > 0) 
-      {      
+      // Nothing to do if this rank has no off-process columns
+      if (cols_ao > 0)
+      {
          Kokkos::parallel_for(
-            Kokkos::TeamPolicy<>(exec, local_rows_row, Kokkos::AUTO()),
-            KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+            Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(const PetscInt i_idx_is_row) {
 
-               const PetscInt i_idx_is_row = t.league_rank();
                const PetscInt i = is_fine_local_d(i_idx_is_row);
-               const PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
+               // Most rows have no nonlocal entries
+               if (device_nonlocal_i[i + 1] == device_nonlocal_i[i]) return;
 
-               PetscScalar sum_val = 0.0;
-
-               // Reduce over local columns
-               Kokkos::parallel_reduce(
-                  Kokkos::TeamVectorRange(t, ncols_nonlocal),
-                  [&](const PetscInt j, PetscScalar& thread_sum) {
-
-                     // This is the non-local column we have to check is present
-                     const PetscInt target_col = device_nonlocal_j[device_nonlocal_i[i] + j];
-                     // Is this column in the input IS? F_POINT == -1
-                     if (cf_markers_nonlocal_d(target_col) == -1)
-                     {               
-                        // Get the abs value of the entry
-                        thread_sum += Kokkos::abs(device_nonlocal_vals[device_nonlocal_i[i] + j]);
-                     }
-                  },
-                  Kokkos::Sum<PetscScalar>(sum_val)
-               );
-
-               // Only want one thread in the team to write the result
-               Kokkos::single(Kokkos::PerTeam(t), [&]() {
-                  // Add into existing
-                  diag_dom_ratio_d(i_idx_is_row) += sum_val;
-               });
-         });  
-      }       
+               // Carry on from the local sum, as the CPU does
+               PetscScalar sum_val = diag_dom_ratio_d(i_idx_is_row);
+               for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++)
+               {
+                  // Is this nonlocal column fine? F_POINT == -1
+                  if (cf_markers_nonlocal_d(device_nonlocal_j[k]) == -1) sum_val += Kokkos::abs(device_nonlocal_vals[k]);
+               }
+               diag_dom_ratio_d(i_idx_is_row) = sum_val;
+         });
+      }
    }
 
    // ~~~~~~~~~~~~~

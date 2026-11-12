@@ -27,6 +27,9 @@ for earlier changes please see the git history.
 - With Kokkos and without sparsity reuse, the one point classical prolongator
   is now matrix-free (a `MATSHELL` applied on the device), so the
   interpolation PCAIR gives PCMG is a shell rather than an assembled matrix
+- Faster diagonal dominance ratios in the DDC pass with Kokkos; the ratios are
+  now computed in the same order as on the CPU, so they match it exactly and
+  the GPU CF splitting can differ slightly from before
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
