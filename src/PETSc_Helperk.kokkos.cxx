@@ -3370,7 +3370,13 @@ static PetscErrorCode vec_create_device_vecs_kokkos(MPI_Comm comm, PetscInt n, P
       Vec v;
       PetscScalar *array_d = buffer->data() + i * lda;
       if (comm_size > 1) PetscCall(VecCreateMPIKokkosWithArray(comm, bs, n, N, array_d, &v));
-      else PetscCall(VecCreateSeqKokkosWithArray(comm, bs, n, array_d, &v));
+      else
+      {
+         // VecCreateSeqKokkosWithArray with a device array zero-fills a host array, but an array-less
+         // vector with the device array placed only allocates (without touching) the host array
+         PetscCall(VecCreateSeqKokkosWithArray(comm, bs, n, NULL, &v));
+         PetscCall(VecKokkosPlaceArray(v, array_d));
+      }
       vecs[i] = v;
    }
    if (m > 0) PetscCall(PetscObjectContainerCompose((PetscObject)vecs[0], "pflare_duplicate_vecs", buffer, destroy_vecs_buffer));

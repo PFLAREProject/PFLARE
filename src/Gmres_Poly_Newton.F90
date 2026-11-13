@@ -1774,7 +1774,7 @@ end if
 
       ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
       if (diag_scale_polys) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_inverse_vec)
          call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
          call VecReciprocal(diag_inverse_vec, ierr)
          call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
@@ -1888,7 +1888,7 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
 
       if (.NOT. reuse_triggered) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
       end if
@@ -1935,17 +1935,18 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
 
        ! Our matrix has to be square
-      call MatCreateVecs(matrix, product_vec, diag_vec, ierr)
+      call mat_create_vec_device(matrix, .FALSE., product_vec)
+      call mat_create_vec_device(matrix, .TRUE., diag_vec)
       call MatGetDiagonal(matrix, diag_vec, ierr)
 
       if (.NOT. reuse_triggered) then
-         call VecDuplicate(diag_vec, inv_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., inv_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, inv_vec, ierr)
       end if
-      call VecDuplicate(diag_vec, temp_vec_A, ierr)
-      call VecDuplicate(diag_vec, one_vec, ierr)
-      call VecDuplicate(diag_vec, temp_vec_two, ierr)
+      call mat_create_vec_device(matrix, .TRUE., temp_vec_A)
+      call mat_create_vec_device(matrix, .TRUE., one_vec)
+      call mat_create_vec_device(matrix, .TRUE., temp_vec_two)
       
       ! Set to zero as we add to it
       call VecSet(inv_vec, PFLARE_ZERO, ierr) 

@@ -230,9 +230,9 @@ module gmres_poly
       ! VecDuplicateVecs. Contiguous allocation lets VecMDot use a BLAS-2 operation (when
       ! called on a vector with those operations, see w_j in the Arnoldi)
       ! Kokkos vectors are built on one device buffer without the zero-filled host copy 
-      ! VecDuplicateVecs makes. Destroy them with destroy_temp_space
+      ! VecDuplicateVecs makes (the template is too). Destroy them with destroy_temp_space
       ! ~~~~~~~~~~
-      call MatCreateVecs(matrix, temp_vec, PETSC_NULL_VEC, ierr)
+      call mat_create_vec_device(matrix, .FALSE., temp_vec)
       vecs_needed = subspace_size + 1
       allocate(V_n(vecs_needed))
       allocate(vec_handles(vecs_needed))
@@ -1653,7 +1653,7 @@ end if
 
       ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
       if (diag_scale_polys) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_inverse_vec)
          call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
          call VecReciprocal(diag_inverse_vec, ierr)
          call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
@@ -1833,7 +1833,7 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
 
       if (.NOT. reuse_triggered) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
       end if
@@ -1877,12 +1877,13 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
 
        ! Our matrix has to be square
-      call MatCreateVecs(matrix, power_vec, diag_vec, ierr)
+      call mat_create_vec_device(matrix, .FALSE., power_vec)
+      call mat_create_vec_device(matrix, .TRUE., diag_vec)
       call MatGetDiagonal(matrix, diag_vec, ierr)
 
       ! This stores D^order
       if (.NOT. reuse_triggered) then
-         call VecDuplicate(diag_vec, inv_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., inv_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, inv_vec, ierr)
       end if

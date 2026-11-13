@@ -52,7 +52,7 @@ for earlier changes please see the git history.
   `VecDuplicateVecs` makes, which cuts the GPU setup time
 - Likewise, PCAIR now gives PCMG its per-level `b`, `x` and `r` vectors, and
   builds its smoothing pools, matrix-free polynomial temporaries and diagonal
-  Aff vectors on the device without a host copy
+  Aff vectors on the device without a host copy (also on a single rank)
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
