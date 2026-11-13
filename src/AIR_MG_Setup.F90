@@ -5,7 +5,7 @@ module air_mg_setup
    use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: &
-         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
          PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_WJACOBI, &
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, &
          TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_CONSTRAIN, &
@@ -16,7 +16,7 @@ module air_mg_setup
          PFLARE_KSP_RTOL_COARSE, PFLARE_MINUS_ONE
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
-         destroy_matrix_reuse, inverse_type_is_polynomial
+         destroy_matrix_reuse, inverse_type_is_polynomial, repoint_mf_poly_inverse
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
@@ -37,7 +37,7 @@ module air_mg_setup
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
    use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
          is_one_point_shell, mat_fine_block_diagonal_only, mat_create_vec_device, vec_create_sized_device, &
-         MatGetTypeEffective, raw_shell_assemble
+         MatGetTypeEffective, raw_shell_assemble, is_raw_shell
 
 #include "petsc/finclude/petscksp.h"
 
@@ -86,6 +86,7 @@ module air_mg_setup
       VecScatter :: vec_scatter
       VecType :: vec_type
       logical :: auto_truncated, aff_diag, check_diag_only, truncate_without_test, truncated_here
+      logical :: test_on_raw_shell
       logical :: aff_diag_direct, aff_diag_checked
       PetscRandom :: rctx
       MatType:: mat_type, mat_type_aff, mat_type_inv_aff, mat_type_coarse
@@ -178,9 +179,6 @@ module air_mg_setup
 
             call timer_start(TIMER_ID_AIR_TRUNCATE)   
 
-            ! The truncation test and the coarse solver need a real matrix
-            call raw_shell_assemble(air_data%coarse_matrix(our_level))
-
             ! Set up our coarse inverse data
             call setup_gmres_poly_data(global_rows, &
                      air_data%options%coarsest_inverse_type, &
@@ -189,6 +187,17 @@ module air_mg_setup
                      air_data%options%coarsest_subcomm, &
                      proc_stride, &
                      air_data%inv_coarsest_poly_data)  
+
+            ! A matrix-free power, arnoldi or newton coarse solver (not on a subcomm) only applies
+            ! the coarse matrix, so the test can run on a raw shell, which is then only made a real
+            ! matrix if this level becomes the coarsest. Anything else needs a real matrix now
+            test_on_raw_shell = air_data%options%coarsest_matrix_free_polys .AND. &
+                  .NOT. air_data%options%coarsest_subcomm .AND. &
+                  (air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_POWER .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_ARNOLDI .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
+            if (.NOT. test_on_raw_shell) call raw_shell_assemble(air_data%coarse_matrix(our_level))
 
             ! Start the approximate inverse we'll use on this level
             ! If we are reusing the coefficients and have some, the truncation test uses those
@@ -271,6 +280,13 @@ module air_mg_setup
             if (truncated_here) then
                auto_truncated = .TRUE.
                air_data%auto_truncated_level = our_level
+
+               ! The coarse solver needs a real matrix, with the same entries as the raw shell it
+               ! was built and tested with, so point the matrix-free inverse at it
+               if (is_raw_shell(air_data%coarse_matrix(our_level))) then
+                  call raw_shell_assemble(air_data%coarse_matrix(our_level))
+                  call repoint_mf_poly_inverse(air_data%inv_A_ff(our_level), air_data%coarse_matrix(our_level))
+               end if
 
                ! Delete temporary if not reusing
                if (.NOT. air_data%options%reuse_sparsity .OR. &

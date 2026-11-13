@@ -674,6 +674,33 @@ module approx_inverse_setup
       
    end subroutine reset_inverse_mat
 
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine repoint_mf_poly_inverse(inv_matrix, matrix)
+
+      ! Points a matrix-free power, arnoldi or newton polynomial inverse (and its inner diagonally
+      ! scaled shell, if it has one) at matrix
+      ! These shells only keep a copy of the handle of the matrix they were built with, so this is
+      ! needed if that matrix is replaced by another with the same entries (raw_shell_assemble)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: inv_matrix, matrix
+
+      PetscErrorCode :: ierr
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
+      type(tMat) :: temp_mat
+      ! ~~~~~~
+
+      call MatShellGetContext(inv_matrix, mat_ctx, ierr)
+      mat_ctx%mat = matrix
+      temp_mat = mat_ctx%mat_scaled
+      if (.NOT. PetscObjectIsNull(temp_mat)) then
+         call MatShellGetContext(temp_mat, mat_ctx_scaled, ierr)
+         mat_ctx_scaled%mat = matrix
+      end if
+
+   end subroutine repoint_mf_poly_inverse
+
    ! -------------------------------------------------------------------------------------------------------------------------------
 
 end module approx_inverse_setup

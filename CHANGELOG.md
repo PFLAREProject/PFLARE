@@ -60,6 +60,8 @@ for earlier changes please see the git history.
   same device products as before
 - Likewise the fine-fine, fine-coarse and coarse-fine blocks of each level
   with the default one point prolongator, Arnoldi and matrix-free smoothing
+- With a matrix-free polynomial coarse grid solver, the auto truncation test
+  runs on that device data, and only the level it stops at is assembled
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

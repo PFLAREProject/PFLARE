@@ -1379,7 +1379,8 @@ module air_operators_setup
 
          ! The coarse matrix can stay as device views (a raw shell) when everything that reads it on the
          ! next level can read one; otherwise it is a PETSc matrix. Levels that later need a real matrix
-         ! (the truncation test, the coarsest level and repartitioning) are assembled where they are used
+         ! (the coarsest level, repartitioning, and the truncation test unless the coarse solver is a
+         ! matrix-free polynomial) are assembled where they are used
          raw_shell_ok = raw_shells_ok(air_data)
          call rap_raw_drop(rap_raw_handle, air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
                   air_data%options%a_drop, coarse_matrix, air_data%options%a_lump, raw_shell = raw_shell_ok)
