@@ -55,37 +55,6 @@ struct PowersShareSparsityFunctor {
       return j[start] == key;
    }
 
-   // Finds the entry of the input mat in row row_of_col (a local row if row_local, otherwise a
-   // row of submat) and column col (in the submat column space)
-   // col_input is col as a nonlocal column of the input mat (or -1 if the input mat doesn't
-   // have it), only used when col is nonlocal
-   // Returns false if there is no such entry
-   KOKKOS_INLINE_FUNCTION bool input_entry(const bool row_local, const PetscInt row_of_col, const PetscInt col,
-                                           const PetscInt col_input, PetscScalar &val) const
-   {
-      PetscInt pos = 0;
-      if (row_local)
-      {
-         if (col < cols_ad)
-         {
-            if (!find_col(in_l_j, in_l_i[row_of_col], in_l_i[row_of_col + 1], col, pos)) return false;
-            val = in_l_a(pos);
-         }
-         else
-         {
-            if (col_input < 0) return false;
-            if (!find_col(in_nl_j, in_nl_i[row_of_col], in_nl_i[row_of_col + 1], col_input, pos)) return false;
-            val = in_nl_a(pos);
-         }
-      }
-      else
-      {
-         if (!find_col(sub_j, sub_i[row_of_col], sub_i[row_of_col + 1], col, pos)) return false;
-         val = sub_a(pos);
-      }
-      return true;
-   }
-
    KOKKOS_INLINE_FUNCTION void operator()(const KokkosTeamMemberType &t) const
    {
       // Each thread gets its own scratch, which we reuse for every row it handles
@@ -124,26 +93,29 @@ struct PowersShareSparsityFunctor {
          {
             const PetscScalar coeff_term = coefficients_d(term);
 
-            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i), [&](const PetscInt l) {
+            // The local and the nonlocal output entries go in separate lane loops, so the lanes of
+            // each loop take the same lookup path (rows without nonlocal entries only run the
+            // first). Each entry still sums over j in order: the local rows of the row's columns
+            // first, then the rows fetched from other ranks, as one loop over j would
+            // A^term(i, col_l) = sum_j A^(term-1)(i, col_j) * A(col_j, col_l)
 
-               // The column of entry l, in the submat column space
-               const PetscInt col_l = l < local_cols_row_i ? sp_l_j[sp_l_i[i] + l] : \
-                        sp_nl_j[sp_nl_i[i] + (l - local_cols_row_i)] + cols_ad;
-               // The same column as a nonlocal column of the input mat, if col_l is nonlocal
-               const PetscInt col_input_l = col_l < cols_ad ? -1 : submat_col_to_input_nonlocal_col_d(col_l - cols_ad);
+            // Local output entries: col_l is a local column
+            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, local_cols_row_i), [&](const PetscInt l) {
 
-               // Sum over the entries j of row i in order
-               // A^term(i, col_l) = sum_j A^(term-1)(i, col_j) * A(col_j, col_l)
+               const PetscInt col_l = sp_l_j[sp_l_i[i] + l];
                PetscScalar sum = 0;
-               for (PetscInt j = 0; j < ncols_row_i; j++)
+               PetscInt pos = 0;
+               // Rows we have locally: look col_l up in the local block
+               for (PetscInt j = 0; j < local_cols_row_i; j++)
                {
-                  // The row of column j, which we either have locally or have retrieved
-                  // from other ranks in submat
-                  const bool row_of_col_j_local = j < local_cols_row_i;
-                  const PetscInt row_of_col_j = row_of_col_j_local ? sp_l_j[sp_l_i[i] + j] : \
-                           sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
-                  PetscScalar val_target;
-                  if (input_entry(row_of_col_j_local, row_of_col_j, col_l, col_input_l, val_target)) sum += vals_prev[j] * val_target;
+                  const PetscInt row_j = sp_l_j[sp_l_i[i] + j];
+                  if (find_col(in_l_j, in_l_i[row_j], in_l_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * in_l_a(pos);
+               }
+               // Rows retrieved from other ranks: look col_l up in submat
+               for (PetscInt j = local_cols_row_i; j < ncols_row_i; j++)
+               {
+                  const PetscInt row_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
+                  if (find_col(sub_j, sub_i[row_j], sub_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * sub_a(pos);
                }
                vals_next[l] = sum;
 
@@ -151,25 +123,46 @@ struct PowersShareSparsityFunctor {
                // Still have to compute the A^term above though for the next time through
                if (coeff_term != 0.0)
                {
-                  // If we're in the local part of the matrix
-                  if (l < local_cols_row_i)
+                  // We need to increment the index we access by one
+                  // if we don't have a diagonal in the sparsity matrix
+                  // as we have one in the output_mat
+                  PetscInt diag_increm = 0;
+                  if (found_diag_row_d(i) == 0 && out_l_j[out_l_i[i] + l] >= i)
                   {
-                     // We need to increment the index we access by one
-                     // if we don't have a diagonal in the sparsity matrix
-                     // as we have one in the output_mat
-                     PetscInt diag_increm = 0;
-                     if (found_diag_row_d(i) == 0 && out_l_j[out_l_i[i] + l] >= i)
-                     {
-                        diag_increm = 1;
-                     }
-                     out_l_a(out_l_i[i] + l + diag_increm) += coeff_term * sum;
+                     diag_increm = 1;
                   }
-                  // Nonlocal part
-                  else
+                  out_l_a(out_l_i[i] + l + diag_increm) += coeff_term * sum;
+               }
+            });
+
+            // Nonlocal output entries: col_l is a nonlocal column (in the submat column space)
+            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i - local_cols_row_i), [&](const PetscInt l_nl) {
+
+               const PetscInt l = local_cols_row_i + l_nl;
+               const PetscInt col_l = sp_nl_j[sp_nl_i[i] + l_nl] + cols_ad;
+               // The same column as a nonlocal column of the input mat, or -1 if it has none
+               const PetscInt col_input_l = submat_col_to_input_nonlocal_col_d(col_l - cols_ad);
+               PetscScalar sum = 0;
+               PetscInt pos = 0;
+               // Rows we have locally: look col_l up in the nonlocal block (nothing to find
+               // if the input mat doesn't have that column)
+               if (col_input_l >= 0)
+               {
+                  for (PetscInt j = 0; j < local_cols_row_i; j++)
                   {
-                     out_nl_a(out_nl_i[i] + (l - local_cols_row_i)) += coeff_term * sum;
+                     const PetscInt row_j = sp_l_j[sp_l_i[i] + j];
+                     if (find_col(in_nl_j, in_nl_i[row_j], in_nl_i[row_j + 1], col_input_l, pos)) sum += vals_prev[j] * in_nl_a(pos);
                   }
                }
+               // Rows retrieved from other ranks: look col_l up in submat
+               for (PetscInt j = local_cols_row_i; j < ncols_row_i; j++)
+               {
+                  const PetscInt row_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
+                  if (find_col(sub_j, sub_i[row_j], sub_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * sub_a(pos);
+               }
+               vals_next[l] = sum;
+
+               if (coeff_term != 0.0) out_nl_a(out_nl_i[i] + l_nl) += coeff_term * sum;
             });
 
             // Swap the two rows for the next power

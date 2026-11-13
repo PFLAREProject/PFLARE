@@ -63,7 +63,8 @@ for earlier changes please see the git history.
 - With a matrix-free polynomial coarse grid solver, the auto truncation test
   runs on that device data, and only the level it stops at is assembled
 - Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos in
-  parallel, from sizing the kernel's scratch by the longest row
+  parallel, from sizing the kernel's scratch by the longest row and handling
+  the local and nonlocal entries of each row in separate loops
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
