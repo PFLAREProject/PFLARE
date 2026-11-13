@@ -19,7 +19,7 @@ module approx_inverse_setup
    use weighted_jacobi, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
    use repartition, only: MatMPICreateNonemptySubcomm
-   use petsc_helper, only: destroy_matrix_reuse
+   use petsc_helper, only: destroy_matrix_reuse, mat_create_vec_device
    use matshell_data_type, only: mat_ctxtype
 
 #include "petsc/finclude/petscmat.h"
@@ -371,7 +371,7 @@ module approx_inverse_setup
             
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-            call MatCreateVecs(buffers%matrix, PETSC_NULL_VEC, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr) 
+            call mat_create_vec_device(buffers%matrix, .TRUE., mat_ctx_da%mf_temp_vec(MF_VEC_DIAG))
             ! Get the diagonal
             call MatGetDiagonal(buffers%matrix, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)    
             ! This is the matrix whose inverse we are applying (just copying the pointer here)

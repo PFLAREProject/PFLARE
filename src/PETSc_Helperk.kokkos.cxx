@@ -3345,39 +3345,58 @@ static PetscErrorCode destroy_vecs_buffer(PetscCtxRt ctx)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// Duplicates m vectors from a kokkos template vector, like VecDuplicateVecs, but without a zero-filled host
-// copy: the vectors are slices (with a 64 byte aligned stride, like VecDuplicateVecs) of one device buffer
-// that is zero on the device. Only the public API is used, so the vectors have the operations
-// VecCreate*KokkosWithArray gives them. The buffer is freed once vecs[0] (and any vector
-// duplicated from it) is destroyed
+// Creates m kokkos vectors with local size n and global size N (or PETSC_DECIDE) on comm, without the
+// zero-filled host copy PETSc's VecCreate and VecDuplicateVecs make: the vectors are slices (with a 64 byte
+// aligned stride, like VecDuplicateVecs) of one device buffer that is zero on the device. With more than one
+// rank they are VECMPIKOKKOS, otherwise VECSEQKOKKOS (as VECKOKKOS would give). Only the public API is used,
+// so the vectors have the operations VecCreate*KokkosWithArray gives them. The buffer is freed once
+// vecs[0] (and any vector duplicated from it) is destroyed
+static PetscErrorCode vec_create_device_vecs_kokkos(MPI_Comm comm, PetscInt n, PetscInt N, PetscInt bs, PetscInt m, Vec *vecs)
+{
+   PetscMPIInt comm_size;
+
+   PetscFunctionBegin;
+   PetscCallMPI(MPI_Comm_size(comm, &comm_size));
+   const PetscInt64 align = PetscMax((PetscInt64)(64 / sizeof(PetscScalar)), (PetscInt64)1);
+   const PetscInt64 lda = ((n + align - 1) / align) * align;
+   // Zero on the device (Kokkos initialises views)
+   PetscScalarKokkosView *buffer;
+   // At least one entry, so a rank with no local rows still gets a non-null array (a null one would
+   // make an array-less vector)
+   PetscCallCXX(buffer = new PetscScalarKokkosView("pflare_duplicate_vecs", (size_t)PetscMax(m * lda, (PetscInt64)1)));
+
+   for (PetscInt i = 0; i < m; i++)
+   {
+      Vec v;
+      PetscScalar *array_d = buffer->data() + i * lda;
+      if (comm_size > 1) PetscCall(VecCreateMPIKokkosWithArray(comm, bs, n, N, array_d, &v));
+      else PetscCall(VecCreateSeqKokkosWithArray(comm, bs, n, array_d, &v));
+      vecs[i] = v;
+   }
+   if (m > 0) PetscCall(PetscObjectContainerCompose((PetscObject)vecs[0], "pflare_duplicate_vecs", buffer, destroy_vecs_buffer));
+   else delete buffer;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Duplicates m vectors from a kokkos template vector, like VecDuplicateVecs, see vec_create_device_vecs_kokkos
 PETSC_INTERN PetscErrorCode vec_duplicate_vecs_device_kokkos(Vec template_vec, PetscInt m, Vec *vecs)
 {
    MPI_Comm comm;
    PetscInt n, N, bs;
-   PetscBool is_mpi;
 
    PetscFunctionBegin;
    PetscCall(PetscObjectGetComm((PetscObject)template_vec, &comm));
    PetscCall(VecGetLocalSize(template_vec, &n));
    PetscCall(VecGetSize(template_vec, &N));
    PetscCall(VecGetBlockSize(template_vec, &bs));
-   PetscCall(PetscObjectTypeCompare((PetscObject)template_vec, VECMPIKOKKOS, &is_mpi));
+   PetscCall(vec_create_device_vecs_kokkos(comm, n, N, bs, m, vecs));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 
-   const PetscInt64 align = PetscMax((PetscInt64)(64 / sizeof(PetscScalar)), (PetscInt64)1);
-   const PetscInt64 lda = ((n + align - 1) / align) * align;
-   // Zero on the device (Kokkos initialises views)
-   PetscScalarKokkosView *buffer;
-   PetscCallCXX(buffer = new PetscScalarKokkosView("pflare_duplicate_vecs", (size_t)(m * lda)));
-
-   for (PetscInt i = 0; i < m; i++)
-   {
-      Vec v;
-      PetscScalar *array_d = buffer->data() + i * lda;
-      if (is_mpi) PetscCall(VecCreateMPIKokkosWithArray(comm, bs, n, N, array_d, &v));
-      else PetscCall(VecCreateSeqKokkosWithArray(comm, bs, n, array_d, &v));
-      vecs[i] = v;
-   }
-   if (m > 0) PetscCall(PetscObjectContainerCompose((PetscObject)vecs[0], "pflare_duplicate_vecs", buffer, destroy_vecs_buffer));
-   else delete buffer;
+// One kokkos vector with local size n and global size N (or PETSC_DECIDE), see vec_create_device_vecs_kokkos
+PETSC_INTERN PetscErrorCode vec_create_device_kokkos(MPI_Comm comm, PetscInt n, PetscInt N, PetscInt bs, Vec *v)
+{
+   PetscFunctionBegin;
+   PetscCall(vec_create_device_vecs_kokkos(comm, n, N, bs, 1, v));
    PetscFunctionReturn(PETSC_SUCCESS);
 }

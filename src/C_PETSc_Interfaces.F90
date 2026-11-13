@@ -98,6 +98,24 @@ module c_petsc_interfaces
          PetscErrorCode :: vec_duplicate_vecs_c
       end function vec_duplicate_vecs_c
 
+      function mat_create_vec_device_c(A_array, left, vec_array) &
+         bind(c, name="mat_create_vec_device_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int), value :: left
+         integer(c_long_long) :: vec_array
+         PetscErrorCode :: mat_create_vec_device_c
+      end function mat_create_vec_device_c
+
+      function vec_create_sized_device_c(A_array, n, global_n, vec_array) &
+         bind(c, name="vec_create_sized_device_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt, value :: n, global_n
+         integer(c_long_long) :: vec_array
+         PetscErrorCode :: vec_create_sized_device_c
+      end function vec_create_sized_device_c
+
       function MatGetDiagonalOnly_c(A_array, diag_only) &
          bind(c, name="MatGetDiagonalOnly_c")
          use iso_c_binding

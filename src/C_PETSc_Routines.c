@@ -449,6 +449,17 @@ PETSC_INTERN PetscErrorCode PFLARENoInodesEnd_c(PetscBool pushed)
 
 #if defined(PETSC_HAVE_KOKKOS)
 PETSC_INTERN PetscErrorCode vec_duplicate_vecs_device_kokkos(Vec template_vec, PetscInt m, Vec *vecs);
+PETSC_INTERN PetscErrorCode vec_create_device_kokkos(MPI_Comm comm, PetscInt n, PetscInt N, PetscInt bs, Vec *v);
+
+// Is the vec type one of the kokkos ones
+static PetscErrorCode vec_type_is_kokkos(VecType vtype, PetscBool *is_kokkos)
+{
+   PetscFunctionBegin;
+   *is_kokkos = PETSC_FALSE;
+   if (!vtype) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PetscStrcmpAny(vtype, is_kokkos, VECKOKKOS, VECSEQKOKKOS, VECMPIKOKKOS, ""));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 #endif
 
 // Duplicates m vectors from template_vec into vecs (an array of m handles the caller owns), like
@@ -470,5 +481,59 @@ PETSC_INTERN PetscErrorCode vec_duplicate_vecs_c(Vec *template_vec, PetscInt m, 
    PetscCall(VecDuplicateVecs(*template_vec, m, &dup));
    for (PetscInt i = 0; i < m; i++) vecs[i] = dup[i];
    PetscCall(PetscFree(dup));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Like MatCreateVecs(A, v, NULL) (left == 0) or MatCreateVecs(A, NULL, v) (left != 0), but if the matrix's
+// vec type is a kokkos one the vector is made on the device without a zero-filled host copy
+// (see vec_create_device_vecs_kokkos)
+PETSC_INTERN PetscErrorCode mat_create_vec_device_c(Mat *A, int left, Vec *v)
+{
+   PetscFunctionBegin;
+#if defined(PETSC_HAVE_KOKKOS)
+   VecType vtype;
+   PetscBool is_kokkos;
+   PetscCall(MatGetVecType(*A, &vtype));
+   PetscCall(vec_type_is_kokkos(vtype, &is_kokkos));
+   if (is_kokkos)
+   {
+      MPI_Comm comm;
+      PetscInt m, n, M, N, rbs, cbs;
+      PetscCall(PetscObjectGetComm((PetscObject)(*A), &comm));
+      PetscCall(MatGetLocalSize(*A, &m, &n));
+      PetscCall(MatGetSize(*A, &M, &N));
+      PetscCall(MatGetBlockSizes(*A, &rbs, &cbs));
+      if (left) PetscCall(vec_create_device_kokkos(comm, m, M, rbs, v));
+      else PetscCall(vec_create_device_kokkos(comm, n, N, cbs, v));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+#endif
+   if (left) PetscCall(MatCreateVecs(*A, NULL, v));
+   else PetscCall(MatCreateVecs(*A, v, NULL));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Like VecCreate, VecSetSizes(v, n, N) and VecSetType with A's comm and vec type, but kokkos
+// vectors are made on the device without a zero-filled host copy (see vec_create_device_vecs_kokkos)
+PETSC_INTERN PetscErrorCode vec_create_sized_device_c(Mat *A, PetscInt n, PetscInt N, Vec *v)
+{
+   MPI_Comm comm;
+   VecType vtype;
+
+   PetscFunctionBegin;
+   PetscCall(PetscObjectGetComm((PetscObject)(*A), &comm));
+   PetscCall(MatGetVecType(*A, &vtype));
+#if defined(PETSC_HAVE_KOKKOS)
+   PetscBool is_kokkos;
+   PetscCall(vec_type_is_kokkos(vtype, &is_kokkos));
+   if (is_kokkos)
+   {
+      PetscCall(vec_create_device_kokkos(comm, n, N, 1, v));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+#endif
+   PetscCall(VecCreate(comm, v));
+   PetscCall(VecSetSizes(*v, n, N));
+   PetscCall(VecSetType(*v, vtype));
    PetscFunctionReturn(PETSC_SUCCESS);
 }

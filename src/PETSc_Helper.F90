@@ -1,6 +1,6 @@
 module petsc_helper
 
-   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated
+   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated, c_int
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
@@ -10,7 +10,8 @@ module petsc_helper
          mat_mult_r_one_point_ap_kokkos, mat_mult_r_one_point_ap_raw_kokkos, rap_raw_drop_kokkos, &
          mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
-         mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c
+         mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c, &
+         mat_create_vec_device_c, vec_create_sized_device_c
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
          PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
          PFLARE_PTAP_FILL
@@ -33,6 +34,61 @@ logical, protected :: kokkos_debug_global = .FALSE.
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
    contains 
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_create_vec_device(matrix, left, vec)
+
+      ! Like MatCreateVecs(matrix, vec, PETSC_NULL_VEC) (left false) or 
+      ! MatCreateVecs(matrix, PETSC_NULL_VEC, vec) (left true), but with kokkos vectors 
+      ! the vector is made on the device without the zero-filled host copy PETSc makes
+      ! The vector starts as zero
+
+      ! ~~~~~~
+      type(tMat), intent(in)     :: matrix
+      logical, intent(in)        :: left
+      type(tVec), intent(inout)  :: vec
+
+      integer(c_int) :: left_int
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      left_int = 0
+      if (left) left_int = 1
+      ierr = mat_create_vec_device_c(matrix%v, left_int, vec%v)
+      if (ierr /= 0) then
+         print *, "Creating a vector failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine mat_create_vec_device
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine vec_create_sized_device(matrix, local_size, global_size, vec)
+
+      ! Like VecCreate, VecSetSizes(vec, local_size, global_size) and VecSetType with the comm 
+      ! and vec type of matrix, but with kokkos vectors the vector is made on the device without 
+      ! the zero-filled host copy PETSc makes. The vector starts as zero
+      ! global_size can be PETSC_DECIDE
+
+      ! ~~~~~~
+      type(tMat), intent(in)     :: matrix
+      PetscInt, intent(in)       :: local_size, global_size
+      type(tVec), intent(inout)  :: vec
+
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      ierr = vec_create_sized_device_c(matrix%v, local_size, global_size, vec%v)
+      if (ierr /= 0) then
+         print *, "Creating a vector failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine vec_create_sized_device
 
    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

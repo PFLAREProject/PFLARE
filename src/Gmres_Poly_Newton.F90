@@ -1687,7 +1687,8 @@ end if
                ! q(mat_ctx%mat_scaled) D^-1
                call MatShellSetOperation(inv_matrix, &
                            MATOP_MULT, petsc_matvec_right_scale_poly_newton_mf, ierr)
-               call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+               call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_RHS))
+               call mat_create_vec_device(matrix, .TRUE., mat_ctx%mf_temp_vec(MF_VEC_DIAG))
             else
                ! The subroutine petsc_matvec_poly_newton_mf applies the polynomial inverse, q(mat_ctx%mat)
             call MatShellSetOperation(inv_matrix, &
@@ -1707,8 +1708,9 @@ end if
             
             ! Create temporary vectors we use during application
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)          
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), ierr)             
+            call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_TEMP))
+            call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE))
+            call mat_create_vec_device(matrix, .TRUE., mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO))
 
             ! Need to build mat_ctx%mat_scaled, ie D^-1 A
             if (diag_scale_polys) then

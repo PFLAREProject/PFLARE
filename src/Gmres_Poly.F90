@@ -15,7 +15,7 @@ module gmres_poly
          petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf, highest_nonzero_coeff
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
-   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
+   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, mat_create_vec_device, &
          kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
 
 #include "petsc/finclude/petscmat.h"
@@ -1585,7 +1585,7 @@ end if
 
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)        
+            call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_TEMP))
             
             ! Need to build mat_ctx%mat_scaled, ie D^-1 A
             if (diag_scale_polys) then
@@ -1609,7 +1609,8 @@ end if
                
                ! Create temporary vector we use during horner
                ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-               call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                 
+               call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_RHS))
+               call mat_create_vec_device(matrix, .TRUE., mat_ctx%mf_temp_vec(MF_VEC_DIAG))
 
             end if
 

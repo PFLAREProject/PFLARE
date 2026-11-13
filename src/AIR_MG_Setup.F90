@@ -36,7 +36,7 @@ module air_mg_setup
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
    use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
-         is_one_point_shell, mat_fine_block_diagonal_only
+         is_one_point_shell, mat_fine_block_diagonal_only, mat_create_vec_device, vec_create_sized_device
 
 #include "petsc/finclude/petscksp.h"
 
@@ -93,6 +93,8 @@ module air_mg_setup
       PetscReal :: coarse_rtol, coarse_atol, coarse_dtol
       PetscInt :: coarse_maxits
       PetscBool :: coarse_guess_nonzero
+      type(tVec) :: mg_vec
+      logical :: diag_update_vecs
 
       ! ~~~~~~     
 
@@ -495,12 +497,12 @@ module air_mg_setup
             end if
 
             if (aff_diag_direct) then
-               call MatCreateVecs(air_data%coarse_matrix(our_level), diag_vec, PETSC_NULL_VEC, ierr)
+               ! Both on the device without a zero-filled host copy
+               call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., diag_vec)
                call MatGetDiagonal(air_data%coarse_matrix(our_level), diag_vec, ierr)
-               call VecCreate(MPI_COMM_MATRIX, diag_vec_aff, ierr)
-               call VecSetSizes(diag_vec_aff, local_fine_is_size, global_fine_is_size, ierr)
-               ! Kokkos, as the extracted Aff's vectors would be
-               call VecSetType(diag_vec_aff, VECKOKKOS, ierr)
+               ! Kokkos (the coarse matrix's vec type), as the extracted Aff's vectors would be
+               call vec_create_sized_device(air_data%coarse_matrix(our_level), local_fine_is_size, &
+                        global_fine_is_size, diag_vec_aff)
                ! Pull out the F points of the diagonal
                call VecISCopyLocalWrapper(air_data, our_level, .TRUE., diag_vec, &
                         SCATTER_REVERSE, diag_vec_aff)
@@ -570,8 +572,8 @@ module air_mg_setup
             ! We've already updated Aff above if we are reusing and it is matdiagonal already
             ! or if we built it as a matdiagonal directly
             if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. mat_type_aff /= MATDIAGONAL) then
-               call MatCreateVecs(air_data%A_ff(our_level), diag_vec_aff, PETSC_NULL_VEC, ierr)
-               call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)               
+               call mat_create_vec_device(air_data%A_ff(our_level), .FALSE., diag_vec_aff)
+               call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)
 
                call MatDestroy(air_data%A_ff(our_level), ierr)
                ! The matrix takes ownership of diag_vec_aff and increases ref counter
@@ -1368,33 +1370,52 @@ module air_mg_setup
          call PCSetUp(pc_coarse_solver, ierr)
          call KSPSetUp(ksp_coarse_solver, ierr)
 
-         ! A diagonal update uses the x and r on each level as scratch, so we create them here
-         ! which stops PCSetUp_MG creating its own. This has to be the same condition
-         ! as the one for doing an update in can_diag_update_pc_air_data
-         if (air_data%options%diag_update .AND. .NOT. air_data%options%reuse_sparsity .AND. &
-                  .NOT. air_data%options%full_smoothing_up_and_down) then
-
+         ! Give PCMG the b, x and r on each level, which stops PCSetUp_MG creating its own
+         ! Ours are made like PCSetUp_MG's (from the level operator, b and x on every level but 
+         ! the top grid and r on every level but the coarsest), but with kokkos vectors they 
+         ! don't have the zero-filled host copy PETSc makes
+         ! A diagonal update uses the x and r on each level as scratch, so we keep those
+         ! This has to be the same condition as the one for doing an update in can_diag_update_pc_air_data
+         diag_update_vecs = air_data%options%diag_update .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                  .NOT. air_data%options%full_smoothing_up_and_down
+         if (diag_update_vecs) then
             allocate(air_data%diag_update_x(no_levels))
             allocate(air_data%diag_update_r(no_levels))
-            do our_level = 1, no_levels
-               petsc_level = no_levels - our_level
-               ! PCMG doesn't let us set an x on the top grid and has no r on the coarsest
-               ! The update only needs an r on the coarsest if it has been repartitioned
-               if (our_level > 1) then
-                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                           air_data%diag_update_x(our_level), PETSC_NULL_VEC, ierr)
-                  call PCMGSetX(pcmg_input, petsc_level, air_data%diag_update_x(our_level), ierr)
-               end if
-               if (our_level < no_levels) then
-                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                           air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
-                  call PCMGSetR(pcmg_input, petsc_level, air_data%diag_update_r(our_level), ierr)
-               else if (air_data%repartitioned(no_levels - 1)) then
-                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                           air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
-               end if
-            end do
          end if
+         do our_level = 1, no_levels
+            petsc_level = no_levels - our_level
+            if (our_level > 1) then
+               call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., mg_vec)
+               call PCMGSetRhs(pcmg_input, petsc_level, mg_vec, ierr)
+               call VecDestroy(mg_vec, ierr)
+               ! PCMG doesn't let us set an x on the top grid
+               if (diag_update_vecs) then
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., &
+                           air_data%diag_update_x(our_level))
+                  call PCMGSetX(pcmg_input, petsc_level, air_data%diag_update_x(our_level), ierr)
+               else
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., mg_vec)
+                  call PCMGSetX(pcmg_input, petsc_level, mg_vec, ierr)
+                  call VecDestroy(mg_vec, ierr)
+               end if
+            end if
+            ! PCMG has no r on the coarsest
+            if (our_level < no_levels) then
+               if (diag_update_vecs) then
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., &
+                           air_data%diag_update_r(our_level))
+                  call PCMGSetR(pcmg_input, petsc_level, air_data%diag_update_r(our_level), ierr)
+               else
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., mg_vec)
+                  call PCMGSetR(pcmg_input, petsc_level, mg_vec, ierr)
+                  call VecDestroy(mg_vec, ierr)
+               end if
+            ! The update only needs an r on the coarsest if it has been repartitioned
+            else if (diag_update_vecs .AND. air_data%repartitioned(no_levels - 1)) then
+               call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., &
+                        air_data%diag_update_r(our_level))
+            end if
+         end do
 
       ! If we've only got one level 
       else

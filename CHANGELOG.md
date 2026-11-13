@@ -50,6 +50,9 @@ for earlier changes please see the git history.
 - With Kokkos vectors, the Krylov space for the GMRES polynomial coefficients
   is built on one device buffer, without the zero-filled host copy PETSc's
   `VecDuplicateVecs` makes, which cuts the GPU setup time
+- Likewise, PCAIR now gives PCMG its per-level `b`, `x` and `r` vectors, and
+  builds its smoothing pools, matrix-free polynomial temporaries and diagonal
+  Aff vectors on the device without a host copy
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
