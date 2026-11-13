@@ -1701,8 +1701,13 @@ static void spgemm_mat_raw_kokkos(Mat *r_mat, const RawAIJKokkos &B, RawAIJKokko
       PflareKernelHandle kh1, kh2, kh3, kh4;
       kh1.create_spgemm_handle(spgemm_alg);
       kh2.create_spgemm_handle(spgemm_alg);
-      kh3.create_spgemm_handle(spgemm_alg);
-      kh4.create_spgemm_handle(spgemm_alg);
+      // R's nonlocal block times the fetched rows (C3, C4) uses SPGEMM_KK_MEMORY: on the GPU the
+      // default (SPGEMM_KK, which also tunes the vector and team sizes) was up to ~16x slower for
+      // these products on ranks whose nonlocal rows meet long fetched rows, and the other ranks
+      // waited for them. For C1 and C2 the default is faster
+      const auto spgemm_alg_nonlocal = KokkosSparse::SPGEMMAlgorithm::SPGEMM_KK_MEMORY;
+      kh3.create_spgemm_handle(spgemm_alg_nonlocal);
+      kh4.create_spgemm_handle(spgemm_alg_nonlocal);
       KokkosCsrMatrix C1, C2_mid, C3, C4;
       KokkosSparse::spgemm_symbolic(kh1, Rd, false, APd, false, C1);
       KokkosSparse::spgemm_symbolic(kh2, Rd, false, APo, false, C2_mid);

@@ -65,6 +65,8 @@ for earlier changes please see the git history.
 - Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos in
   parallel, from sizing the kernel's scratch by the longest row and handling
   the local and nonlocal entries of each row in separate loops
+- Faster parallel coarse matrix and Z products with Kokkos on GPUs: the
+  product of the off-process block with the fetched rows uses KKMEM directly
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
