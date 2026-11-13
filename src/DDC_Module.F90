@@ -2,7 +2,7 @@ module ddc_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
+   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper, MatGetTypeEffective
       use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
          MatDiagDomRatio_kokkos, create_cf_is_kokkos
    use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
@@ -108,7 +108,7 @@ module ddc_module
 
 #if defined(PETSC_HAVE_KOKKOS)
 
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 

@@ -1,6 +1,6 @@
 module petsc_helper
 
-   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated, c_int
+   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated, c_int, c_long_long
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
@@ -11,7 +11,8 @@ module petsc_helper
          mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
          mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c, &
-         mat_create_vec_device_c, vec_create_sized_device_c
+         mat_create_vec_device_c, vec_create_sized_device_c, raw_shell_kind_kokkos, raw_shell_nnzs_kokkos, &
+         raw_shell_assemble_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
          PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
          PFLARE_PTAP_FILL
@@ -34,6 +35,82 @@ logical, protected :: kokkos_debug_global = .FALSE.
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
    contains 
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatGetTypeEffective(matrix, mat_type, ierr)
+
+      ! MatGetType, except a raw shell (a level matrix kept as device views, see raw_shell_create_kokkos)
+      ! reports the Kokkos AIJ type its blocks came from, as the code that reads it through 
+      ! AIJDeviceAccess treats it as one
+
+      ! ~~~~~~
+      type(tMat), intent(in)      :: matrix
+      MatType, intent(out)        :: mat_type
+      PetscErrorCode, intent(out) :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_int) :: kind
+      integer(c_long_long) :: A_array
+#endif
+      ! ~~~~~~
+
+      call MatGetType(matrix, mat_type, ierr)
+#if defined(PETSC_HAVE_KOKKOS)
+      if (mat_type == MATSHELL) then
+         A_array = matrix%v
+         call raw_shell_kind_kokkos(A_array, kind)
+         if (kind == 1) mat_type = MATMPIAIJKOKKOS
+         if (kind == 0) mat_type = MATSEQAIJKOKKOS
+      end if
+#endif
+
+   end subroutine MatGetTypeEffective
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function is_raw_shell(matrix)
+
+      ! Is matrix a raw shell (see MatGetTypeEffective)
+
+      ! ~~~~~~
+      type(tMat), intent(in)      :: matrix
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_int) :: kind
+      integer(c_long_long) :: A_array
+#endif
+      ! ~~~~~~
+
+      is_raw_shell = .FALSE.
+#if defined(PETSC_HAVE_KOKKOS)
+      A_array = matrix%v
+      call raw_shell_kind_kokkos(A_array, kind)
+      is_raw_shell = kind >= 0
+#endif
+
+   end function is_raw_shell
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine raw_shell_assemble(matrix)
+
+      ! If matrix is a raw shell, replaces it with a PETSc matrix with the same blocks (for the paths
+      ! that need a real matrix); otherwise does nothing
+
+      ! ~~~~~~
+      type(tMat), intent(inout)   :: matrix
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
+#endif
+      ! ~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      if (.NOT. is_raw_shell(matrix)) return
+      A_array = matrix%v
+      call raw_shell_assemble_kokkos(A_array)
+      matrix%v = A_array
+#endif
+
+   end subroutine raw_shell_assemble
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1513,7 +1590,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 #if defined(PETSC_HAVE_KOKKOS)
 
-      call MatGetType(A, mat_type, ierr)
+      call MatGetTypeEffective(A, mat_type, ierr)
       call MatGetType(R, mat_type_r, ierr)
       if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS)) return
@@ -1709,13 +1786,15 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
    !------------------------------------------------------------------------------------------------------------------------
 
-   subroutine rap_raw_drop(raw_handle, R, A, P, tol, output_mat, lump)
+   subroutine rap_raw_drop(raw_handle, R, A, P, tol, output_mat, lump, raw_shell)
 
       ! Drops the entries smaller than tol relative to the biggest in each row (optionally lumping them
       ! onto the diagonal) from the R * (A * P) in raw_handle (from mat_mult_r_one_point_ap_raw), as
       ! remove_small_from_sparse with relative_max_row_tol_int = 1 and allow_alias does on that matrix,
       ! and frees raw_handle. If nothing is dropped on any rank, output_mat is R * (A * P) itself
       ! R, A and P are only used by the Kokkos debug compare
+      ! If raw_shell is present and true, output_mat is a raw shell (the blocks kept as device views,
+      ! see raw_shell_create_kokkos) rather than a PETSc matrix; not with the Kokkos debug compare
 
       ! ~~~~~~~~~~
       ! Input
@@ -1724,10 +1803,11 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, intent(in)          :: tol
       type(tMat), intent(inout)      :: output_mat
       logical, intent(in)            :: lump
+      logical, optional, intent(in)  :: raw_shell
 
 #if defined(PETSC_HAVE_KOKKOS)
       PetscErrorCode :: ierr
-      integer :: errorcode, lump_int
+      integer :: errorcode, lump_int, raw_shell_int
       integer(c_long_long) :: handle, B_array
       type(tMat) :: temp_ap, temp_rap, temp_mat
       PetscScalar :: normy
@@ -1740,8 +1820,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #if defined(PETSC_HAVE_KOKKOS)
       lump_int = 0
       if (lump) lump_int = 1
+      raw_shell_int = 0
+      if (present(raw_shell)) then
+         if (raw_shell .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+      end if
       handle = raw_handle
-      call rap_raw_drop_kokkos(handle, tol, B_array, 1, lump_int, 0, 0, 1)
+      call rap_raw_drop_kokkos(handle, tol, B_array, 1, lump_int, 0, 0, 1, raw_shell_int)
       output_mat%v = B_array
       raw_handle = 0
 
@@ -1820,7 +1904,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
@@ -2238,6 +2322,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       if (is_one_point_shell(input_mat)) then
          A_array = input_mat%v
          call one_point_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal)
+         return
+      end if
+      ! A level matrix kept as device views
+      if (is_raw_shell(input_mat)) then
+         A_array = input_mat%v
+         call raw_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal)
          return
       end if
 #endif

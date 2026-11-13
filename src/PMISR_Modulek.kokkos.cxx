@@ -1167,35 +1167,25 @@ KOKKOS_INLINE_FUNCTION bool pmisr_is_strong(const PetscScalar val, const PetscSc
 PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal strong_threshold, const int max_luby_steps, PetscReal *measure_local)
 {
    MPI_Comm MPI_COMM_MATRIX;
-   PetscInt local_rows, local_cols, global_rows, global_cols;
-   PetscInt global_row_start_temp, global_row_end_plus_one_temp, global_col_start_temp, global_col_end_plus_one_temp;
+   PetscInt local_rows, local_cols;
+   PetscInt global_row_start_temp, global_col_start_temp;
    PetscInt rows_ao = 0, cols_ao = 0;
-   MatType mat_type;
-
-   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   // The matrix's blocks on the device (a Kokkos AIJ matrix or a raw shell)
+   AIJDeviceAccess acc;
+   aij_device_access_get(*input_mat, acc);
    // Are we in parallel?
-   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   const bool mpi = acc.mpi;
+   PetscSF sf = acc.sf;
+   const PetscInt *colmap = acc.colmap;
+   rows_ao = acc.rows_ao;
+   cols_ao = acc.cols_ao;
+   (void)rows_ao;
 
-   Mat mat_local = NULL, mat_nonlocal = NULL;
-   PetscSF sf = NULL;
-   const PetscInt *colmap = NULL;
-
-   if (mpi)
-   {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
-      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
-   }
-   else
-   {
-      mat_local = *input_mat;
-   }
-
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
-   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
-   PetscCallVoid(MatGetOwnershipRange(*input_mat, &global_row_start_temp, &global_row_end_plus_one_temp));
-   PetscCallVoid(MatGetOwnershipRangeColumn(*input_mat, &global_col_start_temp, &global_col_end_plus_one_temp));
+   MPI_COMM_MATRIX = acc.comm;
+   local_rows = acc.local_rows;
+   local_cols = acc.local_cols;
+   global_row_start_temp = acc.row_start;
+   global_col_start_temp = acc.col_start;
    // This path only sees square level matrices, where row and column ownership match
    // and hence the local index of a column is also the local index of its row
    if (global_row_start_temp != global_col_start_temp || local_rows != local_cols) {
@@ -1203,13 +1193,9 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    }
    const PetscInt global_row_start = global_row_start_temp;
 
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-   PetscMemType mtype;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
-   Kokkos::View<const PetscScalar *> device_local_vals, device_nonlocal_vals;
-   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local, &device_local_vals));
-   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal, &device_nonlocal_vals));
+   const PetscInt *device_local_i = acc.local_i, *device_local_j = acc.local_j;
+   const PetscInt *device_nonlocal_i = acc.nonlocal_i, *device_nonlocal_j = acc.nonlocal_j;
+   Kokkos::View<const PetscScalar *> device_local_vals = acc.local_vals, device_nonlocal_vals = acc.nonlocal_vals;
 
    auto exec = PetscGetKokkosExecutionSpace();
 
@@ -1605,8 +1591,7 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    });
    Kokkos::fence();
 
-   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
-   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+   aij_device_access_restore(acc);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

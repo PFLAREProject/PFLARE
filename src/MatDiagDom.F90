@@ -2,7 +2,7 @@ module matdiagdom
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug
+   use petsc_helper, only: kokkos_debug, MatGetTypeEffective
       use c_petsc_interfaces, only: copy_diag_dom_ratio_d2h, MatDiagDomRatio_kokkos
    use pflare_parameters, only: C_POINT, F_POINT, &
          PFLARE_DD_RATIO_ABS_TOL, PFLARE_DD_RATIO_REL_TOL
@@ -45,7 +45,7 @@ module matdiagdom
 #endif
 
 #if defined(PETSC_HAVE_KOKKOS)
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 

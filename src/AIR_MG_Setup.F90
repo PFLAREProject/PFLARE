@@ -36,7 +36,8 @@ module air_mg_setup
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
    use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
-         is_one_point_shell, mat_fine_block_diagonal_only, mat_create_vec_device, vec_create_sized_device
+         is_one_point_shell, mat_fine_block_diagonal_only, mat_create_vec_device, vec_create_sized_device, &
+         MatGetTypeEffective, raw_shell_assemble
 
 #include "petsc/finclude/petscksp.h"
 
@@ -176,6 +177,9 @@ module air_mg_setup
                      air_data%options%auto_truncate_start_level /= -1) then         
 
             call timer_start(TIMER_ID_AIR_TRUNCATE)   
+
+            ! The truncation test and the coarse solver need a real matrix
+            call raw_shell_assemble(air_data%coarse_matrix(our_level))
 
             ! Set up our coarse inverse data
             call setup_gmres_poly_data(global_rows, &
@@ -478,7 +482,7 @@ module air_mg_setup
             ! the diagonal of the coarse matrix, rather than extracting it and converting it below
             ! We can only do that if the inverse type can use a matdiagonal
             aff_diag_direct = .FALSE.
-            call MatGetType(air_data%coarse_matrix(our_level), mat_type_coarse, ierr)
+            call MatGetTypeEffective(air_data%coarse_matrix(our_level), mat_type_coarse, ierr)
             if ((mat_type_coarse == MATMPIAIJKOKKOS .OR. mat_type_coarse == MATSEQAIJKOKKOS .OR. &
                   mat_type_coarse == MATAIJKOKKOS) .AND. &
                   air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
@@ -791,6 +795,9 @@ module air_mg_setup
                ! Start the process agglomeration 
                if (trigger_proc_agglom) then
 
+                  ! Repartitioning needs a real matrix
+                  call raw_shell_assemble(air_data%coarse_matrix(our_level_coarse))
+
                   call timer_start(TIMER_ID_AIR_PROC_AGGLOM)
                   ! air_data%options%processor_agglom_factor tells us how much we're reducing the number 
                   ! of active mpi ranks by each time
@@ -1050,6 +1057,9 @@ module air_mg_setup
          if (air_data%options%print_stats_timings .AND. comm_rank == 0) call print_timers()
 
       end do level_loop
+
+      ! The coarsest matrix is used in the coarse solve, so it has to be a real matrix
+      call raw_shell_assemble(air_data%coarse_matrix(no_levels))
 
       ! Destroy our copies of the near nullspace vectors
       ! This has to happen after the loop, as we can leave it either by 

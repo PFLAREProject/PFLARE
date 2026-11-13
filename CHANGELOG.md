@@ -53,6 +53,9 @@ for earlier changes please see the git history.
 - Likewise, PCAIR now gives PCMG its per-level `b`, `x` and `r` vectors, and
   builds its smoothing pools, matrix-free polynomial temporaries and diagonal
   Aff vectors on the device without a host copy (also on a single rank)
+- With Kokkos, the coarse matrices on the lower levels are kept as device
+  data inside the setup instead of being built as PETSc matrices, unless an
+  option needs a real matrix; the hierarchy is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

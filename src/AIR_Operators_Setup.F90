@@ -15,7 +15,8 @@ module air_operators_setup
          MAT_SAI_SUB, MAT_W, MAT_W_AFF, MAT_W_DROP, MAT_W_NO_SPARSITY, &
          MAT_Z, MAT_Z_AFF, MAT_Z_DROP, MAT_Z_NO_SPARSITY, &
          AIR_Z_PRODUCT, AIR_Z_LAIR, &
-         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL
+         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL, PFLAREINV_SAI, PFLAREINV_ISAI
+   use cf_splitting, only: CF_PMISR_DDC
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
@@ -23,7 +24,7 @@ module air_operators_setup
          compute_R_from_raw_Z
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
-   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
+   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, MatGetTypeEffective, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
          mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw, &
          mat_mult_mat_raw, raw_free
@@ -52,7 +53,7 @@ module air_operators_setup
       PetscErrorCode :: ierr
       MatType :: mat_type, mat_type_aff
 
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
       r_from_a_diag_possible = (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
                   mat_type == MATAIJKOKKOS) .AND. &
@@ -1174,7 +1175,7 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: temp_mat
-      logical :: rap_done, rap_raw, rap_drop_reused
+      logical :: rap_done, rap_raw, rap_drop_reused, raw_shell_ok
       integer(kind=8) :: rap_raw_handle
 
       ! ~~~~~~~~~~
@@ -1300,8 +1301,23 @@ module air_operators_setup
       ! This is the same as the remove_small_from_sparse with allow_alias below
       if (rap_raw) then
 
+         ! The coarse matrix can stay as device views (a raw shell) when everything that reads it on the
+         ! next level can read one; otherwise it is a PETSc matrix. Levels that later need a real matrix
+         ! (the truncation test, the coarsest level and repartitioning) are assembled where they are used
+         raw_shell_ok = .NOT. air_data%options%reuse_sparsity .AND. &
+               .NOT. air_data%options%full_smoothing_up_and_down .AND. &
+               .NOT. air_data%options%any_c_smooths .AND. &
+               .NOT. air_data%options%diag_update .AND. &
+               .NOT. air_data%options%symmetric .AND. &
+               .NOT. air_data%options%constrain_z .AND. .NOT. air_data%options%constrain_w .AND. &
+               air_data%options%improve_z_its == 0 .AND. air_data%options%improve_w_its == 0 .AND. &
+               air_data%options%z_type == AIR_Z_PRODUCT .AND. &
+               air_data%options%strong_r_threshold == 0d0 .AND. &
+               air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
+               air_data%options%inverse_type /= PFLAREINV_ISAI .AND. &
+               air_data%options%cf_splitting_type == CF_PMISR_DDC
          call rap_raw_drop(rap_raw_handle, air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
-                  air_data%options%a_drop, coarse_matrix, air_data%options%a_lump)
+                  air_data%options%a_drop, coarse_matrix, air_data%options%a_lump, raw_shell = raw_shell_ok)
 
       else if (.NOT. PetscObjectIsNull(temp_mat)) then
 

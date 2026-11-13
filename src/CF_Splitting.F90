@@ -11,7 +11,7 @@ module cf_splitting
    use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio, &
             copy_cf_markers_d2h
    use aggregation, only: generate_serial_aggregation
-   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
+   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse, MatGetTypeEffective
 
 #include "petsc/finclude/petscmat.h"
 
@@ -139,7 +139,7 @@ module cf_splitting
       ! building the strength matrix and its transpose as PETSc matrices is expensive
       from_matrix = .FALSE.
 #if defined(PETSC_HAVE_KOKKOS)
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if ((mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) .AND. .NOT. skip_symmetrize .AND. &
             (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM)) then
@@ -344,7 +344,7 @@ module cf_splitting
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then 
 

@@ -553,15 +553,35 @@ module c_petsc_interfaces
    interface
 
       subroutine rap_raw_drop_kokkos(raw_handle, tol, B_array, relative_max_row_tol_int, lump_int, &
-               allow_drop_diagonal_int, allow_diag_strength_int, allow_alias_int) &
+               allow_drop_diagonal_int, allow_diag_strength_int, allow_alias_int, raw_shell_int) &
          bind(c, name="rap_raw_drop_kokkos")
          use iso_c_binding
          integer(c_long_long) :: raw_handle
          PetscReal, value :: tol
          integer(c_long_long) :: B_array
          integer(c_int), value :: relative_max_row_tol_int, lump_int, allow_drop_diagonal_int
-         integer(c_int), value :: allow_diag_strength_int, allow_alias_int
+         integer(c_int), value :: allow_diag_strength_int, allow_alias_int, raw_shell_int
       end subroutine rap_raw_drop_kokkos
+
+      subroutine raw_shell_kind_kokkos(A_array, kind) &
+         bind(c, name="raw_shell_kind_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int) :: kind
+      end subroutine raw_shell_kind_kokkos
+
+      subroutine raw_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal) &
+         bind(c, name="raw_shell_nnzs_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt :: nnzs_local, nnzs_nonlocal
+      end subroutine raw_shell_nnzs_kokkos
+
+      subroutine raw_shell_assemble_kokkos(A_array) &
+         bind(c, name="raw_shell_assemble_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+      end subroutine raw_shell_assemble_kokkos
 
    end interface
 

@@ -69,6 +69,37 @@ PETSC_INTERN void delete_device_diag_dom_ratio();
 PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int);
 // mat_duplicate_copy_plus_diag_kokkos without reuse, returning the output as device views (PETSc_Helperk)
 PETSC_VISIBILITY_INTERNAL void mat_duplicate_copy_plus_diag_raw_kokkos(Mat *input_mat, RawAIJKokkos &out);
+
+// ~~~~~~~~~~~~~~~~~~
+// Level matrices kept as device views (a "raw shell"): a MATSHELL whose context holds the blocks as a
+// RawAIJKokkos, a host copy of garray and a halo PetscSF built as PETSc builds an MPIAIJ matrix's
+// Mvctx. The setup kernels read either kind of matrix through AIJDeviceAccess (PETSc_Helperk)
+// ~~~~~~~~~~~~~~~~~~
+// Device access to an AIJ matrix's blocks, from a MATSEQAIJKOKKOS / MATMPIAIJKOKKOS or a raw shell
+struct AIJDeviceAccess {
+   bool mpi = false;
+   bool raw = false;
+   MPI_Comm comm = MPI_COMM_NULL;
+   PetscInt local_rows = 0, local_cols = 0, global_rows = 0, global_cols = 0;
+   PetscInt row_start = 0, row_end = 0, col_start = 0, col_end = 0;
+   // Columns (and rows) of the nonlocal block
+   PetscInt rows_ao = 0, cols_ao = 0;
+   const PetscInt *local_i = nullptr, *local_j = nullptr, *nonlocal_i = nullptr, *nonlocal_j = nullptr;
+   Kokkos::View<const PetscScalar *> local_vals, nonlocal_vals;
+   PetscInt nnz_local = 0, nnz_nonlocal = 0;
+   // garray on the host (as MatMPIAIJGetSeqAIJ's colmap) and the halo SF (as MatGetMultPetscSF)
+   const PetscInt *colmap = nullptr;
+   PetscSF sf = NULL;
+   // The blocks when the input is a PETSc matrix (for the restores)
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+};
+// Is this a raw shell
+PETSC_VISIBILITY_INTERNAL bool is_raw_shell(Mat A);
+// Fill acc from A (a Kokkos AIJ matrix or a raw shell); restore after use
+PETSC_VISIBILITY_INTERNAL void aij_device_access_get(Mat A, AIJDeviceAccess &acc);
+PETSC_VISIBILITY_INTERNAL void aij_device_access_restore(AIJDeviceAccess &acc);
+// Makes a raw shell holding raw (the shell takes the views; raw is left as it was)
+PETSC_VISIBILITY_INTERNAL void raw_shell_create_kokkos(const RawAIJKokkos &raw, Mat *A);
 // The global column and value of each row's entry in a one point shell prolongator
 // (Grid_Transferk), false if P isn't one
 PETSC_VISIBILITY_INTERNAL bool one_point_shell_targets_kokkos(Mat P, const PetscInt sentinel, PetscIntKokkosView &target_global_d, PetscScalarKokkosView &weight_d);

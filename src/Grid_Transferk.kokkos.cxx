@@ -2141,28 +2141,22 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
                   Vec *inv_diag_vec, const PetscReal tol, Mat *output_mat)
 {
    MPI_Comm MPI_COMM_MATRIX;
-   PetscInt local_rows, local_cols, global_rows, global_cols, rows_ao = 0, cols_ao = 0;
+   PetscInt local_rows, local_cols, global_cols, cols_ao = 0;
    MatType mat_type;
    Mat output_mat_local, output_mat_nonlocal;
    auto exec = PetscGetKokkosExecutionSpace();
 
-   PetscCallVoid(MatGetType(*input_mat, &mat_type));
-   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
-   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
-
-   Mat mat_local = NULL, mat_nonlocal = NULL;
-   const PetscInt *colmap_input = NULL;
-   if (mpi)
-   {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap_input));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
-   }
-   else
-   {
-      mat_local = *input_mat;
-   }
+   // The matrix's blocks on the device (a Kokkos AIJ matrix or a raw shell)
+   AIJDeviceAccess acc;
+   aij_device_access_get(*input_mat, acc);
+   (void)mat_type;
+   const bool mpi = acc.mpi;
+   MPI_COMM_MATRIX = acc.comm;
+   local_rows = acc.local_rows;
+   local_cols = acc.local_cols;
+   global_cols = acc.global_cols;
+   const PetscInt *colmap_input = acc.colmap;
+   cols_ao = acc.cols_ao;
 
    // The local indices of the fine and coarse points, in the order of is_fine and is_coarse
    PetscIntKokkosView is_fine_d = VecISCopyLocal_kokkos_get_view(kokkos_is_views_handle, our_level, 1);
@@ -2193,8 +2187,7 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
    PetscScalarKokkosView d_nl_d;
    if (mpi)
    {
-      PetscSF sf = NULL;
-      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
+      PetscSF sf = acc.sf;
       fine_global_nl_d = PetscIntKokkosView("fine_global_nl_d", cols_ao);
       d_nl_d = PetscScalarKokkosView("d_nl_d", cols_ao);
       // While Begin/End is in flight, do not touch the send/recv buffers
@@ -2215,14 +2208,10 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos views to the values
    // ~~~~~~~~~~~~
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-   PetscMemType mtype;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
-   Kokkos::View<const PetscScalar *> device_local_vals;
-   Kokkos::View<const PetscScalar *> device_nonlocal_vals;
-   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local, &device_local_vals));
-   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal, &device_nonlocal_vals));
+   const PetscInt *device_local_i = acc.local_i, *device_local_j = acc.local_j;
+   const PetscInt *device_nonlocal_i = acc.nonlocal_i, *device_nonlocal_j = acc.nonlocal_j;
+   Kokkos::View<const PetscScalar *> device_local_vals = acc.local_vals;
+   Kokkos::View<const PetscScalar *> device_nonlocal_vals = acc.nonlocal_vals;
 
    RFromADiagFunctor functor;
    functor.nrows = local_coarse;
@@ -2246,9 +2235,7 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
 
    // The vector length comes from the average row length of A (local plus nonlocal)
    // The host backends run the vector lanes serially, so there it makes no difference
-   MatInfo info;
-   PetscCallVoid(MatGetInfo(*input_mat, MAT_LOCAL, &info));
-   const double avg_row_nnz = local_rows > 0 ? info.nz_used / local_rows : 0.0;
+   const double avg_row_nnz = local_rows > 0 ? static_cast<double>(acc.nnz_local + acc.nnz_nonlocal) / local_rows : 0.0;
    int vector_length = 1;
    while (2 * vector_length <= avg_row_nnz && vector_length < 32) vector_length *= 2;
    vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
@@ -2347,8 +2334,7 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
       *output_mat = output_mat_local;
    }
 
-   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
-   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+   aij_device_access_restore(acc);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -12,31 +12,20 @@
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
 {
-   PetscInt local_rows, local_cols;
+   PetscInt local_cols;
 
-   // Are we in parallel?
-   MatType mat_type;
-   MPI_Comm MPI_COMM_MATRIX;
-   PetscCallVoid(MatGetType(*input_mat, &mat_type));
-
-   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
-
-   Mat mat_local = NULL, mat_nonlocal = NULL;
+   // The matrix's blocks on the device (a Kokkos AIJ matrix or a raw shell)
+   AIJDeviceAccess acc;
+   aij_device_access_get(*input_mat, acc);
+   const bool mpi = acc.mpi;
+   MPI_Comm MPI_COMM_MATRIX = acc.comm;
+   local_cols = acc.local_cols;
+   (void)local_cols;
    // The matrix's own mult SF (the borrowed mvctx) drives the halo broadcast
-   PetscSF sf = NULL;
+   PetscSF sf = acc.sf;
+   (void)MPI_COMM_MATRIX;
 
-   PetscInt rows_ao, cols_ao;
-   if (mpi)
-   {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, NULL));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
-   }
-   else
-   {
-      mat_local = *input_mat;
-   }
+   PetscInt cols_ao = acc.cols_ao;
 
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -60,14 +49,12 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // ~~~~~~~~~~~~~~~
    // Can now go and compute the diagonal dominance sums
    // ~~~~~~~~~~~~~~~
-   PetscMemType mtype;
 
    // The off-diagonal component requires some comms which we can start now
    if (mpi)
    {
       cf_markers_nonlocal_d = intKokkosView("cf_markers_nonlocal_d", cols_ao);
 
-      PetscCallVoid(MatGetMultPetscSF(*input_mat, &sf));
 
       // Start the broadcast of the cf splitting, then overlap with local-only work below.
       // The local work only reads the root cf_markers_d, which is allowed while the
@@ -87,9 +74,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // ~~~~~~~~~~~~
    // Get pointers to the local i,j,vals on the device
    // ~~~~~~~~~~~~
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr;
-   PetscScalar *device_local_vals = nullptr;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, &device_local_vals, &mtype));
+   const PetscInt *device_local_i = acc.local_i, *device_local_j = acc.local_j;
+   const PetscScalar *device_local_vals = acc.local_vals.data();
 
    // Have to store the diagonal entry, every entry is written by the local kernel
    PetscScalarKokkosView diag_entry_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "diag_entry_d"), local_rows_row);
@@ -140,9 +126,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // ~~~~~~~~~~~~
       // Get pointers to the nonlocal i,j,vals on the device
       // ~~~~~~~~~~~~
-      const PetscInt *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-      PetscScalar *device_nonlocal_vals = nullptr;        
-      PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, &device_nonlocal_vals, &mtype));
+      const PetscInt *device_nonlocal_i = acc.nonlocal_i, *device_nonlocal_j = acc.nonlocal_j;
+      const PetscScalar *device_nonlocal_vals = acc.nonlocal_vals.data();
 
       // Sum up the nonlocal matching entries into diag_dom_ratio_d
       // Nothing to do if this rank has no off-process columns
@@ -200,6 +185,8 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
 
    PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&max_dd_ratio_local, max_dd_ratio_achieved, 1, MPIU_REAL, MPI_MAX, MPI_COMM_MATRIX));
 
+   exec.fence();
+   aij_device_access_restore(acc);
    return;
 }
 
