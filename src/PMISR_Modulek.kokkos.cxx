@@ -1264,12 +1264,13 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    });
 
    // The strong entries in the transpose that cross ranks and their mutual pairs need comms.
-   // Each strong non-local entry (i, ghost j) is a leaf of an SF whose root is row j on the rank
-   // that owns it, taken from the matrix's own mult SF. The root degree is then the number of
+   // Each strong non-local entry (i, ghost j) is a leaf of an SF whose root is row j (by its
+   // boundary-row number, see below) on the rank that owns it, taken from the matrix's own mult SF. The root degree is then the number of
    // strong entries in other ranks' rows that point at that row, and gathering the global row
    // index of each leaf to its root lets the owner find the mutual pairs. The messages only hold
    // the strong entries that cross ranks; the in-degree and two cheap host loops are over the
-   // local rows. This replaces building and transposing a parallel matrix on the host
+   // boundary rows (those other ranks hold as ghosts). This replaces building and transposing a
+   // parallel matrix on the host
    if (mpi)
    {
       PetscInt strong_nonlocal_nnz = 0;
@@ -1313,16 +1314,59 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
          if (sf_nleaves != cols_ao) {
             SETERRABORT(MPI_COMM_MATRIX, PETSC_ERR_PLIB, "pmisr_from_matrix_kokkos needs one mult SF leaf per ghost column");
          }
+         // Only the local rows other ranks hold as ghost columns (the roots of the mult SF that have
+         // leaves) can be pointed at by a strong entry from another rank. They are numbered
+         // compactly, in increasing row order, and the edge SF's roots are those numbers, so the
+         // degree and gather below (and the host loops over their roots) scale with the boundary
+         // rows rather than all the local rows
+         // Mark them with a reduce from every ghost leaf of the mult SF (any SF type), and number
+         // them with a scan
+         PetscIntKokkosView ones_ghost_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "ones_ghost_d"), cols_ao);
+         Kokkos::deep_copy(exec, ones_ghost_d, 1);
+         // Zero initialised on exec
+         PetscIntKokkosView bnd_flag_d(Kokkos::view_alloc(exec, "bnd_flag_d"), local_rows);
+         PetscCallVoid(sf_sync_before_begin_kokkos());
+         PetscCallVoid(PetscSFReduceWithMemTypeBegin(sf, MPIU_INT, PETSC_MEMTYPE_KOKKOS, ones_ghost_d.data(), \
+                     PETSC_MEMTYPE_KOKKOS, bnd_flag_d.data(), MPI_MAX));
+         PetscCallVoid(PetscSFReduceEnd(sf, MPIU_INT, ones_ghost_d.data(), bnd_flag_d.data(), MPI_MAX));
+         PetscCallVoid(sf_sync_after_end_kokkos());
+         // Each boundary row's compact number (the rest of comp_d is never read)
+         PetscIntKokkosView comp_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "comp_d"), local_rows);
+         PetscInt n_bnd = 0;
+         Kokkos::parallel_scan(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i, PetscInt &update, const bool final) {
+            if (final) comp_d(i) = update;
+            if (bnd_flag_d(i)) update++;
+         }, n_bnd);
+         PetscIntKokkosView bnd_rows_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "bnd_rows_d"), n_bnd);
+         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+            if (bnd_flag_d(i)) bnd_rows_d(comp_d(i)) = i;
+         });
+         auto bnd_rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bnd_rows_d);
+         PetscCallVoid(PetscLogGpuToCpu(n_bnd * sizeof(PetscInt)));
+
+         // Each boundary row's compact number, sent to the ranks that have it as a ghost column
+         PetscIntKokkosView comp_ghost_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "comp_ghost_d"), cols_ao);
+         PetscCallVoid(sf_sync_before_begin_kokkos());
+         PetscCallVoid(PetscSFBcastWithMemTypeBegin(sf, MPIU_INT, PETSC_MEMTYPE_KOKKOS, comp_d.data(), \
+                     PETSC_MEMTYPE_KOKKOS, comp_ghost_d.data(), MPI_REPLACE));
+         PetscCallVoid(PetscSFBcastEnd(sf, MPIU_INT, comp_d.data(), comp_ghost_d.data(), MPI_REPLACE));
+         PetscCallVoid(sf_sync_after_end_kokkos());
+         auto comp_ghost_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), comp_ghost_d);
+         PetscCallVoid(PetscLogGpuToCpu(cols_ao * sizeof(PetscInt)));
+
          PetscSFNode *ghost_remote = NULL, *edge_remote = NULL;
          PetscCallVoid(PetscMalloc1(cols_ao, &ghost_remote));
          for (PetscInt l = 0; l < sf_nleaves; l++) ghost_remote[sf_ilocal ? sf_ilocal[l] : l] = sf_iremote[l];
          PetscCallVoid(PetscMalloc1(strong_nonlocal_nnz, &edge_remote));
-         for (PetscInt k = 0; k < strong_nonlocal_nnz; k++) edge_remote[k] = ghost_remote[ghost_strong_h(k)];
+         for (PetscInt k = 0; k < strong_nonlocal_nnz; k++) {
+            edge_remote[k].rank = ghost_remote[ghost_strong_h(k)].rank;
+            edge_remote[k].index = comp_ghost_h(ghost_strong_h(k));
+         }
          PetscCallVoid(PetscFree(ghost_remote));
 
          PetscSF edge_sf;
          PetscCallVoid(PetscSFCreate(MPI_COMM_MATRIX, &edge_sf));
-         PetscCallVoid(PetscSFSetGraph(edge_sf, local_rows, strong_nonlocal_nnz, NULL, PETSC_COPY_VALUES, edge_remote, PETSC_OWN_POINTER));
+         PetscCallVoid(PetscSFSetGraph(edge_sf, n_bnd, strong_nonlocal_nnz, NULL, PETSC_COPY_VALUES, edge_remote, PETSC_OWN_POINTER));
          // The order of the gathered entries at each root doesn't matter
          PetscCallVoid(PetscSFSetRankOrder(edge_sf, PETSC_FALSE));
          PetscCallVoid(PetscSFSetUp(edge_sf));
@@ -1331,18 +1375,19 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
          PetscCallVoid(PetscSFComputeDegreeBegin(edge_sf, &in_degree));
          PetscCallVoid(PetscSFComputeDegreeEnd(edge_sf, &in_degree));
 
-         // Only the rows that something points at need any work
+         // Only the rows that something points at need any work (in increasing row order, as the
+         // boundary rows are numbered in that order)
          PetscInt in_rows = 0, in_nnz = 0;
-         for (PetscInt i = 0; i < local_rows; i++) {
-            if (in_degree[i] > 0) in_rows++;
-            in_nnz += in_degree[i];
+         for (PetscInt b = 0; b < n_bnd; b++) {
+            if (in_degree[b] > 0) in_rows++;
+            in_nnz += in_degree[b];
          }
          PetscIntKokkosViewHost in_row_h("in_row_h", in_rows), in_offset_h("in_offset_h", in_rows + 1);
          in_offset_h(0) = 0;
-         for (PetscInt i = 0, n = 0; i < local_rows; i++) {
-            if (in_degree[i] == 0) continue;
-            in_row_h(n) = i;
-            in_offset_h(n + 1) = in_offset_h(n) + in_degree[i];
+         for (PetscInt b = 0, n = 0; b < n_bnd; b++) {
+            if (in_degree[b] == 0) continue;
+            in_row_h(n) = bnd_rows(b);
+            in_offset_h(n + 1) = in_offset_h(n) + in_degree[b];
             n++;
          }
 

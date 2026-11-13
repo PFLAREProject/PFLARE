@@ -67,6 +67,8 @@ for earlier changes please see the git history.
   the local and nonlocal entries of each row in separate loops
 - Faster parallel coarse matrix and Z products with Kokkos on GPUs: the
   product of the off-process block with the fetched rows uses KKMEM directly
+- Faster parallel PMISR with Kokkos: the cross-rank part of the symmetrized
+  strong graph only involves the rows other ranks hold as ghosts
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
