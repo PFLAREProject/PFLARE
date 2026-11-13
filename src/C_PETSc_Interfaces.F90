@@ -89,6 +89,15 @@ module c_petsc_interfaces
 
    interface   
       
+      function vec_duplicate_vecs_c(template_array, m, vecs_array) &
+         bind(c, name="vec_duplicate_vecs_c")
+         use iso_c_binding
+         integer(c_long_long) :: template_array
+         PetscInt, value :: m
+         integer(c_long_long), dimension(*) :: vecs_array
+         PetscErrorCode :: vec_duplicate_vecs_c
+      end function vec_duplicate_vecs_c
+
       function MatGetDiagonalOnly_c(A_array, diag_only) &
          bind(c, name="MatGetDiagonalOnly_c")
          use iso_c_binding

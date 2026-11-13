@@ -3,7 +3,7 @@ module gmres_poly
    use petscmat
    use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos, mat_mult_powers_share_sparsity_raw_kokkos, &
-         raw_copy_to_mat_kokkos
+         raw_copy_to_mat_kokkos, vec_duplicate_vecs_c
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
@@ -175,6 +175,7 @@ module gmres_poly
       PetscScalar, dimension(:), pointer :: v_array
       type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
+      integer(c_long_long), dimension(:), allocatable :: vec_handles
       ! ~~~~~~    
 
       ! We might want to call the gmres poly creation on a sub communicator
@@ -225,12 +226,25 @@ module gmres_poly
       deallocate(seed)
 
       ! ~~~~~~~~~~
-      ! Use a template vec and VecDuplicateVecs to allocate all V_n vectors 
-      ! in one contiguous block. Contiguous allocation lets VecMAXPY use BLAS-2 operations.
+      ! Use a template vec to allocate all V_n vectors in one contiguous block, like 
+      ! VecDuplicateVecs. Contiguous allocation lets VecMDot use a BLAS-2 operation (when
+      ! called on a vector with those operations, see w_j in the Arnoldi)
+      ! Kokkos vectors are built on one device buffer without the zero-filled host copy 
+      ! VecDuplicateVecs makes. Destroy them with destroy_temp_space
       ! ~~~~~~~~~~
       call MatCreateVecs(matrix, temp_vec, PETSC_NULL_VEC, ierr)
       vecs_needed = subspace_size + 1
-      call VecDuplicateVecs(temp_vec, vecs_needed, V_n, ierr)
+      allocate(V_n(vecs_needed))
+      allocate(vec_handles(vecs_needed))
+      ierr = vec_duplicate_vecs_c(temp_vec%v, vecs_needed, vec_handles)
+      if (ierr /= 0) then
+         print *, "Creating the temporary space failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      do i_loc = 1, vecs_needed
+         V_n(i_loc)%v = vec_handles(i_loc)
+      end do
+      deallocate(vec_handles)
       call VecDestroy(temp_vec, ierr)
 
       ! The random values are just the local entries of the first vector, so copy them
@@ -243,6 +257,29 @@ module gmres_poly
       ! ~~~~~~~~~~~~
 
    end subroutine create_temp_space_box_muller  
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine destroy_temp_space(V_n)
+
+      ! Destroys the vectors created by create_temp_space_box_muller
+
+      ! ~~~~~~
+      type(tVec), pointer, dimension(:)                           :: V_n
+
+      ! Local variables
+      integer :: i_loc
+      PetscErrorCode :: ierr
+      ! ~~~~~~    
+
+      if (.NOT. associated(V_n)) return
+      do i_loc = 1, size(V_n)
+         call VecDestroy(V_n(i_loc), ierr)
+      end do
+      deallocate(V_n)
+      V_n => null()
+
+   end subroutine destroy_temp_space
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -479,7 +516,7 @@ module gmres_poly
       PetscReal, optional, intent(inout)                     :: user_rel_tol
 
       ! Local variables
-      PetscInt :: global_rows, global_cols, vecs_needed
+      PetscInt :: global_rows, global_cols
       integer :: subspace_size, m
       integer :: errorcode
       PetscErrorCode :: ierr
@@ -521,7 +558,9 @@ module gmres_poly
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
       ! Create an extra vector for storage
-      call VecDuplicate(V_n(1), w_j, ierr)         
+      ! Made from the matrix rather than duplicated from V_n(1), as VecMDot uses w_j's
+      ! operations, and only a vector made this way has the Kokkos GEMV VecMDot
+      call MatCreateVecs(matrix, w_j, PETSC_NULL_VEC, ierr)
 
       ! Do the Arnoldi and compute H_n and C_n
       ! We only compute H_n until we hit a relative residual of 1e-14 against the random rhs
@@ -546,8 +585,7 @@ module gmres_poly
                y, one_bl, &
                blas_zero, coefficients(1), one_bl)
 
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)
+      call destroy_temp_space(V_n)
       call VecDestroy(w_j, ierr)
 
    end subroutine calculate_gmres_polynomial_coefficients_arnoldi   
@@ -573,7 +611,7 @@ module gmres_poly
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
+      PetscInt :: global_row_start, global_row_end_plus_one, row_i
       PetscInt, dimension(:), allocatable :: global_indices
       integer :: comm_size, subspace_size, comm_rank, i_loc
       integer :: errorcode
@@ -661,8 +699,7 @@ module gmres_poly
          ! This does a copy of the vec from gpu to cpu if necessary
          call VecGetValues(V_n(i_loc), local_rows, global_indices, K_m_plus_1_data(:, i_loc), ierr)
       end do
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)         
+      call destroy_temp_space(V_n)         
 
       ! ~~~~~~~~~~~~~
       ! Start the tall-skinny QR factorisation of the power basis - this all happens

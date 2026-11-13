@@ -450,7 +450,7 @@ module gmres_poly_newton
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
 
       ! Local variables
-      PetscInt :: global_rows, global_cols, local_rows, local_cols, vecs_needed
+      PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
       integer :: total_extra, counter, k_loc, m, numerical_order
       ! BLAS/LAPACK integer arguments must be PetscBLASInt
@@ -509,7 +509,9 @@ module gmres_poly_newton
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
       ! Create an extra vector for storage
-      call VecDuplicate(V_n(1), w_j, ierr)      
+      ! Made from the matrix rather than duplicated from V_n(1), as VecMDot uses w_j's
+      ! operations, and only a vector made this way has the Kokkos GEMV VecMDot
+      call MatCreateVecs(matrix, w_j, PETSC_NULL_VEC, ierr)
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
@@ -785,8 +787,7 @@ module gmres_poly_newton
       end if     
 
       ! Cleanup
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)
+      call destroy_temp_space(V_n)
       call VecDestroy(w_j, ierr)       
 
    end subroutine calculate_gmres_polynomial_roots_newton   

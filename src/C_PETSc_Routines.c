@@ -446,3 +446,29 @@ PETSC_INTERN PetscErrorCode PFLARENoInodesEnd_c(PetscBool pushed)
    if (pushed) PetscCall(PetscOptionsClearValue(NULL, "-mat_no_inode"));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+#if defined(PETSC_HAVE_KOKKOS)
+PETSC_INTERN PetscErrorCode vec_duplicate_vecs_device_kokkos(Vec template_vec, PetscInt m, Vec *vecs);
+#endif
+
+// Duplicates m vectors from template_vec into vecs (an array of m handles the caller owns), like
+// VecDuplicateVecs. Kokkos vectors are built on one device buffer without a host copy
+// Destroy each vector with VecDestroy (the array itself belongs to the caller)
+PETSC_INTERN PetscErrorCode vec_duplicate_vecs_c(Vec *template_vec, PetscInt m, Vec *vecs)
+{
+   PetscFunctionBegin;
+#if defined(PETSC_HAVE_KOKKOS)
+   PetscBool is_kokkos;
+   PetscCall(PetscObjectTypeCompareAny((PetscObject)(*template_vec), &is_kokkos, VECSEQKOKKOS, VECMPIKOKKOS, ""));
+   if (is_kokkos)
+   {
+      PetscCall(vec_duplicate_vecs_device_kokkos(*template_vec, m, vecs));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+#endif
+   Vec *dup;
+   PetscCall(VecDuplicateVecs(*template_vec, m, &dup));
+   for (PetscInt i = 0; i < m; i++) vecs[i] = dup[i];
+   PetscCall(PetscFree(dup));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}

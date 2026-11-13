@@ -3331,3 +3331,53 @@ PETSC_INTERN void mat_fine_block_diagonal_only_kokkos(Mat *input_mat, void *kokk
    int diag_only_local = bad_rows == 0;
    PetscCallMPIAbort(MPI_COMM_MATRIX, MPI_Allreduce(&diag_only_local, diag_only, 1, MPI_INT, MPI_LAND, MPI_COMM_MATRIX));
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// ctx points to the PetscScalarKokkosView pointer
+static PetscErrorCode destroy_vecs_buffer(PetscCtxRt ctx)
+{
+   PetscScalarKokkosView **buffer = static_cast<PetscScalarKokkosView **>(ctx);
+
+   PetscFunctionBegin;
+   delete *buffer;
+   *buffer = NULL;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Duplicates m vectors from a kokkos template vector, like VecDuplicateVecs, but without a zero-filled host
+// copy: the vectors are slices (with a 64 byte aligned stride, like VecDuplicateVecs) of one device buffer
+// that is zero on the device. Only the public API is used, so the vectors have the operations
+// VecCreate*KokkosWithArray gives them. The buffer is freed once vecs[0] (and any vector
+// duplicated from it) is destroyed
+PETSC_INTERN PetscErrorCode vec_duplicate_vecs_device_kokkos(Vec template_vec, PetscInt m, Vec *vecs)
+{
+   MPI_Comm comm;
+   PetscInt n, N, bs;
+   PetscBool is_mpi;
+
+   PetscFunctionBegin;
+   PetscCall(PetscObjectGetComm((PetscObject)template_vec, &comm));
+   PetscCall(VecGetLocalSize(template_vec, &n));
+   PetscCall(VecGetSize(template_vec, &N));
+   PetscCall(VecGetBlockSize(template_vec, &bs));
+   PetscCall(PetscObjectTypeCompare((PetscObject)template_vec, VECMPIKOKKOS, &is_mpi));
+
+   const PetscInt64 align = PetscMax((PetscInt64)(64 / sizeof(PetscScalar)), (PetscInt64)1);
+   const PetscInt64 lda = ((n + align - 1) / align) * align;
+   // Zero on the device (Kokkos initialises views)
+   PetscScalarKokkosView *buffer;
+   PetscCallCXX(buffer = new PetscScalarKokkosView("pflare_duplicate_vecs", (size_t)(m * lda)));
+
+   for (PetscInt i = 0; i < m; i++)
+   {
+      Vec v;
+      PetscScalar *array_d = buffer->data() + i * lda;
+      if (is_mpi) PetscCall(VecCreateMPIKokkosWithArray(comm, bs, n, N, array_d, &v));
+      else PetscCall(VecCreateSeqKokkosWithArray(comm, bs, n, array_d, &v));
+      vecs[i] = v;
+   }
+   if (m > 0) PetscCall(PetscObjectContainerCompose((PetscObject)vecs[0], "pflare_duplicate_vecs", buffer, destroy_vecs_buffer));
+   else delete buffer;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
