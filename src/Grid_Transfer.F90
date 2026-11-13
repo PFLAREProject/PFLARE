@@ -785,11 +785,13 @@ module grid_transfer
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine compute_R_from_raw_Z(raw_handle, global_row_start, is_fine, is_coarse, &
-                     orig_fine_col_indices, R, drop_tol)
+                     orig_fine_col_indices, R, drop_tol, raw_shell)
 
       ! compute_R_from_Z with identity, no reuse and drop_tol, with Z = -1 times the product in
       ! raw_handle (from mat_mult_raw, which never made it a PETSc matrix), as MatScale with -1
       ! would give. Only with Kokkos. raw_handle is freed
+      ! If raw_shell is present and true, R is a raw shell (device data, see raw_shell_create_kokkos)
+      ! rather than a PETSc matrix; not with the Kokkos debug compare
 
       ! ~~~~~~~~~~
       ! Input
@@ -799,11 +801,13 @@ module grid_transfer
       type(tIS), intent(inout)  :: orig_fine_col_indices
       type(tMat), intent(inout) :: R
       PetscReal, intent(in)     :: drop_tol
+      logical, optional, intent(in) :: raw_shell
 
 #if defined(PETSC_HAVE_KOKKOS)
       PetscErrorCode :: ierr
       integer :: errorcode
       integer(c_long_long) :: handle, B_array, indices_fine, indices_coarse, orig_indices, Z_array
+      integer(c_int) :: raw_shell_int
       type(tMat) :: Z_ref, R_ref
       type(tIS) :: orig_ref
       PetscScalar :: normy
@@ -832,8 +836,12 @@ module grid_transfer
 
       indices_fine = is_fine%v
       indices_coarse = is_coarse%v
+      raw_shell_int = 0
+      if (present(raw_shell)) then
+         if (raw_shell .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+      end if
       call compute_R_from_raw_Z_drop_kokkos(handle, z_scale, global_row_start, indices_fine, &
-               indices_coarse, orig_indices, drop_tol, B_array)
+               indices_coarse, orig_indices, drop_tol, B_array, raw_shell_int)
       R%v = B_array
       orig_fine_col_indices%v = orig_indices
       raw_handle = 0
@@ -865,7 +873,7 @@ module grid_transfer
 !------------------------------------------------------------------------------------------------------------------------
    
    subroutine compute_R_from_A_diag(A, inv_Aff, our_level, kokkos_is_views_handle, &
-                     global_row_start, is_fine, is_coarse, drop_tol, R)
+                     global_row_start, is_fine, is_coarse, drop_tol, R, raw_shell)
 
       ! Builds R straight from the square Kokkos matrix A when the Aff inverse is a matdiagonal,
       ! without building A_cf or Z
@@ -873,9 +881,12 @@ module grid_transfer
       ! and drop_tol
       ! Only for Kokkos matrices, with the fine and coarse views of our_level already in
       ! kokkos_is_views_handle
+      ! If raw_shell is present and true, R is a raw shell (device data, see raw_shell_create_kokkos)
+      ! rather than a PETSc matrix; not with the Kokkos debug compare
    
       ! ~~~~~~~~~~
       ! Input 
+      logical, optional, intent(in) :: raw_shell
       type(tMat), intent(in)    :: A, inv_Aff
       integer, intent(in)       :: our_level
       type(c_ptr), intent(in)   :: kokkos_is_views_handle
@@ -888,6 +899,7 @@ module grid_transfer
 #if defined(PETSC_HAVE_KOKKOS)                     
       PetscErrorCode :: ierr
       integer(c_long_long) :: A_array, B_array, vec_array
+      integer(c_int) :: raw_shell_int
       type(tVec) :: inv_diag
       type(tMat) :: A_cf, Z, Z_drop, temp_mat, temp_mat_reuse
       type(tIS) :: temp_is
@@ -903,8 +915,12 @@ module grid_transfer
       call MatDiagonalGetDiagonal(inv_Aff, inv_diag, ierr)
       A_array = A%v
       vec_array = inv_diag%v
+      raw_shell_int = 0
+      if (present(raw_shell)) then
+         if (raw_shell .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+      end if
       call compute_R_from_A_diag_kokkos(A_array, kokkos_is_views_handle, our_level, &
-                  vec_array, drop_tol, B_array)
+                  vec_array, drop_tol, B_array, raw_shell_int)
       R%v = B_array
       call MatDiagonalRestoreDiagonal(inv_Aff, inv_diag, ierr)
 

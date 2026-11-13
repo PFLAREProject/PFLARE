@@ -82,6 +82,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
       is_raw_shell = .FALSE.
 #if defined(PETSC_HAVE_KOKKOS)
+      ! A matrix that was never made (or was destroyed) isn't one
+      if (PetscObjectIsNull(matrix)) return
       A_array = matrix%v
       call raw_shell_kind_kokkos(A_array, kind)
       is_raw_shell = kind >= 0
@@ -1591,7 +1593,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 #if defined(PETSC_HAVE_KOKKOS)
 
       call MatGetTypeEffective(A, mat_type, ierr)
-      call MatGetType(R, mat_type_r, ierr)
+      call MatGetTypeEffective(R, mat_type_r, ierr)
       if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS)) return
       if (.NOT. (mat_type_r == MATMPIAIJKOKKOS .OR. mat_type_r == MATSEQAIJKOKKOS .OR. &

@@ -433,12 +433,12 @@ module c_petsc_interfaces
       end subroutine compute_R_from_Z_kokkos         
 
       subroutine compute_R_from_A_diag_kokkos(A_array, kokkos_is_views_handle, our_level, &
-                     inv_diag_vec, tol, B_array) &
+                     inv_diag_vec, tol, B_array, raw_shell_int) &
          bind(c, name="compute_R_from_A_diag_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array, inv_diag_vec, B_array
          type(c_ptr), value :: kokkos_is_views_handle
-         integer(c_int), value :: our_level
+         integer(c_int), value :: our_level, raw_shell_int
          PetscReal, value :: tol
       end subroutine compute_R_from_A_diag_kokkos
  
@@ -615,7 +615,7 @@ module c_petsc_interfaces
       end subroutine raw_free_kokkos
 
       subroutine compute_R_from_raw_Z_drop_kokkos(raw_handle, scale, global_row_start, indices_fine, &
-                     indices_coarse, indices_orig, tol, B_array) &
+                     indices_coarse, indices_orig, tol, B_array, raw_shell_int) &
          bind(c, name="compute_R_from_raw_Z_drop_kokkos")
          use iso_c_binding
          integer(c_long_long) :: raw_handle
@@ -624,6 +624,7 @@ module c_petsc_interfaces
          integer(c_long_long) :: indices_fine, indices_coarse, indices_orig
          PetscReal, value :: tol
          integer(c_long_long) :: B_array
+         integer(c_int), value :: raw_shell_int
       end subroutine compute_R_from_raw_Z_drop_kokkos
 
    end interface

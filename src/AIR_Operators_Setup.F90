@@ -24,7 +24,7 @@ module air_operators_setup
          compute_R_from_raw_Z
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
-   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, MatGetTypeEffective, &
+   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, MatGetTypeEffective, raw_shell_assemble, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
          mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw, &
          mat_mult_mat_raw, raw_free
@@ -36,6 +36,34 @@ module air_operators_setup
    public
 
    contains
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_ok(air_data)
+
+      ! Can the setup's level matrices (the coarse matrices and R) be kept as device data (raw shells,
+      ! see raw_shell_create_kokkos) rather than PETSc matrices: only when no option reads them in a way
+      ! a raw shell can't serve. The Kokkos debug compare also keeps real matrices (rap_raw_drop and the
+      ! R builders check that). Paths that need a real matrix later assemble it (raw_shell_assemble)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_shells_ok = .NOT. air_data%options%reuse_sparsity .AND. &
+            .NOT. air_data%options%full_smoothing_up_and_down .AND. &
+            .NOT. air_data%options%any_c_smooths .AND. &
+            .NOT. air_data%options%diag_update .AND. &
+            .NOT. air_data%options%symmetric .AND. &
+            .NOT. air_data%options%constrain_z .AND. .NOT. air_data%options%constrain_w .AND. &
+            air_data%options%improve_z_its == 0 .AND. air_data%options%improve_w_its == 0 .AND. &
+            air_data%options%z_type == AIR_Z_PRODUCT .AND. &
+            air_data%options%strong_r_threshold == 0d0 .AND. &
+            air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
+            air_data%options%inverse_type /= PFLAREINV_ISAI .AND. &
+            air_data%options%cf_splitting_type == CF_PMISR_DDC
+
+   end function raw_shells_ok
 
 !------------------------------------------------------------------------------------------------------------------------
 
@@ -1067,14 +1095,14 @@ module air_operators_setup
                   global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
                   air_data%options%r_drop, &
-                  air_data%restrictors(our_level))
+                  air_data%restrictors(our_level), raw_shell = raw_shells_ok(air_data))
          if (destroy_mat) call MatDestroy(inv_dropped_Aff, ierr)
       else if (z_raw) then
          call compute_R_from_raw_Z(z_raw_handle, global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
                   air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
                   air_data%restrictors(our_level), &
-                  air_data%options%r_drop)
+                  air_data%options%r_drop, raw_shell = raw_shells_ok(air_data))
       else if (fuse_z_drop) then
          call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z), global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
@@ -1229,6 +1257,7 @@ module air_operators_setup
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_AP)
          if (.NOT. PetscObjectIsNull(temp_mat)) then
 
+            call raw_shell_assemble(air_data%restrictors(our_level))
             call MatMatMult(A, air_data%prolongators(our_level), &
                      MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
                      
@@ -1252,12 +1281,15 @@ module air_operators_setup
                            air_data%prolongators(our_level), rap_raw_handle, rap_done)
                   rap_raw = rap_done
                else
+                  call raw_shell_assemble(air_data%restrictors(our_level))
                   call mat_mult_r_one_point_ap(air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
                            air_data%reuse(our_level)%reuse_mat(MAT_RAP), rap_done)
                end if
             end if
 
             if (.NOT. rap_done) then
+               ! These paths need R as a real matrix
+               call raw_shell_assemble(air_data%restrictors(our_level))
                ! A one point P has at most one entry per row, so A*P is a relabelling of the
                ! columns of A, as long as we don't need MAT_AP to be a product for reuse
                if (air_data%options%one_point_classical_prolong .AND. &
@@ -1304,18 +1336,7 @@ module air_operators_setup
          ! The coarse matrix can stay as device views (a raw shell) when everything that reads it on the
          ! next level can read one; otherwise it is a PETSc matrix. Levels that later need a real matrix
          ! (the truncation test, the coarsest level and repartitioning) are assembled where they are used
-         raw_shell_ok = .NOT. air_data%options%reuse_sparsity .AND. &
-               .NOT. air_data%options%full_smoothing_up_and_down .AND. &
-               .NOT. air_data%options%any_c_smooths .AND. &
-               .NOT. air_data%options%diag_update .AND. &
-               .NOT. air_data%options%symmetric .AND. &
-               .NOT. air_data%options%constrain_z .AND. .NOT. air_data%options%constrain_w .AND. &
-               air_data%options%improve_z_its == 0 .AND. air_data%options%improve_w_its == 0 .AND. &
-               air_data%options%z_type == AIR_Z_PRODUCT .AND. &
-               air_data%options%strong_r_threshold == 0d0 .AND. &
-               air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
-               air_data%options%inverse_type /= PFLAREINV_ISAI .AND. &
-               air_data%options%cf_splitting_type == CF_PMISR_DDC
+         raw_shell_ok = raw_shells_ok(air_data)
          call rap_raw_drop(rap_raw_handle, air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
                   air_data%options%a_drop, coarse_matrix, air_data%options%a_lump, raw_shell = raw_shell_ok)
 

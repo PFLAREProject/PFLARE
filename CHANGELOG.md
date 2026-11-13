@@ -56,6 +56,8 @@ for earlier changes please see the git history.
 - With Kokkos, the coarse matrices on the lower levels are kept as device
   data inside the setup instead of being built as PETSc matrices, unless an
   option needs a real matrix; the hierarchy is unchanged
+- Likewise the restrictors, which PCMG then applies through a shell with the
+  same device products as before
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

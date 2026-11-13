@@ -795,8 +795,9 @@ module air_mg_setup
                ! Start the process agglomeration 
                if (trigger_proc_agglom) then
 
-                  ! Repartitioning needs a real matrix
+                  ! Repartitioning needs real matrices
                   call raw_shell_assemble(air_data%coarse_matrix(our_level_coarse))
+                  call raw_shell_assemble(air_data%restrictors(our_level))
 
                   call timer_start(TIMER_ID_AIR_PROC_AGGLOM)
                   ! air_data%options%processor_agglom_factor tells us how much we're reducing the number 

@@ -4,6 +4,7 @@
 #include <vector>
 #include <KokkosKernels_Handle.hpp>
 #include <KokkosSparse_spgemm.hpp>
+#include <KokkosSparse_spmv.hpp>
 #include <petscpkg_version.h>
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -17,6 +18,15 @@ struct RawShellCtx {
    // garray on the host, and the halo SF built from it as MatSetUpMultiply_MPIAIJ does
    PetscInt *garray_h = nullptr;
    PetscSF sf = NULL;
+   // For the matrix-vector products (made on first use): the blocks as KokkosSparse matrices and the
+   // ghost values, as MATMPIAIJKOKKOS has them (its csrmat and lvec)
+   bool csr_made = false;
+   KokkosCsrMatrix csr_l, csr_nl;
+   Vec lvec = NULL;
+   // For products with dense matrices (multiple right hand sides), made on first use: a PETSc matrix
+   // sharing the blocks and the product with the last dense matrix, so the result is what PETSc's
+   // MatMatMult gives
+   Mat real = NULL, prod = NULL, prod_B = NULL;
 };
 
 static PetscErrorCode raw_shell_destroy(PetscCtxRt ctx)
@@ -25,6 +35,9 @@ static PetscErrorCode raw_shell_destroy(PetscCtxRt ctx)
 
    PetscFunctionBegin;
    PetscCall(PetscSFDestroy(&c->sf));
+   PetscCall(VecDestroy(&c->lvec));
+   PetscCall(MatDestroy(&c->prod));
+   PetscCall(MatDestroy(&c->real));
    PetscCall(PetscFree(c->garray_h));
    delete c;
    PetscFunctionReturn(PETSC_SUCCESS);
@@ -56,8 +69,127 @@ static PetscErrorCode raw_shell_get_diagonal(Mat A, Vec d)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+// ~~~~~~~~~~
+// Matrix-vector products of a raw shell, in the same steps as MATMPIAIJKOKKOS / MATSEQAIJKOKKOS
+// (MatMult_MPIAIJKokkos and friends): the same KokkosSparse spmv calls on the same blocks, so the
+// results are the same
+// ~~~~~~~~~~
+PETSC_INTERN PetscErrorCode vec_create_device_kokkos(MPI_Comm comm, PetscInt n, PetscInt N, PetscInt bs, Vec *v);
+
+static PetscErrorCode raw_shell_make_csr(RawShellCtx *c)
+{
+   PetscFunctionBegin;
+   if (c->csr_made) PetscFunctionReturn(PETSC_SUCCESS);
+   const RawAIJKokkos &r = c->raw;
+   c->csr_l = KokkosCsrMatrix("raw_csr_l", r.local_rows, r.local_cols, r.a_l.extent(0), r.a_l, r.i_l, r.j_l);
+   if (r.mpi)
+   {
+      c->csr_nl = KokkosCsrMatrix("raw_csr_nl", r.local_rows, r.col_ao, r.a_nl.extent(0), r.a_nl, r.i_nl, r.j_nl);
+      PetscCall(vec_create_device_kokkos(PETSC_COMM_SELF, r.col_ao, r.col_ao, 1, &c->lvec));
+   }
+   c->csr_made = true;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// z = csr (or csr^T) x + beta z, as MatMult(Add)/MatMultTranspose(Add)_SeqAIJKokkos
+static PetscErrorCode raw_shell_spmv(const KokkosCsrMatrix &csr, const char *mode, Vec x, const PetscScalar beta, Vec z)
+{
+   ConstPetscScalarKokkosView xv;
+   PetscScalarKokkosView zv;
+
+   PetscFunctionBegin;
+   PetscCall(PetscLogGpuTimeBegin());
+   PetscCall(VecGetKokkosView(x, &xv));
+   if (beta == 0.0) PetscCall(VecGetKokkosViewWrite(z, &zv));
+   else PetscCall(VecGetKokkosView(z, &zv));
+   PetscCallCXX(KokkosSparse::spmv(PetscGetKokkosExecutionSpace(), mode, 1.0, csr, xv, beta, zv));
+   PetscCall(VecRestoreKokkosView(x, &xv));
+   if (beta == 0.0) PetscCall(VecRestoreKokkosViewWrite(z, &zv));
+   else PetscCall(VecRestoreKokkosView(z, &zv));
+   PetscCall(PetscLogGpuFlops(2.0 * csr.nnz()));
+   PetscCall(PetscLogGpuTimeEnd());
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// z = A x + y (add) or y = A x
+static PetscErrorCode raw_shell_mult_impl(Mat A, Vec x, Vec y, Vec z, const bool add)
+{
+   RawShellCtx *c;
+
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(A, &c));
+   PetscCall(raw_shell_make_csr(c));
+   Vec out = add ? z : y;
+   if (add && z != y) PetscCall(VecCopy(y, z));
+   if (c->raw.mpi) PetscCall(VecScatterBegin(c->sf, x, c->lvec, INSERT_VALUES, SCATTER_FORWARD));
+   PetscCall(raw_shell_spmv(c->csr_l, "N", x, add ? 1.0 : 0.0, out));
+   if (c->raw.mpi)
+   {
+      PetscCall(VecScatterEnd(c->sf, x, c->lvec, INSERT_VALUES, SCATTER_FORWARD));
+      PetscCall(raw_shell_spmv(c->csr_nl, "N", c->lvec, 1.0, out));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// z = A^T x + y (add) or y = A^T x
+static PetscErrorCode raw_shell_mult_transpose_impl(Mat A, Vec x, Vec y, Vec z, const bool add)
+{
+   RawShellCtx *c;
+
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(A, &c));
+   PetscCall(raw_shell_make_csr(c));
+   Vec out = add ? z : y;
+   if (add && z != y) PetscCall(VecCopy(y, z));
+   if (c->raw.mpi) PetscCall(raw_shell_spmv(c->csr_nl, "T", x, 0.0, c->lvec));
+   PetscCall(raw_shell_spmv(c->csr_l, "T", x, add ? 1.0 : 0.0, out));
+   if (c->raw.mpi)
+   {
+      PetscCall(VecScatterBegin(c->sf, c->lvec, out, ADD_VALUES, SCATTER_REVERSE));
+      PetscCall(VecScatterEnd(c->sf, c->lvec, out, ADD_VALUES, SCATTER_REVERSE));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode raw_shell_mult(Mat A, Vec x, Vec y) { return raw_shell_mult_impl(A, x, y, y, false); }
+static PetscErrorCode raw_shell_mult_add(Mat A, Vec x, Vec y, Vec z) { return raw_shell_mult_impl(A, x, y, z, true); }
+static PetscErrorCode raw_shell_mult_transpose(Mat A, Vec x, Vec y) { return raw_shell_mult_transpose_impl(A, x, y, y, false); }
+static PetscErrorCode raw_shell_mult_transpose_add(Mat A, Vec x, Vec y, Vec z) { return raw_shell_mult_transpose_impl(A, x, y, z, true); }
+
+// Forward declaration, defined below
+static void wrap_rap_raw_kokkos(RawAIJKokkos &raw, Mat *output_mat);
+
+// C = A * B with B dense, with PETSc's own product on a PETSc matrix that shares the blocks (made the
+// first time), so the result (and the kernels) are the same as for a MATMPIAIJKOKKOS. The product's
+// symbolic part is kept and reused while B is the same matrix
+static PetscErrorCode raw_shell_mat_mult_dense(Mat A, Mat B, Mat C, void *)
+{
+   RawShellCtx *c;
+
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(A, &c));
+   if (!c->real)
+   {
+      RawAIJKokkos raw = c->raw;
+      wrap_rap_raw_kokkos(raw, &c->real);
+   }
+   if (c->prod && c->prod_B == B)
+   {
+      PetscCall(MatMatMult(c->real, B, MAT_REUSE_MATRIX, PETSC_DETERMINE, &c->prod));
+   }
+   else
+   {
+      PetscCall(MatDestroy(&c->prod));
+      PetscCall(MatMatMult(c->real, B, MAT_INITIAL_MATRIX, PETSC_DETERMINE, &c->prod));
+      c->prod_B = B;
+   }
+   PetscCall(MatCopy(c->prod, C, SAME_NONZERO_PATTERN));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 PETSC_VISIBILITY_INTERNAL bool is_raw_shell(Mat A)
 {
+   if (!A) return false;
    PetscBool shell;
    PetscCallAbort(PETSC_COMM_SELF, PetscObjectTypeCompare((PetscObject)A, MATSHELL, &shell));
    if (!shell) return false;
@@ -84,7 +216,9 @@ PETSC_VISIBILITY_INTERNAL void raw_shell_create_kokkos(const RawAIJKokkos &raw, 
       Vec gvec, lvec;
       IS from, to;
       PetscCallAbort(PETSC_COMM_SELF, VecCreateMPIWithArray(raw.comm, 1, raw.local_cols, raw.global_cols, NULL, &gvec));
-      PetscCallAbort(PETSC_COMM_SELF, VecCreateSeqWithArray(PETSC_COMM_SELF, 1, raw.col_ao, NULL, &lvec));
+      // As MatSetUpMultiply_MPIAIJ, whose lvec comes from MatCreateVecs of the (Kokkos) nonlocal block;
+      // array-less, as only its layout and type are needed here
+      PetscCallAbort(PETSC_COMM_SELF, VecCreateSeqKokkosWithArray(PETSC_COMM_SELF, 1, raw.col_ao, NULL, &lvec));
       PetscCallAbort(PETSC_COMM_SELF, ISCreateGeneral(PETSC_COMM_SELF, raw.col_ao, c->garray_h, PETSC_COPY_VALUES, &from));
       PetscCallAbort(PETSC_COMM_SELF, ISCreateStride(PETSC_COMM_SELF, raw.col_ao, 0, 1, &to));
       PetscCallAbort(PETSC_COMM_SELF, VecScatterCreate(gvec, from, lvec, to, &c->sf));
@@ -96,7 +230,17 @@ PETSC_VISIBILITY_INTERNAL void raw_shell_create_kokkos(const RawAIJKokkos &raw, 
    PetscCallAbort(PETSC_COMM_SELF, MatCreateShell(raw.comm, raw.local_rows, raw.local_cols, raw.global_rows, raw.global_cols, c, A));
    PetscCallAbort(PETSC_COMM_SELF, MatShellSetContextDestroy(*A, raw_shell_destroy));
    PetscCallAbort(PETSC_COMM_SELF, MatShellSetOperation(*A, MATOP_GET_DIAGONAL, (PetscErrorCodeFn *)raw_shell_get_diagonal));
+   PetscCallAbort(PETSC_COMM_SELF, MatShellSetOperation(*A, MATOP_MULT, (PetscErrorCodeFn *)raw_shell_mult));
+   PetscCallAbort(PETSC_COMM_SELF, MatShellSetOperation(*A, MATOP_MULT_ADD, (PetscErrorCodeFn *)raw_shell_mult_add));
+   PetscCallAbort(PETSC_COMM_SELF, MatShellSetOperation(*A, MATOP_MULT_TRANSPOSE, (PetscErrorCodeFn *)raw_shell_mult_transpose));
+   PetscCallAbort(PETSC_COMM_SELF, MatShellSetOperation(*A, MATOP_MULT_TRANSPOSE_ADD, (PetscErrorCodeFn *)raw_shell_mult_transpose_add));
    PetscCallAbort(PETSC_COMM_SELF, MatShellSetVecType(*A, VECKOKKOS));
+   {
+      const MatType dense_types[] = {MATSEQDENSE, MATMPIDENSE, MATSEQDENSECUDA, MATMPIDENSECUDA, MATSEQDENSEHIP, MATMPIDENSEHIP};
+      for (const MatType t : dense_types) {
+         PetscCallAbort(PETSC_COMM_SELF, MatShellSetMatProductOperation(*A, MATPRODUCT_AB, NULL, raw_shell_mat_mult_dense, NULL, t, t));
+      }
+   }
 }
 
 PETSC_VISIBILITY_INTERNAL void aij_device_access_get(Mat A, AIJDeviceAccess &acc)
@@ -191,8 +335,6 @@ PETSC_INTERN void raw_shell_nnzs_kokkos(Mat *A, PetscInt *nnzs_local, PetscInt *
    *nnzs_nonlocal = c->raw.mpi ? c->raw.j_nl.extent(0) : 0;
 }
 
-// Forward declaration, defined below
-static void wrap_rap_raw_kokkos(RawAIJKokkos &raw, Mat *output_mat);
 
 // For Fortran: replace a raw shell by a PETSc matrix with the same blocks (the safety net, for paths
 // that need a real matrix); does nothing to any other matrix
@@ -1339,20 +1481,11 @@ PETSC_INTERN void mat_mult_one_entry_per_row_kokkos(Mat *input_mat, Mat *p_mat, 
 using PflareKernelHandle = KokkosKernels::Experimental::KokkosKernelsHandle<PetscInt, PetscInt, PetscScalar, \
                   DefaultExecutionSpace, DefaultMemorySpace, DefaultMemorySpace>;
 
-// A KokkosCsrMatrix that views (doesn't copy) the device CSR of a MATSEQAIJKOKKOS
-// vals has to be restored with MatSeqAIJRestoreKokkosView once the views aren't needed
-static KokkosCsrMatrix csr_view_seqaijkokkos(Mat mat, Kokkos::View<const PetscScalar *> &vals)
+// A KokkosCsrMatrix view of a block given as device data (m x n with nnz entries), as
+// csr_view_seqaijkokkos gives for a MATSEQAIJKOKKOS
+static KokkosCsrMatrix csr_view_of_device_block(const PetscInt m, const PetscInt n, const PetscInt *i_d, const PetscInt *j_d, \
+                  const Kokkos::View<const PetscScalar *> &vals, const PetscInt nnz)
 {
-   PetscInt m, n;
-   const PetscInt *i_d = nullptr, *j_d = nullptr;
-   PetscMemType mtype;
-   MatInfo info;
-   PetscCallAbort(PETSC_COMM_SELF, MatGetSize(mat, &m, &n));
-   PetscCallAbort(PETSC_COMM_SELF, MatGetInfo(mat, MAT_LOCAL, &info));
-   const PetscInt nnz = static_cast<PetscInt>(info.nz_used);
-   PetscCallAbort(PETSC_COMM_SELF, MatSeqAIJGetCSRAndMemType(mat, &i_d, &j_d, NULL, &mtype));
-   PetscCallAbort(PETSC_COMM_SELF, MatSeqAIJGetKokkosView(mat, &vals));
-   // Views made from pointers don't own the memory; spgemm only reads them
    Kokkos::View<PetscScalar *> a_v(const_cast<PetscScalar *>(vals.data()), nnz);
    Kokkos::View<const PetscInt *> i_v(i_d, m + 1);
    Kokkos::View<PetscInt *> j_v(const_cast<PetscInt *>(j_d), nnz);
@@ -1413,30 +1546,23 @@ static void wrap_rap_raw_kokkos(RawAIJKokkos &raw, Mat *output_mat)
 // The output is returned as device views in out, not yet a PETSc matrix
 static void spgemm_mat_raw_kokkos(Mat *r_mat, const RawAIJKokkos &B, RawAIJKokkos &out)
 {
-   MatType r_type;
-   PetscInt r_local_rows, r_local_cols, r_global_rows;
    auto exec = PetscGetKokkosExecutionSpace();
    const auto spgemm_alg = KokkosSparse::SPGEMMAlgorithm::SPGEMM_DEFAULT;
 
-   PetscCallVoid(MatGetType(*r_mat, &r_type));
-   const bool r_mpi = strcmp(r_type, MATMPIAIJKOKKOS) == 0;
-   PetscCallVoid(MatGetLocalSize(*r_mat, &r_local_rows, &r_local_cols));
-   PetscCallVoid(MatGetSize(*r_mat, &r_global_rows, NULL));
+   // R's blocks on the device (a Kokkos AIJ matrix or a raw shell)
+   AIJDeviceAccess racc;
+   aij_device_access_get(*r_mat, racc);
+   const bool r_mpi = racc.mpi;
+   const PetscInt r_local_rows = racc.local_rows, r_local_cols = racc.local_cols, r_global_rows = racc.global_rows;
    PetscCheckAbort(r_mpi == B.mpi && r_local_cols == B.local_rows, B.comm, PETSC_ERR_ARG_SIZ, \
                   "The matrices in the product are not compatible");
 
    // R's blocks, viewed on the device
-   Mat r_local = *r_mat, r_nonlocal = NULL;
-   const PetscInt *colmap_r = nullptr;
-   PetscInt n_ghost_r = 0;
-   if (r_mpi)
-   {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*r_mat, &r_local, &r_nonlocal, &colmap_r));
-      PetscCallVoid(MatGetSize(r_nonlocal, NULL, &n_ghost_r));
-   }
-   Kokkos::View<const PetscScalar *> r_local_vals, r_nonlocal_vals;
-   KokkosCsrMatrix Rd = csr_view_seqaijkokkos(r_local, r_local_vals), Ro;
-   if (r_mpi) Ro = csr_view_seqaijkokkos(r_nonlocal, r_nonlocal_vals);
+   const PetscInt n_ghost_r = racc.cols_ao;
+   KokkosCsrMatrix Rd = csr_view_of_device_block(racc.local_rows, racc.local_cols, racc.local_i, racc.local_j, \
+                  racc.local_vals, racc.nnz_local), Ro;
+   if (r_mpi) Ro = csr_view_of_device_block(racc.rows_ao, racc.cols_ao, racc.nonlocal_i, racc.nonlocal_j, \
+                  racc.nonlocal_vals, racc.nnz_nonlocal);
 
    const PetscInt b_nnz_l = B.j_l.extent(0), b_nnz_nl = B.mpi ? B.j_nl.extent(0) : 0;
    KokkosCsrMatrix APd("Bd", B.local_rows, B.local_cols, b_nnz_l, B.a_l, B.i_l, B.j_l);
@@ -1472,7 +1598,7 @@ static void spgemm_mat_raw_kokkos(Mat *r_mat, const RawAIJKokkos &B, RawAIJKokko
       PetscInt nroots_r, nleaves_r;
       const PetscInt *ilocal_r;
       const PetscSFNode *iremote_r;
-      PetscCallVoid(MatGetMultPetscSF(*r_mat, &sf_r));
+      sf_r = racc.sf;
       PetscCallVoid(PetscSFGetGraph(sf_r, &nroots_r, &nleaves_r, &ilocal_r, &iremote_r));
 
       // Each local row of B packed together with global columns in order (B's columns below its
@@ -1715,8 +1841,7 @@ static void spgemm_mat_raw_kokkos(Mat *r_mat, const RawAIJKokkos &B, RawAIJKokko
    }
 
    PetscCallVoid(PetscSFDestroy(&sf_nz));
-   PetscCallVoid(MatSeqAIJRestoreKokkosView(r_local, &r_local_vals));
-   if (r_mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(r_nonlocal, &r_nonlocal_vals));
+   aij_device_access_restore(racc);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

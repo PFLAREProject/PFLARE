@@ -1641,8 +1641,51 @@ struct RFromZInput {
 // followed by compute_R_from_Z_kokkos with identity and without reuse
 // Also creates orig_fine_col_indices for the columns of the dropped Z (local, then the nonlocal
 // columns that are kept on this rank)
+// The output R from its blocks on the device as a raw shell (see raw_shell_create_kokkos) rather than a
+// PETSc matrix; garray_host (the global columns of the nonlocal block) is freed
+static void r_raw_shell_output(MPI_Comm comm, const bool mpi, const PetscInt local_rows, const PetscInt local_cols, \
+                  const PetscInt global_rows, const PetscInt global_cols, const PetscInt col_start, \
+                  Kokkos::View<PetscInt *> i_l, Kokkos::View<PetscInt *> j_l, Kokkos::View<PetscScalar *> a_l, \
+                  Kokkos::View<PetscInt *> i_nl, Kokkos::View<PetscInt *> j_nl, Kokkos::View<PetscScalar *> a_nl, \
+                  const PetscInt col_ao, PetscInt *garray_host, Mat *output_mat)
+{
+   RawAIJKokkos raw;
+   raw.mpi = mpi;
+   raw.comm = comm;
+   raw.local_rows = local_rows;
+   raw.local_cols = local_cols;
+   raw.global_rows = global_rows;
+   raw.global_cols = global_cols;
+   // The row layout MatCreateMPIAIJWithSeqAIJ would make
+   PetscInt row_end = 0;
+   PetscCallMPIAbort(comm, MPI_Scan(&local_rows, &row_end, 1, MPIU_INT, MPI_SUM, comm));
+   raw.row_start = row_end - local_rows;
+   raw.col_start = col_start;
+   raw.col_end = col_start + local_cols;
+   raw.i_l = i_l;
+   raw.j_l = j_l;
+   raw.a_l = a_l;
+   if (mpi)
+   {
+      raw.i_nl = i_nl;
+      raw.j_nl = j_nl;
+      raw.a_nl = a_nl;
+      raw.col_ao = col_ao;
+      raw.garray_d = PetscIntKokkosView("garray_d", col_ao);
+      if (col_ao > 0)
+      {
+         Kokkos::deep_copy(raw.garray_d, PetscIntConstKokkosViewHost(garray_host, col_ao));
+         PetscCallAbort(PETSC_COMM_SELF, PetscLogCpuToGpu(col_ao * sizeof(PetscInt)));
+      }
+   }
+   PetscCallAbort(PETSC_COMM_SELF, PetscFree(garray_host));
+   raw_shell_create_kokkos(raw, output_mat);
+}
+
+// If raw_shell_int is set, output_mat is a raw shell rather than a PETSc matrix
 static void r_from_z_drop_core(const RFromZInput &z, PetscInt global_row_start, IS *is_fine, \
-                  IS *is_coarse, IS *orig_fine_col_indices, const PetscReal tol, Mat *output_mat)
+                  IS *is_coarse, IS *orig_fine_col_indices, const PetscReal tol, Mat *output_mat, \
+                  const int raw_shell_int = 0)
 {
    MPI_Comm MPI_COMM_MATRIX = z.comm;
    PetscInt local_coarse_size, local_fine_size, local_full_cols;
@@ -1774,7 +1817,7 @@ static void r_from_z_drop_core(const RFromZInput &z, PetscInt global_row_start, 
    KokkosSparse::sort_crs_matrix(exec, csrmat_local);
    exec.fence();
 
-   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
+   if (!raw_shell_int) PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, local_full_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
    PetscInt *orig_indices_array;
    PetscInt col_ao_output = 0;
@@ -1813,14 +1856,29 @@ static void r_from_z_drop_core(const RFromZInput &z, PetscInt global_row_start, 
       PetscCallVoid(ISDestroy(&orig_nonlocal));
       PetscCallVoid(ISDestroy(&col_indices));
 
-      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
-      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_z, global_full_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+      if (raw_shell_int)
+      {
+         r_raw_shell_output(MPI_COMM_MATRIX, true, local_rows_z, local_full_cols, global_rows_z, global_full_cols, \
+                  global_row_start, i_local_d, j_local_d, a_local_d, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, \
+                  col_ao_output, garray_host, output_mat);
+      }
+      else
+      {
+         PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows_z, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
+         PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows_z, global_full_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+      }
    }
    else
    {
       PetscCallVoid(PetscMalloc1(cols_ad, &orig_indices_array));
       PetscCallVoid(PetscArraycpy(orig_indices_array, fine_indices_ptr, cols_ad));
-      *output_mat = output_mat_local;
+      if (raw_shell_int)
+      {
+         r_raw_shell_output(MPI_COMM_MATRIX, false, local_rows_z, local_full_cols, global_rows_z, global_full_cols, \
+                  global_row_start, i_local_d, j_local_d, a_local_d, Kokkos::View<PetscInt *>(), Kokkos::View<PetscInt *>(), \
+                  Kokkos::View<PetscScalar *>(), 0, NULL, output_mat);
+      }
+      else *output_mat = output_mat_local;
    }
 
    // The original fine indices of all the columns of the dropped Z, local then off-processor
@@ -1900,7 +1958,8 @@ static void compute_R_from_Z_drop_kokkos(Mat *input_mat, PetscInt global_row_sta
 // raw_handle (a RawAIJKokkos from mat_mult_raw_kokkos, which is never made into a PETSc matrix)
 // Scaling the values in place first gives the same values as MatScale would; raw_handle is freed
 PETSC_INTERN void compute_R_from_raw_Z_drop_kokkos(void **raw_handle, const PetscReal scale, PetscInt global_row_start, \
-                  IS *is_fine, IS *is_coarse, IS *orig_fine_col_indices, const PetscReal tol, Mat *output_mat)
+                  IS *is_fine, IS *is_coarse, IS *orig_fine_col_indices, const PetscReal tol, Mat *output_mat, \
+                  const int raw_shell_int)
 {
    RawAIJKokkos *raw = static_cast<RawAIJKokkos *>(*raw_handle);
    auto exec = PetscGetKokkosExecutionSpace();
@@ -1948,7 +2007,7 @@ PETSC_INTERN void compute_R_from_raw_Z_drop_kokkos(void **raw_handle, const Pets
       z.colmap_h = colmap_h.data();
    }
 
-   r_from_z_drop_core(z, global_row_start, is_fine, is_coarse, orig_fine_col_indices, tol, output_mat);
+   r_from_z_drop_core(z, global_row_start, is_fine, is_coarse, orig_fine_col_indices, tol, output_mat, raw_shell_int);
 
    delete raw;
    *raw_handle = NULL;
@@ -2138,7 +2197,7 @@ static void launch_r_from_a_diag(const RFromADiagFunctor &functor, const int vec
 // with relative row tolerance tol, and compute_R_from_Z_kokkos with identity and without reuse
 // The fine and coarse points of our_level come from the per-PCAIR IS views
 PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_views_handle, const int our_level, \
-                  Vec *inv_diag_vec, const PetscReal tol, Mat *output_mat)
+                  Vec *inv_diag_vec, const PetscReal tol, Mat *output_mat, const int raw_shell_int)
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_cols, cols_ao = 0;
@@ -2308,7 +2367,7 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
    KokkosSparse::sort_crs_matrix(exec, csrmat_local);
    exec.fence();
 
-   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_coarse, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
+   if (!raw_shell_int) PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_coarse, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
 
    if (mpi)
    {
@@ -2326,12 +2385,27 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
       for (PetscInt k = 0; k < col_ao_output; k++) garray_host[k] = colmap_input[kept_cols_host[k]];
       PetscCallVoid(PetscFree(kept_cols_host));
 
-      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_coarse, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
-      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_coarse, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+      if (raw_shell_int)
+      {
+         r_raw_shell_output(MPI_COMM_MATRIX, true, local_coarse, local_cols, global_coarse, global_cols, acc.col_start, \
+                  i_local_d, j_local_d, a_local_d, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, col_ao_output, garray_host, \
+                  output_mat);
+      }
+      else
+      {
+         PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_coarse, col_ao_output, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
+         PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_coarse, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+      }
    }
    else
    {
-      *output_mat = output_mat_local;
+      if (raw_shell_int)
+      {
+         r_raw_shell_output(MPI_COMM_MATRIX, false, local_coarse, local_cols, global_coarse, global_cols, acc.col_start, \
+                  i_local_d, j_local_d, a_local_d, Kokkos::View<PetscInt *>(), Kokkos::View<PetscInt *>(), \
+                  Kokkos::View<PetscScalar *>(), 0, NULL, output_mat);
+      }
+      else *output_mat = output_mat_local;
    }
 
    aij_device_access_restore(acc);
