@@ -16,7 +16,7 @@ module gmres_poly
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
    use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, mat_create_vec_device, &
-         kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
+         kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity, MatGetTypeEffective
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -1017,7 +1017,8 @@ end if
 #if defined(PETSC_HAVE_KOKKOS)
       if (inverse_type /= PFLAREINV_POWER .AND. inverse_type /= PFLAREINV_ARNOLDI) return
       if (poly_sparsity_order /= 1 .OR. poly_order < 2 .OR. diag_scale_polys) return
-      call MatGetType(matrix, mat_type, ierr)
+      ! matrix may be a raw shell (device data), read through its blocks
+      call MatGetTypeEffective(matrix, mat_type, ierr)
       if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS)) return
 
       ! As finish_approximate_inverse

@@ -1061,7 +1061,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+      ! input_mat may be a raw shell (device data), read through its blocks
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
@@ -1645,7 +1646,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 #if defined(PETSC_HAVE_KOKKOS)
 
-      call MatGetType(A, mat_type_a, ierr)
+      ! A may be a raw shell (device data, read through its blocks)
+      call MatGetTypeEffective(A, mat_type_a, ierr)
       call MatGetType(B, mat_type_b, ierr)
       if (.NOT. ((mat_type_a == MATMPIAIJKOKKOS .AND. mat_type_b == MATMPIAIJKOKKOS) .OR. &
             (mat_type_a == MATSEQAIJKOKKOS .AND. mat_type_b == MATSEQAIJKOKKOS))) return
@@ -1868,7 +1870,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
    
    subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, &
                   reuse, output_mat, &
-                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle)
+                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle, raw_shell)
 
       ! Wrapper around MatCreateSubMatrix_kokkos
       ! Only works if the input IS have the same parallel row/column distribution
@@ -1877,6 +1879,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! When our_level is supplied (i.e. the kokkos path uses precomputed per-level
       ! fine/coarse IS views), kokkos_is_views_handle MUST also be supplied; it
       ! is the per-PCAIR handle stored on air_multigrid_data.
+      ! If raw_shell is true (only without reuse), a Kokkos output is a raw shell (device data, see
+      ! raw_shell_create_kokkos) rather than a PETSc matrix; not with the Kokkos debug compare
 
       ! ~~~~~~~~~~
       ! Input
@@ -1885,6 +1889,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer, intent(in), optional :: our_level
       logical, intent(in), optional :: is_row_fine, is_col_fine
       type(c_ptr), intent(in), optional :: kokkos_is_views_handle
+      logical, intent(in), optional :: raw_shell
       MatReuse, intent(in)          :: reuse
       type(tMat), intent(inout)     :: output_mat
 
@@ -1893,7 +1898,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       MPIU_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
-      integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
+      integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int, raw_shell_int
       logical :: reuse_logical
       MatType :: mat_type
       Mat :: temp_mat
@@ -1942,6 +1947,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
          if (present(kokkos_is_views_handle)) then
             handle_local = kokkos_is_views_handle
          end if
+         raw_shell_int = 0
+         if (present(raw_shell)) then
+            if (raw_shell .AND. .NOT. reuse_logical .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+         end if
          if (our_level_int /= -1 .AND. .NOT. c_associated(handle_local)) then
             print *, "MatCreateSubMatrixWrapper: our_level set but kokkos_is_views_handle is null"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -1950,7 +1959,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
                   reuse_int, B_array, &
                   handle_local, &
-                  our_level_int, is_row_fine_int, is_col_fine_int)
+                  our_level_int, is_row_fine_int, is_col_fine_int, raw_shell_int)
 
          output_mat%v = B_array
 

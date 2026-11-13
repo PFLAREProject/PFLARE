@@ -58,6 +58,8 @@ for earlier changes please see the git history.
   option needs a real matrix; the hierarchy is unchanged
 - Likewise the restrictors, which PCMG then applies through a shell with the
   same device products as before
+- Likewise the fine-fine, fine-coarse and coarse-fine blocks of each level
+  with the default one point prolongator, Arnoldi and matrix-free smoothing
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

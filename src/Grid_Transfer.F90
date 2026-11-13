@@ -4,7 +4,7 @@ module grid_transfer
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
          compute_P_from_W_kokkos, compute_R_from_Z_kokkos, generate_one_point_P_from_sparse_kokkos, &
          compute_R_from_A_diag_kokkos, compute_R_from_raw_Z_drop_kokkos, raw_copy_to_mat_kokkos
-   use petsc_helper, only: kokkos_debug, assemble_one_point_shell, remove_small_from_sparse_cpu
+   use petsc_helper, only: kokkos_debug, assemble_one_point_shell, remove_small_from_sparse_cpu, MatGetTypeEffective
    use iso_c_binding, only: c_ptr
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
          PFLARE_TWO, PFLARE_PTAP_FILL
@@ -368,7 +368,8 @@ module grid_transfer
 
 #if defined(PETSC_HAVE_KOKKOS)
 
-      call MatGetType(A_fc, mat_type, ierr)
+      ! A_fc may be a raw shell (device data), which reports its Kokkos type here
+      call MatGetTypeEffective(A_fc, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 

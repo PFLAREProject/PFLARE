@@ -28,7 +28,7 @@ module air_mg_setup
          mg_smooth_shell_block_apply, mg_coarse_shell_block_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
    use air_operators_setup, only: &
-         get_submatrices_start_poly_coeff_comms, &
+         get_submatrices_start_poly_coeff_comms, raw_shells_aff_ok, &
          finish_comms_compute_restrict_prolong, compute_coarse_matrix
    use gmres_poly, only: setup_gmres_poly_data
    use gmres_poly_apply, only: &
@@ -519,7 +519,8 @@ module air_mg_setup
                      air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                      air_data%A_ff(our_level), &
                      our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
-                     kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+                     kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                     raw_shell = raw_shells_aff_ok(air_data))
             end if
          end if
                   

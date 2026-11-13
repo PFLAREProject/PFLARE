@@ -15,7 +15,7 @@ module air_operators_setup
          MAT_SAI_SUB, MAT_W, MAT_W_AFF, MAT_W_DROP, MAT_W_NO_SPARSITY, &
          MAT_Z, MAT_Z_AFF, MAT_Z_DROP, MAT_Z_NO_SPARSITY, &
          AIR_Z_PRODUCT, AIR_Z_LAIR, &
-         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL, PFLAREINV_SAI, PFLAREINV_ISAI
+         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL, PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_ARNOLDI
    use cf_splitting, only: CF_PMISR_DDC
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
@@ -64,6 +64,45 @@ module air_operators_setup
             air_data%options%cf_splitting_type == CF_PMISR_DDC
 
    end function raw_shells_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_fc_ok(air_data)
+
+      ! Can A_fc and A_cf be kept as device data (raw shells): as raw_shells_ok, and A_fc only feeds
+      ! the one point prolongator built straight from it, A_cf only Z = A_cf * Aff^-1 (paths that
+      ! need a real A_cf assemble it); the solve applies both through their matvecs
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_shells_fc_ok = raw_shells_ok(air_data) .AND. air_data%options%one_point_classical_prolong
+
+   end function raw_shells_fc_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_aff_ok(air_data)
+
+      ! Can A_ff be kept as device data (a raw shell): as raw_shells_fc_ok, and A_ff is only applied
+      ! (the Arnoldi coefficients, the matrix-free smoother and the solve's matvecs) and fed to the
+      ! raw assembled inverse for Z (build_gmres_polynomial_inverse_raw, which fetches the
+      ! off-processor rows itself)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_shells_aff_ok = raw_shells_fc_ok(air_data) .AND. &
+            air_data%options%inverse_type == PFLAREINV_ARNOLDI .AND. &
+            air_data%options%matrix_free_polys .AND. &
+            air_data%options%inverse_sparsity_order == 1 .AND. &
+            air_data%options%poly_order >= 2 .AND. &
+            .NOT. air_data%options%diag_scale_polys .AND. &
+            .NOT. air_data%options%subcomm
+
+   end function raw_shells_aff_ok
 
 !------------------------------------------------------------------------------------------------------------------------
 
@@ -284,7 +323,8 @@ module air_operators_setup
                air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                air_data%A_fc(our_level), &
                our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
-               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+               kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+               raw_shell = raw_shells_fc_ok(air_data))
          ! If R can be built straight from A, A_cf is only needed for C smoothing
          ! If the Aff inverse turns out not to be diagonal, A_cf is extracted when Z is built
          if (air_data%options%any_c_smooths .OR. &
@@ -293,7 +333,8 @@ module air_operators_setup
                   air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_cf(our_level), &
                   our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
-                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                  raw_shell = raw_shells_fc_ok(air_data))
          end if
       end if
 
@@ -934,7 +975,8 @@ module air_operators_setup
                   air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_cf(our_level), &
                   our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
-                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                  raw_shell = raw_shells_fc_ok(air_data))
             call timer_finish(TIMER_ID_AIR_EXTRACT)
             air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
             call PetscObjectReference(air_data%A_cf(our_level), ierr)
@@ -964,6 +1006,8 @@ module air_operators_setup
                         z_raw_handle, z_raw)
             end if
             if (.NOT. z_raw) then
+               ! MatMatMult needs a real A_cf
+               call raw_shell_assemble(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))
                call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                      MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
                if (.NOT. air_data%options%reuse_sparsity .OR. &

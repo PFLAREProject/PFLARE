@@ -809,24 +809,22 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows_fine, local_rows_coarse, local_rows, global_rows_fine, global_cols_coarse;
-   PetscInt rows_ao, cols_ao = 0;
-   MatType mat_type;
+   PetscInt cols_ao = 0;
    Mat output_mat_local, output_mat_nonlocal;
 
-   PetscCallVoid(MatGetType(*input_mat, &mat_type));
-   // Are we in parallel?
-   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
-   Mat mat_local = NULL, mat_nonlocal = NULL;
+   // A_fc's blocks on the device (a Kokkos AIJ matrix or a raw shell)
+   AIJDeviceAccess acc;
+   aij_device_access_get(*input_mat, acc);
+   const bool mpi = acc.mpi;
 
    PetscIntConstKokkosViewHost colmap_input_h;
    PetscIntKokkosView colmap_input_d;
-   const PetscInt *colmap_input;
+   const PetscInt *colmap_input = acc.colmap;
    auto exec = PetscGetKokkosExecutionSpace();
 
    if (mpi)
    {
-      PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap_input));
-      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+      cols_ao = acc.cols_ao;
 
       // We also copy the input mat colmap over to the device as we need it
       colmap_input_h = PetscIntConstKokkosViewHost(colmap_input, cols_ao);
@@ -836,14 +834,11 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
       size_t bytes = colmap_input_h.extent(0) * sizeof(PetscInt);
       PetscCallVoid(PetscLogCpuToGpu(bytes));
    }
-   else
-   {
-      mat_local = *input_mat;
-   }
 
-   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   MPI_COMM_MATRIX = acc.comm;
    // A_fc has the fine rows and the coarse columns
-   PetscCallVoid(MatGetSize(*input_mat, &global_rows_fine, &global_cols_coarse));
+   global_rows_fine = acc.global_rows;
+   global_cols_coarse = acc.global_cols;
    PetscCallVoid(ISGetLocalSize(*is_fine, &local_rows_fine));
    PetscCallVoid(ISGetLocalSize(*is_coarse, &local_rows_coarse));
    local_rows = local_rows_fine + local_rows_coarse;
@@ -865,14 +860,10 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
    // ~~~~~~~~~~~~
    // Get pointers to the i,j on the device and Kokkos views to the values
    // ~~~~~~~~~~~~
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr, *device_nonlocal_i = nullptr, *device_nonlocal_j = nullptr;
-   PetscMemType mtype;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_local, &device_local_i, &device_local_j, NULL, &mtype));
-   if (mpi) PetscCallVoid(MatSeqAIJGetCSRAndMemType(mat_nonlocal, &device_nonlocal_i, &device_nonlocal_j, NULL, &mtype));
-   Kokkos::View<const PetscScalar *> device_local_vals;
-   Kokkos::View<const PetscScalar *> device_nonlocal_vals;
-   PetscCallVoid(MatSeqAIJGetKokkosView(mat_local, &device_local_vals));
-   if (mpi) PetscCallVoid(MatSeqAIJGetKokkosView(mat_nonlocal, &device_nonlocal_vals));
+   const PetscInt *device_local_i = acc.local_i, *device_local_j = acc.local_j;
+   const PetscInt *device_nonlocal_i = acc.nonlocal_i, *device_nonlocal_j = acc.nonlocal_j;
+   Kokkos::View<const PetscScalar *> device_local_vals = acc.local_vals;
+   Kokkos::View<const PetscScalar *> device_nonlocal_vals = acc.nonlocal_vals;
 
    // ~~~~~~~~~~~~
    // Count the entries in each row of P, straight into the output row pointers at row + 1
@@ -905,9 +896,9 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
 
    // The vector length comes from the average row length of A_fc (local plus nonlocal)
    // The host backends run the vector lanes serially, so there it makes no difference
-   MatInfo info;
-   PetscCallVoid(MatGetInfo(*input_mat, MAT_LOCAL, &info));
-   const double avg_row_nnz = local_rows_fine > 0 ? info.nz_used / local_rows_fine : 0.0;
+   // As MatGetInfo's nz_used (MAT_LOCAL): both blocks
+   const double nz_used = static_cast<double>(acc.nnz_local + acc.nnz_nonlocal);
+   const double avg_row_nnz = local_rows_fine > 0 ? nz_used / local_rows_fine : 0.0;
    int vector_length = 1;
    while (2 * vector_length <= avg_row_nnz && vector_length < 32) vector_length *= 2;
    vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
@@ -1047,8 +1038,7 @@ PETSC_INTERN void generate_one_point_P_from_sparse_kokkos(Mat *input_mat, PetscI
 
    PetscCallVoid(ISRestoreIndices(*is_fine, &fine_indices_ptr));
    PetscCallVoid(ISRestoreIndices(*is_coarse, &coarse_indices_ptr));
-   PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local, &device_local_vals));
-   if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal, &device_nonlocal_vals));
+   aij_device_access_restore(acc);
 
    return;
 }
