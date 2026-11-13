@@ -1164,6 +1164,30 @@ KOKKOS_INLINE_FUNCTION bool pmisr_is_strong(const PetscScalar val, const PetscSc
    return Kokkos::abs(val) >= tol;
 }
 
+// Runs row_body(t, i) once for every row i in [0, nrows), one thread per row with vector lanes
+// for the row's entries (the team-vector pattern of DropSmallRowsFunctor): the vector length is the
+// largest power of 2 no bigger than avg_row_nnz (at most 32), and each team takes team_size rows
+// One thread per row on its own is slow on long rows, one team per row on short ones
+template <class RowBody>
+static void pmisr_rows_team_vector(const PetscInt nrows, const double avg_row_nnz, const RowBody &row_body)
+{
+   if (nrows == 0) return;
+   auto exec = PetscGetKokkosExecutionSpace();
+   int vector_length = 1;
+   while (2 * vector_length <= avg_row_nnz && vector_length < 32) vector_length *= 2;
+   vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
+   auto body = KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
+      const PetscInt row_start = static_cast<PetscInt>(t.league_rank()) * t.team_size();
+      const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt i) { row_body(t, i); });
+   };
+   Kokkos::TeamPolicy<> probe(exec, 1, 1, vector_length);
+   int team_size = std::max(1, 256 / vector_length);
+   team_size = std::min(team_size, probe.team_size_max(body, Kokkos::ParallelForTag()));
+   const int league_size = static_cast<int>((nrows + team_size - 1) / team_size);
+   Kokkos::parallel_for(Kokkos::TeamPolicy<>(exec, league_size, team_size, vector_length), body);
+}
+
 PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal strong_threshold, const int max_luby_steps, PetscReal *measure_local)
 {
    MPI_Comm MPI_COMM_MATRIX;
@@ -1212,20 +1236,28 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    // of remove_small_from_sparse_kokkos: the max is over the off-diagonal entries in both blocks
    // ~~~~~~~~~~~~
    PetscScalarKokkosView row_tol_d("row_tol_d", local_rows);
-   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
-      PetscScalar max_val = -1.0;
-      for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
-         if (device_local_j[k] == i) continue;
-         const PetscScalar val = Kokkos::abs(device_local_vals(k));
-         if (val > max_val) max_val = val;
-      }
+   // The average row lengths, for the vector length of the row kernels below
+   const double avg_nnz_local = local_rows > 0 ? static_cast<double>(acc.nnz_local) / local_rows : 0.0;
+   const double avg_nnz_nonlocal = local_rows > 0 && mpi ? static_cast<double>(acc.nnz_nonlocal) / local_rows : 0.0;
+   pmisr_rows_team_vector(local_rows, avg_nnz_local + avg_nnz_nonlocal, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
+      // A max is the same in any order; it starts from -1 (as the serial loop did), which any
+      // entry beats, and a NaN never wins a comparison either way
+      PetscReal max_l = -1.0, max_nl = -1.0;
+      Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, device_local_i[i], device_local_i[i + 1]), [&](const PetscInt k, PetscReal &m) {
+         if (device_local_j[k] == i) return;
+         const PetscReal val = Kokkos::abs(device_local_vals(k));
+         if (val > m) m = val;
+      }, Kokkos::Max<PetscReal>(max_l));
       if (mpi) {
-         for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
-            const PetscScalar val = Kokkos::abs(device_nonlocal_vals(k));
-            if (val > max_val) max_val = val;
-         }
+         Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, device_nonlocal_i[i], device_nonlocal_i[i + 1]), [&](const PetscInt k, PetscReal &m) {
+            const PetscReal val = Kokkos::abs(device_nonlocal_vals(k));
+            if (val > m) m = val;
+         }, Kokkos::Max<PetscReal>(max_nl));
       }
-      row_tol_d(i) = strong_threshold * max_val;
+      PetscReal max_val = -1.0;
+      if (max_l > max_val) max_val = max_l;
+      if (max_nl > max_val) max_val = max_nl;
+      Kokkos::single(Kokkos::PerThread(t), [&]() { row_tol_d(i) = strong_threshold * max_val; });
    });
 
    // ~~~~~~~~~~~~
@@ -1238,28 +1270,31 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    PetscIntKokkosView strong_nonlocal_d;
    if (mpi) strong_nonlocal_d = PetscIntKokkosView("strong_nonlocal_d", local_rows);
 
-   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+   // Integer counts and atomic increments, so the result doesn't depend on the order
+   pmisr_rows_team_vector(local_rows, avg_nnz_local + avg_nnz_nonlocal, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
       int out_minus_mutual = 0;
-      for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+      Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, device_local_i[i], device_local_i[i + 1]), [&](const PetscInt k, int &count) {
          const PetscInt col = device_local_j[k];
-         if (col == i || !pmisr_is_strong(device_local_vals(k), row_tol_d(i))) continue;
-         out_minus_mutual++;
+         if (col == i || !pmisr_is_strong(device_local_vals(k), row_tol_d(i))) return;
+         count++;
          Kokkos::atomic_inc(&degree_local_d(col));
          // Is the reverse entry strong as well? Then this pair was counted twice
          const PetscInt col_start = device_local_i[col];
          const PetscInt pos = binary_search_sorted([&](const PetscInt m) { return device_local_j[col_start + m]; },
                                                    device_local_i[col + 1] - col_start, i);
-         if (pos >= 0 && pmisr_is_strong(device_local_vals(col_start + pos), row_tol_d(col))) out_minus_mutual--;
-      }
-      Kokkos::atomic_add(&degree_local_d(i), out_minus_mutual);
+         if (pos >= 0 && pmisr_is_strong(device_local_vals(col_start + pos), row_tol_d(col))) count--;
+      }, out_minus_mutual);
+      Kokkos::single(Kokkos::PerThread(t), [&]() { Kokkos::atomic_add(&degree_local_d(i), out_minus_mutual); });
 
       if (mpi) {
          PetscInt strong_count = 0;
-         for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
-            if (pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i))) strong_count++;
-         }
-         strong_nonlocal_d(i) = strong_count;
-         degree_nonlocal_d(i) = static_cast<int>(strong_count);
+         Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, device_nonlocal_i[i], device_nonlocal_i[i + 1]), [&](const PetscInt k, PetscInt &count) {
+            if (pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i))) count++;
+         }, strong_count);
+         Kokkos::single(Kokkos::PerThread(t), [&]() {
+            strong_nonlocal_d(i) = strong_count;
+            degree_nonlocal_d(i) = static_cast<int>(strong_count);
+         });
       }
    });
 
@@ -1507,15 +1542,15 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
          veto_d(i) = (cf_markers_d(i) != 0);
       });
 
-      // Local edges
-      Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+      // Local edges (only stores of 1, so the order doesn't matter)
+      pmisr_rows_team_vector(local_rows, avg_nnz_local, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
          if (cf_markers_d(i) != 0) return;
-         for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+         Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, device_local_i[i], device_local_i[i + 1]), [&](const PetscInt k) {
             const PetscInt col = device_local_j[k];
-            if (col == i || !pmisr_is_strong(device_local_vals(k), row_tol_d(i)) || cf_markers_d(col) != 0) continue;
+            if (col == i || !pmisr_is_strong(device_local_vals(k), row_tol_d(i)) || cf_markers_d(col) != 0) return;
             const bool i_loses = measure_local_d(i) > measure_local_d(col) || (measure_local_d(i) == measure_local_d(col) && i > col);
             Kokkos::atomic_store(&veto_d(i_loses ? i : col), 1);
-         }
+         });
       });
 
       if (mpi) {
@@ -1524,17 +1559,17 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
 
          // Cross-rank edges: the row side knows its own loser, and vetoes a ghost through the reduce
          Kokkos::deep_copy(exec, veto_nonlocal_d, 0);
-         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         pmisr_rows_team_vector(local_rows, avg_nnz_nonlocal, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
             if (cf_markers_d(i) != 0) return;
-            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, device_nonlocal_i[i], device_nonlocal_i[i + 1]), [&](const PetscInt k) {
                const PetscInt col = device_nonlocal_j[k];
-               if (!pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i)) || cf_markers_nonlocal_d(col) != 0) continue;
+               if (!pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i)) || cf_markers_nonlocal_d(col) != 0) return;
                if (measure_local_d(i) > measure_nonlocal_d(col) || (measure_local_d(i) == measure_nonlocal_d(col) && global_row_start + i > colmap_d(col))) {
                   Kokkos::atomic_store(&veto_d(i), 1);
                } else {
                   Kokkos::atomic_store(&veto_nonlocal_d(col), 1);
                }
-            }
+            });
          });
 
          PetscCallVoid(sf_sync_before_begin_kokkos());
@@ -1555,18 +1590,23 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
       // Neighbours of nodes that just entered the set become C. Each edge is handled from the
       // row that stores it, again in both directions
       // ~~~~~~~~
-      Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
-         const int cf_i = Kokkos::atomic_load(&cf_markers_d(i));
+      // Only 0 -> 1 changes, and the set (loops_through) is fixed during the kernel, so the order
+      // doesn't matter
+      pmisr_rows_team_vector(local_rows, avg_nnz_local, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
+         // Loaded once and broadcast, so all the lanes of the row take the same branch even if
+         // another row changes cf_markers_d(i) meanwhile
+         int cf_i = 0;
+         Kokkos::single(Kokkos::PerThread(t), [&](int &v) { v = Kokkos::atomic_load(&cf_markers_d(i)); }, cf_i);
          if (cf_i != loops_through && cf_i != 0) return;
-         for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++) {
+         Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, device_local_i[i], device_local_i[i + 1]), [&](const PetscInt k) {
             const PetscInt col = device_local_j[k];
-            if (col == i || !pmisr_is_strong(device_local_vals(k), row_tol_d(i))) continue;
+            if (col == i || !pmisr_is_strong(device_local_vals(k), row_tol_d(i))) return;
             if (cf_i == loops_through) {
                Kokkos::atomic_compare_exchange(&cf_markers_d(col), 0, 1);
             } else if (Kokkos::atomic_load(&cf_markers_d(col)) == loops_through) {
                Kokkos::atomic_compare_exchange(&cf_markers_d(i), 0, 1);
             }
-         }
+         });
       });
 
       if (mpi) {
@@ -1580,11 +1620,11 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
 
          // Nodes in the set mark their ghosts as C. This only reads the root
          // cf_markers_d so it overlaps with the broadcast
-         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         pmisr_rows_team_vector(local_rows, avg_nnz_nonlocal, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
             if (cf_markers_d(i) != loops_through) return;
-            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
+            Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, device_nonlocal_i[i], device_nonlocal_i[i + 1]), [&](const PetscInt k) {
                if (pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i))) Kokkos::atomic_store(&veto_nonlocal_d(device_nonlocal_j[k]), 1);
-            }
+            });
          });
 
          PetscCallVoid(PetscSFBcastEnd(sf, MPI_INT, cf_markers_d.data(), cf_markers_nonlocal_d.data(), MPI_REPLACE));
@@ -1599,14 +1639,13 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
 
          // Undecided nodes with a ghost in the set become C. This doesn't touch
          // the data in the reduction so it overlaps with it
-         Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows), KOKKOS_LAMBDA(const PetscInt i) {
+         pmisr_rows_team_vector(local_rows, avg_nnz_nonlocal, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
             if (cf_markers_d(i) != 0) return;
-            for (PetscInt k = device_nonlocal_i[i]; k < device_nonlocal_i[i + 1]; k++) {
-               if (pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i)) && cf_markers_nonlocal_d(device_nonlocal_j[k]) == loops_through) {
-                  cf_markers_d(i) = 1;
-                  return;
-               }
-            }
+            int any_in_set = 0;
+            Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, device_nonlocal_i[i], device_nonlocal_i[i + 1]), [&](const PetscInt k, int &found) {
+               if (pmisr_is_strong(device_nonlocal_vals(k), row_tol_d(i)) && cf_markers_nonlocal_d(device_nonlocal_j[k]) == loops_through) found = 1;
+            }, Kokkos::Max<int>(any_in_set));
+            if (any_in_set > 0) Kokkos::single(Kokkos::PerThread(t), [&]() { cf_markers_d(i) = 1; });
          });
 
          PetscCallVoid(PetscSFReduceEnd(sf, MPI_INT, veto_nonlocal_d.data(), veto_d.data(), MPI_LOR));
