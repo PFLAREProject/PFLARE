@@ -45,6 +45,8 @@ module air_operators_setup
       ! see raw_shell_create_kokkos) rather than PETSc matrices: only when no option reads them in a way
       ! a raw shell can't serve. The Kokkos debug compare also keeps real matrices (rap_raw_drop and the
       ! R builders check that). Paths that need a real matrix later assemble it (raw_shell_assemble)
+      ! C point smoothing only applies A_cf and A_cc (MatMult, MatMultTranspose and the dense block
+      ! products), which raw shells serve, and A_cc is extracted from a raw shell like A_ff
 
       ! ~~~~~~
       type(air_multigrid_data), intent(in) :: air_data
@@ -52,7 +54,6 @@ module air_operators_setup
 
       raw_shells_ok = .NOT. air_data%options%reuse_sparsity .AND. &
             .NOT. air_data%options%full_smoothing_up_and_down .AND. &
-            .NOT. air_data%options%any_c_smooths .AND. &
             .NOT. air_data%options%diag_update .AND. &
             .NOT. air_data%options%symmetric .AND. &
             .NOT. air_data%options%constrain_z .AND. .NOT. air_data%options%constrain_w .AND. &
@@ -103,6 +104,33 @@ module air_operators_setup
             .NOT. air_data%options%subcomm
 
    end function raw_shells_aff_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_acc_ok(air_data)
+
+      ! Can A_cc be kept as device data (a raw shell) when C point smoothing: as raw_shells_ok, and
+      ! A_cc is only applied (the Arnoldi coefficients, the matrix-free C smoother and its matvecs)
+      ! The C point inverse options default to the F point ones if unset (-1)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      integer :: c_inverse_type, c_poly_order
+      ! ~~~~~~
+
+      c_inverse_type = air_data%options%c_inverse_type
+      if (c_inverse_type == -1) c_inverse_type = air_data%options%inverse_type
+      c_poly_order = air_data%options%c_poly_order
+      if (c_poly_order == -1) c_poly_order = air_data%options%poly_order
+
+      raw_shells_acc_ok = raw_shells_ok(air_data) .AND. &
+            c_inverse_type == PFLAREINV_ARNOLDI .AND. &
+            air_data%options%matrix_free_polys .AND. &
+            c_poly_order >= 2 .AND. &
+            .NOT. air_data%options%diag_scale_polys .AND. &
+            .NOT. air_data%options%subcomm
+
+   end function raw_shells_acc_ok
 
 !------------------------------------------------------------------------------------------------------------------------
 
@@ -277,7 +305,8 @@ module air_operators_setup
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_cc(our_level), &
                   our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE., &
-                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                  raw_shell = raw_shells_acc_ok(air_data))
          end if
 
          call timer_start(TIMER_ID_AIR_INVERSE)    
