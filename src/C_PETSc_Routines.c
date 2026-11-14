@@ -513,6 +513,57 @@ PETSC_INTERN PetscErrorCode mat_create_vec_device_c(Mat *A, int left, Vec *v)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
+#if defined(PETSC_HAVE_KOKKOS)
+// VecDuplicate for a kokkos vector made on the device without a host copy: the duplicate is made the
+// same way (see vec_create_device_vecs_kokkos), and duplicates the same way in turn
+// VecDuplicateVecs on a parallel kokkos vector whose duplicate isn't PETSc's own falls back to calling
+// VecDuplicate on each, so it ends up here too
+static PetscErrorCode vec_duplicate_device_op(Vec win, Vec *v)
+{
+   PetscFunctionBegin;
+   PetscCall(vec_duplicate_vecs_device_kokkos(win, 1, v));
+   PetscCall(VecSetOperation(*v, VECOP_DUPLICATE, (PetscErrorCodeFn *)vec_duplicate_device_op));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// MatCreateVecs for a shell with a kokkos vec type, see mat_shell_set_device_vecs_c
+static PetscErrorCode mat_create_vecs_device_op(Mat A, Vec *right, Vec *left)
+{
+   PetscFunctionBegin;
+   if (right)
+   {
+      PetscCall(mat_create_vec_device_c(&A, 0, right));
+      PetscCall(VecSetOperation(*right, VECOP_DUPLICATE, (PetscErrorCodeFn *)vec_duplicate_device_op));
+   }
+   if (left)
+   {
+      PetscCall(mat_create_vec_device_c(&A, 1, left));
+      PetscCall(VecSetOperation(*left, VECOP_DUPLICATE, (PetscErrorCodeFn *)vec_duplicate_device_op));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+#endif
+
+// Makes MatCreateVecs on the shell A (and VecDuplicate / VecDuplicateVecs on what it gives) build its
+// kokkos vectors on the device without the zero-filled host copy PETSc makes. The smoothers' KSPs use
+// this for their work vectors. Only with more than one rank: on one rank PETSc's VecDuplicateVecs
+// for these vectors doesn't go through VecDuplicate. Does nothing for other vec types
+PETSC_INTERN PetscErrorCode mat_shell_set_device_vecs_c(Mat *A)
+{
+   PetscFunctionBegin;
+#if defined(PETSC_HAVE_KOKKOS)
+   VecType vtype;
+   PetscBool is_kokkos;
+   PetscMPIInt comm_size;
+   PetscCall(MatGetVecType(*A, &vtype));
+   PetscCall(vec_type_is_kokkos(vtype, &is_kokkos));
+   PetscCallMPI(MPI_Comm_size(PetscObjectComm((PetscObject)(*A)), &comm_size));
+   if (is_kokkos && comm_size > 1)
+      PetscCall(MatShellSetOperation(*A, MATOP_CREATE_VECS, (PetscErrorCodeFn *)mat_create_vecs_device_op));
+#endif
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 // Like VecCreate, VecSetSizes(v, n, N) and VecSetType with A's comm and vec type, but kokkos
 // vectors are made on the device without a zero-filled host copy (see vec_create_device_vecs_kokkos)
 PETSC_INTERN PetscErrorCode vec_create_sized_device_c(Mat *A, PetscInt n, PetscInt N, Vec *v)

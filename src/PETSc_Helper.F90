@@ -11,8 +11,8 @@ module petsc_helper
          mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
          mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c, &
-         mat_create_vec_device_c, vec_create_sized_device_c, raw_shell_kind_kokkos, raw_shell_nnzs_kokkos, &
-         raw_shell_assemble_kokkos
+         mat_create_vec_device_c, vec_create_sized_device_c, mat_shell_set_device_vecs_c, &
+         raw_shell_kind_kokkos, raw_shell_nnzs_kokkos, raw_shell_assemble_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
          PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
          PFLARE_PTAP_FILL
@@ -142,6 +142,29 @@ logical, protected :: kokkos_debug_global = .FALSE.
       end if
 
    end subroutine mat_create_vec_device
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_shell_set_device_vecs(matrix)
+
+      ! Makes MatCreateVecs on the shell matrix (and duplicates of what it gives, e.g., the work
+      ! vectors of a KSP using it) build kokkos vectors on the device without the zero-filled host
+      ! copy PETSc makes, see mat_shell_set_device_vecs_c. Does nothing for other vec types
+
+      ! ~~~~~~
+      type(tMat), intent(inout)  :: matrix
+
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      ierr = mat_shell_set_device_vecs_c(matrix%v)
+      if (ierr /= 0) then
+         print *, "Setting the shell vector creation failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine mat_shell_set_device_vecs
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

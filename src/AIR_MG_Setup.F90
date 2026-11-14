@@ -38,7 +38,7 @@ module air_mg_setup
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
    use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
          is_one_point_shell, mat_fine_block_diagonal_only, mat_create_vec_device, vec_create_sized_device, &
-         MatGetTypeEffective, raw_shell_assemble, is_raw_shell
+         MatGetTypeEffective, raw_shell_assemble, is_raw_shell, mat_shell_set_device_vecs
 
 #include "petsc/finclude/petscksp.h"
 
@@ -770,6 +770,9 @@ module air_mg_setup
             ! Input can be any matrix, we just need the correct type
             call MatGetVecType(air_data%A_fc(our_level), vec_type, ierr)
             call MatShellSetVecType(air_data%coarse_matrix(our_level), vec_type, ierr)
+            ! The smoother on this level makes its work vectors from this shell, so make them on
+            ! the device without a host copy
+            call mat_shell_set_device_vecs(air_data%coarse_matrix(our_level))
 
             ! We now own the matrix on this level - on the top level this replaces
             ! the input pmat, which we must never destroy

@@ -53,6 +53,8 @@ for earlier changes please see the git history.
 - Likewise, PCAIR now gives PCMG its per-level `b`, `x` and `r` vectors, and
   builds its smoothing pools, matrix-free polynomial temporaries and diagonal
   Aff vectors on the device without a host copy (also on a single rank)
+- In parallel with Kokkos vectors, the work vectors PETSc makes for each
+  level's smoother are also made on the device without a host copy
 - With Kokkos, the coarse matrices on the lower levels are kept as device
   data inside the setup instead of being built as PETSc matrices, unless an
   option needs a real matrix; the hierarchy is unchanged

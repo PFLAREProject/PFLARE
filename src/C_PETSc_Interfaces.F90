@@ -107,6 +107,13 @@ module c_petsc_interfaces
          PetscErrorCode :: mat_create_vec_device_c
       end function mat_create_vec_device_c
 
+      function mat_shell_set_device_vecs_c(A_array) &
+         bind(c, name="mat_shell_set_device_vecs_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscErrorCode :: mat_shell_set_device_vecs_c
+      end function mat_shell_set_device_vecs_c
+
       function vec_create_sized_device_c(A_array, n, global_n, vec_array) &
          bind(c, name="vec_create_sized_device_c")
          use iso_c_binding
