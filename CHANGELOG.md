@@ -68,8 +68,9 @@ for earlier changes please see the git history.
 - Faster parallel coarse matrix and Z products with Kokkos on GPUs: the
   product of the off-process block with the fetched rows uses KKMEM directly
 - Faster PMISR with Kokkos: the cross-rank part of the symmetrized strong
-  graph only involves the rows other ranks hold as ghosts, and the row kernels
-  use vector lanes over each row; the CF splitting is unchanged
+  graph only involves the rows other ranks hold as ghosts, the row kernels
+  use vector lanes over each row, and in PCAIR the random measure is drawn
+  once per setup rather than on every level; the CF splitting is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

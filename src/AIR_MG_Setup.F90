@@ -3,6 +3,7 @@ module air_mg_setup
    use petscksp
    use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
    use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
+   use pmisr_module, only: pmisr_measure_cache_begin, pmisr_measure_cache_end
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: &
          PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
@@ -102,6 +103,9 @@ module air_mg_setup
 
       ! Start timing the setup
       call timer_start(TIMER_ID_AIR_SETUP)    
+
+      ! Keep the PMISR random numbers between the levels of this setup
+      call pmisr_measure_cache_begin()
       
       ! Get the communicator the input matrix is on, we build everything on that
       call PetscObjectGetComm(pmat, MPI_COMM_MATRIX, ierr)
@@ -1515,6 +1519,7 @@ module air_mg_setup
       ! We are done, print out info
       ! ~~~~~~~~~       
 
+      call pmisr_measure_cache_end()
       call timer_finish(TIMER_ID_AIR_SETUP)                
       ! Print out the coarse grid info
       if (air_data%options%print_stats_timings .AND. comm_rank == 0) then

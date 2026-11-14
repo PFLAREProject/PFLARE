@@ -13,7 +13,49 @@ module pmisr_module
 
    public
 
+   ! The random numbers for the measure in pmisr_from_matrix, kept between the levels of a PCAIR
+   ! setup. The seed only depends on the rank, so each level's measure is the start of the same
+   ! sequence: keeping the largest one means the coarser levels don't have to draw them again
+   ! Only used between pmisr_measure_cache_begin and pmisr_measure_cache_end, which can nest (a
+   ! PCAIR set up inside another's setup), the outermost pair owns the cache
+   logical :: pmisr_measure_cache_on = .FALSE.
+   integer :: pmisr_measure_cache_depth = 0
+   integer :: pmisr_measure_cache_rank = -1
+   PetscReal, dimension(:), allocatable, target :: pmisr_measure_cache
+
    contains
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_measure_cache_begin()
+
+      ! Start keeping the random numbers of pmisr_from_matrix between calls
+
+      ! ~~~~~~
+
+      pmisr_measure_cache_depth = pmisr_measure_cache_depth + 1
+      if (pmisr_measure_cache_depth > 1) return
+      if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+      pmisr_measure_cache_rank = -1
+      pmisr_measure_cache_on = .TRUE.
+
+   end subroutine pmisr_measure_cache_begin
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_measure_cache_end()
+
+      ! Stop keeping the random numbers of pmisr_from_matrix and free them
+
+      ! ~~~~~~
+
+      pmisr_measure_cache_depth = max(pmisr_measure_cache_depth - 1, 0)
+      if (pmisr_measure_cache_depth > 0) return
+      if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+      pmisr_measure_cache_rank = -1
+      pmisr_measure_cache_on = .FALSE.
+
+   end subroutine pmisr_measure_cache_end
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -158,6 +200,19 @@ module pmisr_module
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
       call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
       call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+      allocate(cf_markers_local(local_rows))
+      A_array = input_mat%v
+
+      ! Can we reuse the random numbers from an earlier (bigger) level of this setup
+      ! The kokkos routine only reads the measure, so the cached values are left unchanged
+      if (pmisr_measure_cache_on .AND. allocated(pmisr_measure_cache) .AND. &
+            pmisr_measure_cache_rank == comm_rank) then
+         if (size(pmisr_measure_cache, kind=kind(local_rows)) >= local_rows) then
+            call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, &
+                     c_loc(pmisr_measure_cache))
+            return
+         end if
+      end if
 
       allocate(measure_local(local_rows))
       call random_seed(size=seed_size)
@@ -169,11 +224,16 @@ module pmisr_module
       call random_number(measure_local)
       deallocate(seed)
 
-      allocate(cf_markers_local(local_rows))
-
-      A_array = input_mat%v
       call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, c_loc(measure_local))
-      deallocate(measure_local)
+
+      ! Keep them for the coarser levels
+      if (pmisr_measure_cache_on) then
+         if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+         call move_alloc(measure_local, pmisr_measure_cache)
+         pmisr_measure_cache_rank = comm_rank
+      else
+         deallocate(measure_local)
+      end if
 #else
       call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
       call pmisr_cpu(strength_mat, max_luby_steps, .FALSE., cf_markers_local)
