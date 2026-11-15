@@ -64,7 +64,7 @@ for earlier changes please see the git history.
   with the default one point prolongator, Arnoldi and matrix-free smoothing
 - All of these now also apply with C point smoothing, as does the
   coarse-coarse block when its inverse is a matrix-free Arnoldi polynomial
-- All of these now also apply with the `diag_dom` CF splitting
+- All of these now also apply with the `diag_dom` and `pmis` CF splittings
 - With a matrix-free polynomial coarse grid solver, the auto truncation test
   runs on that device data, and only the level it stops at is assembled
 - Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos in
@@ -79,6 +79,10 @@ for earlier changes please see the git history.
 - Faster `diag_dom` CF splitting with Kokkos: each DDC pass picks the F points
   to swap straight from the matrix, without extracting Aff; the CF splitting
   is unchanged
+- With Kokkos, the first pass of the `pmis` CF splitting also runs straight
+  from the matrix, as do those of `pmisr_ddc` and `diag_dom` without
+  symmetrizing; `pmis_dist2` and `pmis_agg` use the same device PMISR on their
+  strength matrix; the CF splitting is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
