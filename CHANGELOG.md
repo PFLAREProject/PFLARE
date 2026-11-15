@@ -75,6 +75,9 @@ for earlier changes please see the git history.
   graph only involves the rows other ranks hold as ghosts, the row kernels
   use vector lanes over each row, and in PCAIR the random measure is drawn
   once per setup rather than on every level; the CF splitting is unchanged
+- Faster `diag_dom` CF splitting with Kokkos: each DDC pass picks the F points
+  to swap straight from the matrix, without extracting Aff; the CF splitting
+  is unchanged
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

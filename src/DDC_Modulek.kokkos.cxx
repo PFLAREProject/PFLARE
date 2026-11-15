@@ -11,7 +11,7 @@
 // ddc cleanup but on the device - uses the global variable cf_markers_local_d
 // This no longer copies back to the host pointer cf_markers_local at the end
 // You have to explicitly call copy_cf_markers_d2h(cf_markers_local) to do this
-PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, Mat *aff, PetscReal *random_numbers)
+PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, const PetscReal max_dd_ratio, const PetscReal max_dd_ratio_achieved, PetscReal *random_numbers)
 {
    // Can't use the global directly within the parallel 
    // regions on the device
@@ -60,17 +60,27 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
       // We build an independent set in Aff + Aff^T with a measure given by the
       // diagonal dominance ratio, swap those to C points, and let the outer loop
       // recompute
+      // The set is built straight from A rather than an extracted Aff: every point other than
+      // the F points still above the target ratio starts out assigned, so the only edges are
+      // the entries of Aff, and the local and global orders of the F points are those of Aff,
+      // so the ties break the same way
       // ~~~~~~~~~~~~~~~
       {
-         // Create measure and cf_markers for Aff
-         PetscScalarKokkosView measure_d("measure_d", local_rows_aff);
-         intKokkosView cf_markers_aff_d("cf_markers_aff_d", local_rows_aff);
-         Kokkos::deep_copy(exec, cf_markers_aff_d, 0);
+         PetscInt local_rows, local_cols;
+         PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+
+         // The measure and cf_markers for the rows of A
+         // Assigned (as C) unless they're an F point that may swap
+         PetscScalarKokkosView measure_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "measure_d"), local_rows);
+         intKokkosView cf_markers_swap_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "cf_markers_swap_d"), local_rows);
+         Kokkos::deep_copy(exec, measure_d, PETSC_MAX_REAL);
+         Kokkos::deep_copy(exec, cf_markers_swap_d, 1);
 
          // Copy the random numbers from host to device
          // These are generated in the Fortran wrapper so CPU and Kokkos use the same randoms
+         // The random number of an F point is that of its row in Aff
          PetscScalarKokkosViewHost random_h(random_numbers, local_rows_aff);
-         PetscScalarKokkosView random_d("random_d", local_rows_aff);
+         PetscScalarKokkosView random_d(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "random_d"), local_rows_aff);
          Kokkos::deep_copy(exec, random_d, random_h);
          PetscCallVoid(PetscLogCpuToGpu(local_rows_aff * sizeof(PetscReal)));
 
@@ -78,36 +88,29 @@ PETSC_INTERN void ddc_kokkos(Mat *input_mat, const PetscReal fraction_swap, cons
          const PetscReal target_ratio = max_dd_ratio;
 
          // Build the measure:
-         // pmisr_existing_measure_cf_markers tags the smallest measure as F points
+         // The PMISR tags the smallest measure as F points
          // So we feed in measure = max(10, max_achieved*2) - (diag_dom_ratio - random/1e10)
          // which picks the biggest diagonal dominance ratio
          // We have to ensure abs(measure) >= 1 as PMISR sets anything with measure < 1 as F directly
+         // Points already below the target ratio keep a measure of PETSC_MAX_REAL and stay C
+         // so they won't be swapped
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
-
-               // Scale: measure = max(10, max_achieved*2) - (diag_dom_ratio - random/1e10)
-               measure_d(i) = max_scale - (diag_dom_ratio_d(i) - random_d(i) / 1e10);
-
-               // Points already below threshold: set measure to max and mark as C
-               // so they won't be swapped
-               if (diag_dom_ratio_d(i) < target_ratio) {
-                  measure_d(i) = PETSC_MAX_REAL;
-                  cf_markers_aff_d(i) = 1; // C_POINT
+               if (!(diag_dom_ratio_d(i) < target_ratio)) {
+                  const PetscInt row = is_fine_local_d(i);
+                  measure_d(row) = max_scale - (diag_dom_ratio_d(i) - random_d(i) / 1e10);
+                  cf_markers_swap_d(row) = 0;
                }
          });
-         Kokkos::fence();
 
-         // Call PMISR with implicit transpose - takes Aff directly, handles Aff+Aff^T internally
-         // pmis_int=0 means PMISR, zero_measure_c_point_int=0
-         pmisr_existing_measure_implicit_transpose_kokkos(aff, -1, 0, measure_d, cf_markers_aff_d, 0);  // halo SF obtained from aff via MatGetMultPetscSF inside the callee
+         // As many steps as necessary
+         pmisr_existing_measure_from_matrix_kokkos(input_mat, -1, measure_d, cf_markers_swap_d);
 
-         // Swap F-tagged points back into cf_markers_d
+         // Swap the F-tagged points in cf_markers_d
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows_aff), KOKKOS_LAMBDA(PetscInt i) {
-               if (cf_markers_aff_d(i) == -1) { // F_POINT
-                  PetscInt idx = is_fine_local_d(i);
-                  cf_markers_d(idx) *= -1;
-               }
+               const PetscInt idx = is_fine_local_d(i);
+               if (cf_markers_swap_d(idx) == -1) cf_markers_d(idx) *= -1; // F_POINT
          });
          Kokkos::fence();
       }

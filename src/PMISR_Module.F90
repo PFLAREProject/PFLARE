@@ -13,9 +13,10 @@ module pmisr_module
 
    public
 
-   ! The random numbers for the measure in pmisr_from_matrix, kept between the levels of a PCAIR
-   ! setup. The seed only depends on the rank, so each level's measure is the start of the same
-   ! sequence: keeping the largest one means the coarser levels don't have to draw them again
+   ! The random numbers for the measure in pmisr_from_matrix and the DDC swaps, kept between the
+   ! levels of a PCAIR setup (see pmisr_random_numbers). The seed only depends on the rank, so each
+   ! level's measure is the start of the same sequence: keeping the largest one means the later
+   ! calls don't have to draw them again
    ! Only used between pmisr_measure_cache_begin and pmisr_measure_cache_end, which can nest (a
    ! PCAIR set up inside another's setup), the outermost pair owns the cache
    logical :: pmisr_measure_cache_on = .FALSE.
@@ -56,6 +57,58 @@ module pmisr_module
       pmisr_measure_cache_on = .FALSE.
 
    end subroutine pmisr_measure_cache_end
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_random_numbers(comm_rank, local_rows, randoms_owned, randoms)
+
+      ! The random numbers the PMISR measures start from, at least local_rows of them. The seed
+      ! only depends on the rank, so every call gets the start of the same sequence
+      ! randoms points at the cache when it is on and holds enough, otherwise at new ones drawn
+      ! into randoms_owned (which the cache then takes if it is on). Only read randoms, and
+      ! deallocate randoms_owned afterwards if it's allocated
+
+      ! ~~~~~~
+
+      integer, intent(in)                 :: comm_rank
+      PetscInt, intent(in)                :: local_rows
+      PetscReal, dimension(:), allocatable, target, intent(inout) :: randoms_owned
+      PetscReal, dimension(:), pointer, intent(out) :: randoms
+
+      integer :: seed_size, kfree
+      integer, dimension(:), allocatable :: seed
+
+      ! ~~~~~~
+
+      if (pmisr_measure_cache_on .AND. allocated(pmisr_measure_cache) .AND. &
+            pmisr_measure_cache_rank == comm_rank) then
+         if (size(pmisr_measure_cache, kind=kind(local_rows)) >= local_rows) then
+            randoms => pmisr_measure_cache
+            return
+         end if
+      end if
+
+      allocate(randoms_owned(local_rows))
+      call random_seed(size=seed_size)
+      allocate(seed(seed_size))
+      do kfree = 1, seed_size
+         seed(kfree) = comm_rank + 1 + kfree
+      end do
+      call random_seed(put=seed)
+      call random_number(randoms_owned)
+      deallocate(seed)
+
+      ! Keep them for the later calls
+      if (pmisr_measure_cache_on) then
+         if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+         call move_alloc(randoms_owned, pmisr_measure_cache)
+         pmisr_measure_cache_rank = comm_rank
+         randoms => pmisr_measure_cache
+      else
+         randoms => randoms_owned
+      end if
+
+   end subroutine pmisr_random_numbers
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -181,9 +234,9 @@ module pmisr_module
 #if defined(PETSC_HAVE_KOKKOS)
       MPIU_Comm :: MPI_COMM_MATRIX
       integer(c_long_long) :: A_array
-      integer :: seed_size, kfree, comm_rank
-      integer, dimension(:), allocatable :: seed
+      integer :: comm_rank
       PetscReal, dimension(:), allocatable, target :: measure_local
+      PetscReal, dimension(:), pointer :: measure_ptr
       PetscInt :: local_rows, local_cols
 #else
       type(tMat) :: strength_mat
@@ -203,37 +256,11 @@ module pmisr_module
       allocate(cf_markers_local(local_rows))
       A_array = input_mat%v
 
-      ! Can we reuse the random numbers from an earlier (bigger) level of this setup
+      ! The random numbers, reused from an earlier (bigger) level of this setup if we can
       ! The kokkos routine only reads the measure, so the cached values are left unchanged
-      if (pmisr_measure_cache_on .AND. allocated(pmisr_measure_cache) .AND. &
-            pmisr_measure_cache_rank == comm_rank) then
-         if (size(pmisr_measure_cache, kind=kind(local_rows)) >= local_rows) then
-            call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, &
-                     c_loc(pmisr_measure_cache))
-            return
-         end if
-      end if
-
-      allocate(measure_local(local_rows))
-      call random_seed(size=seed_size)
-      allocate(seed(seed_size))
-      do kfree = 1, seed_size
-         seed(kfree) = comm_rank + 1 + kfree
-      end do
-      call random_seed(put=seed)
-      call random_number(measure_local)
-      deallocate(seed)
-
-      call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, c_loc(measure_local))
-
-      ! Keep them for the coarser levels
-      if (pmisr_measure_cache_on) then
-         if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
-         call move_alloc(measure_local, pmisr_measure_cache)
-         pmisr_measure_cache_rank = comm_rank
-      else
-         deallocate(measure_local)
-      end if
+      call pmisr_random_numbers(comm_rank, local_rows, measure_local, measure_ptr)
+      call pmisr_from_matrix_kokkos(A_array, strong_threshold, max_luby_steps, c_loc(measure_ptr))
+      if (allocated(measure_local)) deallocate(measure_local)
 #else
       call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
       call pmisr_cpu(strength_mat, max_luby_steps, .FALSE., cf_markers_local)
