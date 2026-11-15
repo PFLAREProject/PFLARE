@@ -782,7 +782,7 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols;
    PetscInt global_row_start_temp, global_col_start_temp;
-   PetscInt rows_ao = 0, cols_ao = 0;
+   PetscInt cols_ao = 0;
    // The matrix's blocks on the device (a Kokkos AIJ matrix or a raw shell)
    AIJDeviceAccess acc;
    aij_device_access_get(*input_mat, acc);
@@ -790,9 +790,7 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    const bool mpi = acc.mpi;
    PetscSF sf = acc.sf;
    const PetscInt *colmap = acc.colmap;
-   rows_ao = acc.rows_ao;
    cols_ao = acc.cols_ao;
-   (void)rows_ao;
 
    MPI_COMM_MATRIX = acc.comm;
    local_rows = acc.local_rows;

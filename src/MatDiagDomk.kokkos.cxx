@@ -12,15 +12,11 @@
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
 {
-   PetscInt local_cols;
-
    // The matrix's blocks on the device (a Kokkos AIJ matrix or a raw shell)
    AIJDeviceAccess acc;
    aij_device_access_get(*input_mat, acc);
    const bool mpi = acc.mpi;
    MPI_Comm MPI_COMM_MATRIX = acc.comm;
-   local_cols = acc.local_cols;
-   (void)local_cols;
    // The matrix's own mult SF (the borrowed mvctx) drives the halo broadcast
    PetscSF sf = acc.sf;
    (void)MPI_COMM_MATRIX;

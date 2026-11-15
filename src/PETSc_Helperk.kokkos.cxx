@@ -1158,7 +1158,7 @@ static void build_one_point_ap_kokkos(Mat *input_mat, Mat *p_mat, int *success_i
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, global_rows, global_cols_p, p_local_rows, p_local_cols;
-   PetscInt rows_ao, cols_ao = 0, p_rows_ao, p_cols_ao = 0;
+   PetscInt cols_ao = 0, p_rows_ao, p_cols_ao = 0;
    PetscInt col_start, col_end;
    // A's blocks on the device (a Kokkos AIJ matrix or a raw shell)
    AIJDeviceAccess acc;
@@ -1195,9 +1195,7 @@ static void build_one_point_ap_kokkos(Mat *input_mat, Mat *p_mat, int *success_i
    const bool p_shell = one_point_shell_targets_kokkos(*p_mat, sentinel, target_l_d, weight_l_d);
 
    PetscIntKokkosView colmap_p_d;
-   rows_ao = acc.rows_ao;
    cols_ao = acc.cols_ao;
-   (void)rows_ao;
    if (mpi && !p_shell)
    {
       PetscCallVoid(MatMPIAIJGetSeqAIJ(*p_mat, &p_local, &p_nonlocal, &colmap_p));
