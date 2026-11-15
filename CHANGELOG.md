@@ -64,6 +64,7 @@ for earlier changes please see the git history.
   with the default one point prolongator, Arnoldi and matrix-free smoothing
 - All of these now also apply with C point smoothing, as does the
   coarse-coarse block when its inverse is a matrix-free Arnoldi polynomial
+- All of these now also apply with the `diag_dom` CF splitting
 - With a matrix-free polynomial coarse grid solver, the auto truncation test
   runs on that device data, and only the level it stops at is assembled
 - Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos in

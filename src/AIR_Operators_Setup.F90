@@ -16,7 +16,7 @@ module air_operators_setup
          MAT_Z, MAT_Z_AFF, MAT_Z_DROP, MAT_Z_NO_SPARSITY, &
          AIR_Z_PRODUCT, AIR_Z_LAIR, &
          PFLARE_MINUS_ONE, PFLARE_PTAP_FILL, PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_ARNOLDI
-   use cf_splitting, only: CF_PMISR_DDC
+   use cf_splitting, only: CF_PMISR_DDC, CF_DIAG_DOM
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
@@ -47,6 +47,9 @@ module air_operators_setup
       ! R builders check that). Paths that need a real matrix later assemble it (raw_shell_assemble)
       ! C point smoothing only applies A_cf and A_cc (MatMult, MatMultTranspose and the dense block
       ! products), which raw shells serve, and A_cc is extracted from a raw shell like A_ff
+      ! The PMISR DDC and diag_dom splittings only read the coarse matrices through the device
+      ! access raw shells serve (the first pass, the diagonal dominance ratios and the DDC swaps);
+      ! the others build a strength matrix or submatrices from them as PETSc matrices
 
       ! ~~~~~~
       type(air_multigrid_data), intent(in) :: air_data
@@ -62,7 +65,8 @@ module air_operators_setup
             air_data%options%strong_r_threshold == 0d0 .AND. &
             air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
             air_data%options%inverse_type /= PFLAREINV_ISAI .AND. &
-            air_data%options%cf_splitting_type == CF_PMISR_DDC
+            (air_data%options%cf_splitting_type == CF_PMISR_DDC .OR. &
+             air_data%options%cf_splitting_type == CF_DIAG_DOM)
 
    end function raw_shells_ok
 
