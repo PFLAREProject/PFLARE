@@ -27,7 +27,7 @@ module air_operators_setup
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, MatGetTypeEffective, raw_shell_assemble, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
          mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw, &
-         mat_mult_mat_raw, raw_free, raw_shell_from_handle, kokkos_debug, is_raw_shell
+         mat_mult_mat_raw, raw_free, raw_shell_from_handle, kokkos_debug
    use gmres_poly, only: build_gmres_polynomial_inverse_raw
 
 #include "petsc/finclude/petscksp.h"

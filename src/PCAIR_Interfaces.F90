@@ -10,6 +10,7 @@ module pcair_interfaces
    use gmres_poly_data_type, only: gmres_poly_data
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_newton, only: point_mf_newton_roots
+   use petsc_helper, only: MatGetTypeEffective
 
 #include "petsc/finclude/petscksp.h"
 #include "finclude/pflare_types.h"
@@ -575,7 +576,8 @@ module pcair_interfaces
       ! The check on what it points at means we never touch a matshell that wasn't
       ! built from these coefficients
       if (.NOT. PetscObjectIsNull(inv_matrix)) then
-         call MatGetType(inv_matrix, mat_type, ierr)
+         ! An assembled inverse kept as device data (a raw shell) has no polynomial context
+         call MatGetTypeEffective(inv_matrix, mat_type, ierr)
          if (mat_type == MATSHELL) then
             call MatShellGetContext(inv_matrix, mat_ctx, ierr)
             if (associated(mat_ctx%real_roots, old_coeffs(:, 1))) then

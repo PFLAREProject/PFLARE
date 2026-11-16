@@ -3,7 +3,7 @@ module grid_transfer_improve
    use petscmat
    use timers, only: timer_start, timer_finish
    use pflare_parameters, only: TIMER_ID_AIR_DROP, PFLARE_ONE, PFLARE_MINUS_ONE
-   use petsc_helper, only: MatAXPYWrapper, remove_from_sparse_match
+   use petsc_helper, only: MatAXPYWrapper, remove_from_sparse_match, MatGetTypeEffective
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -40,7 +40,8 @@ module grid_transfer_improve
 
       ! ~~~~~~~~~~
 
-      call MatGetType(A_ff_inv, mat_type_inv_aff, ierr)
+      ! A raw shell (an assembled inverse kept as device data) counts as assembled
+      call MatGetTypeEffective(A_ff_inv, mat_type_inv_aff, ierr)
       call MatGetSize(A_ff, global_rows_aff, global_cols_aff, ierr)
       call MatGetSize(A_ff_inv, global_rows_inv, global_cols_inv, ierr)
 
