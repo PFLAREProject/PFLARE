@@ -2008,6 +2008,13 @@ PETSC_INTERN void mat_mult_mat_raw_kokkos(Mat *a_mat, void **b_handle, void **ra
    *raw_handle = out;
 }
 
+// Makes a raw shell (see raw_shell_create_kokkos) from the matrix in raw_handle; the shell shares the
+// views, so raw_handle is unchanged and still owned (and freed) by the caller
+PETSC_INTERN void raw_shell_from_handle_kokkos(void **raw_handle, Mat *output_mat)
+{
+   raw_shell_create_kokkos(*static_cast<const RawAIJKokkos *>(*raw_handle), output_mat);
+}
+
 // Frees a RawAIJKokkos handle
 PETSC_INTERN void raw_free_kokkos(void **raw_handle)
 {

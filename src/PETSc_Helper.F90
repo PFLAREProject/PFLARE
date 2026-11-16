@@ -8,7 +8,7 @@ module petsc_helper
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
          mat_mult_r_one_point_ap_kokkos, mat_mult_r_one_point_ap_raw_kokkos, rap_raw_drop_kokkos, &
-         mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, &
+         mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, raw_shell_from_handle_kokkos, &
          one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
          mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c, &
          mat_create_vec_device_c, vec_create_sized_device_c, mat_shell_set_device_vecs_c, &
@@ -1810,6 +1810,30 @@ logical, protected :: kokkos_debug_global = .FALSE.
       raw_handle = 0
 
    end subroutine raw_free
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine raw_shell_from_handle(raw_handle, output_mat)
+
+      ! Makes output_mat a raw shell (see raw_shell_create_kokkos) of the device data in raw_handle
+      ! (from one of the *_raw routines). The shell shares that data, so raw_handle is unchanged and
+      ! still has to be freed (raw_free)
+
+      ! ~~~~~~~~~~
+      integer(kind=8), intent(in)    :: raw_handle
+      type(tMat), intent(inout)      :: output_mat
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: handle, B_array
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      handle = raw_handle
+      call raw_shell_from_handle_kokkos(handle, B_array)
+      output_mat%v = B_array
+#endif
+
+   end subroutine raw_shell_from_handle
 
    !------------------------------------------------------------------------------------------------------------------------
 

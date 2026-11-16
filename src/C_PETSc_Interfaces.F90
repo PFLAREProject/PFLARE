@@ -604,6 +604,13 @@ module c_petsc_interfaces
          integer(c_long_long) :: b_handle, raw_handle
       end subroutine mat_mult_mat_raw_kokkos
 
+      subroutine raw_shell_from_handle_kokkos(raw_handle, B_array) &
+         bind(c, name="raw_shell_from_handle_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         integer(c_long_long) :: B_array
+      end subroutine raw_shell_from_handle_kokkos
+
       subroutine raw_free_kokkos(raw_handle) &
          bind(c, name="raw_free_kokkos")
          use iso_c_binding

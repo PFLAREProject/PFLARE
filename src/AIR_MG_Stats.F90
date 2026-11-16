@@ -1,7 +1,7 @@
 module air_mg_stats
 
    use petscksp
-   use petsc_helper, only: get_nnzs_petsc_sparse
+   use petsc_helper, only: get_nnzs_petsc_sparse, MatGetTypeEffective
    use air_data_type, only: air_multigrid_data
    use gmres_poly, only: compute_mf_gmres_poly_num_matvecs
 
@@ -35,7 +35,7 @@ module air_mg_stats
       temp_mat = air_data%inv_A_ff(air_data%no_levels)
       if (.NOT. PetscObjectIsNull(temp_mat)) then
          ! Are we mf?
-         call MatGetType(air_data%inv_A_ff(air_data%no_levels), mat_type, ierr)
+         call MatGetTypeEffective(air_data%inv_A_ff(air_data%no_levels), mat_type, ierr)
          if (mat_type/=MATSHELL) then
             call get_nnzs_petsc_sparse(air_data%inv_A_ff(air_data%no_levels), air_data%inv_A_ff_nnzs(air_data%no_levels))
          end if
@@ -50,7 +50,7 @@ module air_mg_stats
          call get_nnzs_petsc_sparse(air_data%A_fc(our_level), air_data%A_fc_nnzs(our_level))
          
          ! Are we mf?
-         call MatGetType(air_data%inv_A_ff(our_level), mat_type, ierr)
+         call MatGetTypeEffective(air_data%inv_A_ff(our_level), mat_type, ierr)
          if (mat_type/=MATSHELL) then         
             call get_nnzs_petsc_sparse(air_data%inv_A_ff(our_level), air_data%inv_A_ff_nnzs(our_level))                
          end if
@@ -113,7 +113,7 @@ module air_mg_stats
       if (air_data%no_levels == 1) then
          if (pc_type == PCMAT) then
             ! Are we mf?
-            call MatGetType(air_data%inv_A_ff(1), mat_type, ierr)
+            call MatGetTypeEffective(air_data%inv_A_ff(1), mat_type, ierr)
             if (mat_type==MATSHELL) then
                call compute_mf_gmres_poly_num_matvecs(air_data%options%coarsest_inverse_type, &
                            air_data%inv_coarsest_poly_data%coefficients, &
@@ -154,7 +154,7 @@ module air_mg_stats
       ! and the initial guess on the coarse grid is zero
 
       ! Are we mf?
-      call MatGetType(air_data%inv_A_ff(air_data%no_levels), mat_type, ierr)
+      call MatGetTypeEffective(air_data%inv_A_ff(air_data%no_levels), mat_type, ierr)
       if (mat_type==MATSHELL) then
          nnzs = maxits_long * gmres_size_long * air_data%coarse_matrix_nnzs(air_data%no_levels) + &
                   (maxits_long-1) * air_data%coarse_matrix_nnzs(air_data%no_levels)
@@ -204,7 +204,7 @@ module air_mg_stats
          ! and we don't have to do a post residual
 
          ! Are we mf?
-         call MatGetType(air_data%inv_A_ff(our_level), mat_type, ierr)         
+         call MatGetTypeEffective(air_data%inv_A_ff(our_level), mat_type, ierr)         
          
          if (.NOT. air_data%options%full_smoothing_up_and_down) then
 

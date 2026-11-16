@@ -27,7 +27,7 @@ module air_operators_setup
    use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, MatGetTypeEffective, raw_shell_assemble, &
          remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
          mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw, &
-         mat_mult_mat_raw, raw_free
+         mat_mult_mat_raw, raw_free, raw_shell_from_handle, kokkos_debug, is_raw_shell
    use gmres_poly, only: build_gmres_polynomial_inverse_raw
 
 #include "petsc/finclude/petscksp.h"
@@ -93,8 +93,8 @@ module air_operators_setup
 
       ! Can A_ff be kept as device data (a raw shell): as raw_shells_fc_ok, and A_ff is only applied
       ! (the Arnoldi coefficients, the matrix-free smoother and the solve's matvecs) and fed to the
-      ! raw assembled inverse for Z (build_gmres_polynomial_inverse_raw, which fetches the
-      ! off-processor rows itself)
+      ! raw assembled inverse for Z or for the assembled smoother (build_gmres_polynomial_inverse_raw,
+      ! which fetches the off-processor rows itself, see raw_inv_aff_ok)
 
       ! ~~~~~~
       type(air_multigrid_data), intent(in) :: air_data
@@ -102,13 +102,31 @@ module air_operators_setup
 
       raw_shells_aff_ok = raw_shells_fc_ok(air_data) .AND. &
             air_data%options%inverse_type == PFLAREINV_ARNOLDI .AND. &
-            air_data%options%matrix_free_polys .AND. &
             air_data%options%inverse_sparsity_order == 1 .AND. &
             air_data%options%poly_order >= 2 .AND. &
             .NOT. air_data%options%diag_scale_polys .AND. &
             .NOT. air_data%options%subcomm
 
    end function raw_shells_aff_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_inv_aff_ok(air_data)
+
+      ! Can the assembled (not matrix-free) smoother A_ff^-1 be built as device data and kept as a
+      ! raw shell: as raw_shells_aff_ok, without matrix-free smoothing. It is built once with
+      ! build_gmres_polynomial_inverse_raw and also gives Z = A_cf * A_ff^-1 without a matrix
+      ! Not with the Kokkos debug compare (which never makes raw shells)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_inv_aff_ok = raw_shells_aff_ok(air_data) .AND. &
+            .NOT. air_data%options%matrix_free_polys .AND. &
+            .NOT. kokkos_debug()
+
+   end function raw_inv_aff_ok
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -547,19 +565,47 @@ module air_operators_setup
       ! This may build a matrix-free version of inv_A_ff
       call timer_start(TIMER_ID_AIR_INVERSE)   
 
+      destroy_mat = .FALSE.
+      inv_raw = .FALSE.
+      inv_raw_handle = 0
+
+      ! The assembled smoother can be built as device data and kept as a raw shell; the same device
+      ! data then gives Z below without a matrix (see raw_inv_aff_ok)
+      if (raw_inv_aff_ok(air_data)) then
+         call build_gmres_polynomial_inverse_raw(smoothing_mat, &
+               air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+               air_data%inv_A_ff_poly_data(our_level)%buffers, &
+               air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+               air_data%options%diag_scale_polys, &
+               air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+               air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
+               inv_raw_handle, inv_raw)
+         if (inv_raw) call raw_shell_from_handle(inv_raw_handle, air_data%inv_A_ff(our_level))
+      end if
+
       ! Regardless of if we are fc smoothing or smoothing all unknowns we store the inverse
       ! in inv_A_ff
-      call finish_approximate_inverse(smoothing_mat, &
-            air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
-            air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
-            air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
-            air_data%inv_A_ff_poly_data(our_level)%buffers, &
-            air_data%inv_A_ff_poly_data(our_level)%coefficients, &
-            air_data%options%matrix_free_polys, &
-            air_data%options%diag_scale_polys, &
-            air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-            air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
-            air_data%inv_A_ff(our_level)) 
+      if (.NOT. inv_raw) then
+         ! finish_approximate_inverse needs a real A_ff for an assembled inverse
+         if (.NOT. air_data%options%matrix_free_polys .AND. &
+               .NOT. air_data%options%full_smoothing_up_and_down) then
+            call raw_shell_assemble(air_data%A_ff(our_level))
+            smoothing_mat = air_data%A_ff(our_level)
+         end if
+         call finish_approximate_inverse(smoothing_mat, &
+               air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+               air_data%inv_A_ff_poly_data(our_level)%buffers, &
+               air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+               air_data%options%matrix_free_polys, &
+               air_data%options%diag_scale_polys, &
+               air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+               air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
+               air_data%inv_A_ff(our_level))
+      end if
             
       ! Delete temporary if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -570,9 +616,6 @@ module air_operators_setup
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)
       end if              
       
-      destroy_mat = .FALSE.
-      inv_raw = .FALSE.
-      inv_raw_handle = 0
       ! If we are doing AIRG, then we also need an A_ff^-1 for the grid
       ! transfer operators (may be the same used for the smoother)
       if (air_data%options%z_type == AIR_Z_PRODUCT) then

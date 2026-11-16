@@ -19,7 +19,7 @@ module approx_inverse_setup
    use weighted_jacobi, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
    use repartition, only: MatMPICreateNonemptySubcomm
-   use petsc_helper, only: destroy_matrix_reuse, mat_create_vec_device
+   use petsc_helper, only: destroy_matrix_reuse, mat_create_vec_device, is_raw_shell
    use matshell_data_type, only: mat_ctxtype
 
 #include "petsc/finclude/petscmat.h"
@@ -605,7 +605,8 @@ module approx_inverse_setup
       if (.NOT. PetscObjectIsNull(matrix)) then
          call MatGetType(matrix, mat_type, ierr)
          ! If its a matshell, make sure to delete its ctx
-         if (mat_type==MATSHELL) then
+         ! A raw shell (an assembled inverse kept as device data) cleans up after itself
+         if (mat_type==MATSHELL .AND. .NOT. is_raw_shell(matrix)) then
             call MatShellGetContext(matrix, mat_ctx, ierr)
             if (mat_ctx%own_coefficients) then
                deallocate(mat_ctx%coefficients)
