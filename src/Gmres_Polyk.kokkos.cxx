@@ -6,19 +6,34 @@
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Row kernel for mat_mult_powers_share_sparsity_kokkos
-// Each team handles team_size rows, one thread per row, with vector lanes over the
-// entries in the row of the sparsity mat
-// Each thread keeps the current power of its row in per-thread scratch and computes the next
-// power into a second scratch row, swapping the two after each power
+// Row kernels for mat_mult_powers_share_sparsity_kokkos
+// The short rows: each team handles team_size of them, one thread per row, with vector lanes
+// over the entries in the row of the sparsity mat
+// The long rows: one team per row, with the whole team's threads and lanes over the entries,
+// so a long row isn't left on the few lanes of one thread
+// Each thread (short rows) or team (long rows) keeps the current power of its row in scratch and
+// computes the next power into a second scratch row, swapping the two after each power
 // Each lane computes only its own entry l of the next power, summing over the entries j of
-// the row in order, so there are no atomics and the summation order is fixed
+// the row in order, so there are no atomics and the summation order is fixed (and the same
+// whichever kernel a row goes to)
+struct PowersLongRowTag {};
+
+// Rows longer than POW_LONG_FACTOR times the short rows' vector length, or than POW_LONG_MAX,
+// are long
+#define POW_LONG_FACTOR 8
+#define POW_LONG_MAX 32
+// Lanes per team (threads times vector lanes) and the vector length for the long rows
+#define POW_LONG_TEAM_LANES 256
+#define POW_LONG_VECTOR_LENGTH 32
+
 struct PowersShareSparsityFunctor {
 
    PetscInt nrows = 0;
    bool mpi = false;
    PetscInt cols_ad = 0, max_nnz = 0;
    int poly_sparsity_order = 0, poly_order = 0, scratch_level = 0;
+   // The rows each kernel handles
+   PetscIntKokkosView rows_d;
 
    // The sparsity mat
    const PetscInt *sp_l_i = nullptr, *sp_l_j = nullptr, *sp_nl_i = nullptr, *sp_nl_j = nullptr;
@@ -55,6 +70,100 @@ struct PowersShareSparsityFunctor {
       return j[start] == key;
    }
 
+   // The first power of row i: this row of the sparsity mat
+   KOKKOS_INLINE_FUNCTION void first_power_entry(const PetscInt i, const PetscInt j, const PetscInt local_cols_row_i,
+                                                 const ScratchScalarView &vals) const
+   {
+      if (j < local_cols_row_i) vals[j] = sp_l_a(sp_l_i[i] + j);
+      // Nonlocal part
+      else vals[j] = sp_nl_a(sp_nl_i[i] + (j - local_cols_row_i));
+   }
+
+   // The local and the nonlocal output entries go in separate lane loops, so the lanes of
+   // each loop take the same lookup path (rows without nonlocal entries only run the
+   // first). Each entry still sums over j in order: the local rows of the row's columns
+   // first, then the rows fetched from other ranks, as one loop over j would
+   // A^term(i, col_l) = sum_j A^(term-1)(i, col_j) * A(col_j, col_l)
+
+   // Local output entry l of row i: col_l is a local column
+   KOKKOS_INLINE_FUNCTION void local_entry(const PetscInt i, const PetscInt l, const PetscInt local_cols_row_i,
+                                           const PetscInt ncols_row_i, const PetscScalar coeff_term,
+                                           const ScratchScalarView &vals_prev, const ScratchScalarView &vals_next) const
+   {
+      const PetscInt col_l = sp_l_j[sp_l_i[i] + l];
+      PetscScalar sum = 0;
+      PetscInt pos = 0;
+      // Rows we have locally: look col_l up in the local block
+      for (PetscInt j = 0; j < local_cols_row_i; j++)
+      {
+         const PetscInt row_j = sp_l_j[sp_l_i[i] + j];
+         if (find_col(in_l_j, in_l_i[row_j], in_l_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * in_l_a(pos);
+      }
+      // Rows retrieved from other ranks: look col_l up in submat
+      for (PetscInt j = local_cols_row_i; j < ncols_row_i; j++)
+      {
+         const PetscInt row_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
+         if (find_col(sub_j, sub_i[row_j], sub_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * sub_a(pos);
+      }
+      vals_next[l] = sum;
+
+      // Skip any zero coefficients
+      // Still have to compute the A^term above though for the next time through
+      if (coeff_term != 0.0)
+      {
+         // We need to increment the index we access by one
+         // if we don't have a diagonal in the sparsity matrix
+         // as we have one in the output_mat
+         PetscInt diag_increm = 0;
+         if (found_diag_row_d(i) == 0 && out_l_j[out_l_i[i] + l] >= i)
+         {
+            diag_increm = 1;
+         }
+         out_l_a(out_l_i[i] + l + diag_increm) += coeff_term * sum;
+      }
+   }
+
+   // Nonlocal output entry l_nl of row i: col_l is a nonlocal column (in the submat column space)
+   KOKKOS_INLINE_FUNCTION void nonlocal_entry(const PetscInt i, const PetscInt l_nl, const PetscInt local_cols_row_i,
+                                              const PetscInt ncols_row_i, const PetscScalar coeff_term,
+                                              const ScratchScalarView &vals_prev, const ScratchScalarView &vals_next) const
+   {
+      const PetscInt l = local_cols_row_i + l_nl;
+      const PetscInt col_l = sp_nl_j[sp_nl_i[i] + l_nl] + cols_ad;
+      // The same column as a nonlocal column of the input mat, or -1 if it has none
+      const PetscInt col_input_l = submat_col_to_input_nonlocal_col_d(col_l - cols_ad);
+      PetscScalar sum = 0;
+      PetscInt pos = 0;
+      // Rows we have locally: look col_l up in the nonlocal block (nothing to find
+      // if the input mat doesn't have that column)
+      if (col_input_l >= 0)
+      {
+         for (PetscInt j = 0; j < local_cols_row_i; j++)
+         {
+            const PetscInt row_j = sp_l_j[sp_l_i[i] + j];
+            if (find_col(in_nl_j, in_nl_i[row_j], in_nl_i[row_j + 1], col_input_l, pos)) sum += vals_prev[j] * in_nl_a(pos);
+         }
+      }
+      // Rows retrieved from other ranks: look col_l up in submat
+      for (PetscInt j = local_cols_row_i; j < ncols_row_i; j++)
+      {
+         const PetscInt row_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
+         if (find_col(sub_j, sub_i[row_j], sub_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * sub_a(pos);
+      }
+      vals_next[l] = sum;
+
+      if (coeff_term != 0.0) out_nl_a(out_nl_i[i] + l_nl) += coeff_term * sum;
+   }
+
+   KOKKOS_INLINE_FUNCTION PetscInt local_cols(const PetscInt i) const { return sp_l_i[i + 1] - sp_l_i[i]; }
+   KOKKOS_INLINE_FUNCTION PetscInt total_cols(const PetscInt i) const
+   {
+      PetscInt ncols = sp_l_i[i + 1] - sp_l_i[i];
+      if (mpi) ncols += sp_nl_i[i + 1] - sp_nl_i[i];
+      return ncols;
+   }
+
+   // The short rows, one thread per row
    KOKKOS_INLINE_FUNCTION void operator()(const KokkosTeamMemberType &t) const
    {
       // Each thread gets its own scratch, which we reuse for every row it handles
@@ -64,25 +173,17 @@ struct PowersShareSparsityFunctor {
       const PetscInt row_start = static_cast<PetscInt>(t.league_rank()) * t.team_size();
       const PetscInt row_end = row_start + t.team_size() < nrows ? row_start + t.team_size() : nrows;
 
-      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt i) {
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(t, row_start, row_end), [&](const PetscInt idx) {
 
+         const PetscInt i = rows_d(idx);
          // How many local columns do we have in row i
-         const PetscInt local_cols_row_i = sp_l_i[i + 1] - sp_l_i[i];
+         const PetscInt local_cols_row_i = local_cols(i);
          // ncols_row_i is the total number of columns in this row of the sparsity mat
-         PetscInt ncols_row_i = local_cols_row_i;
-         if (mpi) ncols_row_i += sp_nl_i[i + 1] - sp_nl_i[i];
+         const PetscInt ncols_row_i = total_cols(i);
 
          // Fill the first power with this row of the sparsity mat
          Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i), [&](const PetscInt j) {
-            if (j < local_cols_row_i)
-            {
-               vals_a[j] = sp_l_a(sp_l_i[i] + j);
-            }
-            // Nonlocal part
-            else
-            {
-               vals_a[j] = sp_nl_a(sp_nl_i[i] + (j - local_cols_row_i));
-            }
+            first_power_entry(i, j, local_cols_row_i, vals_a);
          });
 
          // Loop over any matrix powers
@@ -92,77 +193,11 @@ struct PowersShareSparsityFunctor {
          for (int term = poly_sparsity_order + 1; term <= poly_order; term++)
          {
             const PetscScalar coeff_term = coefficients_d(term);
-
-            // The local and the nonlocal output entries go in separate lane loops, so the lanes of
-            // each loop take the same lookup path (rows without nonlocal entries only run the
-            // first). Each entry still sums over j in order: the local rows of the row's columns
-            // first, then the rows fetched from other ranks, as one loop over j would
-            // A^term(i, col_l) = sum_j A^(term-1)(i, col_j) * A(col_j, col_l)
-
-            // Local output entries: col_l is a local column
             Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, local_cols_row_i), [&](const PetscInt l) {
-
-               const PetscInt col_l = sp_l_j[sp_l_i[i] + l];
-               PetscScalar sum = 0;
-               PetscInt pos = 0;
-               // Rows we have locally: look col_l up in the local block
-               for (PetscInt j = 0; j < local_cols_row_i; j++)
-               {
-                  const PetscInt row_j = sp_l_j[sp_l_i[i] + j];
-                  if (find_col(in_l_j, in_l_i[row_j], in_l_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * in_l_a(pos);
-               }
-               // Rows retrieved from other ranks: look col_l up in submat
-               for (PetscInt j = local_cols_row_i; j < ncols_row_i; j++)
-               {
-                  const PetscInt row_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
-                  if (find_col(sub_j, sub_i[row_j], sub_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * sub_a(pos);
-               }
-               vals_next[l] = sum;
-
-               // Skip any zero coefficients
-               // Still have to compute the A^term above though for the next time through
-               if (coeff_term != 0.0)
-               {
-                  // We need to increment the index we access by one
-                  // if we don't have a diagonal in the sparsity matrix
-                  // as we have one in the output_mat
-                  PetscInt diag_increm = 0;
-                  if (found_diag_row_d(i) == 0 && out_l_j[out_l_i[i] + l] >= i)
-                  {
-                     diag_increm = 1;
-                  }
-                  out_l_a(out_l_i[i] + l + diag_increm) += coeff_term * sum;
-               }
+               local_entry(i, l, local_cols_row_i, ncols_row_i, coeff_term, vals_prev, vals_next);
             });
-
-            // Nonlocal output entries: col_l is a nonlocal column (in the submat column space)
             Kokkos::parallel_for(Kokkos::ThreadVectorRange(t, ncols_row_i - local_cols_row_i), [&](const PetscInt l_nl) {
-
-               const PetscInt l = local_cols_row_i + l_nl;
-               const PetscInt col_l = sp_nl_j[sp_nl_i[i] + l_nl] + cols_ad;
-               // The same column as a nonlocal column of the input mat, or -1 if it has none
-               const PetscInt col_input_l = submat_col_to_input_nonlocal_col_d(col_l - cols_ad);
-               PetscScalar sum = 0;
-               PetscInt pos = 0;
-               // Rows we have locally: look col_l up in the nonlocal block (nothing to find
-               // if the input mat doesn't have that column)
-               if (col_input_l >= 0)
-               {
-                  for (PetscInt j = 0; j < local_cols_row_i; j++)
-                  {
-                     const PetscInt row_j = sp_l_j[sp_l_i[i] + j];
-                     if (find_col(in_nl_j, in_nl_i[row_j], in_nl_i[row_j + 1], col_input_l, pos)) sum += vals_prev[j] * in_nl_a(pos);
-                  }
-               }
-               // Rows retrieved from other ranks: look col_l up in submat
-               for (PetscInt j = local_cols_row_i; j < ncols_row_i; j++)
-               {
-                  const PetscInt row_j = sp_nl_j[sp_nl_i[i] + (j - local_cols_row_i)];
-                  if (find_col(sub_j, sub_i[row_j], sub_i[row_j + 1], col_l, pos)) sum += vals_prev[j] * sub_a(pos);
-               }
-               vals_next[l] = sum;
-
-               if (coeff_term != 0.0) out_nl_a(out_nl_i[i] + l_nl) += coeff_term * sum;
+               nonlocal_entry(i, l_nl, local_cols_row_i, ncols_row_i, coeff_term, vals_prev, vals_next);
             });
 
             // Swap the two rows for the next power
@@ -171,6 +206,40 @@ struct PowersShareSparsityFunctor {
             vals_next = swap;
          }
       });
+   }
+
+   // The long rows, one team per row
+   KOKKOS_INLINE_FUNCTION void operator()(const PowersLongRowTag &, const KokkosTeamMemberType &t) const
+   {
+      ScratchScalarView vals_a(t.team_scratch(scratch_level), max_nnz);
+      ScratchScalarView vals_b(t.team_scratch(scratch_level), max_nnz);
+
+      const PetscInt i = rows_d(t.league_rank());
+      const PetscInt local_cols_row_i = local_cols(i);
+      const PetscInt ncols_row_i = total_cols(i);
+
+      Kokkos::parallel_for(Kokkos::TeamVectorRange(t, ncols_row_i), [&](const PetscInt j) {
+         first_power_entry(i, j, local_cols_row_i, vals_a);
+      });
+      t.team_barrier();
+
+      ScratchScalarView vals_prev = vals_a, vals_next = vals_b;
+      for (int term = poly_sparsity_order + 1; term <= poly_order; term++)
+      {
+         const PetscScalar coeff_term = coefficients_d(term);
+         Kokkos::parallel_for(Kokkos::TeamVectorRange(t, local_cols_row_i), [&](const PetscInt l) {
+            local_entry(i, l, local_cols_row_i, ncols_row_i, coeff_term, vals_prev, vals_next);
+         });
+         Kokkos::parallel_for(Kokkos::TeamVectorRange(t, ncols_row_i - local_cols_row_i), [&](const PetscInt l_nl) {
+            nonlocal_entry(i, l_nl, local_cols_row_i, ncols_row_i, coeff_term, vals_prev, vals_next);
+         });
+         // Every entry of the next power has to be done before any lane reads it
+         t.team_barrier();
+
+         const ScratchScalarView swap = vals_prev;
+         vals_prev = vals_next;
+         vals_next = swap;
+      }
    }
 };
 
@@ -712,23 +781,6 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
       Kokkos::fence();
    }
 
-   // ~~~~~~~~~~~~~~
-   // Find maximum non-zeros per row for sizing scratch memory
-   // ~~~~~~~~~~~~~~
-   // The longest row of the sparsity mat, local plus nonlocal entries, sizes the scratch
-   // (the sum of the longest local and the longest nonlocal row can be about twice that)
-   PetscInt sparsity_max_nnz = 0;
-   if (local_rows > 0) {
-      Kokkos::parallel_reduce("FindMaxNNZSparsity", Kokkos::RangePolicy<>(exec, 0, local_rows),
-         KOKKOS_LAMBDA(const PetscInt i, PetscInt& thread_max) {
-            PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
-            if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
-            thread_max = (row_nnz > thread_max) ? row_nnz : thread_max;
-         },
-         Kokkos::Max<PetscInt>(sparsity_max_nnz)
-      );
-   }
-
    // ~~~~~~~~~~~~~
    // Now we have to be careful 
    // mat_sparsity_match may not have diagonal entries in some rows
@@ -771,17 +823,20 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
    // ~~~~~~~~~~~~~
 
    // ~~~~~~~~~~~~~
-   // Each team handles team_size rows, one thread per row, with vector lanes over the entries
-   // The vector length comes from the average row length of the sparsity mat (local plus nonlocal)
+   // The short rows go to teams of team_size rows, one thread per row, with vector lanes over
+   // the entries; the vector length comes from the average row length of the sparsity mat
+   // (local plus nonlocal)
+   // The long rows go to one team per row, so the few long rows of an operator with a long
+   // tail of row lengths (e.g. some ILU factors) don't each sit on the lanes of one thread
+   // while the rest of the GPU idles, and the short rows' scratch is sized by the longest
+   // short row only
    // The host backends run the vector lanes serially, so there it makes no difference
    // ~~~~~~~~~~~~~
    if (local_rows > 0)
    {
       PowersShareSparsityFunctor functor;
-      functor.nrows = local_rows;
       functor.mpi = mpi;
       functor.cols_ad = cols_ad;
-      functor.max_nnz = sparsity_max_nnz;
       functor.poly_sparsity_order = poly_sparsity_order;
       functor.poly_order = poly_order;
       functor.sp_l_i = device_local_i_sparsity;
@@ -825,37 +880,102 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
       while (2 * vector_length <= avg_row_nnz && vector_length < 32) vector_length *= 2;
       vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
 
-      // Two scratch rows of the longest row per thread
-      const size_t per_thread = 2 * ScratchScalarView::shmem_size(sparsity_max_nnz);
-      Kokkos::TeamPolicy<> probe(exec, 1, 1, vector_length);
-      int team_size = std::max(1, 256 / vector_length);
-      team_size = std::min(team_size, probe.team_size_max(functor, Kokkos::ParallelForTag()));
-      // Kokkos' GPU block size search never tries a block smaller than a warp, so a team
-      // with level 0 scratch must fill at least one warp, or the launch throws.
-      // vector_length_max() is the warp size on GPUs and 1 on host spaces
-      const int min_team = std::max(1, Kokkos::TeamPolicy<>::vector_length_max() / vector_length);
+      // Rows with more entries than this are long
+      const PetscInt long_row_min = std::min(POW_LONG_FACTOR * vector_length, POW_LONG_MAX);
+
+      // The longest short and long rows, local plus nonlocal entries, size the scratch, and
+      // the count of long rows
+      PetscInt max_short = 0, max_long = 0, n_long = 0;
+      Kokkos::parallel_reduce("FindMaxNNZSparsity", Kokkos::RangePolicy<>(exec, 0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max_short, PetscInt &thread_max_long, PetscInt &thread_long) {
+            PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+            if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
+            if (row_nnz > long_row_min)
+            {
+               thread_max_long = (row_nnz > thread_max_long) ? row_nnz : thread_max_long;
+               thread_long++;
+            }
+            else thread_max_short = (row_nnz > thread_max_short) ? row_nnz : thread_max_short;
+         },
+         Kokkos::Max<PetscInt>(max_short), Kokkos::Max<PetscInt>(max_long), Kokkos::Sum<PetscInt>(n_long)
+      );
+      const PetscInt n_short = local_rows - n_long;
+
+      // The short and long rows, each in order
+      PetscIntKokkosView short_rows_d("short_rows_d", n_short), long_rows_d("long_rows_d", n_long);
+      Kokkos::parallel_scan("SplitRowsSparsity", Kokkos::RangePolicy<>(exec, 0, local_rows),
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt &longs_before, const bool final) {
+            PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+            if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
+            const bool is_long = row_nnz > long_row_min;
+            if (final)
+            {
+               if (is_long) long_rows_d(longs_before) = i;
+               else short_rows_d(i - longs_before) = i;
+            }
+            if (is_long) longs_before++;
+         });
+
       const size_t scratch_max_0 = Kokkos::TeamPolicy<>::scratch_size_max(0);
       const size_t scratch_max_1 = Kokkos::TeamPolicy<>::scratch_size_max(1);
-      // Use level 0 scratch if it fits, shrinking the team down to min_team if needed
-      int team_size_0 = team_size;
-      while (team_size_0 > min_team && team_size_0 * per_thread > scratch_max_0) team_size_0 /= 2;
-      if (team_size_0 * per_thread <= scratch_max_0)
+
+      if (n_short > 0)
       {
-         functor.scratch_level = 0;
-         team_size = team_size_0;
-      }
-      // Otherwise level 1, shrinking the team to keep inside the per-team level 1 cap
-      // (rows too long to fit even min_team will still exceed it)
-      else
-      {
-         functor.scratch_level = 1;
-         while (team_size > min_team && team_size * per_thread > scratch_max_1) team_size /= 2;
+         functor.nrows = n_short;
+         functor.max_nnz = max_short;
+         functor.rows_d = short_rows_d;
+
+         // Two scratch rows of the longest short row per thread
+         const size_t per_thread = 2 * ScratchScalarView::shmem_size(max_short);
+         Kokkos::TeamPolicy<> probe(exec, 1, 1, vector_length);
+         int team_size = std::max(1, 256 / vector_length);
+         team_size = std::min(team_size, probe.team_size_max(functor, Kokkos::ParallelForTag()));
+         // Kokkos' GPU block size search never tries a block smaller than a warp, so a team
+         // with level 0 scratch must fill at least one warp, or the launch throws.
+         // vector_length_max() is the warp size on GPUs and 1 on host spaces
+         const int min_team = std::max(1, Kokkos::TeamPolicy<>::vector_length_max() / vector_length);
+         // Use level 0 scratch if it fits, shrinking the team down to min_team if needed
+         int team_size_0 = team_size;
+         while (team_size_0 > min_team && team_size_0 * per_thread > scratch_max_0) team_size_0 /= 2;
+         if (team_size_0 * per_thread <= scratch_max_0)
+         {
+            functor.scratch_level = 0;
+            team_size = team_size_0;
+         }
+         // Otherwise level 1, shrinking the team to keep inside the per-team level 1 cap
+         // (rows too long to fit even min_team will still exceed it)
+         else
+         {
+            functor.scratch_level = 1;
+            while (team_size > min_team && team_size * per_thread > scratch_max_1) team_size /= 2;
+         }
+
+         const int league_size = static_cast<int>((n_short + team_size - 1) / team_size);
+         Kokkos::TeamPolicy<> policy(exec, league_size, team_size, vector_length);
+         policy.set_scratch_size(functor.scratch_level, Kokkos::PerThread(per_thread));
+         Kokkos::parallel_for(policy, functor);
       }
 
-      const int league_size = static_cast<int>((local_rows + team_size - 1) / team_size);
-      Kokkos::TeamPolicy<> policy(exec, league_size, team_size, vector_length);
-      policy.set_scratch_size(functor.scratch_level, Kokkos::PerThread(per_thread));
-      Kokkos::parallel_for(policy, functor);
+      if (n_long > 0)
+      {
+         functor.nrows = n_long;
+         functor.max_nnz = max_long;
+         functor.rows_d = long_rows_d;
+
+         // Two scratch rows of the longest row per team, in level 0 if they fit
+         const size_t per_team = 2 * ScratchScalarView::shmem_size(max_long);
+         functor.scratch_level = per_team <= scratch_max_0 ? 0 : 1;
+         const int long_vector_length = std::min(POW_LONG_VECTOR_LENGTH,
+                                                 Kokkos::TeamPolicy<PowersLongRowTag>::vector_length_max());
+         Kokkos::TeamPolicy<PowersLongRowTag> probe(exec, 1, 1, long_vector_length);
+         probe.set_scratch_size(functor.scratch_level, Kokkos::PerTeam(per_team));
+         int long_team_size = std::max(1, POW_LONG_TEAM_LANES / long_vector_length);
+         long_team_size = std::min(long_team_size, probe.team_size_max(functor, Kokkos::ParallelForTag()));
+
+         Kokkos::TeamPolicy<PowersLongRowTag> policy(exec, static_cast<int>(n_long), long_team_size, long_vector_length);
+         policy.set_scratch_size(functor.scratch_level, Kokkos::PerTeam(per_team));
+         Kokkos::parallel_for(policy, functor);
+      }
    }
 
    Kokkos::fence();

@@ -71,7 +71,8 @@ for earlier changes please see the git history.
   runs on that device data, and only the level it stops at is assembled
 - Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos in
   parallel, from sizing the kernel's scratch by the longest row and handling
-  the local and nonlocal entries of each row in separate loops
+  the local and nonlocal entries of each row in separate loops; rows much
+  longer than average get a whole team each
 - Faster parallel coarse matrix and Z products with Kokkos on GPUs: the
   product of the off-process block with the fetched rows uses KKMEM directly
 - Faster PMISR with Kokkos: the cross-rank part of the symmetrized strong
