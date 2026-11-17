@@ -830,13 +830,27 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
       Kokkos::TeamPolicy<> probe(exec, 1, 1, vector_length);
       int team_size = std::max(1, 256 / vector_length);
       team_size = std::min(team_size, probe.team_size_max(functor, Kokkos::ParallelForTag()));
-      // Use level 0 scratch if it fits, shrinking the team if needed, otherwise level 1
-      // with the full team
+      // Kokkos' GPU block size search never tries a block smaller than a warp, so a team
+      // with level 0 scratch must fill at least one warp, or the launch throws.
+      // vector_length_max() is the warp size on GPUs and 1 on host spaces
+      const int min_team = std::max(1, Kokkos::TeamPolicy<>::vector_length_max() / vector_length);
       const size_t scratch_max_0 = Kokkos::TeamPolicy<>::scratch_size_max(0);
+      const size_t scratch_max_1 = Kokkos::TeamPolicy<>::scratch_size_max(1);
+      // Use level 0 scratch if it fits, shrinking the team down to min_team if needed
       int team_size_0 = team_size;
-      while (team_size_0 > 1 && team_size_0 * per_thread > scratch_max_0) team_size_0 /= 2;
-      functor.scratch_level = team_size_0 * per_thread <= scratch_max_0 ? 0 : 1;
-      if (functor.scratch_level == 0) team_size = team_size_0;
+      while (team_size_0 > min_team && team_size_0 * per_thread > scratch_max_0) team_size_0 /= 2;
+      if (team_size_0 * per_thread <= scratch_max_0)
+      {
+         functor.scratch_level = 0;
+         team_size = team_size_0;
+      }
+      // Otherwise level 1, shrinking the team to keep inside the per-team level 1 cap
+      // (rows too long to fit even min_team will still exceed it)
+      else
+      {
+         functor.scratch_level = 1;
+         while (team_size > min_team && team_size * per_thread > scratch_max_1) team_size /= 2;
+      }
 
       const int league_size = static_cast<int>((local_rows + team_size - 1) / team_size);
       Kokkos::TeamPolicy<> policy(exec, league_size, team_size, vector_length);
