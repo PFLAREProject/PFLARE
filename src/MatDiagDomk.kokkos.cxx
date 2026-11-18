@@ -13,21 +13,19 @@
 // Entries of a long row loaded into scratch at a time, and the threads per team that load them
 #define DDC_LONG_CHUNK 1024
 #define DDC_LONG_TEAM 128
-// With at least this many fine rows the long rows are listed (which needs a host sync for the
-// count) and only they get a team; with fewer every fine row gets a team and the short ones
-// return at once, which costs less than the sync
-#define DDC_LIST_MIN_ROWS 65536
+// At most this many teams in ddc_ratio_long_rows, past it each team takes several fine rows
+// (no list of the long rows, so no host sync for its length)
+#define DDC_LONG_MAX_TEAMS 65536
 
-// One team per fine row with more than DDC_LONG_ROW entries in the block (i_d, j_d, vals_d), the
-// rest are left to the one thread per row kernels. With use_list the rows are long_rows_d[0, n)
-// (indices into is_fine_local_d, listed by the one thread per row kernels), otherwise the teams
-// are the n fine rows and the short ones return. Adds the |val| of the block's fine
-// off-diagonal entries to diag_dom_ratio_d in the row's order, starting from 0 for the local
-// block (which also writes diag_entry_d) and from the local sum for the nonlocal block
+// A team per DDC_LONG_MAX_TEAMS-th of the n fine rows (one row each with fewer fine rows),
+// which does each of its rows with more than DDC_LONG_ROW entries in the block (i_d, j_d, vals_d)
+// in turn and skips the rest, left to the one thread per row kernels. Adds the |val| of the
+// block's fine off-diagonal entries to diag_dom_ratio_d in the row's order, starting from 0 for
+// the local block (which also writes diag_entry_d) and from the local sum for the nonlocal block
 // The team loads a chunk of the row into scratch at a time, |val| for an entry that counts and 0
 // for the rest, and one thread adds the chunk in order; adding 0 to the non-negative sum leaves
 // it unchanged, so the sum is bitwise that of the one thread per row loop
-static void ddc_ratio_long_rows(const bool use_list, const PetscIntKokkosView &long_rows_d, const PetscInt n, const PetscIntKokkosView &is_fine_local_d, \
+static void ddc_ratio_long_rows(const PetscInt n, const PetscIntKokkosView &is_fine_local_d, \
                   const PetscInt *i_d, const PetscInt *j_d, const PetscScalar *vals_d, const intKokkosView &cf_d, \
                   const bool local, const PetscScalarKokkosView &diag_entry_d, const PetscScalarKokkosView &diag_dom_ratio_d)
 {
@@ -36,47 +34,57 @@ static void ddc_ratio_long_rows(const bool use_list, const PetscIntKokkosView &l
    const size_t scratch = ScratchScalarView::shmem_size(DDC_LONG_CHUNK) + ScratchScalarView::shmem_size(1);
    Kokkos::TeamPolicy<> probe(exec, 1, 1);
    probe.set_scratch_size(0, Kokkos::PerTeam(scratch));
+   const PetscInt rows_per_team = (n + DDC_LONG_MAX_TEAMS - 1) / DDC_LONG_MAX_TEAMS;
+   const PetscInt n_teams = (n + rows_per_team - 1) / rows_per_team;
    auto body = KOKKOS_LAMBDA(const KokkosTeamMemberType &t) {
-      const PetscInt i_idx_is_row = use_list ? long_rows_d(t.league_rank()) : t.league_rank();
-      const PetscInt i = is_fine_local_d(i_idx_is_row);
-      const PetscInt row_start = i_d[i], row_end = i_d[i + 1];
-      if (row_end - row_start <= DDC_LONG_ROW) return;
-
       ScratchScalarView vals(t.team_scratch(0), DDC_LONG_CHUNK);
       // The diagonal, found by whichever thread loads it
       ScratchScalarView diag(t.team_scratch(0), 1);
-      Kokkos::single(Kokkos::PerTeam(t), [&]() { diag(0) = 0.0; });
-      PetscScalar sum_val = local ? 0.0 : diag_dom_ratio_d(i_idx_is_row);
+      const PetscInt first = t.league_rank() * rows_per_team;
+      const PetscInt last = first + rows_per_team < n ? first + rows_per_team : n;
 
-      for (PetscInt chunk = row_start; chunk < row_end; chunk += DDC_LONG_CHUNK)
+      for (PetscInt i_idx_is_row = first; i_idx_is_row < last; i_idx_is_row++)
       {
-         const PetscInt chunk_len = row_end - chunk < DDC_LONG_CHUNK ? row_end - chunk : DDC_LONG_CHUNK;
+         const PetscInt i = is_fine_local_d(i_idx_is_row);
+         const PetscInt row_start = i_d[i], row_end = i_d[i + 1];
+         // The same for the whole team, so no thread skips a barrier
+         if (row_end - row_start <= DDC_LONG_ROW) continue;
+
+         // The previous row is done with the scratch
          t.team_barrier();
-         Kokkos::parallel_for(Kokkos::TeamThreadRange(t, chunk_len), [&](const PetscInt c) {
-            const PetscInt k = chunk + c;
-            const PetscInt target_col = j_d[k];
-            PetscScalar val = 0.0;
-            // Is this column fine? F_POINT == -1
-            if (cf_d(target_col) == -1)
-            {
-               if (local && target_col == i) diag(0) = Kokkos::abs(vals_d[k]);
-               else val = Kokkos::abs(vals_d[k]);
-            }
-            vals(c) = val;
+         Kokkos::single(Kokkos::PerTeam(t), [&]() { diag(0) = 0.0; });
+         PetscScalar sum_val = local ? 0.0 : diag_dom_ratio_d(i_idx_is_row);
+
+         for (PetscInt chunk = row_start; chunk < row_end; chunk += DDC_LONG_CHUNK)
+         {
+            const PetscInt chunk_len = row_end - chunk < DDC_LONG_CHUNK ? row_end - chunk : DDC_LONG_CHUNK;
+            t.team_barrier();
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(t, chunk_len), [&](const PetscInt c) {
+               const PetscInt k = chunk + c;
+               const PetscInt target_col = j_d[k];
+               PetscScalar val = 0.0;
+               // Is this column fine? F_POINT == -1
+               if (cf_d(target_col) == -1)
+               {
+                  if (local && target_col == i) diag(0) = Kokkos::abs(vals_d[k]);
+                  else val = Kokkos::abs(vals_d[k]);
+               }
+               vals(c) = val;
+            });
+            t.team_barrier();
+            Kokkos::single(Kokkos::PerTeam(t), [&](PetscScalar &s) {
+               for (PetscInt c = 0; c < chunk_len; c++) s += vals(c);
+            }, sum_val);
+         }
+         t.team_barrier();
+         Kokkos::single(Kokkos::PerTeam(t), [&]() {
+            if (local) diag_entry_d(i_idx_is_row) = diag(0);
+            diag_dom_ratio_d(i_idx_is_row) = sum_val;
          });
-         t.team_barrier();
-         Kokkos::single(Kokkos::PerTeam(t), [&](PetscScalar &s) {
-            for (PetscInt c = 0; c < chunk_len; c++) s += vals(c);
-         }, sum_val);
       }
-      t.team_barrier();
-      Kokkos::single(Kokkos::PerTeam(t), [&]() {
-         if (local) diag_entry_d(i_idx_is_row) = diag(0);
-         diag_dom_ratio_d(i_idx_is_row) = sum_val;
-      });
    };
    const int team_size = std::min(DDC_LONG_TEAM, probe.team_size_max(body, Kokkos::ParallelForTag()));
-   Kokkos::TeamPolicy<> policy(exec, static_cast<int>(n), team_size);
+   Kokkos::TeamPolicy<> policy(exec, static_cast<int>(n_teams), team_size);
    policy.set_scratch_size(0, Kokkos::PerTeam(scratch));
    Kokkos::parallel_for(policy, body);
 }
@@ -158,28 +166,12 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // device ratios are bitwise the same as the CPU ones
    // The DDC compares these ratios against bin edges and many sit exactly on one,
    // so a different summation order would change the CF splitting
-   // Rows with at most DDC_LONG_ROW entries: one thread per row, which on big matrices lists the
-   // longer ones (in any order, each is summed on its own)
-   const bool use_list = local_rows_row >= DDC_LIST_MIN_ROWS;
-   PetscIntKokkosView long_rows_d;
-   Kokkos::View<PetscInt, Kokkos::DefaultExecutionSpace::memory_space> n_long_d;
-   PetscInt n_long = local_rows_row;
-   if (use_list)
-   {
-      long_rows_d = PetscIntKokkosView(Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "ddc_long_rows_d"), local_rows_row);
-      n_long_d = Kokkos::View<PetscInt, Kokkos::DefaultExecutionSpace::memory_space>(
-         Kokkos::view_alloc(Kokkos::WithoutInitializing, exec, "ddc_n_long_d"));
-      Kokkos::deep_copy(exec, n_long_d, 0);
-   }
+   // Rows with at most DDC_LONG_ROW entries: one thread per row
    Kokkos::parallel_for(
       Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(const PetscInt i_idx_is_row) {
 
          const PetscInt i = is_fine_local_d(i_idx_is_row);
-         if (device_local_i[i + 1] - device_local_i[i] > DDC_LONG_ROW)
-         {
-            if (use_list) long_rows_d(Kokkos::atomic_fetch_add(&n_long_d(), PetscInt(1))) = i_idx_is_row;
-            return;
-         }
+         if (device_local_i[i + 1] - device_local_i[i] > DDC_LONG_ROW) return;
          PetscScalar sum_val = 0.0, diag_val = 0.0;
          for (PetscInt k = device_local_i[i]; k < device_local_i[i + 1]; k++)
          {
@@ -198,12 +190,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Longer rows: one team per row. The team loads a chunk of the row into scratch, |val| for
    // each fine off-diagonal entry and 0 for the rest, then one thread adds the chunk in order
    // Adding 0 to the (non-negative) sum leaves it unchanged, so this is the same sum as above
-   if (use_list)
-   {
-      Kokkos::deep_copy(exec, n_long, n_long_d);
-      exec.fence();
-   }
-   ddc_ratio_long_rows(use_list, long_rows_d, n_long, is_fine_local_d, device_local_i, device_local_j, device_local_vals,
+   ddc_ratio_long_rows(local_rows_row, is_fine_local_d, device_local_i, device_local_j, device_local_vals,
                        cf_markers_d, true, diag_entry_d, diag_dom_ratio_d);
 
    // Finish the in-flight broadcast and only then read from the leaf
@@ -232,7 +219,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
       // Nothing to do if this rank has no off-process columns
       if (cols_ao > 0)
       {
-         if (use_list) Kokkos::deep_copy(exec, n_long_d, 0);
          Kokkos::parallel_for(
             Kokkos::RangePolicy<>(exec, 0, local_rows_row), KOKKOS_LAMBDA(const PetscInt i_idx_is_row) {
 
@@ -240,11 +226,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                // Most rows have no nonlocal entries
                const PetscInt ncols_nonlocal = device_nonlocal_i[i + 1] - device_nonlocal_i[i];
                if (ncols_nonlocal == 0) return;
-               if (ncols_nonlocal > DDC_LONG_ROW)
-               {
-                  if (use_list) long_rows_d(Kokkos::atomic_fetch_add(&n_long_d(), PetscInt(1))) = i_idx_is_row;
-                  return;
-               }
+               if (ncols_nonlocal > DDC_LONG_ROW) return;
 
                // Carry on from the local sum, as the CPU does
                PetscScalar sum_val = diag_dom_ratio_d(i_idx_is_row);
@@ -255,12 +237,7 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                }
                diag_dom_ratio_d(i_idx_is_row) = sum_val;
          });
-         if (use_list)
-         {
-            Kokkos::deep_copy(exec, n_long, n_long_d);
-            exec.fence();
-         }
-         ddc_ratio_long_rows(use_list, long_rows_d, n_long, is_fine_local_d, device_nonlocal_i, device_nonlocal_j, device_nonlocal_vals,
+         ddc_ratio_long_rows(local_rows_row, is_fine_local_d, device_nonlocal_i, device_nonlocal_j, device_nonlocal_vals,
                              cf_markers_nonlocal_d, false, diag_entry_d, diag_dom_ratio_d);
       }
    }
