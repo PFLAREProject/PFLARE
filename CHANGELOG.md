@@ -283,6 +283,8 @@ for earlier changes please see the git history.
   rows not pivoting, which gave Inf/NaN or inaccurate rows when a local block
   had a zero or small leading pivot (e.g. matrices with zero diagonals); it now
   uses LU with partial pivoting like the CPU LAPACK solve
+- Faster Kokkos dense direct solve for lAIR/SAI Z and ISAI rows: rows with
+  16 or fewer entries are solved by one thread each, with the same pivoting
 - Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z
   and ISAI rows dividing by zero (giving Inf/NaN) when a local block has a
   zero diagonal; zero diagonals are now replaced by 1, matching the CPU PCJACOBI
