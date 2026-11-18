@@ -91,6 +91,28 @@ static void ddc_ratio_long_rows(const PetscInt n, const PetscIntKokkosView &is_f
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Whether the local and nonlocal blocks of the matrix last asked about have rows with more than
+// DDC_LONG_ROW entries. Finding out needs a reduction read on the host (a sync), so it's kept for
+// the matrix (its id and state) and so done once per level rather than every DDC iteration
+// Without it ddc_ratio_long_rows would always launch, which costs ms even with no long rows
+static PetscObjectId ddc_long_rows_id = -1;
+static PetscObjectState ddc_long_rows_state = -1;
+static bool ddc_long_rows_local = true, ddc_long_rows_nonlocal = true;
+
+// Does a block with rows rows and row pointers i_d have a row with more than DDC_LONG_ROW entries
+static bool ddc_block_has_long_rows(const PetscInt rows, const PetscInt *i_d)
+{
+   if (rows == 0) return false;
+   auto exec = PetscGetKokkosExecutionSpace();
+   PetscInt max_len = 0;
+   Kokkos::parallel_reduce("DDCMaxRowLength", Kokkos::RangePolicy<>(exec, 0, rows),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &thread_max) {
+         const PetscInt len = i_d[i + 1] - i_d[i];
+         if (len > thread_max) thread_max = len;
+      }, Kokkos::Max<PetscInt>(max_len));
+   return max_len > DDC_LONG_ROW;
+}
+
 // Computes the diagonal dominance ratio of the input matrix over fine points in global variable cf_markers_local_d
 // This code is very similar to MatCreateSubMatrix_kokkos
 PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio_achieved, PetscInt *local_rows_aff)
@@ -120,6 +142,22 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    create_cf_is_device_kokkos(input_mat, match_cf, is_fine_local_d);
    PetscInt local_rows_row = is_fine_local_d.extent(0);
    *local_rows_aff = local_rows_row;
+
+   // Which blocks have long rows, found on the first call for this matrix
+   // (before the halo broadcast starts, so its sync doesn't cut into the overlap)
+   {
+      PetscObjectId id;
+      PetscObjectState state;
+      PetscCallVoid(PetscObjectGetId((PetscObject)*input_mat, &id));
+      PetscCallVoid(PetscObjectStateGet((PetscObject)*input_mat, &state));
+      if (id != ddc_long_rows_id || state != ddc_long_rows_state)
+      {
+         ddc_long_rows_local = ddc_block_has_long_rows(acc.local_rows, acc.local_i);
+         ddc_long_rows_nonlocal = mpi && cols_ao > 0 && ddc_block_has_long_rows(acc.local_rows, acc.nonlocal_i);
+         ddc_long_rows_id = id;
+         ddc_long_rows_state = state;
+      }
+   }
 
    // Create device memory for the diag_dom_ratio
    diag_dom_ratio_local_d = PetscScalarKokkosView("diag_dom_ratio_local_d", local_rows_row);
@@ -190,8 +228,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    // Longer rows: one team per row. The team loads a chunk of the row into scratch, |val| for
    // each fine off-diagonal entry and 0 for the rest, then one thread adds the chunk in order
    // Adding 0 to the (non-negative) sum leaves it unchanged, so this is the same sum as above
-   ddc_ratio_long_rows(local_rows_row, is_fine_local_d, device_local_i, device_local_j, device_local_vals,
-                       cf_markers_d, true, diag_entry_d, diag_dom_ratio_d);
+   if (ddc_long_rows_local)
+      ddc_ratio_long_rows(local_rows_row, is_fine_local_d, device_local_i, device_local_j, device_local_vals,
+                          cf_markers_d, true, diag_entry_d, diag_dom_ratio_d);
 
    // Finish the in-flight broadcast and only then read from the leaf
    if (mpi)
@@ -237,8 +276,9 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
                }
                diag_dom_ratio_d(i_idx_is_row) = sum_val;
          });
-         ddc_ratio_long_rows(local_rows_row, is_fine_local_d, device_nonlocal_i, device_nonlocal_j, device_nonlocal_vals,
-                             cf_markers_nonlocal_d, false, diag_entry_d, diag_dom_ratio_d);
+         if (ddc_long_rows_nonlocal)
+            ddc_ratio_long_rows(local_rows_row, is_fine_local_d, device_nonlocal_i, device_nonlocal_j, device_nonlocal_vals,
+                                cf_markers_nonlocal_d, false, diag_entry_d, diag_dom_ratio_d);
       }
    }
 
