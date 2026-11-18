@@ -2484,6 +2484,61 @@ PETSC_INTERN void MatSetAllValues_kokkos(Mat *input_mat, PetscScalar val)
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// An assembled identity with the same layout and Kokkos type as input_mat, built on the
+// device (one entry per row in the diagonal block, an empty off-diagonal block in parallel).
+// The rows' and columns' ownership ranges must match, as for a square matrix
+PETSC_INTERN void generate_identity_kokkos(Mat *input_mat, Mat *output_mat)
+{
+   MPI_Comm MPI_COMM_MATRIX;
+   MatType mat_type;
+   PetscInt local_rows, local_cols, global_rows, global_cols;
+
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
+   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
+
+   auto exec = PetscGetKokkosExecutionSpace();
+
+   auto i_local_d = Kokkos::View<PetscInt *>("i_local_d", local_rows + 1);
+   auto j_local_d = Kokkos::View<PetscInt *>("j_local_d", local_rows);
+   auto a_local_d = Kokkos::View<PetscScalar *>("a_local_d", local_rows);
+   Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, local_rows + 1), KOKKOS_LAMBDA(const PetscInt i) {
+      i_local_d(i) = i;
+      if (i < local_rows)
+      {
+         j_local_d(i) = i;
+         a_local_d(i) = 1.0;
+      }
+   });
+   // Let's make sure everything on the device is finished
+   Kokkos::fence();
+
+   Mat output_mat_local;
+   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
+
+   if (mpi)
+   {
+      // Empty off-diagonal block (the new views are zero-initialised)
+      auto i_nonlocal_d = Kokkos::View<PetscInt *>("i_nonlocal_d", local_rows + 1);
+      auto j_nonlocal_d = Kokkos::View<PetscInt *>("j_nonlocal_d", 0);
+      auto a_nonlocal_d = Kokkos::View<PetscScalar *>("a_nonlocal_d", 0);
+      Mat output_mat_nonlocal;
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, 0, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
+      // Always allocate the (empty) garray, the MPI matrix takes ownership of it
+      PetscInt *garray_host = NULL;
+      PetscCallVoid(PetscMalloc1(0, &garray_host));
+      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+   }
+   else
+   {
+      *output_mat = output_mat_local;
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
 // Duplicate and copy a matrix ensuring it always has a diagonal but with kokkos - keeping everything on the device
 // If raw_out is set (and not reusing), the output is returned there as device views and output_mat
 // isn't created

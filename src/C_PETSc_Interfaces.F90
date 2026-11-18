@@ -189,6 +189,17 @@ module c_petsc_interfaces
       end subroutine MatSetAllValues_kokkos
  
    end interface
+
+   interface
+
+      subroutine generate_identity_kokkos(A_array, B_array) &
+         bind(c, name="generate_identity_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+      end subroutine generate_identity_kokkos
+
+   end interface
    
    interface
 

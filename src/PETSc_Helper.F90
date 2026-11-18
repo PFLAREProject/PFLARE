@@ -4,7 +4,7 @@ module petsc_helper
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
-         MatSetAllValues_kokkos, &
+         MatSetAllValues_kokkos, generate_identity_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
          MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
          mat_mult_r_one_point_ap_kokkos, mat_mult_r_one_point_ap_raw_kokkos, rap_raw_drop_kokkos, &
@@ -2113,6 +2113,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array
+      PetscInt :: global_col_start, global_col_end_plus_one
+#endif
       
       ! ~~~~~~~~~~
 
@@ -2123,6 +2127,24 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetSize(input_mat, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
+
+#if defined(PETSC_HAVE_KOKKOS)
+      ! With Kokkos build it on the device, rather than a host MatSetValue per row
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+         call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)
+         if (global_col_start == global_row_start .AND. &
+               global_col_end_plus_one == global_row_end_plus_one) then
+            A_array = input_mat%v
+            call generate_identity_kokkos(A_array, B_array)
+            output_mat%v = B_array
+            call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
+            call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
+            return
+         end if
+      end if
+#endif
 
       call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
       call MatSetSizes(output_mat, local_rows, local_cols, &
