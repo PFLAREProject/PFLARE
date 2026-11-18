@@ -18,10 +18,10 @@
 // whichever kernel a row goes to)
 struct PowersLongRowTag {};
 
-// Rows longer than POW_LONG_FACTOR times the short rows' vector length, or than POW_LONG_MAX,
-// are long
+// Rows longer than POW_LONG_FACTOR times the short rows' vector length are long
+// (no fixed cap: at vector length 32 a cap of 32 sent nearly every row of a 5-point
+// stencil's powers to the long kernel, which was slower)
 #define POW_LONG_FACTOR 8
-#define POW_LONG_MAX 32
 // Lanes per team (threads times vector lanes) and the vector length for the long rows
 #define POW_LONG_TEAM_LANES 256
 #define POW_LONG_VECTOR_LENGTH 32
@@ -881,7 +881,7 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
       vector_length = std::min(vector_length, Kokkos::TeamPolicy<>::vector_length_max());
 
       // Rows with more entries than this are long
-      const PetscInt long_row_min = std::min(POW_LONG_FACTOR * vector_length, POW_LONG_MAX);
+      const PetscInt long_row_min = POW_LONG_FACTOR * vector_length;
 
       // The longest short and long rows, local plus nonlocal entries, size the scratch, and
       // the count of long rows
