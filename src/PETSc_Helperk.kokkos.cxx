@@ -28,6 +28,8 @@ struct RawShellCtx {
    // block apply alternates between two, the block smoother uses a third), so the result is what
    // PETSc's MatMatMult gives and its symbolic product is only done once per dense matrix
    // Each product holds a reference to its dense matrix, so a cached B can't be freed and reused
+   // Products with a different number of columns than the current B are freed, so the blocks of
+   // an earlier number of right hand sides aren't kept alive
    static constexpr int n_prod = 4;
    Mat real = NULL;
    Mat prod[n_prod] = {NULL, NULL, NULL, NULL}, prod_B[n_prod] = {NULL, NULL, NULL, NULL};
@@ -178,6 +180,19 @@ static PetscErrorCode raw_shell_mat_mult_dense(Mat A, Mat B, Mat C, void *)
       RawAIJKokkos raw = c->raw;
       wrap_rap_raw_kokkos(raw, &c->real);
    }
+   PetscInt n_cols;
+   PetscCall(MatGetSize(B, NULL, &n_cols));
+   for (int j = 0; j < RawShellCtx::n_prod; j++)
+   {
+      if (!c->prod[j]) continue;
+      PetscInt n_cols_j;
+      PetscCall(MatGetSize(c->prod[j], NULL, &n_cols_j));
+      if (n_cols_j != n_cols)
+      {
+         PetscCall(MatDestroy(&c->prod[j]));
+         c->prod_B[j] = NULL;
+      }
+   }
    int k = 0;
    while (k < RawShellCtx::n_prod && !(c->prod[k] && c->prod_B[k] == B)) k++;
    if (k < RawShellCtx::n_prod)
@@ -186,9 +201,11 @@ static PetscErrorCode raw_shell_mat_mult_dense(Mat A, Mat B, Mat C, void *)
    }
    else
    {
-      // Replace the oldest
-      k = c->prod_next;
-      c->prod_next = (c->prod_next + 1) % RawShellCtx::n_prod;
+      // Use a free slot, else replace the one after the slot filled last (round robin)
+      k = 0;
+      while (k < RawShellCtx::n_prod && c->prod[k]) k++;
+      if (k == RawShellCtx::n_prod) k = c->prod_next;
+      c->prod_next = (k + 1) % RawShellCtx::n_prod;
       PetscCall(MatDestroy(&c->prod[k]));
       PetscCall(MatMatMult(c->real, B, MAT_INITIAL_MATRIX, PETSC_DETERMINE, &c->prod[k]));
       c->prod_B[k] = B;
