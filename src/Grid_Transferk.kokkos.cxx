@@ -416,6 +416,11 @@ struct OnePointShellCtx {
    PetscIntKokkosView ghost_rows_d, ghost_idx_d, garray_d;
    PetscScalarKokkosView ghost_d;
    PetscSF sf = NULL;
+   // For P times a dense block: sf strided over the block's columns (made for one number of
+   // columns and leading dimension at a time) and its ghost values, column by column
+   PetscSF block_sf = NULL;
+   PetscInt block_sf_cols = -1, block_sf_lda = -1;
+   PetscScalarKokkosView ghost_block_d;
    // Host copies, only made if P is applied to vectors in host memory on a device build
    bool host_made = false;
    PetscIntKokkosViewHost target_h, ghost_rows_h, ghost_idx_h;
@@ -427,6 +432,7 @@ static PetscErrorCode one_point_shell_destroy(PetscCtxRt ctx)
    PetscFunctionBegin;
    OnePointShellCtx *c = *reinterpret_cast<OnePointShellCtx **>(ctx);
    if (c->sf) PetscCall(PetscSFDestroy(&c->sf));
+   if (c->block_sf) PetscCall(PetscSFDestroy(&c->block_sf));
    PetscCallCXX(delete c);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -616,9 +622,8 @@ static PetscErrorCode one_point_shell_mult_transpose_add(Mat P, Vec x, Vec y, Ve
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-// C = P B for dense B, one column at a time, wherever B lives
-// (PETSc's default for shells would bind B and C to the CPU on CUDA builds)
-static PetscErrorCode one_point_shell_mat_mult_dense(Mat P, Mat B, Mat C, void *)
+// C = P B for dense B, one column at a time (on the host for host blocks on a device build)
+static PetscErrorCode one_point_shell_mat_mult_dense_columns(Mat P, Mat B, Mat C)
 {
    PetscInt K;
 
@@ -632,6 +637,72 @@ static PetscErrorCode one_point_shell_mat_mult_dense(Mat P, Mat B, Mat C, void *
       PetscCall(MatDenseRestoreColumnVecRead(B, k, &x));
       PetscCall(MatDenseRestoreColumnVecWrite(C, k, &y));
    }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// C = P B for dense B: as one_point_shell_gather on every column at once, with one halo exchange
+// for all the columns (the shell's sf strided over them) rather than one per column
+// (PETSc's default for shells would bind B and C to the CPU on CUDA builds)
+// Each entry of C gets the same operations as in one_point_shell_gather, so C is the same
+static PetscErrorCode one_point_shell_mat_mult_dense(Mat P, Mat B, Mat C, void *)
+{
+   OnePointShellCtx *c;
+   const PetscScalar *b_ptr;
+   PetscScalar *c_ptr;
+   PetscMemType b_mtype, c_mtype;
+   PetscInt K, ldb, ldc;
+
+   PetscFunctionBegin;
+   PetscCall(MatShellGetContext(P, &c));
+   PetscCall(MatGetSize(B, NULL, &K));
+   PetscCall(MatDenseGetLDA(B, &ldb));
+   PetscCall(MatDenseGetLDA(C, &ldc));
+   PetscCall(MatDenseGetArrayReadAndMemType(B, &b_ptr, &b_mtype));
+   PetscCall(MatDenseGetArrayWriteAndMemType(C, &c_ptr, &c_mtype));
+   // Host blocks on a device build (or one on each side) go column by column
+   if (PetscMemTypeHost(b_mtype) != PetscMemTypeHost(c_mtype) || (PetscMemTypeHost(b_mtype) && !default_space_host_accessible)) {
+      PetscCall(MatDenseRestoreArrayReadAndMemType(B, &b_ptr));
+      PetscCall(MatDenseRestoreArrayWriteAndMemType(C, &c_ptr));
+      PetscCall(one_point_shell_mat_mult_dense_columns(P, B, C));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+
+   auto exec = PetscGetKokkosExecutionSpace();
+   const PetscMemType ghost_mtype = default_space_host_accessible ? PETSC_MEMTYPE_HOST : PETSC_MEMTYPE_KOKKOS;
+   const PetscInt n_ghost_cols = c->n_ghost_cols;
+   if (c->sf) {
+      if (c->block_sf_cols != K || c->block_sf_lda != ldb) {
+         if (c->block_sf) PetscCall(PetscSFDestroy(&c->block_sf));
+         PetscCall(PetscSFCreateStridedSF(c->sf, K, ldb, n_ghost_cols, &c->block_sf));
+         c->block_sf_cols = K;
+         c->block_sf_lda = ldb;
+         if ((PetscInt)c->ghost_block_d.extent(0) < n_ghost_cols * K) c->ghost_block_d = PetscScalarKokkosView("ghost_block_d", n_ghost_cols * K);
+      }
+      // Start sending the coarse values that other ranks need, the local rows don't need them
+      if (PetscMemTypeDevice(b_mtype)) PetscCall(sf_sync_before_begin_kokkos());
+      PetscCall(PetscSFBcastWithMemTypeBegin(c->block_sf, MPIU_SCALAR, b_mtype, b_ptr, ghost_mtype, c->ghost_block_d.data(), MPI_REPLACE));
+   }
+   auto target_d = c->target_d;
+   Kokkos::parallel_for(
+      Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left>, Kokkos::IndexType<PetscInt>>(exec, {0, 0}, {c->local_rows, K}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt k) {
+         const PetscInt t = target_d(i);
+         c_ptr[i + k * ldc] = t >= 0 ? b_ptr[t + k * ldb] : 0.0;
+   });
+   if (c->sf) {
+      PetscScalar *ghost = c->ghost_block_d.data();
+      PetscCall(PetscSFBcastEnd(c->block_sf, MPIU_SCALAR, b_ptr, ghost, MPI_REPLACE));
+      if (PetscMemTypeDevice(b_mtype)) PetscCall(sf_sync_after_end_kokkos());
+      // Rows with off-rank entries were zero above
+      auto ghost_rows_d = c->ghost_rows_d, ghost_idx_d = c->ghost_idx_d;
+      Kokkos::parallel_for(
+         Kokkos::MDRangePolicy<Kokkos::Rank<2, Kokkos::Iterate::Left>, Kokkos::IndexType<PetscInt>>(exec, {0, 0}, {c->n_ghost_rows, K}), KOKKOS_LAMBDA(const PetscInt g, const PetscInt k) {
+            c_ptr[ghost_rows_d(g) + k * ldc] += ghost[ghost_idx_d(g) + k * n_ghost_cols];
+      });
+   }
+   // On the device everything is ordered on the PETSc stream, so only the host waits
+   if (PetscMemTypeHost(ghost_mtype)) exec.fence();
+   PetscCall(MatDenseRestoreArrayReadAndMemType(B, &b_ptr));
+   PetscCall(MatDenseRestoreArrayWriteAndMemType(C, &c_ptr));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
