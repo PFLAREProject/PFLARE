@@ -517,8 +517,9 @@ static PetscErrorCode one_point_shell_scatter(const ExecSpace &exec, OnePointShe
          const PetscInt t = target[i];
          if (t >= 0) Kokkos::atomic_add(&y[t], x[i]);
    });
-   // On the device the unpack into y is ordered after this on the PETSc stream
+   // The unpack into y in ReduceEnd may run on another stream, so these adds have to be finished first
    if (PetscMemTypeHost(ghost_mtype)) exec.fence();
+   else if (c->sf) PetscCall(fence_kokkos_if_streams_differ());
    if (c->sf) {
       PetscCall(PetscSFReduceEnd(c->sf, MPIU_SCALAR, ghost, y, MPI_SUM));
       if (PetscMemTypeDevice(y_mtype)) PetscCall(sf_sync_after_end_kokkos());
@@ -670,6 +671,9 @@ static PetscErrorCode one_point_shell_mat_mult_dense(Mat P, Mat B, Mat C, void *
    auto exec = PetscGetKokkosExecutionSpace();
    const PetscMemType ghost_mtype = default_space_host_accessible ? PETSC_MEMTYPE_HOST : PETSC_MEMTYPE_KOKKOS;
    const PetscInt n_ghost_cols = c->n_ghost_cols;
+   // Device dense blocks are read and written by PETSc on the stream of the current device
+   // context, so wait for that stream before the kernels below touch B and C
+   if (PetscMemTypeDevice(b_mtype)) PetscCall(sync_device_context_if_streams_differ_kokkos());
    if (c->sf) {
       if (c->block_sf_cols != K || c->block_sf_lda != ldb) {
          if (c->block_sf) PetscCall(PetscSFDestroy(&c->block_sf));
@@ -699,8 +703,9 @@ static PetscErrorCode one_point_shell_mat_mult_dense(Mat P, Mat B, Mat C, void *
             c_ptr[ghost_rows_d(g) + k * ldc] += ghost[ghost_idx_d(g) + k * n_ghost_cols];
       });
    }
-   // On the device everything is ordered on the PETSc stream, so only the host waits
+   // The host waits for the kernels; on the device, PETSc's later work on C may be on another stream
    if (PetscMemTypeHost(ghost_mtype)) exec.fence();
+   else PetscCall(fence_kokkos_if_streams_differ());
    PetscCall(MatDenseRestoreArrayReadAndMemType(B, &b_ptr));
    PetscCall(MatDenseRestoreArrayWriteAndMemType(C, &c_ptr));
    PetscFunctionReturn(PETSC_SUCCESS);

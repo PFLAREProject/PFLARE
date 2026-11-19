@@ -147,7 +147,9 @@ static inline PetscErrorCode petsc_streams_differ_kokkos(PetscDeviceContext *dct
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static inline PetscErrorCode sf_sync_before_begin_kokkos()
+// Wait for kernels on the PETSc execution space if the current PETSc device context has
+// another stream, e.g. before work on that stream uses what the kernels wrote
+static inline PetscErrorCode fence_kokkos_if_streams_differ()
 {
    PetscDeviceContext dctx;
    PetscBool differ;
@@ -155,6 +157,13 @@ static inline PetscErrorCode sf_sync_before_begin_kokkos()
    PetscFunctionBegin;
    PetscCall(petsc_streams_differ_kokkos(&dctx, &differ));
    if (differ) PetscGetKokkosExecutionSpace().fence();
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_before_begin_kokkos()
+{
+   PetscFunctionBegin;
+   PetscCall(fence_kokkos_if_streams_differ());
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
