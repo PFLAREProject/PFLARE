@@ -1211,19 +1211,21 @@ module air_operators_setup
       ! Calculate R
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~    
+      ! R can stay a raw shell only with a one point P, as only R * (A * P) without A * P as a
+      ! matrix can use it; the other products assemble it straight away
       if (r_from_a_diag) then
          call compute_R_from_A_diag(A, inv_dropped_Aff, our_level, air_data%kokkos_is_views_handle, &
                   global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
                   air_data%options%r_drop, &
-                  air_data%restrictors(our_level), raw_shell = raw_shells_ok(air_data))
+                  air_data%restrictors(our_level), raw_shell = raw_shells_fc_ok(air_data))
          if (destroy_mat) call MatDestroy(inv_dropped_Aff, ierr)
       else if (z_raw) then
          call compute_R_from_raw_Z(z_raw_handle, global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
                   air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
                   air_data%restrictors(our_level), &
-                  air_data%options%r_drop, raw_shell = raw_shells_ok(air_data))
+                  air_data%options%r_drop, raw_shell = raw_shells_fc_ok(air_data))
       else if (fuse_z_drop) then
          call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z), global_row_start, &
                   air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
