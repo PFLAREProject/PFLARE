@@ -123,3 +123,5 @@ jobs:
           eval make -j"$(nproc)" $PFLARE_FLAGS tests
           # Only run here: checks the solves make no host/device copies, which needs a GPU and GPU-aware MPI
           eval make -j"$(nproc)" $PFLARE_FLAGS tests_copies
+          # Only run here: the long row Kokkos kernels' GPU launch shapes
+          eval make -j"$(nproc)" $PFLARE_FLAGS tests_gpu

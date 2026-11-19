@@ -2452,6 +2452,30 @@ run_tests_copies:
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
+# Solves on a matrix with a few long rows, so the long row Kokkos kernels run
+# (DDC ratios, fixed sparsity powers and the SAI/ISAI Z solves). Their GPU
+# launch shapes only run on a GPU, so they run from the GPU CI workflow and
+# are deliberately not part of make tests
+run_tests_gpu:
+	@echo ""
+	@echo "--- Running long row tests ---"
+	@echo "Test AIRG on a matrix with long rows, with a second setup on new values"
+	./long_rows -second_solve -ksp_max_it 5
+	@echo "Test lAIR on a matrix with long rows"
+	./long_rows -pc_air_z_type lair -ksp_max_it 5
+	@echo "Test PCPFLAREINV ISAI on a matrix with long rows"
+	./long_rows -pc_type pflareinv -pc_pflareinv_type isai -ksp_max_it 125
+	@echo "Test PCPFLAREINV power basis on a matrix with long rows"
+	./long_rows -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 125
+	@echo "Test AIRG in parallel on a matrix with long rows, with a second setup on new values"
+	$(MPIEXEC) -n 2 ./long_rows -second_solve -ksp_max_it 5
+	@echo "Test lAIR in parallel on a matrix with long rows"
+	$(MPIEXEC) -n 2 ./long_rows -pc_air_z_type lair -ksp_max_it 5
+	@echo "Test PCPFLAREINV ISAI in parallel on a matrix with long rows"
+	$(MPIEXEC) -n 2 ./long_rows -pc_type pflareinv -pc_pflareinv_type isai -ksp_max_it 125
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
 # The MPI collective counting library the -check_collectives tests preload,
 # see count_collectives.c. It is preloaded rather than linked into the tests
 libcount_collectives.so: count_collectives.c
