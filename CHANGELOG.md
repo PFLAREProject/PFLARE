@@ -286,7 +286,8 @@ for earlier changes please see the git history.
 - Faster Kokkos dense direct solve for lAIR/SAI Z and ISAI rows: rows with
   16 or fewer entries are solved by one thread each, with the same pivoting
 - With Kokkos, identity matrices (e.g. the -I right-hand side of ISAI) are built
-  on the device again rather than with a host MatSetValue per row
+  on the device again rather than with a host MatSetValue per row, and the
+  Kokkos lAIR/SAI Z and ISAI output matrix is duplicated from its sparsity on the device
 - Faster Kokkos Jacobi local solves for lAIR/SAI Z and ISAI rows with 41 to 1024
   entries, which now iterate on a dense block rather than a sparse one
 - Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z

@@ -200,6 +200,17 @@ module c_petsc_interfaces
       end subroutine generate_identity_kokkos
 
    end interface
+
+   interface
+
+      subroutine mat_duplicate_structure_kokkos(A_array, B_array) &
+         bind(c, name="mat_duplicate_structure_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+      end subroutine mat_duplicate_structure_kokkos
+
+   end interface
    
    interface
 

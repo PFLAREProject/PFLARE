@@ -2539,6 +2539,80 @@ PETSC_INTERN void generate_identity_kokkos(Mat *input_mat, Mat *output_mat)
 
 //------------------------------------------------------------------------------------------------------------------------
 
+// Copy the CSR structure of a SeqAIJKokkos block into new device views with zero values
+static void duplicate_structure_block_kokkos(Mat block, Kokkos::View<PetscInt *> &i_d, Kokkos::View<PetscInt *> &j_d,
+                                             Kokkos::View<PetscScalar *> &a_d)
+{
+   PetscInt m, n;
+   PetscMemType mtype;
+   const PetscInt *block_i = nullptr, *block_j = nullptr;
+   PetscCallVoid(MatGetSize(block, &m, &n));
+   PetscCallVoid(MatSeqAIJGetCSRAndMemType(block, &block_i, &block_j, NULL, &mtype));
+   auto exec = PetscGetKokkosExecutionSpace();
+   using ConstIntDeviceView = Kokkos::View<const PetscInt *, DefaultMemorySpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
+
+   // The row pointer's last entry is the nnz, read it back to size j and a
+   PetscInt nnz = 0;
+   i_d = Kokkos::View<PetscInt *>("i_d", m + 1);
+   Kokkos::deep_copy(exec, i_d, ConstIntDeviceView(block_i, m + 1));
+   Kokkos::deep_copy(exec, nnz, Kokkos::subview(i_d, m));
+   exec.fence();
+   j_d = Kokkos::View<PetscInt *>("j_d", nnz);
+   a_d = Kokkos::View<PetscScalar *>("a_d", nnz);
+   Kokkos::deep_copy(exec, j_d, ConstIntDeviceView(block_j, nnz));
+   Kokkos::fence();
+}
+
+// MatDuplicate(input_mat, MAT_DO_NOT_COPY_VALUES, output_mat) for an assembled Kokkos AIJ
+// matrix, done on the device: the same nonzero pattern (and in parallel the same
+// garray) with zero values, without the host duplicate and upload of PETSc's
+PETSC_INTERN void mat_duplicate_structure_kokkos(Mat *input_mat, Mat *output_mat)
+{
+   MPI_Comm MPI_COMM_MATRIX;
+   MatType mat_type;
+   PetscInt global_rows, global_cols;
+
+   PetscCallVoid(PetscObjectGetComm((PetscObject)*input_mat, &MPI_COMM_MATRIX));
+   PetscCallVoid(MatGetType(*input_mat, &mat_type));
+   PetscCallVoid(MatGetSize(*input_mat, &global_rows, &global_cols));
+   const bool mpi = strcmp(mat_type, MATMPIAIJKOKKOS) == 0;
+
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+   const PetscInt *colmap = NULL;
+   if (mpi) PetscCallVoid(MatMPIAIJGetSeqAIJ(*input_mat, &mat_local, &mat_nonlocal, &colmap));
+   else mat_local = *input_mat;
+
+   PetscInt local_rows, local_cols;
+   PetscCallVoid(MatGetSize(mat_local, &local_rows, &local_cols));
+
+   Kokkos::View<PetscInt *> i_local_d, j_local_d;
+   Kokkos::View<PetscScalar *> a_local_d;
+   duplicate_structure_block_kokkos(mat_local, i_local_d, j_local_d, a_local_d);
+   Mat output_mat_local;
+   PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, local_cols, i_local_d, j_local_d, a_local_d, &output_mat_local));
+
+   if (mpi)
+   {
+      PetscInt rows_ao, cols_ao;
+      PetscCallVoid(MatGetSize(mat_nonlocal, &rows_ao, &cols_ao));
+      Kokkos::View<PetscInt *> i_nonlocal_d, j_nonlocal_d;
+      Kokkos::View<PetscScalar *> a_nonlocal_d;
+      duplicate_structure_block_kokkos(mat_nonlocal, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d);
+      Mat output_mat_nonlocal;
+      PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, rows_ao, cols_ao, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
+      // The MPI matrix takes ownership of its garray, a copy of the input's
+      PetscInt *garray_host = NULL;
+      PetscCallVoid(PetscMalloc1(cols_ao, &garray_host));
+      if (cols_ao > 0) PetscCallVoid(PetscArraycpy(garray_host, colmap, cols_ao));
+      PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
+   }
+   else
+   {
+      *output_mat = output_mat_local;
+   }
+}
+
+
 // Duplicate and copy a matrix ensuring it always has a diagonal but with kokkos - keeping everything on the device
 // If raw_out is set (and not reusing), the output is returned there as device views and output_mat
 // isn't created

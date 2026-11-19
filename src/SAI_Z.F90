@@ -5,7 +5,7 @@ module sai_z
    use binary_tree, only: itree, itree2vector, flush_tree
    use sorting, only: create_knuth_shuffle_tree_array, intersect_pre_sorted_indices_only, &
          merge_pre_sorted
-   use c_petsc_interfaces, only: calculate_and_build_sai_z_kokkos
+   use c_petsc_interfaces, only: calculate_and_build_sai_z_kokkos, mat_duplicate_structure_kokkos
    use petsc_helper, only: generate_identity, kokkos_debug, destroy_matrix_reuse, MatAXPYWrapper, &
          mat_mat_symbolic
    use pflare_parameters, only: AIR_Z_PRODUCT, AIR_Z_LAIR, AIR_Z_LAIR_SAI, PFLAREINV_SAI, PFLAREINV_ISAI, &
@@ -762,7 +762,7 @@ module sai_z
       integer :: errorcode, reuse_int
       integer(c_int) :: no_approx_solve_int
       PetscErrorCode :: ierr
-      MatType :: mat_type
+      MatType :: mat_type, mat_type_sparsity
       logical :: reuse_triggered
       type(tMat) :: temp_mat, temp_mat_reuse, temp_mat_compare
       type(tMat) :: reuse_mat_cpu
@@ -782,7 +782,16 @@ module sai_z
          ! We're enforcing the same sparsity 
          ! If not re-using
          if (PetscObjectIsNull(z)) then
-            call MatDuplicate(sparsity_mat_cf, MAT_DO_NOT_COPY_VALUES, z, ierr)
+            ! Duplicate the sparsity's structure on the device if we can, PETSc's
+            ! MatDuplicate does it on the host and then copies it to the device
+            call MatGetType(sparsity_mat_cf, mat_type_sparsity, ierr)
+            if (mat_type_sparsity == MATMPIAIJKOKKOS .OR. mat_type_sparsity == MATSEQAIJKOKKOS) then
+               sparsity_arr = sparsity_mat_cf%v
+               call mat_duplicate_structure_kokkos(sparsity_arr, z_arr)
+               z%v = z_arr
+            else
+               call MatDuplicate(sparsity_mat_cf, MAT_DO_NOT_COPY_VALUES, z, ierr)
+            end if
          end if
 
          ! We know we will never have non-zero locations outside of the sparsity 
