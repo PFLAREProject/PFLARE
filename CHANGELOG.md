@@ -287,6 +287,8 @@ for earlier changes please see the git history.
   16 or fewer entries are solved by one thread each, with the same pivoting
 - With Kokkos, identity matrices (e.g. the -I right-hand side of ISAI) are built
   on the device again rather than with a host MatSetValue per row
+- Faster Kokkos Jacobi local solves for lAIR/SAI Z and ISAI rows with 41 to 1024
+  entries, which now iterate on a dense block rather than a sparse one
 - Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z
   and ISAI rows dividing by zero (giving Inf/NaN) when a local block has a
   zero diagonal; zero diagonals are now replaced by 1, matching the CPU PCJACOBI
