@@ -364,6 +364,10 @@ module grid_transfer
       PetscRandom :: rctx
       PetscReal :: norm_fine, norm_coarse
       MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vec_type
+      type(tMat) :: B_dense, C_dense, C_dense_ref
+      PetscInt :: local_fine, local_coarse, global_fine, global_coarse
+      PetscInt, parameter :: n_rhs = 3
 #endif
       ! ~~~~~~~~~~
 
@@ -432,6 +436,28 @@ module grid_transfer
                print *, "Diff matrix-free and assembled one point P", norm_fine, norm_coarse
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
             end if
+
+            ! And applied to a random dense block of the vectors' type (as for multiple right hand
+            ! sides), twice so the second apply reuses the product
+            call VecGetType(x_coarse, vec_type, ierr)
+            call MatGetLocalSize(P_assembled, local_fine, local_coarse, ierr)
+            call MatGetSize(P_assembled, global_fine, global_coarse, ierr)
+            call MatCreateDenseFromVecType(MPI_COMM_MATRIX, vec_type, local_coarse, PETSC_DECIDE, &
+                     global_coarse, n_rhs, PETSC_DECIDE, PETSC_NULL_SCALAR, B_dense, ierr)
+            call MatSetRandom(B_dense, rctx, ierr)
+            call MatMatMult(P, B_dense, MAT_INITIAL_MATRIX, PETSC_DEFAULT_REAL, C_dense, ierr)
+            call MatMatMult(P, B_dense, MAT_REUSE_MATRIX, PETSC_DEFAULT_REAL, C_dense, ierr)
+            call MatMatMult(P_assembled, B_dense, MAT_INITIAL_MATRIX, PETSC_DEFAULT_REAL, C_dense_ref, ierr)
+            call MatAXPY(C_dense, PFLARE_MINUS_ONE, C_dense_ref, SAME_NONZERO_PATTERN, ierr)
+            call MatNorm(C_dense, NORM_INFINITY, norm_fine, ierr)
+            if (norm_fine .gt. PFLARE_TOL_MATFREE_12 .OR. norm_fine/=norm_fine) then
+               print *, "Diff matrix-free and assembled one point P on a dense block", norm_fine
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(B_dense, ierr)
+            call MatDestroy(C_dense, ierr)
+            call MatDestroy(C_dense_ref, ierr)
+
             call VecDestroy(x_coarse, ierr)
             call VecDestroy(x_fine, ierr)
             call VecDestroy(y_coarse, ierr)
