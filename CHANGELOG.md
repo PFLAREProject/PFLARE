@@ -6,86 +6,10 @@ for earlier changes please see the git history.
 
 ## Unreleased
 
-- The first pass of the PMISR DDC and diagonal dominance CF splittings now runs
-  straight from the matrix with Kokkos, without building the strength matrix,
-  which cuts the GPU coarsening time; the CF splitting is unchanged
-- With Kokkos matrices, PCAIR and PCPFLAREINV setups skip PETSc's host inode
-  check on the matrices they build, as if `-mat_no_inode` were set (unless the
-  user sets it); the device kernels never use inodes
-- Faster submatrix extraction with Kokkos (Aff, Afc, Acf and friends in the
-  PCAIR setup), with the same output
-- Faster dropping of small entries with Kokkos (Z, W, the coarse matrices and
-  the strength matrix in the PCAIR setup); without sparsity reuse, Z and the
-  coarse matrices are no longer copied on levels where nothing is dropped
-- With Kokkos and without sparsity reuse, the one point classical prolongator
-  is built straight from Afc, without building W first; P is unchanged
-- Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos (the
-  Aff inverse used to build Z in AIRG); the result only changes by rounding
-- With Kokkos and a one point classical prolongator, the A*P product in the
-  coarse matrix is now a relabelling of the columns of A rather than a sparse
-  matrix-matrix product; the coarse matrix only changes by rounding
-- With Kokkos and without sparsity reuse, the one point classical prolongator
-  is now matrix-free (a `MATSHELL` applied on the device), so the
-  interpolation PCAIR gives PCMG is a shell rather than an assembled matrix
-- Faster diagonal dominance ratios in the DDC pass with Kokkos; the ratios are
-  now computed in the same order as on the CPU, so they match it exactly and
-  the GPU CF splitting can differ slightly from before
-- Without sparsity reuse or `constrain_z`, the small entries of Z are dropped
-  while R is built from it, without building the dropped Z; R is unchanged
-- With Kokkos, a diagonal Aff is built as a `MATDIAGONAL` straight from the
-  diagonal of the operator, without extracting Aff first; Aff is unchanged
-- With Kokkos, on levels where the Aff inverse used for Z is diagonal (and
-  without sparsity reuse, `constrain_z` or `improve_z`), R is built straight
-  from the operator, without extracting Acf or building Z; R is unchanged
-- With Kokkos, a one point classical prolongator and without sparsity reuse,
-  the coarse matrix R*(A*P) is computed without building A*P as a matrix;
-  the coarse matrix is unchanged
-- In the same case, small entries are dropped from R*(A*P) without building it
-  as a matrix first, unless nothing is dropped; the coarse matrix is unchanged
-- With Kokkos, where R is built from Z with the drop in one pass, Z is
-  computed without building it as a matrix; R is unchanged
-- In the same case, with a power or Arnoldi inverse of sparsity order 1, the
-  assembled Aff inverse used for Z is not built as a matrix either; R is
-  unchanged
-- With Kokkos vectors, the Krylov space for the GMRES polynomial coefficients
-  is built on one device buffer, without the zero-filled host copy PETSc's
-  `VecDuplicateVecs` makes, which cuts the GPU setup time
-- Likewise, PCAIR now gives PCMG its per-level `b`, `x` and `r` vectors, and
-  builds its smoothing pools, matrix-free polynomial temporaries and diagonal
-  Aff vectors on the device without a host copy (also on a single rank)
-- In parallel with Kokkos vectors, the work vectors PETSc makes for each
-  level's smoother are also made on the device without a host copy
-- With Kokkos, the coarse matrices on the lower levels are kept as device
-  data inside the setup instead of being built as PETSc matrices, unless an
-  option needs a real matrix; the hierarchy is unchanged
-- Likewise the restrictors, which PCMG then applies through a shell with the
-  same device products as before
-- Likewise the fine-fine, fine-coarse and coarse-fine blocks of each level
-  with the default one point prolongator, Arnoldi and matrix-free smoothing
-- All of these now also apply with C point smoothing, as does the
-  coarse-coarse block when its inverse is a matrix-free Arnoldi polynomial
-- All of these now also apply with the `diag_dom` and `pmis` CF splittings
-- With an assembled (not matrix-free) Arnoldi smoother, the fine-fine block
-  and the smoother's inverse are kept as device data too
-- With a matrix-free polynomial coarse grid solver, the auto truncation test
-  runs on that device data, and only the level it stops at is assembled
-- Faster assembly of fixed sparsity GMRES polynomial inverses with Kokkos in
-  parallel, from sizing the kernel's scratch by the longest row and handling
-  the local and nonlocal entries of each row in separate loops; rows much
-  longer than average get a whole team each
-- Faster parallel coarse matrix and Z products with Kokkos on GPUs: the
-  product of the off-process block with the fetched rows uses KKMEM directly
-- Faster PMISR with Kokkos: the cross-rank part of the symmetrized strong
-  graph only involves the rows other ranks hold as ghosts, the row kernels
-  use vector lanes over each row, and in PCAIR the random measure is drawn
-  once per setup rather than on every level; the CF splitting is unchanged
-- Faster `diag_dom` CF splitting with Kokkos: each DDC pass picks the F points
-  to swap straight from the matrix, without extracting Aff; the CF splitting
-  is unchanged
-- With Kokkos, the first pass of the `pmis` CF splitting also runs straight
-  from the matrix, as do those of `pmisr_ddc` and `diag_dom` without
-  symmetrizing; `pmis_dist2` and `pmis_agg` use the same device PMISR on their
-  strength matrix; the CF splitting is unchanged
+- Much faster PCAIR setup with Kokkos on GPUs, from faster device kernels and
+  keeping most of the setup's intermediate matrices as device data; results are
+  unchanged or change only by rounding, except the DDC ratios now match the CPU
+- Faster Kokkos lAIR/SAI Z and ISAI setup
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below
@@ -283,13 +207,6 @@ for earlier changes please see the git history.
   rows not pivoting, which gave Inf/NaN or inaccurate rows when a local block
   had a zero or small leading pivot (e.g. matrices with zero diagonals); it now
   uses LU with partial pivoting like the CPU LAPACK solve
-- Faster Kokkos dense direct solve for lAIR/SAI Z and ISAI rows: rows with
-  16 or fewer entries are solved by one thread each, with the same pivoting
-- With Kokkos, identity matrices (e.g. the -I right-hand side of ISAI) are built
-  on the device again rather than with a host MatSetValue per row, and the
-  Kokkos lAIR/SAI Z and ISAI output matrix is duplicated from its sparsity on the device
-- Faster Kokkos Jacobi local solves for lAIR/SAI Z and ISAI rows with 41 to 1024
-  entries, which now iterate on a dense block rather than a sparse one
 - Fixed the Kokkos Jacobi approximate local solves used to build lAIR/SAI Z
   and ISAI rows dividing by zero (giving Inf/NaN) when a local block has a
   zero diagonal; zero diagonals are now replaced by 1, matching the CPU PCJACOBI
