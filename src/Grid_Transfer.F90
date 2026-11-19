@@ -363,6 +363,7 @@ module grid_transfer
       type(tVec) :: x_coarse, x_fine, y_coarse, y_fine, x_coarse_ref, x_fine_ref
       PetscRandom :: rctx
       PetscReal :: norm_fine, norm_coarse
+      MPIU_Comm :: MPI_COMM_MATRIX
 #endif
       ! ~~~~~~~~~~
 
@@ -404,7 +405,8 @@ module grid_transfer
 
             ! The matrix-free P applied to a random vector (forward, adding and transposed)
             ! should match the assembled P
-            call PetscRandomCreate(MPI_COMM_WORLD, rctx, ierr)
+            call PetscObjectGetComm(P_assembled, MPI_COMM_MATRIX, ierr)
+            call PetscRandomCreate(MPI_COMM_MATRIX, rctx, ierr)
             call MatCreateVecs(P_assembled, x_coarse, x_fine, ierr)
             call VecDuplicate(x_coarse, y_coarse, ierr)
             call VecDuplicate(x_fine, y_fine, ierr)
