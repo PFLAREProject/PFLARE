@@ -97,7 +97,7 @@ PETSC_VISIBILITY_INTERNAL bool is_raw_shell(Mat A);
 // Fill acc from A (a Kokkos AIJ matrix or a raw shell); restore after use
 PETSC_VISIBILITY_INTERNAL void aij_device_access_get(Mat A, AIJDeviceAccess &acc);
 PETSC_VISIBILITY_INTERNAL void aij_device_access_restore(AIJDeviceAccess &acc);
-// Makes a raw shell holding raw (the shell takes the views; raw is left as it was)
+// Makes a raw shell holding raw (the shell shares the views; raw is left as it was)
 PETSC_VISIBILITY_INTERNAL void raw_shell_create_kokkos(const RawAIJKokkos &raw, Mat *A);
 // The global column and value of each row's entry in a one point shell prolongator
 // (Grid_Transferk), false if P isn't one

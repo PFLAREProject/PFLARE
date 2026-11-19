@@ -13,7 +13,7 @@ static char help[] = "Solves an upwind advection matrix with a few long rows, so
   The default hub lengths are picked to land in each of the row length regimes of the
   Kokkos kernels: the DDC ratios (more than 64 entries), the fixed sparsity powers
   kernel (more than 8 times the vector length) and the thread, team, dense block and
-  iterative solves in SAI/ISAI (16, 40 and 1024 entries).
+  iterative solves in lAIR/ISAI (16, 40 and 1024 entries).
 
   With -second_solve the matrix gets new values and is solved again with the same KSP,
   so the setup runs again on a matrix with a new state.
@@ -44,7 +44,7 @@ int main(int argc, char **args)
   PetscCall(PetscInitialize(&argc, &args, (char *)0, help));
 
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-n", &n, NULL));
-  // n_hubs comes back as 0 when the option isn't given, so only take it when it is
+  // n_given comes back as 0 when the option isn't given, so only take it when it is
   n_given = MAX_HUBS;
   PetscCall(PetscOptionsGetIntArray(NULL, NULL, "-hub_lengths", hub_lengths, &n_given, &flg));
   if (flg) n_hubs = n_given;

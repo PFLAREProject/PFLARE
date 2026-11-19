@@ -1530,7 +1530,7 @@ PETSC_INTERN void compute_P_from_W_kokkos(Mat *input_mat, PetscInt global_row_st
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Row kernels for compute_R_from_Z_drop_kokkos
+// Row kernels for r_from_z_drop_core
 // Each team handles team_size rows of Z, one thread per row, with vector lanes over the
 // entries in that row
 // The drop is the one remove_small_from_sparse_kokkos does with relative_max_row_tolerance_int = 1,
@@ -1701,12 +1701,6 @@ struct RFromZInput {
    PetscInt nnz_l = 0, nnz_nl = 0;
 };
 
-// Drop small entries from Z and stick it in a full sized R with the identity, in one pass and
-// without building the dropped Z as a matrix, from Z's blocks
-// Gives the same R as remove_small_from_sparse_kokkos on Z (relative row tolerance, no lumping)
-// followed by compute_R_from_Z_kokkos with identity and without reuse
-// Also creates orig_fine_col_indices for the columns of the dropped Z (local, then the nonlocal
-// columns that are kept on this rank)
 // The output R from its blocks on the device as a raw shell (see raw_shell_create_kokkos) rather than a
 // PETSc matrix; garray_host (the global columns of the nonlocal block) is freed
 static void r_raw_shell_output(MPI_Comm comm, const bool mpi, const PetscInt local_rows, const PetscInt local_cols, \
@@ -1748,6 +1742,12 @@ static void r_raw_shell_output(MPI_Comm comm, const bool mpi, const PetscInt loc
    raw_shell_create_kokkos(raw, output_mat);
 }
 
+// Drop small entries from Z and stick it in a full sized R with the identity, in one pass and
+// without building the dropped Z as a matrix, from Z's blocks
+// Gives the same R as remove_small_from_sparse_kokkos on Z (relative row tolerance, no lumping)
+// followed by compute_R_from_Z_kokkos with identity and without reuse
+// Also creates orig_fine_col_indices for the columns of the dropped Z (local, then the nonlocal
+// columns that are kept on this rank)
 // If raw_shell_int is set, output_mat is a raw shell rather than a PETSc matrix
 static void r_from_z_drop_core(const RFromZInput &z, PetscInt global_row_start, IS *is_fine, \
                   IS *is_coarse, IS *orig_fine_col_indices, const PetscReal tol, Mat *output_mat, \
@@ -2267,14 +2267,12 @@ PETSC_INTERN void compute_R_from_A_diag_kokkos(Mat *input_mat, void *kokkos_is_v
 {
    MPI_Comm MPI_COMM_MATRIX;
    PetscInt local_rows, local_cols, global_cols, cols_ao = 0;
-   MatType mat_type;
    Mat output_mat_local, output_mat_nonlocal;
    auto exec = PetscGetKokkosExecutionSpace();
 
    // The matrix's blocks on the device (a Kokkos AIJ matrix or a raw shell)
    AIJDeviceAccess acc;
    aij_device_access_get(*input_mat, acc);
-   (void)mat_type;
    const bool mpi = acc.mpi;
    MPI_COMM_MATRIX = acc.comm;
    local_rows = acc.local_rows;

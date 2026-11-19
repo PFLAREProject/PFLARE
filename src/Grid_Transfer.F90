@@ -857,7 +857,7 @@ module grid_transfer
          call MatGetRowMaxAbs(R_ref, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
          call VecMax(max_vec, row_loc, normy, ierr)
          call VecDestroy(max_vec, ierr)
-         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
                .OR. normy/=normy) then
             print *, "Diff Kokkos compute_R_from_raw_Z and compute_R_from_Z", normy, "row", row_loc
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -927,7 +927,7 @@ module grid_transfer
       R%v = B_array
       call MatDiagonalRestoreDiagonal(inv_Aff, inv_diag, ierr)
 
-      ! If debugging compare against building A_cf and Z on the CPU
+      ! If debugging compare against building A_cf and Z as matrices, with the drop and R on the CPU
       if (kokkos_debug()) then
 
          call MatCreateSubMatrix(A, is_coarse, is_fine, MAT_INITIAL_MATRIX, A_cf, ierr)

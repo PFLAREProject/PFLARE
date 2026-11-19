@@ -10,7 +10,8 @@
 // the elimination (same flops, same order as ?getrs), then back substitution with
 // the upper factor writes x. A and b are overwritten; no extra scratch is needed.
 // If a column has no nonzero pivot candidate (singular block) it is skipped, as
-// in ?getf2, and the back substitution will produce Inf/NaN as LAPACK would.
+// in ?getf2, and the back substitution then gives Inf/NaN (the CPU ISAI path
+// aborts on a singular block instead).
 template <typename MemberType, typename MatrixType, typename VectorType>
 KOKKOS_INLINE_FUNCTION void team_gesv_partial_pivot(const MemberType &member, const MatrixType &A,
                                                    const VectorType &x, const VectorType &b, const PetscInt n)
@@ -1091,7 +1092,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    //  * MATRIX-FREE - no block stored; the mat-vec is applied straight from the CSR
    //                rows of A_ff every iteration. O(j) scratch, never OOMs.
    //
-   // Kokkos caps level-1 team scratch at an arbitrary 20 MiB, so COMPACT is only
+   // Kokkos caps level-1 team scratch at 20 MiB on the GPU, so COMPACT is only
    // used when the whole team scratch (the six length-j vectors plus the block CSR)
    // fits under that cap; otherwise we fall back to MATRIX-FREE. This keeps the
    // huge-j rows (e.g. trans4, j ~ millions) on the safe matrix-free path.
@@ -1109,7 +1110,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                                       + ScratchIntView::shmem_size(j_max_iter)
                                       + ScratchIntView::shmem_size(j_max_iter);
 
-      // Kokkos hard-caps level-1 team scratch at 20 MiB; keep a small margin.
+      // Kokkos caps level-1 team scratch at 20 MiB on the GPU (scratch_size_max(1)); the
+      // same fixed cap is used on every backend, with a small margin.
       const size_t kokkos_l1_cap = 20 * 1024 * 1024;
       const size_t l1_budget     = kokkos_l1_cap - 64 * 1024;
 
@@ -1238,7 +1240,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
          const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
 
          if (j_size == 0) return;
-         // Small rows are handled by the direct kernel above
+         // Rows up to long_threshold are handled by the small row and dense kernels
          if (j_size <= long_threshold) return;
 
          ScratchScalarView rhs(member.team_scratch(1), j_size);
@@ -1510,7 +1512,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
          const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
 
          if (j_size == 0) return;
-         // Small rows are handled by the direct kernel above
+         // Rows up to long_threshold are handled by the small row and dense kernels
          if (j_size <= long_threshold) return;
 
          ScratchScalarView rhs(member.team_scratch(1), j_size);

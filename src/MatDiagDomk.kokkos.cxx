@@ -124,7 +124,6 @@ PETSC_INTERN void MatDiagDomRatio_kokkos(Mat *input_mat, PetscReal *max_dd_ratio
    MPI_Comm MPI_COMM_MATRIX = acc.comm;
    // The matrix's own mult SF (the borrowed mvctx) drives the halo broadcast
    PetscSF sf = acc.sf;
-   (void)MPI_COMM_MATRIX;
 
    PetscInt cols_ao = acc.cols_ao;
 

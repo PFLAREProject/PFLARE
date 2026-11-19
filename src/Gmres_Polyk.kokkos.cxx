@@ -16,11 +16,13 @@
 // Each lane computes only its own entry l of the next power, summing over the entries j of
 // the row in order, so there are no atomics and the summation order is fixed (and the same
 // whichever kernel a row goes to)
+// In parallel the local rows of the row's columns are summed first, then the fetched rows,
+// which need not be the CPU path's order, so the two can differ in rounding
 struct PowersLongRowTag {};
 
 // Rows longer than POW_LONG_FACTOR times the short rows' vector length are long
-// (no fixed cap: at vector length 32 a cap of 32 sent nearly every row of a 5-point
-// stencil's powers to the long kernel, which was slower)
+// (a factor rather than a fixed cap, so rows only a few times longer than the vector length,
+// like the powers of a stencil, stay in the short row kernel)
 #define POW_LONG_FACTOR 8
 // Lanes per team (threads times vector lanes) and the vector length for the long rows
 #define POW_LONG_TEAM_LANES 256
@@ -604,13 +606,13 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
       {
          const bool scale_zero = c_scale == 0.0;
          Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, out_a_l.extent(0)), KOKKOS_LAMBDA(const PetscInt k) {
-            out_a_l(k) = scale_zero ? 0.0 : c_scale * out_a_l(k);
+            out_a_l(k) = scale_zero ? PetscScalar(0.0) : c_scale * out_a_l(k);
          });
          if (mpi)
          {
             auto out_a_nl = raw_out->a_nl;
             Kokkos::parallel_for(Kokkos::RangePolicy<>(exec, 0, out_a_nl.extent(0)), KOKKOS_LAMBDA(const PetscInt k) {
-               out_a_nl(k) = scale_zero ? 0.0 : c_scale * out_a_nl(k);
+               out_a_nl(k) = scale_zero ? PetscScalar(0.0) : c_scale * out_a_nl(k);
             });
          }
       }
@@ -991,14 +993,15 @@ static void mat_mult_powers_share_sparsity_impl_kokkos(Mat *input_mat, const int
       if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_sparsity, &device_nonlocal_vals_sparsity));
    }
 
-   // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
-   // marks device modified, invalidates transpose/hermitian, bumps object state).
    if (raw_out)
    {
+      // The output views go straight back to the caller, so the kernels writing them have to finish
       exec.fence();
    }
    else
    {
+      // The matching restore handles MatSeqAIJKokkosModifyDevice (clears sync state,
+      // marks device modified, invalidates transpose/hermitian, bumps object state).
       PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_local_output, &device_local_vals_output));
       if (mpi) PetscCallVoid(MatSeqAIJRestoreKokkosView(mat_nonlocal_output, &device_nonlocal_vals_output));
    }

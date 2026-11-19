@@ -1948,7 +1948,7 @@ else
 #
 	@echo ""
 	@echo "Test matrix-free polynomials down to a level with two coupled F points in parallel"
-	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 16 -da_grid_y 16 -pc_type air -ksp_max_it 5 \
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 16 -da_grid_y 16 -pc_type air -ksp_pc_side right -ksp_max_it 5 \
 	 -pc_air_strong_threshold 0.5 -pc_air_matrix_free_polys -pc_air_coarse_eq_limit 1
 #
 	@echo ""
@@ -2452,10 +2452,6 @@ run_tests_copies:
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
-# Solves on a matrix with a few long rows, so the long row Kokkos kernels run
-# (DDC ratios, fixed sparsity powers and the SAI/ISAI Z solves). Their GPU
-# launch shapes only run on a GPU, so they run from the GPU CI workflow and
-# are deliberately not part of make tests
 run_tests_gpu:
 	@echo ""
 	@echo "--- Running long row tests ---"

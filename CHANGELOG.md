@@ -9,7 +9,7 @@ for earlier changes please see the git history.
 - Much faster PCAIR setup with Kokkos on GPUs, from faster device kernels and
   keeping most of the setup's intermediate matrices as device data; results are
   unchanged or change only by rounding, except the DDC ratios now match the CPU
-- Faster Kokkos lAIR/SAI Z and ISAI setup
+- Faster Kokkos lAIR Z and ISAI setup
 - Fixed the `diag_dom` CF splitting never finishing with a negative strong
   threshold (its target diagonal dominance ratio)
 - Negative polynomial and sparsity orders, and a maximum number of levels below

@@ -1475,7 +1475,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
             call VecMax(max_vec, row_loc, normy, ierr)
             call VecDestroy(max_vec, ierr)
 
-            if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+            if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
                   .OR. normy/=normy) then
                print *, "Diff Kokkos mat_mult_one_entry_per_row and MatMatMult", normy, "row", row_loc
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -1576,7 +1576,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call VecMax(max_vec, row_loc, normy, ierr)
          call VecDestroy(max_vec, ierr)
 
-         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
                .OR. normy/=normy) then
             print *, "Diff Kokkos mat_mult_r_one_point_ap and MatMatMult", normy, "row", row_loc
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -1705,7 +1705,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
          call VecMax(max_vec, row_loc, normy, ierr)
          call VecDestroy(max_vec, ierr)
-         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
                .OR. normy/=normy) then
             print *, "Diff Kokkos mat_mult_raw and MatMatMult", normy, "row", row_loc
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -1778,7 +1778,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
          call VecMax(max_vec, row_loc, normy, ierr)
          call VecDestroy(max_vec, ierr)
-         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
                .OR. normy/=normy) then
             print *, "Diff Kokkos mat_mult_mat_raw and MatMatMult", normy, "row", row_loc
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -1898,7 +1898,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call VecMax(max_vec, row_loc, normy, ierr)
          call VecDestroy(max_vec, ierr)
 
-         if (real(normy) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
                .OR. normy/=normy) then
             print *, "Diff Kokkos rap_raw_drop and CPU drop of MatMatMult", normy, "row", row_loc
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)

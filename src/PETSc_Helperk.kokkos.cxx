@@ -1548,8 +1548,9 @@ static void wrap_rap_raw_kokkos(RawAIJKokkos &raw, Mat *output_mat)
 // matrix). Repeats the steps of PETSc's device MatMatMult for MPIAIJKOKKOS
 // (MatProductSymbolic_MPIAIJKokkos_AB): R's local block times B's local and nonlocal blocks, the
 // rows of B that R's nonlocal columns need gathered from their owners (F) and split into a local
-// and nonlocal block, R's nonlocal block times those, then the sums. The KokkosKernels calls are the
-// same as PETSc's in the same order, so the result is the same as MatMatMult(R, B) with B a matrix
+// and nonlocal block, R's nonlocal block times those, then the sums. The products R's nonlocal
+// block makes use SPGEMM_KK_MEMORY rather than PETSc's choice (see below), so the entries match
+// MatMatMult(R, B) with B a matrix only to rounding
 // R and B must both be parallel or both serial, with R's columns laid out like B's rows
 // The output is returned as device views in out, not yet a PETSc matrix
 static void spgemm_mat_raw_kokkos(Mat *r_mat, const RawAIJKokkos &B, RawAIJKokkos &out)
@@ -1700,7 +1701,7 @@ static void spgemm_mat_raw_kokkos(Mat *r_mat, const RawAIJKokkos &B, RawAIJKokko
       kh1.create_spgemm_handle(spgemm_alg);
       kh2.create_spgemm_handle(spgemm_alg);
       // R's nonlocal block times the fetched rows (C3, C4) uses SPGEMM_KK_MEMORY: on the GPU the
-      // default (SPGEMM_KK, which also tunes the vector and team sizes) was up to ~16x slower for
+      // default (the vendor SpGEMM if enabled, else SPGEMM_KK) was up to ~16x slower for
       // these products on ranks whose nonlocal rows meet long fetched rows, and the other ranks
       // waited for them. For C1 and C2 the default is faster
       const auto spgemm_alg_nonlocal = KokkosSparse::SPGEMMAlgorithm::SPGEMM_KK_MEMORY;
@@ -2055,7 +2056,8 @@ PETSC_INTERN void raw_copy_to_mat_kokkos(void **raw_handle, Mat *output_mat)
 // Drops small entries from the matrix in raw_handle (from mat_mult_r_one_point_ap_raw_kokkos) with
 // kokkos, as remove_small_from_sparse_kokkos does on a PETSc matrix, then frees raw_handle
 // If allow_alias_int is set and nothing would be dropped (or added) on any rank, output_mat is the
-// matrix in raw_handle itself, made into a PETSc matrix; otherwise that is never made into a matrix
+// matrix in raw_handle itself (a PETSc matrix, or a raw shell if raw_shell_int is set); otherwise
+// that is never made into a matrix
 PETSC_INTERN void rap_raw_drop_kokkos(void **raw_handle, const PetscReal tol, Mat *output_mat, \
                   const int relative_max_row_tolerance_int, const int lump_int, \
                   const int allow_drop_diagonal_int, const int allow_diag_strength_int, \
@@ -2526,7 +2528,7 @@ PETSC_INTERN void generate_identity_kokkos(Mat *input_mat, Mat *output_mat)
       auto a_nonlocal_d = Kokkos::View<PetscScalar *>("a_nonlocal_d", 0);
       Mat output_mat_nonlocal;
       PetscCallVoid(MatCreateSeqAIJKokkosWithKokkosViews(PETSC_COMM_SELF, local_rows, 0, i_nonlocal_d, j_nonlocal_d, a_nonlocal_d, &output_mat_nonlocal));
-      // Always allocate the (empty) garray, the MPI matrix takes ownership of it
+      // No nonlocal columns, so the garray is empty; the MPI matrix takes ownership of it
       PetscInt *garray_host = NULL;
       PetscCallVoid(PetscMalloc1(0, &garray_host));
       PetscCallVoid(MatCreateMPIAIJWithSeqAIJ(MPI_COMM_MATRIX, global_rows, global_cols, output_mat_local, output_mat_nonlocal, garray_host, output_mat));
@@ -3221,7 +3223,7 @@ PETSC_INTERN void MatAXPY_kokkos(Mat *Y, PetscScalar alpha, Mat *X)
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Row kernels for MatCreateSubMatrix_Seq_kokkos
+// Row kernels for submatrix_seq_core
 // Each team handles team_size rows, one thread per row, with vector lanes over the
 // columns in that row
 struct SubMatrixRowsFunctor {
@@ -3297,16 +3299,18 @@ static void launch_submatrix_rows(const SubMatrixRowsFunctor &functor, const int
 
 //------------------------------------------------------------------------------------------------------------------------
 
-// Does a MatCreateSubMatrix on a sequential Kokkos matrix
-// is_row_d_d and is_col_d_d must have the local indices in them
-// is_col must be sorted
-// The core, on a sequential block given as device data (local_rows x local_cols with nnz entries)
-// If raw_out is given (only without reuse), the output block is returned there as device views
-// (i, j, a) and output_mat isn't created
+// A sequential output block as device views
 struct SubmatrixRawBlock {
    Kokkos::View<PetscInt *> i, j;
    Kokkos::View<PetscScalar *> a;
 };
+
+// Does a MatCreateSubMatrix on a sequential block given as device data (local_rows x local_cols
+// with nnz entries)
+// is_row_d_d and is_col_d_d must have the local indices in them
+// is_col must be sorted
+// If raw_out is given (only without reuse), the output block is returned there as device views
+// (i, j, a) and output_mat isn't created
 static void submatrix_seq_core(const PetscInt local_rows, const PetscInt local_cols, const PetscInt *device_local_i, \
                   const PetscInt *device_local_j, Kokkos::View<const PetscScalar *> device_local_vals, const PetscInt nnz, \
                   PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat, \
@@ -3418,25 +3422,6 @@ static void submatrix_seq_core(const PetscInt local_rows, const PetscInt local_c
    return;
 }
 
-// Does a MatCreateSubMatrix on a sequential Kokkos matrix
-// is_row_d_d and is_col_d_d must have the local indices in them
-// is_col must be sorted
-PETSC_INTERN void MatCreateSubMatrix_Seq_kokkos(Mat *input_mat, PetscIntKokkosView &is_row_d_d, PetscIntKokkosView &is_col_d_d, const int reuse_int, Mat *output_mat)
-{
-   PetscInt local_rows, local_cols;
-   PetscCallVoid(MatGetLocalSize(*input_mat, &local_rows, &local_cols));
-   const PetscInt *device_local_i = nullptr, *device_local_j = nullptr;
-   PetscMemType mtype;
-   PetscCallVoid(MatSeqAIJGetCSRAndMemType(*input_mat, &device_local_i, &device_local_j, NULL, &mtype));
-   Kokkos::View<const PetscScalar *> device_local_vals;
-   PetscCallVoid(MatSeqAIJGetKokkosView(*input_mat, &device_local_vals));
-   MatInfo info;
-   PetscCallVoid(MatGetInfo(*input_mat, MAT_LOCAL, &info));
-   submatrix_seq_core(local_rows, local_cols, device_local_i, device_local_j, device_local_vals, \
-                  static_cast<PetscInt>(info.nz_used), is_row_d_d, is_col_d_d, reuse_int, output_mat);
-   PetscCallVoid(MatSeqAIJRestoreKokkosView(*input_mat, &device_local_vals));
-}
-
 //------------------------------------------------------------------------------------------------------------------------
 
 // Does a MatGetSubMatrix for a Kokkos matrix - the petsc version currently uses the host making it very slow
@@ -3459,8 +3444,6 @@ PETSC_INTERN void MatCreateSubMatrix_kokkos_view(Mat *input_mat, \
    const bool mpi = acc.mpi;
    MPI_Comm MPI_COMM_MATRIX = acc.comm;
    const PetscInt local_cols = acc.local_cols;
-   const PetscInt global_rows = acc.global_rows;
-   (void)global_rows;
 
    Mat output_mat_local, output_mat_nonlocal;
    // The matrix's own mult SF (the borrowed mvctx) drives the halo broadcast

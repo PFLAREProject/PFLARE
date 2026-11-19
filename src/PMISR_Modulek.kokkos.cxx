@@ -46,12 +46,12 @@ static void pmisr_rows_team_vector(const PetscInt nrows, const double avg_row_nn
 // stores it, so no transpose is needed). Directed, a node only looks at the entries of its own
 // row, as a PMISR on that matrix does: it is veto'd only by the neighbours in its row, and when
 // it enters the set only those neighbours become C
-// Only the nodes with a zero cf_markers_d take part; any other marker is kept as it is and its
-// edges are ignored. Undecided nodes with abs(measure) < 1 get isolated_marker, then each step
-// puts the undecided nodes that have the smallest measure among their undecided neighbours (a
-// tie is broken on the global index, larger loses) in the set as F, and their undecided
-// neighbours become C. With a positive max_luby_steps the nodes still undecided after that many
-// steps become C
+// Only the nodes with a zero cf_markers_d take part; any other marker only keeps its sign (all
+// markers are made -1 or 1 at the end) and its edges are ignored. Undecided nodes with
+// abs(measure) < 1 get isolated_marker, then each step puts the undecided nodes that have the
+// smallest measure among their undecided neighbours (a tie is broken on the global index,
+// larger loses) in the set as F, and their undecided neighbours become C. With a positive
+// max_luby_steps the nodes still undecided after that many steps become C
 // colmap_d is the device copy of colmap (only read in parallel)
 static void pmisr_luby_kokkos(const AIJDeviceAccess &acc, const PetscIntKokkosView &colmap_d, const PetscScalarKokkosView &row_tol_d, \
                   const bool directed, const int isolated_marker, \
@@ -363,7 +363,7 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
    const double avg_nnz_nonlocal = local_rows > 0 && mpi ? static_cast<double>(acc.nnz_nonlocal) / local_rows : 0.0;
    if (strength) row_tol_d = PetscScalarKokkosView("row_tol_d", local_rows);
    if (strength) pmisr_rows_team_vector(local_rows, avg_nnz_local + avg_nnz_nonlocal, KOKKOS_LAMBDA(const KokkosTeamMemberType &t, const PetscInt i) {
-      // A max is the same in any order; it starts from -1 (as the serial loop did), which any
+      // A max is the same in any order; it starts from -1 (as the CPU path does), which any
       // entry beats, and a NaN never wins a comparison either way
       PetscReal max_l = -1.0, max_nl = -1.0;
       Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, device_local_i[i], device_local_i[i + 1]), [&](const PetscInt k, PetscReal &m) {
@@ -453,12 +453,12 @@ PETSC_INTERN void pmisr_from_matrix_kokkos(Mat *input_mat, const PetscReal stron
 
       // The strong entries in the transpose that cross ranks and their mutual pairs need comms.
       // Each strong non-local entry (i, ghost j) is a leaf of an SF whose root is row j (by its
-      // boundary-row number, see below) on the rank that owns it, taken from the matrix's own mult SF. The root degree is then the number of
-      // strong entries in other ranks' rows that point at that row, and gathering the global row
-      // index of each leaf to its root lets the owner find the mutual pairs. The messages only hold
-      // the strong entries that cross ranks; the in-degree and two cheap host loops are over the
-      // boundary rows (those other ranks hold as ghosts). This replaces building and transposing a
-      // parallel matrix on the host
+      // boundary-row number, see below) on the rank that owns it, taken from the matrix's own
+      // mult SF. The root degree is then the number of strong entries in other ranks' rows that
+      // point at that row, and gathering the global row index of each leaf to its root lets the
+      // owner find the mutual pairs. The messages only hold the strong entries that cross ranks;
+      // the in-degree and two cheap host loops are over the boundary rows (those other ranks hold
+      // as ghosts), so no parallel matrix is built or transposed on the host
       if (mpi)
       {
          PetscInt strong_nonlocal_nnz = 0;
