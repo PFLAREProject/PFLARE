@@ -165,7 +165,7 @@ module gmres_poly
       ! Local variables
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, vecs_needed
+      PetscInt :: global_row_start, global_row_end_plus_one, vecs_needed, i_vec
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
@@ -241,8 +241,8 @@ module gmres_poly
          print *, "Creating the temporary space failed"
          call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
       end if
-      do i_loc = 1, vecs_needed
-         V_n(i_loc)%v = vec_handles(i_loc)
+      do i_vec = 1, vecs_needed
+         V_n(i_vec)%v = vec_handles(i_vec)
       end do
       deallocate(vec_handles)
       call VecDestroy(temp_vec, ierr)
