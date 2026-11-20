@@ -854,6 +854,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
       type(tVec) :: max_vec
       PetscInt :: row_loc      
+      PetscReal :: result_scale
 #endif      
       ! ~~~~~~~~~~
 
@@ -928,6 +929,12 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
 
+            ! The biggest entry of the Kokkos result, to scale the tolerance below
+            call MatCreateVecs(temp_mat_compare, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_compare, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, result_scale, ierr)
+            call VecDestroy(max_vec, ierr)
+
             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
@@ -936,8 +943,11 @@ end if
             call VecDestroy(max_vec, ierr)
 
             ! There is floating point compute in these inverses, so we have to be a 
-            ! bit more tolerant to rounding differences
-            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
+            ! bit more tolerant to rounding differences. The coefficients can be huge (e.g. for
+            ! a singular matrix) with entries that cancel, so the rounding scales with the
+            ! biggest entry of the result
+            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 * max(1.0_PFLARE_REAL_KIND, result_scale) &
+                     .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
@@ -1002,6 +1012,7 @@ end if
       type(c_ptr)  :: coefficients_ptr
       type(tVec) :: max_vec
       PetscInt :: row_loc
+      PetscReal :: result_scale
       logical :: reuse_triggered
 #if defined(PETSC_USE_MPI_F08)
       MPIU_Status :: status
@@ -1054,12 +1065,19 @@ end if
          call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)
          call raw_copy_to_mat_kokkos(handle, C_array)
          raw_mat%v = C_array
+         ! The tolerance scales with the biggest entry of the result, as in
+         ! mat_mult_powers_share_sparsity
+         call MatCreateVecs(raw_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(raw_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, result_scale, ierr)
+         call VecDestroy(max_vec, ierr)
          call MatAXPYWrapper(temp_mat, PFLARE_MINUS_ONE, raw_mat)
          call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
          call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
          call VecMax(max_vec, row_loc, normy, ierr)
          call VecDestroy(max_vec, ierr)
-         if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
+         if (normy .gt. PFLARE_TOL_MATFREE_4EM11 * max(1.0_PFLARE_REAL_KIND, result_scale) &
+                  .OR. normy/=normy) then
             print *, "Diff Kokkos and CPU build_gmres_polynomial_inverse_raw", normy, "row", row_loc
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
          end if
