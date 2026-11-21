@@ -95,7 +95,7 @@ static PetscErrorCode check_sai(const SAICase *sai_case, PetscReal *err)
 int main(int argc, char **args)
 {
   PetscInt    c;
-  PetscReal   err;
+  PetscReal   err = 0.0;
   PetscMPIInt size;
   // Entries not listed in M_exact are zero
   const SAICase cases[N_CASES] = {

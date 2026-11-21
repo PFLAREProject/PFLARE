@@ -2,9 +2,12 @@ module grid_transfer
 
    use petscmat
    use c_petsc_interfaces, only: generate_one_point_with_one_entry_from_sparse_kokkos, &
-         compute_P_from_W_kokkos, compute_R_from_Z_kokkos
-   use petsc_helper, only: kokkos_debug
-   use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE
+         compute_P_from_W_kokkos, compute_R_from_Z_kokkos, generate_one_point_P_from_sparse_kokkos, &
+         compute_R_from_A_diag_kokkos, compute_R_from_raw_Z_drop_kokkos, raw_copy_to_mat_kokkos
+   use petsc_helper, only: kokkos_debug, assemble_one_point_shell, remove_small_from_sparse_cpu, MatGetTypeEffective
+   use iso_c_binding, only: c_ptr
+   use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
+         PFLARE_TWO, PFLARE_PTAP_FILL
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -326,7 +329,160 @@ module grid_transfer
 #endif  
 
          
-   end subroutine compute_P_from_W         
+   end subroutine compute_P_from_W
+
+  !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine generate_one_point_P_from_sparse(A_fc, global_row_start, is_fine, is_coarse, P)
+
+      ! Builds the one point classical prolongator P = [W I]' straight from A_fc, where W has
+      ! a one in the column of the biggest entry in each row of A_fc
+      ! The same as generate_one_point_with_one_entry_from_sparse followed by compute_P_from_W
+      ! with the identity, but with Kokkos it doesn't build W, and P is matrix-free
+      ! (a MATSHELL, see assemble_one_point_shell for the places that need it assembled)
+      ! Always creates a new P (no reuse)
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: A_fc
+      type(tMat), intent(inout) :: P
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      PetscInt, intent(in)      :: global_row_start
+
+      type(tMat) :: W
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse
+      integer :: errorcode
+      MatType :: mat_type
+      type(tMat) :: temp_mat, P_assembled
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(c_int) :: shell_int
+      type(tVec) :: x_coarse, x_fine, y_coarse, y_fine, x_coarse_ref, x_fine_ref
+      PetscRandom :: rctx
+      PetscReal :: norm_fine, norm_coarse
+      MPIU_Comm :: MPI_COMM_MATRIX
+      VecType :: vec_type
+      type(tMat) :: B_dense, C_dense, C_dense_ref
+      PetscInt :: local_fine, local_coarse, global_fine, global_coarse
+      PetscInt, parameter :: n_rhs = 3
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      ! A_fc may be a raw shell (device data), which reports its Kokkos type here
+      call MatGetTypeEffective(A_fc, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         A_array = A_fc%v
+         indices_fine = is_fine%v
+         indices_coarse = is_coarse%v
+         shell_int = 1
+         call generate_one_point_P_from_sparse_kokkos(A_array, global_row_start, &
+                     indices_fine, indices_coarse, shell_int, B_array)
+         P%v = B_array
+
+         ! If debugging do a comparison between CPU and Kokkos results
+         if (kokkos_debug()) then
+
+            call generate_one_point_with_one_entry_from_sparse_cpu(A_fc, W)
+            call compute_P_from_W_cpu(W, global_row_start, is_fine, is_coarse, &
+                     .TRUE., .FALSE., temp_mat)
+            call MatDestroy(W, ierr)
+
+            call assemble_one_point_shell(P, P_assembled)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, P_assembled, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
+               print *, "Diff Kokkos and CPU generate_one_point_P_from_sparse", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            ! The matrix-free P applied to a random vector (forward, adding and transposed)
+            ! should match the assembled P
+            call PetscObjectGetComm(P_assembled, MPI_COMM_MATRIX, ierr)
+            call PetscRandomCreate(MPI_COMM_MATRIX, rctx, ierr)
+            call MatCreateVecs(P_assembled, x_coarse, x_fine, ierr)
+            call VecDuplicate(x_coarse, y_coarse, ierr)
+            call VecDuplicate(x_fine, y_fine, ierr)
+            call VecDuplicate(x_coarse, x_coarse_ref, ierr)
+            call VecDuplicate(x_fine, x_fine_ref, ierr)
+            call VecSetRandom(x_coarse, rctx, ierr)
+            call VecSetRandom(x_fine, rctx, ierr)
+            call MatMult(P, x_coarse, y_fine, ierr)
+            call MatMultAdd(P, x_coarse, y_fine, y_fine, ierr)
+            call MatMultTranspose(P, x_fine, y_coarse, ierr)
+            call MatMultTransposeAdd(P, x_fine, y_coarse, y_coarse, ierr)
+            ! y_fine should be 2 P x_coarse, y_coarse 2 P^T x_fine
+            call VecScale(x_coarse, PFLARE_TWO, ierr)
+            call VecScale(x_fine, PFLARE_TWO, ierr)
+            call MatMult(P_assembled, x_coarse, x_fine_ref, ierr)
+            call MatMultTranspose(P_assembled, x_fine, x_coarse_ref, ierr)
+            call VecAXPY(y_fine, PFLARE_MINUS_ONE, x_fine_ref, ierr)
+            call VecAXPY(y_coarse, PFLARE_MINUS_ONE, x_coarse_ref, ierr)
+            call VecNorm(y_fine, NORM_INFINITY, norm_fine, ierr)
+            call VecNorm(y_coarse, NORM_INFINITY, norm_coarse, ierr)
+            if (norm_fine .gt. PFLARE_TOL_MATFREE_12 .OR. norm_fine/=norm_fine .OR. &
+                  norm_coarse .gt. PFLARE_TOL_MATFREE_12 .OR. norm_coarse/=norm_coarse) then
+               print *, "Diff matrix-free and assembled one point P", norm_fine, norm_coarse
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            ! And applied to a random dense block of the vectors' type (as for multiple right hand
+            ! sides), twice so the second apply reuses the product
+            call VecGetType(x_coarse, vec_type, ierr)
+            call MatGetLocalSize(P_assembled, local_fine, local_coarse, ierr)
+            call MatGetSize(P_assembled, global_fine, global_coarse, ierr)
+            call MatCreateDenseFromVecType(MPI_COMM_MATRIX, vec_type, local_coarse, PETSC_DECIDE, &
+                     global_coarse, n_rhs, PETSC_DECIDE, PETSC_NULL_SCALAR, B_dense, ierr)
+            call MatSetRandom(B_dense, rctx, ierr)
+            call MatMatMult(P, B_dense, MAT_INITIAL_MATRIX, PETSC_DEFAULT_REAL, C_dense, ierr)
+            call MatMatMult(P, B_dense, MAT_REUSE_MATRIX, PETSC_DEFAULT_REAL, C_dense, ierr)
+            call MatMatMult(P_assembled, B_dense, MAT_INITIAL_MATRIX, PETSC_DEFAULT_REAL, C_dense_ref, ierr)
+            call MatAXPY(C_dense, PFLARE_MINUS_ONE, C_dense_ref, SAME_NONZERO_PATTERN, ierr)
+            call MatNorm(C_dense, NORM_INFINITY, norm_fine, ierr)
+            if (norm_fine .gt. PFLARE_TOL_MATFREE_12 .OR. norm_fine/=norm_fine) then
+               print *, "Diff matrix-free and assembled one point P on a dense block", norm_fine
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(B_dense, ierr)
+            call MatDestroy(C_dense, ierr)
+            call MatDestroy(C_dense_ref, ierr)
+
+            call VecDestroy(x_coarse, ierr)
+            call VecDestroy(x_fine, ierr)
+            call VecDestroy(y_coarse, ierr)
+            call VecDestroy(y_fine, ierr)
+            call VecDestroy(x_coarse_ref, ierr)
+            call VecDestroy(x_fine_ref, ierr)
+            call PetscRandomDestroy(rctx, ierr)
+            call MatDestroy(P_assembled, ierr)
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call generate_one_point_with_one_entry_from_sparse(A_fc, W)
+         call compute_P_from_W(W, global_row_start, is_fine, is_coarse, .TRUE., .FALSE., P)
+         call MatDestroy(W, ierr)
+
+      end if
+#else
+      call generate_one_point_with_one_entry_from_sparse(A_fc, W)
+      call compute_P_from_W(W, global_row_start, is_fine, is_coarse, .TRUE., .FALSE., P)
+      call MatDestroy(W, ierr)
+#endif
+
+   end subroutine generate_one_point_P_from_sparse
 
   !------------------------------------------------------------------------------------------------------------------------
    
@@ -459,9 +615,13 @@ module grid_transfer
    subroutine compute_R_from_Z(Z, global_row_start, is_fine, is_coarse, &
                      orig_fine_col_indices, &
                      identity, reuse, &
-                     R)
+                     R, drop_tol)
 
       ! Wrapper around compute_R_from_Z_kokkos and compute_R_from_Z_cpu
+      ! If drop_tol is present, R is built from Z with its small entries dropped, as
+      ! remove_small_from_sparse with relative_max_row_tol_int = 1 would drop them
+      ! With Kokkos this is done in one pass without building the dropped Z
+      ! drop_tol needs identity, no reuse and a null orig_fine_col_indices
    
       ! ~~~~~~~~~~
       ! Input 
@@ -470,18 +630,34 @@ module grid_transfer
       type(tIS), intent(in)     :: is_fine, is_coarse
       type(tIS), intent(inout)  :: orig_fine_col_indices
       logical, intent(in) :: identity, reuse
+      PetscReal, intent(in), optional :: drop_tol
 
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      type(tMat) :: Z_drop
+      logical :: have_indices
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array, indices_fine, indices_coarse, orig_indices
-      integer :: identity_int, reuse_int, reuse_indices_int, errorcode
-      PetscErrorCode :: ierr
+      integer :: identity_int, reuse_int, reuse_indices_int, drop_int
       MatType :: mat_type
       Mat :: temp_mat, temp_mat_reuse, temp_mat_compare
       PetscScalar :: normy
+      PetscReal :: tol
       type(tVec) :: max_vec
+      type(tIS) :: temp_is
       PetscInt :: row_loc      
+      MatInfo :: info_kokkos, info_cpu
 #endif        
       ! ~~~~~~~~~~
+
+      if (present(drop_tol)) then
+         ! PetscObjectIsNull is a macro, so keep it on a short line
+         have_indices = .NOT. PetscObjectIsNull(orig_fine_col_indices)
+         if (.NOT. identity .OR. reuse .OR. have_indices) then
+            print *, "compute_R_from_Z with drop_tol needs identity and no reuse"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if
 
 
 #if defined(PETSC_HAVE_KOKKOS)    
@@ -498,6 +674,12 @@ module grid_transfer
          if (.NOT. PetscObjectIsNull(orig_fine_col_indices)) then
             reuse_indices_int = 1
          end if
+         drop_int = 0
+         tol = 0
+         if (present(drop_tol)) then
+            drop_int = 1
+            tol = drop_tol
+         end if
 
          A_array = Z%v             
          indices_fine = is_fine%v
@@ -507,12 +689,49 @@ module grid_transfer
          call compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, indices_coarse, &
                         orig_indices, &
                         identity_int, reuse_int, reuse_indices_int, &
+                        drop_int, tol, &
                         B_array)
          R%v = B_array
          orig_fine_col_indices%v = orig_indices
+
+         ! If debugging the fused drop, compare against the CPU drop followed by the CPU R
+         if (kokkos_debug() .AND. present(drop_tol)) then
+
+            call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+            call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                           temp_is, &
+                           identity, .FALSE., &
+                           temp_mat)
+            call MatDestroy(Z_drop, ierr)
+            call ISDestroy(temp_is, ierr)
+
+            ! The same entries have to be kept
+            call MatGetInfo(R, MAT_GLOBAL_SUM, info_kokkos, ierr)
+            call MatGetInfo(temp_mat, MAT_GLOBAL_SUM, info_cpu, ierr)
+            if (info_kokkos%NZ_USED /= info_cpu%NZ_USED) then
+               print *, "Diff Kokkos and CPU compute_R_from_Z with drop nnzs", &
+                        info_kokkos%NZ_USED, info_cpu%NZ_USED
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
+                        temp_mat_reuse, ierr)
+            call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, R, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+            if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
+               print *, "Diff Kokkos and CPU compute_R_from_Z with drop", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat_reuse, ierr)
+            call MatDestroy(R, ierr)
+            R = temp_mat
          
          ! If debugging do a comparison between CPU and Kokkos results
-         if (kokkos_debug()) then
+         else if (kokkos_debug()) then
 
             ! If we're doing reuse and debug, then the cpu version reuses the output
             ! matrix itself (as that has the sparsity the cpu version expects) and so
@@ -558,21 +777,228 @@ module grid_transfer
 
       else
 
-         call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
-                        orig_fine_col_indices, &
-                        identity, reuse, &
-                        R)       
+         if (present(drop_tol)) then
+            call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+            call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                           orig_fine_col_indices, &
+                           identity, reuse, &
+                           R)
+            call MatDestroy(Z_drop, ierr)
+         else
+            call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                           orig_fine_col_indices, &
+                           identity, reuse, &
+                           R)
+         end if
 
       end if
 #else
-      call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
-                     orig_fine_col_indices, &
-                     identity, reuse, &
-                     R)
+      if (present(drop_tol)) then
+         call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+         call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                        orig_fine_col_indices, &
+                        identity, reuse, &
+                        R)
+         call MatDestroy(Z_drop, ierr)
+      else
+         call compute_R_from_Z_cpu(Z, global_row_start, is_fine, is_coarse, &
+                        orig_fine_col_indices, &
+                        identity, reuse, &
+                        R)
+      end if
 #endif 
          
          
    end subroutine compute_R_from_Z   
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine compute_R_from_raw_Z(raw_handle, global_row_start, is_fine, is_coarse, &
+                     orig_fine_col_indices, R, drop_tol, raw_shell)
+
+      ! compute_R_from_Z with identity, no reuse and drop_tol, with Z = -1 times the product in
+      ! raw_handle (from mat_mult_raw, which never made it a PETSc matrix), as MatScale with -1
+      ! would give. Only with Kokkos. raw_handle is freed
+      ! If raw_shell is present and true, R is a raw shell (device data, see raw_shell_create_kokkos)
+      ! rather than a PETSc matrix; not with the Kokkos debug compare
+
+      ! ~~~~~~~~~~
+      ! Input
+      integer(kind=8), intent(inout) :: raw_handle
+      PetscInt, intent(in)      :: global_row_start
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      type(tIS), intent(inout)  :: orig_fine_col_indices
+      type(tMat), intent(inout) :: R
+      PetscReal, intent(in)     :: drop_tol
+      logical, optional, intent(in) :: raw_shell
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: handle, B_array, indices_fine, indices_coarse, orig_indices, Z_array
+      integer(c_int) :: raw_shell_int
+      type(tMat) :: Z_ref, R_ref
+      type(tIS) :: orig_ref
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      PetscReal :: norm_ref
+      ! Z is -1 times the product
+      PetscReal, parameter :: z_scale = -1.0_PETSC_REAL_KIND
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      handle = raw_handle
+
+      ! If debugging, build R the old way from a copy of Z made into a matrix
+      if (kokkos_debug()) then
+         call raw_copy_to_mat_kokkos(handle, Z_array)
+         Z_ref%v = Z_array
+         call MatScale(Z_ref, PFLARE_MINUS_ONE, ierr)
+         orig_ref = PETSC_NULL_IS
+         call compute_R_from_Z(Z_ref, global_row_start, is_fine, is_coarse, orig_ref, &
+                  .TRUE., .FALSE., R_ref, drop_tol = drop_tol)
+         call MatDestroy(Z_ref, ierr)
+         call ISDestroy(orig_ref, ierr)
+      end if
+
+      indices_fine = is_fine%v
+      indices_coarse = is_coarse%v
+      raw_shell_int = 0
+      if (present(raw_shell)) then
+         if (raw_shell .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+      end if
+      call compute_R_from_raw_Z_drop_kokkos(handle, z_scale, global_row_start, indices_fine, &
+               indices_coarse, orig_indices, drop_tol, B_array, raw_shell_int)
+      R%v = B_array
+      orig_fine_col_indices%v = orig_indices
+      raw_handle = 0
+
+      if (kokkos_debug()) then
+         call MatNorm(R_ref, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(R_ref, PFLARE_MINUS_ONE, R, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(R_ref, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(R_ref, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos compute_R_from_raw_Z and compute_R_from_Z", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(R_ref, ierr)
+      end if
+#else
+      ! Only made with Kokkos, so never called without it
+      raw_handle = 0
+      R = PETSC_NULL_MAT
+      orig_fine_col_indices = PETSC_NULL_IS
+#endif
+
+   end subroutine compute_R_from_raw_Z
+
+!------------------------------------------------------------------------------------------------------------------------
+   
+   subroutine compute_R_from_A_diag(A, inv_Aff, our_level, kokkos_is_views_handle, &
+                     global_row_start, is_fine, is_coarse, drop_tol, R, raw_shell)
+
+      ! Builds R straight from the square Kokkos matrix A when the Aff inverse is a matdiagonal,
+      ! without building A_cf or Z
+      ! Gives the same R as Z = -A_cf * inv_Aff, then compute_R_from_Z with identity, no reuse
+      ! and drop_tol
+      ! Only for Kokkos matrices, with the fine and coarse views of our_level already in
+      ! kokkos_is_views_handle
+      ! If raw_shell is present and true, R is a raw shell (device data, see raw_shell_create_kokkos)
+      ! rather than a PETSc matrix; not with the Kokkos debug compare
+   
+      ! ~~~~~~~~~~
+      ! Input 
+      logical, optional, intent(in) :: raw_shell
+      type(tMat), intent(in)    :: A, inv_Aff
+      integer, intent(in)       :: our_level
+      type(c_ptr), intent(in)   :: kokkos_is_views_handle
+      PetscInt, intent(in)      :: global_row_start
+      type(tIS), intent(in)     :: is_fine, is_coarse
+      PetscReal, intent(in)     :: drop_tol
+      type(tMat), intent(inout) :: R
+
+      integer :: errorcode
+#if defined(PETSC_HAVE_KOKKOS)                     
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: A_array, B_array, vec_array
+      integer(c_int) :: raw_shell_int
+      type(tVec) :: inv_diag
+      type(tMat) :: A_cf, Z, Z_drop, temp_mat, temp_mat_reuse
+      type(tIS) :: temp_is
+      PetscScalar :: normy
+      type(tVec) :: max_vec
+      PetscInt :: row_loc      
+      MatInfo :: info_kokkos, info_cpu
+#endif        
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)    
+
+      call MatDiagonalGetDiagonal(inv_Aff, inv_diag, ierr)
+      A_array = A%v
+      vec_array = inv_diag%v
+      raw_shell_int = 0
+      if (present(raw_shell)) then
+         if (raw_shell .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+      end if
+      call compute_R_from_A_diag_kokkos(A_array, kokkos_is_views_handle, our_level, &
+                  vec_array, drop_tol, B_array, raw_shell_int)
+      R%v = B_array
+      call MatDiagonalRestoreDiagonal(inv_Aff, inv_diag, ierr)
+
+      ! If debugging compare against building A_cf and Z as matrices, with the drop and R on the CPU
+      if (kokkos_debug()) then
+
+         call MatCreateSubMatrix(A, is_coarse, is_fine, MAT_INITIAL_MATRIX, A_cf, ierr)
+         call MatMatMult(A_cf, inv_Aff, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, Z, ierr)
+         call MatScale(Z, PFLARE_MINUS_ONE, ierr)
+         call remove_small_from_sparse_cpu(Z, drop_tol, Z_drop, relative_max_row_tol_int = 1)
+         call compute_R_from_Z_cpu(Z_drop, global_row_start, is_fine, is_coarse, &
+                        temp_is, &
+                        .TRUE., .FALSE., &
+                        temp_mat)
+         call MatDestroy(A_cf, ierr)
+         call MatDestroy(Z, ierr)
+         call MatDestroy(Z_drop, ierr)
+         call ISDestroy(temp_is, ierr)
+
+         ! The same entries have to be kept
+         call MatGetInfo(R, MAT_GLOBAL_SUM, info_kokkos, ierr)
+         call MatGetInfo(temp_mat, MAT_GLOBAL_SUM, info_cpu, ierr)
+         if (info_kokkos%NZ_USED /= info_cpu%NZ_USED) then
+            print *, "Diff Kokkos and CPU compute_R_from_A_diag nnzs", &
+                     info_kokkos%NZ_USED, info_cpu%NZ_USED
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+
+         call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, temp_mat_reuse, ierr)
+         call MatAXPY(temp_mat_reuse, PFLARE_MINUS_ONE, R, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat_reuse, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (normy .gt. PFLARE_TOL_MATFREE_13 .OR. normy/=normy) then
+            print *, "Diff Kokkos and CPU compute_R_from_A_diag", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat_reuse, ierr)
+         call MatDestroy(R, ierr)
+         R = temp_mat
+      end if
+#else
+      print *, "compute_R_from_A_diag needs Kokkos"
+      call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+#endif 
+         
+   end subroutine compute_R_from_A_diag
 
 
  !------------------------------------------------------------------------------------------------------------------------

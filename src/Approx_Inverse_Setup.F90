@@ -19,7 +19,7 @@ module approx_inverse_setup
    use weighted_jacobi, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
    use repartition, only: MatMPICreateNonemptySubcomm
-   use petsc_helper, only: destroy_matrix_reuse
+   use petsc_helper, only: destroy_matrix_reuse, mat_create_vec_device, is_raw_shell
    use matshell_data_type, only: mat_ctxtype
 
 #include "petsc/finclude/petscmat.h"
@@ -371,7 +371,7 @@ module approx_inverse_setup
             
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-            call MatCreateVecs(buffers%matrix, PETSC_NULL_VEC, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr) 
+            call mat_create_vec_device(buffers%matrix, .TRUE., mat_ctx_da%mf_temp_vec(MF_VEC_DIAG))
             ! Get the diagonal
             call MatGetDiagonal(buffers%matrix, mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)    
             ! This is the matrix whose inverse we are applying (just copying the pointer here)
@@ -605,7 +605,8 @@ module approx_inverse_setup
       if (.NOT. PetscObjectIsNull(matrix)) then
          call MatGetType(matrix, mat_type, ierr)
          ! If its a matshell, make sure to delete its ctx
-         if (mat_type==MATSHELL) then
+         ! A raw shell (an assembled inverse kept as device data) cleans up after itself
+         if (mat_type==MATSHELL .AND. .NOT. is_raw_shell(matrix)) then
             call MatShellGetContext(matrix, mat_ctx, ierr)
             if (mat_ctx%own_coefficients) then
                deallocate(mat_ctx%coefficients)
@@ -673,6 +674,33 @@ module approx_inverse_setup
       end if  
       
    end subroutine reset_inverse_mat
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine repoint_mf_poly_inverse(inv_matrix, matrix)
+
+      ! Points a matrix-free power, arnoldi or newton polynomial inverse (and its inner diagonally
+      ! scaled shell, if it has one) at matrix
+      ! These shells only keep a copy of the handle of the matrix they were built with, so this is
+      ! needed if that matrix is replaced by another with the same entries (raw_shell_assemble)
+
+      ! ~~~~~~
+      type(tMat), intent(in) :: inv_matrix, matrix
+
+      PetscErrorCode :: ierr
+      type(mat_ctxtype), pointer :: mat_ctx=>null(), mat_ctx_scaled=>null()
+      type(tMat) :: temp_mat
+      ! ~~~~~~
+
+      call MatShellGetContext(inv_matrix, mat_ctx, ierr)
+      mat_ctx%mat = matrix
+      temp_mat = mat_ctx%mat_scaled
+      if (.NOT. PetscObjectIsNull(temp_mat)) then
+         call MatShellGetContext(temp_mat, mat_ctx_scaled, ierr)
+         mat_ctx_scaled%mat = matrix
+      end if
+
+   end subroutine repoint_mf_poly_inverse
 
    ! -------------------------------------------------------------------------------------------------------------------------------
 

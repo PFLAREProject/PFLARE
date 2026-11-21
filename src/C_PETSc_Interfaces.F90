@@ -89,21 +89,69 @@ module c_petsc_interfaces
 
    interface   
       
+      function vec_duplicate_vecs_c(template_array, m, vecs_array) &
+         bind(c, name="vec_duplicate_vecs_c")
+         use iso_c_binding
+         integer(c_long_long) :: template_array
+         PetscInt, value :: m
+         integer(c_long_long), dimension(*) :: vecs_array
+         PetscErrorCode :: vec_duplicate_vecs_c
+      end function vec_duplicate_vecs_c
+
+      function mat_create_vec_device_c(A_array, left, vec_array) &
+         bind(c, name="mat_create_vec_device_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int), value :: left
+         integer(c_long_long) :: vec_array
+         PetscErrorCode :: mat_create_vec_device_c
+      end function mat_create_vec_device_c
+
+      function mat_shell_set_device_vecs_c(A_array) &
+         bind(c, name="mat_shell_set_device_vecs_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscErrorCode :: mat_shell_set_device_vecs_c
+      end function mat_shell_set_device_vecs_c
+
+      function vec_create_sized_device_c(A_array, n, global_n, vec_array) &
+         bind(c, name="vec_create_sized_device_c")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt, value :: n, global_n
+         integer(c_long_long) :: vec_array
+         PetscErrorCode :: vec_create_sized_device_c
+      end function vec_create_sized_device_c
+
       function MatGetDiagonalOnly_c(A_array, diag_only) &
          bind(c, name="MatGetDiagonalOnly_c")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_int) :: diag_only
          PetscErrorCode :: MatGetDiagonalOnly_c
-      end function MatGetDiagonalOnly_c         
- 
-   end interface   
+      end function MatGetDiagonalOnly_c
+
+   end interface
+
+   interface
+
+      subroutine mat_fine_block_diagonal_only_kokkos(A_array, kokkos_is_views_handle, &
+                     our_level, diag_only) &
+         bind(c, name="mat_fine_block_diagonal_only_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         type(c_ptr), value :: kokkos_is_views_handle
+         integer(c_int), value :: our_level
+         integer(c_int) :: diag_only
+      end subroutine mat_fine_block_diagonal_only_kokkos
+
+   end interface
 
    interface   
       
       subroutine remove_small_from_sparse_kokkos(A_array, tol, B_array, &
                      relative_max_row_tolerance_int, lump_int, allow_drop_diagonal_int, &
-                     allow_diag_strength_int) &
+                     allow_diag_strength_int, allow_alias_int) &
          bind(c, name="remove_small_from_sparse_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
@@ -112,6 +160,7 @@ module c_petsc_interfaces
          integer(c_int), value :: relative_max_row_tolerance_int
          integer(c_int), value :: lump_int
          integer(c_int), value :: allow_drop_diagonal_int, allow_diag_strength_int
+         integer(c_int), value :: allow_alias_int
       end subroutine remove_small_from_sparse_kokkos         
  
    end interface
@@ -139,6 +188,28 @@ module c_petsc_interfaces
          PetscScalar, value :: val
       end subroutine MatSetAllValues_kokkos
  
+   end interface
+
+   interface
+
+      subroutine generate_identity_kokkos(A_array, B_array) &
+         bind(c, name="generate_identity_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+      end subroutine generate_identity_kokkos
+
+   end interface
+
+   interface
+
+      subroutine mat_duplicate_structure_kokkos(A_array, B_array) &
+         bind(c, name="mat_duplicate_structure_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: B_array
+      end subroutine mat_duplicate_structure_kokkos
+
    end interface
    
    interface
@@ -216,15 +287,18 @@ module c_petsc_interfaces
    end interface   
 
    interface   
-      
-      subroutine pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local, zero_meaure_c_point_int) &
-         bind(c, name="pmisr_kokkos")
+
+      subroutine pmisr_from_matrix_kokkos(A_array, strong_threshold, strength_int, symmetrize_int, &
+            pmis_int, zero_measure_c_point_int, max_luby_steps, measure_local) &
+         bind(c, name="pmisr_from_matrix_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
+         PetscReal, value :: strong_threshold
+         integer(c_int), value :: strength_int, symmetrize_int, pmis_int, zero_measure_c_point_int
+         integer(c_int), value :: max_luby_steps
          type(c_ptr), value :: measure_local
-         integer(c_int), value :: max_luby_steps, pmis_int, zero_meaure_c_point_int
-      end subroutine pmisr_kokkos
- 
+      end subroutine pmisr_from_matrix_kokkos
+
    end interface     
 
    interface   
@@ -241,7 +315,7 @@ module c_petsc_interfaces
 
    interface   
       
-      subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
+      subroutine ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
             random_numbers_ptr) &
          bind(c, name="ddc_kokkos")
          use iso_c_binding
@@ -249,7 +323,6 @@ module c_petsc_interfaces
          PetscReal, value :: fraction_swap
          PetscReal, value :: max_dd_ratio
          PetscReal, value :: max_dd_ratio_achieved
-         integer(c_long_long) :: Aff_array
          type(c_ptr), value :: random_numbers_ptr
       end subroutine ddc_kokkos
  
@@ -313,21 +386,79 @@ module c_petsc_interfaces
          bind(c, name="generate_one_point_with_one_entry_from_sparse_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array, B_array
-      end subroutine generate_one_point_with_one_entry_from_sparse_kokkos         
- 
-   end interface    
+      end subroutine generate_one_point_with_one_entry_from_sparse_kokkos
+
+   end interface
+
+   interface
+
+      subroutine generate_one_point_P_from_sparse_kokkos(A_array, global_row_start, indices_fine, &
+                     indices_coarse, shell_int, B_array) &
+         bind(c, name="generate_one_point_P_from_sparse_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, indices_fine, indices_coarse
+         integer(c_long_long) :: B_array
+         PetscInt, value :: global_row_start
+         integer(c_int), value :: shell_int
+      end subroutine generate_one_point_P_from_sparse_kokkos
+
+   end interface
+
+   interface
+
+      subroutine one_point_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal) &
+         bind(c, name="one_point_shell_nnzs_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt :: nnzs_local, nnzs_nonlocal
+      end subroutine one_point_shell_nnzs_kokkos
+
+   end interface
+
+   interface
+
+      subroutine one_point_shell_assemble_kokkos(A_array, B_array) &
+         bind(c, name="one_point_shell_assemble_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+      end subroutine one_point_shell_assemble_kokkos
+
+   end interface
+
+   interface
+
+      subroutine is_one_point_shell_kokkos(A_array, result_int) &
+         bind(c, name="is_one_point_shell_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int) :: result_int
+      end subroutine is_one_point_shell_kokkos
+
+   end interface
    
    interface   
       
       subroutine compute_R_from_Z_kokkos(A_array, global_row_start, indices_fine, &
-                     indices_coarse, indices_orig, identity_int, reuse_int, reuse_indices_int, B_array) &
+                     indices_coarse, indices_orig, identity_int, reuse_int, reuse_indices_int, &
+                     drop_int, tol, B_array) &
          bind(c, name="compute_R_from_Z_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array, indices_fine, indices_coarse, indices_orig
          integer(c_long_long) :: B_array
          PetscInt, value :: global_row_start
-         integer(c_int), value :: identity_int, reuse_int, reuse_indices_int
+         integer(c_int), value :: identity_int, reuse_int, reuse_indices_int, drop_int
+         PetscReal, value :: tol
       end subroutine compute_R_from_Z_kokkos         
+
+      subroutine compute_R_from_A_diag_kokkos(A_array, kokkos_is_views_handle, our_level, &
+                     inv_diag_vec, tol, B_array, raw_shell_int) &
+         bind(c, name="compute_R_from_A_diag_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, inv_diag_vec, B_array
+         type(c_ptr), value :: kokkos_is_views_handle
+         integer(c_int), value :: our_level, raw_shell_int
+         PetscReal, value :: tol
+      end subroutine compute_R_from_A_diag_kokkos
  
    end interface
    
@@ -343,6 +474,17 @@ module c_petsc_interfaces
          type(c_ptr), value :: coefficients
          integer(c_int), value :: reuse_int_cmat, reuse_int_reuse_mat
       end subroutine mat_mult_powers_share_sparsity_kokkos
+
+      subroutine mat_mult_powers_share_sparsity_raw_kokkos(A_array, poly_order, &
+                  coefficients, reuse_int_reuse_mat, reuse_array, raw_handle) &
+         bind(c, name="mat_mult_powers_share_sparsity_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: reuse_array, raw_handle
+         integer(c_int), value :: poly_order
+         type(c_ptr), value :: coefficients
+         integer(c_int), value :: reuse_int_reuse_mat
+      end subroutine mat_mult_powers_share_sparsity_raw_kokkos
 
    end interface
 
@@ -390,6 +532,128 @@ module c_petsc_interfaces
  
    end interface   
 
+   interface
+
+      subroutine mat_mult_one_entry_per_row_kokkos(A_array, B_array, success_int, C_array) &
+         bind(c, name="mat_mult_one_entry_per_row_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+         integer(c_int) :: success_int
+         integer(c_long_long) :: C_array
+      end subroutine mat_mult_one_entry_per_row_kokkos
+
+   end interface
+
+   interface
+
+      subroutine mat_mult_r_one_point_ap_kokkos(R_array, A_array, B_array, success_int, C_array) &
+         bind(c, name="mat_mult_r_one_point_ap_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: R_array, A_array, B_array
+         integer(c_int) :: success_int
+         integer(c_long_long) :: C_array
+      end subroutine mat_mult_r_one_point_ap_kokkos
+
+   end interface
+
+   interface
+
+      subroutine mat_mult_r_one_point_ap_raw_kokkos(R_array, A_array, B_array, success_int, raw_handle) &
+         bind(c, name="mat_mult_r_one_point_ap_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: R_array, A_array, B_array
+         integer(c_int) :: success_int
+         integer(c_long_long) :: raw_handle
+      end subroutine mat_mult_r_one_point_ap_raw_kokkos
+
+   end interface
+
+   interface
+
+      subroutine rap_raw_drop_kokkos(raw_handle, tol, B_array, relative_max_row_tol_int, lump_int, &
+               allow_drop_diagonal_int, allow_diag_strength_int, allow_alias_int, raw_shell_int) &
+         bind(c, name="rap_raw_drop_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         PetscReal, value :: tol
+         integer(c_long_long) :: B_array
+         integer(c_int), value :: relative_max_row_tol_int, lump_int, allow_drop_diagonal_int
+         integer(c_int), value :: allow_diag_strength_int, allow_alias_int, raw_shell_int
+      end subroutine rap_raw_drop_kokkos
+
+      subroutine raw_shell_kind_kokkos(A_array, kind) &
+         bind(c, name="raw_shell_kind_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_int) :: kind
+      end subroutine raw_shell_kind_kokkos
+
+      subroutine raw_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal) &
+         bind(c, name="raw_shell_nnzs_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         PetscInt :: nnzs_local, nnzs_nonlocal
+      end subroutine raw_shell_nnzs_kokkos
+
+      subroutine raw_shell_assemble_kokkos(A_array) &
+         bind(c, name="raw_shell_assemble_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+      end subroutine raw_shell_assemble_kokkos
+
+   end interface
+
+   interface
+
+      subroutine mat_mult_raw_kokkos(A_array, B_array, raw_handle) &
+         bind(c, name="mat_mult_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array, B_array
+         integer(c_long_long) :: raw_handle
+      end subroutine mat_mult_raw_kokkos
+
+      subroutine raw_copy_to_mat_kokkos(raw_handle, B_array) &
+         bind(c, name="raw_copy_to_mat_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         integer(c_long_long) :: B_array
+      end subroutine raw_copy_to_mat_kokkos
+
+      subroutine mat_mult_mat_raw_kokkos(A_array, b_handle, raw_handle) &
+         bind(c, name="mat_mult_mat_raw_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: A_array
+         integer(c_long_long) :: b_handle, raw_handle
+      end subroutine mat_mult_mat_raw_kokkos
+
+      subroutine raw_shell_from_handle_kokkos(raw_handle, B_array) &
+         bind(c, name="raw_shell_from_handle_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         integer(c_long_long) :: B_array
+      end subroutine raw_shell_from_handle_kokkos
+
+      subroutine raw_free_kokkos(raw_handle) &
+         bind(c, name="raw_free_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+      end subroutine raw_free_kokkos
+
+      subroutine compute_R_from_raw_Z_drop_kokkos(raw_handle, scale, global_row_start, indices_fine, &
+                     indices_coarse, indices_orig, tol, B_array, raw_shell_int) &
+         bind(c, name="compute_R_from_raw_Z_drop_kokkos")
+         use iso_c_binding
+         integer(c_long_long) :: raw_handle
+         PetscReal, value :: scale
+         PetscInt, value :: global_row_start
+         integer(c_long_long) :: indices_fine, indices_coarse, indices_orig
+         PetscReal, value :: tol
+         integer(c_long_long) :: B_array
+         integer(c_int), value :: raw_shell_int
+      end subroutine compute_R_from_raw_Z_drop_kokkos
+
+   end interface
+
    interface   
       
       subroutine MatAXPY_kokkos(A_array, alpha, B_array) &
@@ -407,14 +671,14 @@ module c_petsc_interfaces
       subroutine MatCreateSubMatrix_kokkos(A_array, is_row, is_col, &
                      reuse_int, B_array, &
                      kokkos_is_views_handle, &
-                     our_level, is_row_fine_int, is_col_fine_int) &
+                     our_level, is_row_fine_int, is_col_fine_int, raw_shell_int) &
          bind(c, name="MatCreateSubMatrix_kokkos")
          use iso_c_binding
          integer(c_long_long) :: A_array
          integer(c_long_long) :: B_array
          integer(c_long_long) :: is_row, is_col
          type(c_ptr), value :: kokkos_is_views_handle
-         integer(c_int), value :: our_level, is_row_fine_int, is_col_fine_int, reuse_int
+         integer(c_int), value :: our_level, is_row_fine_int, is_col_fine_int, reuse_int, raw_shell_int
 
       end subroutine MatCreateSubMatrix_kokkos
 

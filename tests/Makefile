@@ -1947,6 +1947,11 @@ else
 	 -ksp_rtol $(KSP_RTOL) -ksp_atol 1e-50 -pc_air_a_lump -ksp_max_it 5 -curved_velocity
 #
 	@echo ""
+	@echo "Test matrix-free polynomials down to a level with two coupled F points in parallel"
+	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 16 -da_grid_y 16 -pc_type air -ksp_pc_side right -ksp_max_it 5 \
+	 -pc_air_strong_threshold 0.5 -pc_air_matrix_free_polys -pc_air_coarse_eq_limit 1
+#
+	@echo ""
 	@echo "Test improving Z in parallel"
 	$(MPIEXEC) -n 2 ./adv_diff_fd -da_grid_x 50 -da_grid_y 50 -pc_type air -pc_air_improve_z_its 3 -ksp_max_it 3 \
 	 -pc_air_a_drop 1e-3 -pc_air_inverse_type power
@@ -2444,6 +2449,26 @@ run_tests_copies:
 	$(MPIEXEC) -n 2 ./adv_1d -n 500 -ksp_type richardson -ksp_rtol $(KSP_RTOL) -pc_air_smooth_type fc -pc_air_diag_update \
 	 -pc_air_reuse_poly_coeffs -pc_air_matrix_free_polys -pc_air_coarsest_matrix_free_polys -pc_air_diag_scale_polys \
 	 -pc_air_coarsest_diag_scale_polys -diag_update_scale 1 -min_levels 2 -pc_air_processor_agglom 0 -check_copies
+
+# ~~~~~~~~~~~
+# ~~~~~~~~~~~
+run_tests_gpu:
+	@echo ""
+	@echo "--- Running long row tests ---"
+	@echo "Test AIRG on a matrix with long rows, with a second setup on new values"
+	./long_rows -second_solve -ksp_max_it 5
+	@echo "Test lAIR on a matrix with long rows"
+	./long_rows -pc_air_z_type lair -ksp_max_it 5
+	@echo "Test PCPFLAREINV ISAI on a matrix with long rows"
+	./long_rows -pc_type pflareinv -pc_pflareinv_type isai -ksp_max_it 125
+	@echo "Test PCPFLAREINV power basis on a matrix with long rows"
+	./long_rows -pc_type pflareinv -pc_pflareinv_type power -ksp_max_it 125
+	@echo "Test AIRG in parallel on a matrix with long rows, with a second setup on new values"
+	$(MPIEXEC) -n 2 ./long_rows -second_solve -ksp_max_it 5
+	@echo "Test lAIR in parallel on a matrix with long rows"
+	$(MPIEXEC) -n 2 ./long_rows -pc_air_z_type lair -ksp_max_it 5
+	@echo "Test PCPFLAREINV ISAI in parallel on a matrix with long rows"
+	$(MPIEXEC) -n 2 ./long_rows -pc_type pflareinv -pc_pflareinv_type isai -ksp_max_it 125
 
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~

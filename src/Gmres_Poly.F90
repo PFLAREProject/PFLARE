@@ -2,7 +2,8 @@ module gmres_poly
 
    use petscmat
    use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
-   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos
+   use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos, mat_mult_powers_share_sparsity_raw_kokkos, &
+         raw_copy_to_mat_kokkos, vec_duplicate_vecs_c
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
          PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
@@ -14,8 +15,8 @@ module gmres_poly
          petsc_matvec_da_poly_mf, petsc_matvec_poly_transpose_mf, highest_nonzero_coeff
    use tsqr, only: finish_tsqr_parallel, start_tsqr, tsqr_buffers
    use gmres_poly_data_type, only: gmres_poly_data
-   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, &
-         kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity
+   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, mat_create_vec_device, &
+         kokkos_debug, mat_duplicate_copy_plus_diag, generate_identity, MatGetTypeEffective
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -164,7 +165,7 @@ module gmres_poly
       ! Local variables
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscInt :: local_rows, local_cols, global_rows, global_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, vecs_needed
+      PetscInt :: global_row_start, global_row_end_plus_one, vecs_needed, i_vec
       integer :: i_loc, seed_size, comm_size, comm_rank, errorcode
       PetscErrorCode :: ierr      
       integer, dimension(:), allocatable :: seed
@@ -174,6 +175,7 @@ module gmres_poly
       PetscScalar, dimension(:), pointer :: v_array
       type(tVec) :: temp_vec
       PetscInt, parameter :: one=1, zero=0
+      integer(c_long_long), dimension(:), allocatable :: vec_handles
       ! ~~~~~~    
 
       ! We might want to call the gmres poly creation on a sub communicator
@@ -224,12 +226,25 @@ module gmres_poly
       deallocate(seed)
 
       ! ~~~~~~~~~~
-      ! Use a template vec and VecDuplicateVecs to allocate all V_n vectors 
-      ! in one contiguous block. Contiguous allocation lets VecMAXPY use BLAS-2 operations.
+      ! Use a template vec to allocate all V_n vectors in one contiguous block, like 
+      ! VecDuplicateVecs. Contiguous allocation lets VecMDot use a BLAS-2 operation (when
+      ! called on a vector with those operations, see w_j in the Arnoldi)
+      ! Kokkos vectors are built on one device buffer without the zero-filled host copy 
+      ! VecDuplicateVecs makes (the template is too). Destroy them with destroy_temp_space
       ! ~~~~~~~~~~
-      call MatCreateVecs(matrix, temp_vec, PETSC_NULL_VEC, ierr)
+      call mat_create_vec_device(matrix, .FALSE., temp_vec)
       vecs_needed = subspace_size + 1
-      call VecDuplicateVecs(temp_vec, vecs_needed, V_n, ierr)
+      allocate(V_n(vecs_needed))
+      allocate(vec_handles(vecs_needed))
+      ierr = vec_duplicate_vecs_c(temp_vec%v, vecs_needed, vec_handles)
+      if (ierr /= 0) then
+         print *, "Creating the temporary space failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+      do i_vec = 1, vecs_needed
+         V_n(i_vec)%v = vec_handles(i_vec)
+      end do
+      deallocate(vec_handles)
       call VecDestroy(temp_vec, ierr)
 
       ! The random values are just the local entries of the first vector, so copy them
@@ -242,6 +257,29 @@ module gmres_poly
       ! ~~~~~~~~~~~~
 
    end subroutine create_temp_space_box_muller  
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine destroy_temp_space(V_n)
+
+      ! Destroys the vectors created by create_temp_space_box_muller
+
+      ! ~~~~~~
+      type(tVec), pointer, dimension(:)                           :: V_n
+
+      ! Local variables
+      integer :: i_loc
+      PetscErrorCode :: ierr
+      ! ~~~~~~    
+
+      if (.NOT. associated(V_n)) return
+      do i_loc = 1, size(V_n)
+         call VecDestroy(V_n(i_loc), ierr)
+      end do
+      deallocate(V_n)
+      V_n => null()
+
+   end subroutine destroy_temp_space
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -478,7 +516,7 @@ module gmres_poly
       PetscReal, optional, intent(inout)                     :: user_rel_tol
 
       ! Local variables
-      PetscInt :: global_rows, global_cols, vecs_needed
+      PetscInt :: global_rows, global_cols
       integer :: subspace_size, m
       integer :: errorcode
       PetscErrorCode :: ierr
@@ -520,7 +558,9 @@ module gmres_poly
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
       ! Create an extra vector for storage
-      call VecDuplicate(V_n(1), w_j, ierr)         
+      ! Made from the matrix rather than duplicated from V_n(1), as VecMDot uses w_j's
+      ! operations, and only a vector made this way has the Kokkos GEMV VecMDot
+      call MatCreateVecs(matrix, w_j, PETSC_NULL_VEC, ierr)
 
       ! Do the Arnoldi and compute H_n and C_n
       ! We only compute H_n until we hit a relative residual of 1e-14 against the random rhs
@@ -545,8 +585,7 @@ module gmres_poly
                y, one_bl, &
                blas_zero, coefficients(1), one_bl)
 
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)
+      call destroy_temp_space(V_n)
       call VecDestroy(w_j, ierr)
 
    end subroutine calculate_gmres_polynomial_coefficients_arnoldi   
@@ -572,7 +611,7 @@ module gmres_poly
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
-      PetscInt :: global_row_start, global_row_end_plus_one, row_i, vecs_needed
+      PetscInt :: global_row_start, global_row_end_plus_one, row_i
       PetscInt, dimension(:), allocatable :: global_indices
       integer :: comm_size, subspace_size, comm_rank, i_loc
       integer :: errorcode
@@ -660,8 +699,7 @@ module gmres_poly
          ! This does a copy of the vec from gpu to cpu if necessary
          call VecGetValues(V_n(i_loc), local_rows, global_indices, K_m_plus_1_data(:, i_loc), ierr)
       end do
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)         
+      call destroy_temp_space(V_n)         
 
       ! ~~~~~~~~~~~~~
       ! Start the tall-skinny QR factorisation of the power basis - this all happens
@@ -816,6 +854,7 @@ subroutine  finish_gmres_polynomial_coefficients_power(poly_order, buffers, coef
       type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
       type(tVec) :: max_vec
       PetscInt :: row_loc      
+      PetscReal :: result_scale
 #endif      
       ! ~~~~~~~~~~
 
@@ -890,6 +929,12 @@ end if
             call MatConvert(temp_mat, MATSAME, MAT_INITIAL_MATRIX, &
                         temp_mat_reuse, ierr)                        
 
+            ! The biggest entry of the Kokkos result, to scale the tolerance below
+            call MatCreateVecs(temp_mat_compare, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat_compare, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, result_scale, ierr)
+            call VecDestroy(max_vec, ierr)
+
             call MatAXPYWrapper(temp_mat_reuse, PFLARE_MINUS_ONE, temp_mat_compare)
             ! Find the biggest entry in the difference
             call MatCreateVecs(temp_mat_reuse, PETSC_NULL_VEC, max_vec, ierr)
@@ -898,8 +943,11 @@ end if
             call VecDestroy(max_vec, ierr)
 
             ! There is floating point compute in these inverses, so we have to be a 
-            ! bit more tolerant to rounding differences
-            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 .OR. normy/=normy) then
+            ! bit more tolerant to rounding differences. The coefficients can be huge (e.g. for
+            ! a singular matrix) with entries that cancel, so the rounding scales with the
+            ! biggest entry of the result
+            if (normy .gt. PFLARE_TOL_MATFREE_4EM11 * max(1.0_PFLARE_REAL_KIND, result_scale) &
+                     .OR. normy/=normy) then
                !call MatFilter(temp_mat_reuse, 1d-14, PETSC_TRUE, PETSC_FALSE, ierr)
                !call MatView(temp_mat_reuse, PETSC_VIEWER_STDOUT_WORLD, ierr)
                print *, "Diff Kokkos and CPU mat_mult_powers_share_sparsity", normy, "row", row_loc
@@ -929,6 +977,119 @@ end if
       ! ~~~~~~~~~~
       
    end subroutine mat_mult_powers_share_sparsity
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine build_gmres_polynomial_inverse_raw(matrix, inverse_type, poly_order, poly_sparsity_order, &
+                  buffers, coefficients, diag_scale_polys, reuse_mat, reuse_submatrices, raw_handle, done)
+
+      ! The assembled (not matrix-free) GMRES polynomial inverse that finish_approximate_inverse builds
+      ! for the power and Arnoldi bases with sparsity order 1 (mat_mult_powers_share_sparsity), but
+      ! left as device data in raw_handle rather than made into a PETSc matrix. The same steps and
+      ! arithmetic, so the same values
+      ! done is .FALSE. (and nothing is built) unless: Kokkos AIJ matrix, power or Arnoldi, sparsity
+      ! order 1, polynomial order > 1 and no diagonal scaling. raw_handle has to be freed (raw_free)
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)                     :: matrix
+      integer, intent(in)                                :: inverse_type, poly_order, poly_sparsity_order
+      type(tsqr_buffers), intent(inout)                  :: buffers
+      PetscReal, dimension(:, :), pointer, contiguous, intent(inout) :: coefficients
+      logical, intent(in)                                :: diag_scale_polys
+      type(tMat), intent(inout)                          :: reuse_mat
+      type(tMat), dimension(:), pointer, intent(inout)   :: reuse_submatrices
+      integer(kind=8), intent(out)                       :: raw_handle
+      logical, intent(out)                               :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, reuse_array, handle, C_array
+      integer :: errorcode, reuse_int_reuse_mat
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+      type(tMat) :: temp_mat, raw_mat, reuse_mat_cpu
+      type(tMat), dimension(:), pointer :: reuse_submatrices_cpu
+      PetscScalar :: normy
+      type(c_ptr)  :: coefficients_ptr
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      PetscReal :: result_scale
+      logical :: reuse_triggered
+#if defined(PETSC_USE_MPI_F08)
+      MPIU_Status :: status
+#else
+      MPIU_Status, dimension(MPI_STATUS_SIZE) :: status
+#endif
+#endif
+      ! ~~~~~~
+
+      done = .FALSE.
+      raw_handle = 0
+
+#if defined(PETSC_HAVE_KOKKOS)
+      if (inverse_type /= PFLAREINV_POWER .AND. inverse_type /= PFLAREINV_ARNOLDI) return
+      if (poly_sparsity_order /= 1 .OR. poly_order < 2 .OR. diag_scale_polys) return
+      ! matrix may be a raw shell (device data), read through its blocks
+      call MatGetTypeEffective(matrix, mat_type, ierr)
+      if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS)) return
+
+      ! As finish_approximate_inverse
+      if (buffers%on_subcomm .AND. buffers%request /= MPI_REQUEST_NULL) then
+         call mpi_wait(buffers%request, status, errorcode)
+         if (errorcode /= MPI_SUCCESS) then
+            print *, "mpi_wait failed"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         buffers%request = MPI_REQUEST_NULL
+      end if
+
+      ! As mat_mult_powers_share_sparsity
+      call finish_gmres_polynomial_coefficients_power(poly_order, buffers, coefficients(:, 1))
+      A_array = matrix%v
+      ! PetscObjectIsNull is a macro, so keep it on a short line
+      reuse_triggered = .NOT. PetscObjectIsNull(reuse_mat)
+      reuse_int_reuse_mat = 0
+      if (reuse_triggered) reuse_int_reuse_mat = 1
+      reuse_array = reuse_mat%v
+      coefficients_ptr = c_loc(coefficients(1, 1))
+      call mat_mult_powers_share_sparsity_raw_kokkos(A_array, poly_order, &
+               coefficients_ptr, reuse_int_reuse_mat, reuse_array, handle)
+      reuse_mat%v = reuse_array
+      raw_handle = handle
+      done = .TRUE.
+
+      ! If debugging do a comparison against the CPU version
+      if (kokkos_debug()) then
+         reuse_submatrices_cpu => null()
+         call mat_mult_powers_share_sparsity_cpu(matrix, poly_order, poly_sparsity_order, &
+                  buffers, coefficients(:, 1), reuse_mat_cpu, reuse_submatrices_cpu, temp_mat)
+         call destroy_matrix_reuse(reuse_mat_cpu, reuse_submatrices_cpu)
+         call raw_copy_to_mat_kokkos(handle, C_array)
+         raw_mat%v = C_array
+         ! The tolerance scales with the biggest entry of the result, as in
+         ! mat_mult_powers_share_sparsity
+         call MatCreateVecs(raw_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(raw_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, result_scale, ierr)
+         call VecDestroy(max_vec, ierr)
+         call MatAXPYWrapper(temp_mat, PFLARE_MINUS_ONE, raw_mat)
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (normy .gt. PFLARE_TOL_MATFREE_4EM11 * max(1.0_PFLARE_REAL_KIND, result_scale) &
+                  .OR. normy/=normy) then
+            print *, "Diff Kokkos and CPU build_gmres_polynomial_inverse_raw", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(raw_mat, ierr)
+      end if
+
+      ! As finish_approximate_inverse
+      call MatDestroy(buffers%matrix, ierr)
+#endif
+
+   end subroutine build_gmres_polynomial_inverse_raw
 
 !------------------------------------------------------------------------------------------------------------------------
    
@@ -1443,7 +1604,7 @@ end if
 
             ! Create temporary vector we use during horner
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)        
+            call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_TEMP))
             
             ! Need to build mat_ctx%mat_scaled, ie D^-1 A
             if (diag_scale_polys) then
@@ -1467,7 +1628,8 @@ end if
                
                ! Create temporary vector we use during horner
                ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)            
-               call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)                 
+               call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_RHS))
+               call mat_create_vec_device(matrix, .TRUE., mat_ctx%mf_temp_vec(MF_VEC_DIAG))
 
             end if
 
@@ -1510,7 +1672,7 @@ end if
 
       ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
       if (diag_scale_polys) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_inverse_vec)
          call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
          call VecReciprocal(diag_inverse_vec, ierr)
          call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
@@ -1690,7 +1852,7 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
 
       if (.NOT. reuse_triggered) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
       end if
@@ -1734,12 +1896,13 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
 
        ! Our matrix has to be square
-      call MatCreateVecs(matrix, power_vec, diag_vec, ierr)
+      call mat_create_vec_device(matrix, .FALSE., power_vec)
+      call mat_create_vec_device(matrix, .TRUE., diag_vec)
       call MatGetDiagonal(matrix, diag_vec, ierr)
 
       ! This stores D^order
       if (.NOT. reuse_triggered) then
-         call VecDuplicate(diag_vec, inv_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., inv_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, inv_vec, ierr)
       end if

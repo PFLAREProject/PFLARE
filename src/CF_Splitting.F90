@@ -3,7 +3,7 @@ module cf_splitting
    use petscmat
    use pflare_parameters, only: C_POINT, F_POINT, PFLARE_CR_MAX_ITS, &
             PFLARE_CR_POLY_ORDER, PFLAREINV_ARNOLDI
-   use pmisr_module, only: pmisr
+   use pmisr_module, only: pmisr, pmisr_cpu, pmisr_from_matrix
    use ddc_module, only: ddc
    use cr_splitting, only: cr_pass
    use sabs, only: generate_sabs
@@ -11,7 +11,7 @@ module cf_splitting
    use c_petsc_interfaces, only: create_cf_is_kokkos, delete_device_cf_markers, delete_device_diag_dom_ratio, &
             copy_cf_markers_d2h
    use aggregation, only: generate_serial_aggregation
-   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse
+   use petsc_helper, only: MatAXPYWrapper, MatSetAllValues, kokkos_debug, remove_small_from_sparse, MatGetTypeEffective
 
 #include "petsc/finclude/petscmat.h"
 
@@ -111,6 +111,10 @@ module cf_splitting
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscErrorCode :: ierr
       type(tMat) :: strength_mat
+      logical :: from_matrix, symmetrize
+#if defined(PETSC_HAVE_KOKKOS)
+      integer, dimension(:), allocatable :: cf_markers_local_two
+#endif
       ! type(tMat) :: prolongators, strength_mat_c, strength_mat_fc, temp_mat
       ! type(tIS) :: is_fine, is_coarse, zero_diags
       ! integer, dimension(:), allocatable :: cf_markers_local_c
@@ -131,6 +135,25 @@ module cf_splitting
       call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)   
 
+      ! Is the strength matrix symmetrized
+      symmetrize = .NOT. skip_symmetrize
+      if (cf_splitting_type == CF_PMIS) symmetrize = .TRUE.
+
+      ! The first pass PMISR (and PMIS) can run straight from the level matrix on the device, where
+      ! building the strength matrix and its transpose as PETSc matrices is expensive
+      ! Distance 2 PMIS needs the square of the strength matrix, and the aggregations need the
+      ! strength matrix itself
+      from_matrix = .FALSE.
+#if defined(PETSC_HAVE_KOKKOS)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
+      if ((mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) .AND. &
+            (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM .OR. &
+             cf_splitting_type == CF_PMIS)) then
+         from_matrix = .TRUE.
+      end if
+#endif
+
       ! ~~~~~~~~~~~~
       ! Generate the strength matrix
       ! ~~~~~~~~~~~~
@@ -145,7 +168,9 @@ module cf_splitting
       else if (cf_splitting_type == CF_PMIS) then
 
          ! Note we are symmetrizing the strength matrix here
-         call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
+         if (.NOT. from_matrix) then
+            call generate_sabs(input_mat, strong_threshold, .TRUE., .FALSE., strength_mat)
+         end if
 
       else if (cf_splitting_type == CF_DIAG_DOM) then
          ! Symmetrize the strength matrix unless asked to skip it
@@ -155,20 +180,45 @@ module cf_splitting
          ! the DDC cleanup take a lot more work
          !call generate_sabs(input_mat, strong_threshold, .NOT. skip_symmetrize, .FALSE., strength_mat, &
          !         allow_diag_strength = .TRUE.)
-         call generate_sabs(input_mat, strong_threshold, .NOT. skip_symmetrize, .FALSE., strength_mat)
+         if (.NOT. from_matrix) then
+            call generate_sabs(input_mat, strong_threshold, symmetrize, .FALSE., strength_mat)
+         end if
 
       ! PMISR DDC and Aggregation
       else
          ! Symmetrize the strength matrix unless asked to skip it
-         call generate_sabs(input_mat, strong_threshold, .NOT. skip_symmetrize, .FALSE., strength_mat)
+         if (.NOT. from_matrix) then
+            call generate_sabs(input_mat, strong_threshold, symmetrize, .FALSE., strength_mat)
+         end if
       end if
 
       ! ~~~~~~~~~~~~
       ! Do the first pass splitting
       ! ~~~~~~~~~~~~
 
+      ! PMISR and distance 1 PMIS straight from the matrix
+      if (from_matrix) then
+#if defined(PETSC_HAVE_KOKKOS)
+         call pmisr_from_matrix(input_mat, strong_threshold, symmetrize, &
+                  cf_splitting_type == CF_PMIS, max_luby_steps, cf_markers_local)
+
+         ! If debugging compare against the CPU version on an explicit strength matrix
+         if (kokkos_debug()) then
+            call copy_cf_markers_d2h(c_loc(cf_markers_local))
+            call generate_sabs(input_mat, strong_threshold, symmetrize, .FALSE., strength_mat)
+            call pmisr_cpu(strength_mat, max_luby_steps, cf_splitting_type == CF_PMIS, cf_markers_local_two)
+            call MatDestroy(strength_mat, ierr)
+
+            if (any(cf_markers_local /= cf_markers_local_two)) then
+               print *, "Kokkos pmisr from the matrix and CPU pmisr do not match"
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            deallocate(cf_markers_local_two)
+         end if
+#endif
+
       ! PMISR
-      if (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM) then
+      else if (cf_splitting_type == CF_PMISR_DDC .OR. cf_splitting_type == CF_DIAG_DOM) then
 
          call pmisr(strength_mat, max_luby_steps, .FALSE., cf_markers_local)
 
@@ -245,7 +295,7 @@ module cf_splitting
       end if
 
       ! Destroy the strength matrix
-      call MatDestroy(strength_mat, ierr)
+      if (.NOT. from_matrix) call MatDestroy(strength_mat, ierr)
 
    end subroutine first_pass_splitting
 
@@ -304,7 +354,7 @@ module cf_splitting
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then 
 

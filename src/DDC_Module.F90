@@ -2,10 +2,9 @@ module ddc_module
 
    use iso_c_binding
    use petscmat
-   use petsc_helper, only: kokkos_debug, remove_small_from_sparse, MatCreateSubMatrixWrapper
-      use c_petsc_interfaces, only: copy_cf_markers_d2h, copy_diag_dom_ratio_d2h, ddc_kokkos, &
-         MatDiagDomRatio_kokkos, create_cf_is_kokkos
-   use pmisr_module, only: pmisr_existing_measure_cf_markers, pmisr_existing_measure_implicit_transpose
+   use petsc_helper, only: kokkos_debug, MatCreateSubMatrixWrapper, MatGetTypeEffective
+   use c_petsc_interfaces, only: copy_cf_markers_d2h, ddc_kokkos
+   use pmisr_module, only: pmisr_existing_measure_implicit_transpose, pmisr_random_numbers
    use pflare_parameters, only: C_POINT, F_POINT
    use matdiagdom, only: MatDiagDomRatio
 
@@ -36,29 +35,28 @@ module ddc_module
       PetscReal, intent(inout)            :: max_dd_ratio
       integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
 
-      type(tMat) :: Aff_ddc
       PetscErrorCode :: ierr
-      logical :: trigger_dd_ratio_compute_local
+      logical :: trigger_dd_ratio_compute_local, on_device
       PetscInt :: local_rows, local_cols
       PetscReal :: max_dd_ratio_achieved
-      integer :: seed_size_ddc, comm_rank_ddc, errorcode_ddc, i_loc
-      integer, dimension(:), allocatable :: seed_ddc
+      integer :: comm_rank_ddc, errorcode_ddc
       PetscReal, dimension(:), allocatable :: diag_dom_ratio
-      PetscReal, dimension(:), allocatable, target :: diag_dom_ratio_random
+      PetscReal, dimension(:), allocatable, target :: randoms_owned
+      PetscReal, dimension(:), pointer :: randoms
       type(c_ptr) :: random_numbers_ptr
       MPIU_Comm :: MPI_COMM_MATRIX
 
 #if defined(PETSC_HAVE_KOKKOS)
-      integer(c_long_long) :: A_array, Aff_array, is_fine_array, is_coarse_array
+      integer(c_long_long) :: A_array
       MatType :: mat_type
       type(c_ptr)  :: cf_markers_local_ptr
       integer :: errorcode
-      !integer :: kfree
       integer, dimension(:), allocatable :: cf_markers_local_two
-      type(tIS) :: is_fine_temp, is_coarse_temp
 #endif
       ! ~~~~~~
 
+      ! Not with an initialiser in the declaration, which would give it an implicit save
+      nullify(randoms)
       trigger_dd_ratio_compute_local = max_dd_ratio > 0
 
       ! If we don't need to swap anything, return
@@ -82,56 +80,29 @@ module ddc_module
          return
       end if
 
-      ! Generate random numbers for the PMIS tie-breaking in the trigger path
-      ! These are generated here so both CPU and Kokkos use the same randoms
+      ! The random numbers for the PMIS tie-breaking in the trigger path, the same ones
+      ! for the CPU and Kokkos (and those of the PMISR, kept between the calls in a PCAIR setup)
+      ! We take as many as the local rows, rather than just the F points, as if we are on the
+      ! device the is_fine won't be allocated on the host yet
       random_numbers_ptr = c_null_ptr
       if (trigger_dd_ratio_compute_local) then
-         
          call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
-         ! We allocate randoms here to be the size of input, rather than 
-         ! just F points as if we are on the device the is_fine won't be allocated
-         ! on the host yet
-         allocate(diag_dom_ratio_random(local_rows))
-         
-         call random_seed(size=seed_size_ddc)
-         allocate(seed_ddc(seed_size_ddc))
-         
-         do i_loc = 1, seed_size_ddc
-            seed_ddc(i_loc) = comm_rank_ddc + 1 + i_loc
-         end do
-         call random_seed(put=seed_ddc)
-         call random_number(diag_dom_ratio_random)
-
-         deallocate(seed_ddc)
-         random_numbers_ptr = c_loc(diag_dom_ratio_random)
+         call pmisr_random_numbers(comm_rank_ddc, local_rows, randoms_owned, randoms)
+         random_numbers_ptr = c_loc(randoms)
       end if
 
+      on_device = .FALSE.
 #if defined(PETSC_HAVE_KOKKOS)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
+      on_device = mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS
+#endif
 
-      call MatGetType(input_mat, mat_type, ierr)
-      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
-            mat_type == MATAIJKOKKOS) then
-
-         ! Kokkos path: only extract Aff if trigger_dd_ratio_compute
-         ! as the kokkos ddc computes diag dominance ratio without needing Aff
-         Aff_array = 0
+      if (on_device) then
+#if defined(PETSC_HAVE_KOKKOS)
+         ! The kokkos ddc works on the input matrix and the device cf_markers,
+         ! it never needs Aff or the host ISs
          A_array = input_mat%v
-         if (trigger_dd_ratio_compute_local) then
-
-            ! Create the host is_fine and is_coarse based on device cf_markers
-            call create_cf_is_kokkos(A_array, is_fine_array, is_coarse_array)
-            is_fine_temp%v = is_fine_array
-            is_coarse_temp%v = is_coarse_array
-
-            call MatCreateSubMatrixWrapper(input_mat, &
-                        is_fine_temp, is_fine_temp, MAT_INITIAL_MATRIX, &
-                        Aff_ddc)
-
-            Aff_array = Aff_ddc%v
-            call ISDestroy(is_fine_temp, ierr)
-            call ISDestroy(is_coarse_temp, ierr)
-         end if
-
          cf_markers_local_ptr = c_loc(cf_markers_local)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -141,7 +112,7 @@ module ddc_module
          end if
 
          ! Modifies the existing device cf_markers created by the pmisr
-         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, Aff_array, &
+         call ddc_kokkos(A_array, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
             random_numbers_ptr)
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -150,71 +121,64 @@ module ddc_module
             ! Kokkos DDC by default now doesn't copy back to the host, as any subsequent ddc calls
             ! use the existing device data
             call copy_cf_markers_d2h(cf_markers_local_ptr)
-            if (trigger_dd_ratio_compute_local) then
-               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-                  diag_dom_ratio, cf_markers_local_two, &
-                  Aff=Aff_ddc, &
-                  diag_dom_ratio_random=diag_dom_ratio_random)
-            else
-               call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-                  diag_dom_ratio, cf_markers_local_two)
-            end if
+            ! When debugging the host is_fine is kept up to date
+            call ddc_host(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+                  diag_dom_ratio, cf_markers_local_two, randoms)
 
             if (any(cf_markers_local /= cf_markers_local_two)) then
-
-               ! do kfree = 1, size(cf_markers_local)
-               !    if (cf_markers_local(kfree) /= cf_markers_local_two(kfree)) then
-               !       print *, kfree-1, "no match", cf_markers_local(kfree), cf_markers_local_two(kfree)
-               !    end if
-               ! end do
                print *, "Kokkos and CPU versions of ddc do not match"
                call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
             end if
             deallocate(cf_markers_local_two)
          end if
-
-         ! Cleanup
-         if (trigger_dd_ratio_compute_local) then
-            call MatDestroy(Aff_ddc, ierr)
-         end if
-
+#endif
       else
-         ! CPU path: only extract Aff if trigger_dd_ratio_compute
-         if (trigger_dd_ratio_compute_local) then
-            call MatCreateSubMatrix(input_mat, &
-                  is_fine, is_fine, MAT_INITIAL_MATRIX, &
-                  Aff_ddc, ierr)
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-               diag_dom_ratio, cf_markers_local, &
-                  Aff=Aff_ddc, &
-                  diag_dom_ratio_random=diag_dom_ratio_random)
-            call MatDestroy(Aff_ddc, ierr)
-         else
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
-               diag_dom_ratio, cf_markers_local)
-         end if
+         call ddc_host(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+               diag_dom_ratio, cf_markers_local, randoms)
       end if
-#else
-      ! CPU path: only extract Aff if trigger_dd_ratio_compute
-      if (trigger_dd_ratio_compute_local) then
-         call MatCreateSubMatrix(input_mat, &
+
+      if (allocated(randoms_owned)) deallocate(randoms_owned)
+      if (allocated(diag_dom_ratio)) deallocate(diag_dom_ratio)
+
+   end subroutine ddc
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine ddc_host(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, diag_dom_ratio, &
+         cf_markers_local, randoms)
+
+      ! ddc_cpu, extracting Aff first if the trigger path needs it
+
+      ! ~~~~~~
+      type(tMat), target, intent(in)      :: input_mat
+      type(tIS), intent(in)               :: is_fine
+      PetscReal, intent(in)               :: fraction_swap
+      PetscReal, intent(in)               :: max_dd_ratio
+      PetscReal, intent(in)               :: max_dd_ratio_achieved
+      PetscReal, dimension(:), intent(in) :: diag_dom_ratio
+      integer, dimension(:), allocatable, intent(inout) :: cf_markers_local
+      PetscReal, dimension(:), pointer, intent(in) :: randoms
+
+      type(tMat) :: Aff_ddc
+      PetscErrorCode :: ierr
+
+      ! ~~~~~~
+
+      if (max_dd_ratio > 0) then
+         call MatCreateSubMatrixWrapper(input_mat, &
                is_fine, is_fine, MAT_INITIAL_MATRIX, &
-               Aff_ddc, ierr)
+               Aff_ddc)
          call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local, &
                Aff=Aff_ddc, &
-               diag_dom_ratio_random=diag_dom_ratio_random)
+               diag_dom_ratio_random=randoms)
          call MatDestroy(Aff_ddc, ierr)
       else
-            call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
+         call ddc_cpu(input_mat, is_fine, fraction_swap, max_dd_ratio, max_dd_ratio_achieved, &
                diag_dom_ratio, cf_markers_local)
       end if
-#endif
 
-      if (allocated(diag_dom_ratio_random)) deallocate(diag_dom_ratio_random)
-         if (allocated(diag_dom_ratio)) deallocate(diag_dom_ratio)
-
-   end subroutine ddc
+   end subroutine ddc_host
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

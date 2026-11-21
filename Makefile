@@ -208,6 +208,7 @@ export TEST_TARGETS = ex12f \
 		  pcair_option_changes \
 		  pflareinv_setcoeffs \
 		  pflareinv_empty_rows \
+		  long_rows \
 		  operator_refcount \
 		  pcair_reuse_amount_range \
 		  comm_self_then_world \
@@ -344,6 +345,12 @@ tests_medium: build_tests
 .PHONY: tests_copies
 tests_copies: build_tests
 	$(MAKE) -C tests run_tests_copies
+
+# Long row Kokkos kernel tests - their GPU launch shapes only run on a GPU, so
+# run from the GPU CI workflow and deliberately not part of make tests
+.PHONY: tests_gpu
+tests_gpu: build_tests
+	$(MAKE) -C tests run_tests_gpu
 
 # Checks that PCAIR v-cycles and diagonal updates call no MPI collectives,
 # with a counting library preloaded with LD_PRELOAD, so linux only. Deliberately

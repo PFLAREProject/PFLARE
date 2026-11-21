@@ -37,11 +37,26 @@ using ViewPetscIntPtr = std::shared_ptr<PetscIntKokkosView>;
 using KokkosTeamMemberType = Kokkos::TeamPolicy<DefaultExecutionSpace>::member_type;
 using KokkosCsrMatrix = KokkosSparse::CrsMatrix<PetscScalar, PetscInt, DefaultMemorySpace, void, PetscInt>;
 
+// The blocks of a parallel (or serial) AIJ matrix as device views, not (yet) a PETSc matrix
+struct RawAIJKokkos {
+   bool mpi = false;
+   MPI_Comm comm = MPI_COMM_NULL;
+   PetscInt local_rows = 0, local_cols = 0, global_rows = 0, global_cols = 0;
+   PetscInt row_start = 0, col_start = 0, col_end = 0;
+   // The local block, with local columns
+   Kokkos::View<PetscInt *> i_l, j_l;
+   Kokkos::View<PetscScalar *> a_l;
+   // The nonlocal block, with local columns into garray_d (sorted global columns)
+   Kokkos::View<PetscInt *> i_nl, j_nl;
+   Kokkos::View<PetscScalar *> a_nl;
+   PetscIntKokkosView garray_d;
+   PetscInt col_ao = 0;
+};
+
 PETSC_INTERN void mat_duplicate_copy_plus_diag_kokkos(Mat *, int, Mat *);
 PETSC_INTERN void rewrite_j_global_to_local(PetscInt, PetscInt&, PetscIntKokkosView, PetscInt**);
 PETSC_INTERN void create_cf_is_device_kokkos(Mat *input_mat, const int match_cf, PetscIntKokkosView &is_local_d);
-PETSC_INTERN void pmisr_existing_measure_cf_markers_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int);
-PETSC_INTERN void pmisr_existing_measure_implicit_transpose_kokkos(Mat *strength_mat, const int max_luby_steps, const int pmis_int, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d, const int zero_measure_c_point_int);
+PETSC_INTERN void pmisr_existing_measure_from_matrix_kokkos(Mat *input_mat, const int max_luby_steps, PetscScalarKokkosView &measure_local_d, intKokkosView &cf_markers_d);
 PETSC_INTERN void copy_diag_dom_ratio_d2h(PetscReal *diag_dom_ratio_local);
 PETSC_INTERN void delete_device_diag_dom_ratio();
 
@@ -51,6 +66,42 @@ PETSC_INTERN void delete_device_diag_dom_ratio();
 // Not PETSC_INTERN: that forces extern "C" linkage, which is incompatible with
 // returning a C++ Kokkos View. Callers are all C++ (.kokkos.cxx).
 PETSC_VISIBILITY_INTERNAL PetscIntKokkosView VecISCopyLocal_kokkos_get_view(void *handle, int our_level, int fine_int);
+// mat_duplicate_copy_plus_diag_kokkos without reuse, returning the output as device views (PETSc_Helperk)
+PETSC_VISIBILITY_INTERNAL void mat_duplicate_copy_plus_diag_raw_kokkos(Mat *input_mat, RawAIJKokkos &out);
+
+// ~~~~~~~~~~~~~~~~~~
+// Level matrices kept as device views (a "raw shell"): a MATSHELL whose context holds the blocks as a
+// RawAIJKokkos, a host copy of garray and a halo PetscSF built as PETSc builds an MPIAIJ matrix's
+// Mvctx. The setup kernels read either kind of matrix through AIJDeviceAccess (PETSc_Helperk)
+// ~~~~~~~~~~~~~~~~~~
+// Device access to an AIJ matrix's blocks, from a MATSEQAIJKOKKOS / MATMPIAIJKOKKOS or a raw shell
+struct AIJDeviceAccess {
+   bool mpi = false;
+   bool raw = false;
+   MPI_Comm comm = MPI_COMM_NULL;
+   PetscInt local_rows = 0, local_cols = 0, global_rows = 0, global_cols = 0;
+   PetscInt row_start = 0, row_end = 0, col_start = 0, col_end = 0;
+   // Columns (and rows) of the nonlocal block
+   PetscInt rows_ao = 0, cols_ao = 0;
+   const PetscInt *local_i = nullptr, *local_j = nullptr, *nonlocal_i = nullptr, *nonlocal_j = nullptr;
+   Kokkos::View<const PetscScalar *> local_vals, nonlocal_vals;
+   PetscInt nnz_local = 0, nnz_nonlocal = 0;
+   // garray on the host (as MatMPIAIJGetSeqAIJ's colmap) and the halo SF (as MatGetMultPetscSF)
+   const PetscInt *colmap = nullptr;
+   PetscSF sf = NULL;
+   // The blocks when the input is a PETSc matrix (for the restores)
+   Mat mat_local = NULL, mat_nonlocal = NULL;
+};
+// Is this a raw shell
+PETSC_VISIBILITY_INTERNAL bool is_raw_shell(Mat A);
+// Fill acc from A (a Kokkos AIJ matrix or a raw shell); restore after use
+PETSC_VISIBILITY_INTERNAL void aij_device_access_get(Mat A, AIJDeviceAccess &acc);
+PETSC_VISIBILITY_INTERNAL void aij_device_access_restore(AIJDeviceAccess &acc);
+// Makes a raw shell holding raw (the shell shares the views; raw is left as it was)
+PETSC_VISIBILITY_INTERNAL void raw_shell_create_kokkos(const RawAIJKokkos &raw, Mat *A);
+// The global column and value of each row's entry in a one point shell prolongator
+// (Grid_Transferk), false if P isn't one
+PETSC_VISIBILITY_INTERNAL bool one_point_shell_targets_kokkos(Mat P, const PetscInt sentinel, PetscIntKokkosView &target_global_d, PetscScalarKokkosView &weight_d);
 
 extern intKokkosView cf_markers_local_d;
 extern PetscScalarKokkosView diag_dom_ratio_local_d;
@@ -96,7 +147,9 @@ static inline PetscErrorCode petsc_streams_differ_kokkos(PetscDeviceContext *dct
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-static inline PetscErrorCode sf_sync_before_begin_kokkos()
+// Wait for kernels on the PETSc execution space if the current PETSc device context has
+// another stream, e.g. before work on that stream uses what the kernels wrote
+static inline PetscErrorCode fence_kokkos_if_streams_differ()
 {
    PetscDeviceContext dctx;
    PetscBool differ;
@@ -104,6 +157,13 @@ static inline PetscErrorCode sf_sync_before_begin_kokkos()
    PetscFunctionBegin;
    PetscCall(petsc_streams_differ_kokkos(&dctx, &differ));
    if (differ) PetscGetKokkosExecutionSpace().fence();
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static inline PetscErrorCode sf_sync_before_begin_kokkos()
+{
+   PetscFunctionBegin;
+   PetscCall(fence_kokkos_if_streams_differ());
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

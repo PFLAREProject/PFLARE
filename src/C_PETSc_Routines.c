@@ -413,3 +413,178 @@ PETSC_INTERN PetscErrorCode MatGetDiagonalOnly_c(Mat *A, int *diag_only)
 
   PetscFunctionReturn(PETSC_SUCCESS);
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// PETSc checks every new SeqAIJ matrix for inodes on the host when it is assembled, which for
+// Kokkos matrices built on the device is host work that buys nothing, as the device kernels never
+// use inodes. The check happens inside PETSc as each matrix is created (including PETSc's own
+// product matrices), so it can't be switched off per matrix with MAT_USE_INODES. Instead, while a
+// PFLARE setup runs on a Kokkos matrix, we set -mat_no_inode in the global options database (as
+// if it were given on the command line) and remove it afterwards. If the user has set
+// -mat_no_inode themselves, either way, we leave it alone
+// This could be removed if PETSc skipped the inode check for Kokkos matrices
+PETSC_INTERN PetscErrorCode PFLARENoInodesBegin_c(Mat mat, PetscBool *pushed)
+{
+   PetscBool is_kokkos, user_set;
+
+   PetscFunctionBegin;
+   *pushed = PETSC_FALSE;
+   PetscCall(PetscObjectTypeCompareAny((PetscObject)mat, &is_kokkos, MATSEQAIJKOKKOS, MATMPIAIJKOKKOS, ""));
+   if (!is_kokkos) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PetscOptionsHasName(NULL, NULL, "-mat_no_inode", &user_set));
+   if (user_set) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PetscOptionsSetValue(NULL, "-mat_no_inode", NULL));
+   *pushed = PETSC_TRUE;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Undoes PFLARENoInodesBegin_c
+PETSC_INTERN PetscErrorCode PFLARENoInodesEnd_c(PetscBool pushed)
+{
+   PetscFunctionBegin;
+   if (pushed) PetscCall(PetscOptionsClearValue(NULL, "-mat_no_inode"));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+#if defined(PETSC_HAVE_KOKKOS)
+PETSC_INTERN PetscErrorCode vec_duplicate_vecs_device_kokkos(Vec template_vec, PetscInt m, Vec *vecs);
+PETSC_INTERN PetscErrorCode vec_create_device_kokkos(MPI_Comm comm, PetscInt n, PetscInt N, PetscInt bs, Vec *v);
+
+// Is the vec type one of the kokkos ones
+static PetscErrorCode vec_type_is_kokkos(VecType vtype, PetscBool *is_kokkos)
+{
+   PetscFunctionBegin;
+   *is_kokkos = PETSC_FALSE;
+   if (!vtype) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PetscStrcmpAny(vtype, is_kokkos, VECKOKKOS, VECSEQKOKKOS, VECMPIKOKKOS, ""));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+#endif
+
+// Duplicates m vectors from template_vec into vecs (an array of m handles the caller owns), like
+// VecDuplicateVecs. Kokkos vectors are built on one device buffer without a host copy
+// Destroy each vector with VecDestroy (the array itself belongs to the caller)
+PETSC_INTERN PetscErrorCode vec_duplicate_vecs_c(Vec *template_vec, PetscInt m, Vec *vecs)
+{
+   PetscFunctionBegin;
+#if defined(PETSC_HAVE_KOKKOS)
+   PetscBool is_kokkos;
+   PetscCall(PetscObjectTypeCompareAny((PetscObject)(*template_vec), &is_kokkos, VECSEQKOKKOS, VECMPIKOKKOS, ""));
+   if (is_kokkos)
+   {
+      PetscCall(vec_duplicate_vecs_device_kokkos(*template_vec, m, vecs));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+#endif
+   Vec *dup;
+   PetscCall(VecDuplicateVecs(*template_vec, m, &dup));
+   for (PetscInt i = 0; i < m; i++) vecs[i] = dup[i];
+   PetscCall(PetscFree(dup));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Like MatCreateVecs(A, v, NULL) (left == 0) or MatCreateVecs(A, NULL, v) (left != 0), but if the matrix's
+// vec type is a kokkos one the vector is made on the device without a zero-filled host copy
+// (see vec_create_device_vecs_kokkos)
+PETSC_INTERN PetscErrorCode mat_create_vec_device_c(Mat *A, int left, Vec *v)
+{
+   PetscFunctionBegin;
+#if defined(PETSC_HAVE_KOKKOS)
+   VecType vtype;
+   PetscBool is_kokkos;
+   PetscCall(MatGetVecType(*A, &vtype));
+   PetscCall(vec_type_is_kokkos(vtype, &is_kokkos));
+   if (is_kokkos)
+   {
+      MPI_Comm comm;
+      PetscInt m, n, M, N, rbs, cbs;
+      PetscCall(PetscObjectGetComm((PetscObject)(*A), &comm));
+      PetscCall(MatGetLocalSize(*A, &m, &n));
+      PetscCall(MatGetSize(*A, &M, &N));
+      PetscCall(MatGetBlockSizes(*A, &rbs, &cbs));
+      if (left) PetscCall(vec_create_device_kokkos(comm, m, M, rbs, v));
+      else PetscCall(vec_create_device_kokkos(comm, n, N, cbs, v));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+#endif
+   if (left) PetscCall(MatCreateVecs(*A, NULL, v));
+   else PetscCall(MatCreateVecs(*A, v, NULL));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+#if defined(PETSC_HAVE_KOKKOS)
+// VecDuplicate for a kokkos vector made on the device without a host copy: the duplicate is made the
+// same way (see vec_create_device_vecs_kokkos), and duplicates the same way in turn
+// VecDuplicateVecs on a parallel kokkos vector whose duplicate isn't PETSc's own falls back to calling
+// VecDuplicate on each, so it ends up here too
+static PetscErrorCode vec_duplicate_device_op(Vec win, Vec *v)
+{
+   PetscFunctionBegin;
+   PetscCall(vec_duplicate_vecs_device_kokkos(win, 1, v));
+   PetscCall(VecSetOperation(*v, VECOP_DUPLICATE, (PetscErrorCodeFn *)vec_duplicate_device_op));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// MatCreateVecs for a shell with a kokkos vec type, see mat_shell_set_device_vecs_c
+static PetscErrorCode mat_create_vecs_device_op(Mat A, Vec *right, Vec *left)
+{
+   PetscFunctionBegin;
+   if (right)
+   {
+      PetscCall(mat_create_vec_device_c(&A, 0, right));
+      PetscCall(VecSetOperation(*right, VECOP_DUPLICATE, (PetscErrorCodeFn *)vec_duplicate_device_op));
+   }
+   if (left)
+   {
+      PetscCall(mat_create_vec_device_c(&A, 1, left));
+      PetscCall(VecSetOperation(*left, VECOP_DUPLICATE, (PetscErrorCodeFn *)vec_duplicate_device_op));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+#endif
+
+// Makes MatCreateVecs on the shell A (and VecDuplicate / VecDuplicateVecs on what it gives) build its
+// kokkos vectors on the device without the zero-filled host copy PETSc makes. The smoothers' KSPs use
+// this for their work vectors. Only with more than one rank: on one rank PETSc's VecDuplicateVecs
+// for these vectors doesn't go through VecDuplicate. Does nothing for other vec types
+PETSC_INTERN PetscErrorCode mat_shell_set_device_vecs_c(Mat *A)
+{
+   PetscFunctionBegin;
+#if defined(PETSC_HAVE_KOKKOS)
+   VecType vtype;
+   PetscBool is_kokkos;
+   PetscMPIInt comm_size;
+   PetscCall(MatGetVecType(*A, &vtype));
+   PetscCall(vec_type_is_kokkos(vtype, &is_kokkos));
+   PetscCallMPI(MPI_Comm_size(PetscObjectComm((PetscObject)(*A)), &comm_size));
+   if (is_kokkos && comm_size > 1)
+      PetscCall(MatShellSetOperation(*A, MATOP_CREATE_VECS, (PetscErrorCodeFn *)mat_create_vecs_device_op));
+#endif
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// Like VecCreate, VecSetSizes(v, n, N) and VecSetType with A's comm and vec type, but kokkos
+// vectors are made on the device without a zero-filled host copy (see vec_create_device_vecs_kokkos)
+PETSC_INTERN PetscErrorCode vec_create_sized_device_c(Mat *A, PetscInt n, PetscInt N, Vec *v)
+{
+   MPI_Comm comm;
+   VecType vtype;
+
+   PetscFunctionBegin;
+   PetscCall(PetscObjectGetComm((PetscObject)(*A), &comm));
+   PetscCall(MatGetVecType(*A, &vtype));
+#if defined(PETSC_HAVE_KOKKOS)
+   PetscBool is_kokkos;
+   PetscCall(vec_type_is_kokkos(vtype, &is_kokkos));
+   if (is_kokkos)
+   {
+      PetscCall(vec_create_device_kokkos(comm, n, N, 1, v));
+      PetscFunctionReturn(PETSC_SUCCESS);
+   }
+#endif
+   PetscCall(VecCreate(comm, v));
+   PetscCall(VecSetSizes(*v, n, N));
+   PetscCall(VecSetType(*v, vtype));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}

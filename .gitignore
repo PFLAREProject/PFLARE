@@ -69,4 +69,5 @@ tests/reuse_preconditioner
 tests/pcair_option_changes
 tests/pflareinv_setcoeffs
 tests/pflareinv_empty_rows
+tests/long_rows
 tests/shell_block_apply

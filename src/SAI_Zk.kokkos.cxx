@@ -10,29 +10,31 @@
 // the elimination (same flops, same order as ?getrs), then back substitution with
 // the upper factor writes x. A and b are overwritten; no extra scratch is needed.
 // If a column has no nonzero pivot candidate (singular block) it is skipped, as
-// in ?getf2, and the back substitution will produce Inf/NaN as LAPACK would.
+// in ?getf2, and the back substitution then gives Inf/NaN (the CPU ISAI path
+// aborts on a singular block instead).
 template <typename MemberType, typename MatrixType, typename VectorType>
 KOKKOS_INLINE_FUNCTION void team_gesv_partial_pivot(const MemberType &member, const MatrixType &A,
                                                    const VectorType &x, const VectorType &b, const PetscInt n)
 {
    for (PetscInt k = 0; k < n; k++)
    {
-      // Largest magnitude in column k at or below the diagonal
-      PetscReal col_max = 0.0;
+      // Largest magnitude in column k at or below the diagonal and the first row that
+      // attains it (LAPACK i?amax picks the first on ties), in one reduction. NaNs never
+      // win, as in a plain max from zero, so the partials joined never hold one
+      using pivot_reducer_t = Kokkos::MaxFirstLoc<PetscReal, PetscInt>;
+      typename pivot_reducer_t::value_type best;
       Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, k, n),
-         [&](const PetscInt i, PetscReal &thread_max) {
+         [&](const PetscInt i, typename pivot_reducer_t::value_type &thread_best) {
             const PetscReal val = Kokkos::abs(A(i, k));
-            if (val > thread_max) thread_max = val;
-         }, Kokkos::Max<PetscReal>(col_max));
+            if (val > thread_best.val || (val == thread_best.val && i < thread_best.loc))
+            {
+               thread_best.val = val;
+               thread_best.loc = i;
+            }
+         }, pivot_reducer_t(best));
       // Singular column - nothing to eliminate
-      if (col_max == 0.0) continue;
-
-      // First row that attains the max (LAPACK i?amax picks the first on ties)
-      PetscInt piv = n;
-      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, k, n),
-         [&](const PetscInt i, PetscInt &thread_min) {
-            if (Kokkos::abs(A(i, k)) == col_max && i < thread_min) thread_min = i;
-         }, Kokkos::Min<PetscInt>(piv));
+      if (!(best.val > 0.0)) continue;
+      const PetscInt piv = best.loc;
 
       // Swap rows k and piv of A and b
       if (piv != k)
@@ -73,6 +75,69 @@ KOKKOS_INLINE_FUNCTION void team_gesv_partial_pivot(const MemberType &member, co
          b(i) -= x_k * A(i, k);
       });
       member.team_barrier();
+   }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// The same solve as team_gesv_partial_pivot, done by one thread: A(r, c) is a(r + c * n)
+// and the solution overwrites b. Every entry gets the same operations in the same order
+// as in the team version, so the two give the same results.
+template <typename MatView, typename VecView>
+KOKKOS_INLINE_FUNCTION void serial_gesv_partial_pivot(const MatView &a, const VecView &b, const PetscInt n)
+{
+   for (PetscInt k = 0; k < n; k++)
+   {
+      // First row with the largest magnitude in column k at or below the diagonal
+      PetscReal col_max = 0.0;
+      PetscInt piv = k;
+      for (PetscInt i = k; i < n; i++)
+      {
+         const PetscReal val = Kokkos::abs(a(i + k * n));
+         if (val > col_max)
+         {
+            col_max = val;
+            piv = i;
+         }
+      }
+      // Singular column - nothing to eliminate
+      if (col_max == 0.0) continue;
+
+      // Swap rows k and piv of A and b
+      if (piv != k)
+      {
+         for (PetscInt j = 0; j < n; j++)
+         {
+            const PetscScalar temp = a(k + j * n);
+            a(k + j * n) = a(piv + j * n);
+            a(piv + j * n) = temp;
+         }
+         const PetscScalar temp = b(k);
+         b(k) = b(piv);
+         b(piv) = temp;
+      }
+
+      // Eliminate below the pivot, column by column
+      const PetscScalar recip_pivot = PetscScalar(1.0) / a(k + k * n);
+      for (PetscInt i = k + 1; i < n; i++)
+      {
+         const PetscScalar l_ik = a(i + k * n) * recip_pivot;
+         a(i + k * n) = l_ik;
+         b(i) -= l_ik * b(k);
+      }
+      for (PetscInt j = k + 1; j < n; j++)
+      {
+         const PetscScalar a_kj = a(k + j * n);
+         for (PetscInt i = k + 1; i < n; i++) a(i + j * n) -= a(i + k * n) * a_kj;
+      }
+   }
+
+   // Back substitution with the upper factor
+   for (PetscInt k = n - 1; k >= 0; k--)
+   {
+      const PetscScalar x_k = b(k) / a(k + k * n);
+      b(k) = x_k;
+      for (PetscInt i = 0; i < k; i++) b(i) -= x_k * a(i + k * n);
    }
 }
 
@@ -332,61 +397,271 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    if (mpi) PetscCallVoid(MatSeqAIJGetKokkosViewWrite(mat_nonlocal_z, &device_nonlocal_vals_z));
 
    // ~~~~~~~~~~~~~~
-   // Find per-row j_size = local_nnz + nonlocal_nnz and split into:
-   //   sparsity_max_nnz_direct - max j_size over rows handled by the direct solve
-   //   sparsity_max_nnz_iter   - max j_size over rows handled by Jacobi
-   //   count_iter              - number of rows above threshold
-   // When no_approx_solve_int is set, all rows go to the direct kernel
+   // Find per-row j_size = local_nnz + nonlocal_nnz and split the rows into four:
+   //   small rows (0 < j_size <= thread_threshold), direct solve by one thread each
+   //   mid rows (thread_threshold < j_size <= iter_threshold), direct solve by a team each
+   //   dense rows (iter_threshold < j_size <= dense_threshold), Jacobi on the dense block
+   //   long rows (j_size > dense_threshold), Jacobi on a compact or matrix-free block
+   // with the largest j_size of each (to size the scratch) and the mid, dense and long counts.
+   // When no_approx_solve_int is set, there are no long rows, every row is solved directly
    // (used by PFLARE_KOKKOS_DEBUG=1 so CPU and Kokkos sides both do direct).
    // ~~~~~~~~~~~~~~
-   PetscInt sparsity_max_nnz_direct = 0;
+   PetscInt sparsity_max_nnz_small = 0;
+   PetscInt sparsity_max_nnz_mid = 0;
    PetscInt sparsity_max_nnz_iter = 0;
+   PetscInt sparsity_max_nnz_dense = 0;
+   PetscInt count_mid = 0;
+   PetscInt count_dense = 0;
    PetscInt count_iter = 0;
    const bool iter_enabled = (no_approx_solve_int == 0);
+   // Rows this short are solved by one thread, without any team synchronisation. A team
+   // per row spends most of a small solve in its ~3 j_size barriers and reductions
+   const PetscInt thread_threshold = 16;
+   // Rows with iter_threshold < j_size <= dense_threshold do their Jacobi iterations on the
+   // dense block in team scratch (a TeamGemv per iteration), which is much faster than the
+   // compact (sparse block) kernel for these sizes. Only longer rows use the compact or
+   // matrix-free kernels, which exist so huge rows stay under the level-1 scratch cap.
+   // The dense block of the longest such row must itself fit under that cap
+   PetscInt dense_threshold = 1024;
+   {
+      const size_t l1_max = static_cast<size_t>(Kokkos::TeamPolicy<>::scratch_size_max(1));
+      auto dense_bytes = [](const PetscInt j) {
+         return Scratch2DScalarView::shmem_size(j, j) + 3 * ScratchScalarView::shmem_size(j) + 2 * ScratchIntView::shmem_size(j);
+      };
+      while (dense_threshold > iter_threshold && dense_bytes(dense_threshold) > l1_max) dense_threshold /= 2;
+   }
+   const PetscInt long_threshold = dense_threshold > iter_threshold ? dense_threshold : iter_threshold;
    if (local_rows_cf > 0)
    {
       Kokkos::parallel_reduce("FindMaxNNZSparsitySplit", Kokkos::RangePolicy<>(exec, 0, local_rows_cf),
-         KOKKOS_LAMBDA(const PetscInt i, PetscInt& tmax_direct, PetscInt& tmax_iter, PetscInt& tcount_iter) {
+         KOKKOS_LAMBDA(const PetscInt i, PetscInt& tmax_small, PetscInt& tmax_mid, PetscInt& tmax_dense, PetscInt& tmax_iter,
+                       PetscInt& tcount_mid, PetscInt& tcount_dense, PetscInt& tcount_iter) {
             PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
             if (mpi)
             {
                row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
             }
-            if (iter_enabled && row_nnz > iter_threshold)
+            if (iter_enabled && row_nnz > long_threshold)
             {
                if (row_nnz > tmax_iter) tmax_iter = row_nnz;
                tcount_iter += 1;
             }
+            else if (iter_enabled && row_nnz > iter_threshold)
+            {
+               if (row_nnz > tmax_dense) tmax_dense = row_nnz;
+               tcount_dense += 1;
+            }
+            else if (row_nnz > thread_threshold)
+            {
+               if (row_nnz > tmax_mid) tmax_mid = row_nnz;
+               tcount_mid += 1;
+            }
             else
             {
-               if (row_nnz > tmax_direct) tmax_direct = row_nnz;
+               if (row_nnz > tmax_small) tmax_small = row_nnz;
             }
          },
-         Kokkos::Max<PetscInt>(sparsity_max_nnz_direct),
+         Kokkos::Max<PetscInt>(sparsity_max_nnz_small),
+         Kokkos::Max<PetscInt>(sparsity_max_nnz_mid),
+         Kokkos::Max<PetscInt>(sparsity_max_nnz_dense),
          Kokkos::Max<PetscInt>(sparsity_max_nnz_iter),
+         Kokkos::Sum<PetscInt>(count_mid),
+         Kokkos::Sum<PetscInt>(count_dense),
          Kokkos::Sum<PetscInt>(count_iter)
       );
       // Kokkos::Max identity is the minimum representable value; clamp to zero.
-      if (sparsity_max_nnz_direct < 0) sparsity_max_nnz_direct = 0;
-      if (sparsity_max_nnz_iter   < 0) sparsity_max_nnz_iter   = 0;
+      if (sparsity_max_nnz_small < 0) sparsity_max_nnz_small = 0;
+      if (sparsity_max_nnz_mid   < 0) sparsity_max_nnz_mid   = 0;
+      if (sparsity_max_nnz_dense < 0) sparsity_max_nnz_dense = 0;
+      if (sparsity_max_nnz_iter  < 0) sparsity_max_nnz_iter  = 0;
    }
 
-   // If there are no rows to solve, both kernel sections below are skipped by their
-   // j_max > 0 / count_iter > 0 guards and we fall through to the restores/cleanup
+   // If there are no rows to solve, all the kernel sections below are skipped by their
+   // guards and we fall through to the restores/cleanup
 
-   // ~~~~~~~~~~~~~~
-   // TeamPolicy: one team per row, with per-team scratch memory
-   // ~~~~~~~~~~~~~~
    using team_policy_t = Kokkos::TeamPolicy<>;
    using member_type = team_policy_t::member_type;
+   const PetscInt iter_threshold_dev = iter_threshold;
+
+   // ~~~~~~~~~~~~~~
+   // Small rows: each team takes rows_per_team consecutive rows, and each of its threads
+   // builds and solves the dense system of one row on its own (TeamThreadRange over the
+   // rows, so on a host space with one thread per team the thread walks them all). Row r of
+   // the team uses slot r of the scratch, laid out with the slot fastest so the threads of
+   // a team access it coalesced. Rows that aren't small are skipped.
+   // ~~~~~~~~~~~~~~
+   const PetscInt j_max_small = sparsity_max_nnz_small;
+   if (j_max_small > 0)
+   {
+      using SlotScalarView = Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, ScratchSpace, Kokkos::MemoryUnmanaged>;
+      using SlotIntView = Kokkos::View<PetscInt **, Kokkos::LayoutLeft, ScratchSpace, Kokkos::MemoryUnmanaged>;
+      constexpr int rows_per_team = 64;
+
+      // dense_mat (j x j, packed with the row's own j_size), rhs/sol, j_global, j_perm
+      const size_t small_scratch = SlotScalarView::shmem_size(rows_per_team, j_max_small * j_max_small)
+                                 + SlotScalarView::shmem_size(rows_per_team, j_max_small)
+                                 + SlotIntView::shmem_size(rows_per_team, j_max_small)
+                                 + SlotIntView::shmem_size(rows_per_team, j_max_small);
+      // Level 0 (shared memory on a GPU) only if it would leave room for many teams at a
+      // time, as one thread does a whole solve and needs other teams to hide its latency.
+      // Otherwise level 1, where the slot-fastest layout keeps the accesses coalesced
+      const int small_level = (8 * small_scratch <= static_cast<size_t>(team_policy_t::scratch_size_max(0))) ? 0 : 1;
+      PetscCheckAbort(small_level == 0 || small_scratch <= static_cast<size_t>(team_policy_t::scratch_size_max(1)), PETSC_COMM_SELF, PETSC_ERR_SUP,
+         "SAI_Z small row direct solve needs %zu bytes of Kokkos level-1 team scratch, but the Kokkos maximum is %d bytes",
+         small_scratch, team_policy_t::scratch_size_max(1));
+
+      const PetscInt n_small_teams = (local_rows_cf + rows_per_team - 1) / rows_per_team;
+
+      auto small_kernel = KOKKOS_LAMBDA(const member_type &member) {
+
+         const PetscInt row_start = static_cast<PetscInt>(member.league_rank()) * rows_per_team;
+         const PetscInt n_rows = (row_start + rows_per_team <= local_rows_cf) ? rows_per_team : local_rows_cf - row_start;
+
+         SlotScalarView dense_all(member.team_scratch(small_level), rows_per_team, j_max_small * j_max_small);
+         SlotScalarView rhs_all(member.team_scratch(small_level), rows_per_team, j_max_small);
+         SlotIntView j_global_all(member.team_scratch(small_level), rows_per_team, j_max_small);
+         SlotIntView j_perm_all(member.team_scratch(small_level), rows_per_team, j_max_small);
+
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(member, n_rows), [&](const PetscInt slot) {
+
+            const PetscInt i = row_start + slot;
+            const PetscInt ncols_local_sparsity = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+            const PetscInt ncols_nonlocal_sparsity = mpi ?
+               (device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i]) : 0;
+            const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
+            // Mid and long rows are handled by the kernels below
+            if (j_size == 0 || j_size > thread_threshold) return;
+
+            auto dense = Kokkos::subview(dense_all, slot, Kokkos::ALL());
+            auto rhs = Kokkos::subview(rhs_all, slot, Kokkos::ALL());
+            auto j_global = Kokkos::subview(j_global_all, slot, Kokkos::ALL());
+            auto j_perm = Kokkos::subview(j_perm_all, slot, Kokkos::ALL());
+
+            // J indices from sparsity_mat_cf row i, insertion sorted with the permutation
+            // back to the original positions (the indices are distinct, so this gives the
+            // same order as the team sort)
+            for (PetscInt j = 0; j < j_size; j++)
+            {
+               const PetscInt global_col = (j < ncols_local_sparsity) ?
+                  device_local_j_sparsity[device_local_i_sparsity[i] + j] + global_row_start_ff :
+                  colmap_sparsity_d(device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + j - ncols_local_sparsity]);
+               PetscInt pos = j;
+               while (pos > 0 && j_global(pos - 1) > global_col)
+               {
+                  j_global(pos) = j_global(pos - 1);
+                  j_perm(pos) = j_perm(pos - 1);
+                  pos--;
+               }
+               j_global(pos) = global_col;
+               j_perm(pos) = j;
+            }
+
+            for (PetscInt k = 0; k < j_size; k++) rhs(k) = 0.0;
+            for (PetscInt k = 0; k < j_size * j_size; k++) dense(k) = 0.0;
+
+            // RHS from A_cf row i
+            const PetscInt ncols_local_cf = device_local_i_cf[i + 1] - device_local_i_cf[i];
+            for (PetscInt k = 0; k < ncols_local_cf; k++)
+            {
+               const PetscInt global_col = device_local_j_cf[device_local_i_cf[i] + k] + global_row_start_ff;
+               const PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+               if (pos >= 0) rhs(pos) = -device_local_vals_cf(device_local_i_cf[i] + k);
+            }
+            if (mpi)
+            {
+               const PetscInt ncols_nonlocal_cf = device_nonlocal_i_cf[i + 1] - device_nonlocal_i_cf[i];
+               for (PetscInt k = 0; k < ncols_nonlocal_cf; k++)
+               {
+                  const PetscInt global_col = colmap_cf_d(device_nonlocal_j_cf[device_nonlocal_i_cf[i] + k]);
+                  const PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+                  if (pos >= 0) rhs(pos) = -device_nonlocal_vals_cf(device_nonlocal_i_cf[i] + k);
+               }
+            }
+
+            // Dense A_ff(J,J)^T: row J[j] of A_ff goes down column j, i.e. dense(pos + j * j_size)
+            for (PetscInt j = 0; j < j_size; j++)
+            {
+               const PetscInt global_row = j_global(j);
+               const bool is_local = (global_row >= global_row_start_ff &&
+                                      global_row < global_row_start_ff + local_rows_ff);
+               if (is_local)
+               {
+                  const PetscInt local_row = global_row - global_row_start_ff;
+                  for (PetscInt k = device_local_i_ff[local_row]; k < device_local_i_ff[local_row + 1]; k++)
+                  {
+                     const PetscInt pos = binary_search_sorted(j_global, j_size, device_local_j_ff[k] + global_row_start_ff);
+                     if (pos >= 0) dense(pos + j * j_size) = device_local_vals_ff(k);
+                  }
+                  if (mpi)
+                  {
+                     for (PetscInt k = device_nonlocal_i_ff[local_row]; k < device_nonlocal_i_ff[local_row + 1]; k++)
+                     {
+                        const PetscInt pos = binary_search_sorted(j_global, j_size, colmap_ff_d(device_nonlocal_j_ff[k]));
+                        if (pos >= 0) dense(pos + j * j_size) = device_nonlocal_vals_ff(k);
+                     }
+                  }
+               }
+               else
+               {
+                  // Non-local row: find in submatrix
+                  const PetscInt submat_row = binary_search_sorted(colmap_sparsity_d, cols_ao_sparsity, global_row);
+                  if (submat_row < 0) continue;
+                  for (PetscInt k = device_submat_i[submat_row]; k < device_submat_i[submat_row + 1]; k++)
+                  {
+                     const PetscInt pos = binary_search_sorted(j_global, j_size, col_indices_off_proc_d(device_submat_j[k]));
+                     if (pos >= 0) dense(pos + j * j_size) = device_submat_vals(k);
+                  }
+               }
+            }
+
+            // Solve A_ff(J,J)^T * x = rhs with LU and partial pivoting, x in rhs
+            serial_gesv_partial_pivot(dense, rhs, j_size);
+
+            // Write the solution to Z, j_perm gives the original (local, nonlocal) position
+            for (PetscInt k = 0; k < j_size; k++)
+            {
+               const PetscInt orig_pos = j_perm(k);
+               if (orig_pos < ncols_local_sparsity)
+                  device_local_vals_z(device_local_i_z[i] + orig_pos) = rhs(k);
+               else if (mpi)
+                  device_nonlocal_vals_z(device_nonlocal_i_z[i] + (orig_pos - ncols_local_sparsity)) = rhs(k);
+            }
+         });
+      };
+
+      // One thread per row of the team where the space allows it (1 on host spaces)
+      team_policy_t probe(exec, 1, 1);
+      probe.set_scratch_size(small_level, Kokkos::PerTeam(small_scratch));
+      const int small_team_size = std::min(rows_per_team, probe.team_size_max(small_kernel, Kokkos::ParallelForTag()));
+      auto small_policy = team_policy_t(exec, static_cast<int>(n_small_teams), small_team_size);
+      small_policy.set_scratch_size(small_level, Kokkos::PerTeam(small_scratch));
+      Kokkos::parallel_for("SAI_Z_build_and_solve_small", small_policy, small_kernel);
+   }
+
+   // ~~~~~~~~~~~~~~
+   // Mid rows: one team per row, with per-team scratch memory
+   // ~~~~~~~~~~~~~~
 
    // Direct kernel scratch is sized to the largest row it actually handles.
-   // When iter_enabled is false, every row goes through the direct kernel.
-   const PetscInt j_max = sparsity_max_nnz_direct;
-   const PetscInt iter_threshold_dev = iter_threshold;
+   // When iter_enabled is false, every row that isn't small comes here.
+   const PetscInt j_max = sparsity_max_nnz_mid;
 
    if (j_max > 0)
    {
+
+   // The mid rows, in order, so the kernel launches a team only for them
+   PetscIntKokkosView mid_rows_d("mid_rows_d", count_mid);
+   Kokkos::parallel_scan("SAI_Z_mid_rows", Kokkos::RangePolicy<>(exec, 0, local_rows_cf),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &mids_before, const bool final) {
+         PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+         if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
+         const bool is_mid = row_nnz > thread_threshold && !(iter_enabled && row_nnz > iter_threshold_dev);
+         if (is_mid)
+         {
+            if (final) mid_rows_d(mids_before) = i;
+            mids_before++;
+         }
+      });
 
    // Level 1 scratch budget: dense_mat + rhs + sol + j_global + j_perm
    // Sized for j_max (worst case); inside the kernel views are created with actual j_size
@@ -408,16 +683,12 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    // No level 0 scratch is needed, team_gesv_partial_pivot works in place on
    // dense_mat and rhs
 
-   auto policy = team_policy_t(exec, local_rows_cf, Kokkos::AUTO());
-   policy.set_scratch_size(1, Kokkos::PerTeam(level1_scratch));
-
    // ~~~~~~~~~~~~~~
    // Main kernel: one team per row, build dense system and solve
    // ~~~~~~~~~~~~~~
-   Kokkos::parallel_for("SAI_Z_build_and_solve", policy,
-      KOKKOS_LAMBDA(const member_type &member) {
+   auto mid_kernel = KOKKOS_LAMBDA(const member_type &member) {
 
-      const PetscInt i = member.league_rank();
+      const PetscInt i = mid_rows_d(member.league_rank());
 
       // ~~~~~~~~
       // Compute j_size from CSR row pointers (all threads, no data dependency)
@@ -426,10 +697,6 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
       const PetscInt ncols_nonlocal_sparsity = mpi ?
          (device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i]) : 0;
       const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
-
-      if (j_size == 0) return;
-      // Large rows are handled by the iterative Jacobi kernel below
-      if (iter_enabled && j_size > iter_threshold_dev) return;
 
       // Allocate per-team scratch views sized to j_size
       Scratch2DScalarView dense_mat(member.team_scratch(1), j_size, j_size);
@@ -575,12 +842,242 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                device_nonlocal_vals_z(device_nonlocal_i_z[i]
                   + (orig_pos - ncols_local_sparsity)) = sol(k);
          });
-   });
+   };
+
+   // One warp (wavefront) per team where the space allows it, so the solve's per-column
+   // barriers and reductions stay inside one warp; mid rows have at most iter_threshold
+   // entries outside of debug mode, so the team has about a thread per dense row
+   team_policy_t probe(exec, 1, 1);
+   probe.set_scratch_size(1, Kokkos::PerTeam(level1_scratch));
+   const int mid_team_size = std::min(team_policy_t::vector_length_max(), probe.team_size_max(mid_kernel, Kokkos::ParallelForTag()));
+   auto policy = team_policy_t(exec, static_cast<int>(count_mid), mid_team_size);
+   policy.set_scratch_size(1, Kokkos::PerTeam(level1_scratch));
+   Kokkos::parallel_for("SAI_Z_build_and_solve", policy, mid_kernel);
 
    } // end if (j_max > 0)
 
    // ~~~~~~~~~~~~~~
-   // Iterative Jacobi kernel for rows with j_size > iter_threshold.
+   // Dense long rows: one team per row, Jacobi on the dense block
+   // ~~~~~~~~~~~~~~
+   if (count_dense > 0)
+   {
+   const PetscInt j_max = sparsity_max_nnz_dense;
+   PetscIntKokkosView dense_rows_d("dense_rows_d", count_dense);
+   Kokkos::parallel_scan("SAI_Z_dense_rows", Kokkos::RangePolicy<>(exec, 0, local_rows_cf),
+      KOKKOS_LAMBDA(const PetscInt i, PetscInt &dense_before, const bool final) {
+         PetscInt row_nnz = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+         if (mpi) row_nnz += device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i];
+         if (row_nnz > iter_threshold_dev && row_nnz <= long_threshold)
+         {
+            if (final) dense_rows_d(dense_before) = i;
+            dense_before++;
+         }
+      });
+   const size_t level1_scratch = Scratch2DScalarView::shmem_size(j_max, j_max)
+                               + 3 * ScratchScalarView::shmem_size(j_max)
+                               + 2 * ScratchIntView::shmem_size(j_max);
+   auto dense_kernel = KOKKOS_LAMBDA(const member_type &member) {
+
+      const PetscInt i = dense_rows_d(member.league_rank());
+
+      // ~~~~~~~~
+      // Compute j_size from CSR row pointers (all threads, no data dependency)
+      // ~~~~~~~~
+      const PetscInt ncols_local_sparsity = device_local_i_sparsity[i + 1] - device_local_i_sparsity[i];
+      const PetscInt ncols_nonlocal_sparsity = mpi ?
+         (device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i]) : 0;
+      const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
+
+      // Allocate per-team scratch views sized to j_size
+      Scratch2DScalarView dense_mat(member.team_scratch(1), j_size, j_size);
+      ScratchScalarView rhs(member.team_scratch(1), j_size);
+      ScratchScalarView sol(member.team_scratch(1), j_size);
+      ScratchScalarView r(member.team_scratch(1), j_size);
+      ScratchIntView j_global(member.team_scratch(1), j_size);
+      ScratchIntView j_perm(member.team_scratch(1), j_size);
+
+      // Zero dense_mat and rhs (sol is overwritten by the solve)
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size), [&](const PetscInt k) {
+         rhs(k) = 0.0;
+      });
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size * j_size), [&](const PetscInt k) {
+         dense_mat.data()[k] = 0.0;
+      });
+      member.team_barrier();
+
+      // ~~~~~~~~
+      // Step A: Fill J indices from sparsity_mat_cf row i, then team sort
+      // ~~~~~~~~
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, ncols_local_sparsity),
+         [&](const PetscInt j) {
+            PetscInt local_col = device_local_j_sparsity[device_local_i_sparsity[i] + j];
+            j_global(j) = local_col + global_row_start_ff;
+            j_perm(j) = j;
+         });
+      if (mpi) {
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(member, ncols_nonlocal_sparsity),
+            [&](const PetscInt j) {
+               PetscInt nonlocal_col = device_nonlocal_j_sparsity[device_nonlocal_i_sparsity[i] + j];
+               j_global(ncols_local_sparsity + j) = colmap_sparsity_d(nonlocal_col);
+               j_perm(ncols_local_sparsity + j) = ncols_local_sparsity + j;
+            });
+      }
+      member.team_barrier();
+
+      // Team-parallel sort of j_global with permutation j_perm to keep track of original positions
+      Kokkos::Experimental::sort_by_key_team(member, j_global, j_perm);
+
+      // ~~~~~~~~
+      // Step B: Build RHS from A_cf row i (parallel over columns)
+      // ~~~~~~~~
+      const PetscInt ncols_local_cf = device_local_i_cf[i + 1] - device_local_i_cf[i];
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, ncols_local_cf),
+         [&](const PetscInt k) {
+            PetscInt col_local = device_local_j_cf[device_local_i_cf[i] + k];
+            PetscScalar val = device_local_vals_cf(device_local_i_cf[i] + k);
+            PetscInt global_col = col_local + global_row_start_ff;
+            PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+            if (pos >= 0) rhs(pos) = -val;
+         });
+      if (mpi) {
+         const PetscInt ncols_nonlocal_cf = device_nonlocal_i_cf[i + 1] - device_nonlocal_i_cf[i];
+         Kokkos::parallel_for(Kokkos::TeamThreadRange(member, ncols_nonlocal_cf),
+            [&](const PetscInt k) {
+               PetscInt col_nonlocal = device_nonlocal_j_cf[device_nonlocal_i_cf[i] + k];
+               PetscScalar val = device_nonlocal_vals_cf(device_nonlocal_i_cf[i] + k);
+               PetscInt global_col = colmap_cf_d(col_nonlocal);
+               PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+               if (pos >= 0) rhs(pos) = -val;
+            });
+      }
+      member.team_barrier();
+
+      // ~~~~~~~~
+      // Step C: Build dense matrix A_ff(J,J)^T (parallel over J rows)
+      // Each thread handles one j, writing to dense_mat(*, j) — no races.
+      // On GPU (LayoutLeft), the transpose is cache-friendly: each thread reads
+      // row J[j] of A_ff sequentially from CSR and writes down column j of
+      // dense_mat, which is contiguous in column-major layout.
+      // ~~~~~~~~
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
+         [&](const PetscInt j) {
+            PetscInt global_row = j_global(j);
+            bool is_local = (global_row >= global_row_start_ff &&
+                             global_row < global_row_start_ff + local_rows_ff);
+
+            if (is_local) {
+               PetscInt local_row = global_row - global_row_start_ff;
+               // Local A_ff columns
+               PetscInt ncols = device_local_i_ff[local_row + 1] - device_local_i_ff[local_row];
+               for (PetscInt k = 0; k < ncols; k++) {
+                  PetscInt global_col = device_local_j_ff[device_local_i_ff[local_row] + k]
+                                        + global_row_start_ff;
+                  PetscScalar val = device_local_vals_ff(device_local_i_ff[local_row] + k);
+                  PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+                  if (pos >= 0) dense_mat(pos, j) = val;
+               }
+               // Nonlocal A_ff columns
+               if (mpi) {
+                  PetscInt ncols_nl = device_nonlocal_i_ff[local_row + 1]
+                                      - device_nonlocal_i_ff[local_row];
+                  for (PetscInt k = 0; k < ncols_nl; k++) {
+                     PetscInt col_nonlocal = device_nonlocal_j_ff[
+                        device_nonlocal_i_ff[local_row] + k];
+                     PetscScalar val = device_nonlocal_vals_ff(
+                        device_nonlocal_i_ff[local_row] + k);
+                     PetscInt global_col = colmap_ff_d(col_nonlocal);
+                     PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+                     if (pos >= 0) dense_mat(pos, j) = val;
+                  }
+               }
+            } else {
+               // Non-local row: find in submatrix
+               PetscInt submat_row = binary_search_sorted(
+                  colmap_sparsity_d, cols_ao_sparsity, global_row);
+               if (submat_row < 0) return;
+               PetscInt ncols_sub = device_submat_i[submat_row + 1]
+                                    - device_submat_i[submat_row];
+               for (PetscInt k = 0; k < ncols_sub; k++) {
+                  PetscInt submat_col = device_submat_j[
+                     device_submat_i[submat_row] + k];
+                  PetscScalar val = device_submat_vals(
+                     device_submat_i[submat_row] + k);
+                  PetscInt global_col = col_indices_off_proc_d(submat_col);
+                  PetscInt pos = binary_search_sorted(j_global, j_size, global_col);
+                  if (pos >= 0) dense_mat(pos, j) = val;
+               }
+            }
+         });
+      member.team_barrier();
+
+      // ~~~~~~~~
+      // Step D-Jacobi: solve dense_mat * sol = rhs by Jacobi iteration, dense_mat is
+      // A_ff(J,J)^T. Same iteration and stopping test as the compact kernel below
+      // ~~~~~~~~
+      PetscScalar r0_sq = 0.0;
+      Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, j_size),
+         [&](const PetscInt k, PetscScalar &acc) {
+            sol(k) = 0.0;
+            acc += rhs(k) * rhs(k);
+         }, r0_sq);
+      member.team_barrier();
+
+      const PetscScalar rtol_sq = 1.0e-6;       // (1e-3)^2
+      const PetscScalar abs_floor_sq = 1.0e-100;
+      const int max_iter = 100;
+
+      if (r0_sq > abs_floor_sq) {
+         const PetscScalar stop_sq = rtol_sq * r0_sq;
+         PetscScalar rnorm_sq = 0.0;
+
+         for (int it = 0; it < max_iter; ++it) {
+            // r = -dense_mat * sol
+            KokkosBlas::TeamGemv<member_type, KokkosBlas::Trans::NoTranspose, KokkosBlas::Algo::Gemv::Default>
+               ::invoke(member, -1.0, dense_mat, sol, 0.0, r);
+            member.team_barrier();
+
+            // r += rhs ; accumulate ||r||^2
+            rnorm_sq = 0.0;
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(member, j_size),
+               [&](const PetscInt k, PetscScalar &acc) {
+                  r(k) += rhs(k);
+                  acc  += r(k) * r(k);
+               }, rnorm_sq);
+            member.team_barrier();
+
+            if (rnorm_sq < stop_sq) break;
+
+            // Jacobi update, a zero diagonal is replaced by 1 as in PCJACOBI
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
+               [&](const PetscInt k) {
+                  const PetscScalar d = dense_mat(k, k);
+                  sol(k) += (d == 0.0) ? r(k) : r(k) / d;
+               });
+            member.team_barrier();
+         }
+      }
+
+      // ~~~~~~~~
+      // Step E: Write solution to Z (parallel over j_size)
+      // ~~~~~~~~
+      Kokkos::parallel_for(Kokkos::TeamThreadRange(member, j_size),
+         [&](const PetscInt k) {
+            PetscInt orig_pos = j_perm(k);
+            if (orig_pos < ncols_local_sparsity)
+               device_local_vals_z(device_local_i_z[i] + orig_pos) = sol(k);
+            else if (mpi)
+               device_nonlocal_vals_z(device_nonlocal_i_z[i]
+                  + (orig_pos - ncols_local_sparsity)) = sol(k);
+         });
+   };
+
+   auto policy = team_policy_t(exec, static_cast<int>(count_dense), Kokkos::AUTO());
+   policy.set_scratch_size(1, Kokkos::PerTeam(level1_scratch));
+   Kokkos::parallel_for("SAI_Z_build_and_solve_dense_jacobi", policy, dense_kernel);
+   } // end if (count_dense > 0)
+
+   // ~~~~~~~~~~~~~~
+   // Iterative Jacobi kernel for rows with j_size > dense_threshold.
    //
    // Two implementations, selected on the host:
    //  * COMPACT   - build the per-row sparse block C = A_ff(J,J) ONCE into team
@@ -595,7 +1092,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
    //  * MATRIX-FREE - no block stored; the mat-vec is applied straight from the CSR
    //                rows of A_ff every iteration. O(j) scratch, never OOMs.
    //
-   // Kokkos caps level-1 team scratch at an arbitrary 20 MiB, so COMPACT is only
+   // Kokkos caps level-1 team scratch at 20 MiB on the GPU, so COMPACT is only
    // used when the whole team scratch (the six length-j vectors plus the block CSR)
    // fits under that cap; otherwise we fall back to MATRIX-FREE. This keeps the
    // huge-j rows (e.g. trans4, j ~ millions) on the safe matrix-free path.
@@ -613,7 +1110,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                                       + ScratchIntView::shmem_size(j_max_iter)
                                       + ScratchIntView::shmem_size(j_max_iter);
 
-      // Kokkos hard-caps level-1 team scratch at 20 MiB; keep a small margin.
+      // Kokkos caps level-1 team scratch at 20 MiB on the GPU (scratch_size_max(1)); the
+      // same fixed cap is used on every backend, with a small margin.
       const size_t kokkos_l1_cap = 20 * 1024 * 1024;
       const size_t l1_budget     = kokkos_l1_cap - 64 * 1024;
 
@@ -649,7 +1147,7 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
                (device_nonlocal_i_sparsity[i + 1] - device_nonlocal_i_sparsity[i]) : 0;
             const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
             if (j_size == 0) return;
-            if (j_size <= iter_threshold_dev) return;
+            if (j_size <= long_threshold) return;
 
             ScratchIntView j_global(member.team_scratch(1), j_size);
             ScratchIntView j_perm(member.team_scratch(1), j_size);
@@ -742,8 +1240,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
          const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
 
          if (j_size == 0) return;
-         // Small rows are handled by the direct kernel above
-         if (j_size <= iter_threshold_dev) return;
+         // Rows up to long_threshold are handled by the small row and dense kernels
+         if (j_size <= long_threshold) return;
 
          ScratchScalarView rhs(member.team_scratch(1), j_size);
          ScratchScalarView sol(member.team_scratch(1), j_size);
@@ -1014,8 +1512,8 @@ PETSC_INTERN void calculate_and_build_sai_z_kokkos(Mat *A_ff, Mat *A_cf, Mat *sp
          const PetscInt j_size = ncols_local_sparsity + ncols_nonlocal_sparsity;
 
          if (j_size == 0) return;
-         // Small rows are handled by the direct kernel above
-         if (j_size <= iter_threshold_dev) return;
+         // Rows up to long_threshold are handled by the small row and dense kernels
+         if (j_size <= long_threshold) return;
 
          ScratchScalarView rhs(member.team_scratch(1), j_size);
          ScratchScalarView sol(member.team_scratch(1), j_size);

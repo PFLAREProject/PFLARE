@@ -5,7 +5,7 @@ module fc_smooth
          set_VecISCopyLocal_kokkos_our_level, &
          destroy_VecISCopyLocal_kokkos, VecISCopyLocal_kokkos
    use air_data_type, only: air_multigrid_data
-   use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug
+   use petsc_helper, only: generate_identity_rect, generate_identity_is, kokkos_debug, vec_create_sized_device
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ZERO, &
          PFLARE_ONE
@@ -181,7 +181,6 @@ module fc_smooth
       PetscInt, parameter :: one = 1
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
-      VecType :: vec_type
       type(tVec) :: temp_vec
       ! ~~~~~~~~~~
 
@@ -220,23 +219,20 @@ module fc_smooth
       if (air_data%options%any_c_smooths .AND. &
                .NOT. air_data%options%full_smoothing_up_and_down) n_coarse = 4
 
-      ! Create the pools with the vec type the matrices use
+      ! Create the pools with the comm and vec type the matrices use
+      ! Kokkos pools are made on the device without the zero-filled host copy PETSc makes
       call PetscObjectGetComm(air_data%A_fc(first_level), MPI_COMM_MATRIX, ierr)
-      call MatGetVecType(air_data%A_fc(first_level), vec_type, ierr)
       do i_loc = 1, 4
-         call VecCreate(MPI_COMM_MATRIX, air_data%temp_vecs_fine_pool(i_loc), ierr)
-         call VecSetSizes(air_data%temp_vecs_fine_pool(i_loc), max_fine, PETSC_DECIDE, ierr)
-         call VecSetType(air_data%temp_vecs_fine_pool(i_loc), vec_type, ierr)
+         call vec_create_sized_device(air_data%A_fc(first_level), max_fine, PETSC_DECIDE, &
+                  air_data%temp_vecs_fine_pool(i_loc))
       end do
       do i_loc = 1, n_coarse
-         call VecCreate(MPI_COMM_MATRIX, air_data%temp_vecs_coarse_pool(i_loc), ierr)
-         call VecSetSizes(air_data%temp_vecs_coarse_pool(i_loc), max_coarse, PETSC_DECIDE, ierr)
-         call VecSetType(air_data%temp_vecs_coarse_pool(i_loc), vec_type, ierr)
+         call vec_create_sized_device(air_data%A_fc(first_level), max_coarse, PETSC_DECIDE, &
+                  air_data%temp_vecs_coarse_pool(i_loc))
       end do
       if (.NOT. air_data%fast_veciscopy_exists) then
-         call VecCreate(MPI_COMM_MATRIX, air_data%temp_vecs_pool(1), ierr)
-         call VecSetSizes(air_data%temp_vecs_pool(1), max_full, PETSC_DECIDE, ierr)
-         call VecSetType(air_data%temp_vecs_pool(1), vec_type, ierr)
+         call vec_create_sized_device(air_data%A_fc(first_level), max_full, PETSC_DECIDE, &
+                  air_data%temp_vecs_pool(1))
       end if
 
       ! On each level take the start of each pool as the temporary vectors

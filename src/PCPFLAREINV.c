@@ -12,6 +12,8 @@
 
 // Defined in C_Fortran_Bindings.F90
 PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
+PETSC_INTERN PetscErrorCode PFLARENoInodesBegin_c(Mat mat, PetscBool *pushed);
+PETSC_INTERN PetscErrorCode PFLARENoInodesEnd_c(PetscBool pushed);
 // Whether an inverse type is a polynomial, ie has coefficients and builds a matshell when
 // applied matrix-free - the non-polynomial types (SAI, ISAI, WJacobi, Jacobi, L1Jacobi) have no
 // coefficients and are always assembled. *is_polynomial comes back as 1 or 0
@@ -935,6 +937,11 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
    // Similarly for the subcomm
    int subcomm_int = 0;
 
+   // With Kokkos matrices we skip PETSc's host inode check on every matrix built below,
+   // and undo that before returning
+   PetscBool no_inodes_pushed;
+   PetscCall(PFLARENoInodesBegin_c(pc->pmat, &no_inodes_pushed));
+
    // If we haven't setup yet
    if (pc->setupcalled == 0)
    {
@@ -958,7 +965,9 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       if (pc->flag == DIFFERENT_NONZERO_PATTERN)
       {
          // PCReset also frees poly_coeffs
-         PetscCall(PCReset_PFLAREINV_c(pc));
+         PetscErrorCode reset_err = PCReset_PFLAREINV_c(pc);
+         if (reset_err) PetscCall(PFLARENoInodesEnd_c(no_inodes_pushed));
+         PetscCall(reset_err);
          // Fresh: pass NULL to let Fortran allocate and return the coefficient pointer
          new_coeffs = NULL; new_rows = 0; new_cols = 0;
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
@@ -998,6 +1007,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       }
    }
 
+   PetscCall(PFLARENoInodesEnd_c(no_inodes_pushed));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 

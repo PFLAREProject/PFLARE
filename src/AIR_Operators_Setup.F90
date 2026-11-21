@@ -15,15 +15,20 @@ module air_operators_setup
          MAT_SAI_SUB, MAT_W, MAT_W_AFF, MAT_W_DROP, MAT_W_NO_SPARSITY, &
          MAT_Z, MAT_Z_AFF, MAT_Z_DROP, MAT_Z_NO_SPARSITY, &
          AIR_Z_PRODUCT, AIR_Z_LAIR, &
-         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL
+         PFLARE_MINUS_ONE, PFLARE_PTAP_FILL, PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_ARNOLDI
+   use cf_splitting, only: CF_PMISR_DDC, CF_DIAG_DOM, CF_PMIS
    use timers, only: timer_start, timer_finish
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use grid_transfer, only: generate_one_point_with_one_entry_from_sparse, &
-         compute_P_from_W, compute_R_from_Z
+         compute_P_from_W, compute_R_from_Z, generate_one_point_P_from_sparse, compute_R_from_A_diag, &
+         compute_R_from_raw_Z
    use grid_transfer_improve, only: improve_w, improve_z
    use sai_z, only: calculate_and_build_sai_z
-   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, &
-         remove_from_sparse_match, mat_mat_symbolic
+   use petsc_helper, only: MatCreateSubMatrixWrapper, remove_small_from_sparse, MatGetTypeEffective, raw_shell_assemble, &
+         remove_from_sparse_match, mat_mat_symbolic, mat_mult_one_entry_per_row, &
+         mat_mult_r_one_point_ap, mat_mult_r_one_point_ap_raw, rap_raw_drop, mat_mult_raw, &
+         mat_mult_mat_raw, raw_free, raw_shell_from_handle, kokkos_debug
+   use gmres_poly, only: build_gmres_polynomial_inverse_raw
 
 #include "petsc/finclude/petscksp.h"
 
@@ -31,6 +36,154 @@ module air_operators_setup
    public
 
    contains
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_ok(air_data)
+
+      ! Can the setup's level matrices (the coarse matrices and R) be kept as device data (raw shells,
+      ! see raw_shell_create_kokkos) rather than PETSc matrices: only when no option reads them in a way
+      ! a raw shell can't serve. The Kokkos debug compare also keeps real matrices (rap_raw_drop and the
+      ! R builders check that). Paths that need a real matrix later assemble it (raw_shell_assemble)
+      ! C point smoothing only applies A_cf and A_cc (MatMult, MatMultTranspose and the dense block
+      ! products), which raw shells serve, and A_cc is extracted from a raw shell like A_ff
+      ! The PMISR DDC, diag_dom and PMIS splittings only read the coarse matrices through the device
+      ! access raw shells serve (the first pass, the diagonal dominance ratios and the DDC swaps);
+      ! the others build a strength matrix or submatrices from them as PETSc matrices
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_shells_ok = .NOT. air_data%options%reuse_sparsity .AND. &
+            .NOT. air_data%options%full_smoothing_up_and_down .AND. &
+            .NOT. air_data%options%diag_update .AND. &
+            .NOT. air_data%options%symmetric .AND. &
+            .NOT. air_data%options%constrain_z .AND. .NOT. air_data%options%constrain_w .AND. &
+            air_data%options%improve_z_its == 0 .AND. air_data%options%improve_w_its == 0 .AND. &
+            air_data%options%z_type == AIR_Z_PRODUCT .AND. &
+            air_data%options%strong_r_threshold == 0d0 .AND. &
+            air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
+            air_data%options%inverse_type /= PFLAREINV_ISAI .AND. &
+            (air_data%options%cf_splitting_type == CF_PMISR_DDC .OR. &
+             air_data%options%cf_splitting_type == CF_DIAG_DOM .OR. &
+             air_data%options%cf_splitting_type == CF_PMIS)
+
+   end function raw_shells_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_fc_ok(air_data)
+
+      ! Can A_fc and A_cf be kept as device data (raw shells): as raw_shells_ok, and A_fc only feeds
+      ! the one point prolongator built straight from it, A_cf only Z = A_cf * Aff^-1 (paths that
+      ! need a real A_cf assemble it); the solve applies both through their matvecs
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_shells_fc_ok = raw_shells_ok(air_data) .AND. air_data%options%one_point_classical_prolong
+
+   end function raw_shells_fc_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_aff_ok(air_data)
+
+      ! Can A_ff be kept as device data (a raw shell): as raw_shells_fc_ok, and A_ff is only applied
+      ! (the Arnoldi coefficients, the matrix-free smoother and the solve's matvecs) and fed to the
+      ! raw assembled inverse for Z or for the assembled smoother (build_gmres_polynomial_inverse_raw,
+      ! which fetches the off-processor rows itself, see raw_inv_aff_ok)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_shells_aff_ok = raw_shells_fc_ok(air_data) .AND. &
+            air_data%options%inverse_type == PFLAREINV_ARNOLDI .AND. &
+            air_data%options%inverse_sparsity_order == 1 .AND. &
+            air_data%options%poly_order >= 2 .AND. &
+            .NOT. air_data%options%diag_scale_polys .AND. &
+            .NOT. air_data%options%subcomm
+
+   end function raw_shells_aff_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_inv_aff_ok(air_data)
+
+      ! Can the assembled (not matrix-free) smoother A_ff^-1 be built as device data and kept as a
+      ! raw shell: as raw_shells_aff_ok, without matrix-free smoothing. It is built once with
+      ! build_gmres_polynomial_inverse_raw and also gives Z = A_cf * A_ff^-1 without a matrix
+      ! Not with the Kokkos debug compare (which never makes raw shells)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      ! ~~~~~~
+
+      raw_inv_aff_ok = raw_shells_aff_ok(air_data) .AND. &
+            .NOT. air_data%options%matrix_free_polys .AND. &
+            .NOT. kokkos_debug()
+
+   end function raw_inv_aff_ok
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function raw_shells_acc_ok(air_data)
+
+      ! Can A_cc be kept as device data (a raw shell) when C point smoothing: as raw_shells_ok, and
+      ! A_cc is only applied (the Arnoldi coefficients, the matrix-free C smoother and its matvecs)
+      ! The C point inverse options default to the F point ones if unset (-1)
+
+      ! ~~~~~~
+      type(air_multigrid_data), intent(in) :: air_data
+      integer :: c_inverse_type, c_poly_order
+      ! ~~~~~~
+
+      c_inverse_type = air_data%options%c_inverse_type
+      if (c_inverse_type == -1) c_inverse_type = air_data%options%inverse_type
+      c_poly_order = air_data%options%c_poly_order
+      if (c_poly_order == -1) c_poly_order = air_data%options%poly_order
+
+      raw_shells_acc_ok = raw_shells_ok(air_data) .AND. &
+            c_inverse_type == PFLAREINV_ARNOLDI .AND. &
+            air_data%options%matrix_free_polys .AND. &
+            c_poly_order >= 2 .AND. &
+            .NOT. air_data%options%diag_scale_polys .AND. &
+            .NOT. air_data%options%subcomm
+
+   end function raw_shells_acc_ok
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   logical function r_from_a_diag_possible(input_mat, our_level, air_data)
+
+      ! Can R be built straight from A on this level, without A_cf or Z
+      ! (compute_R_from_A_diag) if the Aff inverse turns out to be a matdiagonal
+      ! That needs a Kokkos matrix, a diagonal Aff, Z = -A_cf * Aff^-1 with A_cf itself
+      ! and nothing else that needs Z or the dropped Z
+
+      type(tMat), intent(in)                    :: input_mat
+      integer, intent(in)                       :: our_level
+      type(air_multigrid_data), intent(in)      :: air_data
+
+      PetscErrorCode :: ierr
+      MatType :: mat_type, mat_type_aff
+
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
+      call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
+      r_from_a_diag_possible = (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+                  mat_type == MATAIJKOKKOS) .AND. &
+               mat_type_aff == MATDIAGONAL .AND. &
+               air_data%options%z_type == AIR_Z_PRODUCT .AND. &
+               air_data%options%strong_r_threshold == 0d0 .AND. &
+               .NOT. air_data%options%full_smoothing_up_and_down .AND. &
+               .NOT. air_data%options%reuse_sparsity .AND. &
+               .NOT. air_data%options%constrain_z .AND. &
+               air_data%options%improve_z_its == 0
+
+   end function r_from_a_diag_possible
 
    !------------------------------------------------------------------------------------------------------------------------
    
@@ -175,7 +328,8 @@ module air_operators_setup
                   air_data%IS_coarse_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                   air_data%A_cc(our_level), &
                   our_level = our_level, is_row_fine = .FALSE., is_col_fine = .FALSE., &
-                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                  raw_shell = raw_shells_acc_ok(air_data))
          end if
 
          call timer_start(TIMER_ID_AIR_INVERSE)    
@@ -221,12 +375,19 @@ module air_operators_setup
                air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), MAT_INITIAL_MATRIX, &
                air_data%A_fc(our_level), &
                our_level = our_level, is_row_fine = .TRUE., is_col_fine = .FALSE., &
-               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
-         call MatCreateSubMatrixWrapper(input_mat, &
-               air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-               air_data%A_cf(our_level), &
-               our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
-               kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+               kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+               raw_shell = raw_shells_fc_ok(air_data))
+         ! If R can be built straight from A, A_cf is only needed for C smoothing
+         ! If the Aff inverse turns out not to be diagonal, A_cf is extracted when Z is built
+         if (air_data%options%any_c_smooths .OR. &
+               .NOT. r_from_a_diag_possible(input_mat, our_level, air_data)) then
+            call MatCreateSubMatrixWrapper(input_mat, &
+                  air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                  air_data%A_cf(our_level), &
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                  raw_shell = raw_shells_fc_ok(air_data))
+         end if
       end if
 
       call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -236,10 +397,13 @@ module air_operators_setup
       ! ~~~~~~~~~~~~~~
       if (air_data%options%strong_r_threshold == 0d0) then
 
-         ! Copy the original pointer
-         air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
-         ! Increase the reference counter
-         call PetscObjectReference(air_data%A_cf(our_level), ierr)
+         ! Copy the original pointer (A_cf may not have been extracted)
+         temp_mat = air_data%A_cf(our_level)
+         if (.NOT. PetscObjectIsNull(temp_mat)) then
+            air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
+            ! Increase the reference counter
+            call PetscObjectReference(air_data%A_cf(our_level), ierr)
+         end if
          air_data%reuse(our_level)%reuse_mat(MAT_AFC_DROP) = air_data%A_fc(our_level)
          ! Increase the reference counter
          call PetscObjectReference(air_data%A_fc(our_level), ierr)        
@@ -321,7 +485,9 @@ module air_operators_setup
       type(tMat) :: C_mat
       PetscInt :: global_row_start, global_row_end_plus_one
       PetscInt, parameter :: nz_ignore = -1
-      logical :: destroy_mat, reuse_grid_transfer
+      logical :: destroy_mat, reuse_grid_transfer, one_point_p_direct, fuse_z_drop, r_from_a_diag
+      logical :: z_raw, z_raw_possible, inv_raw, inv_raw_possible
+      integer(kind=8) :: z_raw_handle, inv_raw_handle
       MatType:: mat_type, mat_type_inv_aff
 
       ! ~~~~~~~~~~
@@ -334,7 +500,14 @@ module air_operators_setup
       ! Get some sizes
       ! ~~~~~~~~~~~
 
-      call MatGetOwnershipRange(A, global_row_start, global_row_end_plus_one, ierr)  
+      call MatGetOwnershipRange(A, global_row_start, global_row_end_plus_one, ierr)
+
+      ! A one point classical prolongator can be built straight from A_fc without building
+      ! W, as long as nothing needs W: no constraints on W and W isn't kept for reuse
+      one_point_p_direct = air_data%options%one_point_classical_prolong .AND. &
+               .NOT. air_data%options%symmetric .AND. &
+               .NOT. air_data%options%constrain_w .AND. &
+               .NOT. air_data%options%reuse_sparsity
       
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~
@@ -357,10 +530,17 @@ module air_operators_setup
             ! The one point classical prolongator will never change if 
             ! we are reusing
             
+         ! If nothing needs W, build P straight from A_fc without building W
+         ! We don't reuse here, so the reset has already destroyed any old P
+         else if (one_point_p_direct) then
+            call generate_one_point_P_from_sparse(air_data%A_fc(our_level), &
+                     global_row_start, &
+                     air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                     air_data%prolongators(our_level))
          ! First time
          else
             call generate_one_point_with_one_entry_from_sparse(air_data%A_fc(our_level), &
-                     air_data%reuse(our_level)%reuse_mat(MAT_W_DROP)) 
+                     air_data%reuse(our_level)%reuse_mat(MAT_W_DROP))
          end if         
          
          call timer_finish(TIMER_ID_AIR_PROLONG)                
@@ -385,19 +565,47 @@ module air_operators_setup
       ! This may build a matrix-free version of inv_A_ff
       call timer_start(TIMER_ID_AIR_INVERSE)   
 
+      destroy_mat = .FALSE.
+      inv_raw = .FALSE.
+      inv_raw_handle = 0
+
+      ! The assembled smoother can be built as device data and kept as a raw shell; the same device
+      ! data then gives Z below without a matrix (see raw_inv_aff_ok)
+      if (raw_inv_aff_ok(air_data)) then
+         call build_gmres_polynomial_inverse_raw(smoothing_mat, &
+               air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+               air_data%inv_A_ff_poly_data(our_level)%buffers, &
+               air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+               air_data%options%diag_scale_polys, &
+               air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+               air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
+               inv_raw_handle, inv_raw)
+         if (inv_raw) call raw_shell_from_handle(inv_raw_handle, air_data%inv_A_ff(our_level))
+      end if
+
       ! Regardless of if we are fc smoothing or smoothing all unknowns we store the inverse
       ! in inv_A_ff
-      call finish_approximate_inverse(smoothing_mat, &
-            air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
-            air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
-            air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
-            air_data%inv_A_ff_poly_data(our_level)%buffers, &
-            air_data%inv_A_ff_poly_data(our_level)%coefficients, &
-            air_data%options%matrix_free_polys, &
-            air_data%options%diag_scale_polys, &
-            air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
-            air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
-            air_data%inv_A_ff(our_level)) 
+      if (.NOT. inv_raw) then
+         ! finish_approximate_inverse needs a real A_ff for an assembled inverse
+         if (.NOT. air_data%options%matrix_free_polys .AND. &
+               .NOT. air_data%options%full_smoothing_up_and_down) then
+            call raw_shell_assemble(air_data%A_ff(our_level))
+            smoothing_mat = air_data%A_ff(our_level)
+         end if
+         call finish_approximate_inverse(smoothing_mat, &
+               air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+               air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+               air_data%inv_A_ff_poly_data(our_level)%buffers, &
+               air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+               air_data%options%matrix_free_polys, &
+               air_data%options%diag_scale_polys, &
+               air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF), &
+               air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array, &
+               air_data%inv_A_ff(our_level))
+      end if
             
       ! Delete temporary if not reusing
       if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -408,7 +616,6 @@ module air_operators_setup
                   air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF)%array)
       end if              
       
-      destroy_mat = .FALSE.
       ! If we are doing AIRG, then we also need an A_ff^-1 for the grid
       ! transfer operators (may be the same used for the smoother)
       if (air_data%options%z_type == AIR_Z_PRODUCT) then
@@ -449,8 +656,29 @@ module air_operators_setup
             ! We can just re-call finish_approximate_inverse, as the requests will have been resolved 
             ! and hence it will just build an assembled version, which we store in inv_dropped_Aff
             if (air_data%options%matrix_free_polys) then            
+               ! If this inverse only feeds Z, and R is built from Z without Z being a matrix
+               ! (see z_raw_possible below), it doesn't have to be a matrix either
+               ! PetscObjectIsNull is a macro, so keep it on a short line
+               temp_is = air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS)
+               inv_raw_possible = PetscObjectIsNull(temp_is)
+               inv_raw_possible = inv_raw_possible .AND. air_data%options%one_point_classical_prolong .AND. &
+                     .NOT. air_data%options%symmetric .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                     .NOT. air_data%options%constrain_z .AND. air_data%options%improve_z_its == 0
+               if (inv_raw_possible) then
+                  call build_gmres_polynomial_inverse_raw(air_data%A_ff(our_level), &
+                        air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
+                        air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
+                        air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
+                        air_data%inv_A_ff_poly_data(our_level)%buffers, &
+                        air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                        air_data%options%diag_scale_polys, &
+                        air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
+                        air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
+                        inv_raw_handle, inv_raw)
+               end if
                ! Making sure to give it the non dropped A_ff here
-               call finish_approximate_inverse(air_data%A_ff(our_level), &
+               if (.NOT. inv_raw) then
+                  call finish_approximate_inverse(air_data%A_ff(our_level), &
                         air_data%inv_A_ff_poly_data(our_level)%inverse_type, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                         air_data%inv_A_ff_poly_data(our_level)%gmres_poly_sparsity_order, &
@@ -461,6 +689,7 @@ module air_operators_setup
                         air_data%reuse(our_level)%reuse_mat(MAT_INV_AFF_DROPPED), &
                         air_data%reuse(our_level)%reuse_submatrices(MAT_INV_AFF_DROPPED)%array, &
                         inv_dropped_Aff)
+               end if
                destroy_mat = .TRUE.
 
                ! Delete temporary if not reusing
@@ -476,7 +705,21 @@ module air_operators_setup
             end if
          end if
 
-         call MatGetType(inv_dropped_Aff, mat_type_inv_aff, ierr)
+         ! A raw inverse is assembled and has the sparsity of A_ff, so it isn't diagonal
+         if (inv_raw) then
+            mat_type_inv_aff = MATAIJKOKKOS
+         else
+            call MatGetType(inv_dropped_Aff, mat_type_inv_aff, ierr)
+         end if
+      end if
+
+      ! Can we build R straight from A, without A_cf or Z
+      r_from_a_diag = .FALSE.
+      z_raw = .FALSE.
+      z_raw_handle = 0
+      if (air_data%options%z_type == AIR_Z_PRODUCT) then
+         r_from_a_diag = mat_type_inv_aff == MATDIAGONAL .AND. &
+               r_from_a_diag_possible(A, our_level, air_data)
       end if
 
       call timer_finish(TIMER_ID_AIR_INVERSE)           
@@ -671,7 +914,8 @@ module air_operators_setup
 
          ! If we've got a one point classical prolongator computed already we can just reuse the prolongator
          ! without change
-         if (.NOT. air_data%reuse_one_point_classical_prolong) then
+         ! (or we built it straight from A_fc above)
+         if (.NOT. air_data%reuse_one_point_classical_prolong .AND. .NOT. one_point_p_direct) then
             call compute_P_from_W(air_data%reuse(our_level)%reuse_mat(MAT_W_DROP), &
                      global_row_start, &
                      air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
@@ -794,20 +1038,62 @@ module air_operators_setup
             call MatDestroy(sparsity_mat_cf, ierr)        
          end if
 
+      ! With a diagonal Aff inverse we may not need Z at all, R is built straight from A below
+      else if (r_from_a_diag) then
+
       ! For AIRG - we do a matmatmult with our approximate A_ff inverse
       else         
+
+         ! If A_cf wasn't extracted as we hoped to build R straight from A, extract it now
+         temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP)
+         if (PetscObjectIsNull(temp_mat)) then
+            call timer_start(TIMER_ID_AIR_EXTRACT)
+            call MatCreateSubMatrixWrapper(A, &
+                  air_data%IS_coarse_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                  air_data%A_cf(our_level), &
+                  our_level = our_level, is_row_fine = .FALSE., is_col_fine = .TRUE., &
+                  kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                  raw_shell = raw_shells_fc_ok(air_data))
+            call timer_finish(TIMER_ID_AIR_EXTRACT)
+            air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP) = air_data%A_cf(our_level)
+            call PetscObjectReference(air_data%A_cf(our_level), ierr)
+         end if
+
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z)       
          if (.NOT. PetscObjectIsNull(temp_mat)) then
             call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
                   MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)            
          else
-            call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
-                  MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr) 
-            if (.NOT. air_data%options%reuse_sparsity .OR. &
-                .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) &
-               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+            ! If R is built from Z with the drop in one pass (see fuse_z_drop below) and nothing else
+            ! needs Z, Z doesn't have to be a matrix
+            ! PetscObjectIsNull is a macro, so keep it on a short line
+            temp_is = air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS)
+            z_raw_possible = PetscObjectIsNull(temp_is)
+            z_raw_possible = z_raw_possible .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                  .NOT. air_data%options%constrain_z .AND. air_data%options%improve_z_its == 0
+            if (inv_raw) then
+               ! The raw inverse is only built when z_raw_possible holds
+               call mat_mult_mat_raw(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_raw_handle, &
+                        z_raw_handle)
+               z_raw = .TRUE.
+               call raw_free(inv_raw_handle)
+               inv_raw = .FALSE.
+            else if (z_raw_possible) then
+               call mat_mult_raw(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
+                        z_raw_handle, z_raw)
+            end if
+            if (.NOT. z_raw) then
+               ! MatMatMult needs a real A_cf
+               call raw_shell_assemble(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP))
+               call MatMatMult(air_data%reuse(our_level)%reuse_mat(MAT_ACF_DROP), inv_dropped_Aff, &
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+               if (.NOT. air_data%options%reuse_sparsity .OR. &
+                   .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) &
+                  call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+            end if
          end if
-         call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), PFLARE_MINUS_ONE, ierr)
+         ! A raw Z is scaled when R is built from it
+         if (.NOT. z_raw) call MatScale(air_data%reuse(our_level)%reuse_mat(MAT_Z), PFLARE_MINUS_ONE, ierr)
       end if
 
       ! Destroy the copies, this only decrements the reference counter
@@ -863,31 +1149,44 @@ module air_operators_setup
       ! ~~~~~~~~~~~~
       ! ~~~~~~~~~~~~
 
-      call timer_start(TIMER_ID_AIR_DROP)    
+      ! Without reuse or constraints nothing needs the dropped Z, so the drop is done
+      ! while building R, without building the dropped Z as a matrix
+      fuse_z_drop = .NOT. air_data%options%reuse_sparsity .AND. .NOT. air_data%options%constrain_z
 
-      ! If we want to reuse, we have to match the original sparsity
-      ! which might be different if the matrix has changed (but the sparsity is the same)
-      ! so we can't just drop with a drop tolerance
-      temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP)
-      if (.NOT. PetscObjectIsNull(temp_mat)) then
+      if (.NOT. fuse_z_drop) then
 
-         call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
-                  air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP))     
-         
-      ! First time so just drop according to a tolerance 
-      else
-         call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
-                     air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
-                     relative_max_row_tol_int= 1)  
+         call timer_start(TIMER_ID_AIR_DROP)    
+
+         ! If we want to reuse, we have to match the original sparsity
+         ! which might be different if the matrix has changed (but the sparsity is the same)
+         ! so we can't just drop with a drop tolerance
+         temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP)
+         if (.NOT. PetscObjectIsNull(temp_mat)) then
+
+            call remove_from_sparse_match(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                     air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP))     
+            
+         ! First time so just drop according to a tolerance 
+         else
+            ! If nothing is dropped MAT_Z_DROP can just be MAT_Z, as long as we
+            ! aren't keeping either for reuse
+            call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_Z), &
+                        air_data%options%r_drop, air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), &
+                        relative_max_row_tol_int= 1, &
+                        allow_alias = .NOT. air_data%options%reuse_sparsity .OR. &
+                           (.NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount) .AND. &
+                            .NOT. REUSE_MAT_ACTIVE(MAT_Z_DROP, air_data%options%reuse_amount)))
+         end if
+
+         call timer_finish(TIMER_ID_AIR_DROP)
+         ! Delete temporary if not reusing
+         if (.NOT. air_data%options%reuse_sparsity .OR. &
+             .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) then
+            call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+         end if
       end if
-
-      call timer_finish(TIMER_ID_AIR_DROP)
-      ! Delete temporary if not reusing
-      if (.NOT. air_data%options%reuse_sparsity .OR. &
-          .NOT. REUSE_MAT_ACTIVE(MAT_Z, air_data%options%reuse_amount)) then
-         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
-      end if
-      if (air_data%options%z_type == AIR_Z_PRODUCT .AND. destroy_mat) then
+      ! If we build R straight from A we still need the Aff inverse
+      if (air_data%options%z_type == AIR_Z_PRODUCT .AND. destroy_mat .AND. .NOT. r_from_a_diag) then
          call MatDestroy(inv_dropped_Aff, ierr)
       end if 
 
@@ -912,12 +1211,38 @@ module air_operators_setup
       ! Calculate R
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~    
-      call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), global_row_start, &
-               air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
-               air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
-               .TRUE., &
-               reuse_grid_transfer, &
-               air_data%restrictors(our_level))
+      ! R can stay a raw shell only with a one point P, as only R * (A * P) without A * P as a
+      ! matrix can use it; the other products assemble it straight away
+      if (r_from_a_diag) then
+         call compute_R_from_A_diag(A, inv_dropped_Aff, our_level, air_data%kokkos_is_views_handle, &
+                  global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%options%r_drop, &
+                  air_data%restrictors(our_level), raw_shell = raw_shells_fc_ok(air_data))
+         if (destroy_mat) call MatDestroy(inv_dropped_Aff, ierr)
+      else if (z_raw) then
+         call compute_R_from_raw_Z(z_raw_handle, global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  air_data%restrictors(our_level), &
+                  air_data%options%r_drop, raw_shell = raw_shells_fc_ok(air_data))
+      else if (fuse_z_drop) then
+         call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z), global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  .TRUE., &
+                  reuse_grid_transfer, &
+                  air_data%restrictors(our_level), &
+                  drop_tol = air_data%options%r_drop)
+         call MatDestroy(air_data%reuse(our_level)%reuse_mat(MAT_Z), ierr)
+      else
+         call compute_R_from_Z(air_data%reuse(our_level)%reuse_mat(MAT_Z_DROP), global_row_start, &
+                  air_data%IS_fine_index(our_level), air_data%IS_coarse_index(our_level), &
+                  air_data%reuse(our_level)%reuse_is(IS_R_Z_FINE_COLS), &
+                  .TRUE., &
+                  reuse_grid_transfer, &
+                  air_data%restrictors(our_level))
+      end if
 
       call timer_finish(TIMER_ID_AIR_RESTRICT) 
       
@@ -1001,6 +1326,8 @@ module air_operators_setup
 
       PetscErrorCode :: ierr
       type(tMat) :: temp_mat
+      logical :: rap_done, rap_raw, rap_drop_reused, raw_shell_ok
+      integer(kind=8) :: rap_raw_handle
 
       ! ~~~~~~~~~~
 
@@ -1011,7 +1338,16 @@ module air_operators_setup
       ! Z A_ff W + A_cf W + Z A_fc + A_cc
       ! ~~~~~~~~~~~~~~~~~~~
       ! ~~~~~~~~~~~~~~~~~~~
-      call timer_start(TIMER_ID_AIR_RAP)                          
+      rap_raw = .FALSE.
+      rap_raw_handle = 0
+      ! Is the dropped coarse matrix kept (or to be kept) for sparsity reuse
+      temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP)
+      rap_drop_reused = .NOT. PetscObjectIsNull(temp_mat)
+      if (air_data%options%reuse_sparsity) then
+         if (REUSE_MAT_ACTIVE(MAT_RAP_DROP, air_data%options%reuse_amount)) rap_drop_reused = .TRUE.
+      end if
+
+      call timer_start(TIMER_ID_AIR_RAP)
 
       ! Can just do PtAP
       if (air_data%options%symmetric) then  
@@ -1027,7 +1363,12 @@ module air_operators_setup
          else
 
             call MatPtap(A, air_data%prolongators(our_level), &
-                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)          
+                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+            ! The product data references A and P, so clear it if we're not reusing
+            ! MAT_RAP may become the coarse matrix if nothing is dropped
+            if (.NOT. air_data%options%reuse_sparsity .OR. &
+                .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)) &
+               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
          end if
 
       ! ~~~~~~~~~~~
@@ -1039,6 +1380,7 @@ module air_operators_setup
          temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_AP)
          if (.NOT. PetscObjectIsNull(temp_mat)) then
 
+            call raw_shell_assemble(air_data%restrictors(our_level))
             call MatMatMult(A, air_data%prolongators(our_level), &
                      MAT_REUSE_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
                      
@@ -1048,17 +1390,50 @@ module air_operators_setup
          ! First time
          else
 
-            call MatMatMult(A, air_data%prolongators(our_level), &
-                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)     
-            if (.NOT. air_data%options%reuse_sparsity .OR. &
-                .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount)) &
-               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
-                     
-            call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
-                     MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr) 
-            if (.NOT. air_data%options%reuse_sparsity .OR. &
-                .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)) &
-               call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+            ! With Kokkos and a one point P, R * (A * P) can be computed without making A * P a
+            ! matrix, as long as neither MAT_AP nor MAT_RAP has to be a product for reuse
+            rap_done = .FALSE.
+            if (air_data%options%one_point_classical_prolong .AND. &
+                  (.NOT. air_data%options%reuse_sparsity .OR. &
+                   (.NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount) .AND. &
+                    .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)))) then
+               ! If the coarse matrix is just dropped from it (not kept for reuse), R * (A * P) doesn't
+               ! have to be a matrix either
+               if (.NOT. rap_drop_reused) then
+                  call mat_mult_r_one_point_ap_raw(air_data%restrictors(our_level), A, &
+                           air_data%prolongators(our_level), rap_raw_handle, rap_done)
+                  rap_raw = rap_done
+               else
+                  call raw_shell_assemble(air_data%restrictors(our_level))
+                  call mat_mult_r_one_point_ap(air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
+                           air_data%reuse(our_level)%reuse_mat(MAT_RAP), rap_done)
+               end if
+            end if
+
+            if (.NOT. rap_done) then
+               ! These paths need R as a real matrix
+               call raw_shell_assemble(air_data%restrictors(our_level))
+               ! A one point P has at most one entry per row, so A*P is a relabelling of the
+               ! columns of A, as long as we don't need MAT_AP to be a product for reuse
+               if (air_data%options%one_point_classical_prolong .AND. &
+                     (.NOT. air_data%options%reuse_sparsity .OR. &
+                      .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount))) then
+                  call mat_mult_one_entry_per_row(A, air_data%prolongators(our_level), &
+                           air_data%reuse(our_level)%reuse_mat(MAT_AP))
+               else
+                  call MatMatMult(A, air_data%prolongators(our_level), &
+                           MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
+                  if (.NOT. air_data%options%reuse_sparsity .OR. &
+                      .NOT. REUSE_MAT_ACTIVE(MAT_AP, air_data%options%reuse_amount)) &
+                     call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_AP), ierr)
+               end if
+
+               call MatMatMult(air_data%restrictors(our_level), air_data%reuse(our_level)%reuse_mat(MAT_AP), &
+                        MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+               if (.NOT. air_data%options%reuse_sparsity .OR. &
+                   .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount)) &
+                  call MatProductClear(air_data%reuse(our_level)%reuse_mat(MAT_RAP), ierr)
+            end if
          end if
          
          ! Delete temporary if not reusing
@@ -1077,7 +1452,20 @@ module air_operators_setup
       ! which might be different if the matrix has changed (but the sparsity is the same)
       ! so we can't just drop with a drop tolerance
       temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP)
-      if (.NOT. PetscObjectIsNull(temp_mat)) then
+      ! R * (A * P) was left as device data, drop straight from it
+      ! This is the same as the remove_small_from_sparse with allow_alias below
+      if (rap_raw) then
+
+         ! The coarse matrix can stay as device views (a raw shell) when everything that reads it on the
+         ! next level can read one; otherwise it is a PETSc matrix. Levels that later need a real matrix
+         ! (the coarsest level, repartitioning, and the truncation test unless the coarse solver is a
+         ! matrix-free power, Arnoldi or Newton polynomial without a coarsest subcomm) are assembled
+         ! where they are used
+         raw_shell_ok = raw_shells_ok(air_data)
+         call rap_raw_drop(rap_raw_handle, air_data%restrictors(our_level), A, air_data%prolongators(our_level), &
+                  air_data%options%a_drop, coarse_matrix, air_data%options%a_lump, raw_shell = raw_shell_ok)
+
+      else if (.NOT. PetscObjectIsNull(temp_mat)) then
 
          ! Duplicate the sparsity
          call MatDuplicate(air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &
@@ -1092,9 +1480,13 @@ module air_operators_setup
          ! If we know we're not reusing MAT_RAP_DROP, compute directly into coarse_matrix
          if (.NOT. air_data%options%reuse_sparsity .OR. &
              .NOT. REUSE_MAT_ACTIVE(MAT_RAP_DROP, air_data%options%reuse_amount)) then
+            ! If nothing is dropped the coarse matrix can just be MAT_RAP, as long as
+            ! we aren't keeping MAT_RAP for reuse
             call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                      air_data%options%a_drop, coarse_matrix, &
-                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump)
+                     relative_max_row_tol_int = 1, lump=air_data%options%a_lump, &
+                     allow_alias = .NOT. air_data%options%reuse_sparsity .OR. &
+                        .NOT. REUSE_MAT_ACTIVE(MAT_RAP, air_data%options%reuse_amount))
          else
             call remove_small_from_sparse(air_data%reuse(our_level)%reuse_mat(MAT_RAP), &
                      air_data%options%a_drop, air_data%reuse(our_level)%reuse_mat(MAT_RAP_DROP), &

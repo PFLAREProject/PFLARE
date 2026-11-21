@@ -1,14 +1,21 @@
 module petsc_helper
 
-   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated
+   use iso_c_binding, only: c_ptr, c_null_ptr, c_associated, c_int, c_long_long
    use petscmat
    use c_petsc_interfaces, only: remove_small_from_sparse_kokkos, &
          remove_from_sparse_match_kokkos, &
-         MatSetAllValues_kokkos, &
+         MatSetAllValues_kokkos, generate_identity_kokkos, &
          mat_duplicate_copy_plus_diag_kokkos, &
-         MatAXPY_kokkos, MatCreateSubMatrix_kokkos
+         MatAXPY_kokkos, MatCreateSubMatrix_kokkos, mat_mult_one_entry_per_row_kokkos, &
+         mat_mult_r_one_point_ap_kokkos, mat_mult_r_one_point_ap_raw_kokkos, rap_raw_drop_kokkos, &
+         mat_mult_raw_kokkos, raw_copy_to_mat_kokkos, mat_mult_mat_raw_kokkos, raw_free_kokkos, raw_shell_from_handle_kokkos, &
+         one_point_shell_nnzs_kokkos, one_point_shell_assemble_kokkos, is_one_point_shell_kokkos, &
+         mat_fine_block_diagonal_only_kokkos, MatGetDiagonalOnly_c, &
+         mat_create_vec_device_c, vec_create_sized_device_c, mat_shell_set_device_vecs_c, &
+         raw_shell_kind_kokkos, raw_shell_nnzs_kokkos, raw_shell_assemble_kokkos
    use pflare_parameters, only: PFLARE_TOL_MATFREE_12, PFLARE_TOL_MATFREE_13, &
-         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE
+         PFLARE_TOL_SIGMA_DROP, PFLARE_TOL_SIGMA_DROP_REL, PFLARE_MINUS_ONE, PFLARE_ZERO, PFLARE_ONE, &
+         PFLARE_PTAP_FILL
 
 #include "petsc/finclude/petscmat.h"
 #include "petscconf.h"
@@ -28,6 +35,162 @@ logical, protected :: kokkos_debug_global = .FALSE.
    ! -------------------------------------------------------------------------------------------------------------------------------      
 
    contains 
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine MatGetTypeEffective(matrix, mat_type, ierr)
+
+      ! MatGetType, except a raw shell (a level matrix kept as device views, see raw_shell_create_kokkos)
+      ! reports the Kokkos AIJ type its blocks came from, as the code that reads it through 
+      ! AIJDeviceAccess treats it as one
+
+      ! ~~~~~~
+      type(tMat), intent(in)      :: matrix
+      MatType, intent(out)        :: mat_type
+      PetscErrorCode, intent(out) :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_int) :: kind
+      integer(c_long_long) :: A_array
+#endif
+      ! ~~~~~~
+
+      call MatGetType(matrix, mat_type, ierr)
+#if defined(PETSC_HAVE_KOKKOS)
+      if (mat_type == MATSHELL) then
+         A_array = matrix%v
+         call raw_shell_kind_kokkos(A_array, kind)
+         if (kind == 1) mat_type = MATMPIAIJKOKKOS
+         if (kind == 0) mat_type = MATSEQAIJKOKKOS
+      end if
+#endif
+
+   end subroutine MatGetTypeEffective
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   logical function is_raw_shell(matrix)
+
+      ! Is matrix a raw shell (see MatGetTypeEffective)
+
+      ! ~~~~~~
+      type(tMat), intent(in)      :: matrix
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_int) :: kind
+      integer(c_long_long) :: A_array
+#endif
+      ! ~~~~~~
+
+      is_raw_shell = .FALSE.
+#if defined(PETSC_HAVE_KOKKOS)
+      ! A matrix that was never made (or was destroyed) isn't one
+      if (PetscObjectIsNull(matrix)) return
+      A_array = matrix%v
+      call raw_shell_kind_kokkos(A_array, kind)
+      is_raw_shell = kind >= 0
+#endif
+
+   end function is_raw_shell
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine raw_shell_assemble(matrix)
+
+      ! If matrix is a raw shell, replaces it with a PETSc matrix with the same blocks (for the paths
+      ! that need a real matrix); otherwise does nothing
+
+      ! ~~~~~~
+      type(tMat), intent(inout)   :: matrix
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
+#endif
+      ! ~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      if (.NOT. is_raw_shell(matrix)) return
+      A_array = matrix%v
+      call raw_shell_assemble_kokkos(A_array)
+      matrix%v = A_array
+#endif
+
+   end subroutine raw_shell_assemble
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_create_vec_device(matrix, left, vec)
+
+      ! Like MatCreateVecs(matrix, vec, PETSC_NULL_VEC) (left false) or 
+      ! MatCreateVecs(matrix, PETSC_NULL_VEC, vec) (left true), but with kokkos vectors 
+      ! the vector is made on the device without the zero-filled host copy PETSc makes
+      ! The vector starts as zero
+
+      ! ~~~~~~
+      type(tMat), intent(in)     :: matrix
+      logical, intent(in)        :: left
+      type(tVec), intent(inout)  :: vec
+
+      integer(c_int) :: left_int
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      left_int = 0
+      if (left) left_int = 1
+      ierr = mat_create_vec_device_c(matrix%v, left_int, vec%v)
+      if (ierr /= 0) then
+         print *, "Creating a vector failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine mat_create_vec_device
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_shell_set_device_vecs(matrix)
+
+      ! Makes MatCreateVecs on the shell matrix (and duplicates of what it gives, e.g., the work
+      ! vectors of a KSP using it) build kokkos vectors on the device without the zero-filled host
+      ! copy PETSc makes, see mat_shell_set_device_vecs_c. Does nothing for other vec types
+
+      ! ~~~~~~
+      type(tMat), intent(inout)  :: matrix
+
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      ierr = mat_shell_set_device_vecs_c(matrix%v)
+      if (ierr /= 0) then
+         print *, "Setting the shell vector creation failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine mat_shell_set_device_vecs
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine vec_create_sized_device(matrix, local_size, global_size, vec)
+
+      ! Like VecCreate, VecSetSizes(vec, local_size, global_size) and VecSetType with the comm 
+      ! and vec type of matrix, but with kokkos vectors the vector is made on the device without 
+      ! the zero-filled host copy PETSc makes. The vector starts as zero
+      ! global_size can be PETSC_DECIDE
+
+      ! ~~~~~~
+      type(tMat), intent(in)     :: matrix
+      PetscInt, intent(in)       :: local_size, global_size
+      type(tVec), intent(inout)  :: vec
+
+      integer :: errorcode
+      PetscErrorCode :: ierr
+      ! ~~~~~~
+
+      ierr = vec_create_sized_device_c(matrix%v, local_size, global_size, vec%v)
+      if (ierr /= 0) then
+         print *, "Creating a vector failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+   end subroutine vec_create_sized_device
 
    !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -106,9 +269,13 @@ logical, protected :: kokkos_debug_global = .FALSE.
    !------------------------------------------------------------------------------------------------------------------------
    
    subroutine remove_small_from_sparse(input_mat, tol, output_mat, relative_max_row_tol_int, &
-                  lump, drop_diagonal_int, diag_strength_int)
+                  lump, drop_diagonal_int, diag_strength_int, allow_alias)
 
       ! Wrapper around remove_small_from_sparse_cpu and remove_small_from_sparse_kokkos
+      ! If allow_alias is true and nothing would be dropped, the Kokkos version may return
+      ! output_mat as the input matrix with its reference count increased, rather than a copy
+      ! Only pass it if neither matrix is modified or reused afterwards in a way that needs
+      ! them to be separate objects
    
       ! ~~~~~~~~~~
       ! Input 
@@ -117,10 +284,12 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscReal, intent(in) :: tol
       logical, intent(in), optional :: lump
       integer, intent(in), optional :: relative_max_row_tol_int, drop_diagonal_int, diag_strength_int
+      logical, intent(in), optional :: allow_alias
       
 #if defined(PETSC_HAVE_KOKKOS)                     
       integer(c_long_long) :: A_array, B_array
       integer :: lump_int, allow_drop_diagonal_int, allow_diag_strength_int, rel_max_row_tol_int, errorcode
+      integer :: allow_alias_int
       PetscErrorCode :: ierr
       MatType :: mat_type
       Mat :: temp_mat
@@ -158,11 +327,17 @@ logical, protected :: kokkos_debug_global = .FALSE.
             allow_diag_strength_int = diag_strength_int
          end if                    
 
+         ! Never return the input by default
+         allow_alias_int = 0
+         if (present(allow_alias)) then
+            if (allow_alias) allow_alias_int = 1
+         end if
+
          A_array = input_mat%v             
          call remove_small_from_sparse_kokkos(A_array, tol, &
                   B_array, rel_max_row_tol_int, &
                   lump_int, allow_drop_diagonal_int, &
-                  allow_diag_strength_int) 
+                  allow_diag_strength_int, allow_alias_int) 
          output_mat%v = B_array
 
          ! If debugging do a comparison between CPU and Kokkos results
@@ -909,7 +1084,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+      ! input_mat may be a raw shell (device data), read through its blocks
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
@@ -1158,10 +1334,590 @@ logical, protected :: kokkos_debug_global = .FALSE.
    end subroutine MatAXPYWrapper   
 
 !------------------------------------------------------------------------------------------------------------------------
+
+   function is_one_point_shell(P)
+
+      ! Is P a matrix-free one point prolongator (see generate_one_point_P_from_sparse)
+      ! rather than any other MATSHELL
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in) :: P
+      logical :: is_one_point_shell
+
+      PetscErrorCode :: ierr
+      MatType :: mat_type
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
+      integer(c_int) :: result_int
+#endif
+      ! ~~~~~~~~~~
+
+      is_one_point_shell = .FALSE.
+      call MatGetType(P, mat_type, ierr)
+#if defined(PETSC_HAVE_KOKKOS)
+      if (mat_type == MATSHELL) then
+         A_array = P%v
+         call is_one_point_shell_kokkos(A_array, result_int)
+         is_one_point_shell = result_int == 1
+      end if
+#endif
+
+   end function is_one_point_shell
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   subroutine assemble_one_point_shell(P, P_assembled)
+
+      ! Assembles a matrix-free one point prolongator (see generate_one_point_P_from_sparse)
+      ! as a Kokkos matrix, for the places that need P as a matrix
+      ! Anything else is just duplicated
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: P
+      type(tMat), intent(inout) :: P_assembled
+
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      if (is_one_point_shell(P)) then
+         A_array = P%v
+         call one_point_shell_assemble_kokkos(A_array, B_array)
+         P_assembled%v = B_array
+         return
+      end if
+#endif
+      call MatDuplicate(P, MAT_COPY_VALUES, P_assembled, ierr)
+
+   end subroutine assemble_one_point_shell
+
+!------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_one_entry_per_row(A, P, AP)
+
+      ! Computes AP = A * P, always as a new matrix that isn't a PETSc product (so it
+      ! can't be refilled with MAT_REUSE_MATRIX)
+      ! With Kokkos, if every row of P has at most one entry (e.g., the one point classical
+      ! prolongator) this relabels the columns of A rather than doing a matrix-matrix product
+      ! Otherwise it's MatMatMult
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: A, P
+      type(tMat), intent(inout) :: AP
+
+      PetscErrorCode :: ierr
+#if defined(PETSC_HAVE_KOKKOS)
+      integer :: errorcode
+      integer(c_long_long) :: A_array, B_array, C_array
+      integer(c_int) :: success_int
+      MatType :: mat_type
+      type(tMat) :: temp_mat, P_assembled
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+
+         A_array = A%v
+         B_array = P%v
+         call mat_mult_one_entry_per_row_kokkos(A_array, B_array, success_int, C_array)
+
+         ! Some row of P has more than one entry
+         if (success_int == 0) then
+            call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, AP, ierr)
+            call MatProductClear(AP, ierr)
+            return
+         end if
+         AP%v = C_array
+
+         ! If debugging do a comparison against the matrix-matrix product
+         if (kokkos_debug()) then
+
+            ! A matrix-free one point P has to be assembled for the product
+            if (is_one_point_shell(P)) then
+               call assemble_one_point_shell(P, P_assembled)
+               call MatMatMult(A, P_assembled, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+               call MatDestroy(P_assembled, ierr)
+            else
+               call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+            end if
+            call MatProductClear(temp_mat, ierr)
+
+            ! Same sparsity
+            call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+            call get_nnzs_petsc_sparse(AP, nnzs_out)
+            if (nnzs_ref /= nnzs_out) then
+               print *, "Diff nnzs Kokkos mat_mult_one_entry_per_row and MatMatMult", &
+                     nnzs_out, nnzs_ref
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+
+            ! Same values up to the order of the sums
+            call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+            call MatAXPY(temp_mat, PFLARE_MINUS_ONE, AP, DIFFERENT_NONZERO_PATTERN, ierr)
+            ! Find the biggest entry in the difference
+            call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+            call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+            call VecMax(max_vec, row_loc, normy, ierr)
+            call VecDestroy(max_vec, ierr)
+
+            if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+                  .OR. normy/=normy) then
+               print *, "Diff Kokkos mat_mult_one_entry_per_row and MatMatMult", normy, "row", row_loc
+               call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+            end if
+            call MatDestroy(temp_mat, ierr)
+         end if
+
+      else
+
+         call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, AP, ierr)
+         call MatProductClear(AP, ierr)
+
+      end if
+#else
+      call MatMatMult(A, P, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, AP, ierr)
+      call MatProductClear(AP, ierr)
+#endif
+
+   end subroutine mat_mult_one_entry_per_row
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_r_one_point_ap(R, A, P, RAP, done)
+
+      ! Computes RAP = R * (A * P) as a new matrix that isn't a PETSc product (so it can't be
+      ! refilled with MAT_REUSE_MATRIX), when every row of P has at most one entry (e.g., the one
+      ! point classical prolongator), with Kokkos
+      ! A * P is a relabelling of the columns of A (see mat_mult_one_entry_per_row), but here it is
+      ! never made into a PETSc matrix: the product with R repeats the steps of PETSc's device
+      ! MatMatMult on it, so RAP is the same as MatMatMult(R, mat_mult_one_entry_per_row(A, P))
+      ! done is .FALSE. (and RAP isn't set) if R or A aren't Kokkos matrices or some row of P has
+      ! more than one entry
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)    :: R, A, P
+      type(tMat), intent(inout) :: RAP
+      logical, intent(out)      :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: R_array, A_array, B_array, C_array
+      integer(c_int) :: success_int
+      MatType :: mat_type, mat_type_r
+      type(tMat) :: temp_ap, temp_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+      done = .FALSE.
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetType(A, mat_type, ierr)
+      call MatGetType(R, mat_type_r, ierr)
+      if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS)) return
+      if (.NOT. (mat_type_r == MATMPIAIJKOKKOS .OR. mat_type_r == MATSEQAIJKOKKOS .OR. &
+            mat_type_r == MATAIJKOKKOS)) return
+
+      R_array = R%v
+      A_array = A%v
+      B_array = P%v
+      call mat_mult_r_one_point_ap_kokkos(R_array, A_array, B_array, success_int, C_array)
+      ! Some row of P has more than one entry
+      if (success_int == 0) return
+      RAP%v = C_array
+      done = .TRUE.
+
+      ! If debugging do a comparison against the product with an assembled A * P
+      if (kokkos_debug()) then
+
+         call mat_mult_one_entry_per_row(A, P, temp_ap)
+         call MatMatMult(R, temp_ap, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+         call MatProductClear(temp_mat, ierr)
+         call MatDestroy(temp_ap, ierr)
+
+         ! Same sparsity
+         call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+         call get_nnzs_petsc_sparse(RAP, nnzs_out)
+         if (nnzs_ref /= nnzs_out) then
+            print *, "Diff nnzs Kokkos mat_mult_r_one_point_ap and MatMatMult", &
+                  nnzs_out, nnzs_ref
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+
+         ! Same values
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, RAP, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos mat_mult_r_one_point_ap and MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+      end if
+#endif
+
+   end subroutine mat_mult_r_one_point_ap
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_r_one_point_ap_raw(R, A, P, raw_handle, done)
+
+      ! Computes R * (A * P) as mat_mult_r_one_point_ap does, but leaves the result as device data
+      ! in raw_handle rather than making it a PETSc matrix
+      ! raw_handle has to be passed to rap_raw_drop, which makes the dropped matrix from it and frees it
+      ! done is .FALSE. (and raw_handle isn't set) if R or A aren't Kokkos matrices or some row of P
+      ! has more than one entry
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)        :: R, A, P
+      integer(kind=8), intent(out)  :: raw_handle
+      logical, intent(out)          :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer(c_long_long) :: R_array, A_array, B_array, handle
+      integer(c_int) :: success_int
+      MatType :: mat_type, mat_type_r
+#endif
+      ! ~~~~~~~~~~
+
+      done = .FALSE.
+      raw_handle = 0
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      call MatGetTypeEffective(A, mat_type, ierr)
+      call MatGetTypeEffective(R, mat_type_r, ierr)
+      if (.NOT. (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS)) return
+      if (.NOT. (mat_type_r == MATMPIAIJKOKKOS .OR. mat_type_r == MATSEQAIJKOKKOS .OR. &
+            mat_type_r == MATAIJKOKKOS)) return
+
+      R_array = R%v
+      A_array = A%v
+      B_array = P%v
+      call mat_mult_r_one_point_ap_raw_kokkos(R_array, A_array, B_array, success_int, handle)
+      ! Some row of P has more than one entry
+      if (success_int == 0) return
+      raw_handle = handle
+      done = .TRUE.
+#endif
+
+   end subroutine mat_mult_r_one_point_ap_raw
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_raw(A, B, raw_handle, done)
+
+      ! Computes A * B as MatMatMult would, for assembled Kokkos AIJ matrices A and B, but leaves the
+      ! result as device data in raw_handle rather than making it a PETSc matrix
+      ! raw_handle has to be passed to something that frees it, e.g. compute_R_from_raw_Z
+      ! done is .FALSE. (and raw_handle isn't set) if A or B aren't Kokkos AIJ matrices
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)        :: A, B
+      integer(kind=8), intent(out)  :: raw_handle
+      logical, intent(out)          :: done
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: A_array, B_array, handle, C_array
+      MatType :: mat_type_a, mat_type_b
+      type(tMat) :: temp_mat, raw_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+      done = .FALSE.
+      raw_handle = 0
+
+#if defined(PETSC_HAVE_KOKKOS)
+
+      ! A may be a raw shell (device data, read through its blocks)
+      call MatGetTypeEffective(A, mat_type_a, ierr)
+      call MatGetType(B, mat_type_b, ierr)
+      if (.NOT. ((mat_type_a == MATMPIAIJKOKKOS .AND. mat_type_b == MATMPIAIJKOKKOS) .OR. &
+            (mat_type_a == MATSEQAIJKOKKOS .AND. mat_type_b == MATSEQAIJKOKKOS))) return
+
+      A_array = A%v
+      B_array = B%v
+      call mat_mult_raw_kokkos(A_array, B_array, handle)
+      raw_handle = handle
+      done = .TRUE.
+
+      ! If debugging do a comparison against MatMatMult
+      if (kokkos_debug()) then
+
+         call MatMatMult(A, B, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+         call MatProductClear(temp_mat, ierr)
+         call raw_copy_to_mat_kokkos(handle, C_array)
+         raw_mat%v = C_array
+
+         ! Same sparsity
+         call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+         call get_nnzs_petsc_sparse(raw_mat, nnzs_out)
+         if (nnzs_ref /= nnzs_out) then
+            print *, "Diff nnzs Kokkos mat_mult_raw and MatMatMult", nnzs_out, nnzs_ref
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+
+         ! Same values
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, raw_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos mat_mult_raw and MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(raw_mat, ierr)
+      end if
+#endif
+
+   end subroutine mat_mult_raw
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine mat_mult_mat_raw(A, b_handle, raw_handle)
+
+      ! Computes A * B as mat_mult_raw does, with B given as device data in b_handle (e.g. from
+      ! build_gmres_polynomial_inverse_raw), and leaves the result as device data in raw_handle
+      ! b_handle is unchanged and still has to be freed (raw_free). Only with Kokkos
+
+      ! ~~~~~~~~~~
+      ! Input
+      type(tMat), intent(in)          :: A
+      integer(kind=8), intent(inout)  :: b_handle
+      integer(kind=8), intent(out)    :: raw_handle
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode
+      integer(c_long_long) :: A_array, b_h, handle, C_array
+      type(tMat) :: temp_mat, raw_mat, b_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+      integer(kind=8) :: nnzs_ref, nnzs_out
+#endif
+      ! ~~~~~~~~~~
+
+      raw_handle = 0
+#if defined(PETSC_HAVE_KOKKOS)
+      A_array = A%v
+      b_h = b_handle
+      call mat_mult_mat_raw_kokkos(A_array, b_h, handle)
+      raw_handle = handle
+
+      ! If debugging do a comparison against MatMatMult with B made into a matrix
+      if (kokkos_debug()) then
+
+         call raw_copy_to_mat_kokkos(b_h, C_array)
+         b_mat%v = C_array
+         call MatMatMult(A, b_mat, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_mat, ierr)
+         call MatProductClear(temp_mat, ierr)
+         call MatDestroy(b_mat, ierr)
+         call raw_copy_to_mat_kokkos(handle, C_array)
+         raw_mat%v = C_array
+
+         ! Same sparsity
+         call get_nnzs_petsc_sparse(temp_mat, nnzs_ref)
+         call get_nnzs_petsc_sparse(raw_mat, nnzs_out)
+         if (nnzs_ref /= nnzs_out) then
+            print *, "Diff nnzs Kokkos mat_mult_mat_raw and MatMatMult", nnzs_out, nnzs_ref
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+
+         ! Same values
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, raw_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos mat_mult_mat_raw and MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+         call MatDestroy(raw_mat, ierr)
+      end if
+#endif
+
+   end subroutine mat_mult_mat_raw
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine raw_free(raw_handle)
+
+      ! Frees device data from one of the *_raw routines
+
+      ! ~~~~~~~~~~
+      integer(kind=8), intent(inout)  :: raw_handle
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: handle
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      handle = raw_handle
+      if (handle /= 0) call raw_free_kokkos(handle)
+#endif
+      raw_handle = 0
+
+   end subroutine raw_free
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine raw_shell_from_handle(raw_handle, output_mat)
+
+      ! Makes output_mat a raw shell (see raw_shell_create_kokkos) of the device data in raw_handle
+      ! (from one of the *_raw routines). The shell shares that data, so raw_handle is unchanged and
+      ! still has to be freed (raw_free)
+
+      ! ~~~~~~~~~~
+      integer(kind=8), intent(in)    :: raw_handle
+      type(tMat), intent(inout)      :: output_mat
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: handle, B_array
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      handle = raw_handle
+      call raw_shell_from_handle_kokkos(handle, B_array)
+      output_mat%v = B_array
+#endif
+
+   end subroutine raw_shell_from_handle
+
+   !------------------------------------------------------------------------------------------------------------------------
+
+   subroutine rap_raw_drop(raw_handle, R, A, P, tol, output_mat, lump, raw_shell)
+
+      ! Drops the entries smaller than tol relative to the biggest in each row (optionally lumping them
+      ! onto the diagonal) from the R * (A * P) in raw_handle (from mat_mult_r_one_point_ap_raw), as
+      ! remove_small_from_sparse with relative_max_row_tol_int = 1 and allow_alias does on that matrix,
+      ! and frees raw_handle. If nothing is dropped on any rank, output_mat is R * (A * P) itself
+      ! R, A and P are only used by the Kokkos debug compare
+      ! If raw_shell is present and true, output_mat is a raw shell (the blocks kept as device views,
+      ! see raw_shell_create_kokkos) rather than a PETSc matrix; not with the Kokkos debug compare
+
+      ! ~~~~~~~~~~
+      ! Input
+      integer(kind=8), intent(inout) :: raw_handle
+      type(tMat), intent(in)         :: R, A, P
+      PetscReal, intent(in)          :: tol
+      type(tMat), intent(inout)      :: output_mat
+      logical, intent(in)            :: lump
+      logical, optional, intent(in)  :: raw_shell
+
+#if defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      integer :: errorcode, lump_int, raw_shell_int
+      integer(c_long_long) :: handle, B_array
+      type(tMat) :: temp_ap, temp_rap, temp_mat
+      PetscScalar :: normy
+      PetscReal :: norm_ref
+      type(tVec) :: max_vec
+      PetscInt :: row_loc
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      lump_int = 0
+      if (lump) lump_int = 1
+      raw_shell_int = 0
+      if (present(raw_shell)) then
+         if (raw_shell .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+      end if
+      handle = raw_handle
+      call rap_raw_drop_kokkos(handle, tol, B_array, 1, lump_int, 0, 0, 1, raw_shell_int)
+      output_mat%v = B_array
+      raw_handle = 0
+
+      ! If debugging do a comparison against the CPU drop of the product with an assembled A * P
+      if (kokkos_debug()) then
+
+         call mat_mult_one_entry_per_row(A, P, temp_ap)
+         call MatMatMult(R, temp_ap, MAT_INITIAL_MATRIX, PFLARE_PTAP_FILL, temp_rap, ierr)
+         call MatProductClear(temp_rap, ierr)
+         call MatDestroy(temp_ap, ierr)
+         call remove_small_from_sparse_cpu(temp_rap, tol, temp_mat, relative_max_row_tol_int = 1, lump = lump)
+         call MatDestroy(temp_rap, ierr)
+
+         call MatNorm(temp_mat, NORM_INFINITY, norm_ref, ierr)
+         call MatAXPY(temp_mat, PFLARE_MINUS_ONE, output_mat, DIFFERENT_NONZERO_PATTERN, ierr)
+         ! Find the biggest entry in the difference
+         call MatCreateVecs(temp_mat, PETSC_NULL_VEC, max_vec, ierr)
+         call MatGetRowMaxAbs(temp_mat, max_vec, PETSC_NULL_INTEGER_POINTER, ierr)
+         call VecMax(max_vec, row_loc, normy, ierr)
+         call VecDestroy(max_vec, ierr)
+
+         if (real(normy, kind=PETSC_REAL_KIND) .gt. PFLARE_TOL_MATFREE_12 * max(1.0_PETSC_REAL_KIND, norm_ref) &
+               .OR. normy/=normy) then
+            print *, "Diff Kokkos rap_raw_drop and CPU drop of MatMatMult", normy, "row", row_loc
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         call MatDestroy(temp_mat, ierr)
+      end if
+#else
+      ! Only made with Kokkos, so never called without it
+      raw_handle = 0
+      output_mat = PETSC_NULL_MAT
+#endif
+
+   end subroutine rap_raw_drop
+
+!------------------------------------------------------------------------------------------------------------------------
    
    subroutine MatCreateSubMatrixWrapper(input_mat, is_row, is_col, &
                   reuse, output_mat, &
-                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle)
+                  our_level, is_row_fine, is_col_fine, kokkos_is_views_handle, raw_shell)
 
       ! Wrapper around MatCreateSubMatrix_kokkos
       ! Only works if the input IS have the same parallel row/column distribution
@@ -1170,6 +1926,8 @@ logical, protected :: kokkos_debug_global = .FALSE.
       ! When our_level is supplied (i.e. the kokkos path uses precomputed per-level
       ! fine/coarse IS views), kokkos_is_views_handle MUST also be supplied; it
       ! is the per-PCAIR handle stored on air_multigrid_data.
+      ! If raw_shell is true (only without reuse), a Kokkos output is a raw shell (device data, see
+      ! raw_shell_create_kokkos) rather than a PETSc matrix; not with the Kokkos debug compare
 
       ! ~~~~~~~~~~
       ! Input
@@ -1178,6 +1936,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       integer, intent(in), optional :: our_level
       logical, intent(in), optional :: is_row_fine, is_col_fine
       type(c_ptr), intent(in), optional :: kokkos_is_views_handle
+      logical, intent(in), optional :: raw_shell
       MatReuse, intent(in)          :: reuse
       type(tMat), intent(inout)     :: output_mat
 
@@ -1186,7 +1945,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
       MPIU_Comm :: MPI_COMM_MATRIX
       integer :: comm_size, errorcode
       integer(c_long_long) :: A_array, B_array, is_row_ptr, is_col_ptr
-      integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int
+      integer :: reuse_int, our_level_int, is_row_fine_int, is_col_fine_int, raw_shell_int
       logical :: reuse_logical
       MatType :: mat_type
       Mat :: temp_mat
@@ -1199,7 +1958,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
 
 #if defined(PETSC_HAVE_KOKKOS)    
 
-      call MatGetType(input_mat, mat_type, ierr)
+      call MatGetTypeEffective(input_mat, mat_type, ierr)
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)  
       ! Get the comm size 
       call MPI_Comm_size(MPI_COMM_MATRIX, comm_size, errorcode)       
@@ -1235,6 +1994,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
          if (present(kokkos_is_views_handle)) then
             handle_local = kokkos_is_views_handle
          end if
+         raw_shell_int = 0
+         if (present(raw_shell)) then
+            if (raw_shell .AND. .NOT. reuse_logical .AND. .NOT. kokkos_debug()) raw_shell_int = 1
+         end if
          if (our_level_int /= -1 .AND. .NOT. c_associated(handle_local)) then
             print *, "MatCreateSubMatrixWrapper: our_level set but kokkos_is_views_handle is null"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
@@ -1243,7 +2006,7 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatCreateSubMatrix_kokkos(A_array, is_row_ptr, is_col_ptr, &
                   reuse_int, B_array, &
                   handle_local, &
-                  our_level_int, is_row_fine_int, is_col_fine_int)
+                  our_level_int, is_row_fine_int, is_col_fine_int, raw_shell_int)
 
          output_mat%v = B_array
 
@@ -1283,6 +2046,56 @@ logical, protected :: kokkos_debug_global = .FALSE.
    end subroutine MatCreateSubMatrixWrapper   
 
    !------------------------------------------------------------------------------------------------------------------------
+
+   function mat_fine_block_diagonal_only(input_mat, is_fine, our_level, kokkos_is_views_handle) result(diag_only)
+
+      ! Is the fine-fine block of a square Kokkos matrix only a diagonal (stored entries), the
+      ! same answer MatGetDiagonalOnly_c gives on the extracted Aff, but without extracting it
+      ! Only for Kokkos matrices, with the fine views of our_level already in kokkos_is_views_handle
+      ! Collective
+
+      ! ~~~~~~~~~~
+      ! Input 
+      type(tMat), intent(in)        :: input_mat
+      type(tIS), intent(in)         :: is_fine
+      integer, intent(in)           :: our_level
+      type(c_ptr), intent(in)       :: kokkos_is_views_handle
+      logical                       :: diag_only
+
+      integer :: errorcode
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, Aff_array
+      integer(c_int) :: diag_only_int, diag_only_cpu_int
+      PetscErrorCode :: ierr
+      type(tMat) :: temp_mat
+#endif
+      ! ~~~~~~~~~~
+
+#if defined(PETSC_HAVE_KOKKOS)
+      A_array = input_mat%v
+      call mat_fine_block_diagonal_only_kokkos(A_array, kokkos_is_views_handle, our_level, diag_only_int)
+      diag_only = diag_only_int == 1
+
+      ! If debugging compare against the check on the extracted Aff
+      if (kokkos_debug()) then
+         call MatCreateSubMatrix(input_mat, is_fine, is_fine, MAT_INITIAL_MATRIX, temp_mat, ierr)
+         Aff_array = temp_mat%v
+         ierr = MatGetDiagonalOnly_c(Aff_array, diag_only_cpu_int)
+         call MatDestroy(temp_mat, ierr)
+         if (diag_only_cpu_int /= diag_only_int) then
+            print *, "Diff Kokkos and CPU fine block diagonal only", diag_only_int, diag_only_cpu_int
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+      end if
+#else
+      diag_only = .FALSE.
+      print *, "mat_fine_block_diagonal_only needs Kokkos"
+      call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+#endif
+
+   end function mat_fine_block_diagonal_only
+
+   !------------------------------------------------------------------------------------------------------------------------
    
    subroutine generate_identity(input_mat, output_mat)
 
@@ -1300,6 +2113,10 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, allocatable, dimension(:) :: d_nnz, o_nnz
       MPIU_Comm :: MPI_COMM_MATRIX
       MatType:: mat_type
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array, B_array
+      PetscInt :: global_col_start, global_col_end_plus_one
+#endif
       
       ! ~~~~~~~~~~
 
@@ -1310,6 +2127,24 @@ logical, protected :: kokkos_debug_global = .FALSE.
       call MatGetSize(input_mat, global_rows, global_cols, ierr)
       ! This returns the global index of the local portion of the matrix
       call MatGetOwnershipRange(input_mat, global_row_start, global_row_end_plus_one, ierr)  
+
+#if defined(PETSC_HAVE_KOKKOS)
+      ! With Kokkos build it on the device, rather than a host MatSetValue per row
+      call MatGetType(input_mat, mat_type, ierr)
+      if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
+            mat_type == MATAIJKOKKOS) then
+         call MatGetOwnershipRangeColumn(input_mat, global_col_start, global_col_end_plus_one, ierr)
+         if (global_col_start == global_row_start .AND. &
+               global_col_end_plus_one == global_row_end_plus_one) then
+            A_array = input_mat%v
+            call generate_identity_kokkos(A_array, B_array)
+            output_mat%v = B_array
+            call MatSetOption(output_mat, MAT_NO_OFF_PROC_ENTRIES, PETSC_TRUE, ierr)
+            call MatSetOption(output_mat, MAT_NEW_NONZERO_ALLOCATION_ERR, PETSC_TRUE,  ierr)
+            return
+         end if
+      end if
+#endif
 
       call MatCreate(MPI_COMM_MATRIX, output_mat, ierr)
       call MatSetSizes(output_mat, local_rows, local_cols, &
@@ -1547,6 +2382,9 @@ logical, protected :: kokkos_debug_global = .FALSE.
       PetscInt, dimension(:), pointer :: colmap => null(), ia => null(), ja => null()
       PetscInt :: n, shift = 0
       PetscBool :: symmetric = PETSC_FALSE, inodecompressed = PETSC_FALSE, done
+#if defined(PETSC_HAVE_KOKKOS)
+      integer(c_long_long) :: A_array
+#endif
       ! ~~~~~~~~~~
 
       call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
@@ -1559,6 +2397,20 @@ logical, protected :: kokkos_debug_global = .FALSE.
          call MatGetLocalSize(input_mat, nnzs_local, PETSC_NULL_INTEGER, ierr)
          return
       end if
+#if defined(PETSC_HAVE_KOKKOS)
+      ! A matrix-free one point prolongator
+      if (is_one_point_shell(input_mat)) then
+         A_array = input_mat%v
+         call one_point_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal)
+         return
+      end if
+      ! A level matrix kept as device views
+      if (is_raw_shell(input_mat)) then
+         A_array = input_mat%v
+         call raw_shell_nnzs_kokkos(A_array, nnzs_local, nnzs_nonlocal)
+         return
+      end if
+#endif
 
       if (comm_size /= 1) then
          call MatMPIAIJGetSeqAIJ(input_mat, Ad, Ao, colmap, ierr)

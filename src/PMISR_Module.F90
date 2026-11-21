@@ -3,8 +3,9 @@ module pmisr_module
    use iso_c_binding
    use petscmat
    use petsc_helper, only: kokkos_debug
-   use c_petsc_interfaces, only: pmisr_kokkos, copy_cf_markers_d2h
+   use c_petsc_interfaces, only: copy_cf_markers_d2h, pmisr_from_matrix_kokkos
    use pflare_parameters, only: C_POINT, F_POINT
+   use sabs, only: generate_sabs
 
 #include "petsc/finclude/petscmat.h"
 
@@ -12,13 +13,110 @@ module pmisr_module
 
    public
 
+   ! The random numbers for the measure in pmisr_from_matrix and the DDC swaps, kept between the
+   ! levels of a PCAIR setup (see pmisr_random_numbers). The seed only depends on the rank, so each
+   ! level's measure is the start of the same sequence: keeping the largest one means the later
+   ! calls don't have to draw them again
+   ! Only used between pmisr_measure_cache_begin and pmisr_measure_cache_end, which can nest (a
+   ! PCAIR set up inside another's setup), the outermost pair owns the cache
+   logical :: pmisr_measure_cache_on = .FALSE.
+   integer :: pmisr_measure_cache_depth = 0
+   integer :: pmisr_measure_cache_rank = -1
+   PetscReal, dimension(:), allocatable, target :: pmisr_measure_cache
+
    contains
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_measure_cache_begin()
+
+      ! Start keeping the random numbers of pmisr_from_matrix between calls
+
+      ! ~~~~~~
+
+      pmisr_measure_cache_depth = pmisr_measure_cache_depth + 1
+      if (pmisr_measure_cache_depth > 1) return
+      if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+      pmisr_measure_cache_rank = -1
+      pmisr_measure_cache_on = .TRUE.
+
+   end subroutine pmisr_measure_cache_begin
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_measure_cache_end()
+
+      ! Stop keeping the random numbers of pmisr_from_matrix and free them
+
+      ! ~~~~~~
+
+      pmisr_measure_cache_depth = max(pmisr_measure_cache_depth - 1, 0)
+      if (pmisr_measure_cache_depth > 0) return
+      if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+      pmisr_measure_cache_rank = -1
+      pmisr_measure_cache_on = .FALSE.
+
+   end subroutine pmisr_measure_cache_end
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_random_numbers(comm_rank, local_rows, randoms_owned, randoms)
+
+      ! The random numbers the PMISR measures start from, at least local_rows of them. The seed
+      ! only depends on the rank, so every call gets the start of the same sequence
+      ! randoms points at the cache when it is on and holds enough, otherwise at new ones drawn
+      ! into randoms_owned (which the cache then takes if it is on). Only read randoms, and
+      ! deallocate randoms_owned afterwards if it's allocated
+
+      ! ~~~~~~
+
+      integer, intent(in)                 :: comm_rank
+      PetscInt, intent(in)                :: local_rows
+      PetscReal, dimension(:), allocatable, target, intent(inout) :: randoms_owned
+      PetscReal, dimension(:), pointer, intent(out) :: randoms
+
+      integer :: seed_size, kfree
+      integer, dimension(:), allocatable :: seed
+
+      ! ~~~~~~
+
+      if (pmisr_measure_cache_on .AND. allocated(pmisr_measure_cache) .AND. &
+            pmisr_measure_cache_rank == comm_rank) then
+         if (size(pmisr_measure_cache, kind=kind(local_rows)) >= local_rows) then
+            randoms => pmisr_measure_cache
+            return
+         end if
+      end if
+
+      allocate(randoms_owned(local_rows))
+      call random_seed(size=seed_size)
+      allocate(seed(seed_size))
+      do kfree = 1, seed_size
+         seed(kfree) = comm_rank + 1 + kfree
+      end do
+      call random_seed(put=seed)
+      call random_number(randoms_owned)
+      deallocate(seed)
+
+      ! Keep them for the later calls
+      if (pmisr_measure_cache_on) then
+         if (allocated(pmisr_measure_cache)) deallocate(pmisr_measure_cache)
+         call move_alloc(randoms_owned, pmisr_measure_cache)
+         pmisr_measure_cache_rank = comm_rank
+         randoms => pmisr_measure_cache
+      else
+         randoms => randoms_owned
+      end if
+
+   end subroutine pmisr_random_numbers
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine pmisr(strength_mat, max_luby_steps, pmis, cf_markers_local, zero_measure_c_point)
 
-      ! Wrapper
+      ! PMISR (or PMIS) on a strength matrix, every stored entry of which is an edge
+      ! With Kokkos the cf markers are left on the device (they're only copied back to the host
+      ! when debugging); see pmisr_from_matrix_kokkos
 
       ! ~~~~~~
 
@@ -31,15 +129,11 @@ module pmisr_module
 
 #if defined(PETSC_HAVE_KOKKOS)
       PetscErrorCode :: ierr
-      MPIU_Comm :: MPI_COMM_MATRIX
-      integer(c_long_long) :: A_array
       MatType :: mat_type
-      integer :: pmis_int, zero_measure_c_point_int, seed_size, kfree, comm_rank
-      integer, dimension(:), allocatable :: seed
-      PetscReal, dimension(:), allocatable, target :: measure_local
-      PetscInt :: local_rows, local_cols
-      type(c_ptr)  :: measure_local_ptr, cf_markers_local_ptr
+      logical :: zero_measure_c
       integer, dimension(:), allocatable :: cf_markers_local_two
+      ! Not used, as every stored entry is an edge
+      PetscReal :: no_threshold
 #endif
       ! ~~~~~~~~~~
 
@@ -54,45 +148,21 @@ module pmisr_module
       if (mat_type == MATMPIAIJKOKKOS .OR. mat_type == MATSEQAIJKOKKOS .OR. &
             mat_type == MATAIJKOKKOS) then
 
-         call PetscObjectGetComm(strength_mat, MPI_COMM_MATRIX, ierr)
-         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
-
-         A_array = strength_mat%v
-         pmis_int = 0
-         if (pmis) pmis_int = 1
-         zero_measure_c_point_int = 0
-         if (present(zero_measure_c_point)) then
-            if (zero_measure_c_point) zero_measure_c_point_int = 1
-         end if
-
-         ! Let's generate the random values on the host for now so they match
-         ! for comparisons with pmisr_cpu
-         call MatGetLocalSize(strength_mat, local_rows, local_cols, ierr)
-         allocate(measure_local(local_rows))
-         call random_seed(size=seed_size)
-         allocate(seed(seed_size))
-         do kfree = 1, seed_size
-            seed(kfree) = comm_rank + 1 + kfree
-         end do
-         call random_seed(put=seed)
-         ! Fill the measure with random numbers
-         call random_number(measure_local)
-         deallocate(seed)
-
-         measure_local_ptr = c_loc(measure_local)
-
-         allocate(cf_markers_local(local_rows))
-         cf_markers_local_ptr = c_loc(cf_markers_local)
+         zero_measure_c = .FALSE.
+         if (present(zero_measure_c_point)) zero_measure_c = zero_measure_c_point
+         no_threshold = 0
 
          ! Creates a cf_markers on the device
-         call pmisr_kokkos(A_array, max_luby_steps, pmis_int, measure_local_ptr, zero_measure_c_point_int)
+         ! Not symmetrized, each node only looks at its own row as pmisr_cpu does
+         call pmisr_device(strength_mat, no_threshold, .FALSE., .FALSE., pmis, zero_measure_c, &
+                  max_luby_steps, cf_markers_local)
 
          ! If debugging do a comparison between CPU and Kokkos results
          if (kokkos_debug()) then
 
             ! Kokkos PMISR by default now doesn't copy back to the host, as any following ddc calls
             ! use the device data
-            call copy_cf_markers_d2h(cf_markers_local_ptr)
+            call copy_cf_markers_d2h(c_loc(cf_markers_local))
             call pmisr_cpu(strength_mat, max_luby_steps, pmis, &
                            cf_markers_local_two, zero_measure_c_point)
 
@@ -116,6 +186,101 @@ module pmisr_module
 
    end subroutine pmisr
    
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine pmisr_from_matrix(input_mat, strong_threshold, symmetrize, pmis, max_luby_steps, cf_markers_local)
+
+      ! First pass PMISR (or PMIS) straight from the level matrix, without building the strength
+      ! matrix or its transpose. The cf markers are left on the device, as with pmisr
+      ! The result matches generate_sabs (symmetrized if asked) followed by pmisr
+      ! Without Kokkos this is never called, but it falls back to exactly that CPU path
+
+      ! ~~~~~~
+
+      type(tMat), target, intent(in)      :: input_mat
+      PetscReal, intent(in)               :: strong_threshold
+      logical, intent(in)                 :: symmetrize, pmis
+      integer, intent(in)                 :: max_luby_steps
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
+
+      integer :: errorcode
+#if !defined(PETSC_HAVE_KOKKOS)
+      PetscErrorCode :: ierr
+      type(tMat) :: strength_mat
+#endif
+
+      ! ~~~~~~~~~~
+
+      if (max_luby_steps == 0) then
+         print *, "max_luby_steps must be positive or negative (0 is invalid)"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+#if defined(PETSC_HAVE_KOKKOS)
+      call pmisr_device(input_mat, strong_threshold, .TRUE., symmetrize, pmis, .FALSE., &
+               max_luby_steps, cf_markers_local)
+#else
+      call generate_sabs(input_mat, strong_threshold, symmetrize, .FALSE., strength_mat)
+      call pmisr_cpu(strength_mat, max_luby_steps, pmis, cf_markers_local)
+      call MatDestroy(strength_mat, ierr)
+#endif
+
+   end subroutine pmisr_from_matrix
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+#if defined(PETSC_HAVE_KOKKOS)
+   subroutine pmisr_device(input_mat, strong_threshold, strength, symmetrize, pmis, zero_measure_c_point, &
+                  max_luby_steps, cf_markers_local)
+
+      ! Calls pmisr_from_matrix_kokkos, which leaves the cf markers on the device
+      ! cf_markers_local is only allocated here
+      ! The measure starts from the same random numbers as pmisr_cpu, reused from an earlier
+      ! (bigger) level of this setup if we can. The kokkos routine only reads them, so the
+      ! cached values are left unchanged
+
+      ! ~~~~~~
+
+      type(tMat), target, intent(in)      :: input_mat
+      PetscReal, intent(in)               :: strong_threshold
+      logical, intent(in)                 :: strength, symmetrize, pmis, zero_measure_c_point
+      integer, intent(in)                 :: max_luby_steps
+      integer, dimension(:), allocatable, target, intent(inout) :: cf_markers_local
+
+      PetscErrorCode :: ierr
+      MPIU_Comm :: MPI_COMM_MATRIX
+      integer(c_long_long) :: A_array
+      integer :: comm_rank, errorcode
+      integer(c_int) :: strength_int, symmetrize_int, pmis_int, zero_measure_c_point_int
+      PetscReal, dimension(:), allocatable, target :: measure_local
+      PetscReal, dimension(:), pointer :: measure_ptr
+      PetscInt :: local_rows, local_cols
+
+      ! ~~~~~~
+
+      call PetscObjectGetComm(input_mat, MPI_COMM_MATRIX, ierr)
+      call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
+      call MatGetLocalSize(input_mat, local_rows, local_cols, ierr)
+      allocate(cf_markers_local(local_rows))
+      A_array = input_mat%v
+
+      strength_int = 0
+      if (strength) strength_int = 1
+      symmetrize_int = 0
+      if (symmetrize) symmetrize_int = 1
+      pmis_int = 0
+      if (pmis) pmis_int = 1
+      zero_measure_c_point_int = 0
+      if (zero_measure_c_point) zero_measure_c_point_int = 1
+
+      call pmisr_random_numbers(comm_rank, local_rows, measure_local, measure_ptr)
+      call pmisr_from_matrix_kokkos(A_array, strong_threshold, strength_int, symmetrize_int, &
+               pmis_int, zero_measure_c_point_int, max_luby_steps, c_loc(measure_ptr))
+      if (allocated(measure_local)) deallocate(measure_local)
+
+   end subroutine pmisr_device
+#endif
+
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine pmisr_cpu(strength_mat, max_luby_steps, pmis, &

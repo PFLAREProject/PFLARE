@@ -3,7 +3,7 @@ module fc_smooth_block
    use petscksp
    use c_petsc_interfaces, only: mat_iscopy_local_kokkos
    use air_data_type, only: air_multigrid_data
-   use petsc_helper, only: kokkos_debug
+   use petsc_helper, only: kokkos_debug, MatGetTypeEffective
    use matshell_data_type, only: mat_ctxtype, attach_mat_product
    use gmres_poly_apply, only: shell_poly_block_apply
    use pflare_parameters, only: PFLARE_TOL_MATFREE_13, PFLARE_MINUS_ONE, PFLARE_ONE, &
@@ -263,8 +263,9 @@ module fc_smooth_block
 
          ! The assembled (or diagonal) inverses are applied with a product too -
          ! the matrix-free matshells go through the blockwise shell apply instead
-         ! and never have a product attached
-         call MatGetType(air_data%inv_A_ff(our_level), inv_type, ierr)
+         ! and never have a product attached. An assembled inverse kept as device
+         ! data (a raw shell) counts as assembled, it does the dense product itself
+         call MatGetTypeEffective(air_data%inv_A_ff(our_level), inv_type, ierr)
          if (inv_type /= MATSHELL) then
             call attach_mat_product(air_data%inv_A_ff(our_level), &
                      air_data%block_temp_fine(AIR_MAT_RESIDUAL)%array(our_level), .FALSE., &
@@ -370,7 +371,7 @@ module fc_smooth_block
       MatType :: inv_type
       ! ~~~~~~
 
-      call MatGetType(inv_mat, inv_type, ierr)
+      call MatGetTypeEffective(inv_mat, inv_type, ierr)
 
       if (inv_type == MATSHELL) then
          call shell_block_apply_or_columns(inv_mat, x_mat, y_mat, ierr)
@@ -400,7 +401,7 @@ module fc_smooth_block
       MatType :: inv_type
       ! ~~~~~~
 
-      call MatGetType(inv_mat, inv_type, ierr)
+      call MatGetTypeEffective(inv_mat, inv_type, ierr)
 
       if (inv_type == MATSHELL) then
          call shell_block_apply_or_columns(inv_mat, x_mat, y_mat, ierr)

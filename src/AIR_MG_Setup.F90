@@ -3,9 +3,10 @@ module air_mg_setup
    use petscksp
    use constrain_z_or_w, only: get_near_nullspace, smooth_near_nullspace
    use cf_splitting, only: compute_cf_splitting, CF_PMISR_DDC, CF_DIAG_DOM
+   use pmisr_module, only: pmisr_measure_cache_begin, pmisr_measure_cache_end
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: &
-         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
          PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_WJACOBI, &
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, &
          TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_CONSTRAIN, &
@@ -16,25 +17,28 @@ module air_mg_setup
          PFLARE_KSP_RTOL_COARSE, PFLARE_MINUS_ONE
    use approx_inverse_setup, only: &
          start_approximate_inverse, finish_approximate_inverse, reset_inverse_mat, &
-         destroy_matrix_reuse, inverse_type_is_polynomial
+         destroy_matrix_reuse, inverse_type_is_polynomial, repoint_mf_poly_inverse
    use timers, only: timer_start, timer_finish, timer_time, print_timers
    use air_data_type, only: air_multigrid_data, REUSE_MAT_ACTIVE, REUSE_IS_ACTIVE
    use air_mg_stats, only: print_stats
    use fc_smooth, only: create_VecISCopyLocalWrapper, create_smooth_temp_vecs, mg_FC_point_richardson, mg_coarse_shell_apply, &
          mg_smooth_shell_apply, mg_coarse_shell_apply_transpose, mg_smooth_shell_apply_transpose, &
-         mg_FC_point_apply_transpose, mg_FC_point_residual_transpose, mg_coarse_shell_richardson
+         mg_FC_point_apply_transpose, mg_FC_point_residual_transpose, mg_coarse_shell_richardson, &
+         VecISCopyLocalWrapper
    use fc_smooth_block, only: mg_FC_block_richardson, mg_coarse_shell_block_apply, &
          mg_smooth_shell_block_apply, mg_coarse_shell_block_richardson
    use c_petsc_interfaces, only: MatGetDiagonalOnly_c
    use air_operators_setup, only: &
-         get_submatrices_start_poly_coeff_comms, &
+         get_submatrices_start_poly_coeff_comms, raw_shells_aff_ok, &
          finish_comms_compute_restrict_prolong, compute_coarse_matrix
    use gmres_poly, only: setup_gmres_poly_data
    use gmres_poly_apply, only: &
          petsc_matvec_right_scale_poly_newton_residual_mf, &
          petsc_matvec_poly_newton_residual_mf
    use repartition, only: calculate_repartition, compute_mat_ratio_local_nonlocal_nnzs
-   use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper
+   use petsc_helper, only: get_nnzs_petsc_sparse, MatCreateSubMatrixWrapper, assemble_one_point_shell, &
+         is_one_point_shell, mat_fine_block_diagonal_only, mat_create_vec_device, vec_create_sized_device, &
+         MatGetTypeEffective, raw_shell_assemble, is_raw_shell, mat_shell_set_device_vecs
 
 #include "petsc/finclude/petscksp.h"
 
@@ -83,18 +87,25 @@ module air_mg_setup
       VecScatter :: vec_scatter
       VecType :: vec_type
       logical :: auto_truncated, aff_diag, check_diag_only, truncate_without_test, truncated_here
+      logical :: test_on_raw_shell
+      logical :: aff_diag_direct, aff_diag_checked
       PetscRandom :: rctx
-      MatType:: mat_type, mat_type_aff, mat_type_inv_aff
+      MatType:: mat_type, mat_type_aff, mat_type_inv_aff, mat_type_coarse
       integer(c_int) :: diag_only
       KSPNormType :: coarse_norm_type
       PetscReal :: coarse_rtol, coarse_atol, coarse_dtol
       PetscInt :: coarse_maxits
       PetscBool :: coarse_guess_nonzero
+      type(tVec) :: mg_vec
+      logical :: diag_update_vecs
 
       ! ~~~~~~     
 
       ! Start timing the setup
       call timer_start(TIMER_ID_AIR_SETUP)    
+
+      ! Keep the PMISR random numbers between the levels of this setup
+      call pmisr_measure_cache_begin()
       
       ! Get the communicator the input matrix is on, we build everything on that
       call PetscObjectGetComm(pmat, MPI_COMM_MATRIX, ierr)
@@ -181,6 +192,17 @@ module air_mg_setup
                      proc_stride, &
                      air_data%inv_coarsest_poly_data)  
 
+            ! A matrix-free power, arnoldi or newton coarse solver (not on a subcomm) only applies
+            ! the coarse matrix, so the test can run on a raw shell, which is then only made a real
+            ! matrix if this level becomes the coarsest. Anything else needs a real matrix now
+            test_on_raw_shell = air_data%options%coarsest_matrix_free_polys .AND. &
+                  .NOT. air_data%options%coarsest_subcomm .AND. &
+                  (air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_POWER .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_ARNOLDI .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
+            if (.NOT. test_on_raw_shell) call raw_shell_assemble(air_data%coarse_matrix(our_level))
+
             ! Start the approximate inverse we'll use on this level
             ! If we are reusing the coefficients and have some, the truncation test uses those
             if (.NOT. (air_data%inv_coarsest_poly_data%coefficients_set .AND. &
@@ -262,6 +284,13 @@ module air_mg_setup
             if (truncated_here) then
                auto_truncated = .TRUE.
                air_data%auto_truncated_level = our_level
+
+               ! The coarse solver needs a real matrix, with the same entries as the raw shell it
+               ! was built and tested with, so point the matrix-free inverse at it
+               if (is_raw_shell(air_data%coarse_matrix(our_level))) then
+                  call raw_shell_assemble(air_data%coarse_matrix(our_level))
+                  call repoint_mf_poly_inverse(air_data%inv_A_ff(our_level), air_data%coarse_matrix(our_level))
+               end if
 
                ! Delete temporary if not reusing
                if (.NOT. air_data%options%reuse_sparsity .OR. &
@@ -428,6 +457,7 @@ module air_mg_setup
 
          call timer_start(TIMER_ID_AIR_EXTRACT)             
 
+         aff_diag_checked = .FALSE.
          ! Pull out A_ff
          if (air_data%allocated_matrices_A_ff(our_level)) then
             call MatGetType(air_data%A_ff(our_level), mat_type_aff, ierr)
@@ -467,11 +497,51 @@ module air_mg_setup
                      kokkos_is_views_handle = air_data%kokkos_is_views_handle)
             end if
          else
-            call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
-                  air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
-                  air_data%A_ff(our_level), &
-                  our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
-                  kokkos_is_views_handle = air_data%kokkos_is_views_handle)
+
+            ! With Kokkos, if Aff is only a diagonal we build it as a matdiagonal straight from
+            ! the diagonal of the coarse matrix, rather than extracting it and converting it below
+            ! We can only do that if the inverse type can use a matdiagonal
+            aff_diag_direct = .FALSE.
+            call MatGetTypeEffective(air_data%coarse_matrix(our_level), mat_type_coarse, ierr)
+            if ((mat_type_coarse == MATMPIAIJKOKKOS .OR. mat_type_coarse == MATSEQAIJKOKKOS .OR. &
+                  mat_type_coarse == MATAIJKOKKOS) .AND. &
+                  air_data%options%inverse_type /= PFLAREINV_SAI .AND. &
+                  air_data%options%inverse_type /= PFLAREINV_ISAI) then
+
+               ! Same reasoning as the check below for when Aff has to be diagonal
+               if (air_data%options%strong_threshold == 0d0 .AND. &
+                     (air_data%options%cf_splitting_type == CF_PMISR_DDC .OR. &
+                      air_data%options%cf_splitting_type == CF_DIAG_DOM)) then
+                  aff_diag_direct = .TRUE.
+               else
+                  aff_diag_direct = mat_fine_block_diagonal_only(air_data%coarse_matrix(our_level), &
+                        air_data%IS_fine_index(our_level), our_level, air_data%kokkos_is_views_handle)
+                  aff_diag_checked = .TRUE.
+               end if
+            end if
+
+            if (aff_diag_direct) then
+               ! Both on the device without a zero-filled host copy
+               call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., diag_vec)
+               call MatGetDiagonal(air_data%coarse_matrix(our_level), diag_vec, ierr)
+               ! Kokkos (the coarse matrix's vec type), as the extracted Aff's vectors would be
+               call vec_create_sized_device(air_data%coarse_matrix(our_level), local_fine_is_size, &
+                        global_fine_is_size, diag_vec_aff)
+               ! Pull out the F points of the diagonal
+               call VecISCopyLocalWrapper(air_data, our_level, .TRUE., diag_vec, &
+                        SCATTER_REVERSE, diag_vec_aff)
+               call VecDestroy(diag_vec, ierr)
+               ! The matrix takes ownership of diag_vec_aff and increases ref counter
+               call MatCreateDiagonal(diag_vec_aff, air_data%A_ff(our_level), ierr)
+               call VecDestroy(diag_vec_aff, ierr)
+            else
+               call MatCreateSubMatrixWrapper(air_data%coarse_matrix(our_level), &
+                     air_data%IS_fine_index(our_level), air_data%IS_fine_index(our_level), MAT_INITIAL_MATRIX, &
+                     air_data%A_ff(our_level), &
+                     our_level = our_level, is_row_fine = .TRUE., is_col_fine = .TRUE., &
+                     kokkos_is_views_handle = air_data%kokkos_is_views_handle, &
+                     raw_shell = raw_shells_aff_ok(air_data))
+            end if
          end if
                   
          call timer_finish(TIMER_ID_AIR_EXTRACT)   
@@ -499,7 +569,10 @@ module air_mg_setup
          end if
 
          ! Check if Aff is only a diagonal
-         if (check_diag_only) then      
+         ! If we already checked before extracting it, we know it isn't
+         if (aff_diag_checked .AND. mat_type_aff /= MATDIAGONAL) then
+            aff_diag = .FALSE.
+         else if (check_diag_only) then      
 
             ierr = MatGetDiagonalOnly_c(air_data%A_ff(our_level)%v, diag_only)
             ! Don't carry on with a garbage diag_only if petsc failed in the c routine
@@ -522,9 +595,10 @@ module air_mg_setup
                   inverse_type_aff /= PFLAREINV_ISAI) then
 
             ! We've already updated Aff above if we are reusing and it is matdiagonal already
-            if (.NOT. air_data%allocated_matrices_A_ff(our_level)) then
-               call MatCreateVecs(air_data%A_ff(our_level), diag_vec_aff, PETSC_NULL_VEC, ierr)
-               call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)               
+            ! or if we built it as a matdiagonal directly
+            if (.NOT. air_data%allocated_matrices_A_ff(our_level) .AND. mat_type_aff /= MATDIAGONAL) then
+               call mat_create_vec_device(air_data%A_ff(our_level), .FALSE., diag_vec_aff)
+               call MatGetDiagonal(air_data%A_ff(our_level), diag_vec_aff, ierr)
 
                call MatDestroy(air_data%A_ff(our_level), ierr)
                ! The matrix takes ownership of diag_vec_aff and increases ref counter
@@ -696,6 +770,9 @@ module air_mg_setup
             ! Input can be any matrix, we just need the correct type
             call MatGetVecType(air_data%A_fc(our_level), vec_type, ierr)
             call MatShellSetVecType(air_data%coarse_matrix(our_level), vec_type, ierr)
+            ! The smoother on this level makes its work vectors from this shell, so make them on
+            ! the device without a host copy
+            call mat_shell_set_device_vecs(air_data%coarse_matrix(our_level))
 
             ! We now own the matrix on this level - on the top level this replaces
             ! the input pmat, which we must never destroy
@@ -741,6 +818,10 @@ module air_mg_setup
                                  
                ! Start the process agglomeration 
                if (trigger_proc_agglom) then
+
+                  ! Repartitioning needs real matrices
+                  call raw_shell_assemble(air_data%coarse_matrix(our_level_coarse))
+                  call raw_shell_assemble(air_data%restrictors(our_level))
 
                   call timer_start(TIMER_ID_AIR_PROC_AGGLOM)
                   ! air_data%options%processor_agglom_factor tells us how much we're reducing the number 
@@ -828,6 +909,12 @@ module air_mg_setup
                   ! ~~~~~~~~~~~~~~~~~~
                   ! Repartition the prolongator matrix
                   ! ~~~~~~~~~~~~~~~~~~
+                  ! A matrix-free one point prolongator has to be assembled to be repartitioned
+                  if (is_one_point_shell(air_data%prolongators(our_level))) then
+                     call assemble_one_point_shell(air_data%prolongators(our_level), temp_mat)
+                     call MatDestroy(air_data%prolongators(our_level), ierr)
+                     air_data%prolongators(our_level) = temp_mat
+                  end if
                   temp_mat = air_data%reuse(our_level)%reuse_mat(MAT_P_REPARTITIONED)
                   if (.NOT. PetscObjectIsNull(temp_mat)) then
 
@@ -995,6 +1082,9 @@ module air_mg_setup
          if (air_data%options%print_stats_timings .AND. comm_rank == 0) call print_timers()
 
       end do level_loop
+
+      ! The coarsest matrix is used in the coarse solve, so it has to be a real matrix
+      call raw_shell_assemble(air_data%coarse_matrix(no_levels))
 
       ! Destroy our copies of the near nullspace vectors
       ! This has to happen after the loop, as we can leave it either by 
@@ -1315,33 +1405,52 @@ module air_mg_setup
          call PCSetUp(pc_coarse_solver, ierr)
          call KSPSetUp(ksp_coarse_solver, ierr)
 
-         ! A diagonal update uses the x and r on each level as scratch, so we create them here
-         ! which stops PCSetUp_MG creating its own. This has to be the same condition
-         ! as the one for doing an update in can_diag_update_pc_air_data
-         if (air_data%options%diag_update .AND. .NOT. air_data%options%reuse_sparsity .AND. &
-                  .NOT. air_data%options%full_smoothing_up_and_down) then
-
+         ! Give PCMG the b, x and r on each level, which stops PCSetUp_MG creating its own
+         ! Ours are made like PCSetUp_MG's (from the level operator, b and x on every level but 
+         ! the top grid and r on every level but the coarsest), but with kokkos vectors they 
+         ! don't have the zero-filled host copy PETSc makes
+         ! A diagonal update uses the x and r on each level as scratch, so we keep those
+         ! This has to be the same condition as the one for doing an update in can_diag_update_pc_air_data
+         diag_update_vecs = air_data%options%diag_update .AND. .NOT. air_data%options%reuse_sparsity .AND. &
+                  .NOT. air_data%options%full_smoothing_up_and_down
+         if (diag_update_vecs) then
             allocate(air_data%diag_update_x(no_levels))
             allocate(air_data%diag_update_r(no_levels))
-            do our_level = 1, no_levels
-               petsc_level = no_levels - our_level
-               ! PCMG doesn't let us set an x on the top grid and has no r on the coarsest
-               ! The update only needs an r on the coarsest if it has been repartitioned
-               if (our_level > 1) then
-                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                           air_data%diag_update_x(our_level), PETSC_NULL_VEC, ierr)
-                  call PCMGSetX(pcmg_input, petsc_level, air_data%diag_update_x(our_level), ierr)
-               end if
-               if (our_level < no_levels) then
-                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                           air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
-                  call PCMGSetR(pcmg_input, petsc_level, air_data%diag_update_r(our_level), ierr)
-               else if (air_data%repartitioned(no_levels - 1)) then
-                  call MatCreateVecs(air_data%coarse_matrix(our_level), &
-                           air_data%diag_update_r(our_level), PETSC_NULL_VEC, ierr)
-               end if
-            end do
          end if
+         do our_level = 1, no_levels
+            petsc_level = no_levels - our_level
+            if (our_level > 1) then
+               call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., mg_vec)
+               call PCMGSetRhs(pcmg_input, petsc_level, mg_vec, ierr)
+               call VecDestroy(mg_vec, ierr)
+               ! PCMG doesn't let us set an x on the top grid
+               if (diag_update_vecs) then
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., &
+                           air_data%diag_update_x(our_level))
+                  call PCMGSetX(pcmg_input, petsc_level, air_data%diag_update_x(our_level), ierr)
+               else
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., mg_vec)
+                  call PCMGSetX(pcmg_input, petsc_level, mg_vec, ierr)
+                  call VecDestroy(mg_vec, ierr)
+               end if
+            end if
+            ! PCMG has no r on the coarsest
+            if (our_level < no_levels) then
+               if (diag_update_vecs) then
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., &
+                           air_data%diag_update_r(our_level))
+                  call PCMGSetR(pcmg_input, petsc_level, air_data%diag_update_r(our_level), ierr)
+               else
+                  call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., mg_vec)
+                  call PCMGSetR(pcmg_input, petsc_level, mg_vec, ierr)
+                  call VecDestroy(mg_vec, ierr)
+               end if
+            ! The update only needs an r on the coarsest if it has been repartitioned
+            else if (diag_update_vecs .AND. air_data%repartitioned(no_levels - 1)) then
+               call mat_create_vec_device(air_data%coarse_matrix(our_level), .FALSE., &
+                        air_data%diag_update_r(our_level))
+            end if
+         end do
 
       ! If we've only got one level 
       else
@@ -1413,6 +1522,7 @@ module air_mg_setup
       ! We are done, print out info
       ! ~~~~~~~~~       
 
+      call pmisr_measure_cache_end()
       call timer_finish(TIMER_ID_AIR_SETUP)                
       ! Print out the coarse grid info
       if (air_data%options%print_stats_timings .AND. comm_rank == 0) then

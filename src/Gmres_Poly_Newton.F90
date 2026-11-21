@@ -450,7 +450,7 @@ module gmres_poly_newton
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
 
       ! Local variables
-      PetscInt :: global_rows, global_cols, local_rows, local_cols, vecs_needed
+      PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
       integer :: total_extra, counter, k_loc, m, numerical_order
       ! BLAS/LAPACK integer arguments must be PetscBLASInt
@@ -509,7 +509,9 @@ module gmres_poly_newton
       call create_temp_space_box_muller(matrix, subspace_size, V_n)
       
       ! Create an extra vector for storage
-      call VecDuplicate(V_n(1), w_j, ierr)      
+      ! Made from the matrix rather than duplicated from V_n(1), as VecMDot uses w_j's
+      ! operations, and only a vector made this way has the Kokkos GEMV VecMDot
+      call MatCreateVecs(matrix, w_j, PETSC_NULL_VEC, ierr)
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
@@ -785,8 +787,7 @@ module gmres_poly_newton
       end if     
 
       ! Cleanup
-      vecs_needed = subspace_size + 1
-      call VecDestroyVecs(vecs_needed, V_n, ierr)
+      call destroy_temp_space(V_n)
       call VecDestroy(w_j, ierr)       
 
    end subroutine calculate_gmres_polynomial_roots_newton   
@@ -1686,7 +1687,8 @@ end if
                ! q(mat_ctx%mat_scaled) D^-1
                call MatShellSetOperation(inv_matrix, &
                            MATOP_MULT, petsc_matvec_right_scale_poly_newton_mf, ierr)
-               call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_RHS), mat_ctx%mf_temp_vec(MF_VEC_DIAG), ierr)
+               call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_RHS))
+               call mat_create_vec_device(matrix, .TRUE., mat_ctx%mf_temp_vec(MF_VEC_DIAG))
             else
                ! The subroutine petsc_matvec_poly_newton_mf applies the polynomial inverse, q(mat_ctx%mat)
             call MatShellSetOperation(inv_matrix, &
@@ -1706,8 +1708,9 @@ end if
             
             ! Create temporary vectors we use during application
             ! Make sure to use matrix here to get the right type (as the shell doesn't know about gpus)
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP), PETSC_NULL_VEC, ierr)          
-            call MatCreateVecs(matrix, mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE), mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO), ierr)             
+            call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_TEMP))
+            call mat_create_vec_device(matrix, .FALSE., mat_ctx%mf_temp_vec(MF_VEC_TEMP_THREE))
+            call mat_create_vec_device(matrix, .TRUE., mat_ctx%mf_temp_vec(MF_VEC_TEMP_TWO))
 
             ! Need to build mat_ctx%mat_scaled, ie D^-1 A
             if (diag_scale_polys) then
@@ -1771,7 +1774,7 @@ end if
 
       ! If we want to diagonally scale (ie apply Jacobi preconditioned gmres polynomial)
       if (diag_scale_polys) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_inverse_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_inverse_vec)
          call MatGetDiagonal(matrix, diag_inverse_vec, ierr)
          call VecReciprocal(diag_inverse_vec, ierr)
          call MatDuplicate(matrix, MAT_COPY_VALUES, diag_scaled_mat, ierr)
@@ -1885,7 +1888,7 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)       
 
       if (.NOT. reuse_triggered) then
-         call MatCreateVecs(matrix, PETSC_NULL_VEC, diag_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., diag_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, diag_vec, ierr)
       end if
@@ -1932,17 +1935,18 @@ end if
       reuse_triggered = .NOT. PetscObjectIsNull(inv_matrix)
 
        ! Our matrix has to be square
-      call MatCreateVecs(matrix, product_vec, diag_vec, ierr)
+      call mat_create_vec_device(matrix, .FALSE., product_vec)
+      call mat_create_vec_device(matrix, .TRUE., diag_vec)
       call MatGetDiagonal(matrix, diag_vec, ierr)
 
       if (.NOT. reuse_triggered) then
-         call VecDuplicate(diag_vec, inv_vec, ierr)
+         call mat_create_vec_device(matrix, .TRUE., inv_vec)
       else
          call MatDiagonalGetDiagonal(inv_matrix, inv_vec, ierr)
       end if
-      call VecDuplicate(diag_vec, temp_vec_A, ierr)
-      call VecDuplicate(diag_vec, one_vec, ierr)
-      call VecDuplicate(diag_vec, temp_vec_two, ierr)
+      call mat_create_vec_device(matrix, .TRUE., temp_vec_A)
+      call mat_create_vec_device(matrix, .TRUE., one_vec)
+      call mat_create_vec_device(matrix, .TRUE., temp_vec_two)
       
       ! Set to zero as we add to it
       call VecSet(inv_vec, PFLARE_ZERO, ierr) 
