@@ -45,8 +45,8 @@ module gmres_poly_newton
       integer :: i_loc, k_loc, counter
       integer :: max_loc(1)
       PetscReal, dimension(:), allocatable :: magnitude
-      PetscReal :: a, b, squares, max_mag
-      logical, dimension(size(real_roots)) :: sorted
+      PetscReal :: max_mag
+      logical, dimension(size(real_roots)) :: sorted, repeated
       logical :: found
 
       ! ~~~~~~    
@@ -82,38 +82,30 @@ module gmres_poly_newton
          counter = counter + 1
       end if
 
+      ! magnitude(i) is one plus the log of the product of the distances from root i to every
+      ! root sorted so far, added up in the order they were sorted. It is kept as a running
+      ! sum, so each newly sorted root costs one pass over the unsorted ones
+      ! repeated(i) is set once root i is exactly on top of a sorted root, where the product
+      ! of distances is zero - we skip those rather than computing log10(0) = -infinity,
+      ! which raises a floating point exception
+      magnitude = 1d0
+      repeated = .FALSE.
+      do k_loc = 1, counter - 1
+         call add_sorted_root(indices(k_loc))
+      end do
+
       ! Do while we still have some sorting to do
       do while (counter-1 < size(real_roots))
 
          max_mag = -huge(max_mag)
          found = .FALSE.
 
-         ! For each value compute a product of differences
+         ! Find the unsorted root with the biggest product of differences
          do i_loc = 1, size(real_roots)
 
-            ! Skip any we've already sorted
-            if (sorted(i_loc)) cycle
-            magnitude(i_loc) = 1d0
+            ! Skip any we've already sorted, or that are on top of a sorted root
+            if (sorted(i_loc) .OR. repeated(i_loc)) cycle
 
-            ! Loop over all those we've sorted so far
-            do k_loc = 1, counter-1
-               
-               ! Distance
-               a = real_roots(i_loc) - real_roots(indices(k_loc))
-               b = imag_roots(i_loc) - imag_roots(indices(k_loc))
-
-               ! If we have repeated roots this will be exactly zero, and the product 
-               ! of differences is zero - we set the log of it to -huge rather than 
-               ! computing log10(0) = -infinity, which raises a floating point exception
-               squares = a**2 + b**2
-               if (squares == 0d0) then
-                  magnitude(i_loc) = -huge(magnitude(i_loc))
-                  exit
-               end if
-               magnitude(i_loc) = magnitude(i_loc) + &
-                  log10(sqrt(squares))
-            end do
-            
             ! Store the biggest as we're going
             if (magnitude(i_loc) > max_mag) then
                max_mag = magnitude(i_loc)
@@ -139,6 +131,7 @@ module gmres_poly_newton
          ! The new index is the biggest in distance 
          indices(counter) = max_loc(1)
          sorted(indices(counter)) = .TRUE.
+         call add_sorted_root(indices(counter))
          counter = counter + 1
          ! If it was imaginary its complex conjugate is next to this one
          if (imag_roots(indices(counter - 1)) /= 0d0) then
@@ -156,11 +149,40 @@ module gmres_poly_newton
                indices(counter) = indices(counter - 1) - 1
             end if    
             sorted(indices(counter)) = .TRUE.
+            call add_sorted_root(indices(counter))
             counter = counter + 1
          end if
       end do
 
       deallocate(magnitude)
+
+      contains
+
+      subroutine add_sorted_root(new_index)
+
+         ! Adds the log of the distance to a newly sorted root to the running sum
+         ! of every root
+
+         integer, intent(in) :: new_index
+         integer :: i_root
+         PetscReal :: a_root, b_root, squares_root
+
+         do i_root = 1, size(real_roots)
+
+            if (repeated(i_root)) cycle
+
+            ! Distance
+            a_root = real_roots(i_root) - real_roots(new_index)
+            b_root = imag_roots(i_root) - imag_roots(new_index)
+            squares_root = a_root**2 + b_root**2
+            if (squares_root == 0d0) then
+               repeated(i_root) = .TRUE.
+            else
+               magnitude(i_root) = magnitude(i_root) + log10(sqrt(squares_root))
+            end if
+         end do
+
+      end subroutine add_sorted_root
 
    end subroutine modified_leja   
 
