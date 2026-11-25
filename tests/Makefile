@@ -230,8 +230,10 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5
 	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free lowers the degree in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 200 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3
-	@echo "Test adaptive Newton GMRES polynomials order 60 matrix-free adds no roots at the small isolated eigenvalues of a diagonal matrix"
+	@echo "Test adaptive Newton GMRES polynomials order 60 matrix-free on a diagonal matrix with small isolated eigenvalues"
 	./ex6 -b_in_f 0 -f data/diag7_small500 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 4
+	@echo "Test adaptive Newton GMRES polynomials order 80 matrix-free on the badly scaled market matrix problem bcsstk19"
+	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 8
 	@echo "Test power basis GMRES polynomials order 10 matrix-free on the badly scaled market matrix problem bcsstk19"
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 30
 	@echo "Test power basis GMRES polynomials order 10 with fixed sparsity on the badly scaled market matrix problem bcsstk19"
@@ -832,6 +834,8 @@ run_tests_no_load_short_serial:
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly, plain and diagonally scaled"
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 2
+	@echo "Test the block apply of the matrix-free adaptive Newton matshell directly, plain and diagonally scaled"
+	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 10
 	@echo "Test the block apply of the matrix-free Neumann matshell directly"
 	./shell_block_apply -n 1000 -nrhs 5 -inverse_type 4
 #
@@ -1672,6 +1676,8 @@ else
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 1
 	@echo "Test the block apply of the matrix-free Newton matshell directly in parallel, plain and diagonally scaled"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 2
+	@echo "Test the block apply of the matrix-free adaptive Newton matshell directly in parallel, plain and diagonally scaled"
+	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 10
 	@echo "Test the block apply of the matrix-free Neumann matshell directly in parallel"
 	$(MPIEXEC) -n 2 ./shell_block_apply -n 1000 -nrhs 5 -inverse_type 4
 #	

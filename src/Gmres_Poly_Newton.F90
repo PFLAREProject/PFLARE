@@ -701,6 +701,7 @@ module gmres_poly_newton
       ! started with, including the rounding in the apply. It is exact only while the
       ! number of roots is at most degree
       ! The residual is returned as huge if the apply blows up
+      ! Everything tested here is independent of the scale of the matrix
 
       ! ~~~~~~
       PetscReal, dimension(:,:), intent(in) :: H
@@ -749,19 +750,19 @@ module gmres_poly_newton
          end if
 
          ! The comparison is false for a NaN
-         if (.NOT. (maxval(abs(t)) < blow_up .AND. maxval(abs(y)) < blow_up)) return
+         if (.NOT. (maxval(abs(t)) < blow_up)) return
       end do
 
       ! Final step if last root is real
       if (imag_roots(n_roots) == 0d0) then
          y = y + t/real_roots(n_roots)
       end if
-      if (.NOT. (maxval(abs(y)) < blow_up)) return
-
       ! Residual of e_1 - H y
       t = -matmul(H_ext, y)
       t(1) = t(1) + 1
       residual = norm2(t)
+      ! The comparison is false for a NaN
+      if (.NOT. (residual < huge(residual))) residual = huge(residual)
 
    end subroutine hessenberg_newton_replay
 

@@ -16,8 +16,8 @@ static char help[] = "Tests the multiple rhs (block) apply of the matrix-free po
   diagonal scaling flag, and test both modes.
 
   -inverse_type takes the integer value of the PCPFLAREINVType, so the GMRES
-  polynomials 0 power, 1 arnoldi, 2 newton, 3 newton_no_extra and also
-  4 neumann, which is q(I - D^-1 A) D^-1.
+  polynomials 0 power, 1 arnoldi, 2 newton, 3 newton_no_extra, 10 newton_adaptive
+  and also 4 neumann, which is q(I - D^-1 A) D^-1.
 
     ./shell_block_apply -n 1000 -nrhs 5
     mpiexec -n 2 ./shell_block_apply -n 1000 -nrhs 5
@@ -226,7 +226,7 @@ int main(int argc, char **args)
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-nrhs", &nrhs, NULL));
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-poly_order", &poly_order, NULL));
   // The integer value of the PCPFLAREINVType we want, ie 0 power, 1 arnoldi,
-  // 2 newton, 3 newton_no_extra, 4 neumann
+  // 2 newton, 3 newton_no_extra, 4 neumann, 10 newton_adaptive
   PetscCall(PetscOptionsGetInt(NULL, NULL, "-inverse_type", &inverse_type, NULL));
   PetscCall(PetscOptionsGetReal(NULL, NULL, "-check_tol", &check_tol, NULL));
 

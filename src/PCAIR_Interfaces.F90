@@ -648,7 +648,7 @@ module pcair_interfaces
       ! The caller's array is not referenced after this call and can be
       ! deallocated or modified freely.
       ! The sizes of coeffs must match those stored, except for the Newton inverse
-      ! types (newton, newton_no_extra), where the number of rows (roots) can differ,
+      ! types (newton, newton_no_extra, newton_adaptive), where the number of rows (roots) can differ,
       ! as long as there are 2 columns and at least poly_order + 1 rows. The internal
       ! storage is then reallocated
       ! Does not trigger a rebuild; after setting these coefficients call

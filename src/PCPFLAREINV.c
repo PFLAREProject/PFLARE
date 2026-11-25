@@ -1016,28 +1016,29 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
 
 // Prints how many roots a Newton polynomial applies, from the stored roots (real parts in the first
 // column, imaginary in the second). Only exactly zero roots are skipped when applying
-// The storage always has at least poly_order + 1 rows, with any more being extra copies of roots
-static PetscErrorCode PFLAREViewNewtonRoots_Private(PetscViewer viewer, const char *indent, const PetscReal *coeffs, PetscInt rows, PetscInt cols, PetscInt poly_order)
+// The roots of the polynomial are distinct, so any repeated root is an extra copy
+static PetscErrorCode PFLAREViewNewtonRoots_Private(PetscViewer viewer, const char *indent, const PetscReal *coeffs, PetscInt rows, PetscInt cols)
 {
-   PetscInt nonzero = 0, extra;
+   PetscInt nonzero = 0, extra = 0;
 
    PetscFunctionBegin;
    // Nothing is stored before the setup
    if (!coeffs || cols != 2) PetscFunctionReturn(PETSC_SUCCESS);
    for (PetscInt i = 0; i < rows; i++)
    {
-      if (coeffs[i] != 0.0 || coeffs[rows + i] != 0.0) nonzero++;
+      if (coeffs[i] == 0.0 && coeffs[rows + i] == 0.0) continue;
+      nonzero++;
+      // An extra copy has the same value as a root earlier in the storage
+      for (PetscInt j = 0; j < i; j++)
+      {
+         if (coeffs[j] == coeffs[i] && coeffs[rows + j] == coeffs[rows + i])
+         {
+            extra++;
+            break;
+         }
+      }
    }
-   extra = rows - (poly_order + 1);
-   // The order is clamped on very small matrices, where we can't tell which roots are extra
-   if (extra < 0 || extra > nonzero)
-   {
-      PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied \n", indent, nonzero));
-   }
-   else
-   {
-      PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied: %" PetscInt_FMT " from the polynomial and %" PetscInt_FMT " extra copies \n", indent, nonzero, nonzero - extra, extra));
-   }
+   PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied: %" PetscInt_FMT " from the polynomial and %" PetscInt_FMT " extra copies \n", indent, nonzero, nonzero - extra, extra));
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -1105,7 +1106,7 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
       }
       if (type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA || type == PFLAREINV_NEWTON_ADAPTIVE)
       {
-         PetscCall(PFLAREViewNewtonRoots_Private(viewer, "    ", inv_data->poly_coeffs, inv_data->poly_coeffs_rows, inv_data->poly_coeffs_cols, (PetscInt)inv_data->poly_order));
+         PetscCall(PFLAREViewNewtonRoots_Private(viewer, "    ", inv_data->poly_coeffs, inv_data->poly_coeffs_rows, inv_data->poly_coeffs_cols));
       }
       if (type != PFLAREINV_WJACOBI && type != PFLAREINV_JACOBI && type != PFLAREINV_L1JACOBI)
       {

@@ -17,7 +17,7 @@ Any size change that isn't allowed (one column, fewer rows than the polynomial o
 or any change for the non-Newton types) must error and leave the stored roots alone.\n\
 \n\
   -test_acc    : also resize COEFFS_INV_ACC (needs C point smoothing, e.g. -pc_air_smooth_type fc)\n\
-  -test_coarse : also resize COEFFS_INV_COARSE (needs -pc_air_coarsest_inverse_type newton or newton_no_extra)\n\
+  -test_coarse : also resize COEFFS_INV_COARSE (needs a Newton -pc_air_coarsest_inverse_type)\n\
   -n           : grid size (default 10)\n\n";
 
 #include <petscksp.h>
