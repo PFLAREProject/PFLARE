@@ -3,7 +3,7 @@ module gmres_poly_newton
    use petscmat
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos, &
-         sstep_project_gram_kokkos, sstep_apply_inverse_kokkos
+         sstep_project_gram_kokkos, sstep_apply_inverse_kokkos, sstep_gemm_warmup_kokkos
    use pflare_parameters, only: PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
@@ -1292,8 +1292,9 @@ module gmres_poly_newton
       ! which costs no more reductions than the blocks would
       !
       ! The block is built in place in V_n, so this needs no more vectors than the arnoldi routine
-      ! If kernels is true and the vectors in V_n are slices of one device buffer (see
-      ! create_temp_space_box_muller), each pass is done as dense matrix products on the device
+      ! If kernels is not zero and the vectors in V_n are slices of one device buffer (see
+      ! create_temp_space_box_muller), each pass is done as dense matrix products on the device,
+      ! with KokkosBlas (1) or our own kernels (2)
       ! Otherwise it is done with PETSc vector operations one column at a time
 
       ! ~~~~~~
@@ -1305,7 +1306,8 @@ module gmres_poly_newton
       PetscReal, intent(out)                    :: beta
       PetscReal, dimension(:,:), intent(inout)  :: H_n
       integer, intent(out)                      :: m
-      logical, intent(in)                       :: view, kernels
+      logical, intent(in)                       :: view
+      integer, intent(in)                       :: kernels
 
       ! Local variables
       integer, parameter :: dp = kind(1d0)
@@ -1314,7 +1316,8 @@ module gmres_poly_newton
       integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
       integer :: n_blocks, n_wasted, n_reductions, n_single
       integer, dimension(:), allocatable :: kept_history
-      PetscLogDouble :: time_start, time_end
+      PetscLogDouble :: time_start, time_end, time_block
+      PetscLogDouble, dimension(:), allocatable :: time_history
       PetscErrorCode :: ierr
       PetscInt :: n_petscint
       PetscReal, dimension(:), allocatable :: ritz_real, ritz_imag, shift_real, shift_imag, work, dots
@@ -1333,7 +1336,8 @@ module gmres_poly_newton
       s = max(1, s_max)
       allocate(kept_history(k))
       call PetscTime(time_start, ierr)
-      use_kernels = kernels
+      use_kernels = kernels /= 0
+      allocate(time_history(k))
       allocate(vec_handles(size(V_n)))
       do i_loc = 1, size(V_n)
          vec_handles(i_loc) = V_n(i_loc)%v
@@ -1403,6 +1407,7 @@ module gmres_poly_newton
          sb = min(s, k - j)
          n_old = j + 1
          n_blocks = n_blocks + 1
+         call PetscTime(time_block, ierr)
 
          ! ~~~~~~~~~
          ! Build the block with the scaled Newton recurrence
@@ -1457,6 +1462,7 @@ module gmres_poly_newton
          if (p == 0) then
             n_wasted = n_wasted + sb
             kept_history(n_blocks) = 0
+            time_history(n_blocks) = 0
             exit
          end if
          call apply_inverse_factor(p, Z)
@@ -1470,6 +1476,7 @@ module gmres_poly_newton
          if (p_two == 0) then
             n_wasted = n_wasted + sb
             kept_history(n_blocks) = 0
+            time_history(n_blocks) = 0
             exit
          end if
          p = p_two
@@ -1509,6 +1516,8 @@ module gmres_poly_newton
          H_n(1:j + p + 1, j + 1:j + p) = real(rhs, kind=kind(H_n))
          deallocate(C, R_new, R_full, rhs)
 
+         call PetscTime(time_end, ierr)
+         time_history(n_blocks) = time_end - time_block
          if (use_kernels .AND. kokkos_debug()) call check_block_orthogonal(p)
 
          j = j + p
@@ -1549,7 +1558,7 @@ module gmres_poly_newton
          if (use_kernels) then
             allocate(X_k(n_old, n_cols), G_k(n_cols, n_cols))
             call sstep_project_gram_kokkos(vec_handles, int(n_old, c_int), int(n_cols, c_int), &
-                     c_loc(X_k), c_loc(G_k), done)
+                     c_loc(X_k), c_loc(G_k), int(kernels - 1, c_int), done)
             if (done /= 0) then
                X(1:n_old, 1:n_cols) = real(X_k, kind=dp)
                G(1:n_cols, 1:n_cols) = real(G_k, kind=dp)
@@ -1667,12 +1676,13 @@ module gmres_poly_newton
          call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
          call PetscTime(time_end, ierr)
          if (comm_rank == 0) then
-            if (use_kernels) print '(A)', "s-step Arnoldi: device block kernels"
+            if (use_kernels) print '(A,I0)', "s-step Arnoldi: device block kernels ", kernels
             print '(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,ES10.3)', "s-step Arnoldi: steps ", m, &
                   " single steps ", n_single, &
                   " blocks ", n_blocks, " final block size ", s, " wasted matvecs ", n_wasted, &
                   " reductions ", n_reductions, " time ", time_end - time_start
             if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
+            if (n_blocks > 0) print '(A,*(1X,ES9.2))', "s-step Arnoldi: time per block", time_history(1:n_blocks)
          end if
 
       end subroutine view_counts
@@ -1716,7 +1726,8 @@ module gmres_poly_newton
       type(tVec), pointer, dimension(:) :: V_n
       PetscInt :: sstep_size, sstep_start
       PetscLogDouble :: time_start, time_end
-      PetscBool :: sstep_view, sstep_kernels, option_found
+      PetscBool :: sstep_view, sstep_warm, option_found
+      PetscInt :: sstep_kernels
 
       ! ~~~~~~    
 
@@ -1765,20 +1776,32 @@ module gmres_poly_newton
       sstep_size = 0
       sstep_start = 10
       sstep_view = PETSC_FALSE
-      sstep_kernels = PETSC_TRUE
+      sstep_kernels = 1
+      sstep_warm = PETSC_FALSE
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep', sstep_size, option_found, ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep_start', sstep_start, option_found, ierr)
       call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep_view', sstep_view, option_found, ierr)
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep_kernels', sstep_kernels, option_found, ierr)
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_sstep_warm', sstep_warm, option_found, ierr)
+#if defined(PETSC_HAVE_KOKKOS)
+      ! Temporary: time the first use of the device gemm on its own
+      if (sstep_warm) then
+         call PetscTime(time_start, ierr)
+         call sstep_gemm_warmup_kokkos()
+         call PetscTime(time_end, ierr)
+         if (sstep_view .AND. comm_rank == 0) print '(A,ES10.3)', "s-step Arnoldi: gemm warm up time ", time_end - time_start
+      end if
+#endif
 
       if (sstep_size > 0) then
          call arnoldi_sstep(matrix, poly_order, int(sstep_size), int(sstep_start), PFLARE_TOL_LUCKY, &
                   V_n, w_j, beta, H_n, m, logical(sstep_view .eqv. PETSC_TRUE), &
-                  logical(sstep_kernels .eqv. PETSC_TRUE))
+                  int(sstep_kernels))
       else
          call PetscTime(time_start, ierr)
          call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)

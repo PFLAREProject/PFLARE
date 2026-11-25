@@ -508,14 +508,19 @@ module c_petsc_interfaces
 
    interface
 
-      subroutine sstep_project_gram_kokkos(vecs_array, n_old, n_cols, X, G, done) &
+      subroutine sstep_project_gram_kokkos(vecs_array, n_old, n_cols, X, G, native, done) &
          bind(c, name="sstep_project_gram_kokkos")
          use iso_c_binding
          integer(c_long_long), dimension(*) :: vecs_array
-         integer(c_int), value :: n_old, n_cols
+         integer(c_int), value :: n_old, n_cols, native
          type(c_ptr), value :: X, G
          integer(c_int) :: done
       end subroutine sstep_project_gram_kokkos
+
+      subroutine sstep_gemm_warmup_kokkos() &
+         bind(c, name="sstep_gemm_warmup_kokkos")
+         use iso_c_binding
+      end subroutine sstep_gemm_warmup_kokkos
 
    end interface
 

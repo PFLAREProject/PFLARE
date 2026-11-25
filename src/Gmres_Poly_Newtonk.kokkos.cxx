@@ -799,9 +799,10 @@ static PetscErrorCode sstep_basis_view(Vec *vecs, const PetscInt n_read, const P
 // vecs holds the n_old existing basis vectors followed by the block
 // X (n_old x n_cols, column-major) returns the components of the block along the existing basis,
 // which are removed from the block, and G (n_cols x n_cols) the Gram matrix of the block after that
+// The products are KokkosBlas gemms, or if native is non-zero our own kernels
 // done is zero (and nothing is changed) if the vectors are not slices of one device buffer
 PETSC_INTERN void sstep_project_gram_kokkos(Vec *vecs, const int n_old, const int n_cols, \
-               PetscReal *X, PetscReal *G, int *done)
+               PetscReal *X, PetscReal *G, const int native, int *done)
 {
    typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> DenseView;
    typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, Kokkos::HostSpace> DenseHostView;
@@ -822,19 +823,58 @@ PETSC_INTERN void sstep_project_gram_kokkos(Vec *vecs, const int n_old, const in
    DenseView X_d("sstep_X", n_old, n_cols);
    DenseHostView X_h("sstep_X_h", n_old, n_cols);
    DenseHostView X_out(X, n_old, n_cols);
-   KokkosBlas::gemm("T", "N", 1.0, Q, V, 0.0, X_d);
+   const PetscInt n_rows = basis.extent(0);
+   if (native)
+   {
+      // One team for each entry of X, with a reduction over the rows
+      Kokkos::parallel_for(
+         Kokkos::TeamPolicy<>(n_old * n_cols, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
+            const int q = t.league_rank() % n_old;
+            const int c = t.league_rank() / n_old;
+            PetscScalar sum = 0.0;
+            Kokkos::parallel_reduce(
+               Kokkos::TeamThreadRange(t, n_rows), [&](const PetscInt i, PetscScalar &sum_loc) {
+                  sum_loc += Q(i, q) * V(i, c);
+               }, sum);
+            X_d(q, c) = sum;
+      });
+   }
+   else KokkosBlas::gemm("T", "N", 1.0, Q, V, 0.0, X_d);
    Kokkos::deep_copy(X_h, X_d);
    PetscCallVoid(PetscMPIIntCast((PetscInt)n_old * n_cols, &count));
    PetscCallMPIAbort(comm, MPI_Allreduce(X_h.data(), X, count, MPIU_SCALAR, MPIU_SUM, comm));
    Kokkos::deep_copy(X_d, X_out);
 
    // V = V - Q X
-   KokkosBlas::gemm("N", "N", -1.0, Q, X_d, 1.0, V);
+   if (native)
+   {
+      Kokkos::parallel_for(
+         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, (PetscInt)n_cols}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt c) {
+            PetscScalar sum = 0.0;
+            for (int q = 0; q < n_old; q++) sum += Q(i, q) * X_d(q, c);
+            V(i, c) -= sum;
+      });
+   }
+   else KokkosBlas::gemm("N", "N", -1.0, Q, X_d, 1.0, V);
 
    // G = V^T V
    DenseView G_d("sstep_G", n_cols, n_cols);
    DenseHostView G_h("sstep_G_h", n_cols, n_cols);
-   KokkosBlas::gemm("T", "N", 1.0, V, V, 0.0, G_d);
+   if (native)
+   {
+      Kokkos::parallel_for(
+         Kokkos::TeamPolicy<>(n_cols * n_cols, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
+            const int r = t.league_rank() % n_cols;
+            const int c = t.league_rank() / n_cols;
+            PetscScalar sum = 0.0;
+            Kokkos::parallel_reduce(
+               Kokkos::TeamThreadRange(t, n_rows), [&](const PetscInt i, PetscScalar &sum_loc) {
+                  sum_loc += V(i, r) * V(i, c);
+               }, sum);
+            G_d(r, c) = sum;
+      });
+   }
+   else KokkosBlas::gemm("T", "N", 1.0, V, V, 0.0, G_d);
    Kokkos::deep_copy(G_h, G_d);
    PetscCallVoid(PetscMPIIntCast((PetscInt)n_cols * n_cols, &count));
    PetscCallMPIAbort(comm, MPI_Allreduce(G_h.data(), G, count, MPIU_SCALAR, MPIU_SUM, comm));
@@ -877,5 +917,17 @@ PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const i
    });
 
    *done = 1;
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// A tiny KokkosBlas gemm on the device, to time the first use of the gemm backend on its own
+PETSC_INTERN void sstep_gemm_warmup_kokkos()
+{
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> DenseView;
+   DenseView A("sstep_warm_A", 2, 2), B("sstep_warm_B", 2, 2), C("sstep_warm_C", 2, 2);
+   KokkosBlas::gemm("T", "N", 1.0, A, B, 0.0, C);
+   Kokkos::fence();
    return;
 }
