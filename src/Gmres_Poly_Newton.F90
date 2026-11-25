@@ -1439,10 +1439,11 @@ module gmres_poly_newton
       integer(c_long_long), dimension(:), allocatable :: vec_handles
       integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
       integer :: n_blocks, n_wasted, n_reductions, n_single, s_est_ritz, s_est_harmonic, p_keep, n_cut
-      real(kind=kind(1d0)) :: worst_ratio, ratio_max, worst_relation
+      real(kind=kind(1d0)) :: worst_ratio, ratio_max, worst_relation, ratio_before
       real(kind=kind(1d0)), dimension(:), allocatable :: column_ratio
       PetscReal :: relation_error, relation_tol
-      integer :: n_tightened, n_extra_matvecs, p_block
+      integer :: n_tightened, n_extra_matvecs, p_block, n_resume, n_resume_start, m_target, n_stretches
+      logical :: lucky
       PetscReal :: ratio_option
       PetscBool :: ratio_found, discard_start, check_blocks
       integer, dimension(:), allocatable :: kept_history
@@ -1485,10 +1486,15 @@ module gmres_poly_newton
       n_cut = 0
       worst_ratio = 0
       n_tightened = 0
+      n_stretches = 0
+      lucky = .FALSE.
+      ! The number of ordinary steps before going back to blocks
+      n_resume_start = 10
+      n_resume = n_resume_start
       n_extra_matvecs = 0
       worst_relation = 0
       ! A block is cut shorter if the relative error in A v = V H for its last column passes this
-      relation_tol = 1d-2 * sqrt(PFLARE_EPS)
+      relation_tol = 1d-1 * sqrt(PFLARE_EPS)
       ! Temporary option for the bound on the ratio that controls the accuracy of H
       ! Temporary option: without the check the blocks are only cut by ratio_max, and with a big
       ! -pflare_newton_sstep_ratio as well this is the algorithm of the paper
@@ -1678,13 +1684,14 @@ module gmres_poly_newton
          ! So we only keep the columns where the ratio is below ratio_max, and then check the
          ! last column kept against the basis, as the error is biggest there: one matvec and
          ! one reduction to measure how well A v = V H holds for it
-         ! If that has lost accuracy we tighten ratio_max and keep fewer columns of this block,
-         ! which needs no more work on the vectors as the columns are nested, and check again
+         ! If that has lost accuracy we keep half as many columns of this block, which needs no
+         ! more work on the vectors as the columns are nested, and check again
          do col_loc = 1, p
             column_ratio(col_loc) = max(1d0, sqrt(sum(C(:, col_loc)**2) + sum(R_new(1:col_loc, col_loc)**2))) &
                      /R_new(col_loc, col_loc)
          end do
          p_block = p
+         ratio_before = ratio_max
          call PetscTime(time_end, ierr)
          time_host = time_host + time_end - time_mark
 
@@ -1720,24 +1727,46 @@ module gmres_poly_newton
                exit
             end if
 
-            ! Not accurate enough: tighten the bound so at least one fewer column is kept
+            ! Not accurate enough: keep half as many columns and bound the ratio by what
+            ! those have, so the blocks after this one are cut to match
             n_tightened = n_tightened + 1
             H_n(:, j + 1:j + p) = 0
-            ratio_max = min(ratio_max, maxval(column_ratio(1:p)))/10d0
             if (p == 1) then
                p = 0
                exit
             end if
-            p = p - 1
+            p = (p + 1)/2
+            ratio_max = min(ratio_max, maxval(column_ratio(1:p)))
          end do
 
          n_wasted = n_wasted + p_block - p
          kept_history(n_blocks) = p
          deallocate(C, R_new, column_ratio)
          if (p == 0) then
+
+            ! Not even one column of this block could be kept accurately, so the error is in the
+            ! columns of H we already have. Some ordinary steps measure their columns of H
+            ! directly, after which the blocks no longer build on the inaccurate ones (exactly
+            ! so if H is banded). We do twice as many each time this happens in a row
             time_history(n_blocks) = 0
-            exit
+            ! The bound goes back to what it was, as it was not the ratio that failed this block
+            ratio_max = ratio_before
+            m_target = min(k, j + n_resume)
+            call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2)
+            n_reductions = n_reductions + 3 * (m - j)
+            n_single = n_single + m - j
+            n_stretches = n_stretches + 1
+            n_resume = 2 * n_resume
+            ! Have we hit the lucky tolerance
+            if (m < m_target .OR. H_n(m + 1, m) < lucky_tol) then
+               j = m
+               lucky = .TRUE.
+               exit
+            end if
+            j = m
+            cycle
          end if
+         n_resume = n_resume_start
 
          call PetscTime(time_end, ierr)
          time_history(n_blocks) = time_end - time_block
@@ -1753,7 +1782,7 @@ module gmres_poly_newton
 
       ! Any steps left are an ordinary Arnoldi
       m = j
-      if (j < k) then
+      if (j < k .AND. .NOT. lucky) then
          ! With two passes, as the blocks are orthogonalised twice
          call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, k, m, 2)
          n_reductions = n_reductions + 3 * (m - j)
@@ -1946,9 +1975,10 @@ module gmres_poly_newton
                   s_est_ritz, " harmonic Ritz points ", s_est_harmonic
             if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
             if (n_blocks > 0) print '(A,ES10.3)', "s-step Arnoldi: host time in the Cholesky and Hessenberg recovery ", time_host
-            if (n_blocks > 0) print '(A,I0,A,ES9.2,A,I0,A,I0,A,ES9.2,A,ES9.2)', &
+            if (n_blocks > 0) print '(A,I0,A,ES9.2,A,I0,A,I0,A,I0,A,ES9.2,A,ES9.2)', &
                   "s-step Arnoldi: blocks cut to keep H accurate ", n_cut, &
                   " largest ratio kept ", worst_ratio, " times the bound was tightened ", n_tightened, &
+                  " stretches of ordinary steps ", n_stretches, &
                   " extra matvecs ", n_extra_matvecs, " final ratio bound ", ratio_max, &
                   " worst relation error seen ", worst_relation
             if (n_blocks > 0 .AND. n_blocks <= 12) print '(A,*(1X,ES9.2))', "s-step Arnoldi: time per block", &
