@@ -1444,7 +1444,7 @@ module gmres_poly_newton
       PetscReal :: relation_error, relation_tol
       integer :: n_tightened, n_extra_matvecs, p_block
       PetscReal :: ratio_option
-      PetscBool :: ratio_found, discard_start
+      PetscBool :: ratio_found, discard_start, check_blocks
       integer, dimension(:), allocatable :: kept_history
       PetscLogDouble :: time_start, time_end, time_block, time_host, time_mark
       PetscLogDouble, dimension(:), allocatable :: time_history
@@ -1490,6 +1490,11 @@ module gmres_poly_newton
       ! A block is cut shorter if the relative error in A v = V H for its last column passes this
       relation_tol = 1d-2 * sqrt(PFLARE_EPS)
       ! Temporary option for the bound on the ratio that controls the accuracy of H
+      ! Temporary option: without the check the blocks are only cut by ratio_max, and with a big
+      ! -pflare_newton_sstep_ratio as well this is the algorithm of the paper
+      check_blocks = PETSC_TRUE
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_sstep_check', check_blocks, ratio_found, ierr)
       ratio_option = -1
       call PetscOptionsGetReal(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep_ratio', ratio_option, ratio_found, ierr)
@@ -1709,7 +1714,7 @@ module gmres_poly_newton
             relation_error = relation_error/norm2(H_n(1:j + p + 1, j + p))
             n_reductions = n_reductions + 1
             n_extra_matvecs = n_extra_matvecs + 1
-            if (relation_error <= relation_tol) then
+            if (relation_error <= relation_tol .OR. .NOT. check_blocks) then
                worst_relation = max(worst_relation, real(relation_error, kind=dp))
                worst_ratio = max(worst_ratio, maxval(column_ratio(1:p)))
                exit
