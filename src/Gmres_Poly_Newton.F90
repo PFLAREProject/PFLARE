@@ -885,7 +885,9 @@ module gmres_poly_newton
       integer, intent(out)                                :: n_base
 
       ! Local variables
-      integer :: degree, bad, good, mid, step, n_base_trial
+      integer :: degree, bad, good, mid, step, n_base_trial, degree_floor
+      PetscBool :: view_choice
+      PetscErrorCode :: ierr
       PetscReal, dimension(m) :: rho_h
       PetscReal, dimension(:), allocatable :: real_trial, imag_trial
       logical :: accepted
@@ -906,8 +908,18 @@ module gmres_poly_newton
       end do
       degree = min(degree, m)
 
+      ! Temporary option: print how the degree was chosen (on every rank)
+      call PetscOptionsHasName(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_adaptive_view', view_choice, ierr)
+      degree_floor = degree
+
       call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base)
-      if (accepted) return
+      if (accepted) then
+         if (view_choice) print '(A,I0,A,I0,A,ES9.2,A,ES9.2,A,I0,A,I0)', "Adaptive degree: steps ", m, &
+               " residual stops improving at ", degree_floor, " residual there ", rho_h(degree_floor), &
+               " at the last step ", rho_h(m), " lowered for stability to ", degree_floor, " roots ", n_base
+         return
+      end if
 
       ! Otherwise we have to lower the degree until the roots are acceptable
       ! Step down geometrically until we find a degree that is (degree one always is)
@@ -934,6 +946,11 @@ module gmres_poly_newton
             bad = mid
          end if
       end do
+
+      if (view_choice) print '(A,I0,A,I0,A,ES9.2,A,ES9.2,A,I0,A,I0,A,ES9.2)', "Adaptive degree: steps ", m, &
+            " residual stops improving at ", degree_floor, " residual there ", rho_h(degree_floor), &
+            " at the last step ", rho_h(m), " lowered for stability to ", good, " roots ", n_base, &
+            " residual there ", rho_h(good)
 
    end subroutine adaptive_newton_roots
 
