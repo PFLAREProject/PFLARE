@@ -723,7 +723,7 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	coeffs : numpy.ndarray
 	    Coefficient array as returned by pcair_get_poly_coeffs.
 	    Must have the shape PCAIR stores, (poly_order+1, 1) for the power and
-	    Arnoldi bases. For the Newton bases (newton, newton_no_extra) the rows
+	    Arnoldi bases. For the Newton bases (newton, newton_no_extra, newton_adaptive) the rows
 	    are the roots, whose number can differ between setups, so any shape
 	    (n, 2) with n >= poly_order+1 is accepted and PCAIR resizes its storage.
 	    Every rank must pass the same coefficients; this is not checked, to

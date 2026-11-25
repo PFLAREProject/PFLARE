@@ -184,7 +184,7 @@ int main(int argc, char **args)
   PetscCall(PCPFLAREINVGetMatrixFree(pc, &matrix_free));
   PetscCall(PCPFLAREINVGetPolyOrder(pc, &po));
   PetscCall(PCPFLAREINVGetSparsityOrder(pc, &sp));
-  PetscCheck(type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "Needs a Newton type");
+  PetscCheck(type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA || type == PFLAREINV_NEWTON_ADAPTIVE, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "Needs a Newton type");
   if (!matrix_free && PetscMin(sp, po) > 0) PetscCall(NnzOfPower(A, PetscMin(sp, po), &nz_power));
 
   if (zero_root_first) {

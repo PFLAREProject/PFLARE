@@ -24,7 +24,8 @@
 . `PFLAREINV_ISAI`            - incomplete sparse approximate inverse; cannot be applied matrix-free
 . `PFLAREINV_WJACOBI`         - weighted Jacobi
 . `PFLAREINV_JACOBI`          - unweighted Jacobi
-- `PFLAREINV_L1JACOBI`        - l1 Jacobi
+. `PFLAREINV_L1JACOBI`        - l1 Jacobi
+- `PFLAREINV_NEWTON_ADAPTIVE` - GMRES polynomial with the Newton basis, with the degree and the extra roots chosen adaptively
 
   Level: intermediate
 
@@ -45,6 +46,7 @@ typedef enum {
    PFLAREINV_WJACOBI,
    PFLAREINV_JACOBI,
    PFLAREINV_L1JACOBI,
+   PFLAREINV_NEWTON_ADAPTIVE,
 }  PCPFLAREINVType;
 
 /*E

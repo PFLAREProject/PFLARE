@@ -40,6 +40,7 @@ PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int
 // PFLAREINV_ARNOLDI    - GMRES polynomial with the arnoldi basis 
 // PFLAREINV_NEWTON     - GMRES polynomial with the newton basis with extra roots for stability 
 // PFLAREINV_NEWTON_NO_EXTRA     - GMRES polynomial with the newton basis without extra roots    
+// PFLAREINV_NEWTON_ADAPTIVE     - GMRES polynomial with the newton basis with the degree and extra roots chosen adaptively
 // PFLAREINV_NEUMANN    - Neumann polynomial
 // PFLAREINV_SAI        - SAI - cannot be used matrix-free atm
 // PFLAREINV_ISAI       - Incomplete SAI - cannot be used matrix-free atm
@@ -415,12 +416,12 @@ PetscErrorCode PCPFLAREINVSetSparsityOrder(PC pc, PetscInt inverse_sparsity_orde
 - inverse_type - the approximate inverse type, one of the `PCPFLAREINVType` values
 
   Options Database Key:
-. -pc_pflareinv_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type; defaults to arnoldi
+. -pc_pflareinv_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type; defaults to arnoldi
 
   Level: intermediate
 
   Note:
-  The polynomial types (`power`, `arnoldi`, `newton`, `newton_no_extra`, `neumann`) approximate the inverse with a
+  The polynomial types (`power`, `arnoldi`, `newton`, `newton_no_extra`, `newton_adaptive`, `neumann`) approximate the inverse with a
   polynomial in the matrix whose degree is set by `PCPFLAREINVSetPolyOrder()`. The `sai` and `isai` types instead
   assemble a sparse approximate inverse whose pattern is controlled by `PCPFLAREINVSetSparsityOrder()`, while
   `wjacobi`, `jacobi` and `l1jacobi` are cheap diagonal inverses.
@@ -596,7 +597,7 @@ static PetscErrorCode PCPFLAREINVSetPolyCoeffs_PFLAREINV(PC pc, PetscReal *coeff
    // The non-polynomial types never read the coefficients
    inverse_type_is_polynomial_c(inv_data->inverse_type, &is_polynomial);
    if (is_polynomial) {
-      cols_needed = (inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA) ? 2 : 1;
+      cols_needed = (inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || inv_data->inverse_type == PFLAREINV_NEWTON_ADAPTIVE) ? 2 : 1;
       PetscCheck(cols == cols_needed, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_SIZ, "Coefficient array has %" PetscInt_FMT " columns but this inverse type needs %" PetscInt_FMT, cols, cols_needed);
    }
    // Copy into a new buffer before freeing the old one, as coeffs may be the
@@ -759,7 +760,7 @@ static PetscErrorCode PCMatApply_PFLAREINV_c(PC pc, Mat X, Mat Y)
       // (the Jacobi types are never matrix-free anyway).
       int applied = 0;
       if (inv_data->inverse_type == PFLAREINV_POWER || inv_data->inverse_type == PFLAREINV_ARNOLDI || \
-          inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || \
+          inv_data->inverse_type == PFLAREINV_NEWTON || inv_data->inverse_type == PFLAREINV_NEWTON_NO_EXTRA || inv_data->inverse_type == PFLAREINV_NEWTON_ADAPTIVE || \
           inv_data->inverse_type == PFLAREINV_NEUMANN)
       {
          pflareinv_shell_block_matapply_c(&(inv_data->mat_inverse), &X, &Y, &applied);
@@ -886,7 +887,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
 
    PetscCall(PCPFLAREINVGetType(pc, &deflt));
    PetscOptionsHeadBegin(PetscOptionsObject, "PCPFLAREINV options");
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "NEWTON_ADAPTIVE", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PetscOptionsEnum("-pc_pflareinv_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)deflt, (PetscEnum *)&type, &flg));
    if (flg) PetscCall(PCPFLAREINVSetType(pc, type));
    // Go through the setter so a changed value resets the PC
@@ -1013,6 +1014,33 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
 
 // ~~~~~~~~~~
 
+// Prints how many roots a Newton polynomial applies, from the stored roots (real parts in the first
+// column, imaginary in the second). Only exactly zero roots are skipped when applying
+// The storage always has at least poly_order + 1 rows, with any more being extra copies of roots
+static PetscErrorCode PFLAREViewNewtonRoots_Private(PetscViewer viewer, const char *indent, const PetscReal *coeffs, PetscInt rows, PetscInt cols, PetscInt poly_order)
+{
+   PetscInt nonzero = 0, extra;
+
+   PetscFunctionBegin;
+   // Nothing is stored before the setup
+   if (!coeffs || cols != 2) PetscFunctionReturn(PETSC_SUCCESS);
+   for (PetscInt i = 0; i < rows; i++)
+   {
+      if (coeffs[i] != 0.0 || coeffs[rows + i] != 0.0) nonzero++;
+   }
+   extra = rows - (poly_order + 1);
+   // The order is clamped on very small matrices, where we can't tell which roots are extra
+   if (extra < 0 || extra > nonzero)
+   {
+      PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied \n", indent, nonzero));
+   }
+   else
+   {
+      PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied: %" PetscInt_FMT " from the polynomial and %" PetscInt_FMT " extra copies \n", indent, nonzero, nonzero - extra, extra));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
 {
 
@@ -1047,6 +1075,10 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  GMRES polynomial, newton basis without extra roots, order %i \n", inv_data->poly_order));
       }
+      else if (type == PFLAREINV_NEWTON_ADAPTIVE)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "  GMRES polynomial, newton basis with adaptive degree and extra roots, order %i \n", inv_data->poly_order));
+      }
       else if (type == PFLAREINV_SAI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  SAI \n"));
@@ -1070,6 +1102,10 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
       else if (type == PFLAREINV_L1JACOBI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  l1 Jacobi \n"));
+      }
+      if (type == PFLAREINV_NEWTON || type == PFLAREINV_NEWTON_NO_EXTRA || type == PFLAREINV_NEWTON_ADAPTIVE)
+      {
+         PetscCall(PFLAREViewNewtonRoots_Private(viewer, "    ", inv_data->poly_coeffs, inv_data->poly_coeffs_rows, inv_data->poly_coeffs_cols, (PetscInt)inv_data->poly_order));
       }
       if (type != PFLAREINV_WJACOBI && type != PFLAREINV_JACOBI && type != PFLAREINV_L1JACOBI)
       {
@@ -1096,7 +1132,7 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   approximate inverses, weighted Jacobi), applied assembled or matrix-free
 
   Options Database Keys:
-+ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse type; defaults to arnoldi
++ -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse type; defaults to arnoldi
 . -pc_pflareinv_poly_order  poly_order - polynomial order if using a polynomial inverse type; defaults to 6
 - -pc_pflareinv_matrix_free (true|false) - apply matrix-free instead of assembling the inverse; defaults to false
 

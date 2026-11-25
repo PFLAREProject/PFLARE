@@ -167,7 +167,7 @@ int main(int argc, char **args)
   PetscCall(PCAIRGetMatrixFreePolys(pc, &matrix_free));
   PetscCall(PCAIRGetReuseSparsity(pc, &reuse_sparsity));
   PetscCall(PCAIRGetDiagUpdate(pc, &diag_update));
-  newton = (PetscBool)(inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA);
+  newton = (PetscBool)(inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA || inverse_type == PFLAREINV_NEWTON_ADAPTIVE);
   PetscCheck(num_levels > 1, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Need more than one level");
   /* Without either of these the next setup starts from scratch and computes new roots */
   PetscCheck(!newton || reuse_sparsity || diag_update, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "Use -pc_air_reuse_sparsity or -pc_air_diag_update to rebuild from the stored roots");

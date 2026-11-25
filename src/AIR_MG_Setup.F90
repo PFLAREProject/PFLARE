@@ -7,6 +7,7 @@ module air_mg_setup
    use matshell_data_type, only: mat_ctxtype
    use pflare_parameters, only: &
          PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_NEWTON_ADAPTIVE, &
          PFLAREINV_SAI, PFLAREINV_ISAI, PFLAREINV_WJACOBI, &
          TIMER_ID_AIR_SETUP, TIMER_ID_AIR_INVERSE, TIMER_ID_AIR_EXTRACT, &
          TIMER_ID_AIR_COARSEN, TIMER_ID_AIR_PROC_AGGLOM, TIMER_ID_AIR_CONSTRAIN, &
@@ -200,7 +201,8 @@ module air_mg_setup
                   (air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_POWER .OR. &
                    air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_ARNOLDI .OR. &
                    air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
-                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                   air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_ADAPTIVE)
             if (.NOT. test_on_raw_shell) call raw_shell_assemble(air_data%coarse_matrix(our_level))
 
             ! Start the approximate inverse we'll use on this level
@@ -254,7 +256,8 @@ module air_mg_setup
                ! when applying the Newton form of the gmres polynomial that saves some flops
                ! We don't actually need the solution here as it's useless
                if ((air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
-                     air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+                     air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                     air_data%inv_coarsest_poly_data%inverse_type == PFLAREINV_NEWTON_ADAPTIVE) .AND. &
                      air_data%options%coarsest_matrix_free_polys) then
 
                   if (air_data%options%coarsest_diag_scale_polys) then

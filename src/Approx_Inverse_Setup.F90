@@ -4,6 +4,7 @@ module approx_inverse_setup
    use tsqr, only: tsqr_buffers
    use pflare_parameters, only: &
          PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_NEWTON_ADAPTIVE, &
          PFLAREINV_NEUMANN, PFLAREINV_WJACOBI, PFLAREINV_JACOBI, PFLAREINV_L1JACOBI, &
          PFLAREINV_SAI, PFLAREINV_ISAI, AIR_Z_PRODUCT, &
          MF_VEC_DIAG, MF_VEC_TEMP, MF_VEC_RHS, MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE
@@ -14,7 +15,8 @@ module approx_inverse_setup
    use gmres_poly_apply, only: petsc_matvec_da_poly_mf, destroy_transpose_mat
    use gmres_poly_newton, only: &
          build_gmres_polynomial_newton_inverse, &
-         calculate_gmres_polynomial_roots_newton
+         calculate_gmres_polynomial_roots_newton, &
+         NEWTON_ROOTS_NONE, NEWTON_ROOTS_POF, NEWTON_ROOTS_ADAPTIVE
    use neumann_poly, only: calculate_and_build_neumann_polynomial_inverse
    use weighted_jacobi, only: calculate_and_build_weighted_jacobi_inverse
    use sai_z, only: calculate_and_build_sai
@@ -42,6 +44,7 @@ module approx_inverse_setup
       ! PFLAREINV_ARNOLDI - GMRES polynomial with the arnoldi basis 
       ! PFLAREINV_NEWTON - GMRES polynomial with the newton basis with extra roots for stability - can only be used matrix-free atm      
       ! PFLAREINV_NEWTON_NO_EXTRA - GMRES polynomial with the newton basis with no extra roots - can only be used matrix-free atm      
+      ! PFLAREINV_NEWTON_ADAPTIVE - GMRES polynomial with the newton basis, with the degree and the extra roots chosen adaptively
       ! PFLAREINV_NEUMANN - Neumann polynomial
       ! PFLAREINV_SAI - SAI
       ! PFLAREINV_ISAI - Incomplete SAI (ie a restricted additive schwartz)
@@ -201,9 +204,11 @@ module approx_inverse_setup
          ! never touch the coefficients, so they just get the (unused) stack storage.
          heap_allocated = poly_type .AND. (matrix_free .OR. poly_order_eff /= poly_order .OR. &
                           (present(coefficients) .AND. .NOT. coefficients_supplied) .OR. &
-                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA)
+                          inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                          inverse_type == PFLAREINV_NEWTON_ADAPTIVE)
          if (heap_allocated) then
-            if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+            if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+            inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
                ! Newton basis needs storage for real and imaginary roots
                allocate(work_coefficients(poly_order_eff + 1, 2))
             else
@@ -269,6 +274,7 @@ module approx_inverse_setup
                                    inverse_type == PFLAREINV_ARNOLDI .OR. &
                                    inverse_type == PFLAREINV_NEWTON .OR. &
                                    inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+                                   inverse_type == PFLAREINV_NEWTON_ADAPTIVE .OR. &
                                    inverse_type == PFLAREINV_NEUMANN
 
    end function inverse_type_is_polynomial
@@ -305,7 +311,8 @@ module approx_inverse_setup
       if (buffers%subcomm .AND. &
             (inverse_type == PFLAREINV_ARNOLDI .OR. &
             inverse_type == PFLAREINV_NEWTON .OR. &
-            inverse_type == PFLAREINV_NEWTON_NO_EXTRA)) then
+            inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+            inverse_type == PFLAREINV_NEWTON_ADAPTIVE)) then
 
          ! Create a version of matrix on a subcomm and store it in buffers%matrix
          ! If all ranks have entries, then this just returns a pointer to the original 
@@ -342,7 +349,8 @@ module approx_inverse_setup
          if ((inverse_type == PFLAREINV_POWER .OR. &
              inverse_type == PFLAREINV_ARNOLDI .OR. &
              inverse_type == PFLAREINV_NEWTON .OR. &
-             inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+             inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+             inverse_type == PFLAREINV_NEWTON_ADAPTIVE) .AND. &
              diag_scale_polys) then             
 
             ! ~~~~~~~~~~~~~
@@ -404,20 +412,27 @@ module approx_inverse_setup
          else if (inverse_type == PFLAREINV_NEWTON) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .TRUE., coefficients)
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_POF, coefficients)
 
          ! Gmres polynomial with Newton basis without extra added roots - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, .FALSE., coefficients)            
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_NONE, coefficients)
+
+         ! Gmres polynomial with Newton basis, with the degree and the extra roots chosen adaptively
+         else if (inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
+
+            ! Does lots of reductions in parallel
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_ADAPTIVE, coefficients)
          end if
 
          ! Destroy the shell matrix
          if ((inverse_type == PFLAREINV_POWER .OR. &
              inverse_type == PFLAREINV_ARNOLDI .OR. &
              inverse_type == PFLAREINV_NEWTON .OR. &
-             inverse_type == PFLAREINV_NEWTON_NO_EXTRA) .AND. &
+             inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+             inverse_type == PFLAREINV_NEWTON_ADAPTIVE) .AND. &
              diag_scale_polys) then
 
             call VecDestroy(mat_ctx_da%mf_temp_vec(MF_VEC_DIAG), ierr)             
@@ -450,7 +465,8 @@ module approx_inverse_setup
                      MPI_COMM_MATRIX, buffers%request, errorcode)
 
          ! Gmres polynomial with Newton basis - Can only use matrix-free
-         else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+         else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+         inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
 
             ! The ranks on the subcomm may have resized coefficients to hold extra roots
             ! so the ranks not on the subcomm need to match that size before the broadcast
@@ -527,7 +543,8 @@ module approx_inverse_setup
                   reuse_mat, reuse_submatrices, inv_matrix)  
 
       ! Gmres polynomial with newton basis
-      else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+      else if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+      inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
 
          call build_gmres_polynomial_newton_inverse(matrix, poly_order, &
                            coefficients, &

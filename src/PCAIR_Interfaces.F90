@@ -6,7 +6,8 @@ module pcair_interfaces
          PCSetMaxLevels_AIR_Shell
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE, &
-         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA
+         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_NEWTON_ADAPTIVE
    use gmres_poly_data_type, only: gmres_poly_data
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_newton, only: point_mf_newton_roots
@@ -544,7 +545,8 @@ module pcair_interfaces
       end if
 
       newton = poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
-               poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+               poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+               poly_data%inverse_type == PFLAREINV_NEWTON_ADAPTIVE
       if (newton) then
          min_rows = poly_data%gmres_poly_order + 1
       else

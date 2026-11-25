@@ -12,6 +12,7 @@ PCPFLAREINV contains methods for computing approximate inverses, most of which c
    | arnoldi  |  PFLAREINV_ARNOLDI  | GMRES polynomial, applied as a mononomial, with coefficients computed with an Arnoldi method  | Yes |
    | newton  |  PFLAREINV_NEWTON  | GMRES polynomial, applied as a Newton polynomial, with roots computed with an Arnoldi method and with extra roots added for stability  | Yes |
    | newton_no_extra  |  PFLAREINV_NEWTON_NO_EXTRA  | GMRES polynomial, applied as a Newton polynomial, with roots computed with an Arnoldi method and with no extra roots added   | Yes |
+   | newton_adaptive  |  PFLAREINV_NEWTON_ADAPTIVE  | GMRES polynomial, applied as a Newton polynomial, with roots computed with an Arnoldi method and with the degree and the extra roots chosen adaptively   | Yes |
    | neumann  |  PFLAREINV_NEUMANN  | Neumann polynomial  | Yes |
    | sai  |  PFLAREINV_SAI  | Sparse approximate inverse  | No |
    | isai  |  PFLAREINV_ISAI  | Incomplete sparse approximate inverse (equivalent to a one-level RAS)  | Yes |

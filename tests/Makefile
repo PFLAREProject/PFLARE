@@ -151,6 +151,13 @@ run_tests_load_serial:
 	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1
 #
+	@echo "Test AIRG as an exact solver, heavily truncating hierarchy and using high order mf GMRES poly in the\
+	 adaptive Newton basis as a coarse solver for hyperbolic streaming"
+	./ex12f -f data/mat_stream_2364 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 \
+	 -pc_air_inverse_type jacobi -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
+	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton_adaptive -pc_air_max_luby_steps 3 -ksp_max_it 1
+#
 	@echo ""
 	@echo "Test exact two-level AIRG in a difficult problem which requires exact coarse solve"
 	./ex12f -f data/spring_chain_40 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 \
@@ -217,6 +224,14 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv  -pc_pflareinv_type newton -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5		
 	@echo "Test Newton GMRES polynomials order 80 matrix-free on the badly scaled market matrix problem bcsstk19"
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 5
+	@echo "Test adaptive Newton GMRES polynomials order 120 matrix-free in market matrix problem 1138"
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3
+	@echo "Test adaptive Newton GMRES polynomials order 120 with fixed sparsity in market matrix problem 1138"
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5
+	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free lowers the degree in market matrix problem 1138"
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 200 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3
+	@echo "Test adaptive Newton GMRES polynomials order 60 matrix-free adds no roots at the small isolated eigenvalues of a diagonal matrix"
+	./ex6 -b_in_f 0 -f data/diag7_small500 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test power basis GMRES polynomials order 10 matrix-free on the badly scaled market matrix problem bcsstk19"
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 30
 	@echo "Test power basis GMRES polynomials order 10 with fixed sparsity on the badly scaled market matrix problem bcsstk19"
@@ -259,6 +274,13 @@ else
 	 -pc_air_inverse_type jacobi -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1
+#
+	@echo "Test AIRG as an exact solver, heavily truncating hierarchy and using high order mf GMRES poly in the\
+	 adaptive Newton basis as a coarse solver for hyperbolic streaming in parallel"
+	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 \
+	 -pc_air_inverse_type jacobi -ksp_type richardson -ksp_norm_type unpreconditioned \
+	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
+	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton_adaptive -pc_air_max_luby_steps 3 -ksp_max_it 1
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem with coefficients calculated on subcomms serial"
@@ -624,6 +646,8 @@ run_tests_no_load_short_serial:
 	$(SKIP_SINGLE) ./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type power
 	@echo "Test PCPFLAREINV get/set polynomial coefficients - newton basis"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton
+	@echo "Test PCPFLAREINV get/set polynomial coefficients - adaptive newton basis"
+	./ex6f_getcoeffs -m 10 -n 10 -pc_type pflareinv -pc_pflareinv_type newton_adaptive
 	@echo "Test AIRG set polynomial coefficients in Fortran with a different number of Newton roots"
 	./ex6f_getcoeffs -m 10 -n 10 -pc_type air -pc_air_inverse_type newton -pc_air_coarsest_inverse_type newton \
 	 -pc_air_matrix_free_polys -grow_newton_roots

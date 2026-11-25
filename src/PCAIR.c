@@ -975,7 +975,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_rea
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: intermediate
 
@@ -997,7 +997,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: advanced
 
@@ -1151,7 +1151,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: intermediate
 
@@ -1849,8 +1849,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit(PC pc, PetscInt input_int)
 
   Note:
   Only relevant after processor agglomeration (see `PCAIRSetProcessorAgglom()`) has left some MPI ranks with no
-  rows, and only affects the basis-building reductions of the `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, and
-  `PFLAREINV_NEWTON_NO_EXTRA` polynomial inverse types (see `PCAIRSetInverseType()`). It does not apply to the
+  rows, and only affects the basis-building reductions of the `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`,
+  `PFLAREINV_NEWTON_NO_EXTRA`, and `PFLAREINV_NEWTON_ADAPTIVE` polynomial inverse types (see `PCAIRSetInverseType()`). It does not apply to the
   `PFLAREINV_POWER` basis, which needs no such reductions; enabling it with the power basis is an error.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSubcomm()`, `PCAIRSetProcessorAgglom()`, `PCAIRSetInverseType()`
@@ -2319,10 +2319,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
+. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
 
   Level: intermediate
 
@@ -2346,10 +2346,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType inverse_t
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
+. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
 
   Level: advanced
 
@@ -2544,10 +2544,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
+. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
 
   Level: intermediate
 
@@ -2973,7 +2973,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
   this call and may be freed or modified. petsc_level and which_inverse must be valid for `PCAIRGetPolyCoeffs()`.
   row_size and col_size must match the sizes it returns, except for the Newton types described below.
 
-  For the Newton types (`PFLAREINV_NEWTON` and `PFLAREINV_NEWTON_NO_EXTRA`) the coefficients are the real and
+  For the Newton types (`PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA` and `PFLAREINV_NEWTON_ADAPTIVE`) the coefficients are the real and
   imaginary parts of the roots, in 2 columns. Only roots that are exactly zero are skipped when the polynomial is
   applied or built; any non-zero root, however small, is used. The number of roots can differ between setups (the
   extra roots `PFLAREINV_NEWTON` adds for stability depend on the matrix), so for these types row_size may differ
@@ -3196,7 +3196,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsInt("-pc_air_auto_truncate_start_level", "Use auto truncation from this level", "PCAIRSetAutoTruncateStartLevel", old_int, &input_int, NULL));
    PetscCall(PCAIRSetAutoTruncateStartLevel(pc, input_int));
    // ~~~~ 
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "NEWTON_ADAPTIVE", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PCAIRGetInverseType(pc, &old_type));
    type = old_type;
    PetscCall(PetscOptionsEnum("-pc_air_inverse_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
@@ -3273,6 +3273,33 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
 }
 
 // ~~~~~~~~~~~~~~~~
+
+// Prints how many roots a Newton polynomial applies, from the stored roots (real parts in the first
+// column, imaginary in the second). Only exactly zero roots are skipped when applying
+// The storage always has at least poly_order + 1 rows, with any more being extra copies of roots
+static PetscErrorCode PFLAREViewNewtonRoots_Private(PetscViewer viewer, const char *indent, const PetscReal *coeffs, PetscInt rows, PetscInt cols, PetscInt poly_order)
+{
+   PetscInt nonzero = 0, extra;
+
+   PetscFunctionBegin;
+   // Nothing is stored before the setup
+   if (!coeffs || cols != 2) PetscFunctionReturn(PETSC_SUCCESS);
+   for (PetscInt i = 0; i < rows; i++)
+   {
+      if (coeffs[i] != 0.0 || coeffs[rows + i] != 0.0) nonzero++;
+   }
+   extra = rows - (poly_order + 1);
+   // The order is clamped on very small matrices, where we can't tell which roots are extra
+   if (extra < 0 || extra > nonzero)
+   {
+      PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied \n", indent, nonzero));
+   }
+   else
+   {
+      PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied: %" PetscInt_FMT " from the polynomial and %" PetscInt_FMT " extra copies \n", indent, nonzero, nonzero - extra, extra));
+   }
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
 
 static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 {
@@ -3421,6 +3448,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
                PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
             }            
          }
+         else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }            
+         }
          else if (input_type == PFLAREINV_SAI)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    SAI \n"));
@@ -3521,6 +3556,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
                   PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
                }
             }
+            else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
+            }
             else if (input_type == PFLAREINV_SAI)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: SAI \n"));      
@@ -3606,6 +3649,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
+            }
+            else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
                if (flg_diag_scale)
                {
                   PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
@@ -3758,6 +3809,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
          }          
       }
+      else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
+         if (flg_diag_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+         }          
+      }
       else if (input_type == PFLAREINV_SAI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    SAI \n"));
@@ -3781,6 +3840,15 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       else if (input_type == PFLAREINV_L1JACOBI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    l1 Jacobi \n"));
+      }
+      if (input_type == PFLAREINV_NEWTON || input_type == PFLAREINV_NEWTON_NO_EXTRA || input_type == PFLAREINV_NEWTON_ADAPTIVE)
+      {
+         // The roots only exist once there is a hierarchy
+         PetscInt num_levels, coeffs_rows = 0, coeffs_cols = 0;
+         PetscReal *coeffs = NULL;
+         PCAIRGetNumLevels_c(&pc, &num_levels);
+         if (num_levels > 0) PCAIRGetPolyCoeffs_c(&pc, 0, COEFFS_INV_COARSE, &coeffs, &coeffs_rows, &coeffs_cols);
+         PetscCall(PFLAREViewNewtonRoots_Private(viewer, "      ", coeffs, coeffs_rows, coeffs_cols, input_int_two));
       }
       if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
       {
@@ -3821,7 +3889,7 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 
   Options Database Keys:
 + -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type; defaults to product
-. -pc_air_inverse_type      (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
+. -pc_air_inverse_type      (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
 . -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc
