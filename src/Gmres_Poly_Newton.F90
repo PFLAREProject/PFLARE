@@ -1358,7 +1358,7 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m, passes)
+   subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m, passes, floor_stop)
 
       ! Continues an Arnoldi that has done m_done steps up to m_max steps, one step at a time
       ! in the same way as the arnoldi routine
@@ -1366,6 +1366,8 @@ module gmres_poly_newton
       ! Returns the number of steps done in m, which is less than m_max only if we hit
       ! the lucky tolerance
       ! passes is the number of Gram-Schmidt passes in each step (one if not given)
+      ! If floor_stop is given and true we also stop once the relative GMRES residual is at
+      ! rounding level, with m the steps done and V_n(m+1) set. Further steps are only noise
 
       ! ~~~~~~
       type(tMat), intent(in)                    :: matrix
@@ -1376,17 +1378,31 @@ module gmres_poly_newton
       integer, intent(in)                       :: m_done, m_max
       integer, intent(out)                      :: m
       integer, intent(in), optional             :: passes
+      logical, intent(in), optional             :: floor_stop
 
       ! Local variables
       PetscErrorCode :: ierr
       PetscReal, dimension(m_max) :: neg_h
       PetscInt :: m_petscint
-      integer :: n_passes, i_pass
+      integer :: n_passes, i_pass, j_loc
+      logical :: stop_at_floor
+      PetscReal, dimension(m_max) :: cs, sn
+      PetscReal :: g_last, rho
 
       ! ~~~~~~
 
       n_passes = 1
       if (present(passes)) n_passes = passes
+      stop_at_floor = .FALSE.
+      if (present(floor_stop)) stop_at_floor = floor_stop
+
+      ! The Givens rotations of the columns of H we already have
+      g_last = 1
+      if (stop_at_floor) then
+         do j_loc = 1, m_done
+            call rotate_column(j_loc, rho)
+         end do
+      end if
 
       do m = m_done + 1, m_max
 
@@ -1405,16 +1421,56 @@ module gmres_poly_newton
          if (H_n(m+1, m) < lucky_tol) return
 
          call VecAXPBY(V_n(m + 1), PFLARE_ONE/H_n(m+1, m), PFLARE_ZERO, w_j, ierr)
+
+         if (stop_at_floor) then
+            call rotate_column(m, rho)
+            if (rho <= 10 * PFLARE_EPS) return
+         end if
       end do
 
       ! Fortran leaves the loop variable one bigger if we get to the end of the loop
       m = m_max
 
+      contains
+
+      subroutine rotate_column(j_col, rho_col)
+
+         ! Applies the Givens rotations so far to column j_col of H, adds the one that zeros
+         ! its subdiagonal and returns the relative GMRES residual after j_col steps
+         ! (as hessenberg_gmres_residuals does for the whole matrix)
+
+         integer, intent(in)    :: j_col
+         PetscReal, intent(out) :: rho_col
+
+         integer :: i_col
+         PetscReal, dimension(j_col + 1) :: col
+         PetscReal :: temp, denom
+
+         col = H_n(1:j_col + 1, j_col)
+         do i_col = 1, j_col - 1
+            temp = cs(i_col) * col(i_col) + sn(i_col) * col(i_col + 1)
+            col(i_col + 1) = -sn(i_col) * col(i_col) + cs(i_col) * col(i_col + 1)
+            col(i_col) = temp
+         end do
+         denom = sqrt(col(j_col)**2 + col(j_col + 1)**2)
+         if (denom == 0) then
+            cs(j_col) = 1
+            sn(j_col) = 0
+         else
+            cs(j_col) = col(j_col)/denom
+            sn(j_col) = col(j_col + 1)/denom
+         end if
+         g_last = -sn(j_col) * g_last
+         rho_col = abs(g_last)
+
+      end subroutine rotate_column
+
    end subroutine arnoldi_extend
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine arnoldi_sstep(matrix, poly_order, s_max, m_start, lucky_tol, V_n, w_j, beta, H_n, m, view, kernels)
+   subroutine arnoldi_sstep(matrix, poly_order, s_max, m_start, lucky_tol, V_n, w_j, beta, H_n, m, view, kernels, &
+                  floor_stop)
 
       ! An s-step Arnoldi that returns the same Hessenberg matrix as the arnoldi routine
       ! (to rounding) with far fewer reductions. This is the adaptive s-step method of
@@ -1447,7 +1503,7 @@ module gmres_poly_newton
       PetscReal, intent(out)                    :: beta
       PetscReal, dimension(:,:), intent(inout)  :: H_n
       integer, intent(out)                      :: m
-      logical, intent(in)                       :: view
+      logical, intent(in)                       :: view, floor_stop
       integer, intent(in)                       :: kernels
 
       ! Local variables
@@ -1462,6 +1518,7 @@ module gmres_poly_newton
       integer :: n_tightened, n_extra_matvecs, p_block, n_resume, n_resume_start, m_target, n_stretches
       integer :: n_tightened_before
       logical :: lucky
+      PetscReal, dimension(poly_order + 1) :: rho_block
       PetscReal :: ratio_option
       PetscBool :: ratio_found, discard_start, check_blocks
       integer, dimension(:), allocatable :: kept_history
@@ -1776,7 +1833,7 @@ module gmres_poly_newton
             ratio_max = ratio_before
             H_n(:, j + 1:j + p_block) = 0
             m_target = min(k, j + n_resume)
-            call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2)
+            call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2, floor_stop)
             n_reductions = n_reductions + 3 * (m - j)
             n_single = n_single + m - j
             n_stretches = n_stretches + 1
@@ -1800,6 +1857,16 @@ module gmres_poly_newton
          ! The block size never grows back
          if (p < sb) s = p
 
+         ! Stop once the relative GMRES residual is at rounding level, as further steps are
+         ! only noise. We can only test this after a block, so we may do up to a block too many
+         if (floor_stop) then
+            call hessenberg_gmres_residuals(H_n, j, rho_block)
+            if (minval(rho_block(1:j)) <= 10 * PFLARE_EPS) then
+               lucky = .TRUE.
+               exit
+            end if
+         end if
+
       end do
 
       deallocate(shift_real, shift_imag, dots, B, X_one, X_two, G, Z, Z_two)
@@ -1808,7 +1875,7 @@ module gmres_poly_newton
       m = j
       if (j < k .AND. .NOT. lucky) then
          ! With two passes, as the blocks are orthogonalised twice
-         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, k, m, 2)
+         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, k, m, 2, floor_stop)
          n_reductions = n_reductions + 3 * (m - j)
          n_single = n_single + m - j
       end if
@@ -2050,7 +2117,8 @@ module gmres_poly_newton
       type(tVec), pointer, dimension(:) :: V_n
       PetscInt :: sstep_size, sstep_start
       PetscLogDouble :: time_start, time_end
-      PetscBool :: sstep_view, sstep_warm, sstep_check, option_found
+      PetscBool :: sstep_view, sstep_warm, sstep_check, option_found, floor_option
+      logical :: floor_stop
       PetscInt :: sstep_kernels, arnoldi_passes
       PetscLogDouble :: time_roots
 
@@ -2104,6 +2172,12 @@ module gmres_poly_newton
       sstep_kernels = 2
       sstep_warm = PETSC_FALSE
       arnoldi_passes = 1
+      ! The adaptive rule only uses the steps up to where the Arnoldi residual reaches rounding
+      ! level, so the Arnoldi can stop there (temporary option to switch that off)
+      floor_option = PETSC_TRUE
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_floor_stop', floor_option, option_found, ierr)
+      floor_stop = root_rule == NEWTON_ROOTS_ADAPTIVE .AND. floor_option
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_arnoldi_passes', arnoldi_passes, option_found, ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
@@ -2129,14 +2203,16 @@ module gmres_poly_newton
       if (sstep_size > 0) then
          call arnoldi_sstep(matrix, poly_order, int(sstep_size), int(sstep_start), PFLARE_TOL_LUCKY, &
                   V_n, w_j, beta, H_n, m, logical(sstep_view .eqv. PETSC_TRUE), &
-                  int(sstep_kernels))
+                  int(sstep_kernels), floor_stop)
       else
          call PetscTime(time_start, ierr)
-         if (arnoldi_passes > 1) then
-            ! Temporary: an ordinary Arnoldi with more than one Gram-Schmidt pass in each step
+         if (arnoldi_passes > 1 .OR. floor_stop) then
+            ! The same Arnoldi one step at a time, which can stop at the noise floor and
+            ! (temporary option) do more than one Gram-Schmidt pass in each step
             call arnoldi(matrix, 0, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
             if (poly_order > 0 .AND. .NOT. H_n(2, 1) < PFLARE_TOL_LUCKY) then
-               call arnoldi_extend(matrix, PFLARE_TOL_LUCKY, V_n, w_j, H_n, 1, poly_order + 1, m, int(arnoldi_passes))
+               call arnoldi_extend(matrix, PFLARE_TOL_LUCKY, V_n, w_j, H_n, 1, poly_order + 1, m, &
+                        int(arnoldi_passes), floor_stop)
             end if
          else
             call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
