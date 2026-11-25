@@ -1161,6 +1161,448 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine partial_cholesky(G, n, omega, p, R)
+
+      ! Column by column Cholesky G = R^T R of the leading n x n block of G, that stops before
+      ! the first column that gives a non-positive pivot or a 2-norm condition number of
+      ! R bigger than omega
+      ! Returns the number of columns kept in p and the factor in R(1:p, 1:p)
+
+      ! ~~~~~~
+      real(kind=kind(1d0)), dimension(:,:), intent(in)    :: G
+      integer, intent(in)                                 :: n
+      real(kind=kind(1d0)), intent(in)                    :: omega
+      integer, intent(out)                                :: p
+      real(kind=kind(1d0)), dimension(:,:), intent(inout) :: R
+
+      ! Local variables
+      integer :: i_loc, j_loc, errorcode
+      real(kind=kind(1d0)) :: pivot
+      PetscReal, dimension(n, n) :: R_copy
+      PetscReal, dimension(n) :: sigma
+      PetscReal, dimension(1, 1) :: U, VT
+      PetscReal, dimension(:), allocatable :: work
+      ! BLAS/LAPACK integer arguments must be PetscBLASInt
+      PetscBLASInt :: lwork, j_bl, lda_bl, one_bl, info
+
+      ! ~~~~~~
+
+      R(1:n, 1:n) = 0
+      p = 0
+      lwork = 10 * max(1, n)
+      allocate(work(lwork))
+      lda_bl = n
+      one_bl = 1
+
+      do j_loc = 1, n
+
+         do i_loc = 1, j_loc - 1
+            R(i_loc, j_loc) = (G(i_loc, j_loc) - &
+                     dot_product(R(1:i_loc-1, i_loc), R(1:i_loc-1, j_loc)))/R(i_loc, i_loc)
+         end do
+         pivot = G(j_loc, j_loc) - dot_product(R(1:j_loc-1, j_loc), R(1:j_loc-1, j_loc))
+         ! The comparisons are false for a NaN
+         if (.NOT. (pivot > 0 .AND. pivot < huge(pivot))) exit
+         R(j_loc, j_loc) = sqrt(pivot)
+
+         ! The condition number of the factor so far
+         R_copy(1:j_loc, 1:j_loc) = real(R(1:j_loc, 1:j_loc), kind=kind(sigma))
+         j_bl = int(j_loc, kind=kind(j_bl))
+         call PFLAREgesvd('N', 'N', j_bl, j_bl, R_copy, lda_bl, &
+                  sigma, U, one_bl, VT, one_bl, work, lwork, info)
+         if (info /= 0) then
+            print *, "SVD in the partial Cholesky failed"
+            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+         end if
+         if (.NOT. (sigma(j_loc) > 0)) exit
+         if (.NOT. (sigma(1)/sigma(j_loc) <= omega)) exit
+
+         p = j_loc
+      end do
+
+      deallocate(work)
+
+   end subroutine partial_cholesky
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m)
+
+      ! Continues an Arnoldi that has done m_done steps up to m_max steps, one step at a time
+      ! in the same way as the arnoldi routine
+      ! V_n(1:m_done+1) must hold the basis and H_n(1:m_done+1, 1:m_done) the Hessenberg matrix
+      ! Returns the number of steps done in m, which is less than m_max only if we hit
+      ! the lucky tolerance
+
+      ! ~~~~~~
+      type(tMat), intent(in)                    :: matrix
+      PetscReal, intent(in)                     :: lucky_tol
+      type(tVec), dimension(:), intent(in)      :: V_n
+      type(tVec), intent(in)                    :: w_j
+      PetscReal, dimension(:,:), intent(inout)  :: H_n
+      integer, intent(in)                       :: m_done, m_max
+      integer, intent(out)                      :: m
+
+      ! Local variables
+      PetscErrorCode :: ierr
+      PetscReal, dimension(m_max) :: neg_h
+      PetscInt :: m_petscint
+
+      ! ~~~~~~
+
+      do m = m_done + 1, m_max
+
+         m_petscint = m
+         call MatMult(matrix, V_n(m), w_j, ierr)
+
+         call VecMDot(w_j, m_petscint, V_n, neg_h, ierr)
+         H_n(1:m, m) = neg_h(1:m)
+         neg_h(1:m) = -neg_h(1:m)
+         call VecMAXPY(w_j, m_petscint, neg_h, V_n, ierr)
+
+         call VecNorm(w_j, NORM_2, H_n(m+1, m), ierr)
+         if (H_n(m+1, m) < lucky_tol) return
+
+         call VecAXPBY(V_n(m + 1), PFLARE_ONE/H_n(m+1, m), PFLARE_ZERO, w_j, ierr)
+      end do
+
+      ! Fortran leaves the loop variable one bigger if we get to the end of the loop
+      m = m_max
+
+   end subroutine arnoldi_extend
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine arnoldi_sstep(matrix, poly_order, s_max, m_start, lucky_tol, V_n, w_j, beta, H_n, m, view)
+
+      ! An s-step Arnoldi that returns the same Hessenberg matrix as the arnoldi routine
+      ! (to rounding) with far fewer reductions. This is the adaptive s-step method of
+      ! Xu, Alonso & Darve, "A numerically stable communication-avoiding s-step GMRES algorithm"
+      !
+      ! The first m_start steps are an ordinary Arnoldi. The Ritz values of those, leja ordered,
+      ! are the shifts of a scaled Newton basis. After that we build a block of up to s new
+      ! Krylov vectors with matvecs only, and orthogonalise the block in two passes. Each pass
+      ! projects out the existing basis and does a Cholesky QR of the block, which is two
+      ! reductions, so a block costs four reductions however big it is
+      ! The Cholesky stops at the first column where the block becomes too ill-conditioned.
+      ! The columns after that are thrown away and the block size is reduced to the number
+      ! kept. It is never increased again
+      ! If the block size goes below three the rest of the steps are an ordinary Arnoldi,
+      ! which costs no more reductions than the blocks would
+      !
+      ! The block is built in place in V_n, so this needs no more vectors than the arnoldi routine
+
+      ! ~~~~~~
+      type(tMat), intent(in)                    :: matrix
+      integer, intent(in)                       :: poly_order, s_max, m_start
+      PetscReal, intent(in)                     :: lucky_tol
+      type(tVec), dimension(:), intent(in)      :: V_n
+      type(tVec), intent(in)                    :: w_j
+      PetscReal, intent(out)                    :: beta
+      PetscReal, dimension(:,:), intent(inout)  :: H_n
+      integer, intent(out)                      :: m
+      logical, intent(in)                       :: view
+
+      ! Local variables
+      integer, parameter :: dp = kind(1d0)
+      integer :: k, m0, j, s, sb, p, p_two, i_loc, c_loc, n_old, errorcode
+      integer :: n_blocks, n_wasted, n_reductions, n_single
+      integer, dimension(:), allocatable :: kept_history
+      PetscLogDouble :: time_start, time_end
+      PetscErrorCode :: ierr
+      PetscInt :: n_petscint
+      PetscReal, dimension(:), allocatable :: ritz_real, ritz_imag, shift_real, shift_imag, work, dots
+      PetscReal, dimension(:,:), allocatable :: H_copy, VL, VR
+      integer, dimension(:), allocatable :: indices
+      real(kind=dp), dimension(:,:), allocatable :: B, X_one, X_two, G, Z, Z_two, C, R_new, R_full, rhs
+      real(kind=dp) :: x, y, y_sq, gam, mean, ritz_max, omega
+      PetscReal :: alpha_r, beta_r, gamma_r
+      PetscBLASInt :: m_bl, lda_bl, one_bl, lwork, info
+
+      ! ~~~~~~
+
+      ! The number of Arnoldi steps we want
+      k = poly_order + 1
+      m0 = max(1, min(m_start, k))
+      s = max(1, s_max)
+      allocate(kept_history(k))
+      call PetscTime(time_start, ierr)
+
+      ! ~~~~~~~~~
+      ! Ordinary Arnoldi for the first m0 steps
+      ! ~~~~~~~~~
+      call arnoldi(matrix, m0 - 1, lucky_tol, V_n, w_j, beta, H_n, m)
+      n_reductions = 1 + 2 * m
+      n_single = m
+      n_blocks = 0
+      n_wasted = 0
+      ! Have we finished or hit the lucky tolerance
+      if (m == k .OR. H_n(m+1, m) < lucky_tol) then
+         if (view) call view_counts()
+         return
+      end if
+
+      ! ~~~~~~~~~
+      ! The Ritz values of the first m0 steps are the shifts
+      ! ~~~~~~~~~
+      allocate(H_copy(m0, m0), ritz_real(m0), ritz_imag(m0), VL(0, 0), VR(0, 0))
+      H_copy = H_n(1:m0, 1:m0)
+      m_bl = int(m0, kind=kind(m_bl))
+      lda_bl = m_bl
+      one_bl = 1
+      lwork = int(10 * m0, kind=kind(lwork))
+      allocate(work(lwork))
+      call PFLAREgeev('N', 'N', m_bl, H_copy, lda_bl, &
+                     ritz_real, ritz_imag, VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
+      deallocate(work, VL, VR, H_copy)
+      if (info /= 0) then
+         print *, "Eig decomposition failed"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
+
+      ! Leja order, which keeps the conjugate pairs next to each other
+      allocate(shift_real(m0), shift_imag(m0))
+      shift_real = ritz_real
+      shift_imag = ritz_imag
+      call modified_leja(shift_real, shift_imag, indices)
+      shift_real = ritz_real(indices)
+      shift_imag = ritz_imag(indices)
+      deallocate(indices)
+
+      ! The scaling of each basis vector is the distance of its shift from the centre
+      mean = sum(real(ritz_real, kind=dp))/m0
+      ritz_max = maxval(sqrt(real(ritz_real, kind=dp)**2 + real(ritz_imag, kind=dp)**2))
+      deallocate(ritz_real, ritz_imag)
+
+      ! The block is kept if its condition number is below this, which keeps the
+      ! Cholesky QR stable in this precision
+      omega = 0.1d0/sqrt(real(PFLARE_EPS, kind=dp))
+
+      allocate(dots(k + 1))
+      allocate(B(s + 1, s), X_one(k + 1, s), X_two(k + 1, s), G(s, s), Z(s, s), Z_two(s, s))
+
+      ! j is the number of Arnoldi steps finished, so V_n(1:j+1) is the basis so far
+      j = m
+      do while (j < k)
+
+         ! Blocks this small cost as many reductions as ordinary steps
+         if (s < 3) exit
+
+         sb = min(s, k - j)
+         n_old = j + 1
+         n_blocks = n_blocks + 1
+
+         ! ~~~~~~~~~
+         ! Build the block with the scaled Newton recurrence
+         ! Column i of the block lives in V_n(j+1+i), with column 0 the last basis vector
+         ! B holds the recurrence: A W(:, 0:sb-1) = W(:, 0:sb) B
+         ! ~~~~~~~~~
+         B = 0
+         i_loc = 0
+         do while (i_loc < sb)
+
+            ! We cycle through the shifts if there are fewer than the block size
+            x = real(shift_real(mod(i_loc, m0) + 1), kind=dp)
+            y = real(shift_imag(mod(i_loc, m0) + 1), kind=dp)
+            gam = max(sqrt((mean - x)**2 + y**2), 1d-3 * ritz_max)
+
+            ! w_{i+1} = (A - x) w_i / gam
+            call MatMult(matrix, V_n(j + 1 + i_loc), V_n(j + 2 + i_loc), ierr)
+            alpha_r = real(-x/gam, kind=kind(alpha_r))
+            beta_r = real(1d0/gam, kind=kind(beta_r))
+            call VecAXPBY(V_n(j + 2 + i_loc), alpha_r, beta_r, V_n(j + 1 + i_loc), ierr)
+            B(i_loc + 1, i_loc + 1) = x
+            B(i_loc + 2, i_loc + 1) = gam
+
+            ! A real shift, or a conjugate pair cut in half by the end of the block
+            ! in which case we have just used its real part
+            if (y == 0d0 .OR. i_loc + 2 > sb) then
+               i_loc = i_loc + 1
+               cycle
+            end if
+
+            ! The second member of a conjugate pair in real arithmetic
+            ! w_{i+2} = ((A - x) w_{i+1} + (y^2/gam) w_i) / gam
+            y_sq = y**2
+            call MatMult(matrix, V_n(j + 2 + i_loc), V_n(j + 3 + i_loc), ierr)
+            alpha_r = real(-x/gam, kind=kind(alpha_r))
+            beta_r = real(y_sq/gam**2, kind=kind(beta_r))
+            gamma_r = real(1d0/gam, kind=kind(gamma_r))
+            call VecAXPBYPCZ(V_n(j + 3 + i_loc), alpha_r, beta_r, gamma_r, &
+                     V_n(j + 2 + i_loc), V_n(j + 1 + i_loc), ierr)
+            B(i_loc + 2, i_loc + 2) = x
+            B(i_loc + 3, i_loc + 2) = gam
+            B(i_loc + 1, i_loc + 2) = -y_sq/gam
+            i_loc = i_loc + 2
+         end do
+
+         ! ~~~~~~~~~
+         ! First pass: project out the existing basis and Cholesky QR the block
+         ! ~~~~~~~~~
+         call project_and_gram(sb, X_one)
+         call partial_cholesky(G, sb, omega, p, Z)
+         n_reductions = n_reductions + 2
+         if (p == 0) then
+            n_wasted = n_wasted + sb
+            kept_history(n_blocks) = 0
+            exit
+         end if
+         call apply_inverse_factor(p, Z)
+
+         ! ~~~~~~~~~
+         ! Second pass on the columns we kept
+         ! ~~~~~~~~~
+         call project_and_gram(p, X_two)
+         call partial_cholesky(G, p, omega, p_two, Z_two)
+         n_reductions = n_reductions + 2
+         if (p_two == 0) then
+            n_wasted = n_wasted + sb
+            kept_history(n_blocks) = 0
+            exit
+         end if
+         p = p_two
+         call apply_inverse_factor(p, Z_two)
+         n_wasted = n_wasted + sb - p
+         kept_history(n_blocks) = p
+
+         ! ~~~~~~~~~
+         ! Recover the new columns of the Hessenberg matrix
+         ! The block before orthogonalising is W(:, 1:p) = V_n(1:j+1) C + V_n(j+2:j+p+1) R_new
+         ! ~~~~~~~~~
+         allocate(C(n_old, p), R_new(p, p), R_full(j + p + 1, p + 1), rhs(j + p + 1, p))
+         C = X_one(1:n_old, 1:p) + matmul(X_two(1:n_old, 1:p), Z(1:p, 1:p))
+         R_new = matmul(Z_two(1:p, 1:p), Z(1:p, 1:p))
+
+         ! W(:, 0:p) = V_n(1:j+p+1) R_full
+         R_full = 0
+         R_full(j + 1, 1) = 1
+         R_full(1:n_old, 2:p + 1) = C
+         R_full(n_old + 1:n_old + p, 2:p + 1) = R_new
+
+         ! A V_n(1:j+p) R_full(1:j+p, 1:p) = V_n(1:j+p+1) R_full B
+         ! and we know A V_n(1:j) already, so take that part across
+         rhs = matmul(R_full, B(1:p + 1, 1:p))
+         if (j > 0) then
+            rhs(1:j + 1, :) = rhs(1:j + 1, :) - &
+                     matmul(real(H_n(1:j + 1, 1:j), kind=dp), R_full(1:j, 1:p))
+         end if
+
+         ! Solve against the upper triangular R_full(j+1:j+p, 1:p) from the right
+         do c_loc = 1, p
+            do i_loc = 1, c_loc - 1
+               rhs(:, c_loc) = rhs(:, c_loc) - rhs(:, i_loc) * R_full(j + i_loc, c_loc)
+            end do
+            rhs(:, c_loc) = rhs(:, c_loc)/R_full(j + c_loc, c_loc)
+         end do
+         H_n(1:j + p + 1, j + 1:j + p) = real(rhs, kind=kind(H_n))
+         deallocate(C, R_new, R_full, rhs)
+
+         j = j + p
+         ! The block size never grows back
+         if (p < sb) s = p
+
+      end do
+
+      deallocate(shift_real, shift_imag, dots, B, X_one, X_two, G, Z, Z_two)
+
+      ! Any steps left are an ordinary Arnoldi
+      m = j
+      if (j < k) then
+         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, k, m)
+         n_reductions = n_reductions + 2 * (m - j)
+         n_single = n_single + m - j
+      end if
+
+      if (view) call view_counts()
+
+      contains
+
+      subroutine project_and_gram(n_cols, X)
+
+         ! Removes the existing basis from the first n_cols columns of the block and
+         ! computes the Gram matrix of the result into G, in two reductions
+         ! X returns the components removed
+
+         integer, intent(in) :: n_cols
+         real(kind=dp), dimension(:,:), intent(inout) :: X
+
+         integer :: col
+         PetscReal, dimension(k + 1, n_cols) :: X_work
+
+         ! All the dot products against the existing basis in one reduction
+         n_petscint = n_old
+         do col = 1, n_cols
+            call VecMDotBegin(V_n(j + 1 + col), n_petscint, V_n, dots, ierr)
+         end do
+         do col = 1, n_cols
+            call VecMDotEnd(V_n(j + 1 + col), n_petscint, V_n, dots, ierr)
+            X_work(1:n_old, col) = dots(1:n_old)
+         end do
+         do col = 1, n_cols
+            X(1:n_old, col) = real(X_work(1:n_old, col), kind=dp)
+            dots(1:n_old) = -X_work(1:n_old, col)
+            call VecMAXPY(V_n(j + 1 + col), n_petscint, dots, V_n, ierr)
+         end do
+
+         ! The upper triangle of the Gram matrix of the block in one reduction
+         do col = 1, n_cols
+            n_petscint = col
+            call VecMDotBegin(V_n(j + 1 + col), n_petscint, V_n(j + 2:j + 1 + col), dots, ierr)
+         end do
+         do col = 1, n_cols
+            n_petscint = col
+            call VecMDotEnd(V_n(j + 1 + col), n_petscint, V_n(j + 2:j + 1 + col), dots, ierr)
+            G(1:col, col) = real(dots(1:col), kind=dp)
+            G(col, 1:col) = G(1:col, col)
+         end do
+
+      end subroutine project_and_gram
+
+      subroutine apply_inverse_factor(n_cols, R)
+
+         ! Overwrites the first n_cols columns of the block with the block times R^-1
+         ! for upper triangular R, one column at a time
+
+         integer, intent(in) :: n_cols
+         real(kind=dp), dimension(:,:), intent(in) :: R
+
+         integer :: col
+
+         do col = 1, n_cols
+            if (col > 1) then
+               n_petscint = col - 1
+               dots(1:col - 1) = real(-R(1:col - 1, col), kind=kind(dots))
+               call VecMAXPY(V_n(j + 1 + col), n_petscint, dots, V_n(j + 2:j + col), ierr)
+            end if
+            alpha_r = real(1d0/R(col, col), kind=kind(alpha_r))
+            call VecScale(V_n(j + 1 + col), alpha_r, ierr)
+         end do
+
+      end subroutine apply_inverse_factor
+
+      subroutine view_counts()
+
+         integer :: comm_rank
+         MPIU_Comm :: MPI_COMM_MATRIX
+
+         call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)
+         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
+         call PetscTime(time_end, ierr)
+         if (comm_rank == 0) then
+            print '(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,ES10.3)', "s-step Arnoldi: steps ", m, &
+                  " single steps ", n_single, &
+                  " blocks ", n_blocks, " final block size ", s, " wasted matvecs ", n_wasted, &
+                  " reductions ", n_reductions, " time ", time_end - time_start
+            if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
+         end if
+
+      end subroutine view_counts
+
+   end subroutine arnoldi_sstep
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, root_rule, coefficients)
 
       ! Computes a fixed order gmres polynomial for the matrix passed in
@@ -1194,6 +1636,9 @@ module gmres_poly_newton
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
+      PetscInt :: sstep_size, sstep_start
+      PetscLogDouble :: time_start, time_end
+      PetscBool :: sstep_view, option_found
 
       ! ~~~~~~    
 
@@ -1237,7 +1682,29 @@ module gmres_poly_newton
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+      ! Temporary options while the s-step Arnoldi is being tested
+      ! -pflare_newton_sstep is the block size, with zero the ordinary Arnoldi
+      sstep_size = 0
+      sstep_start = 10
+      sstep_view = PETSC_FALSE
+      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_sstep', sstep_size, option_found, ierr)
+      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_sstep_start', sstep_start, option_found, ierr)
+      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_sstep_view', sstep_view, option_found, ierr)
+
+      if (sstep_size > 0) then
+         call arnoldi_sstep(matrix, poly_order, int(sstep_size), int(sstep_start), PFLARE_TOL_LUCKY, &
+                  V_n, w_j, beta, H_n, m, logical(sstep_view .eqv. PETSC_TRUE))
+      else
+         call PetscTime(time_start, ierr)
+         call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+         call PetscTime(time_end, ierr)
+         if (sstep_view .AND. comm_rank == 0) then
+            print '(A,I0,A,I0,A,ES10.3)', "Arnoldi: steps ", m, " reductions ", 1 + 2 * m, " time ", time_end - time_start
+         end if
+      end if
 
       if (root_rule == NEWTON_ROOTS_ADAPTIVE) then
 
