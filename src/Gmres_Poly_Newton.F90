@@ -1227,6 +1227,98 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine sstep_estimate_block_size(shift_real, shift_imag, point_real, point_imag, mean, ritz_max, &
+                  s_max, omega, s_est)
+
+      ! Estimates the biggest first block the s-step Arnoldi can keep, after Section 3.5 of
+      ! Xu, Alonso & Darve, with no matvecs or reductions
+      ! The points stand in for the spectrum. We follow the size of the scaled Newton polynomial
+      ! with the given shifts (cycled as in arnoldi_sstep) at each point as its degree grows, and
+      ! s_est is the last degree before the norm of those sizes, relative to degree zero, passes omega
+      ! A shift that is exactly one of the points cancels it down to rounding level, once
+      ! This is only printed, not used: in testing it overestimated the block kept by up to several times
+
+      ! ~~~~~~
+      PetscReal, dimension(:), intent(in)  :: shift_real, shift_imag, point_real, point_imag
+      real(kind=kind(1d0)), intent(in)     :: mean, ritz_max, omega
+      integer, intent(in)                  :: s_max
+      integer, intent(out)                 :: s_est
+
+      ! Local variables
+      integer, parameter :: dp = kind(1d0)
+      integer :: j, i_loc, n_shift, n_point
+      real(kind=dp) :: x, y, gam, dist, dist_conj, eps
+      real(kind=dp), dimension(size(point_real)) :: E, E_mid
+      logical, dimension(size(point_real)) :: cancelled
+
+      ! ~~~~~~
+
+      n_shift = size(shift_real)
+      n_point = size(point_real)
+      eps = real(PFLARE_EPS, kind=dp)
+      E = 1
+      cancelled = .FALSE.
+      s_est = s_max
+
+      j = 0
+      do while (j < s_max)
+
+         x = real(shift_real(mod(j, n_shift) + 1), kind=dp)
+         y = real(shift_imag(mod(j, n_shift) + 1), kind=dp)
+         gam = max(sqrt((mean - x)**2 + y**2), 1d-3 * ritz_max)
+
+         ! The column made with the real part of the shift
+         do i_loc = 1, n_point
+            dist = sqrt((real(point_real(i_loc), kind=dp) - x)**2 + real(point_imag(i_loc), kind=dp)**2)
+            E_mid(i_loc) = E(i_loc) * dist/gam
+         end do
+
+         if (y == 0d0 .OR. j + 2 > s_max) then
+
+            ! A real shift
+            do i_loc = 1, n_point
+               if (E_mid(i_loc) == 0d0 .AND. y == 0d0) then
+                  if (.NOT. cancelled(i_loc)) E(i_loc) = E(i_loc) * eps
+                  cancelled(i_loc) = .TRUE.
+               else
+                  E(i_loc) = E_mid(i_loc)
+               end if
+            end do
+            j = j + 1
+            if (.NOT. (norm2(E)/sqrt(real(n_point, kind=dp)) < omega)) then
+               s_est = j - 1
+               return
+            end if
+
+         else
+
+            ! A conjugate pair, which is two columns
+            if (.NOT. (norm2(E_mid)/sqrt(real(n_point, kind=dp)) < omega)) then
+               s_est = j
+               return
+            end if
+            do i_loc = 1, n_point
+               dist = sqrt((real(point_real(i_loc), kind=dp) - x)**2 + (real(point_imag(i_loc), kind=dp) - y)**2)
+               dist_conj = sqrt((real(point_real(i_loc), kind=dp) - x)**2 + (real(point_imag(i_loc), kind=dp) + y)**2)
+               if (dist == 0d0 .OR. dist_conj == 0d0) then
+                  if (.NOT. cancelled(i_loc)) E(i_loc) = E(i_loc) * eps
+                  cancelled(i_loc) = .TRUE.
+               else
+                  E(i_loc) = E(i_loc) * dist * dist_conj/gam**2
+               end if
+            end do
+            j = j + 2
+            if (.NOT. (norm2(E)/sqrt(real(n_point, kind=dp)) < omega)) then
+               s_est = j - 1
+               return
+            end if
+         end if
+      end do
+
+   end subroutine sstep_estimate_block_size
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m)
 
       ! Continues an Arnoldi that has done m_done steps up to m_max steps, one step at a time
@@ -1294,7 +1386,8 @@ module gmres_poly_newton
       ! The block is built in place in V_n, so this needs no more vectors than the arnoldi routine
       ! If kernels is not zero and the vectors in V_n are slices of one device buffer (see
       ! create_temp_space_box_muller), each pass is done as dense matrix products on the device,
-      ! with KokkosBlas (1) or our own kernels (2)
+      ! with KokkosBlas (1) or our own kernels (2). KokkosBlas with a rocBLAS backend was no faster
+      ! and its first big gemm cost 0.2 s
       ! Otherwise it is done with PETSc vector operations one column at a time
 
       ! ~~~~~~
@@ -1314,7 +1407,7 @@ module gmres_poly_newton
       logical :: use_kernels
       integer(c_long_long), dimension(:), allocatable :: vec_handles
       integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
-      integer :: n_blocks, n_wasted, n_reductions, n_single
+      integer :: n_blocks, n_wasted, n_reductions, n_single, s_est_ritz, s_est_harmonic
       integer, dimension(:), allocatable :: kept_history
       PetscLogDouble :: time_start, time_end, time_block
       PetscLogDouble, dimension(:), allocatable :: time_history
@@ -1388,11 +1481,19 @@ module gmres_poly_newton
       ! The scaling of each basis vector is the distance of its shift from the centre
       mean = sum(real(ritz_real, kind=dp))/m0
       ritz_max = maxval(sqrt(real(ritz_real, kind=dp)**2 + real(ritz_imag, kind=dp)**2))
-      deallocate(ritz_real, ritz_imag)
 
       ! The block is kept if its condition number is below this, which keeps the
       ! Cholesky QR stable in this precision
       omega = 0.1d0/sqrt(real(PFLARE_EPS, kind=dp))
+
+      ! Estimates of the first block size, with the Ritz values and the harmonic Ritz values
+      ! standing in for the spectrum
+      call sstep_estimate_block_size(shift_real, shift_imag, ritz_real, ritz_imag, mean, ritz_max, &
+               k - m, omega, s_est_ritz)
+      call harmonic_ritz_roots(H_n, m0, m0, ritz_real, ritz_imag)
+      call sstep_estimate_block_size(shift_real, shift_imag, ritz_real, ritz_imag, mean, ritz_max, &
+               k - m, omega, s_est_harmonic)
+      deallocate(ritz_real, ritz_imag)
 
       allocate(dots(k + 1))
       allocate(B(s + 1, s), X_one(k + 1, s), X_two(k + 1, s), G(s, s), Z(s, s), Z_two(s, s))
@@ -1681,6 +1782,8 @@ module gmres_poly_newton
                   " single steps ", n_single, &
                   " blocks ", n_blocks, " final block size ", s, " wasted matvecs ", n_wasted, &
                   " reductions ", n_reductions, " time ", time_end - time_start
+            if (n_blocks > 0) print '(A,I0,A,I0)', "s-step Arnoldi: estimated first block, Ritz points ", &
+                  s_est_ritz, " harmonic Ritz points ", s_est_harmonic
             if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
             if (n_blocks > 0) print '(A,*(1X,ES9.2))', "s-step Arnoldi: time per block", time_history(1:n_blocks)
          end if
@@ -1776,7 +1879,7 @@ module gmres_poly_newton
       sstep_size = 0
       sstep_start = 10
       sstep_view = PETSC_FALSE
-      sstep_kernels = 1
+      sstep_kernels = 2
       sstep_warm = PETSC_FALSE
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep', sstep_size, option_found, ierr)
