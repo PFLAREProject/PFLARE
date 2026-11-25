@@ -16,6 +16,7 @@
 #include <Kokkos_NestedSort.hpp>
 #include <KokkosBatched_Gesv.hpp>
 #include <KokkosBlas2_team_gemv.hpp>
+#include <KokkosBlas3_gemm.hpp>
 #include <petsc/private/kokkosimpl.hpp>
 
 using DefaultExecutionSpace = Kokkos::DefaultExecutionSpace;

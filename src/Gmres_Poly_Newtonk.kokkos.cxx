@@ -749,3 +749,133 @@ PETSC_INTERN void mat_mult_powers_share_sparsity_newton_kokkos(Mat *input_mat, M
 
    return;
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// The basis vectors of the s-step Arnoldi as the columns of one dense device matrix
+// The vectors made by vec_create_device_vecs_kokkos are slices of one device buffer with a fixed
+// stride (the padding between them is zero and stays zero), so vecs[0] to vecs[n_vecs-1] are the
+// leading columns of a column-major matrix with that stride as its number of rows
+// found is false if the vectors were not made that way
+// The first n_read vectors are synced to the device, and the n_write after those are also
+// marked as modified on the device
+static PetscErrorCode sstep_basis_view(Vec *vecs, const PetscInt n_read, const PetscInt n_write, \
+               Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> *basis, bool *found)
+{
+   PetscScalarKokkosView *buffer = NULL;
+   PetscInt n;
+
+   PetscFunctionBegin;
+   *found = false;
+   PetscCall(PetscObjectContainerQuery((PetscObject)vecs[0], "pflare_duplicate_vecs", &buffer));
+   if (!buffer) PetscFunctionReturn(PETSC_SUCCESS);
+
+   PetscCall(VecGetLocalSize(vecs[0], &n));
+   const PetscInt64 align = PetscMax((PetscInt64)(64 / sizeof(PetscScalar)), (PetscInt64)1);
+   const PetscInt64 lda = ((n + align - 1) / align) * align;
+
+   for (PetscInt i = 0; i < n_read; i++)
+   {
+      ConstPetscScalarKokkosView v;
+      PetscCall(VecGetKokkosView(vecs[i], &v));
+      PetscCall(VecRestoreKokkosView(vecs[i], &v));
+   }
+   for (PetscInt i = n_read; i < n_read + n_write; i++)
+   {
+      PetscScalarKokkosView v;
+      PetscCall(VecGetKokkosView(vecs[i], &v));
+      PetscCall(VecRestoreKokkosView(vecs[i], &v));
+   }
+
+   *basis = Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace>(buffer->data(), (size_t)lda, (size_t)(n_read + n_write));
+   *found = true;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// One orthogonalisation pass of the s-step Arnoldi on a block of n_cols new vectors, as dense
+// matrix products on the device with two reductions
+// vecs holds the n_old existing basis vectors followed by the block
+// X (n_old x n_cols, column-major) returns the components of the block along the existing basis,
+// which are removed from the block, and G (n_cols x n_cols) the Gram matrix of the block after that
+// done is zero (and nothing is changed) if the vectors are not slices of one device buffer
+PETSC_INTERN void sstep_project_gram_kokkos(Vec *vecs, const int n_old, const int n_cols, \
+               PetscReal *X, PetscReal *G, int *done)
+{
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> DenseView;
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, Kokkos::HostSpace> DenseHostView;
+   DenseView basis;
+   bool found;
+   MPI_Comm comm;
+   PetscMPIInt count;
+
+   *done = 0;
+   PetscCallVoid(sstep_basis_view(vecs, n_old, n_cols, &basis, &found));
+   if (!found) return;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)vecs[0], &comm));
+
+   auto Q = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)0, (size_t)n_old));
+   auto V = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)n_old, (size_t)(n_old + n_cols)));
+
+   // X = Q^T V
+   DenseView X_d("sstep_X", n_old, n_cols);
+   DenseHostView X_h("sstep_X_h", n_old, n_cols);
+   DenseHostView X_out(X, n_old, n_cols);
+   KokkosBlas::gemm("T", "N", 1.0, Q, V, 0.0, X_d);
+   Kokkos::deep_copy(X_h, X_d);
+   PetscCallVoid(PetscMPIIntCast((PetscInt)n_old * n_cols, &count));
+   PetscCallMPIAbort(comm, MPI_Allreduce(X_h.data(), X, count, MPIU_SCALAR, MPIU_SUM, comm));
+   Kokkos::deep_copy(X_d, X_out);
+
+   // V = V - Q X
+   KokkosBlas::gemm("N", "N", -1.0, Q, X_d, 1.0, V);
+
+   // G = V^T V
+   DenseView G_d("sstep_G", n_cols, n_cols);
+   DenseHostView G_h("sstep_G_h", n_cols, n_cols);
+   KokkosBlas::gemm("T", "N", 1.0, V, V, 0.0, G_d);
+   Kokkos::deep_copy(G_h, G_d);
+   PetscCallVoid(PetscMPIIntCast((PetscInt)n_cols * n_cols, &count));
+   PetscCallMPIAbort(comm, MPI_Allreduce(G_h.data(), G, count, MPIU_SCALAR, MPIU_SUM, comm));
+
+   *done = 1;
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Overwrites the block of n_cols vectors after the n_old existing basis vectors in vecs with the
+// block times the upper triangular R_inv (n_cols x n_cols, column-major), in one pass over the rows
+// done is zero (and nothing is changed) if the vectors are not slices of one device buffer
+PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const int n_cols, \
+               PetscReal *R_inv, int *done)
+{
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> DenseView;
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, Kokkos::HostSpace> DenseHostView;
+   DenseView basis;
+   bool found;
+
+   *done = 0;
+   PetscCallVoid(sstep_basis_view(vecs, n_old, n_cols, &basis, &found));
+   if (!found) return;
+
+   DenseView R_d("sstep_R_inv", n_cols, n_cols);
+   DenseHostView R_h(R_inv, n_cols, n_cols);
+   Kokkos::deep_copy(R_d, R_h);
+
+   // Going backwards through the columns, each new column only needs the old values of
+   // the columns before it, so this can be done in place
+   Kokkos::parallel_for(
+      Kokkos::RangePolicy<>(0, basis.extent(0)), KOKKOS_LAMBDA(const size_t i) {
+         for (int c = n_cols - 1; c >= 0; c--)
+         {
+            PetscScalar sum = 0.0;
+            for (int l = 0; l <= c; l++) sum += basis(i, n_old + l) * R_d(l, c);
+            basis(i, n_old + c) = sum;
+         }
+   });
+
+   *done = 1;
+   return;
+}
