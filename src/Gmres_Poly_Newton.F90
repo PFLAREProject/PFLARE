@@ -1443,6 +1443,7 @@ module gmres_poly_newton
       real(kind=kind(1d0)), dimension(:), allocatable :: column_ratio
       PetscReal :: relation_error, relation_tol
       integer :: n_tightened, n_extra_matvecs, p_block, n_resume, n_resume_start, m_target, n_stretches
+      integer :: n_tightened_before
       logical :: lucky
       PetscReal :: ratio_option
       PetscBool :: ratio_found, discard_start, check_blocks
@@ -1692,6 +1693,7 @@ module gmres_poly_newton
          end do
          p_block = p
          ratio_before = ratio_max
+         n_tightened_before = n_tightened
          call PetscTime(time_end, ierr)
          time_host = time_host + time_end - time_mark
 
@@ -1739,6 +1741,10 @@ module gmres_poly_newton
             ratio_max = min(ratio_max, maxval(column_ratio(1:p)))
          end do
 
+         ! If the check cut this block to fewer than three columns the ratio is not what is
+         ! wrong either, so treat it in the same way as keeping none
+         if (p > 0 .AND. p < 3 .AND. p_block >= 3 .AND. n_tightened > n_tightened_before) p = 0
+
          n_wasted = n_wasted + p_block - p
          kept_history(n_blocks) = p
          deallocate(C, R_new, column_ratio)
@@ -1751,6 +1757,7 @@ module gmres_poly_newton
             time_history(n_blocks) = 0
             ! The bound goes back to what it was, as it was not the ratio that failed this block
             ratio_max = ratio_before
+            H_n(:, j + 1:j + p_block) = 0
             m_target = min(k, j + n_resume)
             call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2)
             n_reductions = n_reductions + 3 * (m - j)
