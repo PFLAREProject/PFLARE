@@ -1341,13 +1341,14 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m)
+   subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m, passes)
 
       ! Continues an Arnoldi that has done m_done steps up to m_max steps, one step at a time
       ! in the same way as the arnoldi routine
       ! V_n(1:m_done+1) must hold the basis and H_n(1:m_done+1, 1:m_done) the Hessenberg matrix
       ! Returns the number of steps done in m, which is less than m_max only if we hit
       ! the lucky tolerance
+      ! passes is the number of Gram-Schmidt passes in each step (one if not given)
 
       ! ~~~~~~
       type(tMat), intent(in)                    :: matrix
@@ -1357,23 +1358,31 @@ module gmres_poly_newton
       PetscReal, dimension(:,:), intent(inout)  :: H_n
       integer, intent(in)                       :: m_done, m_max
       integer, intent(out)                      :: m
+      integer, intent(in), optional             :: passes
 
       ! Local variables
       PetscErrorCode :: ierr
       PetscReal, dimension(m_max) :: neg_h
       PetscInt :: m_petscint
+      integer :: n_passes, i_pass
 
       ! ~~~~~~
+
+      n_passes = 1
+      if (present(passes)) n_passes = passes
 
       do m = m_done + 1, m_max
 
          m_petscint = m
          call MatMult(matrix, V_n(m), w_j, ierr)
 
-         call VecMDot(w_j, m_petscint, V_n, neg_h, ierr)
-         H_n(1:m, m) = neg_h(1:m)
-         neg_h(1:m) = -neg_h(1:m)
-         call VecMAXPY(w_j, m_petscint, neg_h, V_n, ierr)
+         H_n(1:m, m) = 0
+         do i_pass = 1, n_passes
+            call VecMDot(w_j, m_petscint, V_n, neg_h, ierr)
+            H_n(1:m, m) = H_n(1:m, m) + neg_h(1:m)
+            neg_h(1:m) = -neg_h(1:m)
+            call VecMAXPY(w_j, m_petscint, neg_h, V_n, ierr)
+         end do
 
          call VecNorm(w_j, NORM_2, H_n(m+1, m), ierr)
          if (H_n(m+1, m) < lucky_tol) return
@@ -1431,7 +1440,7 @@ module gmres_poly_newton
       integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
       integer :: n_blocks, n_wasted, n_reductions, n_single, s_est_ritz, s_est_harmonic
       integer, dimension(:), allocatable :: kept_history
-      PetscLogDouble :: time_start, time_end, time_block
+      PetscLogDouble :: time_start, time_end, time_block, time_host, time_mark
       PetscLogDouble, dimension(:), allocatable :: time_history
       PetscErrorCode :: ierr
       PetscInt :: n_petscint
@@ -1452,6 +1461,7 @@ module gmres_poly_newton
       allocate(kept_history(k))
       call PetscTime(time_start, ierr)
       use_kernels = kernels /= 0
+      time_host = 0
       allocate(time_history(k))
       allocate(vec_handles(size(V_n)))
       do i_loc = 1, size(V_n)
@@ -1580,7 +1590,10 @@ module gmres_poly_newton
          ! First pass: project out the existing basis and Cholesky QR the block
          ! ~~~~~~~~~
          call project_and_gram(sb, X_one)
+         call PetscTime(time_mark, ierr)
          call partial_cholesky(G, sb, omega, p, Z)
+         call PetscTime(time_end, ierr)
+         time_host = time_host + time_end - time_mark
          n_reductions = n_reductions + 2
          if (p == 0) then
             n_wasted = n_wasted + sb
@@ -1594,7 +1607,10 @@ module gmres_poly_newton
          ! Second pass on the columns we kept
          ! ~~~~~~~~~
          call project_and_gram(p, X_two)
+         call PetscTime(time_mark, ierr)
          call partial_cholesky(G, p, omega, p_two, Z_two)
+         call PetscTime(time_end, ierr)
+         time_host = time_host + time_end - time_mark
          n_reductions = n_reductions + 2
          if (p_two == 0) then
             n_wasted = n_wasted + sb
@@ -1611,6 +1627,7 @@ module gmres_poly_newton
          ! Recover the new columns of the Hessenberg matrix
          ! The block before orthogonalising is W(:, 1:p) = V_n(1:j+1) C + V_n(j+2:j+p+1) R_new
          ! ~~~~~~~~~
+         call PetscTime(time_mark, ierr)
          allocate(C(n_old, p), R_new(p, p), R_full(j + p + 1, p + 1), rhs(j + p + 1, p))
          C = X_one(1:n_old, 1:p) + matmul(X_two(1:n_old, 1:p), Z(1:p, 1:p))
          R_new = matmul(Z_two(1:p, 1:p), Z(1:p, 1:p))
@@ -1638,6 +1655,8 @@ module gmres_poly_newton
          end do
          H_n(1:j + p + 1, j + 1:j + p) = real(rhs, kind=kind(H_n))
          deallocate(C, R_new, R_full, rhs)
+         call PetscTime(time_end, ierr)
+         time_host = time_host + time_end - time_mark
 
          call PetscTime(time_end, ierr)
          time_history(n_blocks) = time_end - time_block
@@ -1807,7 +1826,9 @@ module gmres_poly_newton
             if (n_blocks > 0) print '(A,I0,A,I0)', "s-step Arnoldi: estimated first block, Ritz points ", &
                   s_est_ritz, " harmonic Ritz points ", s_est_harmonic
             if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
-            if (n_blocks > 0) print '(A,*(1X,ES9.2))', "s-step Arnoldi: time per block", time_history(1:n_blocks)
+            if (n_blocks > 0) print '(A,ES10.3)', "s-step Arnoldi: host time in the Cholesky and Hessenberg recovery ", time_host
+            if (n_blocks > 0 .AND. n_blocks <= 12) print '(A,*(1X,ES9.2))', "s-step Arnoldi: time per block", &
+                  time_history(1:n_blocks)
          end if
 
       end subroutine view_counts
@@ -1852,7 +1873,8 @@ module gmres_poly_newton
       PetscInt :: sstep_size, sstep_start
       PetscLogDouble :: time_start, time_end
       PetscBool :: sstep_view, sstep_warm, option_found
-      PetscInt :: sstep_kernels
+      PetscInt :: sstep_kernels, arnoldi_passes
+      PetscLogDouble :: time_roots
 
       ! ~~~~~~    
 
@@ -1903,6 +1925,9 @@ module gmres_poly_newton
       sstep_view = PETSC_FALSE
       sstep_kernels = 2
       sstep_warm = PETSC_FALSE
+      arnoldi_passes = 1
+      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_arnoldi_passes', arnoldi_passes, option_found, ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep', sstep_size, option_found, ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
@@ -1929,12 +1954,23 @@ module gmres_poly_newton
                   int(sstep_kernels))
       else
          call PetscTime(time_start, ierr)
-         call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+         if (arnoldi_passes > 1) then
+            ! Temporary: an ordinary Arnoldi with more than one Gram-Schmidt pass in each step
+            call arnoldi(matrix, 0, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+            if (poly_order > 0 .AND. .NOT. H_n(2, 1) < PFLARE_TOL_LUCKY) then
+               call arnoldi_extend(matrix, PFLARE_TOL_LUCKY, V_n, w_j, H_n, 1, poly_order + 1, m, int(arnoldi_passes))
+            end if
+         else
+            call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+         end if
          call PetscTime(time_end, ierr)
          if (sstep_view .AND. comm_rank == 0) then
-            print '(A,I0,A,I0,A,ES10.3)', "Arnoldi: steps ", m, " reductions ", 1 + 2 * m, " time ", time_end - time_start
+            print '(A,I0,A,I0,A,I0,A,ES10.3)', "Arnoldi: steps ", m, " passes ", arnoldi_passes, &
+                  " reductions ", 1 + (1 + int(arnoldi_passes)) * m, " time ", time_end - time_start
          end if
       end if
+
+      call PetscTime(time_roots, ierr)
 
       if (root_rule == NEWTON_ROOTS_ADAPTIVE) then
 
@@ -2041,6 +2077,11 @@ module gmres_poly_newton
 
       end if     
 
+      end if
+
+      call PetscTime(time_end, ierr)
+      if (sstep_view .AND. comm_rank == 0) then
+         print '(A,ES10.3)', "Newton roots: host time to choose and order the roots ", time_end - time_roots
       end if
 
       ! Cleanup
