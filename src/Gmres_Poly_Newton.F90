@@ -1206,6 +1206,7 @@ module gmres_poly_newton
       ! Local variables
       integer :: i_loc, j_loc, errorcode
       real(kind=kind(1d0)) :: pivot, norm_before
+      PetscErrorCode :: ierr
       PetscReal, dimension(n, n) :: R_copy
       PetscReal, dimension(n) :: sigma
       PetscReal, dimension(1, 1) :: U, VT
@@ -1236,8 +1237,12 @@ module gmres_poly_newton
          ! The condition number of the factor so far
          R_copy(1:j_loc, 1:j_loc) = real(R(1:j_loc, 1:j_loc), kind=kind(sigma))
          j_bl = int(j_loc, kind=kind(j_bl))
+         ! LAPACK's singular values only path probes the IEEE arithmetic with an Inf and a NaN
+         ! (ieeeck), so floating point traps are turned off around it
+         call PetscFPTrapPush(PETSC_FP_TRAP_OFF, ierr)
          call PFLAREgesvd('N', 'N', j_bl, j_bl, R_copy, lda_bl, &
                   sigma, U, one_bl, VT, one_bl, work, lwork, info)
+         call PetscFPTrapPop(ierr)
          if (info /= 0) then
             print *, "SVD in the partial Cholesky failed"
             call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
