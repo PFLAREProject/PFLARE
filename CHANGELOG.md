@@ -10,8 +10,9 @@ for earlier changes please see the git history.
   GMRES polynomial that drops any degree that does not reduce the residual and
   only adds extra roots where they do not make the polynomial worse
 - New `-pc_pflareinv_arnoldi_block_size` and `-pc_air_arnoldi_block_size` (with
-  `c_` and `coarsest_` versions): build the Krylov basis of a Newton basis GMRES
-  polynomial several vectors at a time, with far fewer reductions at high order
+  `c_` and `coarsest_` versions): an s-step Arnoldi with every block orthogonalised
+  twice, giving far fewer reductions and a more accurate basis at high order,
+  particularly with `newton_adaptive`
 - `-ksp_view` now shows how many roots a Newton basis GMRES polynomial applies
 - Much faster PCAIR setup with Kokkos on GPUs, from faster device kernels and
   keeping most of the setup's intermediate matrices as device data; results are

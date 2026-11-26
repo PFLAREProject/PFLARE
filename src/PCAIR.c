@@ -2542,9 +2542,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC pc, PetscInt input_int)
 
   Note:
   Only affects the `newton`, `newton_no_extra` and `newton_adaptive` inverse types (see `PCAIRSetInverseType()`).
-  With a block size bigger than zero the Krylov basis is built that many vectors at a time and orthogonalised a
-  block at a time, which needs two global reductions for each block where the ordinary Arnoldi needs two for each
-  vector. The first ten steps are always ordinary, so this only changes anything when the polynomial order (see
+  With a block size bigger than zero the Krylov basis is built that many vectors at a time and orthogonalised
+  twice, a block at a time, which needs two global reductions for each block where the ordinary (single-pass)
+  Arnoldi needs two for each vector. This also gives a more accurate basis at high order, particularly with
+  `newton_adaptive`. The first ten steps are always ordinary, so this only changes anything when the polynomial order (see
   `PCAIRSetPolyOrder()`) is well above ten.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetArnoldiBlockSize()`, `PCAIRSetPolyOrder()`, `PCAIRSetCArnoldiBlockSize()`, `PCAIRSetCoarsestArnoldiBlockSize()`
@@ -2744,8 +2745,9 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC pc, PetscInt input_int)
   Note:
   Only affects the `newton`, `newton_no_extra` and `newton_adaptive` coarse-grid solver types (see
   `PCAIRSetCoarsestInverseType()`). With a block size bigger than zero the Krylov basis is built that many vectors
-  at a time and orthogonalised a block at a time, which needs two global reductions for each block where the
-  ordinary Arnoldi needs two for each vector. The block size is reduced automatically if a block is too
+  at a time and orthogonalised twice, a block at a time, which needs two global reductions for each block where
+  the ordinary (single-pass) Arnoldi needs two for each vector. This also gives a more accurate basis at high
+  order, particularly with `newton_adaptive`. The block size is reduced automatically if a block is too
   ill-conditioned. The first ten steps are always ordinary, so this only changes anything when the coarse-grid
   polynomial order (see `PCAIRSetCoarsestPolyOrder()`) is well above ten; 20 is a reasonable value.
 

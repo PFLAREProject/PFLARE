@@ -413,8 +413,9 @@ PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
   Note:
   This only affects the `newton`, `newton_no_extra` and `newton_adaptive` types selected with `PCPFLAREINVSetType()`.
   With a block size bigger than zero the Krylov basis is built that many vectors at a time with matrix-vector
-  products alone and orthogonalised a block at a time, which needs two global reductions for each block where the
-  ordinary Arnoldi needs two for each vector. The block size is reduced automatically if a block is too
+  products alone and orthogonalised twice, a block at a time, which needs two global reductions for each block
+  where the ordinary (single-pass) Arnoldi needs two for each vector. This also gives a more accurate basis at
+  high order, particularly with `newton_adaptive`. The block size is reduced automatically if a block is too
   ill-conditioned, and the ordinary Arnoldi is used for the steps where blocks cannot be kept accurate. The first
   ten steps are always ordinary, so this only changes anything when the polynomial order (see
   `PCPFLAREINVSetPolyOrder()`) is well above ten; 20 is a reasonable value.

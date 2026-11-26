@@ -11,7 +11,7 @@ All options can be set either through command line arguments or programmatically
    | ``-pc_pflareinv_type``  |  PCPFLAREINVGetType  PCPFLAREINVSetType  | The inverse type, given above | arnoldi |   
    | ``-pc_pflareinv_poly_order``  |  PCPFLAREINVGetPolyOrder  PCPFLAREINVSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
    | ``-pc_pflareinv_sparsity_order``  |  PCPFLAREINVGetSparsityOrder  PCPFLAREINVSetSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |   
-   | ``-pc_pflareinv_arnoldi_block_size``  |  PCPFLAREINVGetArnoldiBlockSize  PCPFLAREINVSetArnoldiBlockSize  | For the Newton basis inverse types, build the Krylov basis this many vectors at a time with an s-step Arnoldi, which needs far fewer global reductions at high polynomial order; 0 is the ordinary Arnoldi | 0 |
+   | ``-pc_pflareinv_arnoldi_block_size``  |  PCPFLAREINVGetArnoldiBlockSize  PCPFLAREINVSetArnoldiBlockSize  | For the Newton basis inverse types, build the Krylov basis this many vectors at a time with an s-step Arnoldi with every block orthogonalised twice: far fewer reductions, and a more accurate basis at high order, particularly with ``newton_adaptive``; 0 is the ordinary (single-pass) Arnoldi | 0 |
    | ``-pc_pflareinv_matrix_free``  |  PCPFLAREINVGetMatrixFree  PCPFLAREINVSetMatrixFree  | Is the inverse applied matrix free, or is an assembled matrix built and used | false |
    | ``-pc_pflareinv_reuse_poly_coeffs``  |  PCPFLAREINVGetReusePolyCoeffs  PCPFLAREINVSetReusePolyCoeffs  | Don't recompute the polynomial inverse coefficients during setup with reuse | false |                                        
 
@@ -61,7 +61,7 @@ All options can be set either through command line arguments or programmatically
    | ------------- | -- | ------------- | --- |
    | ``-pc_air_inverse_type``  |  PCAIRGetInverseType  PCAIRSetInverseType  | The inverse type, given above | arnoldi |
    | ``-pc_air_poly_order``  |  PCAIRGetPolyOrder  PCAIRSetPolyOrder  | If using a polynomial inverse type, this determines the order of the polynomial | 6 |
-   | ``-pc_air_arnoldi_block_size``  |  PCAIRGetArnoldiBlockSize  PCAIRSetArnoldiBlockSize  | For a Newton basis inverse type, build the Krylov basis this many vectors at a time with an s-step Arnoldi; 0 is the ordinary Arnoldi. Only matters at polynomial orders well above ten | 0 |
+   | ``-pc_air_arnoldi_block_size``  |  PCAIRGetArnoldiBlockSize  PCAIRSetArnoldiBlockSize  | For a Newton basis inverse type, build the Krylov basis this many vectors at a time with an s-step Arnoldi with every block orthogonalised twice: far fewer reductions, and a more accurate basis at high order, particularly with ``newton_adaptive``; 0 is the ordinary (single-pass) Arnoldi. Only matters at polynomial orders well above ten | 0 |
    | ``-pc_air_inverse_sparsity_order``  |  PCAIRGetInverseSparsityOrder  PCAIRSetInverseSparsityOrder  | This power of A is used as the sparsity in assembled inverses | 1 |        
    | ``-pc_air_diag_scale_polys``  |  PCAIRGetDiagScalePolys  PCAIRSetDiagScalePolys  | If using a polynomial inverse type, diagonally scale before computing | false (if inverse type neumann this is always true and cannot be overridden) |    
    | ``-pc_air_matrix_free_polys``  |  PCAIRGetMatrixFreePolys  PCAIRSetMatrixFreePolys  | Do smoothing matrix-free if possible | false |   
@@ -95,7 +95,7 @@ By default the coarse grid is solved with one application of a polynomial approx
    | ------------- | -- | ------------- | --- |
    | ``-pc_air_coarsest_inverse_type``  |  PCAIRGetCoarsestInverseType  PCAIRSetCoarsestInverseType  | Coarse grid inverse type, given above | arnoldi |
    | ``-pc_air_coarsest_poly_order``  |  PCAIRGetCoarsestPolyOrder  PCAIRSetCoarsestPolyOrder  | Coarse grid polynomial order | 6 |
-   | ``-pc_air_coarsest_arnoldi_block_size``  |  PCAIRGetCoarsestArnoldiBlockSize  PCAIRSetCoarsestArnoldiBlockSize  | For a Newton basis coarse grid inverse type, the block size of an s-step Arnoldi; 0 is the ordinary Arnoldi | 0 |
+   | ``-pc_air_coarsest_arnoldi_block_size``  |  PCAIRGetCoarsestArnoldiBlockSize  PCAIRSetCoarsestArnoldiBlockSize  | For a Newton basis coarse grid inverse type, the block size of an s-step Arnoldi with every block orthogonalised twice: far fewer reductions, and a more accurate basis at high order, particularly with ``newton_adaptive``; 0 is the ordinary (single-pass) Arnoldi | 0 |
    | ``-pc_air_coarsest_inverse_sparsity_order``  |  PCAIRGetCoarsestInverseSparsityOrder  PCAIRSetCoarsestInverseSparsityOrder  | Coarse grid sparsity order | 1 |
    | ``-pc_air_coarsest_matrix_free_polys``  |  PCAIRGetCoarsestMatrixFreePolys  PCAIRSetCoarsestMatrixFreePolys  | Do smoothing matrix-free if possible on the coarse grid | false |
    | ``-pc_air_coarsest_diag_scale_polys``  |  PCAIRGetCoarsestDiagScalePolys  PCAIRSetCoarsestDiagScalePolys  | If using a polynomial inverse type, diagonally scale on the coarse grid before computing | false (if coarsest inverse type neumann this is always true and cannot be overridden) |                 
