@@ -1040,6 +1040,9 @@ endif
 # ~~~~~~~~~~~
 # ~~~~~~~~~~~
 run_tests_no_load_serial:
+	@echo "Test PCPFLAREINV adaptive newton basis built with an s-step Arnoldi that reaches the noise floor"
+	./ex6f_getcoeffs -m 8 -n 8 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 40 \
+	 -pc_pflareinv_matrix_free -pc_pflareinv_arnoldi_block_size 4
 	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
 	./pcair_option_changes -toggle_reuse_sparsity
 	./pcair_option_changes -toggle_reuse_sparsity -pc_air_reuse_sparsity
@@ -1829,6 +1832,9 @@ run_tests_no_load_parallel:
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
 else
+	@echo "Test PCPFLAREINV adaptive newton basis built with an s-step Arnoldi that reaches the noise floor in parallel"
+	$(MPIEXEC) -n 2 ./ex6f_getcoeffs -m 8 -n 8 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 40 \
+	 -pc_pflareinv_matrix_free -pc_pflareinv_arnoldi_block_size 4
 	@echo "Test turning PCAIR reuse sparsity on and off between setups on a pc that is already set up"
 	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity
 	$(MPIEXEC) -n 3 ./pcair_option_changes -toggle_reuse_sparsity -pc_air_diag_update
