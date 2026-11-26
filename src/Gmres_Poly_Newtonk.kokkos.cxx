@@ -1,6 +1,7 @@
 // Our petsc kokkos definitions - has to go first
 #include "kokkos_helper.hpp"
 #include <iostream>
+#include <vector>
 
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -915,6 +916,128 @@ PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const i
             basis(i, n_old + c) = sum;
          }
    });
+
+   *done = 1;
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// All the dot products of one set of basis vectors against another in one reduction, for the
+// low synchronisation s-step Arnoldi: out (n_left x n_right, column-major) is
+// vecs[l_start : l_start + n_left]^T vecs[r_start : r_start + n_right]
+// If with_w is non-zero the squared norm of w is computed in the same reduction
+// The products are a KokkosBlas gemm, or if native is non-zero our own kernel
+// done is zero if the vectors are not slices of one device buffer
+PETSC_INTERN void sstep_fused_dots_kokkos(Vec *vecs, const int l_start, const int n_left, const int r_start, \
+               const int n_right, Vec *w, const int with_w, PetscReal *out, PetscReal *w_norm_sq, \
+               const int native, int *done)
+{
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> DenseView;
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, Kokkos::HostSpace> DenseHostView;
+   DenseView basis;
+   bool found;
+   MPI_Comm comm;
+   PetscMPIInt count;
+
+   *done = 0;
+   *w_norm_sq = 0.0;
+   if (with_w)
+   {
+      PetscBool is_kokkos;
+      PetscCallVoid(PetscObjectTypeCompareAny((PetscObject)(*w), &is_kokkos, VECSEQKOKKOS, VECMPIKOKKOS, ""));
+      if (!is_kokkos) return;
+   }
+   PetscCallVoid(sstep_basis_view(vecs, PetscMax(l_start + n_left, r_start + n_right), 0, &basis, &found));
+   if (!found) return;
+   PetscCallVoid(PetscObjectGetComm((PetscObject)vecs[0], &comm));
+
+   auto L = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)l_start, (size_t)(l_start + n_left)));
+   auto R = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)r_start, (size_t)(r_start + n_right)));
+
+   DenseView D_d("sstep_D", n_left, n_right);
+   DenseHostView D_h("sstep_D_h", n_left, n_right);
+   const PetscInt n_rows = basis.extent(0);
+   if (native)
+   {
+      // One team for each entry, with a reduction over the rows
+      Kokkos::parallel_for(
+         Kokkos::TeamPolicy<>(n_left * n_right, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
+            const int q = t.league_rank() % n_left;
+            const int c = t.league_rank() / n_left;
+            PetscScalar sum = 0.0;
+            Kokkos::parallel_reduce(
+               Kokkos::TeamThreadRange(t, n_rows), [&](const PetscInt i, PetscScalar &sum_loc) {
+                  sum_loc += L(i, q) * R(i, c);
+               }, sum);
+            D_d(q, c) = sum;
+      });
+   }
+   else KokkosBlas::gemm("T", "N", 1.0, L, R, 0.0, D_d);
+   Kokkos::deep_copy(D_h, D_d);
+
+   // The local squared norm of w goes on the end of the same buffer
+   const size_t n_entries = (size_t)n_left * (size_t)n_right;
+   std::vector<PetscScalar> send(n_entries + 1), recv(n_entries + 1);
+   for (size_t i = 0; i < n_entries; i++) send[i] = D_h.data()[i];
+   send[n_entries] = 0.0;
+   if (with_w)
+   {
+      ConstPetscScalarKokkosView w_d;
+      PetscScalar sum = 0.0;
+      PetscCallVoid(VecGetKokkosView(*w, &w_d));
+      Kokkos::parallel_reduce(
+         Kokkos::RangePolicy<>(0, w_d.extent(0)), KOKKOS_LAMBDA(const size_t i, PetscScalar &sum_loc) {
+            sum_loc += w_d(i) * w_d(i);
+         }, sum);
+      PetscCallVoid(VecRestoreKokkosView(*w, &w_d));
+      send[n_entries] = sum;
+   }
+   PetscCallVoid(PetscMPIIntCast((PetscInt)(n_entries + 1), &count));
+   PetscCallMPIAbort(comm, MPI_Allreduce(send.data(), recv.data(), count, MPIU_SCALAR, MPIU_SUM, comm));
+   for (size_t i = 0; i < n_entries; i++) out[i] = recv[i];
+   *w_norm_sq = recv[n_entries];
+
+   *done = 1;
+   return;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+
+// Removes the components X (n_old x n_cols, column-major) along the n_old existing basis vectors
+// from the block of n_cols vectors after them in vecs, with no reduction
+// done is zero (and nothing is changed) if the vectors are not slices of one device buffer
+PETSC_INTERN void sstep_project_kokkos(Vec *vecs, const int n_old, const int n_cols, \
+               PetscReal *X, const int native, int *done)
+{
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, DefaultMemorySpace> DenseView;
+   typedef Kokkos::View<PetscScalar **, Kokkos::LayoutLeft, Kokkos::HostSpace> DenseHostView;
+   DenseView basis;
+   bool found;
+
+   *done = 0;
+   PetscCallVoid(sstep_basis_view(vecs, n_old, n_cols, &basis, &found));
+   if (!found) return;
+
+   auto Q = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)0, (size_t)n_old));
+   auto V = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)n_old, (size_t)(n_old + n_cols)));
+
+   DenseView X_d("sstep_X", n_old, n_cols);
+   DenseHostView X_h(X, n_old, n_cols);
+   Kokkos::deep_copy(X_d, X_h);
+   const PetscInt n_rows = basis.extent(0);
+
+   // V = V - Q X
+   if (native)
+   {
+      Kokkos::parallel_for(
+         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, (PetscInt)n_cols}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt c) {
+            PetscScalar sum = 0.0;
+            for (int q = 0; q < n_old; q++) sum += Q(i, q) * X_d(q, c);
+            V(i, c) -= sum;
+      });
+   }
+   else KokkosBlas::gemm("N", "N", -1.0, Q, X_d, 1.0, V);
 
    *done = 1;
    return;

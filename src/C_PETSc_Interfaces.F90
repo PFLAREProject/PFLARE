@@ -517,6 +517,27 @@ module c_petsc_interfaces
          integer(c_int) :: done
       end subroutine sstep_project_gram_kokkos
 
+      subroutine sstep_fused_dots_kokkos(vecs_array, l_start, n_left, r_start, n_right, w_vec, with_w, &
+                  out, w_norm_sq, native, done) &
+         bind(c, name="sstep_fused_dots_kokkos")
+         use iso_c_binding
+         integer(c_long_long), dimension(*) :: vecs_array
+         integer(c_int), value :: l_start, n_left, r_start, n_right, with_w, native
+         integer(c_long_long) :: w_vec
+         type(c_ptr), value :: out
+         PetscReal :: w_norm_sq
+         integer(c_int) :: done
+      end subroutine sstep_fused_dots_kokkos
+
+      subroutine sstep_project_kokkos(vecs_array, n_old, n_cols, X, native, done) &
+         bind(c, name="sstep_project_kokkos")
+         use iso_c_binding
+         integer(c_long_long), dimension(*) :: vecs_array
+         integer(c_int), value :: n_old, n_cols, native
+         type(c_ptr), value :: X
+         integer(c_int) :: done
+      end subroutine sstep_project_kokkos
+
       subroutine sstep_gemm_warmup_kokkos() &
          bind(c, name="sstep_gemm_warmup_kokkos")
          use iso_c_binding
