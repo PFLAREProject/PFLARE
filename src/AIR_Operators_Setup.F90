@@ -281,7 +281,8 @@ module air_operators_setup
                   air_data%inv_A_ff_poly_data(our_level)%gmres_poly_order, &
                   air_data%options%diag_scale_polys, &
                   air_data%inv_A_ff_poly_data(our_level)%buffers, &
-                  air_data%inv_A_ff_poly_data(our_level)%coefficients)        
+                  air_data%inv_A_ff_poly_data(our_level)%coefficients, &
+                  air_data%options%arnoldi_block_size)
          air_data%inv_A_ff_poly_data(our_level)%coefficients_set = &
                   inverse_type_is_polynomial(air_data%inv_A_ff_poly_data(our_level)%inverse_type)
       end if
@@ -301,7 +302,8 @@ module air_operators_setup
                   air_data%inv_A_ff_poly_data_dropped(our_level)%gmres_poly_order, &
                   air_data%options%diag_scale_polys, &
                   air_data%inv_A_ff_poly_data_dropped(our_level)%buffers, &
-                  air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients)          
+                  air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients, &
+                  air_data%options%arnoldi_block_size)
             air_data%inv_A_ff_poly_data_dropped(our_level)%coefficients_set = &
                   inverse_type_is_polynomial(air_data%inv_A_ff_poly_data_dropped(our_level)%inverse_type)
          end if
@@ -342,7 +344,9 @@ module air_operators_setup
                   air_data%inv_A_cc_poly_data(our_level)%gmres_poly_order, &
                   air_data%options%diag_scale_polys, &
                   air_data%inv_A_cc_poly_data(our_level)%buffers, &
-                  air_data%inv_A_cc_poly_data(our_level)%coefficients)  
+                  air_data%inv_A_cc_poly_data(our_level)%coefficients, &
+                  merge(air_data%options%arnoldi_block_size, air_data%options%c_arnoldi_block_size, &
+                        air_data%options%c_arnoldi_block_size == -1))
             air_data%inv_A_cc_poly_data(our_level)%coefficients_set = &
                   inverse_type_is_polynomial(air_data%inv_A_cc_poly_data(our_level)%inverse_type)
          end if

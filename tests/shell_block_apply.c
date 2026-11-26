@@ -42,7 +42,7 @@ PETSC_EXTERN void reset_inverse_mat_c(Mat *mat);
 //   *coeffs_ptr != NULL on entry  -> reuse: existing coefficients used, polynomial step skipped
 PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, PetscInt inverse_type, PetscInt order, \
                      PetscInt sparsity_order, PetscInt matrix_free_int, PetscInt diag_scale_polys_int, \
-                     PetscInt subcomm_int, \
+                     PetscInt subcomm_int, PetscInt arnoldi_block_size, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
                      Mat *inv_matrix);
 PETSC_EXTERN void pflareinv_shell_block_matapply_c(Mat *mat, Mat *X, Mat *Y, int *applied);
@@ -152,8 +152,8 @@ static PetscErrorCode RunMode(Mat A, PetscInt inverse_type, PetscInt poly_order,
   PetscCall(MatGetLocalSize(A, &local_size, NULL));
 
   // Build the matshell. matrix_free = 1, sparsity order is unused matrix-free,
-  // no subcomm. inv_shell must be NULL on entry so a fresh one is built.
-  calculate_and_build_approximate_inverse_c(&A, inverse_type, poly_order, 1, 1, diag_scale, 0, \
+  // no subcomm, the ordinary Arnoldi. inv_shell must be NULL on entry so a fresh one is built.
+  calculate_and_build_approximate_inverse_c(&A, inverse_type, poly_order, 1, 1, diag_scale, 0, 0, \
                                             &coeffs, &coeff_rows, &coeff_cols, &inv_shell);
 
   // Dense blocks of rhs and solutions, taking the vector type from A so a device

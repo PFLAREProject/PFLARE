@@ -25,7 +25,7 @@ PETSC_EXTERN void inverse_type_is_polynomial_c(int inverse_type, int *is_polynom
 // (not PetscInt, which is 64-bit with --with-64-bit-indices)
 PETSC_EXTERN void calculate_and_build_approximate_inverse_c(Mat *input_mat, int inverse_type, int order, \
                      int sparsity_order, int matrix_free_int, int diag_scale_polys_int, \
-                     int subcomm_int, \
+                     int subcomm_int, int arnoldi_block_size, \
                      PetscReal **coeffs_ptr, PetscInt *row_size, PetscInt *col_size, \
                      Mat *inv_matrix);
 // Block (multiple rhs) apply of a matrix-free polynomial matshell, Y = q(A) X.
@@ -64,6 +64,8 @@ typedef struct {
    int poly_order;
    // The power of the sparsity we use (if assembled)
    int inverse_sparsity_order;
+   // The block size of the s-step Arnoldi of the Newton basis types (zero is the ordinary Arnoldi)
+   int arnoldi_block_size;
    // Whether or not the mat_inverse is just a matshell and applied
    // matrix free
    PetscBool matrix_free;
@@ -166,6 +168,40 @@ static PetscErrorCode PCPFLAREINVGetPolyOrder_PFLAREINV(PC pc, PetscInt *poly_or
    PetscFunctionBegin;
    inv_data = (PC_PFLAREINV *)pc->data;    
    *poly_order = inv_data->poly_order;
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+/*@
+  PCPFLAREINVGetArnoldiBlockSize - Returns the block size of the s-step Arnoldi used by the Newton basis types of `PCPFLAREINV`
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCPFLAREINV` preconditioner context
+
+  Output Parameter:
+. block_size - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVSetArnoldiBlockSize()`, `PCPFLAREINVSetType()`
+@*/
+PetscErrorCode PCPFLAREINVGetArnoldiBlockSize(PC pc, PetscInt *block_size)
+{
+   PetscFunctionBegin;
+   PetscUseMethod(pc, "PCPFLAREINVGetArnoldiBlockSize_C", (PC, PetscInt *), (pc, block_size));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVGetArnoldiBlockSize_PFLAREINV(PC pc, PetscInt *block_size)
+{
+   PC_PFLAREINV *inv_data;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   *block_size = inv_data->arnoldi_block_size;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -355,6 +391,56 @@ PetscErrorCode PCPFLAREINVSetPolyOrder(PC pc, PetscInt poly_order)
    PetscCall(PCReset_PFLAREINV_c(pc));
    inv_data->poly_order = (int)poly_order;
    pc->setupcalled = PETSC_FALSE;  
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+// ~~~~~~~~~~
+
+/*@
+  PCPFLAREINVSetArnoldiBlockSize - Sets the block size of the s-step Arnoldi used by the Newton basis types of `PCPFLAREINV`
+
+  Logically Collective
+
+  Input Parameters:
++ pc         - the `PCPFLAREINV` preconditioner context
+- block_size - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Options Database Key:
+. -pc_pflareinv_arnoldi_block_size block_size - block size of the s-step Arnoldi for the Newton basis types; defaults to 0
+
+  Level: intermediate
+
+  Note:
+  This only affects the `newton`, `newton_no_extra` and `newton_adaptive` types selected with `PCPFLAREINVSetType()`.
+  With a block size bigger than zero the Krylov basis is built that many vectors at a time with matrix-vector
+  products alone and orthogonalised a block at a time, which needs two global reductions for each block where the
+  ordinary Arnoldi needs two for each vector. The block size is reduced automatically if a block is too
+  ill-conditioned, and the ordinary Arnoldi is used for the steps where blocks cannot be kept accurate. The first
+  ten steps are always ordinary, so this only changes anything when the polynomial order (see
+  `PCPFLAREINVSetPolyOrder()`) is well above ten; 20 is a reasonable value.
+
+.seealso: [](ch_ksp), `PCPFLAREINV`, `PCPFLAREINVGetArnoldiBlockSize()`, `PCPFLAREINVSetPolyOrder()`, `PCPFLAREINVSetType()`
+@*/
+PetscErrorCode PCPFLAREINVSetArnoldiBlockSize(PC pc, PetscInt block_size)
+{
+   PetscFunctionBegin;
+   PetscTryMethod(pc, "PCPFLAREINVSetArnoldiBlockSize_C", (PC, PetscInt), (pc, block_size));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+static PetscErrorCode PCPFLAREINVSetArnoldiBlockSize_PFLAREINV(PC pc, PetscInt block_size)
+{
+   PC_PFLAREINV *inv_data;
+   PetscInt old_size;
+
+   PetscFunctionBegin;
+   inv_data = (PC_PFLAREINV *)pc->data;
+   PetscCheck(block_size >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Arnoldi block size %" PetscInt_FMT " must not be negative", block_size);
+   PetscCall(PCPFLAREINVGetArnoldiBlockSize(pc, &old_size));
+   if (old_size == block_size) PetscFunctionReturn(PETSC_SUCCESS);
+   PetscCall(PCReset_PFLAREINV_c(pc));
+   inv_data->arnoldi_block_size = (int)block_size;
+   pc->setupcalled = PETSC_FALSE;
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
@@ -862,6 +948,8 @@ static PetscErrorCode PCDestroy_PFLAREINV_c(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetMatrixFree_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyOrder_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetArnoldiBlockSize_C", NULL));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetArnoldiBlockSize_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetSparsityOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", NULL));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyCoeffs_C", NULL));
@@ -878,7 +966,7 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
 {
    PetscBool    flg, matrix_free;
    PCPFLAREINVType deflt, type;
-   PetscInt poly_order, inverse_sparsity_order;
+   PetscInt poly_order, inverse_sparsity_order, arnoldi_block_size;
    PC_PFLAREINV *inv_data;
 
    PetscFunctionBegin;
@@ -898,6 +986,8 @@ static PetscErrorCode PCSetFromOptions_PFLAREINV_c(PC pc, PetscOptionItems Petsc
    if (flg) PetscCall(PCPFLAREINVSetPolyOrder(pc, poly_order));
    PetscCall(PetscOptionsInt("-pc_pflareinv_sparsity_order", "Sparsity order of assembled inverse", "PCPFLAREINVSetSparsityOrder", inv_data->inverse_sparsity_order, &inverse_sparsity_order, &flg));
    if (flg) PetscCall(PCPFLAREINVSetSparsityOrder(pc, inverse_sparsity_order));
+   PetscCall(PetscOptionsInt("-pc_pflareinv_arnoldi_block_size", "Block size of the s-step Arnoldi for the Newton basis types", "PCPFLAREINVSetArnoldiBlockSize", inv_data->arnoldi_block_size, &arnoldi_block_size, &flg));
+   if (flg) PetscCall(PCPFLAREINVSetArnoldiBlockSize(pc, arnoldi_block_size));
    PetscOptionsHeadEnd();
    PetscFunctionReturn(PETSC_SUCCESS);
 }
@@ -951,7 +1041,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
       calculate_and_build_approximate_inverse_c(&(pc->pmat), \
             type, \
             inv_data->poly_order, inv_data->inverse_sparsity_order, \
-            matrix_free_int, diag_scale_polys_int, subcomm_int, \
+            matrix_free_int, diag_scale_polys_int, subcomm_int, inv_data->arnoldi_block_size, \
             &new_coeffs, &new_rows, &new_cols, \
             &(inv_data->mat_inverse));
       free(inv_data->poly_coeffs);
@@ -974,7 +1064,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
                type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, diag_scale_polys_int, subcomm_int, \
+               matrix_free_int, diag_scale_polys_int, subcomm_int, inv_data->arnoldi_block_size, \
                &new_coeffs, &new_rows, &new_cols, \
                &(inv_data->mat_inverse));
          inv_data->poly_coeffs      = new_coeffs;
@@ -1002,7 +1092,7 @@ static PetscErrorCode PCSetUp_PFLAREINV_c(PC pc)
          calculate_and_build_approximate_inverse_c(&(pc->pmat), \
                type, \
                inv_data->poly_order, inv_data->inverse_sparsity_order, \
-               matrix_free_int, diag_scale_polys_int, subcomm_int, \
+               matrix_free_int, diag_scale_polys_int, subcomm_int, inv_data->arnoldi_block_size, \
                &inv_data->poly_coeffs, &inv_data->poly_coeffs_rows, &inv_data->poly_coeffs_cols, \
                &(inv_data->mat_inverse));
       }
@@ -1071,14 +1161,17 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
       else if (type == PFLAREINV_NEWTON)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  GMRES polynomial, newton basis with extra roots, order %i \n", inv_data->poly_order));
+         if (inv_data->arnoldi_block_size > 0) PetscCall(PetscViewerASCIIPrintf(viewer, "  s-step Arnoldi, block size %i \n", inv_data->arnoldi_block_size));
       }
       else if (type == PFLAREINV_NEWTON_NO_EXTRA)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  GMRES polynomial, newton basis without extra roots, order %i \n", inv_data->poly_order));
+         if (inv_data->arnoldi_block_size > 0) PetscCall(PetscViewerASCIIPrintf(viewer, "  s-step Arnoldi, block size %i \n", inv_data->arnoldi_block_size));
       }
       else if (type == PFLAREINV_NEWTON_ADAPTIVE)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "  GMRES polynomial, newton basis with adaptive degree and extra roots, order %i \n", inv_data->poly_order));
+         if (inv_data->arnoldi_block_size > 0) PetscCall(PetscViewerASCIIPrintf(viewer, "  s-step Arnoldi, block size %i \n", inv_data->arnoldi_block_size));
       }
       else if (type == PFLAREINV_SAI)
       {
@@ -1135,6 +1228,7 @@ static PetscErrorCode PCView_PFLAREINV_c(PC pc, PetscViewer viewer)
   Options Database Keys:
 + -pc_pflareinv_type        (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse type; defaults to arnoldi
 . -pc_pflareinv_poly_order  poly_order - polynomial order if using a polynomial inverse type; defaults to 6
+. -pc_pflareinv_arnoldi_block_size block_size - block size of the s-step Arnoldi for the Newton basis types; defaults to 0
 - -pc_pflareinv_matrix_free (true|false) - apply matrix-free instead of assembling the inverse; defaults to false
 
   Level: intermediate
@@ -1197,6 +1291,8 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    inv_data->poly_order = 6;
    // The power of the sparsity we use (if assembled)
    inv_data->inverse_sparsity_order = 1;
+   // The ordinary Arnoldi for the Newton basis types
+   inv_data->arnoldi_block_size = 0;
    // Whether or not the mat_inverse is just a matshell and applied
    // matrix free
    inv_data->matrix_free = PETSC_FALSE;
@@ -1228,6 +1324,8 @@ PETSC_EXTERN PetscErrorCode PCCreate_PFLAREINV(PC pc)
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetMatrixFree_C", PCPFLAREINVGetMatrixFree_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetPolyOrder_C", PCPFLAREINVSetPolyOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyOrder_C", PCPFLAREINVGetPolyOrder_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetArnoldiBlockSize_C", PCPFLAREINVSetArnoldiBlockSize_PFLAREINV));
+   PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetArnoldiBlockSize_C", PCPFLAREINVGetArnoldiBlockSize_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVSetSparsityOrder_C", PCPFLAREINVSetSparsityOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetSparsityOrder_C", PCPFLAREINVGetSparsityOrder_PFLAREINV));
    PetscCall(PetscObjectComposeFunction((PetscObject)pc, "PCPFLAREINVGetPolyCoeffs_C", PCPFLAREINVGetPolyCoeffs_PFLAREINV));

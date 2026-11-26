@@ -579,6 +579,23 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetArnoldiBlockSize_c(pc_ptr, block_size) bind(C, name='PCAIRGetArnoldiBlockSize_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)         :: block_size
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetArnoldiBlockSize(pc, block_size, ierr)
+
+   end subroutine PCAIRGetArnoldiBlockSize_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRGetInverseSparsityOrder_c')
 
       ! ~~~~~~~~
@@ -610,6 +627,23 @@ module pcair_c_fortran_bindings
       call PCAIRGetCPolyOrder(pc, order, ierr)
 
    end subroutine PCAIRGetCPolyOrder_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCArnoldiBlockSize_c(pc_ptr, block_size) bind(C, name='PCAIRGetCArnoldiBlockSize_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)         :: block_size
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetCArnoldiBlockSize(pc, block_size, ierr)
+
+   end subroutine PCAIRGetCArnoldiBlockSize_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -661,6 +695,23 @@ module pcair_c_fortran_bindings
       call PCAIRGetCoarsestPolyOrder(pc, order, ierr)
 
    end subroutine PCAIRGetCoarsestPolyOrder_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestArnoldiBlockSize_c(pc_ptr, block_size) bind(C, name='PCAIRGetCoarsestArnoldiBlockSize_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, intent(out)         :: block_size
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRGetCoarsestArnoldiBlockSize(pc, block_size, ierr)
+
+   end subroutine PCAIRGetCoarsestArnoldiBlockSize_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1622,6 +1673,23 @@ module pcair_c_fortran_bindings
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRSetArnoldiBlockSize_c(pc_ptr, block_size) bind(C, name='PCAIRSetArnoldiBlockSize_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)          :: block_size
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetArnoldiBlockSize(pc, block_size, ierr)
+
+   end subroutine PCAIRSetArnoldiBlockSize_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRSetInverseSparsityOrder_c(pc_ptr, order) bind(C, name='PCAIRSetInverseSparsityOrder_c')
 
       ! ~~~~~~~~
@@ -1653,6 +1721,23 @@ module pcair_c_fortran_bindings
       call PCAIRSetCPolyOrder(pc, order, ierr)
 
    end subroutine PCAIRSetCPolyOrder_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCArnoldiBlockSize_c(pc_ptr, block_size) bind(C, name='PCAIRSetCArnoldiBlockSize_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)          :: block_size
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetCArnoldiBlockSize(pc, block_size, ierr)
+
+   end subroutine PCAIRSetCArnoldiBlockSize_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1704,6 +1789,23 @@ module pcair_c_fortran_bindings
       call PCAIRSetCoarsestPolyOrder(pc, order, ierr)
 
    end subroutine PCAIRSetCoarsestPolyOrder_c
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestArnoldiBlockSize_c(pc_ptr, block_size) bind(C, name='PCAIRSetCoarsestArnoldiBlockSize_c')
+
+      ! ~~~~~~~~
+      integer(c_long_long), intent(inout) :: pc_ptr
+      PetscInt, value, intent(in)          :: block_size
+
+      type(tPC)                  :: pc
+      PetscErrorCode         :: ierr
+      ! ~~~~~~~~
+
+      pc%v = pc_ptr
+      call PCAIRSetCoarsestArnoldiBlockSize(pc, block_size, ierr)
+
+   end subroutine PCAIRSetCoarsestArnoldiBlockSize_c
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

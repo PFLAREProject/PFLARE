@@ -36,7 +36,7 @@ module approx_inverse_setup
    subroutine calculate_and_build_approximate_inverse(matrix, inverse_type, &
                   poly_order, inverse_sparsity_order, &
                   matrix_free, diag_scale_polys, subcomm, &
-                  inv_matrix, coefficients)
+                  inv_matrix, coefficients, arnoldi_block_size)
 
       ! Builds an approximate inverse
       ! inverse_type:
@@ -51,6 +51,8 @@ module approx_inverse_setup
       ! PFLAREINV_WJACOBI - Weighted Jacobi with weight 4 / ( 3 * || D^(-1/2) * A * D^(-1/2) ||_inf )
       ! PFLAREINV_JACOBI - Unweighted Jacobi
       ! PFLAREINV_L1JACOBI - l1 Jacobi with inverse sign(a_ii) / sum_j |a_ij|
+      ! arnoldi_block_size (optional) - for the Newton basis types, the number of Krylov vectors the
+      !   Arnoldi builds at a time (an s-step Arnoldi); zero or absent is the ordinary Arnoldi
       ! This is just a wrapper around the start and finish routines below
       ! No opportunity to put work between the async comms
       ! If you want to do that, you will have to call the individual routines
@@ -84,6 +86,7 @@ module approx_inverse_setup
       ! contiguous it creates a temporary copy which then disappears and
       ! we segfault when trying to apply mf
       PetscReal, dimension(:, :), contiguous, pointer, optional, intent(inout) :: coefficients
+      integer, intent(in), optional                                 :: arnoldi_block_size
 
       type(tsqr_buffers)                           :: buffers
       PetscReal, dimension(:, :), contiguous, pointer   :: work_coefficients
@@ -221,7 +224,7 @@ module approx_inverse_setup
          ! Start the calculation
          call start_approximate_inverse(matrix, inverse_type, &
                      poly_order_eff, diag_scale_polys, &
-                     buffers, work_coefficients)
+                     buffers, work_coefficients, arnoldi_block_size)
          ! Finish it
          call finish_approximate_inverse(matrix, inverse_type, &
                      poly_order_eff, inverse_sparsity_order_eff, &
@@ -282,11 +285,13 @@ module approx_inverse_setup
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine start_approximate_inverse(matrix, inverse_type, poly_order, diag_scale_polys, &
-                  buffers, coefficients)
+                  buffers, coefficients, arnoldi_block_size)
 
       ! Starts the assembly of an approximate inverse
       ! We have different types of inverses we can use
       ! Have to call finish_approximate_inverse before it can be used
+      ! arnoldi_block_size (optional) is the block size of the s-step Arnoldi of the Newton
+      ! basis types, with zero or absent the ordinary Arnoldi
 
       ! ~~~~~~
       type(tMat), intent(in)                             :: matrix
@@ -294,6 +299,7 @@ module approx_inverse_setup
       logical, intent(in)                                :: diag_scale_polys
       type(tsqr_buffers), intent(inout)                  :: buffers 
       PetscReal, dimension(:, :), pointer, intent(inout) :: coefficients
+      integer, intent(in), optional                      :: arnoldi_block_size
 
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX, MPI_COMM_BUFFERS_MATRIX
@@ -412,19 +418,22 @@ module approx_inverse_setup
          else if (inverse_type == PFLAREINV_NEWTON) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_POF, coefficients)
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_POF, coefficients, &
+                     arnoldi_block_size)
 
          ! Gmres polynomial with Newton basis without extra added roots - Can only use matrix-free
          else if (inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_NONE, coefficients)
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_NONE, coefficients, &
+                     arnoldi_block_size)
 
          ! Gmres polynomial with Newton basis, with the degree and the extra roots chosen adaptively
          else if (inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
 
             ! Does lots of reductions in parallel
-            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_ADAPTIVE, coefficients)
+            call calculate_gmres_polynomial_roots_newton(mat_ctx_da%mat_scaled, poly_order, NEWTON_ROOTS_ADAPTIVE, coefficients, &
+                     arnoldi_block_size)
          end if
 
          ! Destroy the shell matrix

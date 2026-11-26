@@ -117,7 +117,8 @@ module air_diagonal_update
          call rebuild_approximate_inverse(air_data, air_data%A_ff(our_level), &
                   air_data%inv_A_ff_poly_data(our_level), &
                   air_data%options%matrix_free_polys, air_data%options%diag_scale_polys, &
-                  our_level, MAT_INV_AFF, air_data%inv_A_ff(our_level))
+                  our_level, MAT_INV_AFF, air_data%inv_A_ff(our_level), &
+                  air_data%options%arnoldi_block_size)
 
          ! ~~~~~~~~~~~~
          ! Update A_cc and its inverse if we're C smoothing
@@ -138,7 +139,9 @@ module air_diagonal_update
             call rebuild_approximate_inverse(air_data, air_data%A_cc(our_level), &
                      air_data%inv_A_cc_poly_data(our_level), &
                      air_data%options%matrix_free_polys, air_data%options%diag_scale_polys, &
-                     our_level, MAT_INV_ACC, air_data%inv_A_cc(our_level))
+                     our_level, MAT_INV_ACC, air_data%inv_A_cc(our_level), &
+                     merge(air_data%options%arnoldi_block_size, air_data%options%c_arnoldi_block_size, &
+                           air_data%options%c_arnoldi_block_size == -1))
          end if
 
          ! ~~~~~~~~~~~~
@@ -251,7 +254,8 @@ module air_diagonal_update
       call rebuild_approximate_inverse(air_data, air_data%coarse_matrix(no_levels), &
                air_data%inv_coarsest_poly_data, &
                air_data%options%coarsest_matrix_free_polys, air_data%options%coarsest_diag_scale_polys, &
-               no_levels, MAT_INV_AFF, air_data%inv_A_ff(no_levels))
+               no_levels, MAT_INV_AFF, air_data%inv_A_ff(no_levels), &
+               air_data%options%coarsest_arnoldi_block_size)
 
       call timer_finish(TIMER_ID_AIR_SETUP)
 
@@ -349,7 +353,7 @@ module air_diagonal_update
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine rebuild_approximate_inverse(air_data, matrix, poly_data, matrix_free, diag_scale_polys, &
-                  our_level, reuse_index, inv_matrix)
+                  our_level, reuse_index, inv_matrix, arnoldi_block_size)
 
       ! Rebuilds an approximate inverse in place after the values of matrix have changed
       ! The inverse keeps its sparsity as only the diagonal of matrix changes
@@ -362,6 +366,7 @@ module air_diagonal_update
       type(gmres_poly_data), intent(inout)    :: poly_data
       logical, intent(in)                     :: matrix_free, diag_scale_polys
       integer, intent(in)                     :: our_level, reuse_index
+      integer, intent(in), optional           :: arnoldi_block_size
       type(tMat), intent(inout)               :: inv_matrix
       ! ~~~~~~
 
@@ -375,7 +380,7 @@ module air_diagonal_update
                   poly_data%gmres_poly_order, &
                   diag_scale_polys, &
                   poly_data%buffers, &
-                  poly_data%coefficients)
+                  poly_data%coefficients, arnoldi_block_size)
          poly_data%coefficients_set = inverse_type_is_polynomial(poly_data%inverse_type)
       end if
 

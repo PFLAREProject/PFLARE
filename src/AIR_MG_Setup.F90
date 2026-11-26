@@ -214,7 +214,8 @@ module air_mg_setup
                      air_data%inv_coarsest_poly_data%gmres_poly_order, &
                      air_data%options%coarsest_diag_scale_polys, &
                      air_data%inv_coarsest_poly_data%buffers, &
-                     air_data%inv_coarsest_poly_data%coefficients)                       
+                     air_data%inv_coarsest_poly_data%coefficients, &
+                     air_data%options%coarsest_arnoldi_block_size)
                air_data%inv_coarsest_poly_data%coefficients_set = &
                      inverse_type_is_polynomial(air_data%inv_coarsest_poly_data%inverse_type)
             end if
@@ -1143,7 +1144,8 @@ module air_mg_setup
                   air_data%inv_coarsest_poly_data%gmres_poly_order, &
                   air_data%options%coarsest_diag_scale_polys, &
                   air_data%inv_coarsest_poly_data%buffers, &
-                  air_data%inv_coarsest_poly_data%coefficients)         
+                  air_data%inv_coarsest_poly_data%coefficients, &
+                  air_data%options%coarsest_arnoldi_block_size)
             air_data%inv_coarsest_poly_data%coefficients_set = &
                   inverse_type_is_polynomial(air_data%inv_coarsest_poly_data%inverse_type)
             call timer_finish(TIMER_ID_AIR_INVERSE)

@@ -189,6 +189,11 @@ module air_data_type
       ! power, arnoldi, newton or neumann
       ! -pc_air_poly_order
       integer :: poly_order = 6
+
+      ! The block size of the s-step Arnoldi of the F point smoother inverse, for the Newton
+      ! basis inverse types. Zero is the ordinary Arnoldi
+      ! -pc_air_arnoldi_block_size
+      integer :: arnoldi_block_size = 0
       ! This is the order of sparsity we use if we assemble our approximate inverses
       ! If z_type == 0 this also determines what distance our grid-transfer operators are
       ! distance = inverse_sparsity_order + 1
@@ -204,6 +209,11 @@ module air_data_type
       ! If unset (-1) this defaults to whatever the F point smoother is
       ! -pc_air_c_poly_order
       integer :: c_poly_order = -1
+
+      ! The block size of the s-step Arnoldi of the C point smoother inverse
+      ! If unset (-1) this follows the F point smoother value
+      ! -pc_air_c_arnoldi_block_size
+      integer :: c_arnoldi_block_size = -1
       ! Inverse sparsity order for c smoothing
       ! If unset (-1) this defaults to whatever the F point smoother is
       ! -pc_air_c_inverse_sparsity_order
@@ -214,6 +224,11 @@ module air_data_type
       integer :: coarsest_inverse_type = 1
       ! -pc_air_coarsest_poly_order
       integer :: coarsest_poly_order = 6
+
+      ! The block size of the s-step Arnoldi of the coarse grid solver, for the Newton
+      ! basis inverse types. Zero is the ordinary Arnoldi
+      ! -pc_air_coarsest_arnoldi_block_size
+      integer :: coarsest_arnoldi_block_size = 0
       ! -pc_air_coarsest_inverse_sparsity_order
       integer :: coarsest_inverse_sparsity_order = 1
       ! -pc_air_coarsest_matrix_free_polys

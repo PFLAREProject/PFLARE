@@ -68,6 +68,7 @@ pc.setType('pflareinv')
 # Configure a Newton matrix-free polynomial via the direct Python API
 pflare.pcpflareinv_set_type(pc, pflare.PFLAREINV_NEWTON)
 pflare.pcpflareinv_set_poly_order(pc, 10)
+pflare.pcpflareinv_set_arnoldi_block_size(pc, 4)
 pflare.pcpflareinv_set_matrix_free(pc, True)
 
 ksp.setFromOptions()
@@ -98,6 +99,7 @@ def check(name, got, expected):
 # Verify settings from the solve above were actually applied
 check('type',        pflare.pcpflareinv_get_type(pc),        pflare.PFLAREINV_NEWTON)
 check('poly_order',  pflare.pcpflareinv_get_poly_order(pc),  10)
+check('arnoldi_block_size', pflare.pcpflareinv_get_arnoldi_block_size(pc), 4)
 check('matrix_free', pflare.pcpflareinv_get_matrix_free(pc), True)
 
 # Round-trip a selection of other options

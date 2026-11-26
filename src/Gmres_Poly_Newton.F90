@@ -1963,7 +1963,7 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, root_rule, coefficients)
+   subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, root_rule, coefficients, arnoldi_block_size)
 
       ! Computes a fixed order gmres polynomial for the matrix passed in
       ! and outputs the Harmonic Ritz values (ie the roots) which we can use to apply 
@@ -1977,11 +1977,15 @@ module gmres_poly_newton
       ! be very sparse at high order, and a fixed sparsity version at higher order than either the 
       ! power basis or Arnoldi basis could compute is likely not any better)
 
+      ! If arnoldi_block_size is given and bigger than zero, the Arnoldi is an s-step one
+      ! (see arnoldi_sstep) that builds that many Krylov vectors at a time
+
       ! ~~~~~~
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: poly_order
       integer, intent(in)                               :: root_rule
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
+      integer, intent(in), optional                     :: arnoldi_block_size
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
@@ -1996,8 +2000,7 @@ module gmres_poly_newton
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
-      PetscInt :: sstep_size
-      PetscBool :: option_found
+      integer :: sstep_size
       logical :: floor_stop
 
       ! ~~~~~~    
@@ -2042,18 +2045,16 @@ module gmres_poly_newton
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      ! Temporary option while the s-step Arnoldi is being tested:
-      ! -pflare_newton_sstep is the block size, with zero the ordinary Arnoldi
+      ! The block size of the s-step Arnoldi, with zero the ordinary Arnoldi
       sstep_size = 0
-      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep', sstep_size, option_found, ierr)
+      if (present(arnoldi_block_size)) sstep_size = arnoldi_block_size
       ! The adaptive rule only uses the steps up to where the Arnoldi residual reaches rounding
       ! level, so the Arnoldi can stop there
       floor_stop = root_rule == NEWTON_ROOTS_ADAPTIVE
 
       if (sstep_size > 0) then
          ! The first ten steps are ordinary, and give the shifts
-         call arnoldi_sstep(matrix, poly_order, int(sstep_size), 10, PFLARE_TOL_LUCKY, &
+         call arnoldi_sstep(matrix, poly_order, sstep_size, 10, PFLARE_TOL_LUCKY, &
                   V_n, w_j, beta, H_n, m, floor_stop)
       else if (floor_stop) then
          ! The same Arnoldi one step at a time, which can stop at the noise floor
