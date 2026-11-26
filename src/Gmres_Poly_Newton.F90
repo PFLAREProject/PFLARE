@@ -1436,9 +1436,6 @@ module gmres_poly_newton
       PetscReal :: relation_error, relation_tol, w_norm_sq
       PetscReal, dimension(poly_order + 1) :: rho_block
       PetscErrorCode :: ierr
-      ! Temporary: log events for profiling
-      PetscLogEvent :: ev_build, ev_dots, ev_project, ev_inverse, ev_chol, ev_hess, ev_check, ev_ordinary
-      PetscClassId :: ev_class
       PetscInt :: n_petscint
       PetscReal, dimension(:), allocatable :: ritz_real, ritz_imag, shift_real, shift_imag, work, dots
       PetscReal, dimension(:,:), allocatable :: H_copy, VL, VR
@@ -1449,17 +1446,6 @@ module gmres_poly_newton
       PetscBLASInt :: m_bl, lda_bl, one_bl, lwork, info
 
       ! ~~~~~~
-
-      ! Temporary: log events for profiling
-      ev_class = 0
-      call PetscLogEventRegister("SStepBuild", ev_class, ev_build, ierr)
-      call PetscLogEventRegister("SStepDots", ev_class, ev_dots, ierr)
-      call PetscLogEventRegister("SStepProject", ev_class, ev_project, ierr)
-      call PetscLogEventRegister("SStepInverse", ev_class, ev_inverse, ierr)
-      call PetscLogEventRegister("SStepChol", ev_class, ev_chol, ierr)
-      call PetscLogEventRegister("SStepHess", ev_class, ev_hess, ierr)
-      call PetscLogEventRegister("SStepCheck", ev_class, ev_check, ierr)
-      call PetscLogEventRegister("SStepOrdinary", ev_class, ev_ordinary, ierr)
 
       ! The number of Arnoldi steps we want
       k = poly_order + 1
@@ -1478,9 +1464,7 @@ module gmres_poly_newton
       ! ~~~~~~~~~
       ! Ordinary Arnoldi for the first m0 steps
       ! ~~~~~~~~~
-      call PetscLogEventBegin(ev_ordinary, ierr)
       call arnoldi(matrix, m0 - 1, lucky_tol, V_n, w_j, beta, H_n, m)
-      call PetscLogEventEnd(ev_ordinary, ierr)
       n_tightened = 0
       lucky = .FALSE.
       n_resume_start = 10
@@ -1542,34 +1526,24 @@ module gmres_poly_newton
 
          sb = min(s, k - j)
          n_old = j + 1
-         call PetscLogEventBegin(ev_build, ierr)
          call build_block(j, sb, B)
-         call PetscLogEventEnd(ev_build, ierr)
 
          ! ~~~~~~~~~
          ! First pass: the components along the existing basis and the Gram matrix of the
          ! block in one reduction
          ! ~~~~~~~~~
-         call PetscLogEventBegin(ev_dots, ierr)
          call fused_dots(1, n_old + sb, j + 2, sb, .FALSE.)
-         call PetscLogEventEnd(ev_dots, ierr)
          X_one(1:n_old, 1:sb) = D(1:n_old, 1:sb)
          T_one(1:sb, 1:sb) = D(n_old + 1:n_old + sb, 1:sb)
-         call PetscLogEventBegin(ev_project, ierr)
          call project_block(sb, X_one)
-         call PetscLogEventEnd(ev_project, ierr)
 
          G(1:sb, 1:sb) = T_one(1:sb, 1:sb) - matmul(transpose(X_one(1:n_old, 1:sb)), X_one(1:n_old, 1:sb))
          do col_loc = 1, sb
             t_diag(col_loc) = T_one(col_loc, col_loc)
          end do
-         call PetscLogEventBegin(ev_chol, ierr)
          call partial_cholesky(G, sb, omega, p, Z, t_diag)
-         call PetscLogEventEnd(ev_chol, ierr)
          if (p == 0) exit
-         call PetscLogEventBegin(ev_inverse, ierr)
          call apply_inverse_factor(p, Z)
-         call PetscLogEventEnd(ev_inverse, ierr)
 
          ! The Hessenberg columns come from dividing by the diagonal of the Cholesky factor, the
          ! part of each block vector that is new. The Cholesky only bounds how that varies
@@ -1591,19 +1565,13 @@ module gmres_poly_newton
 
             ! The Hessenberg columns from the first pass alone, and with them the check of the
             ! last column, whose norm rides in the next reduction
-            call PetscLogEventBegin(ev_hess, ierr)
             call recover_hessenberg(p, X_one, Z)
-            call PetscLogEventEnd(ev_hess, ierr)
-            call PetscLogEventBegin(ev_check, ierr)
             call relation_vector(p)
-            call PetscLogEventEnd(ev_check, ierr)
 
             ! ~~~~~~~~~
             ! Second pass, in one reduction: the block against the existing basis and itself
             ! ~~~~~~~~~
-            call PetscLogEventBegin(ev_dots, ierr)
             call fused_dots(1, n_old + p, j + 2, p, .TRUE.)
-            call PetscLogEventEnd(ev_dots, ierr)
                Y_two(1:n_old, 1:p) = D(1:n_old, 1:p)
             T_one(1:p, 1:p) = D(n_old + 1:n_old + p, 1:p)
 
@@ -1621,12 +1589,8 @@ module gmres_poly_newton
                ratio_max = min(ratio_max, maxval(column_ratio(1:p)))
                call cut_by_ratio()
                if (p == 0) exit
-               call PetscLogEventBegin(ev_hess, ierr)
                call recover_hessenberg(p, X_one, Z)
-               call PetscLogEventEnd(ev_hess, ierr)
-               call PetscLogEventBegin(ev_check, ierr)
                call relation_vector(p)
-               call PetscLogEventEnd(ev_check, ierr)
                call VecNorm(w_j, NORM_2, relation_error, ierr)
                relation_error = relation_error/norm2(H_n(1:j + p + 1, j + p))
                      end do
@@ -1638,28 +1602,20 @@ module gmres_poly_newton
 
          if (p > 0) then
             G(1:p, 1:p) = T_one(1:p, 1:p) - matmul(transpose(Y_two(1:n_old, 1:p)), Y_two(1:n_old, 1:p))
-            call PetscLogEventBegin(ev_chol, ierr)
             call partial_cholesky(G, p, omega, p_two, Z_two)
-            call PetscLogEventEnd(ev_chol, ierr)
             if (p_two == 0) then
                H_n(:, j + 1:j + p_block) = 0
                exit
             end if
             p = p_two
-            call PetscLogEventBegin(ev_project, ierr)
             call project_block(p, Y_two)
-            call PetscLogEventEnd(ev_project, ierr)
-            call PetscLogEventBegin(ev_inverse, ierr)
             call apply_inverse_factor(p, Z_two)
-            call PetscLogEventEnd(ev_inverse, ierr)
 
             ! The block before orthogonalising is W(:, 1:p) = V_n(1:j+1) C + V_n(j+2:j+p+1) R_new
             allocate(C(n_old, p), R_new(p, p))
             C = X_one(1:n_old, 1:p) + matmul(Y_two(1:n_old, 1:p), Z(1:p, 1:p))
             R_new = matmul(Z_two(1:p, 1:p), Z(1:p, 1:p))
-            call PetscLogEventBegin(ev_hess, ierr)
             call recover_hessenberg(p, C, R_new)
-            call PetscLogEventEnd(ev_hess, ierr)
             deallocate(C, R_new)
          end if
 
@@ -1673,9 +1629,7 @@ module gmres_poly_newton
             ratio_max = ratio_before
             H_n(:, j + 1:j + p_block) = 0
             m_target = min(k, j + n_resume)
-            call PetscLogEventBegin(ev_ordinary, ierr)
             call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2, floor_stop)
-            call PetscLogEventEnd(ev_ordinary, ierr)
             n_resume = 2 * n_resume
             if (m < m_target .OR. H_n(m + 1, m) < lucky_tol) then
                j = m
@@ -1711,9 +1665,7 @@ module gmres_poly_newton
       ! Any steps left are an ordinary Arnoldi, with two passes as the blocks are orthogonalised twice
       m = j
       if (j < k .AND. .NOT. lucky) then
-         call PetscLogEventBegin(ev_ordinary, ierr)
          call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, k, m, 2, floor_stop)
-         call PetscLogEventEnd(ev_ordinary, ierr)
       end if
 
       contains
@@ -2038,8 +1990,6 @@ module gmres_poly_newton
       PetscInt :: sstep_size
       PetscBool :: option_found
       logical :: floor_stop
-      PetscLogEvent :: ev_arnoldi, ev_roots
-      PetscClassId :: ev_class
 
       ! ~~~~~~    
 
@@ -2092,11 +2042,6 @@ module gmres_poly_newton
       ! level, so the Arnoldi can stop there
       floor_stop = root_rule == NEWTON_ROOTS_ADAPTIVE
 
-      ! Temporary: log events for profiling
-      ev_class = 0
-      call PetscLogEventRegister("NewtonArnoldi", ev_class, ev_arnoldi, ierr)
-      call PetscLogEventRegister("NewtonRoots", ev_class, ev_roots, ierr)
-      call PetscLogEventBegin(ev_arnoldi, ierr)
       if (sstep_size > 0) then
          ! The first ten steps are ordinary, and give the shifts
          call arnoldi_sstep(matrix, poly_order, int(sstep_size), 10, PFLARE_TOL_LUCKY, &
@@ -2110,8 +2055,6 @@ module gmres_poly_newton
       else
          call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
       end if
-      call PetscLogEventEnd(ev_arnoldi, ierr)
-      call PetscLogEventBegin(ev_roots, ierr)
 
       if (root_rule == NEWTON_ROOTS_ADAPTIVE) then
 
@@ -2219,8 +2162,6 @@ module gmres_poly_newton
       end if     
 
       end if
-
-      call PetscLogEventEnd(ev_roots, ierr)
 
       ! Cleanup
       call destroy_temp_space(V_n)

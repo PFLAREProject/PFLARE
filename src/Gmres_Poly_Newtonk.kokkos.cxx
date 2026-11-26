@@ -2,10 +2,9 @@
 #include "kokkos_helper.hpp"
 #include <iostream>
 #include <vector>
-#include <cstdlib>
 
-// The most columns of an s-step block that the projection kernel updates in one pass over a row
-#define SSTEP_CHUNK 32
+// The number of columns of an s-step block that one thread of the projection kernel updates
+#define SSTEP_GROUP 4
 
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -830,8 +829,6 @@ PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const i
          }
    });
 
-   // Temporary: for profiling
-   Kokkos::fence();
    *done = 1;
    return;
 }
@@ -936,20 +933,9 @@ PETSC_INTERN void sstep_fused_dots_kokkos(Vec *vecs, const int l_start, const in
    DenseView D_d("sstep_D", n_left, n_right);
    DenseHostView D_h("sstep_D_h", n_left, n_right);
    const PetscInt n_rows = basis.extent(0);
-   // TEMPORARY for profiling: PFLARE_SSTEP_TILE picks the tile of the dot product kernel
-   static int tile_choice = -1;
-   if (tile_choice < 0)
-   {
-      const char *env = getenv("PFLARE_SSTEP_TILE");
-      tile_choice = env ? atoi(env) : 0;
-   }
-   if (tile_choice == 1) sstep_tiled_dots<4, 4>(L, R, D_d, n_left, n_right, n_rows);
-   else if (tile_choice == 2) sstep_tiled_dots<8, 4>(L, R, D_d, n_left, n_right, n_rows);
-   else if (tile_choice == 3) sstep_tiled_dots<8, 8>(L, R, D_d, n_left, n_right, n_rows);
-   else if (tile_choice == 4) sstep_tiled_dots<2, 8>(L, R, D_d, n_left, n_right, n_rows);
-   else if (tile_choice == 5) sstep_tiled_dots<16, 4>(L, R, D_d, n_left, n_right, n_rows);
-   else if (tile_choice == 6) sstep_tiled_dots<1, 8>(L, R, D_d, n_left, n_right, n_rows);
-   else sstep_tiled_dots<1, 1>(L, R, D_d, n_left, n_right, n_rows);
+   // Tiles of 4 by 4 were the fastest on LUMI (MI250X) of those up to 16 by 4. One with more
+   // than 32 sums was slower than a dot product at a time
+   sstep_tiled_dots<4, 4>(L, R, D_d, n_left, n_right, n_rows);
    Kokkos::deep_copy(D_h, D_d);
 
    // The local squared norm of w goes on the end of the same buffer
@@ -1003,93 +989,25 @@ PETSC_INTERN void sstep_project_kokkos(Vec *vecs, const int n_old, const int n_c
    Kokkos::deep_copy(X_d, X_h);
    const PetscInt n_rows = basis.extent(0);
 
-   // TEMPORARY for profiling: PFLARE_SSTEP_PROJ picks the projection kernel
-   static int proj_choice = -1;
-   if (proj_choice < 0)
-   {
-      const char *env = getenv("PFLARE_SSTEP_PROJ");
-      proj_choice = env ? atoi(env) : 0;
-   }
+   // V = V - Q X, with one thread for each row and each group of SSTEP_GROUP columns of the
+   // block, which reads that row of the basis once for the group
+   // On LUMI (MI250X) groups of four or eight were 1.7 times faster than a column at a time,
+   // and the whole block in one thread three times slower
+   const PetscInt n_groups = (n_cols + SSTEP_GROUP - 1) / SSTEP_GROUP;
+   Kokkos::parallel_for(
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, n_groups}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt g) {
+         const int c0 = g * SSTEP_GROUP;
+         const int n_c = (n_cols - c0 < SSTEP_GROUP) ? n_cols - c0 : SSTEP_GROUP;
+         PetscScalar sum[SSTEP_GROUP];
+         for (int b = 0; b < n_c; b++) sum[b] = 0.0;
+         for (int q = 0; q < n_old; q++)
+         {
+            const PetscScalar q_val = Q(i, q);
+            for (int b = 0; b < n_c; b++) sum[b] += q_val * X_d(q, c0 + b);
+         }
+         for (int b = 0; b < n_c; b++) V(i, c0 + b) -= sum[b];
+   });
 
-   // V = V - Q X
-   if (proj_choice == 0)
-   {
-      Kokkos::parallel_for(
-         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, (PetscInt)n_cols}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt c) {
-            PetscScalar sum = 0.0;
-            for (int q = 0; q < n_old; q++) sum += Q(i, q) * X_d(q, c);
-            V(i, c) -= sum;
-      });
-   }
-   else if (proj_choice == 3 || proj_choice == 4 || proj_choice == 5)
-   {
-      // TEMPORARY variant: one thread for each row and each group of pt columns of the block
-      const int pt = (proj_choice == 3) ? 4 : ((proj_choice == 4) ? 2 : 8);
-      const PetscInt n_ct = (n_cols + pt - 1) / pt;
-      Kokkos::parallel_for(
-         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, n_ct}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt ct) {
-            const int c0 = ct * pt;
-            const int n_c = (n_cols - c0 < pt) ? n_cols - c0 : pt;
-            PetscScalar sum[8];
-            for (int b = 0; b < n_c; b++) sum[b] = 0.0;
-            for (int q = 0; q < n_old; q++)
-            {
-               const PetscScalar q_val = Q(i, q);
-               for (int b = 0; b < n_c; b++) sum[b] += q_val * X_d(q, c0 + b);
-            }
-            for (int b = 0; b < n_c; b++) V(i, c0 + b) -= sum[b];
-      });
-   }
-   else if (proj_choice == 6)
-   {
-      // TEMPORARY variant: a team for each column of the block and each stretch of rows, so
-      // the rows of the basis a team reads are next to each other
-      const PetscInt row_block = 4096;
-      const PetscInt n_rb = (n_rows + row_block - 1) / row_block;
-      Kokkos::parallel_for(
-         Kokkos::TeamPolicy<>(n_rb * n_cols, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
-            const PetscInt r0 = (t.league_rank() % n_rb) * row_block;
-            const int c = t.league_rank() / n_rb;
-            const PetscInt r1 = (r0 + row_block < n_rows) ? r0 + row_block : n_rows;
-            Kokkos::parallel_for(
-               Kokkos::TeamThreadRange(t, r0, r1), [&](const PetscInt i) {
-                  PetscScalar sum = 0.0;
-                  for (int q = 0; q < n_old; q++) sum += Q(i, q) * X_d(q, c);
-                  V(i, c) -= sum;
-            });
-      });
-   }
-   else
-   {
-      // One pass over each row of the basis, updating up to SSTEP_CHUNK columns of the block
-      // at a time. Doing a column of the block at a time would read the row of the basis again
-      // for each one, and the time of this is all in reading the basis
-      // X is copied row by row so the coefficients of one basis vector are next to each other
-      const int chunk = (proj_choice == 2) ? 8 : SSTEP_CHUNK;
-      Kokkos::View<PetscScalar **, Kokkos::LayoutRight, DefaultMemorySpace> X_rows("sstep_X_rows", n_old, n_cols);
-      Kokkos::parallel_for(
-         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {(PetscInt)n_old, (PetscInt)n_cols}), KOKKOS_LAMBDA(const PetscInt q, const PetscInt c) {
-            X_rows(q, c) = X_d(q, c);
-      });
-      Kokkos::parallel_for(
-         Kokkos::RangePolicy<>(0, n_rows), KOKKOS_LAMBDA(const PetscInt i) {
-            for (int c0 = 0; c0 < n_cols; c0 += chunk)
-            {
-               const int n_c = (n_cols - c0 < chunk) ? n_cols - c0 : chunk;
-               PetscScalar sum[SSTEP_CHUNK];
-               for (int b = 0; b < n_c; b++) sum[b] = 0.0;
-               for (int q = 0; q < n_old; q++)
-               {
-                  const PetscScalar q_val = Q(i, q);
-                  for (int b = 0; b < n_c; b++) sum[b] += q_val * X_rows(q, c0 + b);
-               }
-               for (int b = 0; b < n_c; b++) V(i, c0 + b) -= sum[b];
-            }
-      });
-   }
-
-   // Temporary: for profiling
-   Kokkos::fence();
    *done = 1;
    return;
 }
