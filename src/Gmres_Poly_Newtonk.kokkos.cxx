@@ -826,6 +826,8 @@ PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const i
          }
    });
 
+   // Temporary: for profiling
+   Kokkos::fence();
    *done = 1;
    return;
 }
@@ -939,6 +941,8 @@ PETSC_INTERN void sstep_project_kokkos(Vec *vecs, const int n_old, const int n_c
          V(i, c) -= sum;
    });
 
+   // Temporary: for profiling
+   Kokkos::fence();
    *done = 1;
    return;
 }
