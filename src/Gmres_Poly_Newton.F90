@@ -3,7 +3,7 @@ module gmres_poly_newton
    use petscmat
    use gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos, &
-         sstep_fused_dots_kokkos, sstep_project_kokkos, sstep_apply_inverse_kokkos, sstep_gemm_warmup_kokkos
+         sstep_fused_dots_kokkos, sstep_project_kokkos, sstep_apply_inverse_kokkos
    use pflare_parameters, only: PFLARE_TOL_RCOND, &
          PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
@@ -885,9 +885,7 @@ module gmres_poly_newton
       integer, intent(out)                                :: n_base
 
       ! Local variables
-      integer :: degree, bad, good, mid, step, n_base_trial, degree_floor
-      PetscBool :: view_choice
-      PetscErrorCode :: ierr
+      integer :: degree, bad, good, mid, step, n_base_trial
       PetscReal, dimension(m) :: rho_h
       PetscReal, dimension(:), allocatable :: real_trial, imag_trial
       logical :: accepted
@@ -908,18 +906,8 @@ module gmres_poly_newton
       end do
       degree = min(degree, m)
 
-      ! Temporary option: print how the degree was chosen (on every rank)
-      call PetscOptionsHasName(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_adaptive_view', view_choice, ierr)
-      degree_floor = degree
-
       call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base)
-      if (accepted) then
-         if (view_choice) print '(A,I0,A,I0,A,ES9.2,A,ES9.2,A,I0,A,I0)', "Adaptive degree: steps ", m, &
-               " residual stops improving at ", degree_floor, " residual there ", rho_h(degree_floor), &
-               " at the last step ", rho_h(m), " lowered for stability to ", degree_floor, " roots ", n_base
-         return
-      end if
+      if (accepted) return
 
       ! Otherwise we have to lower the degree until the roots are acceptable
       ! Step down geometrically until we find a degree that is (degree one always is)
@@ -946,11 +934,6 @@ module gmres_poly_newton
             bad = mid
          end if
       end do
-
-      if (view_choice) print '(A,I0,A,I0,A,ES9.2,A,ES9.2,A,I0,A,I0,A,ES9.2)', "Adaptive degree: steps ", m, &
-            " residual stops improving at ", degree_floor, " residual there ", rho_h(degree_floor), &
-            " at the last step ", rho_h(m), " lowered for stability to ", good, " roots ", n_base, &
-            " residual there ", rho_h(good)
 
    end subroutine adaptive_newton_roots
 
@@ -1275,98 +1258,6 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine sstep_estimate_block_size(shift_real, shift_imag, point_real, point_imag, mean, ritz_max, &
-                  s_max, omega, s_est)
-
-      ! Estimates the biggest first block the s-step Arnoldi can keep, after Section 3.5 of
-      ! Xu, Alonso & Darve, with no matvecs or reductions
-      ! The points stand in for the spectrum. We follow the size of the scaled Newton polynomial
-      ! with the given shifts (cycled as in arnoldi_sstep) at each point as its degree grows, and
-      ! s_est is the last degree before the norm of those sizes, relative to degree zero, passes omega
-      ! A shift that is exactly one of the points cancels it down to rounding level, once
-      ! This is only printed, not used: in testing it overestimated the block kept by up to several times
-
-      ! ~~~~~~
-      PetscReal, dimension(:), intent(in)  :: shift_real, shift_imag, point_real, point_imag
-      real(kind=kind(1d0)), intent(in)     :: mean, ritz_max, omega
-      integer, intent(in)                  :: s_max
-      integer, intent(out)                 :: s_est
-
-      ! Local variables
-      integer, parameter :: dp = kind(1d0)
-      integer :: j, i_loc, n_shift, n_point
-      real(kind=dp) :: x, y, gam, dist, dist_conj, eps
-      real(kind=dp), dimension(size(point_real)) :: E, E_mid
-      logical, dimension(size(point_real)) :: cancelled
-
-      ! ~~~~~~
-
-      n_shift = size(shift_real)
-      n_point = size(point_real)
-      eps = real(PFLARE_EPS, kind=dp)
-      E = 1
-      cancelled = .FALSE.
-      s_est = s_max
-
-      j = 0
-      do while (j < s_max)
-
-         x = real(shift_real(mod(j, n_shift) + 1), kind=dp)
-         y = real(shift_imag(mod(j, n_shift) + 1), kind=dp)
-         gam = max(sqrt((mean - x)**2 + y**2), 1d-3 * ritz_max)
-
-         ! The column made with the real part of the shift
-         do i_loc = 1, n_point
-            dist = sqrt((real(point_real(i_loc), kind=dp) - x)**2 + real(point_imag(i_loc), kind=dp)**2)
-            E_mid(i_loc) = E(i_loc) * dist/gam
-         end do
-
-         if (y == 0d0 .OR. j + 2 > s_max) then
-
-            ! A real shift
-            do i_loc = 1, n_point
-               if (E_mid(i_loc) == 0d0 .AND. y == 0d0) then
-                  if (.NOT. cancelled(i_loc)) E(i_loc) = E(i_loc) * eps
-                  cancelled(i_loc) = .TRUE.
-               else
-                  E(i_loc) = E_mid(i_loc)
-               end if
-            end do
-            j = j + 1
-            if (.NOT. (norm2(E)/sqrt(real(n_point, kind=dp)) < omega)) then
-               s_est = j - 1
-               return
-            end if
-
-         else
-
-            ! A conjugate pair, which is two columns
-            if (.NOT. (norm2(E_mid)/sqrt(real(n_point, kind=dp)) < omega)) then
-               s_est = j
-               return
-            end if
-            do i_loc = 1, n_point
-               dist = sqrt((real(point_real(i_loc), kind=dp) - x)**2 + (real(point_imag(i_loc), kind=dp) - y)**2)
-               dist_conj = sqrt((real(point_real(i_loc), kind=dp) - x)**2 + (real(point_imag(i_loc), kind=dp) + y)**2)
-               if (dist == 0d0 .OR. dist_conj == 0d0) then
-                  if (.NOT. cancelled(i_loc)) E(i_loc) = E(i_loc) * eps
-                  cancelled(i_loc) = .TRUE.
-               else
-                  E(i_loc) = E(i_loc) * dist * dist_conj/gam**2
-               end if
-            end do
-            j = j + 2
-            if (.NOT. (norm2(E)/sqrt(real(n_point, kind=dp)) < omega)) then
-               s_est = j - 1
-               return
-            end if
-         end if
-      end do
-
-   end subroutine sstep_estimate_block_size
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
    subroutine arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, m_done, m_max, m, passes, floor_stop)
 
       ! Continues an Arnoldi that has done m_done steps up to m_max steps, one step at a time
@@ -1478,8 +1369,7 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine arnoldi_sstep(matrix, poly_order, s_max, m_start, lucky_tol, V_n, w_j, beta, H_n, m, view, kernels, &
-                  floor_stop)
+   subroutine arnoldi_sstep(matrix, poly_order, s_max, m_start, lucky_tol, V_n, w_j, beta, H_n, m, floor_stop)
 
       ! An s-step Arnoldi that returns the same Hessenberg matrix as the arnoldi routine
       ! (to rounding) with far fewer reductions. This is the adaptive s-step method of
@@ -1517,10 +1407,9 @@ module gmres_poly_newton
       ! be built before this one is checked, and its matvecs are wasted if this one is cut
       !
       ! The block is built in place in V_n, so this needs no more vectors than the arnoldi routine
-      ! If kernels is not zero and the vectors in V_n are slices of one device buffer (see
-      ! create_temp_space_box_muller), the block work is dense matrix products on the device,
-      ! with KokkosBlas (1) or our own kernels (2). KokkosBlas with a rocBLAS backend was no faster
-      ! and its first big gemm cost 0.2 s
+      ! If the vectors in V_n are slices of one device buffer (see create_temp_space_box_muller),
+      ! the block work is dense matrix products on the device with our own kernels (KokkosBlas
+      ! with a rocBLAS backend was no faster and its first big gemm cost 0.2 s)
       ! Otherwise it is done with PETSc vector operations
 
       ! ~~~~~~
@@ -1532,8 +1421,7 @@ module gmres_poly_newton
       PetscReal, intent(out)                    :: beta
       PetscReal, dimension(:,:), intent(inout)  :: H_n
       integer, intent(out)                      :: m
-      logical, intent(in)                       :: view, floor_stop
-      integer, intent(in)                       :: kernels
+      logical, intent(in)                       :: floor_stop
 
       ! Local variables
       integer, parameter :: dp = kind(1d0)
@@ -1541,16 +1429,12 @@ module gmres_poly_newton
       integer(c_long_long), dimension(:), allocatable :: vec_handles
       integer(c_long_long) :: w_handle
       integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
-      integer :: n_blocks, n_wasted, n_reductions, n_single, p_block, n_cut, s_est_ritz, s_est_harmonic
-      integer :: n_tightened, n_extra_matvecs, n_resume, n_resume_start, m_target, n_stretches
+      integer :: p_block, n_tightened, n_resume, n_resume_start, m_target
       integer :: n_tightened_before
-      real(kind=dp) :: worst_ratio, ratio_max, worst_relation, ratio_before
+      real(kind=dp) :: ratio_max, ratio_before
       real(kind=dp), dimension(:), allocatable :: column_ratio, t_diag
-      PetscReal :: relation_error, relation_tol, w_norm_sq, ratio_option
+      PetscReal :: relation_error, relation_tol, w_norm_sq
       PetscReal, dimension(poly_order + 1) :: rho_block
-      PetscBool :: option_found, check_blocks, discard_start
-      integer, dimension(:), allocatable :: kept_history
-      PetscLogDouble :: time_start, time_end
       PetscErrorCode :: ierr
       PetscInt :: n_petscint
       PetscReal, dimension(:), allocatable :: ritz_real, ritz_imag, shift_real, shift_imag, work, dots
@@ -1567,9 +1451,7 @@ module gmres_poly_newton
       k = poly_order + 1
       m0 = max(1, min(m_start, k))
       s = max(1, s_max)
-      allocate(kept_history(k))
-      call PetscTime(time_start, ierr)
-      use_kernels = kernels /= 0
+      use_kernels = .TRUE.
 #if !defined(PETSC_HAVE_KOKKOS)
       use_kernels = .FALSE.
 #endif
@@ -1583,38 +1465,17 @@ module gmres_poly_newton
       ! Ordinary Arnoldi for the first m0 steps
       ! ~~~~~~~~~
       call arnoldi(matrix, m0 - 1, lucky_tol, V_n, w_j, beta, H_n, m)
-      n_reductions = 1 + 2 * m
-      n_single = m
-      n_blocks = 0
-      n_wasted = 0
-      n_cut = 0
-      worst_ratio = 0
       n_tightened = 0
-      n_stretches = 0
       lucky = .FALSE.
       n_resume_start = 10
       n_resume = n_resume_start
-      n_extra_matvecs = 0
-      worst_relation = 0
       ! A block is cut shorter if the relative error in A v = V H for its last column passes this
       relation_tol = 1d-1 * sqrt(PFLARE_EPS)
-      ! Temporary options: without the check the blocks are only cut by ratio_max, and with a big
-      ! -pflare_newton_sstep_ratio as well this is the algorithm of the paper
-      check_blocks = PETSC_TRUE
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_check', check_blocks, option_found, ierr)
-      ratio_option = -1
-      call PetscOptionsGetReal(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_ratio', ratio_option, option_found, ierr)
       ! The error made in one block is about eps times this ratio, so it starts where that is
       ! well below the tolerance
       ratio_max = 1d-3/sqrt(real(PFLARE_EPS, kind=dp))
-      if (ratio_option > 0) ratio_max = real(ratio_option, kind=dp)
       ! Have we finished or hit the lucky tolerance
-      if (m == k .OR. H_n(m+1, m) < lucky_tol) then
-         if (view) call view_counts()
-         return
-      end if
+      if (m == k .OR. H_n(m+1, m) < lucky_tol) return
 
       ! ~~~~~~~~~
       ! The Ritz values of the first m0 steps are the shifts
@@ -1651,29 +1512,10 @@ module gmres_poly_newton
       ! The block is kept if its condition number is below this, which keeps the
       ! Cholesky QR stable in this precision
       omega = 0.1d0/sqrt(real(PFLARE_EPS, kind=dp))
-
-      ! Estimates of the first block size, with the Ritz values and the harmonic Ritz values
-      ! standing in for the spectrum
-      call sstep_estimate_block_size(shift_real, shift_imag, ritz_real, ritz_imag, mean, ritz_max, &
-               k - m, omega, s_est_ritz)
-      call harmonic_ritz_roots(H_n, m0, m0, ritz_real, ritz_imag)
-      call sstep_estimate_block_size(shift_real, shift_imag, ritz_real, ritz_imag, mean, ritz_max, &
-               k - m, omega, s_est_harmonic)
       deallocate(ritz_real, ritz_imag)
 
       allocate(dots(k + 1), t_diag(s), column_ratio(s))
       allocate(B(s + 1, s), X_one(k + 1, s), T_one(s, s), G(s, s), Z(s, s), Z_two(s, s), Y_two(k + 1, s), D(k + 1, s))
-
-      ! Temporary option: throw the start up steps away once we have their Ritz values and build
-      ! the whole basis in blocks from the start vector, as the paper does within a restart cycle
-      discard_start = PETSC_FALSE
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_discard_start', discard_start, option_found, ierr)
-      if (discard_start) then
-         m = 0
-         H_n = 0
-         n_single = 0
-      end if
 
       ! j is the number of Arnoldi steps finished, so V_n(1:j+1) is the basis so far
       j = m
@@ -1684,7 +1526,6 @@ module gmres_poly_newton
 
          sb = min(s, k - j)
          n_old = j + 1
-         n_blocks = n_blocks + 1
          call build_block(j, sb, B)
 
          ! ~~~~~~~~~
@@ -1692,7 +1533,6 @@ module gmres_poly_newton
          ! block in one reduction
          ! ~~~~~~~~~
          call fused_dots(1, n_old + sb, j + 2, sb, .FALSE.)
-         n_reductions = n_reductions + 1
          X_one(1:n_old, 1:sb) = D(1:n_old, 1:sb)
          T_one(1:sb, 1:sb) = D(n_old + 1:n_old + sb, 1:sb)
          call project_block(sb, X_one)
@@ -1702,11 +1542,7 @@ module gmres_poly_newton
             t_diag(col_loc) = T_one(col_loc, col_loc)
          end do
          call partial_cholesky(G, sb, omega, p, Z, t_diag)
-         if (p == 0) then
-            n_wasted = n_wasted + sb
-            kept_history(n_blocks) = 0
-            exit
-         end if
+         if (p == 0) exit
          call apply_inverse_factor(p, Z)
 
          ! The Hessenberg columns come from dividing by the diagonal of the Cholesky factor, the
@@ -1730,41 +1566,34 @@ module gmres_poly_newton
             ! The Hessenberg columns from the first pass alone, and with them the check of the
             ! last column, whose norm rides in the next reduction
             call recover_hessenberg(p, X_one, Z)
-            if (check_blocks) call relation_vector(p)
+            call relation_vector(p)
 
             ! ~~~~~~~~~
             ! Second pass, in one reduction: the block against the existing basis and itself
             ! ~~~~~~~~~
-            call fused_dots(1, n_old + p, j + 2, p, logical(check_blocks .eqv. PETSC_TRUE))
-            n_reductions = n_reductions + 1
-            Y_two(1:n_old, 1:p) = D(1:n_old, 1:p)
+            call fused_dots(1, n_old + p, j + 2, p, .TRUE.)
+               Y_two(1:n_old, 1:p) = D(1:n_old, 1:p)
             T_one(1:p, 1:p) = D(n_old + 1:n_old + p, 1:p)
 
             ! If the check fails keep half as many columns and check again, which then costs
             ! a reduction of its own. The columns are nested, so the second pass needs no rework
-            if (check_blocks) then
-               relation_error = sqrt(w_norm_sq)/norm2(H_n(1:j + p + 1, j + p))
-               do
-                  if (relation_error <= relation_tol) then
-                     worst_relation = max(worst_relation, real(relation_error, kind=dp))
-                     exit
-                  end if
-                  n_tightened = n_tightened + 1
-                  if (p == 1) then
-                     p = 0
-                     exit
-                  end if
-                  p = (p + 1)/2
-                  ratio_max = min(ratio_max, maxval(column_ratio(1:p)))
-                  call cut_by_ratio()
-                  if (p == 0) exit
-                  call recover_hessenberg(p, X_one, Z)
-                  call relation_vector(p)
-                  call VecNorm(w_j, NORM_2, relation_error, ierr)
-                  relation_error = relation_error/norm2(H_n(1:j + p + 1, j + p))
-                  n_reductions = n_reductions + 1
-               end do
-            end if
+            relation_error = sqrt(w_norm_sq)/norm2(H_n(1:j + p + 1, j + p))
+            do
+               if (relation_error <= relation_tol) exit
+               n_tightened = n_tightened + 1
+               if (p == 1) then
+                  p = 0
+                  exit
+               end if
+               p = (p + 1)/2
+               ratio_max = min(ratio_max, maxval(column_ratio(1:p)))
+               call cut_by_ratio()
+               if (p == 0) exit
+               call recover_hessenberg(p, X_one, Z)
+               call relation_vector(p)
+               call VecNorm(w_j, NORM_2, relation_error, ierr)
+               relation_error = relation_error/norm2(H_n(1:j + p + 1, j + p))
+                     end do
 
             ! If the check cut this block to fewer than three columns the ratio is not what is
             ! wrong either, so treat it in the same way as keeping none
@@ -1775,15 +1604,12 @@ module gmres_poly_newton
             G(1:p, 1:p) = T_one(1:p, 1:p) - matmul(transpose(Y_two(1:n_old, 1:p)), Y_two(1:n_old, 1:p))
             call partial_cholesky(G, p, omega, p_two, Z_two)
             if (p_two == 0) then
-               n_wasted = n_wasted + sb
-               kept_history(n_blocks) = 0
                H_n(:, j + 1:j + p_block) = 0
                exit
             end if
             p = p_two
             call project_block(p, Y_two)
             call apply_inverse_factor(p, Z_two)
-            worst_ratio = max(worst_ratio, maxval(column_ratio(1:p)))
 
             ! The block before orthogonalising is W(:, 1:p) = V_n(1:j+1) C + V_n(j+2:j+p+1) R_new
             allocate(C(n_old, p), R_new(p, p))
@@ -1793,8 +1619,6 @@ module gmres_poly_newton
             deallocate(C, R_new)
          end if
 
-         n_wasted = n_wasted + sb - p
-         kept_history(n_blocks) = p
          if (p == 0) then
 
             ! Not even one column of this block could be kept accurately, so the error is in the
@@ -1806,9 +1630,6 @@ module gmres_poly_newton
             H_n(:, j + 1:j + p_block) = 0
             m_target = min(k, j + n_resume)
             call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2, floor_stop)
-            n_reductions = n_reductions + 3 * (m - j)
-            n_single = n_single + m - j
-            n_stretches = n_stretches + 1
             n_resume = 2 * n_resume
             if (m < m_target .OR. H_n(m + 1, m) < lucky_tol) then
                j = m
@@ -1845,11 +1666,7 @@ module gmres_poly_newton
       m = j
       if (j < k .AND. .NOT. lucky) then
          call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, k, m, 2, floor_stop)
-         n_reductions = n_reductions + 3 * (m - j)
-         n_single = n_single + m - j
       end if
-
-      if (view) call view_counts()
 
       contains
 
@@ -1912,7 +1729,6 @@ module gmres_poly_newton
          do col = 1, p
             if (.NOT. column_ratio(col) <= ratio_max) then
                p = col - 1
-               n_cut = n_cut + 1
                exit
             end if
          end do
@@ -1941,7 +1757,7 @@ module gmres_poly_newton
             if (with_w) with_w_int = 1
             call sstep_fused_dots_kokkos(vec_handles, int(l_start - 1, c_int), int(n_l, c_int), &
                      int(r_start - 1, c_int), int(n_r, c_int), w_handle, with_w_int, &
-                     c_loc(D_k), w_norm_sq_k, int(kernels - 1, c_int), done)
+                     c_loc(D_k), w_norm_sq_k, done)
             if (done == 0) use_kernels = .FALSE.
          end if
 #endif
@@ -1999,7 +1815,7 @@ module gmres_poly_newton
             allocate(X_k(n_old, n_cols))
             X_k = real(X(1:n_old, 1:n_cols), kind=kind(X_k))
             call sstep_project_kokkos(vec_handles, int(n_old, c_int), int(n_cols, c_int), &
-                     c_loc(X_k), int(kernels - 1, c_int), done)
+                     c_loc(X_k), done)
             deallocate(X_k)
             if (done /= 0) return
             use_kernels = .FALSE.
@@ -2108,7 +1924,6 @@ module gmres_poly_newton
          call MatMult(matrix, V_n(j + n_cols), w_j, ierr)
          dots(1:j + n_cols + 1) = -H_n(1:j + n_cols + 1, j + n_cols)
          call VecMAXPY(w_j, n_petscint, dots, V_n, ierr)
-         n_extra_matvecs = n_extra_matvecs + 1
 
       end subroutine relation_vector
 
@@ -2134,33 +1949,6 @@ module gmres_poly_newton
          end do
 
       end subroutine check_block_orthogonal
-
-      subroutine view_counts()
-
-         integer :: comm_rank
-         MPIU_Comm :: MPI_COMM_MATRIX
-
-         call PetscObjectGetComm(matrix, MPI_COMM_MATRIX, ierr)
-         call MPI_Comm_rank(MPI_COMM_MATRIX, comm_rank, errorcode)
-         call PetscTime(time_end, ierr)
-         if (comm_rank == 0) then
-            if (use_kernels) print '(A,I0)', "s-step Arnoldi: device block kernels ", kernels
-            print '(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0,A,ES10.3)', "s-step Arnoldi: steps ", m, &
-                  " single steps ", n_single, &
-                  " blocks ", n_blocks, " final block size ", s, " wasted matvecs ", n_wasted, &
-                  " reductions ", n_reductions, " time ", time_end - time_start
-            if (n_blocks > 0) print '(A,I0,A,I0)', "s-step Arnoldi: estimated first block, Ritz points ", &
-                  s_est_ritz, " harmonic Ritz points ", s_est_harmonic
-            if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
-            if (n_blocks > 0) print '(A,I0,A,ES9.2,A,I0,A,I0,A,I0,A,ES9.2,A,ES9.2)', &
-                  "s-step Arnoldi: blocks cut to keep H accurate ", n_cut, &
-                  " largest ratio kept ", worst_ratio, " times the bound was tightened ", n_tightened, &
-                  " stretches of ordinary steps ", n_stretches, &
-                  " extra matvecs ", n_extra_matvecs, " final ratio bound ", ratio_max, &
-                  " worst relation error seen ", worst_relation
-         end if
-
-      end subroutine view_counts
 
    end subroutine arnoldi_sstep
 
@@ -2199,12 +1987,9 @@ module gmres_poly_newton
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
-      PetscInt :: sstep_size, sstep_start
-      PetscLogDouble :: time_start, time_end
-      PetscBool :: sstep_view, sstep_warm, sstep_check, option_found, floor_option
+      PetscInt :: sstep_size
+      PetscBool :: option_found
       logical :: floor_stop
-      PetscInt :: sstep_kernels, arnoldi_passes
-      PetscLogDouble :: time_roots
 
       ! ~~~~~~    
 
@@ -2248,73 +2033,28 @@ module gmres_poly_newton
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      ! Temporary options while the s-step Arnoldi is being tested
+      ! Temporary option while the s-step Arnoldi is being tested:
       ! -pflare_newton_sstep is the block size, with zero the ordinary Arnoldi
       sstep_size = 0
-      sstep_start = 10
-      sstep_view = PETSC_FALSE
-      sstep_kernels = 2
-      sstep_warm = PETSC_FALSE
-      arnoldi_passes = 1
-      ! The adaptive rule only uses the steps up to where the Arnoldi residual reaches rounding
-      ! level, so the Arnoldi can stop there (temporary option to switch that off)
-      floor_option = PETSC_TRUE
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_floor_stop', floor_option, option_found, ierr)
-      floor_stop = root_rule == NEWTON_ROOTS_ADAPTIVE .AND. floor_option
-      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_arnoldi_passes', arnoldi_passes, option_found, ierr)
       call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
                '-pflare_newton_sstep', sstep_size, option_found, ierr)
-      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_start', sstep_start, option_found, ierr)
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_view', sstep_view, option_found, ierr)
-      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_kernels', sstep_kernels, option_found, ierr)
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_warm', sstep_warm, option_found, ierr)
-#if defined(PETSC_HAVE_KOKKOS)
-      ! Temporary: time the first use of the device gemm on its own
-      if (sstep_warm) then
-         call PetscTime(time_start, ierr)
-         call sstep_gemm_warmup_kokkos()
-         call PetscTime(time_end, ierr)
-         if (sstep_view .AND. comm_rank == 0) print '(A,ES10.3)', "s-step Arnoldi: gemm warm up time ", time_end - time_start
-      end if
-#endif
+      ! The adaptive rule only uses the steps up to where the Arnoldi residual reaches rounding
+      ! level, so the Arnoldi can stop there
+      floor_stop = root_rule == NEWTON_ROOTS_ADAPTIVE
 
       if (sstep_size > 0) then
-         call arnoldi_sstep(matrix, poly_order, int(sstep_size), int(sstep_start), PFLARE_TOL_LUCKY, &
-                  V_n, w_j, beta, H_n, m, logical(sstep_view .eqv. PETSC_TRUE), &
-                  int(sstep_kernels), floor_stop)
+         ! The first ten steps are ordinary, and give the shifts
+         call arnoldi_sstep(matrix, poly_order, int(sstep_size), 10, PFLARE_TOL_LUCKY, &
+                  V_n, w_j, beta, H_n, m, floor_stop)
+      else if (floor_stop) then
+         ! The same Arnoldi one step at a time, which can stop at the noise floor
+         call arnoldi(matrix, 0, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+         if (poly_order > 0 .AND. .NOT. H_n(2, 1) < PFLARE_TOL_LUCKY) then
+            call arnoldi_extend(matrix, PFLARE_TOL_LUCKY, V_n, w_j, H_n, 1, poly_order + 1, m, 1, floor_stop)
+         end if
       else
-         call PetscTime(time_start, ierr)
-         if (arnoldi_passes > 1 .OR. floor_stop) then
-            ! The same Arnoldi one step at a time, which can stop at the noise floor and
-            ! (temporary option) do more than one Gram-Schmidt pass in each step
-            call arnoldi(matrix, 0, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
-            if (poly_order > 0 .AND. .NOT. H_n(2, 1) < PFLARE_TOL_LUCKY) then
-               call arnoldi_extend(matrix, PFLARE_TOL_LUCKY, V_n, w_j, H_n, 1, poly_order + 1, m, &
-                        int(arnoldi_passes), floor_stop)
-            end if
-         else
-            call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
-         end if
-         call PetscTime(time_end, ierr)
-         if (sstep_view .AND. comm_rank == 0) then
-            print '(A,I0,A,I0,A,I0,A,ES10.3)', "Arnoldi: steps ", m, " passes ", arnoldi_passes, &
-                  " reductions ", 1 + (1 + int(arnoldi_passes)) * m, " time ", time_end - time_start
-         end if
+         call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
       end if
-
-      ! Temporary: check the basis and the Hessenberg matrix we were given
-      sstep_check = PETSC_FALSE
-      call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_check_arnoldi', sstep_check, option_found, ierr)
-      if (sstep_check) call check_arnoldi_relation()
-
-      call PetscTime(time_roots, ierr)
 
       if (root_rule == NEWTON_ROOTS_ADAPTIVE) then
 
@@ -2423,72 +2163,9 @@ module gmres_poly_newton
 
       end if
 
-      call PetscTime(time_end, ierr)
-      if (sstep_view .AND. comm_rank == 0) then
-         print '(A,ES10.3)', "Newton roots: host time to choose and order the roots ", time_end - time_roots
-      end if
-
       ! Cleanup
       call destroy_temp_space(V_n)
       call VecDestroy(w_j, ierr)       
-
-      contains
-
-      subroutine check_arnoldi_relation()
-
-         ! Temporary diagnostic: for each Arnoldi step j measures how well A v_j = V_n(1:j+1) H_n(1:j+1, j)
-         ! holds for the basis and Hessenberg matrix we have, relative to the size of that column of H,
-         ! and how far v_{j+1} is from orthonormal against the basis before it
-         ! Prints the worst of each, the first step where either passes 1e-6 and the GMRES residual there
-
-         integer :: j_step, first_relation, first_orth, n_steps, n_bad
-         PetscReal :: residual, worst_relation, worst_orth, orth
-         PetscReal, dimension(poly_order + 2) :: work_h
-         PetscReal, dimension(m) :: rho
-         PetscInt :: n_vecs
-
-         n_bad = 0
-         worst_relation = 0
-         worst_orth = 0
-         first_relation = 0
-         first_orth = 0
-         ! The last basis vector does not exist if we hit the lucky tolerance
-         n_steps = m
-         if (H_n(m + 1, m) < PFLARE_TOL_LUCKY) n_steps = m - 1
-         call hessenberg_gmres_residuals(H_n, m, rho)
-
-         do j_step = 1, n_steps
-            n_vecs = j_step + 1
-            call MatMult(matrix, V_n(j_step), w_j, ierr)
-            work_h(1:j_step + 1) = -H_n(1:j_step + 1, j_step)
-            call VecMAXPY(w_j, n_vecs, work_h, V_n, ierr)
-            call VecNorm(w_j, NORM_2, residual, ierr)
-            residual = residual/norm2(H_n(1:j_step + 1, j_step))
-            if (residual > worst_relation) worst_relation = residual
-            if (first_relation == 0 .AND. residual > 1d-6) first_relation = j_step
-            if (residual > 1d-6 .AND. comm_rank == 0 .AND. n_bad < 40) then
-               n_bad = n_bad + 1
-               print '(A,I0,A,ES9.2,A,ES9.2,A,ES9.2)', "   bad step ", j_step, " residual ", residual, &
-                     " subdiagonal ", H_n(j_step + 1, j_step), " below subdiagonal ", &
-                     maxval(abs(H_n(min(j_step + 2, m + 1):m + 1, j_step)))
-            end if
-
-            call VecMDot(V_n(j_step + 1), n_vecs, V_n, work_h, ierr)
-            work_h(j_step + 1) = work_h(j_step + 1) - 1
-            orth = maxval(abs(work_h(1:j_step + 1)))
-            if (orth > worst_orth) worst_orth = orth
-            if (first_orth == 0 .AND. orth > 1d-6) first_orth = j_step
-         end do
-
-         if (comm_rank == 0) then
-            print '(A,ES9.2,A,I0,A,ES9.2,A,I0)', "Arnoldi check: worst relation residual ", worst_relation, &
-                  " first above 1e-6 at step ", first_relation, " worst loss of orthogonality ", worst_orth, &
-                  " first above 1e-6 at step ", first_orth
-            print '(A,ES9.2,A,I0,A,ES9.2)', "Arnoldi check: smallest GMRES residual ", minval(rho), " at step ", &
-                  minloc(rho, 1), " and at the first bad relation step ", rho(max(1, first_relation))
-         end if
-
-      end subroutine check_arnoldi_relation
 
    end subroutine calculate_gmres_polynomial_roots_newton   
 
