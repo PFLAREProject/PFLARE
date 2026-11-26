@@ -16,9 +16,11 @@ src/DDC_Module.o : src/DDC_Module.F90 src/MatDiagDom.o src/Pflare_Parameters.o s
 src/FC_Smooth_Block.o : src/FC_Smooth_Block.F90 src/Pflare_Parameters.o src/Gmres_Poly_Apply.o src/Matshell_Data_Type.o src/PETSc_Helper.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/FC_Smooth.o : src/FC_Smooth.F90 src/Pflare_Parameters.o src/Matshell_Data_Type.o src/PETSc_Helper.o src/AIR_Data_Type.o src/C_PETSc_Interfaces.o 
 src/Gmres_Poly_Apply.o : src/Gmres_Poly_Apply.F90 src/Pflare_Parameters.o src/Matshell_Data_Type.o 
+src/Gmres_Poly_Arnoldi.o : src/Gmres_Poly_Arnoldi.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/Gmres_Poly_Newton_Roots.o src/PETSc_Helper.o src/Gmres_Poly.o 
 src/Gmres_Poly_Data_Type.o : src/Gmres_Poly_Data_Type.F90 src/TSQR.o 
 src/Gmres_Poly.o : src/Gmres_Poly.F90 src/PETSc_Helper.o src/Gmres_Poly_Data_Type.o src/TSQR.o src/Gmres_Poly_Apply.o src/Matshell_Data_Type.o src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/Sorting.o 
-src/Gmres_Poly_Newton.o : src/Gmres_Poly_Newton.F90 src/Gmres_Poly_Apply.o src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/Gmres_Poly.o 
+src/Gmres_Poly_Newton.o : src/Gmres_Poly_Newton.F90 src/Gmres_Poly_Apply.o src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/Gmres_Poly_Arnoldi.o src/Gmres_Poly_Newton_Roots.o src/Sorting.o src/Matshell_Data_Type.o src/PETSc_Helper.o src/Gmres_Poly.o 
+src/Gmres_Poly_Newton_Roots.o : src/Gmres_Poly_Newton_Roots.F90 src/Pflare_Parameters.o 
 src/Grid_Transfer.o : src/Grid_Transfer.F90 src/Pflare_Parameters.o src/PETSc_Helper.o src/C_PETSc_Interfaces.o 
 src/Grid_Transfer_Improve.o : src/Grid_Transfer_Improve.F90 src/PETSc_Helper.o src/Pflare_Parameters.o src/Timers.o 
 src/MatDiagDom.o : src/MatDiagDom.F90 src/Pflare_Parameters.o src/C_PETSc_Interfaces.o src/PETSc_Helper.o 

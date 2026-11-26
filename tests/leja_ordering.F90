@@ -11,7 +11,7 @@
       program main
 
       use petscsys
-      use gmres_poly_newton, only: modified_leja
+      use gmres_poly_newton_roots, only: modified_leja
 
 #include "petsc/finclude/petscsys.h"
 

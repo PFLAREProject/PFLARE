@@ -13,7 +13,7 @@
       program main
 
       use petscsys
-      use gmres_poly_newton, only: cluster_eigenvalues_stable, compute_extra_roots, &
+      use gmres_poly_newton_roots, only: cluster_eigenvalues_stable, compute_extra_roots, &
             modified_leja
 
 #include "petsc/finclude/petscsys.h"
