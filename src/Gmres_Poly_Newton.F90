@@ -2248,7 +2248,10 @@ module gmres_poly_newton
       ! ~~~~~~~~~
       ! Ordinary Arnoldi for the first m0 steps
       ! ~~~~~~~~~
-      call arnoldi(matrix, m0 - 1, lucky_tol, V_n, w_j, beta, H_n, m)
+      call arnoldi(matrix, 0, lucky_tol, V_n, w_j, beta, H_n, m)
+      if (m0 > 1 .AND. .NOT. H_n(2, 1) < lucky_tol) then
+         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, 1, m0, m, 2)
+      end if
       n_reductions = 1 + 2 * m
       n_single = m
       n_blocks = 0
