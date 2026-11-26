@@ -1021,6 +1021,44 @@ PETSC_INTERN void sstep_project_kokkos(Vec *vecs, const int n_old, const int n_c
             V(i, c) -= sum;
       });
    }
+   else if (proj_choice == 3 || proj_choice == 4 || proj_choice == 5)
+   {
+      // TEMPORARY variant: one thread for each row and each group of pt columns of the block
+      const int pt = (proj_choice == 3) ? 4 : ((proj_choice == 4) ? 2 : 8);
+      const PetscInt n_ct = (n_cols + pt - 1) / pt;
+      Kokkos::parallel_for(
+         Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, n_ct}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt ct) {
+            const int c0 = ct * pt;
+            const int n_c = (n_cols - c0 < pt) ? n_cols - c0 : pt;
+            PetscScalar sum[8];
+            for (int b = 0; b < n_c; b++) sum[b] = 0.0;
+            for (int q = 0; q < n_old; q++)
+            {
+               const PetscScalar q_val = Q(i, q);
+               for (int b = 0; b < n_c; b++) sum[b] += q_val * X_d(q, c0 + b);
+            }
+            for (int b = 0; b < n_c; b++) V(i, c0 + b) -= sum[b];
+      });
+   }
+   else if (proj_choice == 6)
+   {
+      // TEMPORARY variant: a team for each column of the block and each stretch of rows, so
+      // the rows of the basis a team reads are next to each other
+      const PetscInt row_block = 4096;
+      const PetscInt n_rb = (n_rows + row_block - 1) / row_block;
+      Kokkos::parallel_for(
+         Kokkos::TeamPolicy<>(n_rb * n_cols, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
+            const PetscInt r0 = (t.league_rank() % n_rb) * row_block;
+            const int c = t.league_rank() / n_rb;
+            const PetscInt r1 = (r0 + row_block < n_rows) ? r0 + row_block : n_rows;
+            Kokkos::parallel_for(
+               Kokkos::TeamThreadRange(t, r0, r1), [&](const PetscInt i) {
+                  PetscScalar sum = 0.0;
+                  for (int q = 0; q < n_old; q++) sum += Q(i, q) * X_d(q, c);
+                  V(i, c) -= sum;
+            });
+      });
+   }
    else
    {
       // One pass over each row of the basis, updating up to SSTEP_CHUNK columns of the block
