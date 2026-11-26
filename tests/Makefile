@@ -167,12 +167,12 @@ run_tests_load_serial:
 	 -pflare_newton_sstep 20
 #
 	@echo "Test AIRG as an exact solver, heavily truncating hierarchy and using high order mf GMRES poly in the\
-	 Newton basis built with a one reduction s-step Arnoldi as a coarse solver for hyperbolic streaming"
+	 Newton basis built with a two reduction s-step Arnoldi as a coarse solver for hyperbolic streaming"
 	./ex12f -f data/mat_stream_2364 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 \
 	 -pc_air_inverse_type jacobi -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1 \
-	 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 1
+	 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync
 #
 	@echo ""
 	@echo "Test exact two-level AIRG in a difficult problem which requires exact coarse solve"
@@ -242,16 +242,8 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 5
 	@echo "Test Newton GMRES polynomials order 60 matrix-free built with an s-step Arnoldi in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20
-	@echo "Test Newton GMRES polynomials order 60 matrix-free built with a one reduction s-step Arnoldi in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 1
 	@echo "Test Newton GMRES polynomials order 60 matrix-free built with a two reduction s-step Arnoldi in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 2
-	@echo "Test Newton GMRES polynomials order 60 matrix-free built with a three reduction s-step Arnoldi in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 3
-	@echo "Test Newton GMRES polynomials order 60 matrix-free built with a delayed two reduction s-step Arnoldi in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 4
-	@echo "Test Newton GMRES polynomials order 60 matrix-free built with an adaptive one reduction s-step Arnoldi in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 1 -pflare_newton_sstep_low_sync_adaptive
+	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_max_it 6 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync
 	@echo "Test adaptive Newton GMRES polynomials order 120 matrix-free in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3
 	@echo "Test adaptive Newton GMRES polynomials order 120 with fixed sparsity in market matrix problem 1138"
@@ -321,12 +313,12 @@ else
 	 -pflare_newton_sstep 20
 #
 	@echo "Test AIRG as an exact solver, heavily truncating hierarchy and using high order mf GMRES poly in the\
-	 Newton basis built with a one reduction s-step Arnoldi as a coarse solver for hyperbolic streaming in parallel"
+	 Newton basis built with a two reduction s-step Arnoldi as a coarse solver for hyperbolic streaming in parallel"
 	$(MPIEXEC) -n 2 ./ex6 -f data/mat_stream_2364 -pc_air_strong_threshold 0.0 -pc_air_a_drop 0.0 -pc_air_r_drop 0.0 \
 	 -pc_air_inverse_type jacobi -ksp_type richardson -ksp_norm_type unpreconditioned \
 	 -pc_air_max_levels 10 -pc_air_coarsest_poly_order 60 \
 	 -pc_air_coarsest_matrix_free_polys -pc_air_coarsest_inverse_type newton -pc_air_max_luby_steps 3 -ksp_max_it 1 \
-	 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync 1
+	 -pflare_newton_sstep 20 -pflare_newton_sstep_low_sync
 #
 	@echo ""
 	@echo "Test AIRG with GMRES polynomials for hyperbolic streaming problem with coefficients calculated on subcomms serial"

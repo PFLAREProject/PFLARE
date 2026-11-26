@@ -2093,40 +2093,29 @@ module gmres_poly_newton
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine arnoldi_sstep_low_sync(matrix, poly_order, s_max, m_start, lucky_tol, V_n, w_j, beta, H_n, m, view, kernels, &
-                  floor_stop, mode, adaptive)
+                  floor_stop)
 
-      ! The s-step Arnoldi of arnoldi_sstep with fewer reductions in each block, after
-      ! Carson & Ma, "A stable one-synchronization variant of reorthogonalized block
-      ! classical Gram-Schmidt" (2025). arnoldi_sstep uses five reductions a block: project and
-      ! Gram matrix for each of the two passes, and one for the check of the Hessenberg matrix
+      ! The s-step Arnoldi of arnoldi_sstep with two reductions in each block in place of five
+      ! arnoldi_sstep projects and then computes a Gram matrix in each of its two passes, and
+      ! uses one more reduction for the check of the Hessenberg matrix
       !
-      ! Three things remove reductions here:
-      ! 1) A pass can get the components along the existing basis and the Gram matrix of the block
-      !    in one reduction, [Q W]^T W, with the Gram matrix of the projected block from
-      !    Pythagoras as W^T W - (Q^T W)^T (Q^T W). That is always done for the second pass, where
-      !    the block is already nearly orthonormal. For the first pass it loses accuracy when the
-      !    block vectors lie mostly in the existing basis, so the partial Cholesky then also
-      !    drops a column once the norm of the unprojected vectors over the smallest singular
-      !    value of the factor passes the condition bound
-      ! 2) The second pass of a block can share its reduction with the first projection of the
-      !    next block (delayed). The next block then has to be built before this one is final,
-      !    from its last vector after the first pass, and its components along the final vectors
-      !    come from the same reduction without touching the vectors again
-      ! 3) The check of the last column of the Hessenberg matrix is made after the first pass, and
-      !    the norm it needs rides in the reduction of the second pass
-      !
-      ! mode is
-      ! 1 - Pythagorean first pass, delayed: one reduction a block (BCGSI+P-1S)
-      ! 2 - Pythagorean first pass, not delayed: two reductions (BCGS-PIPI+)
-      ! 3 - explicit Gram matrix in the first pass, not delayed: three reductions
-      ! 4 - explicit Gram matrix in the first pass, delayed: two reductions (BCGSI+P-2S)
-      ! If adaptive, a block whose Pythagorean Cholesky keeps fewer columns than asked is factored
-      ! again from an explicit Gram matrix, for one more reduction
+      ! Here each pass gets the components along the existing basis and the Gram matrix of the
+      ! block in one reduction, [Q W]^T W, with the Gram matrix of the projected block from
+      ! Pythagoras as W^T W - (Q^T W)^T (Q^T W). This is BCGS-PIPI+ (Carson, Lund, Ma & Oktay,
+      ! "Reorthogonalized Pythagorean variants of block classical Gram-Schmidt", 2025)
+      ! In the first pass that difference loses accuracy when the block vectors lie mostly in
+      ! the existing basis, so the partial Cholesky then also drops a column once the norm of
+      ! the unprojected vectors over the smallest singular value of the factor passes the
+      ! condition bound. The block is nearly orthonormal by the second pass
+      ! The check of the last column of the Hessenberg matrix is made after the first pass, and
+      ! the norm it needs rides in the reduction of the second pass
       !
       ! Everything else is as in arnoldi_sstep: the block size never grows, a block that fails
       ! the check is halved, and a block that keeps nothing hands over to ordinary two-pass steps
-      ! With the delayed modes a block that is cut after the next one was built wastes the
-      ! matvecs of that next block
+      ! Carson & Ma, "A stable one-synchronization variant of reorthogonalized block classical
+      ! Gram-Schmidt" (2025) get to one reduction by sharing the second pass with the first
+      ! projection of the next block. That was tried and works, but the next block then has to
+      ! be built before this one is checked, and its matvecs are wasted if this one is cut
 
       ! ~~~~~~
       type(tMat), intent(in)                    :: matrix
@@ -2137,20 +2126,20 @@ module gmres_poly_newton
       PetscReal, intent(out)                    :: beta
       PetscReal, dimension(:,:), intent(inout)  :: H_n
       integer, intent(out)                      :: m
-      logical, intent(in)                       :: view, floor_stop, adaptive
-      integer, intent(in)                       :: kernels, mode
+      logical, intent(in)                       :: view, floor_stop
+      integer, intent(in)                       :: kernels
 
       ! Local variables
       integer, parameter :: dp = kind(1d0)
-      logical :: use_kernels, pyth_first, delayed, pending, have_first, have_next, stop_after, lucky
+      logical :: use_kernels, lucky
       integer(c_long_long), dimension(:), allocatable :: vec_handles
       integer(c_long_long) :: w_handle
-      integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode, sb_next, s_new, p_gen
-      integer :: n_blocks, n_wasted, n_reductions, n_single, p_block, n_cut, n_left, n_right
+      integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
+      integer :: n_blocks, n_wasted, n_reductions, n_single, p_block, n_cut
       integer :: n_tightened, n_extra_matvecs, n_resume, n_resume_start, m_target, n_stretches
-      integer :: n_tightened_before, n_late_waste, n_redo
+      integer :: n_tightened_before
       real(kind=dp) :: worst_ratio, ratio_max, worst_relation, ratio_before
-      real(kind=dp), dimension(:), allocatable :: column_ratio, c_start, c_next, t_diag
+      real(kind=dp), dimension(:), allocatable :: column_ratio, t_diag
       PetscReal :: relation_error, relation_tol, w_norm_sq, ratio_option
       PetscReal, dimension(poly_order + 1) :: rho_block
       PetscBool :: option_found, check_blocks
@@ -2161,16 +2150,12 @@ module gmres_poly_newton
       PetscReal, dimension(:), allocatable :: ritz_real, ritz_imag, shift_real, shift_imag, work, dots
       PetscReal, dimension(:,:), allocatable :: H_copy, VL, VR
       integer, dimension(:), allocatable :: indices
-      real(kind=dp), dimension(:,:), allocatable :: B, B_next, X_one, X_next, T_one, T_next, G, Z, Z_two
-      real(kind=dp), dimension(:,:), allocatable :: Y_two, D, C, R_new, Z_cross, P_cross
+      real(kind=dp), dimension(:,:), allocatable :: B, X_one, T_one, G, Z, Z_two, Y_two, D, C, R_new
       real(kind=dp) :: mean, ritz_max, omega
       PetscReal :: alpha_r, beta_r, gamma_r
       PetscBLASInt :: m_bl, lda_bl, one_bl, lwork, info
 
       ! ~~~~~~
-
-      pyth_first = mode == 1 .OR. mode == 2
-      delayed = mode == 1 .OR. mode == 4
 
       ! The number of Arnoldi steps we want
       k = poly_order + 1
@@ -2196,8 +2181,6 @@ module gmres_poly_newton
       n_single = m
       n_blocks = 0
       n_wasted = 0
-      n_late_waste = 0
-      n_redo = 0
       n_cut = 0
       worst_ratio = 0
       n_tightened = 0
@@ -2259,73 +2242,36 @@ module gmres_poly_newton
       ! The block is kept if its condition number is below this
       omega = 0.1d0/sqrt(real(PFLARE_EPS, kind=dp))
 
-      allocate(dots(k + 1), c_start(k + 1), c_next(k + 1), t_diag(s), column_ratio(s))
-      allocate(B(s + 1, s), B_next(s + 1, s), X_one(k + 1, s), X_next(k + 1, s), T_one(s, s), T_next(s, s))
-      allocate(G(s, s), Z(s, s), Z_two(s, s), Y_two(k + 1, s), D(k + 1, 2 * s), Z_cross(k + 1, s), P_cross(s, s))
+      allocate(dots(k + 1), t_diag(s), column_ratio(s))
+      allocate(B(s + 1, s), X_one(k + 1, s), T_one(s, s), G(s, s), Z(s, s), Z_two(s, s), Y_two(k + 1, s), D(k + 1, s))
 
       ! j is the number of Arnoldi steps finished, so V_n(1:j+1) is the basis so far
-      ! If pending, the next block is already in V_n(j+2:j+1+sb_next), built from V_n(j+1) before
-      ! that had its second pass. c_next holds that start vector in the basis, X_next the
-      ! components of the block along the basis and T_next its Gram matrix
       j = m
-      pending = .FALSE.
-      sb_next = 0
       do while (j < k)
 
          ! Blocks this small cost as many reductions as ordinary steps
          if (s < 3) exit
 
+         sb = min(s, k - j)
          n_old = j + 1
          n_blocks = n_blocks + 1
-         if (pending) then
-            sb = sb_next
-            B = B_next
-            c_start(1:n_old) = c_next(1:n_old)
-            X_one(1:n_old, 1:sb) = X_next(1:n_old, 1:sb)
-            T_one(1:sb, 1:sb) = T_next(1:sb, 1:sb)
-            have_first = .TRUE.
-            pending = .FALSE.
-         else
-            sb = min(s, k - j)
-            call build_block(j, sb, B)
-            c_start(1:n_old) = 0
-            c_start(n_old) = 1
-            have_first = .FALSE.
-         end if
+         call build_block(j, sb, B)
 
          ! ~~~~~~~~~
-         ! First pass: the components along the existing basis (and with them the Gram matrix
-         ! of the block, for the Pythagorean form), unless they came with the last reduction
+         ! First pass: the components along the existing basis and the Gram matrix of the
+         ! block in one reduction
          ! ~~~~~~~~~
-         if (.NOT. have_first) then
-            n_left = n_old
-            if (pyth_first) n_left = n_old + sb
-            call fused_dots(1, n_left, j + 2, sb, .FALSE.)
-            n_reductions = n_reductions + 1
-            X_one(1:n_old, 1:sb) = D(1:n_old, 1:sb)
-            if (pyth_first) T_one(1:sb, 1:sb) = D(n_old + 1:n_old + sb, 1:sb)
-         end if
+         call fused_dots(1, n_old + sb, j + 2, sb, .FALSE.)
+         n_reductions = n_reductions + 1
+         X_one(1:n_old, 1:sb) = D(1:n_old, 1:sb)
+         T_one(1:sb, 1:sb) = D(n_old + 1:n_old + sb, 1:sb)
          call project_block(sb, X_one)
 
-         if (pyth_first) then
-            G(1:sb, 1:sb) = T_one(1:sb, 1:sb) - matmul(transpose(X_one(1:n_old, 1:sb)), X_one(1:n_old, 1:sb))
-            do col_loc = 1, sb
-               t_diag(col_loc) = T_one(col_loc, col_loc)
-            end do
-            call partial_cholesky(G, sb, omega, p, Z, t_diag)
-            if (adaptive .AND. p < sb) then
-               call fused_dots(j + 2, sb, j + 2, sb, .FALSE.)
-               n_reductions = n_reductions + 1
-               n_redo = n_redo + 1
-               G(1:sb, 1:sb) = D(1:sb, 1:sb)
-               call partial_cholesky(G, sb, omega, p, Z)
-            end if
-         else
-            call fused_dots(j + 2, sb, j + 2, sb, .FALSE.)
-            n_reductions = n_reductions + 1
-            G(1:sb, 1:sb) = D(1:sb, 1:sb)
-            call partial_cholesky(G, sb, omega, p, Z)
-         end if
+         G(1:sb, 1:sb) = T_one(1:sb, 1:sb) - matmul(transpose(X_one(1:n_old, 1:sb)), X_one(1:n_old, 1:sb))
+         do col_loc = 1, sb
+            t_diag(col_loc) = T_one(col_loc, col_loc)
+         end do
+         call partial_cholesky(G, sb, omega, p, Z, t_diag)
          if (p == 0) then
             n_wasted = n_wasted + sb
             kept_history(n_blocks) = 0
@@ -2343,55 +2289,23 @@ module gmres_poly_newton
          n_tightened_before = n_tightened
          call cut_by_ratio()
 
-         have_next = .FALSE.
-         stop_after = .FALSE.
-         p_gen = 0
          if (p > 0) then
 
-            ! The Hessenberg columns from the first pass alone, for the check and the floor
+            ! The Hessenberg columns from the first pass alone, and with them the check of the
+            ! last column, whose norm rides in the next reduction
             call recover_hessenberg(p, X_one, Z)
-            if (floor_stop) then
-               call hessenberg_gmres_residuals(H_n, j + p, rho_block)
-               stop_after = minval(rho_block(1:j + p)) <= 10 * PFLARE_EPS
-            end if
-
-            ! ~~~~~~~~~
-            ! Delayed: build the next block now, from the last vector we expect to keep
-            ! ~~~~~~~~~
-            if (delayed .AND. j + p < k .AND. .NOT. stop_after) then
-               s_new = s
-               if (p < sb) s_new = p
-               if (s_new >= 3) then
-                  sb_next = min(s_new, k - j - p)
-                  call build_block(j + p, sb_next, B_next)
-                  have_next = .TRUE.
-                  p_gen = p
-               end if
-            end if
-
-            ! The check of the last column, whose norm rides in the next reduction
             if (check_blocks) call relation_vector(p)
 
             ! ~~~~~~~~~
             ! Second pass, in one reduction: the block against the existing basis and itself
-            ! and for the delayed modes the next block against all of those as well
             ! ~~~~~~~~~
-            n_right = p
-            if (have_next) n_right = p + sb_next
-            n_left = n_old + p
-            if (have_next .AND. pyth_first) n_left = n_old + p + sb_next
-            call fused_dots(1, n_left, j + 2, n_right, logical(check_blocks .eqv. PETSC_TRUE))
+            call fused_dots(1, n_old + p, j + 2, p, logical(check_blocks .eqv. PETSC_TRUE))
             n_reductions = n_reductions + 1
             Y_two(1:n_old, 1:p) = D(1:n_old, 1:p)
             T_one(1:p, 1:p) = D(n_old + 1:n_old + p, 1:p)
-            if (have_next) then
-               Z_cross(1:n_old, 1:sb_next) = D(1:n_old, p + 1:p + sb_next)
-               P_cross(1:p, 1:sb_next) = D(n_old + 1:n_old + p, p + 1:p + sb_next)
-               if (pyth_first) T_next(1:sb_next, 1:sb_next) = D(n_old + p + 1:n_old + p + sb_next, p + 1:p + sb_next)
-            end if
 
-            ! If the check fails keep half as many columns and check again, which then
-            ! costs a reduction of its own
+            ! If the check fails keep half as many columns and check again, which then costs
+            ! a reduction of its own. The columns are nested, so the second pass needs no rework
             if (check_blocks) then
                relation_error = sqrt(w_norm_sq)/norm2(H_n(1:j + p + 1, j + p))
                do
@@ -2426,7 +2340,6 @@ module gmres_poly_newton
             call partial_cholesky(G, p, omega, p_two, Z_two)
             if (p_two == 0) then
                n_wasted = n_wasted + sb
-               if (have_next) n_late_waste = n_late_waste + sb_next
                kept_history(n_blocks) = 0
                H_n(:, j + 1:j + p_block) = 0
                exit
@@ -2450,7 +2363,6 @@ module gmres_poly_newton
 
             ! Not even one column of this block could be kept accurately: a stretch of ordinary
             ! two-pass steps and then blocks again, as in arnoldi_sstep
-            if (have_next) n_late_waste = n_late_waste + sb_next
             ratio_max = ratio_before
             H_n(:, j + 1:j + p_block) = 0
             m_target = min(k, j + n_resume)
@@ -2471,39 +2383,15 @@ module gmres_poly_newton
 
          if (use_kernels .AND. kokkos_debug()) call check_block_orthogonal(p)
 
-         ! The next block was built from a vector that has now had its second pass. Its
-         ! components along the final vectors follow from the reduction we already did
-         if (have_next) then
-            if (p == p_gen) then
-               c_next(1:n_old) = Y_two(1:n_old, p)
-               c_next(n_old + 1:n_old + p) = Z_two(1:p, p)
-               X_next(1:n_old, 1:sb_next) = Z_cross(1:n_old, 1:sb_next)
-               P_cross(1:p, 1:sb_next) = P_cross(1:p, 1:sb_next) - &
-                        matmul(transpose(Y_two(1:n_old, 1:p)), Z_cross(1:n_old, 1:sb_next))
-               ! Solve against the lower triangular transpose of Z_two
-               do i_loc = 1, p
-                  do col_loc = 1, i_loc - 1
-                     P_cross(i_loc, 1:sb_next) = P_cross(i_loc, 1:sb_next) - &
-                              Z_two(col_loc, i_loc) * P_cross(col_loc, 1:sb_next)
-                  end do
-                  P_cross(i_loc, 1:sb_next) = P_cross(i_loc, 1:sb_next)/Z_two(i_loc, i_loc)
-               end do
-               X_next(n_old + 1:n_old + p, 1:sb_next) = P_cross(1:p, 1:sb_next)
-               pending = .TRUE.
-            else
-               n_late_waste = n_late_waste + sb_next
-            end if
-         end if
-
          j = j + p
          ! The block size never grows back
          if (p < sb) s = p
 
-         ! Stop once the relative GMRES residual is at rounding level
+         ! Stop once the relative GMRES residual is at rounding level, as further steps are
+         ! only noise. We can only test this after a block, so we may do up to a block too many
          if (floor_stop) then
             call hessenberg_gmres_residuals(H_n, j, rho_block)
             if (minval(rho_block(1:j)) <= 10 * PFLARE_EPS) then
-               if (pending) n_late_waste = n_late_waste + sb_next
                lucky = .TRUE.
                exit
             end if
@@ -2511,8 +2399,8 @@ module gmres_poly_newton
 
       end do
 
-      deallocate(shift_real, shift_imag, dots, c_start, c_next, t_diag, column_ratio)
-      deallocate(B, B_next, X_one, X_next, T_one, T_next, G, Z, Z_two, Y_two, D, Z_cross, P_cross)
+      deallocate(shift_real, shift_imag, dots, t_diag, column_ratio)
+      deallocate(B, X_one, T_one, G, Z, Z_two, Y_two, D)
 
       ! Any steps left are an ordinary Arnoldi, with two passes
       m = j
@@ -2734,8 +2622,8 @@ module gmres_poly_newton
       subroutine recover_hessenberg(n_cols, C_in, R_in)
 
          ! The columns of H for the first n_cols columns of the block, from the recurrence B
-         ! of the block and the factors of its vectors in the basis: the start vector of the
-         ! block is V_n(1:j+1) c_start and W(:, 1:n) = V_n(1:j+1) C_in + V_n(j+2:j+n+1) R_in
+         ! of the block and the factors of its vectors in the basis:
+         ! W(:, 1:n) = V_n(1:j+1) C_in + V_n(j+2:j+n+1) R_in
 
          integer, intent(in) :: n_cols
          real(kind=dp), dimension(:,:), intent(in) :: C_in, R_in
@@ -2745,7 +2633,7 @@ module gmres_poly_newton
 
          allocate(R_full(j + n_cols + 1, n_cols + 1), rhs(j + n_cols + 1, n_cols))
          R_full = 0
-         R_full(1:n_old, 1) = c_start(1:n_old)
+         R_full(j + 1, 1) = 1
          R_full(1:n_old, 2:n_cols + 1) = C_in(1:n_old, 1:n_cols)
          R_full(n_old + 1:n_old + n_cols, 2:n_cols + 1) = R_in(1:n_cols, 1:n_cols)
 
@@ -2822,8 +2710,7 @@ module gmres_poly_newton
                   " single steps ", n_single, &
                   " blocks ", n_blocks, " final block size ", s, " wasted matvecs ", n_wasted, &
                   " reductions ", n_reductions, " time ", time_end - time_start
-            print '(A,I0,A,L1,A,I0,A,I0)', "s-step Arnoldi: low synchronisation mode ", mode, " adaptive ", adaptive, &
-                  " matvecs of next blocks thrown away ", n_late_waste, " blocks factored again ", n_redo
+            print '(A)', "s-step Arnoldi: two reductions a block"
             if (n_blocks > 0) print '(A,*(1X,I0))', "s-step Arnoldi: columns kept per block", kept_history(1:n_blocks)
             if (n_blocks > 0) print '(A,I0,A,ES9.2,A,I0,A,I0,A,I0,A,ES9.2,A,ES9.2)', &
                   "s-step Arnoldi: blocks cut to keep H accurate ", n_cut, &
@@ -2876,8 +2763,8 @@ module gmres_poly_newton
       PetscLogDouble :: time_start, time_end
       PetscBool :: sstep_view, sstep_warm, sstep_check, option_found, floor_option
       logical :: floor_stop
-      PetscInt :: sstep_kernels, arnoldi_passes, sstep_low_sync
-      PetscBool :: sstep_low_sync_adaptive
+      PetscInt :: sstep_kernels, arnoldi_passes
+      PetscBool :: sstep_low_sync
       PetscLogDouble :: time_roots
 
       ! ~~~~~~    
@@ -2958,20 +2845,15 @@ module gmres_poly_newton
       end if
 #endif
 
-      ! Temporary option: the s-step Arnoldi with fewer reductions in each block
-      ! (see arnoldi_sstep_low_sync for the modes), with zero the five reductions of arnoldi_sstep
-      sstep_low_sync = 0
-      sstep_low_sync_adaptive = PETSC_FALSE
-      call PetscOptionsGetInt(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_low_sync', sstep_low_sync, option_found, ierr)
+      ! Temporary option: the s-step Arnoldi with two reductions in each block in place of five
+      sstep_low_sync = PETSC_FALSE
       call PetscOptionsGetBool(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
-               '-pflare_newton_sstep_low_sync_adaptive', sstep_low_sync_adaptive, option_found, ierr)
+               '-pflare_newton_sstep_low_sync', sstep_low_sync, option_found, ierr)
 
-      if (sstep_size > 0 .AND. sstep_low_sync >= 1 .AND. sstep_low_sync <= 4) then
+      if (sstep_size > 0 .AND. sstep_low_sync) then
          call arnoldi_sstep_low_sync(matrix, poly_order, int(sstep_size), int(sstep_start), PFLARE_TOL_LUCKY, &
                   V_n, w_j, beta, H_n, m, logical(sstep_view .eqv. PETSC_TRUE), &
-                  int(sstep_kernels), floor_stop, int(sstep_low_sync), &
-                  logical(sstep_low_sync_adaptive .eqv. PETSC_TRUE))
+                  int(sstep_kernels), floor_stop)
       else if (sstep_size > 0) then
          call arnoldi_sstep(matrix, poly_order, int(sstep_size), int(sstep_start), PFLARE_TOL_LUCKY, &
                   V_n, w_j, beta, H_n, m, logical(sstep_view .eqv. PETSC_TRUE), &
