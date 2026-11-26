@@ -813,6 +813,7 @@ PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const i
    PetscCallVoid(sstep_basis_view(vecs, n_old, n_cols, &basis, &found));
    if (!found) return;
 
+   auto exec = PetscGetKokkosExecutionSpace();
    DenseView R_d("sstep_R_inv", n_cols, n_cols);
    DenseHostView R_h(R_inv, n_cols, n_cols);
    Kokkos::deep_copy(R_d, R_h);
@@ -820,7 +821,7 @@ PETSC_INTERN void sstep_apply_inverse_kokkos(Vec *vecs, const int n_old, const i
    // Going backwards through the columns, each new column only needs the old values of
    // the columns before it, so this can be done in place
    Kokkos::parallel_for(
-      Kokkos::RangePolicy<>(0, basis.extent(0)), KOKKOS_LAMBDA(const size_t i) {
+      Kokkos::RangePolicy<>(exec, 0, basis.extent(0)), KOKKOS_LAMBDA(const size_t i) {
          for (int c = n_cols - 1; c >= 0; c--)
          {
             PetscScalar sum = 0.0;
@@ -865,9 +866,10 @@ static void sstep_tiled_dots(const LView &L, const RView &R, const DView &D_d, c
 {
    const int n_tq = (n_left + TQ - 1) / TQ;
    const int n_tc = (n_right + TC - 1) / TC;
+   auto exec = PetscGetKokkosExecutionSpace();
 
    Kokkos::parallel_for(
-      Kokkos::TeamPolicy<>(n_tq * n_tc, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
+      Kokkos::TeamPolicy<>(exec, n_tq * n_tc, Kokkos::AUTO()), KOKKOS_LAMBDA(const Kokkos::TeamPolicy<>::member_type &t) {
          const int q0 = (t.league_rank() % n_tq) * TQ;
          const int c0 = (t.league_rank() / n_tq) * TC;
          // A tile that hangs over the edge repeats the last column, and those sums are not kept
@@ -949,7 +951,7 @@ PETSC_INTERN void sstep_fused_dots_kokkos(Vec *vecs, const int l_start, const in
       PetscScalar sum = 0.0;
       PetscCallVoid(VecGetKokkosView(*w, &w_d));
       Kokkos::parallel_reduce(
-         Kokkos::RangePolicy<>(0, w_d.extent(0)), KOKKOS_LAMBDA(const size_t i, PetscScalar &sum_loc) {
+         Kokkos::RangePolicy<>(PetscGetKokkosExecutionSpace(), 0, w_d.extent(0)), KOKKOS_LAMBDA(const size_t i, PetscScalar &sum_loc) {
             sum_loc += w_d(i) * w_d(i);
          }, sum);
       PetscCallVoid(VecRestoreKokkosView(*w, &w_d));
@@ -984,6 +986,7 @@ PETSC_INTERN void sstep_project_kokkos(Vec *vecs, const int n_old, const int n_c
    auto Q = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)0, (size_t)n_old));
    auto V = Kokkos::subview(basis, Kokkos::ALL, std::make_pair((size_t)n_old, (size_t)(n_old + n_cols)));
 
+   auto exec = PetscGetKokkosExecutionSpace();
    DenseView X_d("sstep_X", n_old, n_cols);
    DenseHostView X_h(X, n_old, n_cols);
    Kokkos::deep_copy(X_d, X_h);
@@ -995,7 +998,7 @@ PETSC_INTERN void sstep_project_kokkos(Vec *vecs, const int n_old, const int n_c
    // and the whole block in one thread three times slower
    const PetscInt n_groups = (n_cols + SSTEP_GROUP - 1) / SSTEP_GROUP;
    Kokkos::parallel_for(
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {n_rows, n_groups}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt g) {
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>, Kokkos::IndexType<PetscInt>>(exec, {0, 0}, {n_rows, n_groups}), KOKKOS_LAMBDA(const PetscInt i, const PetscInt g) {
          const int c0 = g * SSTEP_GROUP;
          const int n_c = (n_cols - c0 < SSTEP_GROUP) ? n_cols - c0 : SSTEP_GROUP;
          PetscScalar sum[SSTEP_GROUP];
