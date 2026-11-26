@@ -1431,7 +1431,7 @@ module gmres_poly_newton
 
       ! Local variables
       integer, parameter :: dp = kind(1d0)
-      logical :: use_kernels, lucky
+      logical :: use_kernels, lucky, at_floor
       integer(c_long_long), dimension(:), allocatable :: vec_handles
       integer(c_long_long) :: w_handle
       integer :: k, m0, j, s, sb, p, p_two, i_loc, col_loc, n_old, errorcode
@@ -1477,7 +1477,7 @@ module gmres_poly_newton
       ! ~~~~~~~~~
       call arnoldi(matrix, 0, lucky_tol, V_n, w_j, beta, H_n, m)
       if (m0 > 1 .AND. .NOT. H_n(2, 1) < lucky_tol) then
-         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, 1, m0, m, 2)
+         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, 1, m0, m, 2, floor_stop)
       end if
       n_tightened = 0
       lucky = .FALSE.
@@ -1488,8 +1488,12 @@ module gmres_poly_newton
       ! The error made in one block is about eps times this ratio, so it starts where that is
       ! well below the tolerance
       ratio_max = 1d-3/sqrt(real(PFLARE_EPS, kind=dp))
-      ! Have we finished or hit the lucky tolerance
+      ! Have we finished, hit the lucky tolerance or the noise floor
       if (m == k .OR. H_n(m+1, m) < lucky_tol) return
+      if (floor_stop) then
+         call hessenberg_gmres_residuals(H_n, m, rho_block)
+         if (minval(rho_block(1:m)) <= 10 * PFLARE_EPS) return
+      end if
 
       ! ~~~~~~~~~
       ! The Ritz values of the first m0 steps are the shifts
@@ -1645,7 +1649,13 @@ module gmres_poly_newton
             m_target = min(k, j + n_resume)
             call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, j, m_target, m, 2, floor_stop)
             n_resume = 2 * n_resume
-            if (m < m_target .OR. H_n(m + 1, m) < lucky_tol) then
+            ! The ordinary steps may also reach the noise floor at their last step
+            at_floor = .FALSE.
+            if (floor_stop) then
+               call hessenberg_gmres_residuals(H_n, m, rho_block)
+               at_floor = minval(rho_block(1:m)) <= 10 * PFLARE_EPS
+            end if
+            if (m < m_target .OR. H_n(m + 1, m) < lucky_tol .OR. at_floor) then
                j = m
                lucky = .TRUE.
                exit
