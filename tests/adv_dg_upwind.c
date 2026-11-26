@@ -497,7 +497,7 @@ static PetscErrorCode FacetOutwardNormal(DM dm, PetscInt f, PetscInt c,
     Vec             coords;
     const PetscInt *cone;
     PetscInt        coneSize;
-    PetscReal       x0[2], x1[2], fc[2], cc[2], tx, ty, nx, ny, nlen, dot;
+    PetscReal       x0[2] = {0.0, 0.0}, x1[2] = {0.0, 0.0}, fc[2], cc[2], tx, ty, nx, ny, nlen, dot;
 
     PetscCall(DMPlexGetConeSize(dm, f, &coneSize));
     PetscCheck(coneSize == 2, PETSC_COMM_SELF, PETSC_ERR_PLIB,
