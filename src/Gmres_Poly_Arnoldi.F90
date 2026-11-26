@@ -5,7 +5,7 @@ module gmres_poly_arnoldi
    use petsc_helper, only: kokkos_debug
    use gmres_poly_newton_roots, only: modified_leja, hessenberg_gmres_residuals
    use c_petsc_interfaces, only: sstep_fused_dots_kokkos, sstep_project_kokkos, sstep_apply_inverse_kokkos
-   use pflare_parameters, only: PFLARE_EPS, PFLARE_ONE, PFLARE_ZERO
+   use pflare_parameters, only: PFLARE_EPS, PFLARE_ONE, PFLARE_ZERO, PFLARE_REAL_KIND
 
 #include "petsc/finclude/petscmat.h"
 #include "finclude/pflare_blaslapack.h"
@@ -321,7 +321,7 @@ module gmres_poly_arnoldi
       n_resume_start = 10
       n_resume = n_resume_start
       ! A block is cut shorter if the relative error in A v = V H for its last column passes this
-      relation_tol = 1d-1 * sqrt(PFLARE_EPS)
+      relation_tol = 0.1_PFLARE_REAL_KIND * sqrt(PFLARE_EPS)
       ! The error made in one block is about eps times this ratio, so it starts where that is
       ! well below the tolerance
       ratio_max = 1d-3/sqrt(real(PFLARE_EPS, kind=dp))
