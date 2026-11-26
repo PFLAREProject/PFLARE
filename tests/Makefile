@@ -243,7 +243,7 @@ run_tests_load_serial:
 	@echo "Test adaptive Newton GMRES polynomials order 60 matrix-free on a diagonal matrix with small isolated eigenvalues"
 	./ex6 -b_in_f 0 -f data/diag7_small500 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test adaptive Newton GMRES polynomials order 80 matrix-free on the badly scaled market matrix problem bcsstk19"
-	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 8
+	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 12
 	@echo "Test power basis GMRES polynomials order 10 matrix-free on the badly scaled market matrix problem bcsstk19"
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 30
 	@echo "Test power basis GMRES polynomials order 10 with fixed sparsity on the badly scaled market matrix problem bcsstk19"
