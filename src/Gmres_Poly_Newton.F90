@@ -1378,7 +1378,8 @@ module gmres_poly_newton
       ! variants of block classical Gram-Schmidt" (BCGS-PIPI+), and a check of the Hessenberg
       ! matrix that neither has
       !
-      ! The first m_start steps are an ordinary Arnoldi. The Ritz values of those, leja ordered,
+      ! The first m_start steps are an ordinary Arnoldi, orthogonalised twice. The Ritz values
+      ! of those, leja ordered,
       ! are the shifts of a scaled Newton basis. After that we build a block of up to s new
       ! Krylov vectors with matvecs only, and orthogonalise the block in two passes
       ! Each pass gets the components along the existing basis and the Gram matrix of the
@@ -1463,8 +1464,16 @@ module gmres_poly_newton
 
       ! ~~~~~~~~~
       ! Ordinary Arnoldi for the first m0 steps
+      ! With two Gram-Schmidt passes from the second step on, as the blocks rely on the basis
+      ! they are given being orthonormal: the Pythagorean Gram matrix of a block is wrong by
+      ! the loss of orthogonality of the existing basis times the square of the block vectors,
+      ! and one pass can lose 1e-7 in ten steps on an ill-conditioned matrix. A block vector
+      ! whose new part is smaller than that then gets the wrong normalisation
       ! ~~~~~~~~~
-      call arnoldi(matrix, m0 - 1, lucky_tol, V_n, w_j, beta, H_n, m)
+      call arnoldi(matrix, 0, lucky_tol, V_n, w_j, beta, H_n, m)
+      if (m0 > 1 .AND. .NOT. H_n(2, 1) < lucky_tol) then
+         call arnoldi_extend(matrix, lucky_tol, V_n, w_j, H_n, 1, m0, m, 2)
+      end if
       n_tightened = 0
       lucky = .FALSE.
       n_resume_start = 10
