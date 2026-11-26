@@ -26,6 +26,10 @@ module gmres_poly_newton
    integer, parameter :: NEWTON_ROOTS_NONE = 0
    integer, parameter :: NEWTON_ROOTS_POF = 1
    integer, parameter :: NEWTON_ROOTS_ADAPTIVE = 2
+
+   ! TEMPORARY: timers for profiling the degree search of the adaptive rule
+   PetscLogDouble :: prof_ritz = 0, prof_extra = 0, prof_leja = 0, prof_replay = 0
+   integer :: prof_candidates = 0, prof_replays = 0, prof_copy_all = 0
    
    contains
 
@@ -792,7 +796,7 @@ module gmres_poly_newton
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine adaptive_newton_candidate(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base)
+   subroutine adaptive_newton_candidate_inner(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base)
 
       ! Builds the roots of the Newton polynomial of a given degree for the adaptive rule
       ! and decides if they are acceptable
@@ -814,6 +818,8 @@ module gmres_poly_newton
       integer, dimension(:), allocatable :: indices
       logical :: sensitive, over_cap, copied_all
       PetscReal :: residual
+      PetscLogDouble :: t0, t1
+      PetscErrorCode :: ierr
 
       ! ~~~~~~
 
@@ -821,7 +827,11 @@ module gmres_poly_newton
       accepted = .TRUE.
 
       ! Harmonic Ritz values of the leading block, with the non-zero roots first
+      prof_candidates = prof_candidates + 1
+      call PetscTime(t0, ierr)
       call harmonic_ritz_roots(H, degree, m, roots(:, 1), roots(:, 2))
+      call PetscTime(t1, ierr)
+      prof_ritz = prof_ritz + t1 - t0
       n_base = 0
       do i_loc = 1, degree
          if (roots(i_loc, 1) /= 0d0 .OR. roots(i_loc, 2) /= 0d0) n_base = n_base + 1
@@ -833,8 +843,11 @@ module gmres_poly_newton
       end if
 
       ! Extra copies only of the roots where a copy cannot amplify the polynomial
+      call PetscTime(t0, ierr)
       call compute_extra_roots_adaptive(roots(1:n_base, 1), roots(1:n_base, 2), rho, .FALSE., &
                sensitive, over_cap, real_added, imag_added)
+      call PetscTime(t1, ierr)
+      prof_extra = prof_extra + t1 - t0
 
       ! If one of the roots we didn't copy is too sensitive, see if copying
       ! every sensitive root gives a polynomial that is still good
@@ -843,15 +856,22 @@ module gmres_poly_newton
       if (copied_all) then
 
          deallocate(real_added, imag_added)
+         prof_copy_all = prof_copy_all + 1
+         call PetscTime(t0, ierr)
          call compute_extra_roots_adaptive(roots(1:n_base, 1), roots(1:n_base, 2), rho, .TRUE., &
                   sensitive, over_cap, real_added, imag_added)
+         call PetscTime(t1, ierr)
+         prof_extra = prof_extra + t1 - t0
          if (over_cap) then
             accepted = .FALSE.
             return
          end if
       end if
 
+      call PetscTime(t0, ierr)
       call leja_order_with_extras(roots(1:n_base, 1), roots(1:n_base, 2), real_added, imag_added, indices)
+      call PetscTime(t1, ierr)
+      prof_leja = prof_leja + t1 - t0
       allocate(real_roots_out(size(real_added)), imag_roots_out(size(real_added)))
       real_roots_out = real_added(indices)
       imag_roots_out = imag_added(indices)
@@ -860,12 +880,43 @@ module gmres_poly_newton
       ! The copies we were not sure about are only kept if the polynomial
       ! still does about as well as GMRES on the Arnoldi start vector
       if (copied_all) then
+         prof_replays = prof_replays + 1
+         call PetscTime(t0, ierr)
          call hessenberg_newton_replay(H, degree, real_roots_out, imag_roots_out, residual)
+         call PetscTime(t1, ierr)
+         prof_replay = prof_replay + t1 - t0
          if (residual > 2 * rho) then
             accepted = .FALSE.
             deallocate(real_roots_out, imag_roots_out)
          end if
       end if
+
+   end subroutine adaptive_newton_candidate_inner
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine adaptive_newton_candidate(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base)
+
+      ! TEMPORARY wrapper that prints each candidate degree of the search
+
+      PetscReal, dimension(:,:), intent(in)               :: H
+      integer, intent(in)                                 :: degree, m
+      PetscReal, intent(in)                               :: rho
+      logical, intent(out)                                :: accepted
+      PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_out, imag_roots_out
+      integer, intent(out)                                :: n_base
+
+      PetscLogDouble :: t0, t1
+      PetscErrorCode :: ierr
+      PetscBool :: view_choice
+
+      call PetscTime(t0, ierr)
+      call adaptive_newton_candidate_inner(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base)
+      call PetscTime(t1, ierr)
+      call PetscOptionsHasName(PETSC_NULL_OPTIONS, PETSC_NULL_CHARACTER, &
+               '-pflare_newton_adaptive_view', view_choice, ierr)
+      if (view_choice) print '(A,I0,A,L1,A,ES9.2,A,ES9.2)', "Search candidate: degree ", degree, " accepted ", accepted, &
+            " residual ", rho, " time ", t1 - t0
 
    end subroutine adaptive_newton_candidate
 
@@ -916,6 +967,9 @@ module gmres_poly_newton
 
       call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base)
       if (accepted) then
+         if (view_choice) print '(A,I0,A,I0,A,I0,A,ES9.2,A,ES9.2,A,ES9.2,A,ES9.2)', "Search totals: candidates ", prof_candidates, &
+               " copy-all passes ", prof_copy_all, " replays ", prof_replays, " harmonic Ritz ", prof_ritz, &
+               " extra roots ", prof_extra, " leja ", prof_leja, " replay ", prof_replay
          if (view_choice) print '(A,I0,A,I0,A,ES9.2,A,ES9.2,A,I0,A,I0)', "Adaptive degree: steps ", m, &
                " residual stops improving at ", degree_floor, " residual there ", rho_h(degree_floor), &
                " at the last step ", rho_h(m), " lowered for stability to ", degree_floor, " roots ", n_base
@@ -948,6 +1002,9 @@ module gmres_poly_newton
          end if
       end do
 
+      if (view_choice) print '(A,I0,A,I0,A,I0,A,ES9.2,A,ES9.2,A,ES9.2,A,ES9.2)', "Search totals: candidates ", prof_candidates, &
+            " copy-all passes ", prof_copy_all, " replays ", prof_replays, " harmonic Ritz ", prof_ritz, &
+            " extra roots ", prof_extra, " leja ", prof_leja, " replay ", prof_replay
       if (view_choice) print '(A,I0,A,I0,A,ES9.2,A,ES9.2,A,I0,A,I0,A,ES9.2)', "Adaptive degree: steps ", m, &
             " residual stops improving at ", degree_floor, " residual there ", rho_h(degree_floor), &
             " at the last step ", rho_h(m), " lowered for stability to ", good, " roots ", n_base, &
