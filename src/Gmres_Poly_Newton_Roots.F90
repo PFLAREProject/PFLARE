@@ -1270,6 +1270,15 @@ module gmres_poly_newton_roots
       ! ~~~~~~~~~~~
       ! Greedy ordering
       ! ~~~~~~~~~~~
+      ! The measure of test 1) for the order we were given. No order has a measure below one
+      ! (the first head is one), so if this is already less than five decades the test cannot
+      ! pass and there is nothing to gain: the greedy ordering, which costs the most, is skipped
+      call head_tail_measure(.FALSE., measure_old)
+      if (measure_old < 5 * log(real(10, kind(measure_old)))) then
+         deallocate(log_factor)
+         return
+      end if
+
       left = .FALSE.
       left(1:n_units) = .TRUE.
       log_head = 0
@@ -1307,8 +1316,7 @@ module gmres_poly_newton_roots
          log_tail = log_tail - log_factor(:, best)
       end do
 
-      ! The measure of test 1), for the order we were given and for the new one
-      call head_tail_measure(.FALSE., measure_old)
+      ! The measure of test 1) for the new order
       call head_tail_measure(.TRUE., measure_new)
       deallocate(log_factor)
 
