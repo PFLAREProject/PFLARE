@@ -15,7 +15,6 @@ module gmres_poly_newton_roots
 
    contains
 
-
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine modified_leja(real_roots, imag_roots, indices)
@@ -858,8 +857,8 @@ module gmres_poly_newton_roots
       ! taken smaller than 10 eps: otherwise a converged Arnoldi (a residual at or below
       ! rounding level, or exactly zero after a breakdown) would be rejected for nothing
       replay_limit = 2
-      if (.NOT. copied_all) replay_limit = root_env_int('PFLARE_ROOT_REPLAY_FACTOR', 100)
-      if (degree > 1 .AND. (copied_all .OR. root_env_int('PFLARE_ROOT_REPLAY_ALWAYS', 1) == 1)) then
+      if (.NOT. copied_all) replay_limit = 100
+      if (degree > 1) then
          call hessenberg_newton_replay(H, degree, real_roots_out, imag_roots_out, residual)
          if (residual > replay_limit * max(rho, 10 * PFLARE_EPS)) then
             accepted = .FALSE.
@@ -963,7 +962,6 @@ module gmres_poly_newton_roots
 
          if (.NOT. present(real_roots_alt)) return
          if (allocated(real_roots_alt)) deallocate(real_roots_alt, imag_roots_alt)
-         if (root_env_int('PFLARE_ROOT_ORDER_GREEDY', 1) /= 1) return
          if (size(real_roots_out) == 0) return
 
          allocate(real_new(size(real_roots_out)), imag_new(size(real_roots_out)))
@@ -985,39 +983,6 @@ module gmres_poly_newton_roots
       end subroutine greedy_candidate
 
    end subroutine adaptive_newton_roots
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   integer function root_env_int(name, default_value)
-
-      ! Reads an integer switch for the root rules from the environment
-      ! Returns default_value if the variable is not set or cannot be read
-      ! These are for debugging and for comparisons and are not user options:
-      !   PFLARE_ROOT_REPLAY_ALWAYS = 0   the adaptive rule only replays the candidates where every
-      !                                   sensitive root was copied (default 1: replay every candidate)
-      !   PFLARE_ROOT_REPLAY_FACTOR = f   reject the other candidates if the replay is f times the
-      !                                   GMRES residual (default 100)
-      !   PFLARE_ROOT_ORDER_GREEDY  = 0   the adaptive rule keeps the leja order of its roots
-      !                                   (default 1: reorder with greedy_head_tail_order if its tests pass)
-      !   PFLARE_ROOT_ALG4          = c   the pof rule becomes compute_extra_roots_pof_update with cutoff c
-      !                                   (default 0: off)
-      !   PFLARE_ROOT_VERBOSE       = 1   print what the rules above did
-
-      ! ~~~~~~
-      character(len=*), intent(in) :: name
-      integer, intent(in)          :: default_value
-
-      character(len=32) :: env_char
-      integer :: length, status, env_val, io_status
-      ! ~~~~~~
-
-      root_env_int = default_value
-      call get_environment_variable(name, env_char, length=length, status=status)
-      if (status /= 0 .OR. length == 0) return
-      read(env_char, *, iostat=io_status) env_val
-      if (io_status == 0) root_env_int = env_val
-
-   end function root_env_int
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1335,20 +1300,11 @@ module gmres_poly_newton_roots
       ! The estimates cost far more than the measure, so they are only computed if
       ! the measure has fallen far enough
       ! ~~~~~~~~~~~
-      estimate_old = -1
-      estimate_new = -1
       if (measure_old - measure_new >= 5 * log(real(10, kind(measure_old)))) then
          call head_tail_estimate(H, degree, real_roots, imag_roots, estimate_old)
          call head_tail_estimate(H, degree, real_new, imag_new, estimate_new)
          ! The comparison is false for a NaN
          if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old) taken = .TRUE.
-      end if
-
-      if (root_env_int('PFLARE_ROOT_VERBOSE', 0) == 1) then
-         print '(A,I5,A,I5,A,ES10.2,A,ES10.2,A,F7.1,A,F7.1,A,L1)', " PFLARE root order: degree ", degree, &
-               " roots ", n_roots, " estimate given order ", estimate_old, " greedy order ", estimate_new, &
-               " log10 measure given ", measure_old/log(real(10, kind(measure_old))), &
-               " greedy ", measure_new/log(real(10, kind(measure_new))), " taken ", taken
       end if
 
       contains
@@ -1383,151 +1339,6 @@ module gmres_poly_newton_roots
       end subroutine head_tail_measure
 
    end subroutine greedy_head_tail_order
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine compute_extra_roots_pof_update(real_roots, imag_roots, cutoff, real_roots_output, imag_roots_output, indices)
-
-      ! Adds extra copies of roots for stability with the rule of
-      ! Embree, Henningsen, Jackson & Morgan, "Polynomial approximation to the inverse of a
-      ! large matrix", arXiv:2502.18317 (2025), Algorithm 4
-      ! This differs from compute_extra_roots (Loe & Morgan 2022, Algorithm 2) in that the roots are
-      ! tested in increasing order of magnitude and the pof of the roots not yet tested is
-      ! updated every time copies are added
-      ! A root gets ceiling((log10(pof) - cutoff)/14) copies; they use cutoff = 8, Loe & Morgan use 4
-      ! The roots are then leja ordered with the copies perturbed by a relative 1e-12,
-      ! so that they are distinct for the ordering
-      ! real_roots, imag_roots are the non-zero roots with conjugate pairs next to each other,
-      ! positive imaginary part first
-      ! real_roots_output, imag_roots_output are allocated and hold the roots followed by the copies
-      ! and indices is allocated and gives their ordering
-      ! This is a baseline for comparisons and is only for double precision
-
-      ! ~~~~~~
-      PetscReal, dimension(:), intent(in)                 :: real_roots, imag_roots
-      PetscReal, intent(in)                               :: cutoff
-      PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_output, imag_roots_output
-      integer, dimension(:), allocatable, intent(inout)   :: indices
-
-      ! Local variables
-      integer :: i, j, k, n, n_copy, partner, total, counter, seed, step, n_order
-      integer, dimension(size(real_roots)) :: copies, sorted
-      logical, dimension(size(real_roots)) :: done
-      PetscReal, dimension(size(real_roots)) :: log_pof, mag
-      PetscReal, dimension(:,:), allocatable :: log_factor
-      PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
-      PetscReal :: den, diff_real, diff_imag, factor
-
-      ! ~~~~~~
-
-      n = size(real_roots)
-
-      ! log_factor(k, i) = log10|1 - theta_k/theta_i|
-      allocate(log_factor(n, n))
-      do i = 1, n
-         den = real_roots(i)**2 + imag_roots(i)**2
-         do k = 1, n
-            if (k == i) then
-               log_factor(k, i) = 0
-            else
-               ! theta_k/theta_i
-               diff_real = (real_roots(k) * real_roots(i) + imag_roots(k) * imag_roots(i))/den
-               diff_imag = (imag_roots(k) * real_roots(i) - real_roots(k) * imag_roots(i))/den
-               log_factor(k, i) = log10(max(sqrt((1 - diff_real)**2 + diff_imag**2), tiny(den)))
-            end if
-         end do
-      end do
-      log_pof = sum(log_factor, dim=2)
-
-      ! The roots with non-negative imaginary part in increasing order of magnitude
-      mag = sqrt(real_roots**2 + imag_roots**2)
-      n_order = 0
-      do i = 1, n
-         if (imag_roots(i) < 0d0) cycle
-         n_order = n_order + 1
-         sorted(n_order) = i
-      end do
-      do i = 2, n_order
-         k = sorted(i)
-         j = i - 1
-         do while (j >= 1)
-            if (mag(sorted(j)) <= mag(k)) exit
-            sorted(j + 1) = sorted(j)
-            j = j - 1
-         end do
-         sorted(j + 1) = k
-      end do
-
-      copies = 0
-      done = .FALSE.
-      do step = 1, n_order
-         k = sorted(step)
-         partner = k
-         if (imag_roots(k) > 0d0) partner = k + 1
-         done(k) = .TRUE.
-         done(partner) = .TRUE.
-         if (log_pof(k) > cutoff) then
-            n_copy = ceiling((log_pof(k) - cutoff)/14)
-            copies(k) = n_copy
-            copies(partner) = n_copy
-            ! Update the pof of the roots we haven't tested yet
-            do i = 1, n
-               if (done(i)) cycle
-               log_pof(i) = log_pof(i) + n_copy * log_factor(i, k)
-               if (partner /= k) log_pof(i) = log_pof(i) + n_copy * log_factor(i, partner)
-            end do
-         end if
-      end do
-      deallocate(log_factor)
-
-      total = n
-      do i = 1, n
-         if (imag_roots(i) >= 0d0) then
-            total = total + copies(i)
-            if (imag_roots(i) > 0d0) total = total + copies(i)
-         end if
-      end do
-
-      allocate(real_roots_output(total), imag_roots_output(total))
-      allocate(perturbed_real(total), perturbed_imag(total))
-      real_roots_output(1:n) = real_roots
-      imag_roots_output(1:n) = imag_roots
-      perturbed_real(1:n) = real_roots
-      perturbed_imag(1:n) = imag_roots
-
-      ! The copies, perturbed for the ordering only
-      ! They use a normal random number, we use a fixed sequence in (-1, 1) so the
-      ! result is the same on every rank and every run
-      seed = 4321
-      counter = n
-      do i = 1, n
-         if (imag_roots(i) < 0d0) cycle
-         do j = 1, copies(i)
-            seed = mod(seed * 1103 + 12347, 65521)
-            factor = 1 + (2 * real(seed, kind(factor)) / 65521 - 1) / 1000000 / 1000000
-            counter = counter + 1
-            real_roots_output(counter) = real_roots(i)
-            imag_roots_output(counter) = imag_roots(i)
-            perturbed_real(counter) = real_roots(i) * factor
-            perturbed_imag(counter) = imag_roots(i) * factor
-            if (imag_roots(i) > 0d0) then
-               counter = counter + 1
-               real_roots_output(counter) = real_roots(i)
-               imag_roots_output(counter) = -imag_roots(i)
-               perturbed_real(counter) = real_roots(i) * factor
-               perturbed_imag(counter) = -imag_roots(i) * factor
-            end if
-         end do
-      end do
-
-      call modified_leja(perturbed_real, perturbed_imag, indices)
-      deallocate(perturbed_real, perturbed_imag)
-
-      if (root_env_int('PFLARE_ROOT_VERBOSE', 0) == 1) then
-         print '(A,I5,A,I6)', " PFLARE root rule: pof update, roots ", n, " copies ", total - n
-      end if
-
-   end subroutine compute_extra_roots_pof_update
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

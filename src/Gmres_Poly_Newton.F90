@@ -7,7 +7,7 @@ module gmres_poly_newton
    use matshell_data_type, only: mat_ctxtype
    use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
    use gmres_poly_newton_roots, only: modified_leja, compute_extra_roots, harmonic_ritz_roots, &
-         leja_order_with_extras, adaptive_newton_roots, compute_extra_roots_pof_update, root_env_int
+         leja_order_with_extras, adaptive_newton_roots
    use gmres_poly_arnoldi, only: arnoldi_extend, arnoldi_sstep
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos
    use pflare_parameters, only: PFLARE_TOL_CONSISTENCY, PFLARE_TOL_LUCKY, &
@@ -63,7 +63,7 @@ module gmres_poly_newton
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
       integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode
-      integer :: counter, m, numerical_order, pof_cutoff
+      integer :: counter, m, numerical_order
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
@@ -202,16 +202,8 @@ module gmres_poly_newton
 
          ! Call compute_extra_roots only on the non-zero eigenvalues
          ! This allocates real_roots_added/imag_roots_added with the original + extra roots
-         ! With PFLARE_ROOT_ALG4 set to a positive pof cutoff, the copies and their ordering
-         ! are those of Embree et al. (2025), Algorithm 4, as a baseline
-         pof_cutoff = root_env_int('PFLARE_ROOT_ALG4', 0)
-         if (pof_cutoff > 0) then
-            call compute_extra_roots_pof_update(coefficients_temp(:, 1), coefficients_temp(:, 2), &
-                     real(pof_cutoff, kind(coefficients)), real_roots_added, imag_roots_added, indices)
-         else
-            call compute_extra_roots(coefficients_temp(:, 1), coefficients_temp(:, 2), &
-                     real_roots_added, imag_roots_added)
-         end if
+         call compute_extra_roots(coefficients_temp(:, 1), coefficients_temp(:, 2), &
+                  real_roots_added, imag_roots_added)
 
          ! Resize coefficients to hold non-zero roots (with extras) + zero roots at end
          deallocate(coefficients)
@@ -219,10 +211,8 @@ module gmres_poly_newton
          coefficients = 0d0
 
          ! Leja order only the non-zero eigenvalues (with extras)
-         if (pof_cutoff <= 0) then
-            call leja_order_with_extras(coefficients_temp(:, 1), coefficients_temp(:, 2), &
-                     real_roots_added, imag_roots_added, indices)
-         end if
+         call leja_order_with_extras(coefficients_temp(:, 1), coefficients_temp(:, 2), &
+                  real_roots_added, imag_roots_added, indices)
 
          ! Reorder the (non-perturbed) roots using the leja ordering
          coefficients(1:size(real_roots_added), 1) = real_roots_added(indices)
