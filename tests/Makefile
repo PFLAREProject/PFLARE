@@ -247,6 +247,9 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/diag7_small500 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test adaptive Newton GMRES polynomials order 80 matrix-free on the badly scaled market matrix problem bcsstk19"
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 80 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 12
+	@echo "Test adaptive Newton GMRES polynomials order 71 lower the degree when the roots amplify the Arnoldi start vector, on diagonally scaled bcsstk19"
+	@echo "  (without the replay of every candidate the 72 roots kept amplify it by 13 and the solve takes 54 iterations instead of 46)"
+	PFLARE_ROOT_REPLAY_ALWAYS=1 ./ex6 -b_in_f 0 -f data/bcsstk19 -diag_scale -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 71 -pc_pflareinv_matrix_free -ksp_type gmres -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_rtol 1e-8 -ksp_gmres_restart 300 -ksp_max_it 50 -true_residual_factor 10
 	@echo "Test power basis GMRES polynomials order 10 matrix-free on the badly scaled market matrix problem bcsstk19"
 	./ex6 -b_in_f 0 -f data/bcsstk19 -pc_type pflareinv -pc_pflareinv_type power -pc_pflareinv_poly_order 10 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 30
 	@echo "Test power basis GMRES polynomials order 10 with fixed sparsity on the badly scaled market matrix problem bcsstk19"
