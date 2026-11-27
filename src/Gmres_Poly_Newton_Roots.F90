@@ -1058,7 +1058,7 @@ module gmres_poly_newton_roots
       do k = 1, n_probe
          do i = 1, degree + 1
             seed = mod(seed * 16807_long_int, 2147483647_long_int)
-            z(k, i) = 2 * real(seed, kind(estimate)) / 2147483647 - 1
+            z(k, i) = 2 * real(seed, kind(estimate)) / real(2147483647_long_int, kind(estimate)) - 1
          end do
          z(k, :) = z(k, :) / norm2(z(k, :))
       end do
