@@ -2,7 +2,8 @@ static char help[] = "Reads a PETSc matrix and vector from a file and solves a l
 Input arguments are:\n\
   -f <input_file> : file to load. For example see $PETSC_DIR/share/petsc/datafiles/matrices\n\
   -true_residual_factor <f> : fail if ||b - Ax|| of the returned solution is more than f times\n\
-                              the residual norm the KSP reports (only with -ksp_norm_type unpreconditioned)\n\n";
+                              the residual norm the KSP reports. Only meaningful if the KSP reports the\n\
+                              unpreconditioned residual norm (-ksp_norm_type unpreconditioned); not checked\n\n";
 
 #include <petscksp.h>
 #include <petsclog.h>
@@ -218,14 +219,17 @@ int main(int argc,char **args)
   PetscBool true_residual_bad = PETSC_FALSE;
   if (true_residual_factor > 0 && reason > 0)
   {
-   PetscReal rnorm_reported, rnorm_true;
+   PetscReal rnorm_reported, rnorm_true, norm_ax, norm_b;
    PetscCall(KSPGetResidualNorm(ksp, &rnorm_reported));
    // u = b - A x
    PetscCall(MatMult(A, x, u));
+   PetscCall(VecNorm(u, NORM_2, &norm_ax));
+   PetscCall(VecNorm(b, NORM_2, &norm_b));
    PetscCall(VecAYPX(u, -1.0, b));
    PetscCall(VecNorm(u, NORM_2, &rnorm_true));
+   // A true residual at rounding level always passes, as the reported one can be exactly zero
    // The comparison is false for a NaN
-   if (!(rnorm_true <= true_residual_factor * rnorm_reported))
+   if (!(rnorm_true <= true_residual_factor * rnorm_reported || rnorm_true <= 1000 * PETSC_MACHINE_EPSILON * (norm_ax + norm_b)))
    {
       PetscCall(PetscPrintf(PETSC_COMM_WORLD, "True residual norm %g is more than %g times the reported residual norm %g\n", \
                (double)rnorm_true, (double)true_residual_factor, (double)rnorm_reported));

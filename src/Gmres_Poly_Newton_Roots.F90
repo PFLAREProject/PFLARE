@@ -853,11 +853,15 @@ module gmres_poly_newton_roots
       ! pass on the start vector and be a much worse preconditioner on other vectors
       ! The root sets this is for (eg, close roots merged by the clustering, or an apply that
       ! has lost its accuracy to rounding) are worse than GMRES by many orders of magnitude
+      ! Degree one is never rejected, as the degree search relies on it being acceptable
+      ! The replay has rounding of its own, so the GMRES residual it is compared with is never
+      ! taken smaller than 10 eps: otherwise a converged Arnoldi (a residual at or below
+      ! rounding level, or exactly zero after a breakdown) would be rejected for nothing
       replay_limit = 2
       if (.NOT. copied_all) replay_limit = root_env_int('PFLARE_ROOT_REPLAY_FACTOR', 100)
-      if (copied_all .OR. root_env_int('PFLARE_ROOT_REPLAY_ALWAYS', 1) == 1) then
+      if (degree > 1 .AND. (copied_all .OR. root_env_int('PFLARE_ROOT_REPLAY_ALWAYS', 1) == 1)) then
          call hessenberg_newton_replay(H, degree, real_roots_out, imag_roots_out, residual)
-         if (residual > replay_limit * rho) then
+         if (residual > replay_limit * max(rho, 10 * PFLARE_EPS)) then
             accepted = .FALSE.
             deallocate(real_roots_out, imag_roots_out)
          end if
@@ -886,7 +890,7 @@ module gmres_poly_newton_roots
       PetscReal, dimension(:), allocatable, intent(inout), optional :: real_roots_alt, imag_roots_alt
 
       ! Local variables
-      integer :: degree, bad, good, mid, step, n_base_trial
+      integer :: degree, bad, good, mid, step, n_base_trial, errorcode
       PetscReal, dimension(m) :: rho_h
       PetscReal, dimension(:), allocatable :: real_trial, imag_trial
       logical :: accepted, taken
@@ -914,16 +918,22 @@ module gmres_poly_newton_roots
       end if
 
       ! Otherwise we have to lower the degree until the roots are acceptable
-      ! Step down geometrically until we find a degree that is (degree one always is)
+      ! Step down geometrically until we find a degree that is
+      ! Degree one always is: adaptive_newton_candidate never rejects it
       bad = degree
       step = 1
       do
          good = max(1, degree - step)
          call adaptive_newton_candidate(H, good, m, rho_h(good), accepted, real_roots_out, imag_roots_out, n_base)
-         if (accepted) exit
+         ! The second test can never be needed, but this loop must not be able to run forever
+         if (accepted .OR. good == 1) exit
          bad = good
          step = 2 * step
       end do
+      if (.NOT. accepted) then
+         print *, "The adaptive Newton root rule rejected degree one"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
       ! Then bisect between the acceptable degree and the one that is not
       do while (bad - good > 1)
@@ -949,6 +959,7 @@ module gmres_poly_newton_roots
          ! if it is switched on and estimated to be better
          integer, intent(in) :: degree_final
          PetscReal, dimension(:), allocatable :: real_new, imag_new
+         PetscReal :: replay_old, replay_new
 
          if (.NOT. present(real_roots_alt)) return
          if (allocated(real_roots_alt)) deallocate(real_roots_alt, imag_roots_alt)
@@ -957,6 +968,13 @@ module gmres_poly_newton_roots
 
          allocate(real_new(size(real_roots_out)), imag_new(size(real_roots_out)))
          call greedy_head_tail_order(H, degree_final, real_roots_out, imag_roots_out, real_new, imag_new, taken)
+         ! The order we were given passed the replay; the new order has to do as well, or
+         ! at least pass the same test, before it is used
+         if (taken) then
+            call hessenberg_newton_replay(H, degree_final, real_roots_out, imag_roots_out, replay_old)
+            call hessenberg_newton_replay(H, degree_final, real_new, imag_new, replay_new)
+            taken = replay_new <= max(replay_old, 100 * max(rho_h(degree_final), 10 * PFLARE_EPS))
+         end if
          if (taken) then
             call move_alloc(real_new, real_roots_alt)
             call move_alloc(imag_new, imag_roots_alt)
@@ -1019,6 +1037,10 @@ module gmres_poly_newton_roots
       ! as much as four replays
       ! estimate = eps/2 * sqrt( sum_g ( ||head_{g-1} e_1|| * (1 + max_z ||z^T tail_g||) )^2 )
       ! and is returned as huge if anything overflows
+      ! This is a model and not a bound: the local error of a step also has a factor of about
+      ! ||H||/|theta| and the rounding in the sum that forms the solution is left out, the heads
+      ! are those of the Arnoldi start vector only, and like hessenberg_newton_replay it is
+      ! exact in H only while the number of roots is at most the degree
       ! It is independent of the scale of the matrix
 
       ! ~~~~~~
@@ -1029,9 +1051,11 @@ module gmres_poly_newton_roots
 
       ! Local variables
       integer, parameter :: n_probe = 3
-      integer :: i, k, n_roots, n_units, seed
+      integer :: i, k, n_roots, n_units
+      integer, parameter :: long_int = selected_int_kind(18)
+      integer(kind=long_int) :: seed
       integer, dimension(size(real_roots)) :: unit_start
-      PetscReal, dimension(degree+1, degree+1) :: H_ext
+      PetscReal, dimension(:,:), allocatable :: H_ext
       PetscReal, dimension(n_probe, degree+1) :: z, z_two
       PetscReal, dimension(degree+1) :: t, t_two
       PetscReal, dimension(size(real_roots)) :: head, tail
@@ -1046,6 +1070,7 @@ module gmres_poly_newton_roots
          return
       end if
 
+      allocate(H_ext(degree+1, degree+1))
       H_ext = 0
       H_ext(1:degree+1, 1:degree) = H(1:degree+1, 1:degree)
 
@@ -1062,13 +1087,13 @@ module gmres_poly_newton_roots
          end if
       end do
 
-      ! Fixed pseudo-random row vectors with unit norm (a linear congruential generator,
-      ! so the result is the same on every rank and every run)
+      ! Fixed pseudo-random row vectors with unit norm (the minimal standard linear congruential
+      ! generator, so the result is the same on every rank and every run)
       seed = 12345
       do k = 1, n_probe
          do i = 1, degree + 1
-            seed = mod(seed * 1103 + 12347, 65521)
-            z(k, i) = 2 * real(seed, kind(estimate)) / 65521 - 1
+            seed = mod(seed * 16807_long_int, 2147483647_long_int)
+            z(k, i) = 2 * real(seed, kind(estimate)) / 2147483647 - 1
          end do
          z(k, :) = z(k, :) / norm2(z(k, :))
       end do
@@ -1127,10 +1152,12 @@ module gmres_poly_newton_roots
       ! come (tails) are both kept small, and says if that is estimated to reduce the
       ! rounding error of the apply
       ! The polynomial is not changed, only the order in which its factors are applied
+      ! (for the matrix-free apply; an assembled fixed sparsity build drops entries as it
+      ! goes, so there the order changes the matrix that is built a little)
       ! real_new, imag_new always return the new order, real_roots, imag_roots are not modified
       !
       ! At every step the root is taken that minimises
-      !   max_S |head| * (1 + max_S |tail|)
+      !   max_S |head after the step| * (1 + max_S |tail after the step|)
       ! where S are the Ritz values of the leading degree x degree block of H, a stand-in
       ! for the spectrum, and the distance from a point of S to a root is never taken
       ! smaller than 100 eps ||H||, as a computed root is not closer than that to the
@@ -1140,8 +1167,11 @@ module gmres_poly_newton_roots
       !
       ! The new order is not always better, so taken is only returned as true if two tests
       ! that cost no matvecs both pass
-      ! 1) The measure that was minimised, max over the steps of max_S |head| * (1 + max_S |tail|),
-      !    is at least five decades smaller for the new order than for the order we were given
+      ! 1) The measure max over the steps of max_S |head before the step| * (1 + max_S |tail after it|),
+      !    which is the one the rounding error follows (the greedy choice above uses the head after
+      !    the step, so this is close to but not exactly what was minimised, and it can come out
+      !    larger for the new order), is at least five decades smaller for the new order than for
+      !    the order we were given
       !    When it barely falls the greedy has found nothing: this happens when a root without a
       !    copy has a large product of other factors (no order can then do better than the square
       !    root of that product), or when the Ritz values are not close to the spectrum
@@ -1158,11 +1188,11 @@ module gmres_poly_newton_roots
       logical, intent(out)                   :: taken
 
       ! Local variables
-      integer :: i, k, r, step, n_roots, n_units, best, errorcode, counter
+      integer :: i, k, r, step, n_roots, n_units, best, counter
       PetscBLASInt :: lwork, info, n_bl, lda_bl, one_bl
       integer, dimension(size(real_roots)) :: unit_start, unit_size, order
       logical, dimension(size(real_roots)) :: left
-      PetscReal, dimension(degree, degree) :: H_square
+      PetscReal, dimension(:,:), allocatable :: H_square
       PetscReal, dimension(degree) :: ritz_real, ritz_imag, log_head, log_tail
       PetscReal, dimension(:,:), allocatable :: log_factor, VL, VR
       PetscReal, dimension(:), allocatable :: work
@@ -1197,6 +1227,7 @@ module gmres_poly_newton_roots
       ! ~~~~~~~~~~~
       ! Ritz values of the leading block
       ! ~~~~~~~~~~~
+      allocate(H_square(degree, degree))
       H_square = H(1:degree, 1:degree)
       floor_dist = 100 * PFLARE_EPS * norm2(H(1:degree+1, 1:degree))
 
@@ -1214,11 +1245,9 @@ module gmres_poly_newton_roots
       call PFLAREgeev('N', 'N', n_bl, H_square, lda_bl, &
                      ritz_real, ritz_imag, VL, one_bl, VR, one_bl, &
                      work, lwork, info)
-      deallocate(work, VL, VR)
-      if (info /= 0) then
-         print *, "Eig decomposition failed"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
+      deallocate(work, VL, VR, H_square)
+      ! The reordering is optional, so if we can't get the Ritz values we keep the order we were given
+      if (info /= 0) return
 
       ! ~~~~~~~~~~~
       ! log of the magnitude of every factor at every Ritz value
@@ -1244,14 +1273,10 @@ module gmres_poly_newton_roots
       left = .FALSE.
       left(1:n_units) = .TRUE.
       log_head = 0
+      ! The floor on the distances keeps every log_factor well above the clamp, so the tail
+      ! can be kept as a running difference
+      log_tail = sum(log_factor, dim=2)
       do step = 1, n_units
-
-         ! The tail is recomputed from the roots that are left, so that the clamp
-         ! and rounding in a running difference cannot build up
-         log_tail = 0
-         do r = 1, n_units
-            if (left(r)) log_tail = log_tail + log_factor(:, r)
-         end do
 
          best = 0
          best_score = huge(best_score)
@@ -1279,9 +1304,10 @@ module gmres_poly_newton_roots
          order(step) = best
          left(best) = .FALSE.
          log_head = log_head + log_factor(:, best)
+         log_tail = log_tail - log_factor(:, best)
       end do
 
-      ! The measure that was minimised, for the order we were given and for the new one
+      ! The measure of test 1), for the order we were given and for the new one
       call head_tail_measure(.FALSE., measure_old)
       call head_tail_measure(.TRUE., measure_new)
       deallocate(log_factor)
@@ -1298,14 +1324,16 @@ module gmres_poly_newton_roots
 
       ! ~~~~~~~~~~~
       ! Only take the new order if it is estimated to be clearly better
+      ! The estimates cost far more than the measure, so they are only computed if
+      ! the measure has fallen far enough
       ! ~~~~~~~~~~~
-      call head_tail_estimate(H, degree, real_roots, imag_roots, estimate_old)
-      call head_tail_estimate(H, degree, real_new, imag_new, estimate_new)
-
-      ! The comparison is false for a NaN
-      if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old .AND. &
-            measure_old - measure_new >= 5 * log(real(10, kind(measure_old)))) then
-         taken = .TRUE.
+      estimate_old = -1
+      estimate_new = -1
+      if (measure_old - measure_new >= 5 * log(real(10, kind(measure_old)))) then
+         call head_tail_estimate(H, degree, real_roots, imag_roots, estimate_old)
+         call head_tail_estimate(H, degree, real_new, imag_new, estimate_new)
+         ! The comparison is false for a NaN
+         if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old) taken = .TRUE.
       end if
 
       if (root_env_int('PFLARE_ROOT_VERBOSE', 0) == 1) then

@@ -238,9 +238,7 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3 -true_residual_factor 10
 	@echo "Test adaptive Newton GMRES polynomials order 120 with fixed sparsity in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5
-	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free lowers the degree in market matrix problem 1138"
-	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 200 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3
-	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free returns the true residual it reports in market matrix problem 1138"
+	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free lowers the degree and returns the true residual it reports in market matrix problem 1138"
 	@echo "  (with a leja ordering of the roots, right preconditioned GMRES reports convergence with a true residual 16 times larger)"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 200 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3 -true_residual_factor 10
 	@echo "Test adaptive Newton GMRES polynomials order 60 matrix-free on a diagonal matrix with small isolated eigenvalues"
@@ -1070,6 +1068,11 @@ run_tests_no_load_serial:
 	./diag_update_check -pc_air_smooth_type fc -pc_air_constrain_w -pc_air_constrain_z -pc_air_one_point_classical_prolong 0
 	./diag_update_check -laplacian -pc_air_symmetric
 	./diag_update_check -laplacian -pc_air_symmetric -pc_air_constrain_z -pc_air_smooth_type fc
+	@echo "Test adaptive Newton GMRES polynomials on multiples of the identity, where the Arnoldi breaks down after one step"
+	@echo "  (the degree search must not reject degree one: with a residual of exactly zero it used to loop forever)"
+	./diag_poly -n 100 -constant 49 -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 10 -ksp_max_it 3
+	./diag_poly -n 37 -constant 0.3 -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 10 -ksp_max_it 3
+	./diag_poly -n 131 -constant 49 -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 10 -ksp_max_it 3
 	@echo "Test adaptive Newton GMRES polynomials order 200 keep the leja root order on a diagonal matrix with many more eigenvalues than roots"
 	@echo "  (a reordering of the roots chosen from the Hessenberg matrix alone gives a true residual 230 times the reported one here)"
 	$(SKIP_SINGLE) ./diag_poly -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 200 -ksp_type gmres -ksp_gmres_restart 50 -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_rtol 1e-8 -ksp_max_it 5
