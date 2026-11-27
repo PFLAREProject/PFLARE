@@ -847,16 +847,15 @@ module gmres_poly_newton_roots
 
       ! The copies we were not sure about are only kept if the polynomial
       ! still does about as well as GMRES on the Arnoldi start vector
-      ! With PFLARE_ROOT_REPLAY_ALWAYS=1 every other candidate is replayed too, but is only
-      ! rejected if the polynomial is clearly broken, ie its residual on the start vector is more
-      ! than PFLARE_ROOT_REPLAY_FACTOR (default 100) times that of GMRES
+      ! Every other candidate is replayed too, but is only rejected if the polynomial is clearly
+      ! broken, ie its residual on the start vector is more than 100 times that of GMRES
       ! A candidate that is only a little worse than GMRES is kept, as the degree below it can
       ! pass on the start vector and be a much worse preconditioner on other vectors
       ! The root sets this is for (eg, close roots merged by the clustering, or an apply that
       ! has lost its accuracy to rounding) are worse than GMRES by many orders of magnitude
       replay_limit = 2
       if (.NOT. copied_all) replay_limit = root_env_int('PFLARE_ROOT_REPLAY_FACTOR', 100)
-      if (copied_all .OR. root_env_int('PFLARE_ROOT_REPLAY_ALWAYS', 0) == 1) then
+      if (copied_all .OR. root_env_int('PFLARE_ROOT_REPLAY_ALWAYS', 1) == 1) then
          call hessenberg_newton_replay(H, degree, real_roots_out, imag_roots_out, residual)
          if (residual > replay_limit * rho) then
             accepted = .FALSE.
@@ -881,9 +880,9 @@ module gmres_poly_newton_roots
       integer, intent(in)                                 :: m
       PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_out, imag_roots_out
       integer, intent(out)                                :: n_base
-      ! With PFLARE_ROOT_ORDER_GREEDY=1, if greedy_head_tail_order estimates that its order of
-      ! the same roots is better, that order is returned here (allocated) for the caller
-      ! to test with matvecs; real_roots_out, imag_roots_out are always in the usual order
+      ! If greedy_head_tail_order finds an order of the same roots that passes its tests,
+      ! that order is returned here (allocated) for the caller to use
+      ! real_roots_out, imag_roots_out are always in the leja order
       PetscReal, dimension(:), allocatable, intent(inout), optional :: real_roots_alt, imag_roots_alt
 
       ! Local variables
@@ -953,7 +952,7 @@ module gmres_poly_newton_roots
 
          if (.NOT. present(real_roots_alt)) return
          if (allocated(real_roots_alt)) deallocate(real_roots_alt, imag_roots_alt)
-         if (root_env_int('PFLARE_ROOT_ORDER_GREEDY', 0) /= 1) return
+         if (root_env_int('PFLARE_ROOT_ORDER_GREEDY', 1) /= 1) return
          if (size(real_roots_out) == 0) return
 
          allocate(real_new(size(real_roots_out)), imag_new(size(real_roots_out)))
@@ -973,14 +972,18 @@ module gmres_poly_newton_roots
 
    integer function root_env_int(name, default_value)
 
-      ! Reads an integer switch for the experimental root rules from the environment
+      ! Reads an integer switch for the root rules from the environment
       ! Returns default_value if the variable is not set or cannot be read
-      ! This is for a research branch only: the switches are
-      !   PFLARE_ROOT_REPLAY_ALWAYS = 1   the adaptive rule replays every candidate on the Hessenberg matrix
-      !   PFLARE_ROOT_REPLAY_FACTOR = f   and rejects those candidates if the replay is f times the GMRES residual
-      !   PFLARE_ROOT_ORDER_GREEDY  = 1   the adaptive rule reorders its roots with greedy_head_tail_order
+      ! These are for debugging and for comparisons and are not user options:
+      !   PFLARE_ROOT_REPLAY_ALWAYS = 0   the adaptive rule only replays the candidates where every
+      !                                   sensitive root was copied (default 1: replay every candidate)
+      !   PFLARE_ROOT_REPLAY_FACTOR = f   reject the other candidates if the replay is f times the
+      !                                   GMRES residual (default 100)
+      !   PFLARE_ROOT_ORDER_GREEDY  = 0   the adaptive rule keeps the leja order of its roots
+      !                                   (default 1: reorder with greedy_head_tail_order if its tests pass)
       !   PFLARE_ROOT_ALG4          = c   the pof rule becomes compute_extra_roots_pof_update with cutoff c
-      !   PFLARE_ROOT_VERBOSE       = 1   print what the two rules above did
+      !                                   (default 0: off)
+      !   PFLARE_ROOT_VERBOSE       = 1   print what the rules above did
 
       ! ~~~~~~
       character(len=*), intent(in) :: name
