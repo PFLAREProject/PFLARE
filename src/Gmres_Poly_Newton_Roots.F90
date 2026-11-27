@@ -801,6 +801,7 @@ module gmres_poly_newton_roots
       integer, dimension(:), allocatable :: indices
       logical :: sensitive, over_cap, copied_all
       PetscReal :: residual
+      integer :: replay_limit
 
       ! ~~~~~~
 
@@ -846,10 +847,18 @@ module gmres_poly_newton_roots
 
       ! The copies we were not sure about are only kept if the polynomial
       ! still does about as well as GMRES on the Arnoldi start vector
-      ! With PFLARE_ROOT_REPLAY_ALWAYS=1 every candidate has to pass this test
+      ! With PFLARE_ROOT_REPLAY_ALWAYS=1 every other candidate is replayed too, but is only
+      ! rejected if the polynomial is clearly broken, ie its residual on the start vector is more
+      ! than PFLARE_ROOT_REPLAY_FACTOR (default 100) times that of GMRES
+      ! A candidate that is only a little worse than GMRES is kept, as the degree below it can
+      ! pass on the start vector and be a much worse preconditioner on other vectors
+      ! The root sets this is for (eg, close roots merged by the clustering, or an apply that
+      ! has lost its accuracy to rounding) are worse than GMRES by many orders of magnitude
+      replay_limit = 2
+      if (.NOT. copied_all) replay_limit = root_env_int('PFLARE_ROOT_REPLAY_FACTOR', 100)
       if (copied_all .OR. root_env_int('PFLARE_ROOT_REPLAY_ALWAYS', 0) == 1) then
          call hessenberg_newton_replay(H, degree, real_roots_out, imag_roots_out, residual)
-         if (residual > 2 * rho) then
+         if (residual > replay_limit * rho) then
             accepted = .FALSE.
             deallocate(real_roots_out, imag_roots_out)
          end if
@@ -968,6 +977,7 @@ module gmres_poly_newton_roots
       ! Returns default_value if the variable is not set or cannot be read
       ! This is for a research branch only: the switches are
       !   PFLARE_ROOT_REPLAY_ALWAYS = 1   the adaptive rule replays every candidate on the Hessenberg matrix
+      !   PFLARE_ROOT_REPLAY_FACTOR = f   and rejects those candidates if the replay is f times the GMRES residual
       !   PFLARE_ROOT_ORDER_GREEDY  = 1   the adaptive rule reorders its roots with greedy_head_tail_order
       !   PFLARE_ROOT_ALG4          = c   the pof rule becomes compute_extra_roots_pof_update with cutoff c
       !   PFLARE_ROOT_VERBOSE       = 1   print what the two rules above did
