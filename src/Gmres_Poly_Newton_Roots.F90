@@ -859,7 +859,7 @@ module gmres_poly_newton_roots
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine adaptive_newton_roots(H, m, real_roots_out, imag_roots_out, n_base)
+   subroutine adaptive_newton_roots(H, m, real_roots_out, imag_roots_out, n_base, real_roots_alt, imag_roots_alt)
 
       ! Chooses the degree and the roots (with extras) of the Newton polynomial
       ! using only the (m+1) x m Arnoldi Hessenberg matrix H
@@ -872,6 +872,10 @@ module gmres_poly_newton_roots
       integer, intent(in)                                 :: m
       PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_out, imag_roots_out
       integer, intent(out)                                :: n_base
+      ! With PFLARE_ROOT_ORDER_GREEDY=1, if greedy_head_tail_order estimates that its order of
+      ! the same roots is better, that order is returned here (allocated) for the caller
+      ! to test with matvecs; real_roots_out, imag_roots_out are always in the usual order
+      PetscReal, dimension(:), allocatable, intent(inout), optional :: real_roots_alt, imag_roots_alt
 
       ! Local variables
       integer :: degree, bad, good, mid, step, n_base_trial
@@ -897,9 +901,7 @@ module gmres_poly_newton_roots
 
       call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base)
       if (accepted) then
-         if (root_env_int('PFLARE_ROOT_ORDER_GREEDY', 0) == 1) then
-            call greedy_head_tail_order(H, degree, real_roots_out, imag_roots_out, taken)
-         end if
+         call greedy_candidate(degree)
          return
       end if
 
@@ -929,9 +931,32 @@ module gmres_poly_newton_roots
          end if
       end do
 
-      if (root_env_int('PFLARE_ROOT_ORDER_GREEDY', 0) == 1) then
-         call greedy_head_tail_order(H, good, real_roots_out, imag_roots_out, taken)
-      end if
+      call greedy_candidate(good)
+
+      contains
+
+      subroutine greedy_candidate(degree_final)
+
+         ! Returns the greedy order of the accepted roots in real_roots_alt, imag_roots_alt
+         ! if it is switched on and estimated to be better
+         integer, intent(in) :: degree_final
+         PetscReal, dimension(:), allocatable :: real_new, imag_new
+
+         if (.NOT. present(real_roots_alt)) return
+         if (allocated(real_roots_alt)) deallocate(real_roots_alt, imag_roots_alt)
+         if (root_env_int('PFLARE_ROOT_ORDER_GREEDY', 0) /= 1) return
+         if (size(real_roots_out) == 0) return
+
+         allocate(real_new(size(real_roots_out)), imag_new(size(real_roots_out)))
+         call greedy_head_tail_order(H, degree_final, real_roots_out, imag_roots_out, real_new, imag_new, taken)
+         if (taken) then
+            call move_alloc(real_new, real_roots_alt)
+            call move_alloc(imag_new, imag_roots_alt)
+         else
+            deallocate(real_new, imag_new)
+         end if
+
+      end subroutine greedy_candidate
 
    end subroutine adaptive_newton_roots
 
@@ -1082,12 +1107,14 @@ module gmres_poly_newton_roots
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine greedy_head_tail_order(H, degree, real_roots, imag_roots, taken)
+   subroutine greedy_head_tail_order(H, degree, real_roots, imag_roots, real_new, imag_new, taken)
 
-      ! Reorders the (non-zero, already ordered) roots of the Newton polynomial so that
-      ! the products of the factors applied so far (heads) and of the factors still to come
-      ! (tails) are both kept small, if that is estimated to reduce the rounding error of the apply
+      ! Computes another order for the (non-zero, already ordered) roots of the Newton polynomial,
+      ! in which the products of the factors applied so far (heads) and of the factors still to
+      ! come (tails) are both kept small, and says if that is estimated to reduce the
+      ! rounding error of the apply
       ! The polynomial is not changed, only the order in which its factors are applied
+      ! real_new, imag_new always return the new order, real_roots, imag_roots are not modified
       !
       ! At every step the root is taken that minimises
       !   max_S |head| * (1 + max_S |tail|)
@@ -1098,15 +1125,23 @@ module gmres_poly_newton_roots
       ! A leja ordering only controls the heads; with outlying roots and extra copies
       ! the tails can be very large
       !
-      ! The scalar measure on S is not reliable when the Ritz values are not close to the
-      ! spectrum (eg, non-normal matrices), so the new order is only taken if
-      ! head_tail_estimate is at least 10 times smaller for it than for the order we were given
-      ! taken is returned as true if the roots were reordered
+      ! The new order is not always better, so taken is only returned as true if two tests
+      ! that cost no matvecs both pass
+      ! 1) The measure that was minimised, max over the steps of max_S |head| * (1 + max_S |tail|),
+      !    is at least five decades smaller for the new order than for the order we were given
+      !    When it barely falls the greedy has found nothing: this happens when a root without a
+      !    copy has a large product of other factors (no order can then do better than the square
+      !    root of that product), or when the Ritz values are not close to the spectrum
+      !    (non-normal matrices). In those cases the new order has been seen to be much worse,
+      !    eg on a diagonal matrix with many more eigenvalues than roots, where the heads grow
+      !    between the Ritz values and only a leja ordering keeps them small
+      ! 2) head_tail_estimate is at least 10 times smaller for the new order
 
       ! ~~~~~~
       PetscReal, dimension(:,:), intent(in)  :: H
       integer, intent(in)                    :: degree
-      PetscReal, dimension(:), intent(inout) :: real_roots, imag_roots
+      PetscReal, dimension(:), intent(in)    :: real_roots, imag_roots
+      PetscReal, dimension(:), intent(out)   :: real_new, imag_new
       logical, intent(out)                   :: taken
 
       ! Local variables
@@ -1118,14 +1153,15 @@ module gmres_poly_newton_roots
       PetscReal, dimension(degree) :: ritz_real, ritz_imag, log_head, log_tail
       PetscReal, dimension(:,:), allocatable :: log_factor, VL, VR
       PetscReal, dimension(:), allocatable :: work
-      PetscReal, dimension(size(real_roots)) :: real_new, imag_new
       PetscReal :: floor_dist, root_mag, dist, score, best_score, new_head, new_tail
-      PetscReal :: estimate_old, estimate_new
+      PetscReal :: estimate_old, estimate_new, measure_old, measure_new
       PetscReal, parameter :: log_clamp = -700
 
       ! ~~~~~~
 
       taken = .FALSE.
+      real_new = real_roots
+      imag_new = imag_roots
       n_roots = size(real_roots)
       if (n_roots < 3 .OR. degree < 2) return
 
@@ -1231,6 +1267,10 @@ module gmres_poly_newton_roots
          left(best) = .FALSE.
          log_head = log_head + log_factor(:, best)
       end do
+
+      ! The measure that was minimised, for the order we were given and for the new one
+      call head_tail_measure(.FALSE., measure_old)
+      call head_tail_measure(.TRUE., measure_new)
       deallocate(log_factor)
 
       counter = 0
@@ -1250,16 +1290,47 @@ module gmres_poly_newton_roots
       call head_tail_estimate(H, degree, real_new, imag_new, estimate_new)
 
       ! The comparison is false for a NaN
-      if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old) then
+      if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old .AND. &
+            measure_old - measure_new >= 5 * log(10d0)) then
          taken = .TRUE.
-         real_roots = real_new
-         imag_roots = imag_new
       end if
 
       if (root_env_int('PFLARE_ROOT_VERBOSE', 0) == 1) then
-         print '(A,I5,A,I5,A,ES10.2,A,ES10.2,A,L1)', " PFLARE root order: degree ", degree, " roots ", n_roots, &
-               " estimate given order ", estimate_old, " greedy order ", estimate_new, " taken ", taken
+         print '(A,I5,A,I5,A,ES10.2,A,ES10.2,A,F7.1,A,F7.1,A,L1)', " PFLARE root order: degree ", degree, &
+               " roots ", n_roots, " estimate given order ", estimate_old, " greedy order ", estimate_new, &
+               " log10 measure given ", measure_old/log(10d0), " greedy ", measure_new/log(10d0), " taken ", taken
       end if
+
+      contains
+
+      subroutine head_tail_measure(new_order, measure)
+
+         ! log of max over the steps of max_S |head before the step| * (1 + max_S |tail after it|)
+         logical, intent(in)    :: new_order
+         PetscReal, intent(out) :: measure
+
+         integer :: step_loc, r_loc
+         PetscReal, dimension(degree) :: head_loc, tail_loc
+         PetscReal :: max_tail, term_loc
+
+         head_loc = 0
+         tail_loc = sum(log_factor, dim=2)
+         measure = -huge(measure)
+         do step_loc = 1, n_units
+            r_loc = step_loc
+            if (new_order) r_loc = order(step_loc)
+            tail_loc = tail_loc - log_factor(:, r_loc)
+            max_tail = maxval(tail_loc)
+            if (max_tail > 30) then
+               term_loc = maxval(head_loc) + max_tail
+            else
+               term_loc = maxval(head_loc) + log(1 + exp(max_tail))
+            end if
+            measure = max(measure, term_loc)
+            head_loc = head_loc + log_factor(:, r_loc)
+         end do
+
+      end subroutine head_tail_measure
 
    end subroutine greedy_head_tail_order
 

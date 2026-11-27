@@ -69,6 +69,7 @@ module gmres_poly_newton
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
       integer, dimension(:), allocatable :: indices
       PetscReal, dimension(:), allocatable :: real_roots_added, imag_roots_added
+      PetscReal, dimension(:), allocatable :: real_roots_alt, imag_roots_alt
       PetscReal :: beta
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
@@ -145,7 +146,16 @@ module gmres_poly_newton
          ! Choose the degree and the extra roots from the Hessenberg matrix
          ! This returns the non-zero roots (with any extras) already leja ordered
          ! ~~~~~~~~~~~~~~
-         call adaptive_newton_roots(H_n, m, real_roots_added, imag_roots_added, numerical_order)
+         call adaptive_newton_roots(H_n, m, real_roots_added, imag_roots_added, numerical_order, &
+                  real_roots_alt, imag_roots_alt)
+
+         ! Another order of the same roots is returned if it is expected to give a more
+         ! accurate apply (see greedy_head_tail_order)
+         if (allocated(real_roots_alt)) then
+            real_roots_added = real_roots_alt
+            imag_roots_added = imag_roots_alt
+            deallocate(real_roots_alt, imag_roots_alt)
+         end if
 
          ! Any roots we don't use are zero roots at the end, which are skipped when applying
          ! We always store at least poly_order + 1 roots
