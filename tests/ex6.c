@@ -199,6 +199,12 @@ int main(int argc,char **args)
   PetscCall(PetscLogStagePop());
   PetscCall(PetscBarrier((PetscObject)A));
 
+  // The size of the initial true residual sets what rounding level means in the true residual check
+  PetscReal rnorm_initial;
+  PetscCall(MatMult(A, x, u));
+  PetscCall(VecAYPX(u, -1.0, b));
+  PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
+
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",&gpu_copy));
   PetscCall(PetscLogStagePush(gpu_copy));
   PetscCall(KSPSolve(ksp,b,x));
@@ -219,17 +225,16 @@ int main(int argc,char **args)
   PetscBool true_residual_bad = PETSC_FALSE;
   if (true_residual_factor > 0 && reason > 0)
   {
-   PetscReal rnorm_reported, rnorm_true, norm_ax, norm_b;
+   PetscReal rnorm_reported, rnorm_true;
    PetscCall(KSPGetResidualNorm(ksp, &rnorm_reported));
    // u = b - A x
    PetscCall(MatMult(A, x, u));
-   PetscCall(VecNorm(u, NORM_2, &norm_ax));
-   PetscCall(VecNorm(b, NORM_2, &norm_b));
    PetscCall(VecAYPX(u, -1.0, b));
    PetscCall(VecNorm(u, NORM_2, &rnorm_true));
-   // A true residual at rounding level always passes, as the reported one can be exactly zero
+   // A true residual at rounding level, relative to the initial one, always passes, as the
+   // reported one can be exactly zero
    // The comparison is false for a NaN
-   if (!(rnorm_true <= true_residual_factor * rnorm_reported || rnorm_true <= 1000 * PETSC_MACHINE_EPSILON * (norm_ax + norm_b)))
+   if (!(rnorm_true <= true_residual_factor * rnorm_reported || rnorm_true <= 1000 * PETSC_MACHINE_EPSILON * rnorm_initial))
    {
       PetscCall(PetscPrintf(PETSC_COMM_WORLD, "True residual norm %g is more than %g times the reported residual norm %g\n", \
                (double)rnorm_true, (double)true_residual_factor, (double)rnorm_reported));

@@ -1070,9 +1070,9 @@ run_tests_no_load_serial:
 	./diag_update_check -laplacian -pc_air_symmetric -pc_air_constrain_z -pc_air_smooth_type fc
 	@echo "Test adaptive Newton GMRES polynomials on multiples of the identity, where the Arnoldi breaks down after one step"
 	@echo "  (the degree search must not reject degree one: with a residual of exactly zero it used to loop forever)"
-	./diag_poly -n 100 -constant 49 -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 10 -ksp_max_it 3
-	./diag_poly -n 37 -constant 0.3 -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 10 -ksp_max_it 3
-	./diag_poly -n 131 -constant 49 -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 10 -ksp_max_it 3
+	./diag_poly -n 100 -constant 49 -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 10 -ksp_max_it 3 -ksp_norm_type unpreconditioned
+	./diag_poly -n 37 -constant 0.3 -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 10 -ksp_max_it 3 -ksp_norm_type unpreconditioned
+	./diag_poly -n 131 -constant 49 -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 10 -ksp_max_it 3 -ksp_norm_type unpreconditioned
 	@echo "Test adaptive Newton GMRES polynomials order 200 keep the leja root order on a diagonal matrix with many more eigenvalues than roots"
 	@echo "  (a reordering of the roots chosen from the Hessenberg matrix alone gives a true residual 230 times the reported one here)"
 	$(SKIP_SINGLE) ./diag_poly -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 200 -ksp_type gmres -ksp_gmres_restart 50 -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_rtol 1e-8 -ksp_max_it 5

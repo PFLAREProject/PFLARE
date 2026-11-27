@@ -26,7 +26,7 @@ int main(int argc,char **args)
   PC             pc;
   KSPConvergedReason reason;
   PetscInt       n = 5000, i, start, end;
-  PetscReal      true_residual_factor = 10.0, rnorm_reported, rnorm_true, constant = 0.0;
+  PetscReal      true_residual_factor = 10.0, rnorm_reported, rnorm_true, rnorm_initial, constant = 0.0;
   PetscBool      use_constant = PETSC_FALSE;
   PetscScalar    val;
   PetscBool      true_residual_bad = PETSC_FALSE;
@@ -69,23 +69,25 @@ int main(int argc,char **args)
   PCRegister_PFLARE();
   PetscCall(PCSetType(pc, PCPFLAREINV));
   PetscCall(KSPSetFromOptions(ksp));
+  // The size of the initial true residual sets what rounding level means below
+  PetscCall(MatMult(A, x, u));
+  PetscCall(VecAYPX(u, -1.0, b));
+  PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
   PetscCall(KSPSolve(ksp, b, x));
   PetscCall(KSPGetConvergedReason(ksp, &reason));
 
   // Compare the true residual of the returned solution with the one the KSP reports
   if (true_residual_factor > 0 && reason > 0)
   {
-   PetscReal norm_ax, norm_b;
    PetscCall(KSPGetResidualNorm(ksp, &rnorm_reported));
    // u = b - A x
    PetscCall(MatMult(A, x, u));
-   PetscCall(VecNorm(u, NORM_2, &norm_ax));
-   PetscCall(VecNorm(b, NORM_2, &norm_b));
    PetscCall(VecAYPX(u, -1.0, b));
    PetscCall(VecNorm(u, NORM_2, &rnorm_true));
-   // A true residual at rounding level always passes, as the reported one can be exactly zero
+   // A true residual at rounding level, relative to the initial one, always passes, as the
+   // reported one can be exactly zero
    // The comparison is false for a NaN
-   if (!(rnorm_true <= true_residual_factor * rnorm_reported || rnorm_true <= 1000 * PETSC_MACHINE_EPSILON * (norm_ax + norm_b)))
+   if (!(rnorm_true <= true_residual_factor * rnorm_reported || rnorm_true <= 1000 * PETSC_MACHINE_EPSILON * rnorm_initial))
    {
       PetscCall(PetscPrintf(PETSC_COMM_WORLD, "True residual norm %g is more than %g times the reported residual norm %g\n", \
                (double)rnorm_true, (double)true_residual_factor, (double)rnorm_reported));
