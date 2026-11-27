@@ -240,6 +240,9 @@ run_tests_load_serial:
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 120 -ksp_norm_type unpreconditioned -ksp_max_it 5
 	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free lowers the degree in market matrix problem 1138"
 	./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 200 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3
+	@echo "Test adaptive Newton GMRES polynomials order 200 matrix-free returns the true residual it reports in market matrix problem 1138"
+	@echo "  (with the default root order, right preconditioned GMRES reports convergence with a true residual 16 times larger)"
+	PFLARE_ROOT_REPLAY_ALWAYS=1 PFLARE_ROOT_ORDER_GREEDY=1 ./ex6 -b_in_f 0 -f data/1138_bus -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 200 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 3 -true_residual_factor 10
 	@echo "Test adaptive Newton GMRES polynomials order 60 matrix-free on a diagonal matrix with small isolated eigenvalues"
 	./ex6 -b_in_f 0 -f data/diag7_small500 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 60 -pc_pflareinv_matrix_free -ksp_norm_type unpreconditioned -ksp_max_it 4
 	@echo "Test adaptive Newton GMRES polynomials order 80 matrix-free on the badly scaled market matrix problem bcsstk19"
@@ -1067,6 +1070,9 @@ run_tests_no_load_serial:
 	./diag_update_check -pc_air_smooth_type fc -pc_air_constrain_w -pc_air_constrain_z -pc_air_one_point_classical_prolong 0
 	./diag_update_check -laplacian -pc_air_symmetric
 	./diag_update_check -laplacian -pc_air_symmetric -pc_air_constrain_z -pc_air_smooth_type fc
+	@echo "Test adaptive Newton GMRES polynomials order 200 keep the leja root order on a diagonal matrix with many more eigenvalues than roots"
+	@echo "  (a reordering of the roots chosen from the Hessenberg matrix alone gives a true residual 230 times the reported one here)"
+	$(SKIP_SINGLE) PFLARE_ROOT_REPLAY_ALWAYS=1 PFLARE_ROOT_ORDER_GREEDY=1 ./diag_poly -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 200 -ksp_type gmres -ksp_gmres_restart 50 -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_rtol 1e-8 -ksp_max_it 5
 	@echo "Test rebuilding Newton polynomial inverses from more roots than the sparsity order keeps the requested sparsity"
 	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 0 -pc_pflareinv_sparsity_order 0
 	./ex6_newton_roots_rebuild -pc_pflareinv_poly_order 1 -pc_pflareinv_sparsity_order 1
@@ -1832,6 +1838,8 @@ run_tests_no_load_parallel:
 ifeq ($(PETSC_HAVE_MPIUNI),1)
 	@echo "No-load parallel tests skipped (PETSc configured without MPI)"
 else
+	@echo "Test adaptive Newton GMRES polynomials order 200 keep the leja root order on a diagonal matrix with many more eigenvalues than roots in parallel"
+	$(SKIP_SINGLE) PFLARE_ROOT_REPLAY_ALWAYS=1 PFLARE_ROOT_ORDER_GREEDY=1 $(MPIEXEC) -n 2 ./diag_poly -pc_pflareinv_type newton_adaptive -pc_pflareinv_matrix_free -pc_pflareinv_poly_order 200 -ksp_type gmres -ksp_gmres_restart 50 -ksp_pc_side right -ksp_norm_type unpreconditioned -ksp_rtol 1e-8 -ksp_max_it 5
 	@echo "Test PCPFLAREINV adaptive newton basis built with an s-step Arnoldi that reaches the noise floor in parallel"
 	$(MPIEXEC) -n 2 ./ex6f_getcoeffs -m 8 -n 8 -pc_type pflareinv -pc_pflareinv_type newton_adaptive -pc_pflareinv_poly_order 40 \
 	 -pc_pflareinv_matrix_free -pc_pflareinv_arnoldi_block_size 4
