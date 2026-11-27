@@ -778,12 +778,14 @@ module gmres_poly_newton_roots
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine adaptive_newton_candidate(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base)
+   subroutine adaptive_newton_candidate(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base, residual)
 
       ! Builds the roots of the Newton polynomial of a given degree for the adaptive rule
       ! and decides if they are acceptable
       ! If accepted, real_roots_out, imag_roots_out are allocated and hold the non-zero roots
       ! with any extras in leja order, and n_base is the number of non-zero roots without the extras
+      ! residual is the replay residual of the roots on the Arnoldi start vector, or huge if they
+      ! were not replayed (degree one, or no roots)
 
       ! ~~~~~~
       PetscReal, dimension(:,:), intent(in)               :: H
@@ -792,6 +794,7 @@ module gmres_poly_newton_roots
       logical, intent(out)                                :: accepted
       PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_out, imag_roots_out
       integer, intent(out)                                :: n_base
+      PetscReal, intent(out)                              :: residual
 
       ! Local variables
       integer :: i_loc
@@ -799,13 +802,13 @@ module gmres_poly_newton_roots
       PetscReal, dimension(:), allocatable :: real_added, imag_added
       integer, dimension(:), allocatable :: indices
       logical :: sensitive, over_cap, copied_all
-      PetscReal :: residual
       integer :: replay_limit
 
       ! ~~~~~~
 
       if (allocated(real_roots_out)) deallocate(real_roots_out, imag_roots_out)
       accepted = .TRUE.
+      residual = huge(residual)
 
       ! Harmonic Ritz values of the leading block, with the non-zero roots first
       call harmonic_ritz_roots(H, degree, m, roots(:, 1), roots(:, 2))
@@ -892,6 +895,7 @@ module gmres_poly_newton_roots
       integer :: degree, bad, good, mid, step, n_base_trial, errorcode
       PetscReal, dimension(m) :: rho_h
       PetscReal, dimension(:), allocatable :: real_trial, imag_trial
+      PetscReal :: replay_good, replay_trial
       logical :: accepted, taken
 
       ! ~~~~~~
@@ -910,7 +914,8 @@ module gmres_poly_newton_roots
       end do
       degree = min(degree, m)
 
-      call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base)
+      call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base, &
+               replay_good)
       if (accepted) then
          call greedy_candidate(degree)
          return
@@ -923,7 +928,8 @@ module gmres_poly_newton_roots
       step = 1
       do
          good = max(1, degree - step)
-         call adaptive_newton_candidate(H, good, m, rho_h(good), accepted, real_roots_out, imag_roots_out, n_base)
+         call adaptive_newton_candidate(H, good, m, rho_h(good), accepted, real_roots_out, imag_roots_out, n_base, &
+                  replay_good)
          ! The second test can never be needed, but this loop must not be able to run forever
          if (accepted .OR. good == 1) exit
          bad = good
@@ -937,9 +943,11 @@ module gmres_poly_newton_roots
       ! Then bisect between the acceptable degree and the one that is not
       do while (bad - good > 1)
          mid = (bad + good)/2
-         call adaptive_newton_candidate(H, mid, m, rho_h(mid), accepted, real_trial, imag_trial, n_base_trial)
+         call adaptive_newton_candidate(H, mid, m, rho_h(mid), accepted, real_trial, imag_trial, n_base_trial, &
+                  replay_trial)
          if (accepted) then
             good = mid
+            replay_good = replay_trial
             call move_alloc(real_trial, real_roots_out)
             call move_alloc(imag_trial, imag_roots_out)
             n_base = n_base_trial
@@ -958,7 +966,7 @@ module gmres_poly_newton_roots
          ! if it is switched on and estimated to be better
          integer, intent(in) :: degree_final
          PetscReal, dimension(:), allocatable :: real_new, imag_new
-         PetscReal :: replay_old, replay_new
+         PetscReal :: replay_new
 
          if (.NOT. present(real_roots_alt)) return
          if (allocated(real_roots_alt)) deallocate(real_roots_alt, imag_roots_alt)
@@ -966,12 +974,12 @@ module gmres_poly_newton_roots
 
          allocate(real_new(size(real_roots_out)), imag_new(size(real_roots_out)))
          call greedy_head_tail_order(H, degree_final, real_roots_out, imag_roots_out, real_new, imag_new, taken)
-         ! The order we were given passed the replay; the new order has to do as well, or
-         ! at least pass the same test, before it is used
+         ! The order we were given passed the replay (replay_good, from adaptive_newton_candidate);
+         ! the new order has to do as well, or at least pass the same test, before it is used
+         ! greedy_head_tail_order never takes an order at degree one, the only degree not replayed
          if (taken) then
-            call hessenberg_newton_replay(H, degree_final, real_roots_out, imag_roots_out, replay_old)
             call hessenberg_newton_replay(H, degree_final, real_new, imag_new, replay_new)
-            taken = replay_new <= max(replay_old, 100 * max(rho_h(degree_final), 10 * PFLARE_EPS))
+            taken = replay_new <= max(replay_good, 100 * max(rho_h(degree_final), 10 * PFLARE_EPS))
          end if
          if (taken) then
             call move_alloc(real_new, real_roots_alt)

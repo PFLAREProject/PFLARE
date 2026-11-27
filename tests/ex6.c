@@ -200,10 +200,14 @@ int main(int argc,char **args)
   PetscCall(PetscBarrier((PetscObject)A));
 
   // The size of the initial true residual sets what rounding level means in the true residual check
-  PetscReal rnorm_initial;
-  PetscCall(MatMult(A, x, u));
-  PetscCall(VecAYPX(u, -1.0, b));
-  PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
+  // It is that of the last solve, as that is the one checked
+  PetscReal rnorm_initial = 0.0;
+  if (true_residual_factor > 0 && !second_solve)
+  {
+   PetscCall(MatMult(A, x, u));
+   PetscCall(VecAYPX(u, -1.0, b));
+   PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
+  }
 
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",&gpu_copy));
   PetscCall(PetscLogStagePush(gpu_copy));
@@ -213,6 +217,12 @@ int main(int argc,char **args)
   if (second_solve)
   {
    PetscCall(VecSet(x, 1.0));
+   if (true_residual_factor > 0)
+   {
+    PetscCall(MatMult(A, x, u));
+    PetscCall(VecAYPX(u, -1.0, b));
+    PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
+   }
    PetscCall(PetscLogStageRegister("mystage 2",&stage2));
    PetscCall(PetscLogStagePush(stage2));
    PetscCall(KSPSolve(ksp,b,x));
