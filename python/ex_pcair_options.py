@@ -138,6 +138,19 @@ check('coarsest_inverse_type', pflare.pcair_get_coarsest_inverse_type(pc), pflar
 pflare.pcair_set_coarsest_poly_order(pc, 8)
 check('coarsest_poly_order', pflare.pcair_get_coarsest_poly_order(pc), 8)
 
+pflare.pcair_set_coarsest_arnoldi_block_size(pc, 20)
+check('coarsest_arnoldi_block_size', pflare.pcair_get_coarsest_arnoldi_block_size(pc), 20)
+
+# The F point block size, which the C point one follows until it is set itself
+check('arnoldi_block_size_default', pflare.pcair_get_arnoldi_block_size(pc), 0)
+pflare.pcair_set_arnoldi_block_size(pc, 12)
+check('arnoldi_block_size', pflare.pcair_get_arnoldi_block_size(pc), 12)
+check('c_arnoldi_block_size_follows_f', pflare.pcair_get_c_arnoldi_block_size(pc), 12)
+pflare.pcair_set_c_arnoldi_block_size(pc, 5)
+pflare.pcair_set_arnoldi_block_size(pc, 0)
+check('c_arnoldi_block_size_explicit', pflare.pcair_get_c_arnoldi_block_size(pc), 5)
+pflare.pcair_set_c_arnoldi_block_size(pc, 0)
+
 pflare.pcair_set_matrix_free_polys(pc, True)
 check('matrix_free_polys', pflare.pcair_get_matrix_free_polys(pc), True)
 

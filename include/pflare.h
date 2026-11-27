@@ -24,7 +24,8 @@
 . `PFLAREINV_ISAI`            - incomplete sparse approximate inverse; cannot be applied matrix-free
 . `PFLAREINV_WJACOBI`         - weighted Jacobi
 . `PFLAREINV_JACOBI`          - unweighted Jacobi
-- `PFLAREINV_L1JACOBI`        - l1 Jacobi
+. `PFLAREINV_L1JACOBI`        - l1 Jacobi
+- `PFLAREINV_NEWTON_ADAPTIVE` - GMRES polynomial with the Newton basis, with the degree and the extra roots chosen adaptively
 
   Level: intermediate
 
@@ -45,6 +46,7 @@ typedef enum {
    PFLAREINV_WJACOBI,
    PFLAREINV_JACOBI,
    PFLAREINV_L1JACOBI,
+   PFLAREINV_NEWTON_ADAPTIVE,
 }  PCPFLAREINVType;
 
 /*E
@@ -126,6 +128,7 @@ PETSC_EXTERN void remove_from_sparse_match(Mat, Mat, int, int, PetscReal);
 
 /* Define PCPFLAREINV get routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetPolyOrder(PC, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVGetArnoldiBlockSize(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetSparsityOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetType(PC, PCPFLAREINVType *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetMatrixFree(PC, PetscBool *);
@@ -134,6 +137,7 @@ PETSC_EXTERN PetscErrorCode PCPFLAREINVGetMatrixFree(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVGetInverseMat(PC, Mat *);
 /* Define PCPFLAREINV set routines */
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetPolyOrder(PC, PetscInt);
+PETSC_EXTERN PetscErrorCode PCPFLAREINVSetArnoldiBlockSize(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetSparsityOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetType(PC, PCPFLAREINVType);
 PETSC_EXTERN PetscErrorCode PCPFLAREINVSetMatrixFree(PC, PetscBool);
@@ -175,13 +179,16 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC, PetscReal *);
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC, PCPFLAREINVType *);
 PETSC_EXTERN PetscErrorCode PCAIRGetZType(PC, PCAIRZType *);
 PETSC_EXTERN PetscErrorCode PCAIRGetPolyOrder(PC, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCAIRGetArnoldiBlockSize(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetLairDistance(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetInverseSparsityOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseType(PC, PCPFLAREINVType *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCPolyOrder(PC, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCAIRGetCArnoldiBlockSize(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseType(PC, PCPFLAREINVType *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestPolyOrder(PC, PetscInt *);
+PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestArnoldiBlockSize(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PC, PetscInt *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PC, PetscBool *);
 PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PC, PetscBool *);
@@ -230,12 +237,15 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC, PCPFLAREINVType);
 PETSC_EXTERN PetscErrorCode PCAIRSetZType(PC, PCAIRZType);
 PETSC_EXTERN PetscErrorCode PCAIRSetLairDistance(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC, PetscInt);
+PETSC_EXTERN PetscErrorCode PCAIRSetArnoldiBlockSize(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetInverseSparsityOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetCInverseType(PC, PCPFLAREINVType);
 PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC, PetscInt);
+PETSC_EXTERN PetscErrorCode PCAIRSetCArnoldiBlockSize(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseType(PC, PCPFLAREINVType);
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC, PetscInt);
+PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestArnoldiBlockSize(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PC, PetscInt);
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PC, PetscBool);
 PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PC, PetscBool);

@@ -61,12 +61,15 @@ PETSC_EXTERN void PCAIRGetInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
 PETSC_EXTERN void PCAIRGetCInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
 PETSC_EXTERN void PCAIRGetZType_c(PC *pc, PCAIRZType *z_type);
 PETSC_EXTERN void PCAIRGetPolyOrder_c(PC *pc, PetscInt *input_int);
+PETSC_EXTERN void PCAIRGetArnoldiBlockSize_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetLairDistance_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCPolyOrder_c(PC *pc, PetscInt *input_int);
+PETSC_EXTERN void PCAIRGetCArnoldiBlockSize_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestInverseType_c(PC *pc, PCPFLAREINVType *inverse_type);
 PETSC_EXTERN void PCAIRGetCoarsestPolyOrder_c(PC *pc, PetscInt *input_int);
+PETSC_EXTERN void PCAIRGetCoarsestArnoldiBlockSize_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt *input_int);
 PETSC_EXTERN void PCAIRGetCoarsestMatrixFreePolys_c(PC *pc, PetscBool *input_bool);
 PETSC_EXTERN void PCAIRGetCoarsestDiagScalePolys_c(PC *pc, PetscBool *input_bool);
@@ -117,12 +120,15 @@ PETSC_EXTERN void PCAIRSetInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
 PETSC_EXTERN void PCAIRSetZType_c(PC *pc, PCAIRZType z_type);
 PETSC_EXTERN void PCAIRSetLairDistance_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetPolyOrder_c(PC *pc, PetscInt input_int);
+PETSC_EXTERN void PCAIRSetArnoldiBlockSize_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetInverseSparsityOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
 PETSC_EXTERN void PCAIRSetCPolyOrder_c(PC *pc, PetscInt input_int);
+PETSC_EXTERN void PCAIRSetCArnoldiBlockSize_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCInverseSparsityOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestInverseType_c(PC *pc, PCPFLAREINVType inverse_type);
 PETSC_EXTERN void PCAIRSetCoarsestPolyOrder_c(PC *pc, PetscInt input_int);
+PETSC_EXTERN void PCAIRSetCoarsestArnoldiBlockSize_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestInverseSparsityOrder_c(PC *pc, PetscInt input_int);
 PETSC_EXTERN void PCAIRSetCoarsestMatrixFreePolys_c(PC *pc, PetscBool input_bool);
 PETSC_EXTERN void PCAIRSetCoarsestDiagScalePolys_c(PC *pc, PetscBool input_bool);
@@ -975,7 +981,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetStrongRThreshold(PC pc, PetscReal *input_rea
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: intermediate
 
@@ -997,7 +1003,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetInverseType(PC pc, PCPFLAREINVType *inverse_
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: advanced
 
@@ -1052,6 +1058,28 @@ PETSC_EXTERN PetscErrorCode PCAIRGetPolyOrder(PC pc, PetscInt *input_int)
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRGetPolyOrder_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRGetArnoldiBlockSize - Returns the block size of the s-step Arnoldi used by a Newton basis `PCAIR` F-point smoother inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetArnoldiBlockSize()`, `PCAIRGetPolyOrder()`, `PCAIRGetCArnoldiBlockSize()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetArnoldiBlockSize(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetArnoldiBlockSize_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1121,6 +1149,31 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCPolyOrder(PC pc, PetscInt *input_int)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
+  PCAIRGetCArnoldiBlockSize - Returns the block size of the s-step Arnoldi used by a Newton basis `PCAIR` C-point smoother inverse
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Level: advanced
+
+  Note:
+  If it has not been set this returns the F-point value, see `PCAIRGetArnoldiBlockSize()`.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCArnoldiBlockSize()`, `PCAIRGetArnoldiBlockSize()`, `PCAIRGetCPolyOrder()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetCArnoldiBlockSize(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetCArnoldiBlockSize_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
   PCAIRGetCInverseSparsityOrder - Returns the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` C-point approximate inverses
 
   Not Collective
@@ -1151,7 +1204,7 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCInverseSparsityOrder(PC pc, PetscInt *input
 . pc - the `PCAIR` preconditioner context
 
   Output Parameter:
-. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+. inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Level: intermediate
 
@@ -1184,6 +1237,28 @@ PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestPolyOrder(PC pc, PetscInt *input_int
    PetscFunctionBegin;
    PetscCall(PCAIRCheckType(pc));
    PCAIRGetCoarsestPolyOrder_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRGetCoarsestArnoldiBlockSize - Returns the block size of the s-step Arnoldi used by a Newton basis `PCAIR` coarse-grid solver
+
+  Not Collective
+
+  Input Parameter:
+. pc - the `PCAIR` preconditioner context
+
+  Output Parameter:
+. input_int - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Level: intermediate
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRSetCoarsestArnoldiBlockSize()`, `PCAIRGetCoarsestPolyOrder()`, `PCAIRGetCoarsestInverseType()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRGetCoarsestArnoldiBlockSize(PC pc, PetscInt *input_int)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PCAIRGetCoarsestArnoldiBlockSize_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -1849,8 +1924,8 @@ PETSC_EXTERN PetscErrorCode PCAIRSetProcessEqLimit(PC pc, PetscInt input_int)
 
   Note:
   Only relevant after processor agglomeration (see `PCAIRSetProcessorAgglom()`) has left some MPI ranks with no
-  rows, and only affects the basis-building reductions of the `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, and
-  `PFLAREINV_NEWTON_NO_EXTRA` polynomial inverse types (see `PCAIRSetInverseType()`). It does not apply to the
+  rows, and only affects the basis-building reductions of the `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`,
+  `PFLAREINV_NEWTON_NO_EXTRA`, and `PFLAREINV_NEWTON_ADAPTIVE` polynomial inverse types (see `PCAIRSetInverseType()`). It does not apply to the
   `PFLAREINV_POWER` basis, which needs no such reductions; enabling it with the power basis is an error.
 
 .seealso: [](ch_ksp), `PCAIR`, `PCAIRGetSubcomm()`, `PCAIRSetProcessorAgglom()`, `PCAIRSetInverseType()`
@@ -2319,10 +2394,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetStrongRThreshold(PC pc, PetscReal input_real
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
+. -pc_air_inverse_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the F-point smoother; defaults to arnoldi
 
   Level: intermediate
 
@@ -2346,10 +2421,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetInverseType(PC pc, PCPFLAREINVType inverse_t
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
+. -pc_air_c_inverse_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used for the C-point smooth; if unset, defaults to the same as `-pc_air_inverse_type`
 
   Level: advanced
 
@@ -2452,6 +2527,38 @@ PETSC_EXTERN PetscErrorCode PCAIRSetPolyOrder(PC pc, PetscInt input_int)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
+  PCAIRSetArnoldiBlockSize - Sets the block size of the s-step Arnoldi used by a Newton basis `PCAIR` F-point smoother inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Options Database Key:
+. -pc_air_arnoldi_block_size block_size - block size of the s-step Arnoldi of a Newton basis inverse type; defaults to 0
+
+  Level: intermediate
+
+  Note:
+  Only affects the `newton`, `newton_no_extra` and `newton_adaptive` inverse types (see `PCAIRSetInverseType()`).
+  With a block size bigger than zero the Krylov basis is built that many vectors at a time and orthogonalised
+  twice, a block at a time, which needs two global reductions for each block where the ordinary (single-pass)
+  Arnoldi needs two for each vector. This also gives a more accurate basis at high order, particularly with
+  `newton_adaptive`. The first ten steps are always ordinary, so this only changes anything when the polynomial order (see
+  `PCAIRSetPolyOrder()`) is well above ten.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetArnoldiBlockSize()`, `PCAIRSetPolyOrder()`, `PCAIRSetCArnoldiBlockSize()`, `PCAIRSetCoarsestArnoldiBlockSize()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetArnoldiBlockSize(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Arnoldi block size %" PetscInt_FMT " must not be negative", input_int);
+   PCAIRSetArnoldiBlockSize_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
   PCAIRSetInverseSparsityOrder - Sets the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` approximate inverses
 
   Logically Collective
@@ -2509,6 +2616,35 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCPolyOrder(PC pc, PetscInt input_int)
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
+  PCAIRSetCArnoldiBlockSize - Sets the block size of the s-step Arnoldi used by a Newton basis `PCAIR` C-point smoother inverse
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Options Database Key:
+. -pc_air_c_arnoldi_block_size block_size - block size of the s-step Arnoldi for the C-point smooth; if unset, defaults to the same as `-pc_air_arnoldi_block_size`
+
+  Level: advanced
+
+  Note:
+  Sets the block size for the C-point smoother independently of the F-point smoother (see
+  `PCAIRSetArnoldiBlockSize()`); if left unset it defaults to the F-point value, and it only applies when a Newton
+  basis C inverse type is used.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCArnoldiBlockSize()`, `PCAIRSetArnoldiBlockSize()`, `PCAIRSetCInverseType()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetCArnoldiBlockSize(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= -1, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "C point Arnoldi block size %" PetscInt_FMT " must not be negative (or -1 to follow the F point value)", input_int);
+   PCAIRSetCArnoldiBlockSize_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
   PCAIRSetCInverseSparsityOrder - Sets the power of the operator matrix used as the sparsity pattern of assembled `PCAIR` C-point approximate inverses
 
   Logically Collective
@@ -2544,10 +2680,10 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCInverseSparsityOrder(PC pc, PetscInt input_
 
   Input Parameters:
 + pc           - the `PCAIR` preconditioner context
-- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
+- inverse_type - the approximate inverse type, one of `PFLAREINV_POWER`, `PFLAREINV_ARNOLDI`, `PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA`, `PFLAREINV_NEWTON_ADAPTIVE`, `PFLAREINV_NEUMANN`, `PFLAREINV_SAI`, `PFLAREINV_ISAI`, `PFLAREINV_WJACOBI`, `PFLAREINV_JACOBI`, or `PFLAREINV_L1JACOBI`
 
   Options Database Key:
-. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
+. -pc_air_coarsest_inverse_type (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - the approximate inverse type used as the coarse-grid solver; defaults to arnoldi
 
   Level: intermediate
 
@@ -2590,6 +2726,39 @@ PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestPolyOrder(PC pc, PetscInt input_int)
    PetscCall(PCAIRCheckType(pc));
    PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Coarsest polynomial order %" PetscInt_FMT " must not be negative", input_int);
    PCAIRSetCoarsestPolyOrder_c(&pc, input_int);
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+/*@
+  PCAIRSetCoarsestArnoldiBlockSize - Sets the block size of the s-step Arnoldi used by a Newton basis `PCAIR` coarse-grid solver
+
+  Logically Collective
+
+  Input Parameters:
++ pc        - the `PCAIR` preconditioner context
+- input_int - the number of Krylov vectors built at a time, with zero the ordinary Arnoldi
+
+  Options Database Key:
+. -pc_air_coarsest_arnoldi_block_size block_size - block size of the s-step Arnoldi of a Newton basis coarse-grid solver; defaults to 0
+
+  Level: intermediate
+
+  Note:
+  Only affects the `newton`, `newton_no_extra` and `newton_adaptive` coarse-grid solver types (see
+  `PCAIRSetCoarsestInverseType()`). With a block size bigger than zero the Krylov basis is built that many vectors
+  at a time and orthogonalised twice, a block at a time, which needs two global reductions for each block where
+  the ordinary (single-pass) Arnoldi needs two for each vector. This also gives a more accurate basis at high
+  order, particularly with `newton_adaptive`. The block size is reduced automatically if a block is too
+  ill-conditioned. The first ten steps are always ordinary, so this only changes anything when the coarse-grid
+  polynomial order (see `PCAIRSetCoarsestPolyOrder()`) is well above ten; 20 is a reasonable value.
+
+.seealso: [](ch_ksp), `PCAIR`, `PCAIRGetCoarsestArnoldiBlockSize()`, `PCAIRSetCoarsestPolyOrder()`, `PCAIRSetCoarsestInverseType()`
+@*/
+PETSC_EXTERN PetscErrorCode PCAIRSetCoarsestArnoldiBlockSize(PC pc, PetscInt input_int)
+{
+   PetscFunctionBegin;
+   PetscCall(PCAIRCheckType(pc));
+   PetscCheck(input_int >= 0, PetscObjectComm((PetscObject)pc), PETSC_ERR_ARG_OUTOFRANGE, "Coarsest Arnoldi block size %" PetscInt_FMT " must not be negative", input_int);
+   PCAIRSetCoarsestArnoldiBlockSize_c(&pc, input_int);
    PetscFunctionReturn(PETSC_SUCCESS);
 }
 /*@
@@ -2973,7 +3142,7 @@ PETSC_EXTERN PetscErrorCode PCAIRSetReuseAmount(PC pc, PetscInt input_int)
   this call and may be freed or modified. petsc_level and which_inverse must be valid for `PCAIRGetPolyCoeffs()`.
   row_size and col_size must match the sizes it returns, except for the Newton types described below.
 
-  For the Newton types (`PFLAREINV_NEWTON` and `PFLAREINV_NEWTON_NO_EXTRA`) the coefficients are the real and
+  For the Newton types (`PFLAREINV_NEWTON`, `PFLAREINV_NEWTON_NO_EXTRA` and `PFLAREINV_NEWTON_ADAPTIVE`) the coefficients are the real and
   imaginary parts of the roots, in 2 columns. Only roots that are exactly zero are skipped when the polynomial is
   applied or built; any non-zero root, however small, is used. The number of roots can differ between setups (the
   extra roots `PFLAREINV_NEWTON` adds for stability depend on the matrix), so for these types row_size may differ
@@ -3196,7 +3365,7 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsInt("-pc_air_auto_truncate_start_level", "Use auto truncation from this level", "PCAIRSetAutoTruncateStartLevel", old_int, &input_int, NULL));
    PetscCall(PCAIRSetAutoTruncateStartLevel(pc, input_int));
    // ~~~~ 
-   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "PCPFLAREINVType", "PFLAREINV_", NULL};
+   const char *const PCPFLAREINVTypes[] = {"POWER", "ARNOLDI", "NEWTON", "NEWTON_NO_EXTRA", "NEUMANN", "SAI", "ISAI", "WJACOBI", "JACOBI", "L1JACOBI", "NEWTON_ADAPTIVE", "PCPFLAREINVType", "PFLAREINV_", NULL};
    PetscCall(PCAIRGetInverseType(pc, &old_type));
    type = old_type;
    PetscCall(PetscOptionsEnum("-pc_air_inverse_type", "Inverse type", "PCPFLAREINVSetType", PCPFLAREINVTypes, (PetscEnum)old_type, (PetscEnum *)&type, &flg));
@@ -3225,6 +3394,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    PetscCall(PetscOptionsInt("-pc_air_poly_order", "Polynomial order", "PCAIRSetPolyOrder", old_int, &input_int, NULL));
    PetscCall(PCAIRSetPolyOrder(pc, input_int));
    // ~~~~ 
+   PetscCall(PCAIRGetArnoldiBlockSize(pc, &old_int));
+   input_int = old_int;
+   PetscCall(PetscOptionsInt("-pc_air_arnoldi_block_size", "Block size of the s-step Arnoldi of a Newton basis inverse", "PCAIRSetArnoldiBlockSize", old_int, &input_int, NULL));
+   PetscCall(PCAIRSetArnoldiBlockSize(pc, input_int));
+   // ~~~~ 
    PetscCall(PCAIRGetInverseSparsityOrder(pc, &old_int));
    input_int = old_int;
    PetscCall(PetscOptionsInt("-pc_air_inverse_sparsity_order", "Inverse sparsity order", "PCAIRSetInverseSparsityOrder", old_int, &input_int, NULL));
@@ -3235,6 +3409,12 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    input_int = old_int;
    PetscCall(PetscOptionsInt("-pc_air_c_poly_order", "C point polynomial order", "PCAIRSetCPolyOrder", old_int, &input_int, &flg));
    if (flg) PetscCall(PCAIRSetCPolyOrder(pc, input_int));
+   // ~~~~ 
+   // If not explicitly set, the getter returns the F point smoother value
+   PetscCall(PCAIRGetCArnoldiBlockSize(pc, &old_int));
+   input_int = old_int;
+   PetscCall(PetscOptionsInt("-pc_air_c_arnoldi_block_size", "C point block size of the s-step Arnoldi", "PCAIRSetCArnoldiBlockSize", old_int, &input_int, &flg));
+   if (flg) PetscCall(PCAIRSetCArnoldiBlockSize(pc, input_int));
    // ~~~~ 
    // If not explicitly set, the getter returns the F point smoother value
    PetscCall(PCAIRGetCInverseSparsityOrder(pc, &old_int));
@@ -3251,6 +3431,11 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
    input_int = old_int;
    PetscCall(PetscOptionsInt("-pc_air_coarsest_poly_order", "Polynomial order on the coarse grid", "PCAIRSetCoarsestPolyOrder", old_int, &input_int, NULL));
    PetscCall(PCAIRSetCoarsestPolyOrder(pc, input_int));
+   // ~~~~ 
+   PetscCall(PCAIRGetCoarsestArnoldiBlockSize(pc, &old_int));
+   input_int = old_int;
+   PetscCall(PetscOptionsInt("-pc_air_coarsest_arnoldi_block_size", "Block size of the s-step Arnoldi of a Newton basis coarse grid solver", "PCAIRSetCoarsestArnoldiBlockSize", old_int, &input_int, NULL));
+   PetscCall(PCAIRSetCoarsestArnoldiBlockSize(pc, input_int));
    // ~~~~ 
    PetscCall(PCAIRGetCoarsestInverseSparsityOrder(pc, &old_int));
    input_int = old_int;
@@ -3274,13 +3459,41 @@ static PetscErrorCode PCSetFromOptions_AIR_c(PC pc, PetscOptionItems PetscOption
 
 // ~~~~~~~~~~~~~~~~
 
+// Prints how many roots a Newton polynomial applies, from the stored roots (real parts in the first
+// column, imaginary in the second). Only exactly zero roots are skipped when applying
+// The roots of the polynomial are distinct, so any repeated root is an extra copy
+static PetscErrorCode PFLAREViewNewtonRoots_Private(PetscViewer viewer, const char *indent, const PetscReal *coeffs, PetscInt rows, PetscInt cols)
+{
+   PetscInt nonzero = 0, extra = 0;
+
+   PetscFunctionBegin;
+   // Nothing is stored before the setup
+   if (!coeffs || cols != 2) PetscFunctionReturn(PETSC_SUCCESS);
+   for (PetscInt i = 0; i < rows; i++)
+   {
+      if (coeffs[i] == 0.0 && coeffs[rows + i] == 0.0) continue;
+      nonzero++;
+      // An extra copy has the same value as a root earlier in the storage
+      for (PetscInt j = 0; j < i; j++)
+      {
+         if (coeffs[j] == coeffs[i] && coeffs[rows + j] == coeffs[rows + i])
+         {
+            extra++;
+            break;
+         }
+      }
+   }
+   PetscCall(PetscViewerASCIIPrintf(viewer, "%s%" PetscInt_FMT " roots applied: %" PetscInt_FMT " from the polynomial and %" PetscInt_FMT " extra copies \n", indent, nonzero, nonzero - extra, extra));
+   PetscFunctionReturn(PETSC_SUCCESS);
+}
+
 static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 {
    PetscFunctionBegin;
    
    PC *pc_air_shell = (PC *)pc->data;
 
-   PetscInt input_int, input_int_two, input_int_three, input_int_four;
+   PetscInt input_int, input_int_two, input_int_three, input_int_four, input_int_block;
    PetscBool flg, flg_f_smooth, flg_c_smooth, flg_diag_scale;
    PetscReal input_real, input_real_two;
    PCPFLAREINVType input_type;
@@ -3387,6 +3600,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          PetscCall(PCAIRGetInverseSparsityOrder(pc, &input_int_three));
          PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
          PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
+         PetscCall(PCAIRGetArnoldiBlockSize(pc, &input_int_block));
+         if (input_int_block > 0 && (input_type == PFLAREINV_NEWTON || input_type == PFLAREINV_NEWTON_NO_EXTRA || input_type == PFLAREINV_NEWTON_ADAPTIVE))
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    s-step Arnoldi, block size %" PetscInt_FMT " \n", input_int_block));
+         }
 
          // What type of inverse
          if (input_type == PFLAREINV_POWER)
@@ -3416,6 +3634,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
          else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
          {
             PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+            if (flg_diag_scale)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+            }            
+         }
+         else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
             if (flg_diag_scale)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
@@ -3487,6 +3713,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PCAIRGetInverseSparsityOrder(pc, &input_int_three));
             PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
             PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
+            PetscCall(PCAIRGetArnoldiBlockSize(pc, &input_int_block));
+            if (input_int_block > 0 && (input_type == PFLAREINV_NEWTON || input_type == PFLAREINV_NEWTON_NO_EXTRA || input_type == PFLAREINV_NEWTON_ADAPTIVE))
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    s-step Arnoldi, block size %" PetscInt_FMT " \n", input_int_block));
+            }
 
             // What type of inverse
             if (input_type == PFLAREINV_POWER)
@@ -3516,6 +3747,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
+            }
+            else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    F smooth: GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
                if (flg_diag_scale)
                {
                   PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
@@ -3577,6 +3816,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PCAIRGetCInverseSparsityOrder(pc, &input_int_three));
             PetscCall(PCAIRGetDiagScalePolys(pc, &flg_diag_scale));
             PetscCall(PCAIRGetMatrixFreePolys(pc, &flg));
+            PetscCall(PCAIRGetCArnoldiBlockSize(pc, &input_int_block));
+            if (input_int_block > 0 && (input_type == PFLAREINV_NEWTON || input_type == PFLAREINV_NEWTON_NO_EXTRA || input_type == PFLAREINV_NEWTON_ADAPTIVE))
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    s-step Arnoldi, block size %" PetscInt_FMT " \n", input_int_block));
+            }
 
             // What type of inverse
             if (input_type == PFLAREINV_POWER)
@@ -3606,6 +3850,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             else if (input_type == PFLAREINV_NEWTON_NO_EXTRA)
             {
                PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, newton basis without extra roots, order %" PetscInt_FMT " \n", input_int_two));
+               if (flg_diag_scale)
+               {
+                  PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+               }
+            }
+            else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+            {
+               PetscCall(PetscViewerASCIIPrintf(viewer, "    C smooth: GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
                if (flg_diag_scale)
                {
                   PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
@@ -3724,6 +3976,11 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       PetscCall(PCAIRGetCoarsestInverseSparsityOrder(pc, &input_int_three));
       PetscCall(PCAIRGetCoarsestDiagScalePolys(pc, &flg_diag_scale));
       PetscCall(PCAIRGetCoarsestMatrixFreePolys(pc, &flg));
+      PetscCall(PCAIRGetCoarsestArnoldiBlockSize(pc, &input_int_block));
+      if (input_int_block > 0 && (input_type == PFLAREINV_NEWTON || input_type == PFLAREINV_NEWTON_NO_EXTRA || input_type == PFLAREINV_NEWTON_ADAPTIVE))
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    s-step Arnoldi, block size %" PetscInt_FMT " \n", input_int_block));
+      }
 
       // What type of inverse
       if (input_type == PFLAREINV_POWER)
@@ -3758,6 +4015,14 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
             PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
          }          
       }
+      else if (input_type == PFLAREINV_NEWTON_ADAPTIVE)
+      {
+         PetscCall(PetscViewerASCIIPrintf(viewer, "    GMRES polynomial, newton basis with adaptive degree and extra roots, order %" PetscInt_FMT " \n", input_int_two));
+         if (flg_diag_scale)
+         {
+            PetscCall(PetscViewerASCIIPrintf(viewer, "      with diagonal scaling \n"));
+         }          
+      }
       else if (input_type == PFLAREINV_SAI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    SAI \n"));
@@ -3781,6 +4046,15 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
       else if (input_type == PFLAREINV_L1JACOBI)
       {
          PetscCall(PetscViewerASCIIPrintf(viewer, "    l1 Jacobi \n"));
+      }
+      if (input_type == PFLAREINV_NEWTON || input_type == PFLAREINV_NEWTON_NO_EXTRA || input_type == PFLAREINV_NEWTON_ADAPTIVE)
+      {
+         // The roots only exist once there is a hierarchy
+         PetscInt num_levels, coeffs_rows = 0, coeffs_cols = 0;
+         PetscReal *coeffs = NULL;
+         PCAIRGetNumLevels_c(&pc, &num_levels);
+         if (num_levels > 0) PCAIRGetPolyCoeffs_c(&pc, 0, COEFFS_INV_COARSE, &coeffs, &coeffs_rows, &coeffs_cols);
+         PetscCall(PFLAREViewNewtonRoots_Private(viewer, "      ", coeffs, coeffs_rows, coeffs_cols));
       }
       if (input_type != PFLAREINV_WJACOBI && input_type != PFLAREINV_JACOBI && input_type != PFLAREINV_L1JACOBI)
       {
@@ -3821,8 +4095,9 @@ static PetscErrorCode PCView_AIR_c(PC pc, PetscViewer viewer)
 
   Options Database Keys:
 + -pc_air_z_type            (product|lair|lair_sai) - grid-transfer operator type; defaults to product
-. -pc_air_inverse_type      (power|arnoldi|newton|newton_no_extra|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
+. -pc_air_inverse_type      (power|arnoldi|newton|newton_no_extra|newton_adaptive|neumann|sai|isai|wjacobi|jacobi|l1jacobi) - approximate inverse used for smoothing; defaults to arnoldi
 . -pc_air_poly_order        poly_order - polynomial order if using a polynomial inverse type; defaults to 6
+. -pc_air_arnoldi_block_size block_size - block size of the s-step Arnoldi of a Newton basis inverse type; defaults to 0
 . -pc_air_smooth_type       smooth_type - type and number of smooths, any sequence of at most 10 f and c characters (for example ff, fc, fcf); defaults to ff
 . -pc_air_cf_splitting_type (pmisr_ddc|diag_dom|pmis|pmis_dist2|agg|pmis_agg|cr) - CF splitting to use; defaults to pmisr_ddc
 . -pc_air_strong_threshold  strong_threshold - strong threshold used in the CF splitting; defaults to 0.5

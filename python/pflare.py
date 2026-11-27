@@ -30,6 +30,7 @@ class PCPFLAREINVType(IntEnum):
     PFLAREINV_WJACOBI         = 7
     PFLAREINV_JACOBI          = 8
     PFLAREINV_L1JACOBI        = 9
+    PFLAREINV_NEWTON_ADAPTIVE = 10
 
 class PCAIRZType(IntEnum):
     """Z / restrictor types for PCAIR (PCAIRZType in C)"""
@@ -91,11 +92,14 @@ pcair_get_c_inverse_type               = pflare_defs.pcair_get_c_inverse_type
 pcair_get_z_type                       = pflare_defs.pcair_get_z_type
 pcair_get_lair_distance                = pflare_defs.pcair_get_lair_distance
 pcair_get_poly_order                   = pflare_defs.pcair_get_poly_order
+pcair_get_arnoldi_block_size           = pflare_defs.pcair_get_arnoldi_block_size
 pcair_get_inverse_sparsity_order       = pflare_defs.pcair_get_inverse_sparsity_order
 pcair_get_c_poly_order                 = pflare_defs.pcair_get_c_poly_order
+pcair_get_c_arnoldi_block_size         = pflare_defs.pcair_get_c_arnoldi_block_size
 pcair_get_c_inverse_sparsity_order     = pflare_defs.pcair_get_c_inverse_sparsity_order
 pcair_get_coarsest_inverse_type        = pflare_defs.pcair_get_coarsest_inverse_type
 pcair_get_coarsest_poly_order          = pflare_defs.pcair_get_coarsest_poly_order
+pcair_get_coarsest_arnoldi_block_size  = pflare_defs.pcair_get_coarsest_arnoldi_block_size
 pcair_get_coarsest_inverse_sparsity_order = pflare_defs.pcair_get_coarsest_inverse_sparsity_order
 pcair_get_coarsest_matrix_free_polys   = pflare_defs.pcair_get_coarsest_matrix_free_polys
 pcair_get_coarsest_diag_scale_polys    = pflare_defs.pcair_get_coarsest_diag_scale_polys
@@ -149,11 +153,14 @@ pcair_set_c_inverse_type               = pflare_defs.pcair_set_c_inverse_type
 pcair_set_z_type                       = pflare_defs.pcair_set_z_type
 pcair_set_lair_distance                = pflare_defs.pcair_set_lair_distance
 pcair_set_poly_order                   = pflare_defs.pcair_set_poly_order
+pcair_set_arnoldi_block_size           = pflare_defs.pcair_set_arnoldi_block_size
 pcair_set_inverse_sparsity_order       = pflare_defs.pcair_set_inverse_sparsity_order
 pcair_set_c_poly_order                 = pflare_defs.pcair_set_c_poly_order
+pcair_set_c_arnoldi_block_size         = pflare_defs.pcair_set_c_arnoldi_block_size
 pcair_set_c_inverse_sparsity_order     = pflare_defs.pcair_set_c_inverse_sparsity_order
 pcair_set_coarsest_inverse_type        = pflare_defs.pcair_set_coarsest_inverse_type
 pcair_set_coarsest_poly_order          = pflare_defs.pcair_set_coarsest_poly_order
+pcair_set_coarsest_arnoldi_block_size  = pflare_defs.pcair_set_coarsest_arnoldi_block_size
 pcair_set_coarsest_inverse_sparsity_order = pflare_defs.pcair_set_coarsest_inverse_sparsity_order
 pcair_set_coarsest_matrix_free_polys   = pflare_defs.pcair_set_coarsest_matrix_free_polys
 pcair_set_coarsest_diag_scale_polys    = pflare_defs.pcair_set_coarsest_diag_scale_polys
@@ -171,6 +178,7 @@ pcair_set_poly_coeffs                  = pflare_defs.pcair_set_poly_coeffs
 # PCPFLAREINV Get functions
 # -----------------------------------------------------------------------
 pcpflareinv_get_poly_order         = pflare_defs.pcpflareinv_get_poly_order
+pcpflareinv_get_arnoldi_block_size = pflare_defs.pcpflareinv_get_arnoldi_block_size
 pcpflareinv_get_sparsity_order     = pflare_defs.pcpflareinv_get_sparsity_order
 pcpflareinv_get_type               = pflare_defs.pcpflareinv_get_type
 pcpflareinv_get_matrix_free        = pflare_defs.pcpflareinv_get_matrix_free
@@ -182,6 +190,7 @@ pcpflareinv_get_inverse_mat        = pflare_defs.pcpflareinv_get_inverse_mat
 # PCPFLAREINV Set functions
 # -----------------------------------------------------------------------
 pcpflareinv_set_poly_order         = pflare_defs.pcpflareinv_set_poly_order
+pcpflareinv_set_arnoldi_block_size = pflare_defs.pcpflareinv_set_arnoldi_block_size
 pcpflareinv_set_sparsity_order     = pflare_defs.pcpflareinv_set_sparsity_order
 pcpflareinv_set_type               = pflare_defs.pcpflareinv_set_type
 pcpflareinv_set_matrix_free        = pflare_defs.pcpflareinv_set_matrix_free
@@ -216,6 +225,7 @@ _PCAIR_OPTION_DOCS = {
     'ddc_fraction':                 ("the local fraction of F points converted to C points by diagonal dominance in the pmisr_ddc CF splitting", "-pc_air_ddc_fraction", "0.1"),
     'inverse_type':                 ("the F-point approximate inverse type (a PCPFLAREINVType)", "-pc_air_inverse_type", "PFLAREINV_ARNOLDI"),
     'poly_order':                   ("the order of the polynomial if using a polynomial inverse type", "-pc_air_poly_order", "6"),
+    'arnoldi_block_size':           ("the block size of the s-step Arnoldi of a Newton basis inverse type (0 is the ordinary Arnoldi)", "-pc_air_arnoldi_block_size", "0"),
     'inverse_sparsity_order':       ("the power of A used as the sparsity in assembled inverses", "-pc_air_inverse_sparsity_order", "1"),
     'diag_scale_polys':             ("whether to diagonally scale before computing a polynomial inverse", "-pc_air_diag_scale_polys", "False"),
     'matrix_free_polys':            ("whether to do smoothing matrix-free if possible", "-pc_air_matrix_free_polys", "False"),
@@ -223,6 +233,7 @@ _PCAIR_OPTION_DOCS = {
     'full_smoothing_up_and_down':   ("whether to smooth up and down on all points at once, rather than only down F and C smoothing", "-pc_air_full_smoothing_up_and_down", "False"),
     'c_inverse_type':               ("the approximate inverse type for the C smooth (a PCPFLAREINVType); defaults to the F point smoother type", "-pc_air_c_inverse_type", "inverse_type"),
     'c_poly_order':                 ("the polynomial order for the C smooth; defaults to the F point smoother order", "-pc_air_c_poly_order", "poly_order"),
+    'c_arnoldi_block_size':         ("the block size of the s-step Arnoldi for the C smooth; defaults to the F point smoother value", "-pc_air_c_arnoldi_block_size", "arnoldi_block_size"),
     'c_inverse_sparsity_order':     ("the power of A used as the sparsity in assembled inverses for the C smooth; defaults to the F point smoother order", "-pc_air_c_inverse_sparsity_order", "inverse_sparsity_order"),
     'one_point_classical_prolong':  ("whether to use a one-point classical prolongator, instead of an approximate ideal prolongator", "-pc_air_one_point_classical_prolong", "True"),
     'symmetric':                    ("whether the prolongator is defined as R^T", "-pc_air_symmetric", "False"),
@@ -235,6 +246,7 @@ _PCAIR_OPTION_DOCS = {
     'improve_z_its':                ("the number of Richardson iterations applied to improve the approximate restrictor", "-pc_air_improve_z_its", "0"),
     'coarsest_inverse_type':        ("the coarse grid approximate inverse type (a PCPFLAREINVType)", "-pc_air_coarsest_inverse_type", "PFLAREINV_ARNOLDI"),
     'coarsest_poly_order':          ("the coarse grid polynomial order", "-pc_air_coarsest_poly_order", "6"),
+    'coarsest_arnoldi_block_size':  ("the block size of the s-step Arnoldi of a Newton basis coarse grid solver (0 is the ordinary Arnoldi)", "-pc_air_coarsest_arnoldi_block_size", "0"),
     'coarsest_inverse_sparsity_order': ("the coarse grid sparsity order", "-pc_air_coarsest_inverse_sparsity_order", "1"),
     'coarsest_matrix_free_polys':   ("whether to do smoothing matrix-free if possible on the coarse grid", "-pc_air_coarsest_matrix_free_polys", "False"),
     'coarsest_diag_scale_polys':    ("whether to diagonally scale on the coarse grid before computing a polynomial inverse", "-pc_air_coarsest_diag_scale_polys", "False"),
@@ -249,6 +261,7 @@ _PCAIR_OPTION_DOCS = {
 _PCPFLAREINV_OPTION_DOCS = {
     'type':              ("the approximate inverse type (a PCPFLAREINVType)", "-pc_pflareinv_type", "PFLAREINV_ARNOLDI"),
     'poly_order':        ("the order of the polynomial if using a polynomial inverse type", "-pc_pflareinv_poly_order", "6"),
+    'arnoldi_block_size': ("the block size of the s-step Arnoldi for the Newton basis types (0 is the ordinary Arnoldi)", "-pc_pflareinv_arnoldi_block_size", "0"),
     'sparsity_order':    ("the power of A used as the sparsity in assembled inverses", "-pc_pflareinv_sparsity_order", "1"),
     'matrix_free':       ("whether the inverse is applied matrix-free, or an assembled matrix is built and used", "-pc_pflareinv_matrix_free", "False"),
     'reuse_poly_coeffs': ("whether to skip recomputing the polynomial inverse coefficients during setup with reuse", "-pc_pflareinv_reuse_poly_coeffs", "False"),

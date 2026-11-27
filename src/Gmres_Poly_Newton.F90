@@ -1,12 +1,19 @@
 module gmres_poly_newton
 
    use petscmat
-   use gmres_poly
+   use gmres_poly, only: arnoldi, create_temp_space_box_muller, destroy_temp_space, int_vec, real_vec
+   use petsc_helper, only: MatAXPYWrapper, destroy_matrix_reuse, mat_create_vec_device, &
+         mat_duplicate_copy_plus_diag, generate_identity, kokkos_debug
+   use matshell_data_type, only: mat_ctxtype
+   use sorting, only: intersect_pre_sorted_indices_only, merge_pre_sorted
+   use gmres_poly_newton_roots, only: modified_leja, compute_extra_roots, harmonic_ritz_roots, &
+         leja_order_with_extras, adaptive_newton_roots
+   use gmres_poly_arnoldi, only: arnoldi_extend, arnoldi_sstep
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_newton_kokkos
-   use pflare_parameters, only: PFLARE_TOL_RCOND, &
-         PFLARE_TOL_CONSISTENCY, PFLARE_EPS, PFLARE_TOL_LUCKY, &
+   use pflare_parameters, only: PFLARE_TOL_CONSISTENCY, PFLARE_TOL_LUCKY, &
          PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_TWO, PFLARE_MATMULT_FILL, &
-         PFLARE_TOL_MATFREE_NEWTON, PFLARE_TOL_LEJA_PERTURB
+         PFLARE_TOL_MATFREE_NEWTON, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, MF_VEC_TEMP_TWO, &
+         MF_VEC_TEMP_THREE
    use gmres_poly_apply, only: petsc_matvec_poly_newton_mf, &
          petsc_matvec_right_scale_poly_newton_mf, petsc_matvec_da_poly_mf, &
          petsc_matvec_poly_transpose_mf
@@ -16,420 +23,20 @@ module gmres_poly_newton
 
    implicit none
    public
+
+   ! How the roots of the Newton polynomial are chosen in calculate_gmres_polynomial_roots_newton
+   ! NEWTON_ROOTS_NONE     - no extra roots
+   ! NEWTON_ROOTS_POF      - extra roots from the product of factors of each root
+   ! NEWTON_ROOTS_ADAPTIVE - the degree and the extra roots are chosen from the Arnoldi Hessenberg
+   integer, parameter :: NEWTON_ROOTS_NONE = 0
+   integer, parameter :: NEWTON_ROOTS_POF = 1
+   integer, parameter :: NEWTON_ROOTS_ADAPTIVE = 2
    
    contains
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine modified_leja(real_roots, imag_roots, indices)
-
-      ! Computes a modified leja ordering of the eigenvalues
-      ! and re-orders in place
-      ! The roots must be passed in with complex conjugate pairs next to each other
-      ! with positive imag e'vals first
-
-      ! ~~~~~~
-      PetscReal, dimension(:), intent(inout)  :: real_roots, imag_roots
-      integer, dimension(:), allocatable, intent(inout) :: indices
-
-      ! Local variables
-      integer :: i_loc, k_loc, counter
-      integer :: max_loc(1)
-      PetscReal, dimension(:), allocatable :: magnitude
-      PetscReal :: a, b, squares, max_mag
-      logical, dimension(size(real_roots)) :: sorted
-      logical :: found
-
-      ! ~~~~~~    
-
-      allocate(magnitude(size(real_roots)))
-      allocate(indices(size(real_roots)))
-
-      ! Compute the magnitudes of the evals
-      do i_loc = 1, size(real_roots)
-         magnitude(i_loc) = sqrt(real_roots(i_loc)**2 + imag_roots(i_loc)**2)
-      end do
-      ! Find the biggest
-      max_loc = maxloc(magnitude)
-      counter = 1
-
-      sorted = .FALSE.
-
-      ! That is our first entry
-      indices(counter) = max_loc(1)
-      sorted(indices(counter)) = .TRUE.
-      counter = counter + 1
-      ! If it was imaginary its complex conjugate is next to this one
-      if (imag_roots(indices(counter-1)) /= 0d0) then
-         ! dgeev returns roots with the positive imaginary part first
-         if (imag_roots(indices(counter-1)) > 0) then
-            ! So if positive we know the conjugate is ahead one
-            indices(counter) = indices(counter - 1) + 1
-         else
-            ! If negative we know the conjugate is one behind
-            indices(counter) = indices(counter - 1) - 1
-         end if
-         sorted(indices(counter)) = .TRUE.
-         counter = counter + 1
-      end if
-
-      ! Do while we still have some sorting to do
-      do while (counter-1 < size(real_roots))
-
-         max_mag = -huge(max_mag)
-         found = .FALSE.
-
-         ! For each value compute a product of differences
-         do i_loc = 1, size(real_roots)
-
-            ! Skip any we've already sorted
-            if (sorted(i_loc)) cycle
-            magnitude(i_loc) = 1d0
-
-            ! Loop over all those we've sorted so far
-            do k_loc = 1, counter-1
-               
-               ! Distance
-               a = real_roots(i_loc) - real_roots(indices(k_loc))
-               b = imag_roots(i_loc) - imag_roots(indices(k_loc))
-
-               ! If we have repeated roots this will be exactly zero, and the product 
-               ! of differences is zero - we set the log of it to -huge rather than 
-               ! computing log10(0) = -infinity, which raises a floating point exception
-               squares = a**2 + b**2
-               if (squares == 0d0) then
-                  magnitude(i_loc) = -huge(magnitude(i_loc))
-                  exit
-               end if
-               magnitude(i_loc) = magnitude(i_loc) + &
-                  log10(sqrt(squares))
-            end do
-            
-            ! Store the biggest as we're going
-            if (magnitude(i_loc) > max_mag) then
-               max_mag = magnitude(i_loc)
-               max_loc(1) = i_loc
-               found = .TRUE.
-            end if            
-         end do
-
-         ! If we found nothing (ie the only unsorted are repeated roots with zero distance)
-         ! just have the next entry in the list
-         ! Note we can't test max_mag < 0 here, as the log of the product of distances
-         ! is legitimately negative whenever that product is small (e.g., tightly 
-         ! clustered or small magnitude eigenvalues), which would make the ordering scale dependent
-         if (.NOT. found) then
-            do i_loc = 1, size(real_roots)
-               if (.NOT. sorted(i_loc)) then
-                  max_loc(1) = i_loc
-                  exit
-               endif
-            end do
-         end if      
-
-         ! The new index is the biggest in distance 
-         indices(counter) = max_loc(1)
-         sorted(indices(counter)) = .TRUE.
-         counter = counter + 1
-         ! If it was imaginary its complex conjugate is next to this one
-         if (imag_roots(indices(counter - 1)) /= 0d0) then
-            ! dgeev returns roots with the positive imaginary part first
-            ! We did actually find a situation where due to rounding differnces, the 
-            ! conjugate with negative imaginary root had a bigger product of factors
-            ! (by 1e-14) than the positive imaginary root, so we can't guarantee we hit 
-            ! the positive one first
-            if (imag_roots(indices(counter-1)) > 0) then
-               ! So if positive we know the conjugate is ahead one
-
-               indices(counter) = indices(counter - 1) + 1
-            else
-               ! If negative we know the conjugate is one behind
-               indices(counter) = indices(counter - 1) - 1
-            end if    
-            sorted(indices(counter)) = .TRUE.
-            counter = counter + 1
-         end if
-      end do
-
-      deallocate(magnitude)
-
-   end subroutine modified_leja   
-
-   ! -------------------------------------------------------------------------------------------------
-
-   subroutine cluster_eigenvalues_stable(real_roots, imag_roots, rel_tol, abs_tol)
-
-      ! Clustering of (possibly complex) harmonic Ritz values.
-      ! Numerically distinct clusters are moved to the front.
-      ! Remaining entries are set to zero.
-      ! Skips eigenvalues that are exactly zero (both real and imag parts).
-      !
-      ! The roots must be passed in with complex conjugate pairs next to each other
-      ! (as dgeev returns them). The clustering is done only on the roots with 
-      ! imag >= 0 and every complex cluster is output as a conjugate pair, with the
-      ! positive imaginary root first, as everything downstream relies on that.
-      ! Clustering all the roots instead can split a pair, e.g., if a real root is 
-      ! within tolerance of a complex root but not of its conjugate
-      !
-      ! Inputs:
-      !   real_roots, imag_roots : eigenvalues (length k)
-      !   rel_tol               : relative tolerance (suggest sqrt(eps) ~ 1e-8)
-      !   abs_tol               : absolute tolerance (suggest eps * ||H|| ~ 1e-15)
-      !
-      ! Outputs:
-      !   real_roots, imag_roots : clustered eigenvalues at front, zeros after
-
-      PetscReal, dimension(:), intent(inout) :: real_roots, imag_roots
-      PetscReal, intent(in)                  :: rel_tol, abs_tol
-      integer                                :: i, j, n, n_unique, weight, cluster_weight
-      logical, allocatable                   :: used(:)
-      PetscReal                              :: dist, mag_i, mag_j, scale
-      PetscReal                              :: sum_real, sum_imag, centroid_real, centroid_imag
-      PetscReal, allocatable                 :: rtmp(:), itmp(:)
-
-      n = size(real_roots)
-
-      allocate(used(n))
-      allocate(rtmp(n), itmp(n))
-
-      used = .false.
-      n_unique = 0
-
-      ! ---------------------------------------------------------
-      ! All-pairs clustering of the roots with imag >= 0
-      ! ---------------------------------------------------------
-      do i = 1, n
-
-         if (used(i)) cycle
-
-         ! Skip eigenvalues that are exactly zero and the negative imaginary
-         ! conjugates (they are output with their positive imaginary root)
-         if ((real_roots(i) == 0.0d0 .AND. imag_roots(i) == 0.0d0) .OR. &
-               imag_roots(i) < 0.0d0) then
-            used(i) = .true.
-            cycle
-         end if
-
-         ! Start new cluster with eigenvalue i
-         ! Each member is weighted by how many roots it stands for, ie a complex root 
-         ! counts twice (itself and its conjugate) and a real root once, so the 
-         ! real part of the centroid is the mean over the cluster and its mirror image
-         weight = 1
-         if (imag_roots(i) > 0.0d0) weight = 2
-         sum_real = weight * real_roots(i)
-         sum_imag = weight * imag_roots(i)
-         cluster_weight = weight
-         used(i) = .true.
-         
-         mag_i = sqrt(real_roots(i)**2 + imag_roots(i)**2)
-
-         ! Look for all other eigenvalues close to this one
-         do j = i + 1, n
-
-            if (used(j)) cycle
-
-            ! Skip exactly zero eigenvalues and negative imaginary conjugates
-            if ((real_roots(j) == 0.0d0 .AND. imag_roots(j) == 0.0d0) .OR. &
-                  imag_roots(j) < 0.0d0) then
-               used(j) = .true.
-               cycle
-            end if
-
-            mag_j = sqrt(real_roots(j)**2 + imag_roots(j)**2)
-            
-            ! Distance between eigenvalues
-            ! Both have imag >= 0, so the conjugate of j is never closer to i than j
-            dist = sqrt((real_roots(j) - real_roots(i))**2 + &
-                        (imag_roots(j) - imag_roots(i))**2)
-
-            ! Use the larger magnitude for relative scaling
-            ! This is purely relative so the clustering does not depend on the scale 
-            ! of the matrix, abs_tol handles roots near zero
-            scale = max(mag_i, mag_j)
-
-            ! Check if within tolerance
-            if (dist <= abs_tol + rel_tol * scale) then
-               weight = 1
-               if (imag_roots(j) > 0.0d0) weight = 2
-               sum_real = sum_real + weight * real_roots(j)
-               sum_imag = sum_imag + weight * imag_roots(j)
-               cluster_weight = cluster_weight + weight
-               used(j) = .true.
-            end if
-
-         end do
-
-         ! Compute cluster centroid (weighted mean)
-         centroid_real = sum_real / real(cluster_weight, kind=kind(rtmp))
-         centroid_imag = sum_imag / real(cluster_weight, kind=kind(itmp))
-
-         ! If the centroid is within tolerance of its own conjugate, the pair
-         ! is numerically a single real root
-         if (centroid_imag > 0.0d0) then
-            if (2 * centroid_imag <= abs_tol + &
-                  rel_tol * sqrt(centroid_real**2 + centroid_imag**2)) then
-               centroid_imag = 0.0d0
-            end if
-         end if
-
-         n_unique = n_unique + 1
-         rtmp(n_unique) = centroid_real
-         itmp(n_unique) = centroid_imag
-         ! Output a complex centroid as a conjugate pair, positive imaginary first
-         if (centroid_imag > 0.0d0) then
-            n_unique = n_unique + 1
-            rtmp(n_unique) = centroid_real
-            itmp(n_unique) = -centroid_imag
-         end if
-
-      end do
-
-      ! ---------------------------------------------------------
-      ! Output compact form
-      ! ---------------------------------------------------------
-      real_roots = 0.0d0
-      imag_roots = 0.0d0
-
-      real_roots(1:n_unique) = rtmp(1:n_unique)
-      imag_roots(1:n_unique) = itmp(1:n_unique)
-
-      deallocate(used, rtmp, itmp)
-
-   end subroutine cluster_eigenvalues_stable
-
-   ! -------------------------------------------------------------------------------------------------
-
-   subroutine compute_extra_roots(real_roots, imag_roots, real_roots_output, imag_roots_output)
-
-      ! Add extra roots for stability
-      ! Computes the product of factors for each eigenvalue and adds extra copies
-      ! of roots that have large products (to improve polynomial stability)
-      ! Only non-zero eigenvalues should be passed in
-      ! real_roots_output, imag_roots_output are allocated and filled with the original
-      ! roots plus any extra
-
-      ! ~~~~~~
-      PetscReal, dimension(:), intent(inout)              :: real_roots, imag_roots
-      PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_output, imag_roots_output
-
-      ! Local variables
-      integer :: i_loc, j_loc, k_loc, n_roots, total_extra, counter
-      PetscReal :: a, b, c, d, div_real, div_imag, div_mag
-      PetscReal, dimension(size(real_roots)) :: pof
-      integer, dimension(size(real_roots)) :: extra_pair_roots, overflow
-
-      ! ~~~~~~
-
-      n_roots = size(real_roots)
-
-      ! Compute the product of factors
-      pof = 1   
-      extra_pair_roots = 0
-      overflow = 0
-      total_extra = 0
-      do k_loc = 1, n_roots
-
-         a = real_roots(k_loc)
-         b = imag_roots(k_loc)      
-         
-         ! We have already computed pof for the positive imaginary complex conjugate
-         if (b < 0) cycle
-
-         ! Skips zero eigenvalues (we should only be passed non-zero roots)
-         ! This matches the zero test used when applying the polynomial, ie 
-         ! a purely imaginary root (a == 0, b /= 0) is not zero
-         if (a == 0d0 .AND. b == 0d0) cycle
-
-         ! Compute product(k)_{i, j/=i} * | 1 - theta_j/theta_i|
-         do i_loc = 1, n_roots
-
-            ! Skip
-            if (k_loc == i_loc) cycle
-
-            c = real_roots(i_loc)
-            d = imag_roots(i_loc)
-
-            ! Skips zero eigenvalues
-            if (c == 0d0 .AND. d == 0d0) cycle
-
-            ! theta_k/theta_i
-            div_real = (a * c + b * d)/(c**2 + d**2)
-            div_imag = (b * c - a * d)/(c**2 + d**2)
-
-            ! |1 - theta_k/theta_i|
-            div_mag = sqrt((1 - div_real)**2 + div_imag**2)
-
-            ! Pof is about to overflow, store the exponent and 
-            ! reset pof back to one
-            ! We can hit this for very high order polynomials, where we have to 
-            ! add more roots than 22 (ie pof > 1e308)
-            ! range gives the decimal exponent range of pof, ie 307 in double and 37 in single
-            ! In single pof can overflow at much lower order
-            if (log10(pof(k_loc)) + log10(div_mag) > range(pof(k_loc))) then
-               overflow(k_loc) = overflow(k_loc) + int(log10(pof(k_loc)))
-               pof(k_loc) = 1
-            end if            
-
-            ! Product
-            pof(k_loc) = pof(k_loc) * div_mag
-
-         end do
-
-         ! If pof > 1e4, we add an extra root, plus one extra for every 1e14
-         if (log10(pof(k_loc)) > 4 .OR. overflow(k_loc) /= 0) then
-
-            ! if real extra_pair_roots counts each distinct real root we're adding
-            ! if imaginary it only counts a pair as one
-            extra_pair_roots(k_loc) = ceiling((log10(pof(k_loc)) + overflow(k_loc) - 4.0)/14.0)
-            total_extra = total_extra + extra_pair_roots(k_loc)
-
-            ! If imaginary, the pof is the same for the conjugate, let's just set it to -1
-            if (b > 0) then
-               ! We know the positive imaginary value is first, so the conjugate follows it
-               pof(k_loc+1) = -1
-               ! We need the conjugates as well
-               total_extra = total_extra + extra_pair_roots(k_loc)
-
-            end if            
-         end if
-      end do
-
-      ! Allocate output arrays (original roots + extra roots)
-      allocate(real_roots_output(n_roots + total_extra))
-      allocate(imag_roots_output(n_roots + total_extra))
-      real_roots_output = 0d0
-      imag_roots_output = 0d0
-
-      ! Copy in original roots
-      real_roots_output(1:n_roots) = real_roots(1:n_roots)
-      imag_roots_output(1:n_roots) = imag_roots(1:n_roots)
-
-      ! Add the extra copies of roots, ensuring conjugate pairs we add 
-      ! are next to each other
-      counter = n_roots + 1
-      do i_loc = 1, n_roots
-
-         ! For each extra root pair to add
-         do j_loc = 1, extra_pair_roots(i_loc)
-
-            real_roots_output(counter) = real_roots(i_loc)
-            imag_roots_output(counter) = imag_roots(i_loc)
-            ! Add in the conjugate
-            if (imag_roots(i_loc) > 0) then
-               real_roots_output(counter+1) = real_roots(i_loc)
-               imag_roots_output(counter+1) = -imag_roots(i_loc)
-            end if
-
-            counter = counter + 1
-            if (imag_roots(i_loc) > 0) counter = counter + 1
-         end do
-      end do
-
-   end subroutine compute_extra_roots   
-
-! -------------------------------------------------------------------------------------------------------------------------------
-
-   subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, add_roots, coefficients)
+   subroutine calculate_gmres_polynomial_roots_newton(matrix, poly_order, root_rule, coefficients, arnoldi_block_size)
 
       ! Computes a fixed order gmres polynomial for the matrix passed in
       ! and outputs the Harmonic Ritz values (ie the roots) which we can use to apply 
@@ -443,35 +50,31 @@ module gmres_poly_newton
       ! be very sparse at high order, and a fixed sparsity version at higher order than either the 
       ! power basis or Arnoldi basis could compute is likely not any better)
 
+      ! If arnoldi_block_size is given and bigger than zero, the Arnoldi is an s-step one
+      ! (see arnoldi_sstep) that builds that many Krylov vectors at a time
+
       ! ~~~~~~
       type(tMat), intent(in)                            :: matrix
       integer, intent(in)                               :: poly_order
-      logical, intent(in)                               :: add_roots
+      integer, intent(in)                               :: root_rule
       PetscReal, dimension(:, :), pointer, intent(inout)     :: coefficients
+      integer, intent(in), optional                     :: arnoldi_block_size
 
       ! Local variables
       PetscInt :: global_rows, global_cols, local_rows, local_cols
-      integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode, iwork_size, j_loc
-      integer :: total_extra, counter, k_loc, m, numerical_order
-      ! BLAS/LAPACK integer arguments must be PetscBLASInt
-      PetscBLASInt :: lwork, rank, info
-      PetscBLASInt :: np1_bl, nrhs_bl, lda_hnt_bl, ldb_bl, lda_hn_bl, one_bl
+      integer :: subspace_size, i_loc, comm_size, comm_rank, errorcode
+      integer :: counter, m, numerical_order
       PetscErrorCode :: ierr
       MPIU_Comm :: MPI_COMM_MATRIX
       PetscReal, dimension(poly_order+2,poly_order+1) :: H_n
-      PetscReal, dimension(poly_order+1,poly_order+2) :: H_n_T
-      PetscReal, dimension(poly_order+1) :: e_d, solution, s
-      PetscBLASInt, dimension(:), allocatable :: iwork_allocated
       integer, dimension(:), allocatable :: indices
-      PetscReal, dimension(:), allocatable :: work, real_roots_added, imag_roots_added
-      PetscReal, dimension(:), allocatable :: perturbed_real, perturbed_imag
-      PetscReal, dimension(:,:), allocatable :: VL, VR
+      PetscReal, dimension(:), allocatable :: real_roots_added, imag_roots_added
       PetscReal :: beta
       PetscReal, dimension(:, :), allocatable :: coefficients_temp
       type(tVec) :: w_j
       type(tVec), pointer, dimension(:) :: V_n
-      logical :: use_harmonic_ritz = .TRUE.
-      PetscReal :: rcond = PFLARE_TOL_RCOND, rel_tol, abs_tol, H_norm, perturb_scale
+      integer :: sstep_size
+      logical :: floor_stop
 
       ! ~~~~~~    
 
@@ -515,162 +118,49 @@ module gmres_poly_newton
       
       ! Do the Arnoldi and compute H_n
       ! Use the same lucky tolerance as petsc
-      call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+      ! The block size of the s-step Arnoldi, with zero the ordinary Arnoldi
+      sstep_size = 0
+      if (present(arnoldi_block_size)) sstep_size = arnoldi_block_size
+      ! The adaptive rule only uses the steps up to where the Arnoldi residual reaches rounding
+      ! level, so the Arnoldi can stop there
+      floor_stop = root_rule == NEWTON_ROOTS_ADAPTIVE
 
-      ! ~~~~~~~~~~~
-      ! Now the Ritz values are just the eigenvalues of the square part of H_n
-      ! We're actually going to use the Harmonic Ritz values which are the reciprocals
-      ! of the (ordinary) Ritz values of A^-1
-      ! see Embree - Polynomial preconditioned arnoldi with stability control 
-      ! and Goossens - Ritz and Harmonic Ritz Values and the Convergence of FOM and GMRES
-      ! ~~~~~~~~~~~
-      if (use_harmonic_ritz) then
-
-         e_d = 0
-         e_d(poly_order + 1) = 1
-
-         ! Now we have to be careful here 
-         ! PETSc and Trilinos both just use an LU factorisation here to solve
-         ! H_d^-H e_d
-         ! But we can have the situation where the user has requested a high 
-         ! polynomial order and H_d ends up not full rank
-         ! In that case the LU factorisation fails 
-         ! Previously we just used to abort and tell the user to use lower order
-         ! But that is not super helpful
-         ! Instead we use a rank revealing factorisation that gives the 
-         ! minimum norm solution
-         ! What we find is that when use this to compute eigenvalues we find e-vals 
-         ! as we might expect up to the rank
-         ! but then we have some eigenvalues that are numerically zero
-         ! Given the way the outside code is structured, we can't lower the poly_order
-         ! in this routine and return
-         ! Instead we keep the "zero" eigenvalues our application of the newton polynomial
-         ! just skips them and hence we don't do any 
-         ! extra work in the application phase than we would have done with lower order     
-         
-         ! ~~~~~~~~~~~
-         ! ~~~~~~~~~~~
-
-         ! Rank revealing min norm solution
-         H_n_T = transpose(H_n)
-
-         allocate(work(1))
-         allocate(iwork_allocated(1))
-         lwork = -1         
-
-         ! We have rcond = PFLARE_TOL_RCOND which is used to decide what singular values to drop
-         ! Matlab uses max(size(A))*eps(norm(A)) in their pinv
-         ! Kind-correct BLAS integer dimensions
-         np1_bl = poly_order + 1
-         nrhs_bl = 1
-         lda_hnt_bl = size(H_n_T, 1)
-         ldb_bl = size(e_d)
-         call PFLAREgelsd(np1_bl, np1_bl, nrhs_bl, H_n_T, lda_hnt_bl, &
-                        e_d, ldb_bl, s, rcond, rank, &
-                        work, lwork, iwork_allocated, info)
-         ! Workspace query returns optimal sizes in work(1)/iwork(1); int() is exact
-         ! for all plausible sizes < 2^24 even when work is single precision
-         lwork = int(work(1))
-         iwork_size = iwork_allocated(1)
-         deallocate(work, iwork_allocated)
-         allocate(work(lwork))
-         allocate(iwork_allocated(iwork_size))
-         call PFLAREgelsd(np1_bl, np1_bl, nrhs_bl, H_n_T, lda_hnt_bl, &
-                        e_d, ldb_bl, s, rcond, rank, &
-                        work, lwork, iwork_allocated, info)
-         deallocate(work, iwork_allocated)
-
-         ! Copy in the solution
-         solution = e_d
-
-         if (info /= 0) then
-            print *, "Harmonic Ritz solve failed"
-            call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      if (sstep_size > 0) then
+         ! The first ten steps are ordinary, and give the shifts
+         call arnoldi_sstep(matrix, poly_order, sstep_size, 10, PFLARE_TOL_LUCKY, &
+                  V_n, w_j, beta, H_n, m, floor_stop)
+      else if (floor_stop) then
+         ! The same Arnoldi one step at a time, which can stop at the noise floor
+         call arnoldi(matrix, 0, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
+         if (poly_order > 0 .AND. .NOT. H_n(2, 1) < PFLARE_TOL_LUCKY) then
+            call arnoldi_extend(matrix, PFLARE_TOL_LUCKY, V_n, w_j, H_n, 1, poly_order + 1, m, 1, floor_stop)
          end if
-
-         ! Scale f by H(d+1,d)^2
-         solution = solution * H_n(poly_order + 2, poly_order + 1)**2
-         ! Add to the last column of H_n
-         H_n(1:poly_order + 1, poly_order + 1) = &
-            H_n(1:poly_order + 1, poly_order + 1) + solution
+      else
+         call arnoldi(matrix, poly_order, PFLARE_TOL_LUCKY, V_n, w_j, beta, H_n, m)
       end if
 
-      ! ~~~~~~~~~~~~~~
-      ! Now compute the eigenvalues of the square part of H_n
-      ! ie either compute the Ritz or Harmonic Ritz values
-      ! ~~~~~~~~~~~~~~
+      if (root_rule == NEWTON_ROOTS_ADAPTIVE) then
 
-      ! The tolerances that control the clustering below are relative to ||H||
-      ! This has to be computed before the eigenvalue solve, as PFLAREgeev overwrites H_n
-      ! (after balancing, and at higher order with values that don't scale with the matrix)
-      H_norm = norm2(H_n(1:m,1:m))
+         ! ~~~~~~~~~~~~~~
+         ! Choose the degree and the extra roots from the Hessenberg matrix
+         ! This returns the non-zero roots (with any extras) already leja ordered
+         ! ~~~~~~~~~~~~~~
+         call adaptive_newton_roots(H_n, m, real_roots_added, imag_roots_added, numerical_order)
 
-      allocate(work(1))
-      ! Not used but we have to allocate
-      allocate(VL(0, 0))
-      allocate(VR(0, 0))
-      lwork = -1      
+         ! Any roots we don't use are zero roots at the end, which are skipped when applying
+         ! We always store at least poly_order + 1 roots
+         deallocate(coefficients)
+         allocate(coefficients(size(real_roots_added) + (poly_order + 1 - numerical_order), 2))
+         coefficients = 0d0
+         coefficients(1:size(real_roots_added), 1) = real_roots_added
+         coefficients(1:size(real_roots_added), 2) = imag_roots_added
+         deallocate(real_roots_added, imag_roots_added)
 
-      ! Compute the eigenvalues
-      ! Kind-correct BLAS integer dimensions
-      np1_bl = poly_order + 1
-      lda_hn_bl = size(H_n, 1)
-      one_bl = 1
-      ! DEFERRED (complex-prep): coefficients kept PetscReal by design; see docs/plan.
-      ! PFLAREgeev writes the strictly-real eigenvalue parts wr/wi directly into
-      ! coefficients(:,1)/(:,2) - these are LAPACK real arrays, so PetscReal is correct.
-      call PFLAREgeev('N', 'N', np1_bl, H_n, lda_hn_bl, &
-                     coefficients(1, 1), coefficients(1, 2), VL, one_bl, VR, one_bl, &
-                     work, lwork, info)
-      ! int() is exact for all plausible sizes < 2^24 even when work is single precision
-      lwork = int(work(1))
-      deallocate(work)
-      allocate(work(lwork))
-      call PFLAREgeev('N', 'N', np1_bl, H_n, lda_hn_bl, &
-                     coefficients(1, 1), coefficients(1, 2), VL, one_bl, VR, one_bl, &
-                     work, lwork, info)
-      deallocate(work, VL, VR)
+      else
 
-      if (info /= 0) then
-         print *, "Eig decomposition failed"
-         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
-      end if
-
-      ! ~~~~~~~~~~~~~~
-      ! Now we have to check the output eigenvalues
-      ! ~~~~~~~~~~~~~~
-
-      ! These are the tolerances that control the clustering
-      ! These are all relative to ||H|| (computed above, before H_n is overwritten), 
-      ! which scales with the matrix, so the roots (and hence the polynomial) 
-      ! do not depend on the scale of the matrix
-      rel_tol = sqrt(PFLARE_EPS)
-      abs_tol = PFLARE_EPS * H_norm
-
-      ! In some cases with numerical rank deficiency, we can still
-      ! end up with non-zero (or negative) eigenvalues that
-      ! are trivially small - we set them explicitly to zero
-      ! Everywhere downstream (the matrix-free apply, the assembled builds, 
-      ! the matvec counts) then only skips roots that are exactly zero
-      ! A complex root that survives this is never skipped
-      do i_loc = 1, poly_order + 1
-         if (coefficients(i_loc,1)**2 + coefficients(i_loc,2)**2 < &
-            (abs_tol + rel_tol*H_norm)**2) then
-            coefficients(i_loc, 1) = 0d0
-            coefficients(i_loc, 2) = 0d0
-         end if
-      end do       
-           
-      ! ~~~~~~~~~~~~~~
-      ! Cluster close eigenvalues together to improve stability of the polynomial evaluation
-      ! For example when computing the e'vals of a constant diagonal matrix
-      ! the rank revealing factorisation above doesn't always report a rank of 1 given roundoff
-      ! Instead it returns multiple eigenvalues that are very close to each other, 
-      ! and we want to cluster those together and treat them as one root
-      ! ~~~~~~~~~~~~~~      
-
-      ! This places all exactly zero eigenvalues at the end of coefficients
-      call cluster_eigenvalues_stable(coefficients(:, 1), coefficients(:, 2), rel_tol, abs_tol)      
+      ! Compute the harmonic Ritz values of H_n, with any numerically zero roots set 
+      ! to exactly zero, close roots clustered and the zeros at the end
+      call harmonic_ritz_roots(H_n, poly_order + 1, m, coefficients(:, 1), coefficients(:, 2))
 
       ! ~~~~~~~~~~~~~~
       ! Extract the non-zero eigenvalues for root adding and leja ordering
@@ -687,7 +177,7 @@ module gmres_poly_newton
       ! ~~~~~~~~~~~~~~
       ! Add roots for stability (only on non-zero eigenvalues)
       ! ~~~~~~~~~~~~~~         
-      if (add_roots .AND. numerical_order > 0) then 
+      if (root_rule == NEWTON_ROOTS_POF .AND. numerical_order > 0) then 
 
          ! Extract non-zero eigenvalues into a temporary array
          allocate(coefficients_temp(numerical_order, 2))
@@ -705,45 +195,14 @@ module gmres_poly_newton
          call compute_extra_roots(coefficients_temp(:, 1), coefficients_temp(:, 2), &
                   real_roots_added, imag_roots_added)
 
-         ! total number of non-zero roots after adding extras
-         total_extra = size(real_roots_added) - numerical_order
-
          ! Resize coefficients to hold non-zero roots (with extras) + zero roots at end
          deallocate(coefficients)
          allocate(coefficients(size(real_roots_added) + (poly_order + 1 - numerical_order), 2))
          coefficients = 0d0
 
-         ! Create perturbed copy for leja ordering
-         allocate(perturbed_real(size(real_roots_added)))
-         allocate(perturbed_imag(size(real_roots_added)))
-         perturbed_real = real_roots_added
-         perturbed_imag = imag_roots_added
-
-         ! Perturb the extra roots so they have unique values for the leja sort
-         ! The perturbation is relative to the smallest (non-zero) root, so the ordering 
-         ! doesn't depend on the scale of the matrix, while keeping the perturbation 
-         ! negligible relative to every root
-         ! A larger perturbation (e.g., relative to the biggest root, ||H|| or each root) 
-         ! makes the copies look well separated, so the leja ordering pulls them 
-         ! forward, which destabilises high order polynomials
-         ! If the perturbation is lost to rounding on a big root, the copies are exact 
-         ! duplicates, which modified_leja handles
-         perturb_scale = minval(sqrt(real_roots_added**2 + imag_roots_added**2))
-         counter = numerical_order + 1
-         do i_loc = 1, numerical_order
-            k_loc = 0
-            do j_loc = counter, size(real_roots_added)
-               ! Check if this extra root matches the original
-               if (real_roots_added(j_loc) == coefficients_temp(i_loc, 1) .AND. &
-                   abs(imag_roots_added(j_loc)) == abs(coefficients_temp(i_loc, 2))) then
-                  k_loc = k_loc + 1
-                  perturbed_real(j_loc) = real_roots_added(j_loc) + k_loc * PFLARE_TOL_LEJA_PERTURB * perturb_scale
-               end if
-            end do
-         end do
-
          ! Leja order only the non-zero eigenvalues (with extras)
-         call modified_leja(perturbed_real, perturbed_imag, indices)
+         call leja_order_with_extras(coefficients_temp(:, 1), coefficients_temp(:, 2), &
+                  real_roots_added, imag_roots_added, indices)
 
          ! Reorder the (non-perturbed) roots using the leja ordering
          coefficients(1:size(real_roots_added), 1) = real_roots_added(indices)
@@ -752,8 +211,7 @@ module gmres_poly_newton
          ! Zero eigenvalues are already zero at the end from the coefficients = 0d0 above
 
          ! Cleanup
-         deallocate(coefficients_temp, real_roots_added, imag_roots_added)
-         deallocate(perturbed_real, perturbed_imag, indices)
+         deallocate(coefficients_temp, real_roots_added, imag_roots_added, indices)
 
       else
 
@@ -785,6 +243,8 @@ module gmres_poly_newton
          end if
 
       end if     
+
+      end if
 
       ! Cleanup
       call destroy_temp_space(V_n)

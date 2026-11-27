@@ -6,7 +6,8 @@ module pcair_interfaces
          PCSetMaxLevels_AIR_Shell
    use air_mg_stats, only: compute_stats
    use pflare_parameters, only: COEFFS_INV_AFF, COEFFS_INV_AFF_DROPPED, COEFFS_INV_ACC, COEFFS_INV_COARSE, &
-         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA
+         PFLAREINV_NEWTON, PFLAREINV_NEWTON_NO_EXTRA, &
+         PFLAREINV_NEWTON_ADAPTIVE
    use gmres_poly_data_type, only: gmres_poly_data
    use matshell_data_type, only: mat_ctxtype
    use gmres_poly_newton, only: point_mf_newton_roots
@@ -544,7 +545,8 @@ module pcair_interfaces
       end if
 
       newton = poly_data%inverse_type == PFLAREINV_NEWTON .OR. &
-               poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+               poly_data%inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+               poly_data%inverse_type == PFLAREINV_NEWTON_ADAPTIVE
       if (newton) then
          min_rows = poly_data%gmres_poly_order + 1
       else
@@ -646,7 +648,7 @@ module pcair_interfaces
       ! The caller's array is not referenced after this call and can be
       ! deallocated or modified freely.
       ! The sizes of coeffs must match those stored, except for the Newton inverse
-      ! types (newton, newton_no_extra), where the number of rows (roots) can differ,
+      ! types (newton, newton_no_extra, newton_adaptive), where the number of rows (roots) can differ,
       ! as long as there are 2 columns and at least poly_order + 1 rows. The internal
       ! storage is then reallocated
       ! Does not trigger a rebuild; after setting these coefficients call
@@ -1176,6 +1178,30 @@ module pcair_interfaces
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRGetCArnoldiBlockSize(pc, block_size, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: block_size
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      ! If unset (-1) this defaults to the F point smoother value
+      if (options%c_arnoldi_block_size == -1) then
+         block_size = options%arnoldi_block_size
+      else
+         block_size = options%c_arnoldi_block_size
+      end if
+      ierr = 0
+
+   end subroutine PCAIRGetCArnoldiBlockSize
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRGetCInverseSparsityOrder(pc, order, ierr) 
 
       ! ~~~~~~~~
@@ -1216,6 +1242,25 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetArnoldiBlockSize(pc, block_size, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: block_size
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      block_size = options%arnoldi_block_size
+      ierr = 0
+
+   end subroutine PCAIRGetArnoldiBlockSize
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -1273,6 +1318,25 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRGetCoarsestPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRGetCoarsestArnoldiBlockSize(pc, block_size, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(out)         :: block_size
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      ! ~~~~~~~~
+
+      ! Get the options
+      call PCAIRGetOptions(pc, options)    
+      block_size = options%coarsest_arnoldi_block_size
+      ierr = 0
+
+   end subroutine PCAIRGetCoarsestArnoldiBlockSize
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -2570,6 +2634,44 @@ module pcair_interfaces
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
+   subroutine PCAIRSetArnoldiBlockSize(pc, block_size, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: block_size
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      if (block_size < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Arnoldi block size must not be negative")
+         return
+      end if
+
+      call PCAIRGetArnoldiBlockSize(pc, old_int, ierr)
+      if (old_int == block_size) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%arnoldi_block_size = int(block_size)
+      ierr = 0
+
+   end subroutine PCAIRSetArnoldiBlockSize
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
    subroutine PCAIRSetInverseSparsityOrder(pc, order, ierr) 
 
       ! ~~~~~~~~
@@ -2649,6 +2751,49 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetCPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCArnoldiBlockSize(pc, block_size, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: block_size
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      ! -1 is how an unset value is stored, ie it follows the F point value
+      if (block_size < -1) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "C point Arnoldi block size must not be negative (or -1 to follow the F point value)")
+         return
+      end if
+
+      call PCAIRGetCArnoldiBlockSize(pc, old_int, ierr)
+      if (old_int == block_size) then
+         ! Still record the value as explicitly set, so it no longer
+         ! follows the F point smoother value, but no reset is needed
+         call PCAIRGetOptions(pc, options)
+         options%c_arnoldi_block_size = int(block_size)
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%c_arnoldi_block_size = int(block_size)
+      ierr = 0
+
+   end subroutine PCAIRSetCArnoldiBlockSize
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -2762,6 +2907,44 @@ module pcair_interfaces
       ierr = 0
 
    end subroutine PCAIRSetCoarsestPolyOrder
+   
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCAIRSetCoarsestArnoldiBlockSize(pc, block_size, ierr) 
+
+      ! ~~~~~~~~
+      type(tPC), intent(inout)      :: pc
+      PetscInt, intent(in)          :: block_size
+      PetscErrorCode, intent(out)   :: ierr
+
+      type(air_options), pointer :: options
+      type(tPC)                  :: pc_shell      
+      PetscInt                   :: old_int
+      ! ~~~~~~~~
+
+      if (block_size < 0) then
+         ierr = PETSC_ERR_ARG_OUTOFRANGE
+         call PetscError(PETSC_COMM_SELF, ierr, PETSC_ERROR_INITIAL, &
+                  "Coarsest Arnoldi block size must not be negative")
+         return
+      end if
+
+      call PCAIRGetCoarsestArnoldiBlockSize(pc, old_int, ierr)
+      if (old_int == block_size) then
+         ierr = 0
+         return
+      end if
+
+      ! Set the options
+      call PCAIRGetOptionsAndShell(pc, options, pc_shell)    
+      call PCReset(pc_shell, ierr)
+      call PCReset_AIR_Shell(pc_shell, ierr)
+      call PCMarkNotSetUp_c(pc%v)      
+
+      options%coarsest_arnoldi_block_size = int(block_size)
+      ierr = 0
+
+   end subroutine PCAIRSetCoarsestArnoldiBlockSize
    
 ! -------------------------------------------------------------------------------------------------------------------------------
 

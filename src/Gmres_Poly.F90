@@ -5,7 +5,7 @@ module gmres_poly
    use c_petsc_interfaces, only: mat_mult_powers_share_sparsity_kokkos, mat_mult_powers_share_sparsity_raw_kokkos, &
          raw_copy_to_mat_kokkos, vec_duplicate_vecs_c
    use pflare_parameters, only: PFLAREINV_POWER, PFLAREINV_ARNOLDI, PFLAREINV_NEWTON, &
-         PFLAREINV_NEWTON_NO_EXTRA, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
+         PFLAREINV_NEWTON_NO_EXTRA, PFLAREINV_NEWTON_ADAPTIVE, MF_VEC_DIAG, MF_VEC_RHS, MF_VEC_TEMP, &
          MF_VEC_TEMP_TWO, MF_VEC_TEMP_THREE, &
          PFLARE_TOL_ARNOLDI, PFLARE_TOL_MATFREE_4EM11, &
          PFLARE_TOL_LUCKY, PFLARE_ONE, PFLARE_ZERO, PFLARE_MINUS_ONE, PFLARE_MATMULT_FILL, &
@@ -60,7 +60,8 @@ module gmres_poly
       if (inverse_type == PFLAREINV_POWER .OR. &
           inverse_type == PFLAREINV_ARNOLDI .OR. &
           inverse_type == PFLAREINV_NEWTON .OR. &
-          inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+          inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+          inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
          poly_data%buffers%subcomm = subcomm
       end if   
       poly_data%buffers%proc_stride = int(proc_stride)
@@ -85,7 +86,8 @@ module gmres_poly
       ! size for a polynomial of this order, e.g. if the coarsest grid changed size
       ! A Newton polynomial can store more roots than poly_order + 1, but not fewer
       ! Changing the options that set the order resets the PC, which frees the coefficients
-      newton = inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA
+      newton = inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+      inverse_type == PFLAREINV_NEWTON_ADAPTIVE
       if (associated(poly_data%coefficients)) then
          if (newton) then
             wrong_size = size(poly_data%coefficients, 2) /= 2 .OR. &
@@ -130,7 +132,8 @@ module gmres_poly
       matvecs = size(coefficients,1)
 
       ! We may have zero roots with newton that are skipped
-      if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA) then
+      if (inverse_type == PFLAREINV_NEWTON .OR. inverse_type == PFLAREINV_NEWTON_NO_EXTRA .OR. &
+      inverse_type == PFLAREINV_NEWTON_ADAPTIVE) then
          do i_loc = 1, size(coefficients,1)
             ! The zero check here has to match that in 
             ! petsc_matvec_gmres_newton_mf and petsc_matvec_gmres_newton_mf_residual

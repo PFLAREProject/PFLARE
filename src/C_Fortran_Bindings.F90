@@ -176,7 +176,7 @@ module c_fortran_bindings
 
    subroutine calculate_and_build_approximate_inverse_c(input_mat_ptr, inverse_type, &
          poly_order, poly_sparsity_order, &
-         matrix_free_int, diag_scale_polys_int, subcomm_int, &
+         matrix_free_int, diag_scale_polys_int, subcomm_int, arnoldi_block_size, &
          coeffs_ptr, row_size, col_size, &
          inv_matrix_ptr) &
          bind(C, name='calculate_and_build_approximate_inverse_c')
@@ -207,6 +207,7 @@ module c_fortran_bindings
       integer(c_long_long), intent(in)                   :: input_mat_ptr
       integer(c_int), value, intent(in)                  :: inverse_type, poly_order, poly_sparsity_order
       integer(c_int), value, intent(in)                  :: matrix_free_int, diag_scale_polys_int, subcomm_int
+      integer(c_int), value, intent(in)                  :: arnoldi_block_size
       type(c_ptr), intent(inout)                         :: coeffs_ptr
       PetscInt, intent(inout)      :: row_size, col_size
       integer(c_long_long), intent(inout)                :: inv_matrix_ptr
@@ -252,7 +253,7 @@ module c_fortran_bindings
       call calculate_and_build_approximate_inverse(input_mat, inverse_type, &
                poly_order, poly_sparsity_order, &
                matrix_free, diag_scale_polys, subcomm, &
-               inv_matrix, coefficients)
+               inv_matrix, coefficients, int(arnoldi_block_size))
 
       if (.NOT. c_associated(coeffs_ptr) .AND. .NOT. associated(coefficients)) then
          ! Fresh path with a non-polynomial inverse type: no coefficients

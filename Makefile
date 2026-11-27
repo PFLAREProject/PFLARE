@@ -131,11 +131,14 @@ export OBJS := $(OBJS) $(SRCDIR)/PETSc_Helperk.o \
 							  $(SRCDIR)/DDC_Modulek.o \
 							  $(SRCDIR)/Gmres_Polyk.o \
 							  $(SRCDIR)/Gmres_Poly_Newtonk.o \
+							  $(SRCDIR)/Gmres_Poly_Arnoldik.o \
 							  $(SRCDIR)/SAI_Zk.o
 endif	
 
 OBJS := $(OBJS) $(SRCDIR)/PETSc_Helper.o \
 		  $(SRCDIR)/Gmres_Poly.o \
+		  $(SRCDIR)/Gmres_Poly_Newton_Roots.o \
+		  $(SRCDIR)/Gmres_Poly_Arnoldi.o \
 		  $(SRCDIR)/Gmres_Poly_Newton.o \
 		  $(SRCDIR)/FC_Smooth.o \
 		  $(SRCDIR)/FC_Smooth_Block.o \

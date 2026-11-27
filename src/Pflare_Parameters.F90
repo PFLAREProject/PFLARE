@@ -24,6 +24,7 @@ module pflare_parameters
    PetscEnum, parameter :: PFLAREINV_WJACOBI           = 7
    PetscEnum, parameter :: PFLAREINV_JACOBI            = 8
    PetscEnum, parameter :: PFLAREINV_L1JACOBI          = 9
+   PetscEnum, parameter :: PFLAREINV_NEWTON_ADAPTIVE   = 10
 
    ! --------------------------------------------------------
    ! Z / restrictor construction types (PCAIRZType)

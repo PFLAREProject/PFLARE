@@ -17,7 +17,7 @@ Any size change that isn't allowed (one column, fewer rows than the polynomial o
 or any change for the non-Newton types) must error and leave the stored roots alone.\n\
 \n\
   -test_acc    : also resize COEFFS_INV_ACC (needs C point smoothing, e.g. -pc_air_smooth_type fc)\n\
-  -test_coarse : also resize COEFFS_INV_COARSE (needs -pc_air_coarsest_inverse_type newton or newton_no_extra)\n\
+  -test_coarse : also resize COEFFS_INV_COARSE (needs a Newton -pc_air_coarsest_inverse_type)\n\
   -n           : grid size (default 10)\n\n";
 
 #include <petscksp.h>
@@ -167,7 +167,7 @@ int main(int argc, char **args)
   PetscCall(PCAIRGetMatrixFreePolys(pc, &matrix_free));
   PetscCall(PCAIRGetReuseSparsity(pc, &reuse_sparsity));
   PetscCall(PCAIRGetDiagUpdate(pc, &diag_update));
-  newton = (PetscBool)(inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA);
+  newton = (PetscBool)(inverse_type == PFLAREINV_NEWTON || inverse_type == PFLAREINV_NEWTON_NO_EXTRA || inverse_type == PFLAREINV_NEWTON_ADAPTIVE);
   PetscCheck(num_levels > 1, PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Need more than one level");
   /* Without either of these the next setup starts from scratch and computes new roots */
   PetscCheck(!newton || reuse_sparsity || diag_update, PETSC_COMM_WORLD, PETSC_ERR_ARG_WRONG, "Use -pc_air_reuse_sparsity or -pc_air_diag_update to rebuild from the stored roots");

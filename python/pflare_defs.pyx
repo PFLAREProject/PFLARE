@@ -83,11 +83,14 @@ cdef extern:
 	PetscErrorCode PCAIRGetZType(PetscPC pc, int *z_type)
 	PetscErrorCode PCAIRGetLairDistance(PetscPC pc, PetscInt *distance)
 	PetscErrorCode PCAIRGetPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetArnoldiBlockSize(PetscPC pc, PetscInt *block_size)
 	PetscErrorCode PCAIRGetInverseSparsityOrder(PetscPC pc, PetscInt *order)
 	PetscErrorCode PCAIRGetCPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCArnoldiBlockSize(PetscPC pc, PetscInt *block_size)
 	PetscErrorCode PCAIRGetCInverseSparsityOrder(PetscPC pc, PetscInt *order)
 	PetscErrorCode PCAIRGetCoarsestInverseType(PetscPC pc, int *inv_type)
 	PetscErrorCode PCAIRGetCoarsestPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCAIRGetCoarsestArnoldiBlockSize(PetscPC pc, PetscInt *block_size)
 	PetscErrorCode PCAIRGetCoarsestInverseSparsityOrder(PetscPC pc, PetscInt *order)
 	PetscErrorCode PCAIRGetCoarsestMatrixFreePolys(PetscPC pc, PetscBool *mf)
 	PetscErrorCode PCAIRGetCoarsestDiagScalePolys(PetscPC pc, PetscBool *scale)
@@ -149,11 +152,14 @@ cdef extern:
 	PetscErrorCode PCAIRSetZType(PetscPC pc, int z_type)
 	PetscErrorCode PCAIRSetLairDistance(PetscPC pc, PetscInt distance)
 	PetscErrorCode PCAIRSetPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetArnoldiBlockSize(PetscPC pc, PetscInt block_size)
 	PetscErrorCode PCAIRSetInverseSparsityOrder(PetscPC pc, PetscInt order)
 	PetscErrorCode PCAIRSetCPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCArnoldiBlockSize(PetscPC pc, PetscInt block_size)
 	PetscErrorCode PCAIRSetCInverseSparsityOrder(PetscPC pc, PetscInt order)
 	PetscErrorCode PCAIRSetCoarsestInverseType(PetscPC pc, int inv_type)
 	PetscErrorCode PCAIRSetCoarsestPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCAIRSetCoarsestArnoldiBlockSize(PetscPC pc, PetscInt block_size)
 	PetscErrorCode PCAIRSetCoarsestInverseSparsityOrder(PetscPC pc, PetscInt order)
 	PetscErrorCode PCAIRSetCoarsestMatrixFreePolys(PetscPC pc, PetscBool mf)
 	PetscErrorCode PCAIRSetCoarsestDiagScalePolys(PetscPC pc, PetscBool scale)
@@ -177,6 +183,7 @@ cdef extern:
 
 	# PCPFLAREINV - Get routines (PC passed by value, not pointer)
 	PetscErrorCode PCPFLAREINVGetPolyOrder(PetscPC pc, PetscInt *order)
+	PetscErrorCode PCPFLAREINVGetArnoldiBlockSize(PetscPC pc, PetscInt *block_size)
 	PetscErrorCode PCPFLAREINVGetSparsityOrder(PetscPC pc, PetscInt *order)
 	PetscErrorCode PCPFLAREINVGetType(PetscPC pc, int *pflare_type)
 	PetscErrorCode PCPFLAREINVGetMatrixFree(PetscPC pc, PetscBool *flag)
@@ -192,6 +199,7 @@ cdef extern:
 
 	# PCPFLAREINV - Set routines (PC passed by value, not pointer)
 	PetscErrorCode PCPFLAREINVSetPolyOrder(PetscPC pc, PetscInt order)
+	PetscErrorCode PCPFLAREINVSetArnoldiBlockSize(PetscPC pc, PetscInt block_size)
 	PetscErrorCode PCPFLAREINVSetSparsityOrder(PetscPC pc, PetscInt order)
 	PetscErrorCode PCPFLAREINVSetType(PetscPC pc, int pflare_type)
 	PetscErrorCode PCPFLAREINVSetMatrixFree(PetscPC pc, PetscBool flag)
@@ -380,6 +388,11 @@ cpdef int pcair_get_poly_order(PC pc):
 	CHKERR(PCAIRGetPolyOrder(pc.pc, &result))
 	return <int>result
 
+cpdef int pcair_get_arnoldi_block_size(PC pc):
+	cdef PetscInt result = 0
+	CHKERR(PCAIRGetArnoldiBlockSize(pc.pc, &result))
+	return <int>result
+
 cpdef int pcair_get_inverse_sparsity_order(PC pc):
 	cdef PetscInt result = 0
 	CHKERR(PCAIRGetInverseSparsityOrder(pc.pc, &result))
@@ -388,6 +401,11 @@ cpdef int pcair_get_inverse_sparsity_order(PC pc):
 cpdef int pcair_get_c_poly_order(PC pc):
 	cdef PetscInt result = 0
 	CHKERR(PCAIRGetCPolyOrder(pc.pc, &result))
+	return <int>result
+
+cpdef int pcair_get_c_arnoldi_block_size(PC pc):
+	cdef PetscInt result = 0
+	CHKERR(PCAIRGetCArnoldiBlockSize(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_c_inverse_sparsity_order(PC pc):
@@ -403,6 +421,11 @@ cpdef int pcair_get_coarsest_inverse_type(PC pc):
 cpdef int pcair_get_coarsest_poly_order(PC pc):
 	cdef PetscInt result = 0
 	CHKERR(PCAIRGetCoarsestPolyOrder(pc.pc, &result))
+	return <int>result
+
+cpdef int pcair_get_coarsest_arnoldi_block_size(PC pc):
+	cdef PetscInt result = 0
+	CHKERR(PCAIRGetCoarsestArnoldiBlockSize(pc.pc, &result))
 	return <int>result
 
 cpdef int pcair_get_coarsest_inverse_sparsity_order(PC pc):
@@ -640,11 +663,17 @@ cpdef pcair_set_lair_distance(PC pc, int distance):
 cpdef pcair_set_poly_order(PC pc, int order):
 	CHKERR(PCAIRSetPolyOrder(pc.pc, <PetscInt>order))
 
+cpdef pcair_set_arnoldi_block_size(PC pc, int block_size):
+	CHKERR(PCAIRSetArnoldiBlockSize(pc.pc, <PetscInt>block_size))
+
 cpdef pcair_set_inverse_sparsity_order(PC pc, int order):
 	CHKERR(PCAIRSetInverseSparsityOrder(pc.pc, <PetscInt>order))
 
 cpdef pcair_set_c_poly_order(PC pc, int order):
 	CHKERR(PCAIRSetCPolyOrder(pc.pc, <PetscInt>order))
+
+cpdef pcair_set_c_arnoldi_block_size(PC pc, int block_size):
+	CHKERR(PCAIRSetCArnoldiBlockSize(pc.pc, <PetscInt>block_size))
 
 cpdef pcair_set_c_inverse_sparsity_order(PC pc, int order):
 	CHKERR(PCAIRSetCInverseSparsityOrder(pc.pc, <PetscInt>order))
@@ -654,6 +683,9 @@ cpdef pcair_set_coarsest_inverse_type(PC pc, int inv_type):
 
 cpdef pcair_set_coarsest_poly_order(PC pc, int order):
 	CHKERR(PCAIRSetCoarsestPolyOrder(pc.pc, <PetscInt>order))
+
+cpdef pcair_set_coarsest_arnoldi_block_size(PC pc, int block_size):
+	CHKERR(PCAIRSetCoarsestArnoldiBlockSize(pc.pc, <PetscInt>block_size))
 
 cpdef pcair_set_coarsest_inverse_sparsity_order(PC pc, int order):
 	CHKERR(PCAIRSetCoarsestInverseSparsityOrder(pc.pc, <PetscInt>order))
@@ -723,7 +755,7 @@ cpdef pcair_set_poly_coeffs(PC pc, int petsc_level, int which_inverse, coeffs):
 	coeffs : numpy.ndarray
 	    Coefficient array as returned by pcair_get_poly_coeffs.
 	    Must have the shape PCAIR stores, (poly_order+1, 1) for the power and
-	    Arnoldi bases. For the Newton bases (newton, newton_no_extra) the rows
+	    Arnoldi bases. For the Newton bases (newton, newton_no_extra, newton_adaptive) the rows
 	    are the roots, whose number can differ between setups, so any shape
 	    (n, 2) with n >= poly_order+1 is accepted and PCAIR resizes its storage.
 	    Every rank must pass the same coefficients; this is not checked, to
@@ -795,6 +827,11 @@ cpdef int pcpflareinv_get_poly_order(PC pc):
 	CHKERR(PCPFLAREINVGetPolyOrder(pc.pc, &result))
 	return <int>result
 
+cpdef int pcpflareinv_get_arnoldi_block_size(PC pc):
+	cdef PetscInt result = 0
+	CHKERR(PCPFLAREINVGetArnoldiBlockSize(pc.pc, &result))
+	return <int>result
+
 cpdef int pcpflareinv_get_sparsity_order(PC pc):
 	cdef PetscInt result = 0
 	CHKERR(PCPFLAREINVGetSparsityOrder(pc.pc, &result))
@@ -832,6 +869,9 @@ cpdef pcpflareinv_get_inverse_mat(PC pc):
 
 cpdef pcpflareinv_set_poly_order(PC pc, int order):
 	CHKERR(PCPFLAREINVSetPolyOrder(pc.pc, <PetscInt>order))
+
+cpdef pcpflareinv_set_arnoldi_block_size(PC pc, int block_size):
+	CHKERR(PCPFLAREINVSetArnoldiBlockSize(pc.pc, <PetscInt>block_size))
 
 cpdef pcpflareinv_set_sparsity_order(PC pc, int order):
 	CHKERR(PCPFLAREINVSetSparsityOrder(pc.pc, <PetscInt>order))

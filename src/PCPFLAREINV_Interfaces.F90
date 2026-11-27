@@ -29,6 +29,14 @@ module pcpflareinv_interfaces
          PetscInt        :: b
          PetscErrorCode  :: PCPFLAREINVGetPolyOrder_mine
       end function PCPFLAREINVGetPolyOrder_mine 
+      function PCPFLAREINVGetArnoldiBlockSize_mine(A_array,b) &
+         bind(c, name="PCPFLAREINVGetArnoldiBlockSize")
+         use iso_c_binding
+#include "finclude/pflare_types.h"
+         integer(c_long_long), value            :: A_array
+         PetscInt        :: b
+         PetscErrorCode  :: PCPFLAREINVGetArnoldiBlockSize_mine
+      end function PCPFLAREINVGetArnoldiBlockSize_mine 
    end interface
    
    interface 
@@ -112,6 +120,14 @@ module pcpflareinv_interfaces
          PetscInt, value :: b
          PetscErrorCode  :: PCPFLAREINVSetPolyOrder_mine
       end function PCPFLAREINVSetPolyOrder_mine 
+      function PCPFLAREINVSetArnoldiBlockSize_mine(A_array,b) &
+         bind(c, name="PCPFLAREINVSetArnoldiBlockSize")
+         use iso_c_binding
+#include "finclude/pflare_types.h"
+         integer(c_long_long), value            :: A_array
+         PetscInt, value :: b
+         PetscErrorCode  :: PCPFLAREINVSetArnoldiBlockSize_mine
+      end function PCPFLAREINVSetArnoldiBlockSize_mine 
    end interface
    
    interface 
@@ -196,6 +212,23 @@ module pcpflareinv_interfaces
       ierr = PCPFLAREINVGetPolyOrder_mine(pc_ptr, order)
 
    end subroutine PCPFLAREINVGetPolyOrder    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCPFLAREINVGetArnoldiBlockSize(pc, block_size, ierr)
+
+      ! ~~~~~~~~~~
+      type(tPC), intent(in)         :: pc
+      PetscInt, intent(inout)       :: block_size
+      PetscErrorCode, intent(inout) :: ierr
+
+      integer(c_long_long) :: pc_ptr
+      ! ~~~~~~~~~~
+
+      pc_ptr= pc%v
+      ierr = PCPFLAREINVGetArnoldiBlockSize_mine(pc_ptr, block_size)
+
+   end subroutine PCPFLAREINVGetArnoldiBlockSize    
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
@@ -359,6 +392,23 @@ module pcpflareinv_interfaces
       ierr = PCPFLAREINVSetPolyOrder_mine(pc_ptr, order)
 
    end subroutine PCPFLAREINVSetPolyOrder    
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine PCPFLAREINVSetArnoldiBlockSize(pc, block_size, ierr)
+
+      ! ~~~~~~~~~~
+      type(tPC), intent(in)         :: pc
+      PetscInt, intent(in)          :: block_size
+      PetscErrorCode, intent(inout) :: ierr
+
+      integer(c_long_long) :: pc_ptr
+      ! ~~~~~~~~~~
+
+      pc_ptr= pc%v
+      ierr = PCPFLAREINVSetArnoldiBlockSize_mine(pc_ptr, block_size)
+
+   end subroutine PCPFLAREINVSetArnoldiBlockSize    
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 

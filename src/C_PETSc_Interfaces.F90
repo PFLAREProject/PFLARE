@@ -508,6 +508,44 @@ module c_petsc_interfaces
 
    interface
 
+      subroutine sstep_fused_dots_kokkos(vecs_array, l_start, n_left, r_start, n_right, w_vec, with_w, &
+                  out, w_norm_sq, done) &
+         bind(c, name="sstep_fused_dots_kokkos")
+         use iso_c_binding
+         integer(c_long_long), dimension(*) :: vecs_array
+         integer(c_int), value :: l_start, n_left, r_start, n_right, with_w
+         integer(c_long_long) :: w_vec
+         type(c_ptr), value :: out
+         PetscReal :: w_norm_sq
+         integer(c_int) :: done
+      end subroutine sstep_fused_dots_kokkos
+
+      subroutine sstep_project_kokkos(vecs_array, n_old, n_cols, X, done) &
+         bind(c, name="sstep_project_kokkos")
+         use iso_c_binding
+         integer(c_long_long), dimension(*) :: vecs_array
+         integer(c_int), value :: n_old, n_cols
+         type(c_ptr), value :: X
+         integer(c_int) :: done
+      end subroutine sstep_project_kokkos
+
+   end interface
+
+   interface
+
+      subroutine sstep_apply_inverse_kokkos(vecs_array, n_old, n_cols, R_inv, done) &
+         bind(c, name="sstep_apply_inverse_kokkos")
+         use iso_c_binding
+         integer(c_long_long), dimension(*) :: vecs_array
+         integer(c_int), value :: n_old, n_cols
+         type(c_ptr), value :: R_inv
+         integer(c_int) :: done
+      end subroutine sstep_apply_inverse_kokkos
+
+   end interface
+
+   interface
+
       subroutine calculate_and_build_sai_z_kokkos(A_ff_array, A_cf_array, sparsity_array, &
                   reuse_int_reuse_mat, reuse_array, z_array, no_approx_solve_int) &
          bind(c, name="calculate_and_build_sai_z_kokkos")
