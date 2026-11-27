@@ -1304,14 +1304,15 @@ module gmres_poly_newton_roots
 
       ! The comparison is false for a NaN
       if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old .AND. &
-            measure_old - measure_new >= 5 * log(10d0)) then
+            measure_old - measure_new >= 5 * log(real(10, kind(measure_old)))) then
          taken = .TRUE.
       end if
 
       if (root_env_int('PFLARE_ROOT_VERBOSE', 0) == 1) then
          print '(A,I5,A,I5,A,ES10.2,A,ES10.2,A,F7.1,A,F7.1,A,L1)', " PFLARE root order: degree ", degree, &
                " roots ", n_roots, " estimate given order ", estimate_old, " greedy order ", estimate_new, &
-               " log10 measure given ", measure_old/log(10d0), " greedy ", measure_new/log(10d0), " taken ", taken
+               " log10 measure given ", measure_old/log(real(10, kind(measure_old))), &
+               " greedy ", measure_new/log(real(10, kind(measure_new))), " taken ", taken
       end if
 
       contains
@@ -1467,7 +1468,7 @@ module gmres_poly_newton_roots
          if (imag_roots(i) < 0d0) cycle
          do j = 1, copies(i)
             seed = mod(seed * 1103 + 12347, 65521)
-            factor = 1 + 1d-12 * (2 * real(seed, kind(factor)) / 65521 - 1)
+            factor = 1 + (2 * real(seed, kind(factor)) / 65521 - 1) / 1000000 / 1000000
             counter = counter + 1
             real_roots_output(counter) = real_roots(i)
             imag_roots_output(counter) = imag_roots(i)
