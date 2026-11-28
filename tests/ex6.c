@@ -1,6 +1,9 @@
 static char help[] = "Reads a PETSc matrix and vector from a file and solves a linear system.\n\
 Input arguments are:\n\
-  -f <input_file> : file to load. For example see $PETSC_DIR/share/petsc/datafiles/matrices\n\n";
+  -f <input_file> : file to load. For example see $PETSC_DIR/share/petsc/datafiles/matrices\n\
+  -true_residual_factor <f> : fail if ||b - Ax|| of the returned solution is more than f times\n\
+                              the residual norm the KSP reports. Only meaningful if the KSP reports the\n\
+                              unpreconditioned residual norm (-ksp_norm_type unpreconditioned); not checked\n\n";
 
 #include <petscksp.h>
 #include <petsclog.h>
@@ -28,6 +31,13 @@ int main(int argc,char **args)
 
   PetscBool second_solve= PETSC_FALSE;
   PetscCall(PetscOptionsGetBool(NULL, NULL, "-second_solve", &second_solve, NULL));
+
+  // A KSP that applies its preconditioner inexactly can report convergence on the residual
+  // of its recurrence while the true residual of the solution it returns is much larger
+  // (eg right preconditioned GMRES with a high order polynomial whose apply has lost accuracy)
+  // With a positive factor we check the true residual against the reported one
+  PetscReal true_residual_factor = -1.0;
+  PetscCall(PetscOptionsGetReal(NULL, NULL, "-true_residual_factor", &true_residual_factor, NULL));
 
   /* Read matrix and RHS */
   PetscCall(PetscOptionsGetString(NULL,NULL,"-f",file,sizeof(file),&flg));
@@ -189,6 +199,16 @@ int main(int argc,char **args)
   PetscCall(PetscLogStagePop());
   PetscCall(PetscBarrier((PetscObject)A));
 
+  // The size of the initial true residual sets what rounding level means in the true residual check
+  // It is that of the last solve, as that is the one checked
+  PetscReal rnorm_initial = 0.0;
+  if (true_residual_factor > 0 && !second_solve)
+  {
+   PetscCall(MatMult(A, x, u));
+   PetscCall(VecAYPX(u, -1.0, b));
+   PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
+  }
+
   PetscCall(PetscLogStageRegister("GPU copy stage - triggered by a prelim KSPSolve",&gpu_copy));
   PetscCall(PetscLogStagePush(gpu_copy));
   PetscCall(KSPSolve(ksp,b,x));
@@ -197,6 +217,12 @@ int main(int argc,char **args)
   if (second_solve)
   {
    PetscCall(VecSet(x, 1.0));
+   if (true_residual_factor > 0)
+   {
+    PetscCall(MatMult(A, x, u));
+    PetscCall(VecAYPX(u, -1.0, b));
+    PetscCall(VecNorm(u, NORM_2, &rnorm_initial));
+   }
    PetscCall(PetscLogStageRegister("mystage 2",&stage2));
    PetscCall(PetscLogStagePush(stage2));
    PetscCall(KSPSolve(ksp,b,x));
@@ -205,6 +231,27 @@ int main(int argc,char **args)
 
   PetscCall(KSPGetConvergedReason(ksp,&reason));
 
+  // Compare the true residual of the returned solution with the one the KSP reports
+  PetscBool true_residual_bad = PETSC_FALSE;
+  if (true_residual_factor > 0 && reason > 0)
+  {
+   PetscReal rnorm_reported, rnorm_true;
+   PetscCall(KSPGetResidualNorm(ksp, &rnorm_reported));
+   // u = b - A x
+   PetscCall(MatMult(A, x, u));
+   PetscCall(VecAYPX(u, -1.0, b));
+   PetscCall(VecNorm(u, NORM_2, &rnorm_true));
+   // A true residual at rounding level, relative to the initial one, always passes, as the
+   // reported one can be exactly zero
+   // The comparison is false for a NaN
+   if (!(rnorm_true <= true_residual_factor * rnorm_reported || rnorm_true <= 1000 * PETSC_MACHINE_EPSILON * rnorm_initial))
+   {
+      PetscCall(PetscPrintf(PETSC_COMM_WORLD, "True residual norm %g is more than %g times the reported residual norm %g\n", \
+               (double)rnorm_true, (double)true_residual_factor, (double)rnorm_reported));
+      true_residual_bad = PETSC_TRUE;
+   }
+  }
+
   /* Cleanup */
   PetscCall(KSPDestroy(&ksp));
   PetscCall(VecDestroy(&x));
@@ -212,7 +259,7 @@ int main(int argc,char **args)
   PetscCall(VecDestroy(&u));
   PetscCall(MatDestroy(&A));
   PetscCall(PetscFinalize());
-  if (reason < 0)
+  if (reason < 0 || true_residual_bad)
   {
    return 1;
   }

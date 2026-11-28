@@ -15,7 +15,6 @@ module gmres_poly_newton_roots
 
    contains
 
-
 ! -------------------------------------------------------------------------------------------------------------------------------
 
    subroutine modified_leja(real_roots, imag_roots, indices)
@@ -779,12 +778,14 @@ module gmres_poly_newton_roots
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine adaptive_newton_candidate(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base)
+   subroutine adaptive_newton_candidate(H, degree, m, rho, accepted, real_roots_out, imag_roots_out, n_base, residual)
 
       ! Builds the roots of the Newton polynomial of a given degree for the adaptive rule
       ! and decides if they are acceptable
       ! If accepted, real_roots_out, imag_roots_out are allocated and hold the non-zero roots
       ! with any extras in leja order, and n_base is the number of non-zero roots without the extras
+      ! residual is the replay residual of the roots on the Arnoldi start vector, or huge if they
+      ! were not replayed (degree one, or no roots)
 
       ! ~~~~~~
       PetscReal, dimension(:,:), intent(in)               :: H
@@ -793,6 +794,7 @@ module gmres_poly_newton_roots
       logical, intent(out)                                :: accepted
       PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_out, imag_roots_out
       integer, intent(out)                                :: n_base
+      PetscReal, intent(out)                              :: residual
 
       ! Local variables
       integer :: i_loc
@@ -800,12 +802,13 @@ module gmres_poly_newton_roots
       PetscReal, dimension(:), allocatable :: real_added, imag_added
       integer, dimension(:), allocatable :: indices
       logical :: sensitive, over_cap, copied_all
-      PetscReal :: residual
+      integer :: replay_limit
 
       ! ~~~~~~
 
       if (allocated(real_roots_out)) deallocate(real_roots_out, imag_roots_out)
       accepted = .TRUE.
+      residual = huge(residual)
 
       ! Harmonic Ritz values of the leading block, with the non-zero roots first
       call harmonic_ritz_roots(H, degree, m, roots(:, 1), roots(:, 2))
@@ -846,9 +849,21 @@ module gmres_poly_newton_roots
 
       ! The copies we were not sure about are only kept if the polynomial
       ! still does about as well as GMRES on the Arnoldi start vector
-      if (copied_all) then
+      ! Every other candidate is replayed too, but is only rejected if the polynomial is clearly
+      ! broken, ie its residual on the start vector is more than 100 times that of GMRES
+      ! A candidate that is only a little worse than GMRES is kept, as the degree below it can
+      ! pass on the start vector and be a much worse preconditioner on other vectors
+      ! The root sets this is for (eg, close roots merged by the clustering, or an apply that
+      ! has lost its accuracy to rounding) are worse than GMRES by many orders of magnitude
+      ! Degree one is never rejected, as the degree search relies on it being acceptable
+      ! The replay has rounding of its own, so the GMRES residual it is compared with is never
+      ! taken smaller than 10 eps: otherwise a converged Arnoldi (a residual at or below
+      ! rounding level, or exactly zero after a breakdown) would be rejected for nothing
+      replay_limit = 2
+      if (.NOT. copied_all) replay_limit = 100
+      if (degree > 1) then
          call hessenberg_newton_replay(H, degree, real_roots_out, imag_roots_out, residual)
-         if (residual > 2 * rho) then
+         if (residual > replay_limit * max(rho, 10 * PFLARE_EPS)) then
             accepted = .FALSE.
             deallocate(real_roots_out, imag_roots_out)
          end if
@@ -858,7 +873,7 @@ module gmres_poly_newton_roots
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
-   subroutine adaptive_newton_roots(H, m, real_roots_out, imag_roots_out, n_base)
+   subroutine adaptive_newton_roots(H, m, real_roots_out, imag_roots_out, n_base, real_roots_alt, imag_roots_alt)
 
       ! Chooses the degree and the roots (with extras) of the Newton polynomial
       ! using only the (m+1) x m Arnoldi Hessenberg matrix H
@@ -871,12 +886,17 @@ module gmres_poly_newton_roots
       integer, intent(in)                                 :: m
       PetscReal, dimension(:), allocatable, intent(inout) :: real_roots_out, imag_roots_out
       integer, intent(out)                                :: n_base
+      ! If greedy_head_tail_order finds an order of the same roots that passes its tests,
+      ! that order is returned here (allocated) for the caller to use
+      ! real_roots_out, imag_roots_out are always in the leja order
+      PetscReal, dimension(:), allocatable, intent(inout), optional :: real_roots_alt, imag_roots_alt
 
       ! Local variables
-      integer :: degree, bad, good, mid, step, n_base_trial
+      integer :: degree, bad, good, mid, step, n_base_trial, errorcode
       PetscReal, dimension(m) :: rho_h
       PetscReal, dimension(:), allocatable :: real_trial, imag_trial
-      logical :: accepted
+      PetscReal :: replay_good, replay_trial
+      logical :: accepted, taken
 
       ! ~~~~~~
 
@@ -894,27 +914,40 @@ module gmres_poly_newton_roots
       end do
       degree = min(degree, m)
 
-      call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base)
-      if (accepted) return
+      call adaptive_newton_candidate(H, degree, m, rho_h(degree), accepted, real_roots_out, imag_roots_out, n_base, &
+               replay_good)
+      if (accepted) then
+         call greedy_candidate(degree)
+         return
+      end if
 
       ! Otherwise we have to lower the degree until the roots are acceptable
-      ! Step down geometrically until we find a degree that is (degree one always is)
+      ! Step down geometrically until we find a degree that is
+      ! Degree one always is: adaptive_newton_candidate never rejects it
       bad = degree
       step = 1
       do
          good = max(1, degree - step)
-         call adaptive_newton_candidate(H, good, m, rho_h(good), accepted, real_roots_out, imag_roots_out, n_base)
-         if (accepted) exit
+         call adaptive_newton_candidate(H, good, m, rho_h(good), accepted, real_roots_out, imag_roots_out, n_base, &
+                  replay_good)
+         ! The second test can never be needed, but this loop must not be able to run forever
+         if (accepted .OR. good == 1) exit
          bad = good
          step = 2 * step
       end do
+      if (.NOT. accepted) then
+         print *, "The adaptive Newton root rule rejected degree one"
+         call MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER, errorcode)
+      end if
 
       ! Then bisect between the acceptable degree and the one that is not
       do while (bad - good > 1)
          mid = (bad + good)/2
-         call adaptive_newton_candidate(H, mid, m, rho_h(mid), accepted, real_trial, imag_trial, n_base_trial)
+         call adaptive_newton_candidate(H, mid, m, rho_h(mid), accepted, real_trial, imag_trial, n_base_trial, &
+                  replay_trial)
          if (accepted) then
             good = mid
+            replay_good = replay_trial
             call move_alloc(real_trial, real_roots_out)
             call move_alloc(imag_trial, imag_roots_out)
             n_base = n_base_trial
@@ -923,7 +956,397 @@ module gmres_poly_newton_roots
          end if
       end do
 
+      call greedy_candidate(good)
+
+      contains
+
+      subroutine greedy_candidate(degree_final)
+
+         ! Returns the greedy order of the accepted roots in real_roots_alt, imag_roots_alt
+         ! if it is switched on and estimated to be better
+         integer, intent(in) :: degree_final
+         PetscReal, dimension(:), allocatable :: real_new, imag_new
+         PetscReal :: replay_new
+
+         if (.NOT. present(real_roots_alt)) return
+         if (allocated(real_roots_alt)) deallocate(real_roots_alt, imag_roots_alt)
+         if (size(real_roots_out) == 0) return
+
+         allocate(real_new(size(real_roots_out)), imag_new(size(real_roots_out)))
+         call greedy_head_tail_order(H, degree_final, real_roots_out, imag_roots_out, real_new, imag_new, taken)
+         ! The order we were given passed the replay (replay_good, from adaptive_newton_candidate);
+         ! the new order has to do as well, or at least pass the same test, before it is used
+         ! greedy_head_tail_order never takes an order at degree one, the only degree not replayed
+         if (taken) then
+            call hessenberg_newton_replay(H, degree_final, real_new, imag_new, replay_new)
+            taken = replay_new <= max(replay_good, 100 * max(rho_h(degree_final), 10 * PFLARE_EPS))
+         end if
+         if (taken) then
+            call move_alloc(real_new, real_roots_alt)
+            call move_alloc(imag_new, imag_roots_alt)
+         else
+            deallocate(real_new, imag_new)
+         end if
+
+      end subroutine greedy_candidate
+
    end subroutine adaptive_newton_roots
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine head_tail_estimate(H, degree, real_roots, imag_roots, estimate)
+
+      ! Estimates the rounding error of the product form apply (petsc_newton) of the Newton
+      ! polynomial with the given ordered, non-zero roots, using only the Arnoldi Hessenberg matrix
+      ! With head_g the product of the first g factors and tail_g the product of the rest,
+      ! the first order error is the sum over the steps of the local rounding error, which is
+      ! proportional to the vector the step is applied to (head_{g-1} applied to the start vector),
+      ! propagated by the factors still to come (I - tail_g)
+      ! This is the criterion of Lebedev & Finogenov (1971) for the ordering of the parameters
+      ! of a cyclic Richardson iteration, where the local error is also taken to be
+      ! proportional to the current iterate
+      ! The heads are computed as in hessenberg_newton_replay and the tails by sweeping
+      ! three fixed row vectors backwards through the factors, so this costs about
+      ! as much as four replays
+      ! estimate = eps/2 * sqrt( sum_g ( ||head_{g-1} e_1|| * (1 + max_z ||z^T tail_g||) )^2 )
+      ! and is returned as huge if anything overflows
+      ! This is a model and not a bound: the local error of a step also has a factor of about
+      ! ||H||/|theta| and the rounding in the sum that forms the solution is left out, the heads
+      ! are those of the Arnoldi start vector only, and like hessenberg_newton_replay it is
+      ! exact in H only while the number of roots is at most the degree
+      ! It is independent of the scale of the matrix
+
+      ! ~~~~~~
+      PetscReal, dimension(:,:), intent(in) :: H
+      integer, intent(in)                   :: degree
+      PetscReal, dimension(:), intent(in)   :: real_roots, imag_roots
+      PetscReal, intent(out)                :: estimate
+
+      ! Local variables
+      integer, parameter :: n_probe = 3
+      integer :: i, k, n_roots, n_units
+      integer, parameter :: long_int = selected_int_kind(18)
+      integer(kind=long_int) :: seed
+      integer, dimension(size(real_roots)) :: unit_start
+      PetscReal, dimension(:,:), allocatable :: H_ext
+      PetscReal, dimension(n_probe, degree+1) :: z, z_two
+      PetscReal, dimension(degree+1) :: t, t_two
+      PetscReal, dimension(size(real_roots)) :: head, tail
+      PetscReal :: square_sum, total, term
+
+      ! ~~~~~~
+
+      n_roots = size(real_roots)
+      estimate = huge(estimate)
+      if (n_roots == 0) then
+         estimate = 0
+         return
+      end if
+
+      allocate(H_ext(degree+1, degree+1))
+      H_ext = 0
+      H_ext(1:degree+1, 1:degree) = H(1:degree+1, 1:degree)
+
+      ! A conjugate pair is one step of the apply
+      n_units = 0
+      i = 1
+      do while (i .le. n_roots)
+         n_units = n_units + 1
+         unit_start(n_units) = i
+         if (imag_roots(i) /= 0d0 .AND. i < n_roots) then
+            i = i + 2
+         else
+            i = i + 1
+         end if
+      end do
+
+      ! Fixed pseudo-random row vectors with unit norm (the minimal standard linear congruential
+      ! generator, so the result is the same on every rank and every run)
+      seed = 12345
+      do k = 1, n_probe
+         do i = 1, degree + 1
+            seed = mod(seed * 16807_long_int, 2147483647_long_int)
+            z(k, i) = 2 * real(seed, kind(estimate)) / real(2147483647_long_int, kind(estimate)) - 1
+         end do
+         z(k, :) = z(k, :) / norm2(z(k, :))
+      end do
+
+      ! Tails: tail(g) is the norm of z^T times the product of the factors after step g
+      do k = n_units, 1, -1
+         tail(k) = 0
+         do i = 1, n_probe
+            tail(k) = max(tail(k), norm2(z(i, :)))
+         end do
+         ! The comparison is false for a NaN
+         if (.NOT. (tail(k) < sqrt(huge(estimate)))) return
+         i = unit_start(k)
+         if (imag_roots(i) == 0d0) then
+            z = z - matmul(z, H_ext)/real_roots(i)
+         else
+            square_sum = real_roots(i)**2 + imag_roots(i)**2
+            z_two = 2 * real_roots(i) * z - matmul(z, H_ext)
+            z = z - matmul(z_two, H_ext)/square_sum
+         end if
+      end do
+
+      ! Heads: head(g) is the norm of the product of the factors before step g applied to e_1
+      t = 0
+      t(1) = 1
+      do k = 1, n_units
+         head(k) = norm2(t)
+         if (.NOT. (head(k) < sqrt(huge(estimate)))) return
+         i = unit_start(k)
+         if (imag_roots(i) == 0d0) then
+            t = t - matmul(H_ext, t)/real_roots(i)
+         else
+            square_sum = real_roots(i)**2 + imag_roots(i)**2
+            t_two = 2 * real_roots(i) * t - matmul(H_ext, t)
+            t = t - matmul(H_ext, t_two)/square_sum
+         end if
+      end do
+
+      total = 0
+      do k = 1, n_units
+         term = head(k) * (1 + tail(k))
+         if (.NOT. (term < sqrt(huge(estimate)))) return
+         total = total + term**2
+      end do
+      if (.NOT. (total < huge(estimate))) return
+      estimate = PFLARE_EPS/2 * sqrt(total)
+
+   end subroutine head_tail_estimate
+
+! -------------------------------------------------------------------------------------------------------------------------------
+
+   subroutine greedy_head_tail_order(H, degree, real_roots, imag_roots, real_new, imag_new, taken)
+
+      ! Computes another order for the (non-zero, already ordered) roots of the Newton polynomial,
+      ! in which the products of the factors applied so far (heads) and of the factors still to
+      ! come (tails) are both kept small, and says if that is estimated to reduce the
+      ! rounding error of the apply
+      ! The polynomial is not changed, only the order in which its factors are applied
+      ! (for the matrix-free apply; an assembled fixed sparsity build drops entries as it
+      ! goes, so there the order changes the matrix that is built a little)
+      ! real_new, imag_new always return the new order, real_roots, imag_roots are not modified
+      !
+      ! At every step the root is taken that minimises
+      !   max_S |head after the step| * (1 + max_S |tail after the step|)
+      ! where S are the Ritz values of the leading degree x degree block of H, a stand-in
+      ! for the spectrum, and the distance from a point of S to a root is never taken
+      ! smaller than 100 eps ||H||, as a computed root is not closer than that to the
+      ! eigenvalue it approximates even when a Ritz value coincides with it
+      ! A leja ordering only controls the heads; with outlying roots and extra copies
+      ! the tails can be very large
+      !
+      ! The new order is not always better, so taken is only returned as true if two tests
+      ! that cost no matvecs both pass
+      ! 1) The measure max over the steps of max_S |head before the step| * (1 + max_S |tail after it|),
+      !    which is the one the rounding error follows (the greedy choice above uses the head after
+      !    the step, so this is close to but not exactly what was minimised, and it can come out
+      !    larger for the new order), is at least five decades smaller for the new order than for
+      !    the order we were given
+      !    When it barely falls the greedy has found nothing: this happens when a root without a
+      !    copy has a large product of other factors (no order can then do better than the square
+      !    root of that product), or when the Ritz values are not close to the spectrum
+      !    (non-normal matrices). In those cases the new order has been seen to be much worse,
+      !    eg on a diagonal matrix with many more eigenvalues than roots, where the heads grow
+      !    between the Ritz values and only a leja ordering keeps them small
+      ! 2) head_tail_estimate is at least 10 times smaller for the new order
+
+      ! ~~~~~~
+      PetscReal, dimension(:,:), intent(in)  :: H
+      integer, intent(in)                    :: degree
+      PetscReal, dimension(:), intent(in)    :: real_roots, imag_roots
+      PetscReal, dimension(:), intent(out)   :: real_new, imag_new
+      logical, intent(out)                   :: taken
+
+      ! Local variables
+      integer :: i, k, r, step, n_roots, n_units, best, counter
+      PetscBLASInt :: lwork, info, n_bl, lda_bl, one_bl
+      integer, dimension(size(real_roots)) :: unit_start, unit_size, order
+      logical, dimension(size(real_roots)) :: left
+      PetscReal, dimension(:,:), allocatable :: H_square
+      PetscReal, dimension(degree) :: ritz_real, ritz_imag, log_head, log_tail
+      PetscReal, dimension(:,:), allocatable :: log_factor, VL, VR
+      PetscReal, dimension(:), allocatable :: work
+      PetscReal :: floor_dist, root_mag, dist, score, best_score, new_head, new_tail
+      PetscReal :: estimate_old, estimate_new, measure_old, measure_new
+      PetscReal, parameter :: log_clamp = -700
+
+      ! ~~~~~~
+
+      taken = .FALSE.
+      real_new = real_roots
+      imag_new = imag_roots
+      n_roots = size(real_roots)
+      if (n_roots < 3 .OR. degree < 2) return
+
+      ! A conjugate pair is one unit
+      n_units = 0
+      i = 1
+      do while (i .le. n_roots)
+         n_units = n_units + 1
+         unit_start(n_units) = i
+         if (imag_roots(i) /= 0d0 .AND. i < n_roots) then
+            unit_size(n_units) = 2
+            i = i + 2
+         else
+            unit_size(n_units) = 1
+            i = i + 1
+         end if
+      end do
+      if (n_units < 3) return
+
+      ! ~~~~~~~~~~~
+      ! Ritz values of the leading block
+      ! ~~~~~~~~~~~
+      allocate(H_square(degree, degree))
+      H_square = H(1:degree, 1:degree)
+      floor_dist = 100 * PFLARE_EPS * norm2(H(1:degree+1, 1:degree))
+
+      allocate(work(1), VL(0, 0), VR(0, 0))
+      lwork = -1
+      n_bl = degree
+      lda_bl = size(H_square, 1)
+      one_bl = 1
+      call PFLAREgeev('N', 'N', n_bl, H_square, lda_bl, &
+                     ritz_real, ritz_imag, VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
+      lwork = int(work(1))
+      deallocate(work)
+      allocate(work(lwork))
+      call PFLAREgeev('N', 'N', n_bl, H_square, lda_bl, &
+                     ritz_real, ritz_imag, VL, one_bl, VR, one_bl, &
+                     work, lwork, info)
+      deallocate(work, VL, VR, H_square)
+      ! The reordering is optional, so if we can't get the Ritz values we keep the order we were given
+      if (info /= 0) return
+
+      ! ~~~~~~~~~~~
+      ! log of the magnitude of every factor at every Ritz value
+      ! ~~~~~~~~~~~
+      allocate(log_factor(degree, n_units))
+      do r = 1, n_units
+         i = unit_start(r)
+         root_mag = sqrt(real_roots(i)**2 + imag_roots(i)**2)
+         do k = 1, degree
+            dist = sqrt((ritz_real(k) - real_roots(i))**2 + (ritz_imag(k) - imag_roots(i))**2)
+            log_factor(k, r) = log(max(dist, floor_dist)/root_mag)
+            if (unit_size(r) == 2) then
+               dist = sqrt((ritz_real(k) - real_roots(i))**2 + (ritz_imag(k) + imag_roots(i))**2)
+               log_factor(k, r) = log_factor(k, r) + log(max(dist, floor_dist)/root_mag)
+            end if
+            log_factor(k, r) = max(log_factor(k, r), log_clamp)
+         end do
+      end do
+
+      ! ~~~~~~~~~~~
+      ! Greedy ordering
+      ! ~~~~~~~~~~~
+      ! The measure of test 1) for the order we were given. No order has a measure below one
+      ! (the first head is one), so if this is already less than five decades the test cannot
+      ! pass and there is nothing to gain: the greedy ordering, which costs the most, is skipped
+      call head_tail_measure(.FALSE., measure_old)
+      if (measure_old < 5 * log(real(10, kind(measure_old)))) then
+         deallocate(log_factor)
+         return
+      end if
+
+      left = .FALSE.
+      left(1:n_units) = .TRUE.
+      log_head = 0
+      ! The floor on the distances keeps every log_factor well above the clamp, so the tail
+      ! can be kept as a running difference
+      log_tail = sum(log_factor, dim=2)
+      do step = 1, n_units
+
+         best = 0
+         best_score = huge(best_score)
+         do r = 1, n_units
+            if (.NOT. left(r)) cycle
+            new_head = maxval(log_head + log_factor(:, r))
+            new_tail = maxval(log_tail - log_factor(:, r))
+            ! log(1 + exp(new_tail)) without overflow
+            if (new_tail > 30) then
+               score = new_head + new_tail
+            else
+               score = new_head + log(1 + exp(new_tail))
+            end if
+            if (score < best_score) then
+               best_score = score
+               best = r
+            end if
+         end do
+         ! Only if every score was a NaN
+         if (best == 0) then
+            deallocate(log_factor)
+            return
+         end if
+
+         order(step) = best
+         left(best) = .FALSE.
+         log_head = log_head + log_factor(:, best)
+         log_tail = log_tail - log_factor(:, best)
+      end do
+
+      ! The measure of test 1) for the new order
+      call head_tail_measure(.TRUE., measure_new)
+      deallocate(log_factor)
+
+      counter = 0
+      do step = 1, n_units
+         i = unit_start(order(step))
+         do k = 0, unit_size(order(step)) - 1
+            counter = counter + 1
+            real_new(counter) = real_roots(i + k)
+            imag_new(counter) = imag_roots(i + k)
+         end do
+      end do
+
+      ! ~~~~~~~~~~~
+      ! Only take the new order if it is estimated to be clearly better
+      ! The estimates cost far more than the measure, so they are only computed if
+      ! the measure has fallen far enough
+      ! ~~~~~~~~~~~
+      if (measure_old - measure_new >= 5 * log(real(10, kind(measure_old)))) then
+         call head_tail_estimate(H, degree, real_roots, imag_roots, estimate_old)
+         call head_tail_estimate(H, degree, real_new, imag_new, estimate_new)
+         ! The comparison is false for a NaN
+         if (estimate_new < huge(estimate_new) .AND. 10 * estimate_new < estimate_old) taken = .TRUE.
+      end if
+
+      contains
+
+      subroutine head_tail_measure(new_order, measure)
+
+         ! log of max over the steps of max_S |head before the step| * (1 + max_S |tail after it|)
+         logical, intent(in)    :: new_order
+         PetscReal, intent(out) :: measure
+
+         integer :: step_loc, r_loc
+         PetscReal, dimension(degree) :: head_loc, tail_loc
+         PetscReal :: max_tail, term_loc
+
+         head_loc = 0
+         tail_loc = sum(log_factor, dim=2)
+         measure = -huge(measure)
+         do step_loc = 1, n_units
+            r_loc = step_loc
+            if (new_order) r_loc = order(step_loc)
+            tail_loc = tail_loc - log_factor(:, r_loc)
+            max_tail = maxval(tail_loc)
+            if (max_tail > 30) then
+               term_loc = maxval(head_loc) + max_tail
+            else
+               term_loc = maxval(head_loc) + log(1 + exp(max_tail))
+            end if
+            measure = max(measure, term_loc)
+            head_loc = head_loc + log_factor(:, r_loc)
+         end do
+
+      end subroutine head_tail_measure
+
+   end subroutine greedy_head_tail_order
 
 ! -------------------------------------------------------------------------------------------------------------------------------
 
